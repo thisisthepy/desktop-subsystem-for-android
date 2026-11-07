@@ -1,6 +1,7 @@
 using System.Collections.Specialized;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using Dsa.Settings.Core;
 
 namespace Dsa.Settings.Pages;
@@ -41,6 +42,30 @@ public partial class LogsPage : Page
             return;
         }
         LinesList.ScrollIntoView(LinesList.Items[^1]);
+    }
+
+    private void OnCanCopy(object sender, CanExecuteRoutedEventArgs e)
+    {
+        e.CanExecute = LinesList.SelectedItems.Count > 0;
+        e.Handled = true;
+    }
+
+    /// <summary>Puts the selected lines on the clipboard, each as the log prints it.</summary>
+    private void OnCopy(object sender, ExecutedRoutedEventArgs e)
+    {
+        var text = ViewModel.CopyText(LinesList.SelectedItems.OfType<LogLine>());
+        if (text.Length > 0)
+        {
+            try
+            {
+                System.Windows.Clipboard.SetDataObject(text, copy: true);
+            }
+            catch (System.Runtime.InteropServices.COMException)
+            {
+                // Another program holds the clipboard; the user can copy again.
+            }
+        }
+        e.Handled = true;
     }
 
     private void OnPriorityChanged(object sender, SelectionChangedEventArgs e)

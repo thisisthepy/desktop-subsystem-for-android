@@ -33,6 +33,12 @@ if ((${#gfxstream_patches[@]})); then
     git -C "$source" apply --recount --check "${gfxstream_patches[@]}"
     git -C "$source" apply --recount "${gfxstream_patches[@]}"
 fi
+# The guest's own, after 0001: what the guest libraries need of the shared gfxstream code,
+# which the host renderer does not take.
+for patch in "$patch_dir"/guest/gfxstream/*.patch; do
+    git -C "$source" apply --recount --check "$patch"
+    git -C "$source" apply --recount "$patch"
+done
 
 git -C "$source" rev-parse HEAD
 
@@ -57,6 +63,13 @@ if ((${#mesa_patches[@]})); then
     git -C "$mesa_dir" apply --recount --check "${mesa_patches[@]}"
     git -C "$mesa_dir" apply --recount "${mesa_patches[@]}"
 fi
+# patches/guest/mesa come after them, each on the tree the ones before made: a stream to the
+# host renderer that ended (the renderer restarted, or ended this guest's stream) reports a
+# lost device instead of ending the process.
+for patch in "$patch_dir"/guest/mesa/*.patch; do
+    git -C "$mesa_dir" apply --recount --check "$patch"
+    git -C "$mesa_dir" apply --recount "$patch"
+done
 
 git -C "$mesa_dir" rev-parse HEAD
 

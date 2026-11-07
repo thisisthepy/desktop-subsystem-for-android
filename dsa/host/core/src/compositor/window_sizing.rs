@@ -75,6 +75,24 @@ pub fn maximized_position(proposed: i32, start: i32, area: i32, outer: i32) -> i
     start + (area - outer) / 2
 }
 
+/// Where a window goes and how large it is (left, top, width, height, all of its outer
+/// rectangle) when its monitor changes scale and the desktop suggests `suggested` for it.
+/// That is the suggested rectangle itself, cut down to `limit`, the largest outer size the
+/// window may have there: what the guest can draw, and no more than the work area of the
+/// monitor it moves to. A rectangle that is cut down stays centred on the suggested one, so
+/// it is still on the monitor the desktop chose, and the desktop does not move the window's
+/// scale back.
+pub fn rescaled_rect(suggested: (i32, i32, i32, i32), limit: (i32, i32)) -> (i32, i32, i32, i32) {
+    let (left, top, width, height) = suggested;
+    let (cut_width, cut_height) = (width.min(limit.0.max(1)), height.min(limit.1.max(1)));
+    (
+        left + (width - cut_width) / 2,
+        top + (height - cut_height) / 2,
+        cut_width,
+        cut_height,
+    )
+}
+
 /// The smallest a task window's client area gets, in density-independent pixels in each
 /// direction: the smallest task Android's own freeform windows let a user make. Below it the
 /// guest would keep the task larger than the window, so no frame could ever show 1:1, and
@@ -514,6 +532,25 @@ mod tests {
         // A window as large as the work area, borders and all, stays where it was put.
         assert_eq!(maximized_position(-8, 0, 1920, 1936), -8);
         assert_eq!(maximized_position(-8, 0, 1920, 1920), -8);
+    }
+
+    #[test]
+    fn fr4_a_window_rescaled_larger_than_its_monitor_stays_within_it_and_on_it() {
+        // A 2880x2707 window on a 125% monitor moves to a 200% one of 2880x1800 whose work area
+        // is 2880x1728; the desktop suggests it 1.6 times larger. The guest draws 2880x2880,
+        // which with the window's borders is 2912x2896: the work area is the smaller in both.
+        let suggested = (-1700, -400, 4643, 4348);
+        let limit = (2880, 1728);
+        let (left, top, width, height) = rescaled_rect(suggested, limit);
+        assert_eq!((width, height), (2880, 1728), "within the work area");
+        // Centred on the suggested rectangle, whose middle stays where it was.
+        assert_eq!(left + width / 2, -1700 + 4643 / 2);
+        assert_eq!(top + height / 2, -400 + 4348 / 2);
+        // A suggestion that fits is taken as it is.
+        assert_eq!(
+            rescaled_rect((100, 50, 1670, 1068), limit),
+            (100, 50, 1670, 1068)
+        );
     }
 
     #[test]

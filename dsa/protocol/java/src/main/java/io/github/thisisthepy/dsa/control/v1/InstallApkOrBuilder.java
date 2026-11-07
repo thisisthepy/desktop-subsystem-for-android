@@ -46,4 +46,64 @@ public interface InstallApkOrBuilder extends
    * @return The size.
    */
   long getSize();
+
+  /**
+   * <pre>
+   * The ABI to install the app's native code for, which the agent gives the package
+   * installer as its ABI override: "x86_64" or "arm64-v8a". Empty lets the package manager
+   * take the first ABI of the guest's list the APK has code for. The host chooses arm64-v8a
+   * only while translation is on and the APK's x86_64 libraries leave out some of its arm64
+   * ones.
+   * </pre>
+   *
+   * <code>string abi = 4;</code>
+   * @return The abi.
+   */
+  java.lang.String getAbi();
+  /**
+   * <pre>
+   * The ABI to install the app's native code for, which the agent gives the package
+   * installer as its ABI override: "x86_64" or "arm64-v8a". Empty lets the package manager
+   * take the first ABI of the guest's list the APK has code for. The host chooses arm64-v8a
+   * only while translation is on and the APK's x86_64 libraries leave out some of its arm64
+   * ones.
+   * </pre>
+   *
+   * <code>string abi = 4;</code>
+   * @return The bytes for abi.
+   */
+  com.google.protobuf.ByteString
+      getAbiBytes();
+
+  /**
+   * <pre>
+   * Empty for one APK. Otherwise the files of the install, in the order their bytes follow one
+   * another in the chunks: the APKs first, which the agent writes into one install session,
+   * then any expansion files. `size` is then the sum of their sizes.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.InstallPart parts = 5;</code>
+   */
+  java.util.List<io.github.thisisthepy.dsa.control.v1.InstallPart> 
+      getPartsList();
+  /**
+   * <pre>
+   * Empty for one APK. Otherwise the files of the install, in the order their bytes follow one
+   * another in the chunks: the APKs first, which the agent writes into one install session,
+   * then any expansion files. `size` is then the sum of their sizes.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.InstallPart parts = 5;</code>
+   */
+  io.github.thisisthepy.dsa.control.v1.InstallPart getParts(int index);
+  /**
+   * <pre>
+   * Empty for one APK. Otherwise the files of the install, in the order their bytes follow one
+   * another in the chunks: the APKs first, which the agent writes into one install session,
+   * then any expansion files. `size` is then the sum of their sizes.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.InstallPart parts = 5;</code>
+   */
+  int getPartsCount();
 }

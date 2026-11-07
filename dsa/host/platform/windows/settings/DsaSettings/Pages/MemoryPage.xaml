@@ -32,12 +32,12 @@
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
             <StackPanel Style="{StaticResource PageContent}">
                 <ui:InfoBar Title="{l:Text MemoryErrorBar.Title}" Severity="Error" IsClosable="False"
-                            IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" />
+                            IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" Margin="0,0,0,4" />
 
                 <!-- The limit is a setting, so these two cards read the settings, not the report. -->
                 <StackPanel x:Name="LimitSection">
                     <ui:InfoBar Title="{l:Text SettingsErrorBar.Title}" Severity="Error" IsClosable="False"
-                                IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" />
+                                IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" Margin="0,0,0,4" />
                     <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Ram20}">
                         <ui:CardControl.Header>
                             <StackPanel>
@@ -91,7 +91,7 @@
 
                 <TextBlock Text="{l:Text MemoryGuestHeader.Text}" Style="{StaticResource SectionHeader}" />
                 <ui:InfoBar Title="{l:Text MemoryGuestNoneBar.Title}" Message="{l:Text MemoryGuestNoneBar.Message}"
-                            Severity="Informational" IsClosable="False" IsOpen="{Binding GuestNotReported, Mode=OneWay}" />
+                            Severity="Informational" IsClosable="False" IsOpen="{Binding GuestNotReported, Mode=OneWay}" Margin="0,0,0,4" />
                 <StackPanel Visibility="{Binding GuestReported, Converter={StaticResource Visible}}">
                     <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon DataUsage24}">
                         <ui:CardControl.Header>

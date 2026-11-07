@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Builds the Linux host's VM programs from the pinned upstream revisions in versions.env:
 # crosvm, the VMM, and passt, the user-mode NAT. Neither is kept in this repository: each is
-# fetched into .scratch/ and built there.
+# fetched into .scratch/ and built there. crosvm is built with the patches in patches/
+# applied: virtio-mem.patch adds the virtio-mem device the VM grows and shrinks with.
 #
 #   build.sh --out <folder> --gfxstream <folder with libgfxstream_backend.so>
 #
@@ -58,6 +59,15 @@ crosvm_src="$root/.scratch/crosvm/src"
 checkout "$CROSVM_REMOTE" "$CROSVM_REVISION" "$crosvm_src"
 git -C "$crosvm_src" submodule update --init third_party/minijail
 echo "crosvm $(git -C "$crosvm_src" rev-parse HEAD)"
+
+# The patches DSA keeps on top of the pinned revision, in name order (see patches/). Files an
+# earlier run's patches added are removed first; build output, which crosvm's .gitignore
+# names, stays.
+git -C "$crosvm_src" clean -fdq
+for patch in "$here"/patches/*.patch; do
+    echo "applying $(basename "$patch")"
+    git -C "$crosvm_src" apply --whitespace=nowarn "$patch"
+done
 (
     cd "$crosvm_src"
     # gfxstream's renderer is linked from the given folder and found beside crosvm at run time.

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 using Xunit;
 
 namespace Dsa.Settings.Core.Tests;
@@ -54,13 +55,16 @@ internal sealed class ArgsText : ITextSource
         ["ApkWindow_SummaryUpdate"] = 3,
         ["ApkWindow_SummaryDowngrade"] = 3,
         ["ApkWindow_SummaryReinstall"] = 2,
+        ["ApkWindow_BundleSummary"] = 3,
+        ["ApkWindow_BundleSummaryObb"] = 3,
+        ["ApkWindow_ApksValue"] = 2,
         ["ApkWindow_Signer"] = 2,
         ["ApkWindow_AndroidRange"] = 2,
         ["ApkWindow_VersionText"] = 2,
         ["ApkWindow_AndroidVersion"] = 2,
         ["ApkWindow_ReasonWithWords"] = 2,
         ["ApkWindow_OpenFailed"] = 2,
-        ["ApkWindow_NotApkText"] = 2,
+        ["ApkWindow_LaunchFailedAfterInstall"] = 2,
     };
 
     public string Get(string key) =>
@@ -88,9 +92,12 @@ public class ApkInstallViewModelTests
 
     private const string Installed41 = "{\"version_code\":41,\"version_name\":\"4.1\",\"signers\":[\"AB:CD\"]}";
 
-    private static async Task<ApkInstallViewModel> Loaded(FakeRunner dsa)
+    /// <summary>The processor types of the PC the tests stand for: an x64 PC.</summary>
+    private static readonly string[] X64 = { "x86_64", "x86" };
+
+    private static async Task<ApkInstallViewModel> Loaded(FakeRunner dsa, bool launchWhenReady = false)
     {
-        var vm = new ApkInstallViewModel(dsa, new ArgsText(), Path);
+        var vm = new ApkInstallViewModel(dsa, new ArgsText(), Path, X64) { LaunchWhenReady = launchWhenReady };
         await vm.LoadAsync();
         return vm;
     }
@@ -103,7 +110,7 @@ public class ApkInstallViewModelTests
         Assert.Equal(ApkInstallPage.Details, vm.Page);
         Assert.Equal("Notes", vm.Title);
         Assert.Equal("com.example.notes", vm.Subtitle);
-        Assert.StartsWith("ApkWindow_VersionChip 4.2", vm.VersionChip);
+        Assert.Equal("Version: 4.2", vm.VersionLine);
         Assert.Equal("3 MB", vm.SizeChip);
         Assert.StartsWith("ApkWindow_AndroidChip 8.0", vm.AndroidChip);
         Assert.True(vm.Apk!.Icon!.IsAdaptive);
@@ -113,11 +120,58 @@ public class ApkInstallViewModelTests
         Assert.True(vm.Permissions[0].Sensitive);
         Assert.Contains(vm.Facts, f => f.Value.Contains("AB:CD"));
         Assert.Equal(ApkInstallKind.Unknown, vm.Kind);
-        Assert.StartsWith("ApkWindow_SummaryUnknown", vm.Summary);
+        // Android starting is shown when it happens; nothing needs saying before that.
+        Assert.Equal("", vm.Summary);
         Assert.True(vm.CanInstall);
         Assert.StartsWith("ApkWindow_Install ", vm.InstallButton);
         // Reading the file never starts Android.
         Assert.Equal(new[] { $"apk-info {Path} --json" }, dsa.Calls);
+    }
+
+    /// <summary>What dsa apk-info prints of an APKPure bundle of the notes app: its base
+    /// APK's information, and the three of its APKs and the expansion file installing it sends.</summary>
+    private static string BundleInfo(string android = "stopped", string install = "null") =>
+        Info(android, install).TrimEnd('}') + ",\"format\":\"xapk\"," +
+        "\"apks\":[\"base.apk\",\"split_config.x86_64.apk\",\"split_config.en.apk\"],\"split_count\":2," +
+        "\"obbs\":[\"main.42.com.example.notes.obb\"],\"total_size\":10485760,\"install_abi\":\"x86_64\"}";
+
+    [Fact]
+    public async Task Fr11_a_bundle_shows_its_base_app_with_how_many_files_it_installs_and_their_size()
+    {
+        const string bundle = @"C:\Users\me\Downloads\notes.xapk";
+        var dsa = new FakeRunner().Answer($"apk-info {bundle} --json", BundleInfo());
+        var vm = new ApkInstallViewModel(dsa, new ArgsText(), bundle, X64);
+        await vm.LoadAsync();
+        Assert.Equal(ApkInstallPage.Details, vm.Page);
+        // The app is what the base APK says it is.
+        Assert.Equal("Notes", vm.Title);
+        Assert.Equal("com.example.notes", vm.PackageValue);
+        Assert.Equal("Version: 4.2", vm.VersionLine);
+        // What goes to Android: the size of everything together, and how many APKs.
+        Assert.Equal("10 MB", vm.SizeChip);
+        Assert.Contains(vm.Facts, f => f.Name.StartsWith("ApkWindow_FactSize") && f.Value == "10 MB");
+        Assert.Contains(vm.Facts, f => f.Name.StartsWith("ApkWindow_FactApks") && f.Value == "ApkWindow_ApksValue 3|2");
+        Assert.Contains(vm.Facts, f => f.Name.StartsWith("ApkWindow_FactObbs") && f.Value == "main.42.com.example.notes.obb");
+        Assert.StartsWith("ApkWindow_BundleTitle", vm.SummaryTitle);
+        Assert.Equal("ApkWindow_BundleSummaryObb Notes|3|10 MB", vm.Summary);
+        Assert.True(vm.CanInstall);
+    }
+
+    [Theory]
+    [InlineData("nowhere/app.aab", "dsa: not installed (app-bundle): app.aab: this is an Android App Bundle", "app.aab is an Android App Bundle.")]
+    [InlineData("nowhere/app.apkm", "dsa: not installed (encrypted-bundle): app.apkm: the bundle is encrypted", "app.apkm is an encrypted bundle")]
+    [InlineData("nowhere/app.xapk", "dsa: not installed (split-signature-mismatch): app.xapk: config.ko.apk is signed with another certificate", "app.xapk holds a split APK signed with another certificate")]
+    [InlineData("nowhere/app.apks", "dsa: not installed (invalid-bundle): app.apks: the bundle holds two base APKs, a.apk and b.apk", "app.apks is a split APK bundle that cannot be installed: the bundle holds two base APKs")]
+    public async Task Fr11_a_bundle_dsa_refuses_says_its_reason(string path, string error, string start)
+    {
+        var dsa = new FakeRunner().Fail($"apk-info {path} --json", error);
+        var vm = new ApkInstallViewModel(dsa, new ArgsText(), path, X64);
+        await vm.LoadAsync();
+        Assert.Equal(ApkInstallPage.Failed, vm.Page);
+        Assert.StartsWith("ApkWindow_NotApkTitle", vm.ResultTitle);
+        Assert.StartsWith(start, vm.ResultText);
+        Assert.DoesNotContain("not supported", vm.ResultText);
+        Assert.False(vm.CanInstall);
     }
 
     [Fact]
@@ -210,7 +264,9 @@ public class ApkInstallViewModelTests
         var vm = await Loaded(dsa);
         Assert.Equal(ApkInstallPage.Failed, vm.Page);
         Assert.StartsWith("ApkWindow_NotApkTitle", vm.ResultTitle);
-        Assert.Contains("not a ZIP archive", vm.ResultText);
+        // What dsa says is for developers; the user reads what the file is, in plain words.
+        Assert.Equal("notes.apk is not a valid APK file.", vm.ResultText);
+        Assert.DoesNotContain("ZIP", vm.ResultText);
         Assert.False(vm.CanInstall);
     }
 
@@ -224,6 +280,295 @@ public class ApkInstallViewModelTests
         await vm.InstallAsync();
         Assert.Equal(ApkInstallPage.Failed, vm.Page);
         Assert.StartsWith("ApkWindow_StartFailed Android did not start: the image is missing", vm.ResultText);
+    }
+
+    [Fact]
+    public void Fr11_the_installer_opens_on_reading_the_file_with_launch_when_ready_on()
+    {
+        var vm = new ApkInstallViewModel(new FakeRunner(), new ArgsText(), Path, X64);
+        Assert.Equal(ApkInstallPage.Reading, vm.Page);
+        Assert.Equal("notes.apk", vm.Title);
+        Assert.False(vm.CanInstall);
+        Assert.False(vm.CanOpen);
+        Assert.False(vm.IsBusy);
+        // As App Installer does, the app opens once it is installed unless the user says not to.
+        Assert.True(vm.LaunchWhenReady);
+        Assert.False(vm.Launched);
+    }
+
+    [Fact]
+    public async Task Fr11_the_installer_shows_the_publisher_and_version_under_the_app_name()
+    {
+        var vm = await Loaded(new FakeRunner().Answer($"apk-info {Path} --json", Info()));
+        Assert.Equal("Notes", vm.Title);
+        Assert.StartsWith("Publisher: ApkWindow_Signer v2|AB:CD", vm.PublisherLine);
+        Assert.Equal("Version: 4.2", vm.VersionLine);
+        Assert.Equal("", vm.CompatibilityWarning);
+    }
+
+    [Fact]
+    public async Task Fr11_an_unsigned_apk_says_so_where_the_publisher_goes()
+    {
+        var info = Info().Replace("\"signer\":{\"scheme\":\"v2\",\"sha256\":\"AB:CD\"},", "");
+        var vm = await Loaded(new FakeRunner().Answer($"apk-info {Path} --json", info));
+        Assert.StartsWith("Publisher: ApkWindow_Unsigned", vm.PublisherLine);
+    }
+
+    [Fact]
+    public async Task Fr11_an_apk_without_code_for_this_processor_is_flagged_before_install()
+    {
+        var info = Info().Replace("\"abis\":[\"x86_64\"]", "\"abis\":[\"arm64-v8a\",\"armeabi-v7a\"]");
+        var vm = await Loaded(new FakeRunner().Answer($"apk-info {Path} --json", info));
+        Assert.StartsWith("ApkWindow_AbiWarning arm64-v8a, armeabi-v7a", vm.CompatibilityWarning);
+        Assert.StartsWith("ApkWindow_AbiWarningTitle", vm.CompatibilityTitle);
+        // Android decides with its translation package, so the install stays possible.
+        Assert.True(vm.CanInstall);
+
+        var arm = new ApkInstallViewModel(new FakeRunner().Answer($"apk-info {Path} --json", info), new ArgsText(), Path,
+            new[] { "arm64-v8a" });
+        await arm.LoadAsync();
+        Assert.Equal("", arm.CompatibilityWarning);
+    }
+
+    [Fact]
+    public async Task Fr11_launch_when_ready_opens_the_app_once_it_is_installed()
+    {
+        var dsa = new FakeRunner()
+            .Answer($"apk-info {Path} --json", Info("running", "\"new\""))
+            .Answer($"install {Path} --progress --json", "{\"installed\":true}", "stage sending", "progress 100")
+            .Answer("launch com.example.notes", "Launching com.example.notes");
+        var vm = await Loaded(dsa, launchWhenReady: true);
+        await vm.InstallAsync();
+        Assert.Equal(ApkInstallPage.Done, vm.Page);
+        Assert.True(vm.Launched);
+        Assert.Equal("launch com.example.notes", dsa.Calls[^1]);
+    }
+
+    [Fact]
+    public async Task Fr11_without_launch_when_ready_the_done_screen_offers_launch()
+    {
+        var dsa = new FakeRunner()
+            .Answer($"apk-info {Path} --json", Info("running", "\"new\""))
+            .Answer($"install {Path} --progress --json", "{\"installed\":true}");
+        var vm = await Loaded(dsa);
+        await vm.InstallAsync();
+        Assert.Equal(ApkInstallPage.Done, vm.Page);
+        Assert.False(vm.Launched);
+        Assert.True(vm.CanOpen);
+        Assert.DoesNotContain(dsa.Calls, c => c.StartsWith("launch"));
+    }
+
+    [Fact]
+    public async Task Fr11_an_app_that_does_not_open_after_install_stays_on_done_with_the_reason()
+    {
+        var dsa = new FakeRunner()
+            .Answer($"apk-info {Path} --json", Info("running", "\"new\""))
+            .Answer($"install {Path} --progress --json", "{\"installed\":true}")
+            .Fail("launch com.example.notes", "dsa: the window manager is not running");
+        var vm = await Loaded(dsa, launchWhenReady: true);
+        await vm.InstallAsync();
+        Assert.Equal(ApkInstallPage.Done, vm.Page);
+        Assert.False(vm.Launched);
+        Assert.True(vm.CanOpen);
+        Assert.StartsWith("ApkWindow_LaunchFailedAfterInstall Notes|the window manager is not running", vm.ResultText);
+    }
+
+    [Fact]
+    public async Task Fr11_the_progress_state_can_be_cancelled_until_android_has_the_app()
+    {
+        var dsa = new FakeRunner()
+            .Answer($"apk-info {Path} --json", Info("running", "\"new\""))
+            .Answer($"install {Path} --progress --json", "{\"installed\":true}", "stage sending", "progress 30", "stage installing");
+        var vm = await Loaded(dsa);
+        var seen = new List<(ApkInstallPage Page, bool Busy, bool CanCancel)>();
+        vm.PropertyChanged += (_, _) => seen.Add((vm.Page, vm.IsBusy, vm.CanCancel));
+        await vm.InstallAsync();
+        Assert.Contains((ApkInstallPage.Progress, true, true), seen);
+        // Once Android has the whole APK, the install cannot be stopped.
+        Assert.Contains((ApkInstallPage.Progress, true, false), seen);
+        Assert.False(vm.IsBusy);
+    }
+
+    [Fact]
+    public async Task Fr11_the_labels_are_english_whatever_the_language()
+    {
+        // The test's text source answers every table lookup with the key, so a label that came
+        // from a string table would not read as the English word.
+        var vm = await Loaded(new FakeRunner().Answer($"apk-info {Path} --json", Info()));
+        Assert.Equal("Install Notes?", vm.HeroTitle);
+        Assert.Equal("Package Name: com.example.notes", vm.PackageLine);
+        Assert.StartsWith("Publisher: ", vm.PublisherLine);
+        Assert.Equal("Version: 4.2", vm.VersionLine);
+        Assert.StartsWith("Source: ", vm.SourceLine);
+        Assert.Equal("Capabilities (2):", vm.PermissionsHeader);
+        Assert.Equal("More", vm.MoreLabel);
+    }
+
+    [Fact]
+    public async Task Fr11_a_plain_install_adds_no_sentence()
+    {
+        var vm = await Loaded(new FakeRunner().Answer($"apk-info {Path} --json", Info("running", "\"new\"")));
+        Assert.Equal("", vm.Summary);
+        Assert.Equal("", vm.SummaryTitle);
+    }
+
+    [Theory]
+    [InlineData("\"update\"", "ApkWindow_InstalledTitle")]
+    [InlineData("\"reinstall\"", "ApkWindow_InstalledTitle")]
+    [InlineData("\"downgrade\"", "ApkWindow_DowngradeTitle")]
+    [InlineData("\"signature-mismatch\"", "ApkWindow_SignatureTitle")]
+    public async Task Fr11_every_notice_has_a_short_title(string kind, string title)
+    {
+        var vm = await Loaded(new FakeRunner().Answer($"apk-info {Path} --json", Info("running", kind, Installed41)));
+        Assert.StartsWith(title, vm.SummaryTitle);
+        Assert.NotEqual("", vm.Summary);
+    }
+
+    [Fact]
+    public async Task Fr11_more_expands_from_the_first_three_permissions_to_all_of_them()
+    {
+        var permissions = string.Join(",", Enumerable.Range(1, 40).Select(i =>
+            $"{{\"name\":\"android.permission.P{i}\",\"description\":\"Permission {i}\",\"sensitive\":false}}"));
+        var info = Regex.Replace(Info(), "\"permissions\":\\[.*?\\],\"icon\"", $"\"permissions\":[{permissions}],\"icon\"");
+        var vm = await Loaded(new FakeRunner().Answer($"apk-info {Path} --json", info));
+        Assert.Equal("Capabilities (40):", vm.PermissionsHeader);
+        Assert.False(vm.IsExpanded);
+        Assert.Equal(new[] { "Permission 1", "Permission 2", "Permission 3" }, vm.PermissionPreview.Select(p => p.Description));
+
+        var changed = false;
+        vm.PropertyChanged += (_, _) => changed = true;
+        vm.Expand();
+        Assert.True(vm.IsExpanded);
+        Assert.True(changed);
+        Assert.Equal(40, vm.Permissions.Count);
+        // The raw names stay, for the expanded rows.
+        Assert.Equal("android.permission.P40", vm.Permissions[39].Name);
+    }
+
+    [Fact]
+    public async Task Fr11_more_turns_into_less_and_less_folds_the_list_again()
+    {
+        var vm = await Loaded(new FakeRunner().Answer($"apk-info {Path} --json", Info()));
+        Assert.False(vm.IsExpanded);
+        Assert.Equal("More", vm.MoreLabel);
+
+        vm.ToggleExpanded();
+        Assert.True(vm.IsExpanded);
+        Assert.Equal("Less", vm.MoreLabel);
+
+        var changed = false;
+        vm.PropertyChanged += (_, _) => changed = true;
+        vm.ToggleExpanded();
+        Assert.True(changed);
+        Assert.False(vm.IsExpanded);
+        Assert.Equal("More", vm.MoreLabel);
+
+        vm.Expand();
+        vm.Collapse();
+        Assert.False(vm.IsExpanded);
+    }
+
+    [Fact]
+    public async Task Fr11_the_lines_under_the_title_have_their_labels_in_one_column_and_values_in_the_next()
+    {
+        var vm = await Loaded(new FakeRunner().Answer($"apk-info {Path} --json", Info()));
+        Assert.Equal("Package Name:", ApkInstallViewModel.PackageLabel);
+        Assert.Equal("Publisher:", ApkInstallViewModel.PublisherLabel);
+        Assert.Equal("Version:", ApkInstallViewModel.VersionLabel);
+        Assert.Equal("Source:", ApkInstallViewModel.SourceLabel);
+        Assert.Equal("com.example.notes", vm.PackageValue);
+        Assert.Equal("4.2", vm.VersionValue);
+        Assert.Equal("Package Name: com.example.notes", vm.PackageLine);
+    }
+
+    [Theory]
+    [InlineData("nowhere/app.xapk", "app.xapk is a split APK bundle")]
+    [InlineData("nowhere/app.apks", "app.apks is a split APK bundle")]
+    [InlineData("nowhere/app.apkm", "app.apkm is a split APK bundle")]
+    [InlineData("nowhere/app.aab", "app.aab is an Android App Bundle")]
+    [InlineData("nowhere/app.apk", "app.apk is not a valid APK file.")]
+    public async Task Fr11_a_file_that_cannot_be_installed_is_named_for_what_it_is(string path, string start)
+    {
+        var dsa = new FakeRunner().Fail($"apk-info {path} --json", "dsa: the file has no AndroidManifest.xml, so it is not an APK");
+        var vm = new ApkInstallViewModel(dsa, new ArgsText(), path, X64);
+        await vm.LoadAsync();
+        Assert.Equal(ApkInstallPage.Failed, vm.Page);
+        Assert.StartsWith("ApkWindow_NotApkTitle", vm.ResultTitle);
+        Assert.StartsWith(start, vm.ResultText);
+        Assert.DoesNotContain("AndroidManifest", vm.ResultText);
+    }
+
+    [Fact]
+    public async Task Fr11_reading_the_file_again_never_takes_its_icon_away()
+    {
+        var withoutIcon = Regex.Replace(Info("running", "\"update\"", Installed41), "\"icon\":\\{.*?\\}\\},\"signer\"", "\"icon\":null,\"signer\"");
+        Assert.Contains("\"icon\":null", withoutIcon);
+        var dsa = new FakeRunner()
+            .Answer($"apk-info {Path} --json", Info())
+            .Answer("start --wait --json", "{\"state\":\"Active\"}")
+            .Answer($"apk-info {Path} --json", withoutIcon);
+        var vm = await Loaded(dsa);
+        var icon = vm.Apk!.Icon;
+        Assert.NotNull(icon);
+        await vm.InstallAsync();
+        Assert.Equal(ApkInstallKind.Update, vm.Kind);
+        Assert.Same(icon, vm.Apk!.Icon);
+    }
+
+    [Fact]
+    public async Task Fr11_the_title_asks_only_while_the_install_is_undecided_or_running()
+    {
+        var unread = new ApkInstallViewModel(new FakeRunner(), new ArgsText(), Path, X64);
+        Assert.Equal("notes.apk", unread.HeroTitle);
+        var dsa = new FakeRunner()
+            .Answer($"apk-info {Path} --json", Info("running", "\"new\""))
+            .Answer($"install {Path} --progress --json", "{\"installed\":true}");
+        var vm = await Loaded(dsa);
+        Assert.Equal("Install Notes?", vm.HeroTitle);
+        await vm.InstallAsync();
+        Assert.Equal(ApkInstallPage.Done, vm.Page);
+        Assert.Equal("Notes", vm.HeroTitle);
+    }
+
+    [Theory]
+    [InlineData("[ZoneTransfer]\r\nZoneId=3\r\nReferrerUrl=https://apkpure.net/page\r\nHostUrl=https://d.example.com/a.apk\r\n", "d.example.com")]
+    [InlineData("[ZoneTransfer]\r\nZoneId=3\r\nReferrerUrl=https://apkpure.net/page\r\n", "apkpure.net")]
+    // A browser's about:internet has no host, so the next value speaks.
+    [InlineData("[ZoneTransfer]\r\nHostUrl=about:internet\r\nReferrerUrl=https://apkpure.net/page\r\n", "apkpure.net")]
+    public void Fr11_source_is_the_host_the_file_came_from(string zone, string host)
+    {
+        Assert.Equal(host, ApkSource.Describe(Path, zone));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("[ZoneTransfer]\r\nZoneId=3\r\n")]
+    [InlineData("[ZoneTransfer]\r\nHostUrl=about:internet\r\n")]
+    public void Fr11_source_without_a_host_is_the_files_folder(string? zone)
+    {
+        Assert.Equal(System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(Path)), ApkSource.Describe(Path, zone));
+    }
+
+    [Fact]
+    public void Fr11_source_reads_the_files_zone_identifier_stream()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+        var folder = Directory.CreateTempSubdirectory("dsa-apk-source").FullName;
+        try
+        {
+            var apk = System.IO.Path.Combine(folder, "app.apk");
+            File.WriteAllText(apk, "x");
+            Assert.Equal(folder, ApkSource.Of(apk));
+            File.WriteAllText(apk + ":Zone.Identifier", "[ZoneTransfer]\r\nHostUrl=https://d.example.com/app.apk\r\n");
+            Assert.Equal("d.example.com", ApkSource.Of(apk));
+        }
+        finally
+        {
+            Directory.Delete(folder, true);
+        }
     }
 
     [Fact]

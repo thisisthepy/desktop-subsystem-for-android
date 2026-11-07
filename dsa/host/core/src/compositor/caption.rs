@@ -16,6 +16,9 @@
 //! - [`caption_tone`]: whether the buttons' glyphs are dark or light, from what the app told
 //!   the system about its status bar, so they stay readable over it.
 //! - [`paint_buttons`]: the buttons as an image, in the tone and state they are in.
+//! - [`paint_title_bar`]: the whole band as an image: the app's icon and name at the left
+//!   (the platform lays the name out), the buttons at the right, and a fill when
+//!   [`band_fill`] finds that the app leaves the band empty.
 
 use crate::tasks::StatusBarAppearance;
 
@@ -112,6 +115,24 @@ pub const BUTTON_WIDTH_AT_100: u32 = 46;
 /// The side of a caption glyph at 100%, in pixels.
 const GLYPH_AT_100: f64 = 10.0;
 
+/// The side of the app's icon in the title bar at 100%, in pixels: the small icon Windows 11
+/// draws in a caption.
+pub const ICON_AT_100: u32 = 16;
+
+/// The space before the icon, and between the icon and the app's name, at 100%, in pixels,
+/// as a WinUI 3 title bar leaves them.
+pub const TITLE_PADDING_AT_100: u32 = 16;
+
+/// The space kept between the end of the app's name and the caption buttons at 100%.
+const TITLE_END_AT_100: u32 = 8;
+
+/// The height of the app's name at 100%, in pixels: the caption text of Windows 11.
+pub const TITLE_TEXT_AT_100: u32 = 12;
+
+/// How opaque the icon is drawn while the window is not the active one, as Windows dims an
+/// inactive caption.
+const ICON_INACTIVE_OPACITY: f64 = 0.4;
+
 /// Where a task window's title bar and its buttons are, in client pixels. The client area
 /// covers the whole window, so its top row is the window's top row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -125,6 +146,12 @@ pub struct CaptionLayout {
     /// How far down from the top the window can be resized by its top edge; 0 while the
     /// window is maximized, which has no edge to drag.
     pub resize_border: u32,
+    /// The side of the app's icon.
+    pub icon: u32,
+    /// The space before the icon, and between the icon and the name.
+    pub padding: u32,
+    /// The space between the end of the name and the buttons.
+    pub title_end: u32,
 }
 
 impl CaptionLayout {
@@ -136,6 +163,48 @@ impl CaptionLayout {
             height,
             button_width: scaled(BUTTON_WIDTH_AT_100, dpi),
             resize_border,
+            icon: scaled(ICON_AT_100, dpi),
+            padding: scaled(TITLE_PADDING_AT_100, dpi),
+            title_end: scaled(TITLE_END_AT_100, dpi),
+        }
+    }
+
+    /// Where the app's icon is: left, top, width and height, in client pixels. It stands
+    /// after the left padding, centred in the band as the buttons' glyphs are. `None` when the
+    /// window is too narrow for it to end before the buttons.
+    pub fn icon_rect(&self) -> Option<(i32, i32, u32, u32)> {
+        let left = self.padding as i32;
+        if left + self.icon as i32 > self.buttons_left() || self.icon > self.height {
+            return None;
+        }
+        let top = (self.height - self.icon) / 2;
+        Some((left, top as i32, self.icon, self.icon))
+    }
+
+    /// Where the app's name may be drawn: left, top, width and height, in client pixels. It
+    /// starts a padding after the icon and ends before the buttons, so a long name is cut
+    /// there. `None` when no room is left for it.
+    pub fn title_rect(&self) -> Option<(i32, i32, u32, u32)> {
+        let left = (2 * self.padding + self.icon) as i32;
+        let right = self.buttons_left() - self.title_end as i32;
+        if right <= left {
+            return None;
+        }
+        Some((left, 0, (right - left) as u32, self.height))
+    }
+
+    /// Whether the client point (`x`, `y`) is on the app's icon, which opens the window's
+    /// system menu. The top resize edge comes first, as it does for the buttons.
+    pub fn on_icon(&self, x: i32, y: i32) -> bool {
+        if y < self.resize_border as i32 {
+            return false;
+        }
+        match self.icon_rect() {
+            // The whole height of the band over the icon, as a caption icon takes it.
+            Some((left, _, side, _)) => {
+                x >= left && x < left + side as i32 && y >= 0 && y < self.height as i32
+            }
+            None => false,
         }
     }
 
@@ -306,6 +375,165 @@ pub fn paint_buttons(
         }
     }
     pixels
+}
+
+/// What the title bar shows besides its buttons.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TitleBarContent<'a> {
+    /// The color the band is filled with (0xAARRGGBB), when the app leaves it empty; `None`
+    /// keeps it transparent, so the app shows through.
+    pub fill: Option<u32>,
+    /// The app's icon: rows of premultiplied BGRA pixels, `layout.icon` pixels square.
+    pub icon: Option<&'a [u8]>,
+    /// The app's name, already laid out and cut to fit: one coverage byte (0 to 255) per
+    /// pixel, rows of the width and height of [`CaptionLayout::title_rect`].
+    pub title: Option<&'a [u8]>,
+}
+
+/// The whole title bar as rows of premultiplied BGRA pixels, `layout.width` wide and
+/// `layout.height` high: the fill, if any, the app's icon and name at the left, in the
+/// glyphs' color and dimmed while the window is inactive, and the buttons at the right.
+pub fn paint_title_bar(
+    layout: &CaptionLayout,
+    dpi: u32,
+    palette: &CaptionPalette,
+    state: &CaptionState,
+    content: &TitleBarContent,
+) -> Vec<u8> {
+    let width = layout.width as usize;
+    let height = layout.height as usize;
+    // A high contrast theme gives the band its own background, as it does the buttons.
+    let fill = if palette.rest >> 24 != 0 {
+        Some(palette.rest)
+    } else {
+        content.fill
+    };
+    let base = fill.map_or([0.0; 4], |color| premultiply(color, 1.0));
+    let base = over([0.0; 4], base);
+    let mut pixels = Vec::with_capacity(width * height * 4);
+    for _ in 0..width * height {
+        pixels.extend_from_slice(&base);
+    }
+    let blend = |pixels: &mut [u8], x: usize, y: usize, top: [f64; 4]| {
+        let at = (y * width + x) * 4;
+        let bottom = [
+            f64::from(pixels[at]) / 255.0,
+            f64::from(pixels[at + 1]) / 255.0,
+            f64::from(pixels[at + 2]) / 255.0,
+            f64::from(pixels[at + 3]) / 255.0,
+        ];
+        pixels[at..at + 4].copy_from_slice(&over(bottom, top));
+    };
+    if let (Some(icon), Some((left, top, side, _))) = (content.icon, layout.icon_rect()) {
+        let opacity = if state.active {
+            1.0
+        } else {
+            ICON_INACTIVE_OPACITY
+        };
+        let side = side as usize;
+        if icon.len() >= side * side * 4 {
+            for row in 0..side {
+                for column in 0..side {
+                    let (x, y) = (left as usize + column, top as usize + row);
+                    if x >= width || y >= height {
+                        continue;
+                    }
+                    let at = (row * side + column) * 4;
+                    let source = [
+                        f64::from(icon[at]) / 255.0 * opacity,
+                        f64::from(icon[at + 1]) / 255.0 * opacity,
+                        f64::from(icon[at + 2]) / 255.0 * opacity,
+                        f64::from(icon[at + 3]) / 255.0 * opacity,
+                    ];
+                    blend(&mut pixels, x, y, source);
+                }
+            }
+        }
+    }
+    if let (Some(title), Some((left, _, title_width, title_height))) =
+        (content.title, layout.title_rect())
+    {
+        let color = if state.active {
+            palette.glyph
+        } else {
+            palette.glyph_inactive
+        };
+        let (title_width, title_height) = (title_width as usize, title_height as usize);
+        if title.len() >= title_width * title_height {
+            for row in 0..title_height.min(height) {
+                for column in 0..title_width {
+                    let coverage = title[row * title_width + column];
+                    let x = left as usize + column;
+                    if coverage == 0 || x >= width {
+                        continue;
+                    }
+                    let source = premultiply(color, f64::from(coverage) / 255.0);
+                    blend(&mut pixels, x, row, source);
+                }
+            }
+        }
+    }
+    let buttons = paint_buttons(layout, dpi, palette, state);
+    let strip = 3 * layout.button_width as usize;
+    let buttons_left = layout.buttons_left();
+    for y in 0..height {
+        for column in 0..strip {
+            let x = buttons_left + column as i32;
+            if x < 0 || x as usize >= width {
+                continue;
+            }
+            let at = (y * strip + column) * 4;
+            let source = [
+                f64::from(buttons[at]) / 255.0,
+                f64::from(buttons[at + 1]) / 255.0,
+                f64::from(buttons[at + 2]) / 255.0,
+                f64::from(buttons[at + 3]) / 255.0,
+            ];
+            blend(&mut pixels, x as usize, y, source);
+        }
+    }
+    pixels
+}
+
+/// The color to fill the title bar's band with, from sample pixels of an app's frame
+/// (0xAARRGGBB each): `band` from inside the band, `below` from the row just under it.
+///
+/// An app that draws behind the band (its status bar background) keeps it as it drew it. An
+/// app that does not, as one with an old theme that draws no system bar background, leaves
+/// the band empty or black while its own top (its toolbar) starts below it; the band then
+/// takes the color under it, so the title bar always follows the app's top color. `None`
+/// leaves the band as the app drew it.
+pub fn band_fill(band: &[u32], below: &[u32]) -> Option<u32> {
+    let first = *below.first()?;
+    if band.is_empty() || first >> 24 < 0xF0 {
+        return None;
+    }
+    if !below.iter().all(|color| alike(*color, first)) {
+        return None;
+    }
+    if !band.iter().all(|color| empty_or_black(*color)) {
+        return None;
+    }
+    // Black under black: the app is black at its top, and the band already is.
+    if empty_or_black(first) {
+        return None;
+    }
+    Some(0xFF00_0000 | (first & 0x00FF_FFFF))
+}
+
+/// Whether two 0xAARRGGBB colors differ by at most 2 in every channel.
+fn alike(a: u32, b: u32) -> bool {
+    (0..4).all(|i| channel(a, i).abs_diff(channel(b, i)) <= 2)
+}
+
+/// Whether an 0xAARRGGBB color is (nearly) transparent or (nearly) black.
+fn empty_or_black(color: u32) -> bool {
+    channel(color, 3) < 0x10 || (0..3).all(|i| channel(color, i) <= 0x08)
+}
+
+/// Channel `index` of an 0xAARRGGBB color: 0 blue, 1 green, 2 red, 3 alpha.
+fn channel(color: u32, index: u32) -> u32 {
+    (color >> (8 * index)) & 0xff
 }
 
 type Segment = ((f64, f64), (f64, f64));
@@ -718,6 +946,149 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The BGRA pixel at (`x`, `y`) of a whole title bar painted for `layout`.
+    fn bar_pixel(image: &[u8], layout: &CaptionLayout, x: u32, y: u32) -> [u8; 4] {
+        let at = ((y * layout.width + x) * 4) as usize;
+        [image[at], image[at + 1], image[at + 2], image[at + 3]]
+    }
+
+    #[test]
+    fn fr22_the_title_bar_shows_the_apps_icon_and_name_at_its_left() {
+        for dpi in [96, 144, 192] {
+            let layout = CaptionLayout::new(scaled(800, dpi), scaled(31, dpi), dpi, 0);
+            let (icon_left, icon_top, side, _) = layout.icon_rect().unwrap();
+            // After the WinUI padding, the small icon's size, centred in the band.
+            assert_eq!(icon_left as u32, scaled(16, dpi), "at {dpi}");
+            assert_eq!(side, scaled(16, dpi), "at {dpi}");
+            assert_eq!(icon_top as u32, (layout.height - side) / 2, "at {dpi}");
+            let (title_left, _, title_width, title_height) = layout.title_rect().unwrap();
+            assert_eq!(title_left as u32, scaled(48, dpi), "at {dpi}");
+            assert_eq!(title_height, layout.height);
+            // An opaque red icon and a name that covers its whole rectangle.
+            let icon: Vec<u8> = [0u8, 0, 255, 255].repeat((side * side) as usize);
+            let title = vec![255u8; (title_width * title_height) as usize];
+            let content = TitleBarContent {
+                fill: None,
+                icon: Some(&icon),
+                title: Some(&title),
+            };
+            for (tone, glyph) in [
+                (CaptionTone::DarkGlyphs, 0u8),
+                (CaptionTone::LightGlyphs, 255u8),
+            ] {
+                let palette = CaptionPalette::of(tone);
+                let active = CaptionState {
+                    active: true,
+                    ..CaptionState::default()
+                };
+                let image = paint_title_bar(&layout, dpi, &palette, &active, &content);
+                assert_eq!(image.len(), (layout.width * layout.height * 4) as usize);
+                let center = (icon_left as u32 + side / 2, icon_top as u32 + side / 2);
+                assert_eq!(
+                    bar_pixel(&image, &layout, center.0, center.1),
+                    [0, 0, 255, 255]
+                );
+                // The name takes the glyphs' color.
+                let text = bar_pixel(&image, &layout, title_left as u32 + 2, layout.height / 2);
+                assert!(text[3] > 200, "{text:?}");
+                let expected = u32::from(glyph) * u32::from(text[3]) / 255;
+                assert!(u32::from(text[0]).abs_diff(expected) <= 1, "{text:?}");
+                // Before the icon, the band stays transparent for the app.
+                assert_eq!(bar_pixel(&image, &layout, 1, 1), [0, 0, 0, 0]);
+                // Inactive, both are fainter.
+                let resting = CaptionState::default();
+                let inactive = paint_title_bar(&layout, dpi, &palette, &resting, &content);
+                let at_text = (title_left as u32 + 2, layout.height / 2);
+                let faint_icon = bar_pixel(&inactive, &layout, center.0, center.1);
+                let faint_text = bar_pixel(&inactive, &layout, at_text.0, at_text.1);
+                assert!(faint_icon[3] < 128, "{faint_icon:?}");
+                assert!(
+                    faint_text[3] < text[3] / 2,
+                    "{faint_text:?} against {text:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn fr22_a_long_name_ends_before_the_caption_buttons() {
+        let layout = at_100();
+        let (left, _, width, height) = layout.title_rect().unwrap();
+        assert_eq!(left + width as i32, layout.buttons_left() - 8);
+        let title = vec![255u8; (width * height) as usize];
+        let image = paint_title_bar(
+            &layout,
+            96,
+            &CaptionPalette::of(CaptionTone::DarkGlyphs),
+            &CaptionState {
+                active: true,
+                ..CaptionState::default()
+            },
+            &TitleBarContent {
+                title: Some(&title),
+                ..TitleBarContent::default()
+            },
+        );
+        // Nothing between the name's end and the buttons, nor under the buttons but glyphs.
+        for x in (left as u32 + width)..layout.buttons_left() as u32 {
+            assert_eq!(bar_pixel(&image, &layout, x, 3)[3], 0, "at {x}");
+        }
+        // A window too narrow for a name has none, and one too narrow for the icon no icon.
+        let narrow = CaptionLayout::new(3 * 46 + 40, 31, 96, 0);
+        assert!(narrow.title_rect().is_none());
+        assert!(narrow.icon_rect().is_some());
+        let narrower = CaptionLayout::new(3 * 46 + 20, 31, 96, 0);
+        assert!(narrower.icon_rect().is_none());
+    }
+
+    #[test]
+    fn fr22_the_icon_opens_the_system_menu() {
+        let layout = at_100();
+        assert!(layout.on_icon(20, 15));
+        assert!(
+            layout.on_icon(16, 30),
+            "the band's whole height over the icon"
+        );
+        assert!(!layout.on_icon(20, 4), "the top resize edge comes first");
+        assert!(!layout.on_icon(40, 15));
+        assert!(!layout.on_icon(20, 31), "below the band");
+    }
+
+    #[test]
+    fn fr22_an_app_that_leaves_the_band_empty_gets_its_top_colour_there() {
+        let toolbar = 0xFF03_9BE5;
+        // An old-theme app: nothing (or black) behind the band, a toolbar under it.
+        assert_eq!(band_fill(&[0xFF00_0000; 8], &[toolbar; 8]), Some(toolbar));
+        assert_eq!(band_fill(&[0; 8], &[toolbar; 8]), Some(toolbar));
+        // An app that draws its own status bar keeps it.
+        assert_eq!(band_fill(&[0xFF02_88D1; 8], &[toolbar; 8]), None);
+        assert_eq!(band_fill(&[0xFFFF_FFFF; 8], &[0xFFFF_FFFF; 8]), None);
+        // Black under black, or no single color under the band, changes nothing.
+        assert_eq!(band_fill(&[0xFF00_0000; 8], &[0xFF00_0000; 8]), None);
+        let mut picture = [toolbar; 8];
+        picture[3] = 0xFF80_4020;
+        assert_eq!(band_fill(&[0xFF00_0000; 8], &picture), None);
+        // The fill then decides the glyphs' tone by its lightness.
+        assert_eq!(
+            caption_tone(StatusBarAppearance::Unspecified, 0xFFF5_F5F5),
+            CaptionTone::DarkGlyphs
+        );
+        // And it is painted across the whole band, under the buttons too.
+        let layout = at_100();
+        let image = paint_title_bar(
+            &layout,
+            96,
+            &CaptionPalette::of(CaptionTone::LightGlyphs),
+            &CaptionState::default(),
+            &TitleBarContent {
+                fill: Some(toolbar),
+                ..TitleBarContent::default()
+            },
+        );
+        assert_eq!(bar_pixel(&image, &layout, 2, 2), [0xE5, 0x9B, 0x03, 0xFF]);
+        assert_eq!(bar_pixel(&image, &layout, 799, 2), [0xE5, 0x9B, 0x03, 0xFF]);
     }
 
     #[test]

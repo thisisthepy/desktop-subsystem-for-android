@@ -6,7 +6,7 @@ namespace Dsa.Settings.Core;
 /// <summary>Asks the DSA service, through the dsa command, for what the pages show, and
 /// changes the settings through it. Every change goes through the service; the app writes no
 /// settings file of its own.</summary>
-public sealed class DsaService
+public sealed partial class DsaService
 {
     private readonly IDsaCli _cli;
 
@@ -116,7 +116,20 @@ public sealed class DsaService
         Bool(json, "file_sharing", missing: true),
         json.TryGetProperty("shared_folders", out var shared) && shared.ValueKind == JsonValueKind.Array
             ? Strings(json, "shared_folders")
-            : null);
+            : null,
+        Bool(json, "adb_auto_connect", missing: true),
+        ReadAdbAutoConnectState(OptionalString(json, "adb_auto_connect_state")));
+
+    /// <summary>The auto-connect state a name stands for. An empty or unknown name, as an older
+    /// service gives, is off.</summary>
+    public static AdbAutoConnectState ReadAdbAutoConnectState(string? name) => name switch
+    {
+        "waiting-for-server" => AdbAutoConnectState.WaitingForServer,
+        "waiting-for-android" => AdbAutoConnectState.WaitingForAndroid,
+        "attached" => AdbAutoConnectState.Attached,
+        "detached" => AdbAutoConnectState.Detached,
+        _ => AdbAutoConnectState.Off,
+    };
 
     private static IReadOnlyList<string> Strings(JsonElement element, string name) =>
         element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Array
@@ -165,6 +178,10 @@ public sealed class DsaService
 
     public Task<SettingsInfo> SetDeveloperModeAsync(bool on) => SetAsync("developer-mode", on ? "on" : "off");
 
+    /// <summary>Whether developer mode's port is attached to this computer's adb server by
+    /// itself.</summary>
+    public Task<SettingsInfo> SetAdbAutoConnectAsync(bool on) => SetAsync("adb-auto-connect", on ? "on" : "off");
+
     /// <summary>Whether stopping an app from the notification area skips the question that
     /// confirms it.</summary>
     public Task<SettingsInfo> SetStopWithoutAskingAsync(bool on) =>
@@ -198,21 +215,47 @@ public sealed class DsaService
         return String(json, "path");
     }
 
+    private static ArmPackageInfo? ReadArmPackage(JsonElement json, string name) =>
+        json.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.Object
+            ? new ArmPackageInfo(String(p, "name"), String(p, "version"), String(p, "library"), String(p, "license"))
+            : null;
+
     private static ArmTranslationInfo ReadArmTranslation(JsonElement json)
     {
-        ArmPackageInfo? package = null;
-        if (json.TryGetProperty("package", out var p) && p.ValueKind == JsonValueKind.Object)
-        {
-            package = new ArmPackageInfo(String(p, "name"), String(p, "version"), String(p, "library"),
-                String(p, "license"));
-        }
+        var package = ReadArmPackage(json, "package");
+        var enabled = Bool(json, "enabled", missing: true);
         ArmGuestInfo? android = null;
         if (json.TryGetProperty("android", out var a) && a.ValueKind == JsonValueKind.Object)
         {
             android = new ArmGuestInfo(Bool(a, "installed"), Bool(a, "active"), String(a, "abilist"));
         }
-        return new ArmTranslationInfo(package, Bool(json, "enabled", missing: true), Bool(json, "supported"),
-            android, Bool(json, "restart_needed"));
+        ArmTranslatorInfo? translator = null;
+        if (json.TryGetProperty("translator", out var t))
+        {
+            if (t.ValueKind == JsonValueKind.Object)
+            {
+                ArmSource? source = String(t, "source") switch
+                {
+                    "default" => ArmSource.Default,
+                    "user" => ArmSource.User,
+                    "google" => ArmSource.Google,
+                    _ => (ArmSource?)null,
+                };
+                if (source is { } known)
+                {
+                    translator = new ArmTranslatorInfo(known, String(t, "name"), String(t, "version"),
+                        String(t, "license"));
+                }
+            }
+        }
+        else if (package is not null && enabled)
+        {
+            // A dsa from before the default translator: the installed package, while on.
+            translator = new ArmTranslatorInfo(ArmSource.User, package.Name, package.Version, package.License);
+        }
+        return new ArmTranslationInfo(package, enabled, Bool(json, "supported"),
+            android, Bool(json, "restart_needed"), Bool(json, "google_fetch_available"),
+            ReadArmPackage(json, "default"), translator);
     }
 
     /// <summary>Whether ARM apps can run, and with which translation package.</summary>
@@ -220,9 +263,14 @@ public sealed class DsaService
         ReadArmTranslation(await RunJsonAsync("arm-translation", "status").ConfigureAwait(true));
 
     /// <summary>Removes the ARM translation package; Android goes without it from its next
-    /// start.</summary>
+    /// start, back to the default translator where the image has one.</summary>
     public async Task<ArmTranslationInfo> RemoveArmTranslationAsync() =>
         ReadArmTranslation(await RunJsonAsync("arm-translation", "remove").ConfigureAwait(true));
+
+    /// <summary>Goes back to the default translator the image carries, removing the package
+    /// installed in its place. It applies from the next start of Android.</summary>
+    public async Task<ArmTranslationInfo> UseDefaultArmTranslatorAsync() =>
+        ReadArmTranslation(await RunJsonAsync("arm-translation", "use-default").ConfigureAwait(true));
 
     public Task<SettingsInfo> SetProgramUpdatesAsync(bool on) => SetAsync("program-updates", on ? "on" : "off");
 

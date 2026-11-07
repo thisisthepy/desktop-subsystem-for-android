@@ -43,6 +43,33 @@ fn nfr2_a_short_guest_reports_at_once_and_a_calm_one_every_30_seconds() {
     assert!(!reporter.due(&calm, start + Duration::from_secs(2)));
     assert!(reporter.due(&short, start + Duration::from_secs(4)));
     assert!(reporter.due(&short, start + Duration::from_secs(6)));
-    assert!(!reporter.due(&calm, start + Duration::from_secs(8)));
-    assert!(reporter.due(&calm, start + Duration::from_secs(6) + CALM_INTERVAL));
+    // Calm again: the memory that came back is news once, then the calm pace resumes.
+    assert!(reporter.due(&calm, start + Duration::from_secs(8)));
+    assert!(!reporter.due(&calm, start + Duration::from_secs(10)));
+    assert!(reporter.due(&calm, start + Duration::from_secs(8) + CALM_INTERVAL));
+}
+
+#[test]
+fn nfr2_memory_the_guest_frees_is_reported_at_once_so_the_host_takes_it_back() {
+    let start = Instant::now();
+    let mut reporter = PressureReporter::default();
+    let busy = Sample {
+        mem_total_kb: 4_194_304,
+        mem_available_kb: 2_000_000,
+        stall_percent: 0.0,
+    };
+    assert!(reporter.due(&busy, start));
+    // A little more free is not news.
+    let a_little = Sample {
+        mem_available_kb: 2_050_000,
+        ..busy
+    };
+    assert!(!reporter.due(&a_little, start + Duration::from_secs(2)));
+    // An app closed and 512 MiB came free: the host hears it now, not in 30 seconds.
+    let freed = Sample {
+        mem_available_kb: 2_000_000 + 512 * 1024,
+        ..busy
+    };
+    assert!(reporter.due(&freed, start + Duration::from_secs(4)));
+    assert!(!reporter.due(&freed, start + Duration::from_secs(6)));
 }

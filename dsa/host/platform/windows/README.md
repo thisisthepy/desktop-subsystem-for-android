@@ -218,13 +218,22 @@ after two minutes. `"keep_window_manager": false` turns this off.
   of its own. The window is a tool window owned by the shell's desktop window (`Progman`),
   so it is neither in the taskbar nor in Alt+Tab, stays when the user shows the desktop, and
   is kept below every other window; it never takes the focus. It shows the widget's PNG
-  frames, decoded with WIC, with what the widget leaves clear see-through. Dragging the band
-  along its top moves it and dragging its edges resizes it; when the user lets go, the
-  service remembers the placement (per user, beside the user's settings, as
-  `users/<user>.widgets.json`) and tells Android the window's size, which the widget draws
-  at. Presses, moves and releases inside the widget go to Android. Right-clicking a widget
-  window opens its menu: Resize, with the sizes the widget allows, and Remove (in Korean
-  when that is the display language). The widgets come from the settings app's Widgets
+  frames, decoded with WIC, with what the widget leaves clear see-through. Until the first
+  frame comes, or when a frame has nothing in it, it shows a mostly opaque dark card with
+  rounded corners, so a widget is never an invisible hole on the desktop. While the pointer
+  is over a widget, a small round "More" button fades in at its top right corner, inside
+  its rounded corners. Clicking it, or right-clicking the widget, opens the widget's menu:
+  Resize, with the sizes the widget allows, and Remove (in Korean when that is the display
+  language). The menu is a Windows 11 menu drawn by the window manager, with rounded
+  corners, the acrylic backdrop (a solid fill on Windows 10 or with transparency effects
+  off), the light or dark theme, icons and full keyboard use, and UI Automation reads it as
+  a menu. Dragging the More button moves the widget, and so does pressing anywhere on it,
+  holding still for half a second and then dragging; a press that moves sooner stays the
+  widget's own, so its lists scroll and its buttons work. Dragging its edges resizes it.
+  When the user lets go, the service remembers the placement (per user, beside the user's
+  settings, as `users/<user>.widgets.json`) and tells Android the window's size, which the
+  widget draws at. Presses, moves and releases inside the widget go to Android. The widgets
+  come from the settings app's Widgets
   page, which shows changes made elsewhere through `dsa widgets watch`, or
   `dsa widgets list|add <provider>|remove <id>`. The
   window manager starts at sign-in and starts Android then, so the first app opened after
@@ -491,15 +500,15 @@ request is served impersonating the signed-in user (`src/file_share.rs`), so Win
 user's own rights. Names that leave a folder (`..`, separators, device names) and links that
 point outside it are refused.
 
-The other way, Android's shared storage opens in Explorer from the "DSA Files" Start menu
-entry, the "Android files" button in DSA Settings, or `dsa files open`. The guest serves its
-storage as WebDAV on vsock port 5591, the service bridges a loopback port to it, and Explorer
+The other way, Android's shared storage opens in Explorer from the "Android files" button in
+DSA Settings or `dsa files open`. It has no Start menu entry, so Windows search does not find
+it. The guest serves its storage as WebDAV on vsock port 5591, the service bridges a loopback port to it, and Explorer
 opens it through Windows' WebDAV redirector as `\\127.0.0.1@<port>\<token>`
 (`src/android_files.rs`). The token changes with each session. The redirector is the WebClient
 service, which Windows starts the first time such a path is opened.
 
-Android's storage also has its own entry, "Android", in Explorer's navigation pane, as WSL's
-"Linux" does. It is a shell folder shortcut whose target is the service's files door,
+Android's storage also has its own entry, "Android", in Explorer's navigation pane, directly
+below WSL's "Linux" (`SortOrderIndex` 120 to its 119). It is a shell folder shortcut whose target is the service's files door,
 `\\127.0.0.1@47591\<key>`: one loopback port the service opens when it starts, so the address
 holds while Android is stopped and across restarts. Opening it starts Android and waits for its
 storage. The key is the user's own, made by the window manager the first time it runs and kept
@@ -520,25 +529,50 @@ old folders once they are empty, so files a user put there stay.
 
 An APK file installs in Android three ways, which all end in the same local API request:
 
-- Opening it in Explorer. The installer associates `.apk` files with `settings\DsaSettings.exe
-  --install-apk "%1"`, which opens the APK install window (`settings/DsaSettings/ApkInstallWindow.xaml`).
-  It looks like setup, from setup's own styles and colours (`installer/setup-ui/Styles.xaml` and
-  `Palette.cs`, linked into the settings app), in the light or the dark theme. Before Android
-  is started it shows what the file says about the app, read on the host by `dsa apk-info`:
-  its name and icon, package, version, the Android versions it is made for, the permissions it
-  asks for in plain words, and the SHA-256 of its signing certificate. When Android runs, it
-  also says whether the APK is a new install, an update (with the installed and the new
-  version) or a downgrade or an APK signed with another key, which it refuses with the reason,
-  as Android would. Install starts Android first when it is not running, checks again, then
-  shows the APK's progress and ends with Open (the app's window) and Close, or with the reason
-  it failed. `dsa-app-window.exe --install-apk`, which earlier releases associated, hands the
-  APK to the same window.
-- `dsa install <file.apk>`, which prints the result and exits with code 1 when Android refused
+- Opening it in Explorer. The installer associates `.apk` files with `settings\DsaApkInstaller.exe
+  --install-apk "%1"`, the APK Installer (`settings/DsaApkInstaller/`). It is its own program,
+  not part of the settings app: Explorer, Open with and the taskbar show it as "APK Installer"
+  ("APK 설치 관리자" in Korean) with its own icon, and it sets its own AppUserModelID
+  (`Thisisthepy.DSA.ApkInstaller`), so its windows are their own group in the taskbar. It is a
+  WPF app with WPF UI, like the settings app, and shares the settings app's core
+  (`DsaSettings.Core`), strings and folder, so both use one copy of the .NET runtime. Its window
+  is laid out as App Installer lays out an app package, with Mica and the Windows type ramp:
+  the app's name large at the top left with its package, publisher (the signing certificate,
+  since an APK names no publisher) and version under it, its icon at the top right, then the
+  permissions it asks for in plain words under "Capabilities" and the rest of what the file
+  says under "Details" (version code, the Android versions it is made for, size, processor
+  types, the SHA-256 of its signing certificate). All of it is read on the host by
+  `dsa apk-info` before Android is started. An APK with native code for none of this PC's
+  processor types carries a warning. When Android runs, the window also says whether the APK
+  is a new install, an update (with the installed and the new version) or a downgrade or an
+  APK signed with another key, which it refuses with the reason, as Android would. The footer
+  has "Launch when ready" (on by default) on the left and Install, Update or Reinstall on the
+  right. Install starts Android first when it is not running, checks again, then shows the
+  progress bar and what is happening in place of the checkbox. It ends by opening the app and
+  closing, when "Launch when ready" is on, or with Launch and Close, or with the reason it
+  failed. `DsaSettings.exe --install-apk` and `dsa-app-window.exe --install-apk`, which
+  earlier releases associated, hand the APK to the APK Installer.
+- `dsa install <file>`, which prints the result and exits with code 1 when Android refused
   the APK. Its line then starts with `not installed (<reason>):`. With `--progress` it prints
   each step first (`stage starting`, `stage sending`, `progress <percent>`,
   `stage installing`), which the install window shows.
-- Dropping APK files on the settings app's window, or on an install window. Each APK opens in
-  its own install window.
+- Dropping APK files on the settings app's window, or on the APK Installer's window. Each APK
+  opens in its own APK Installer window.
+
+Split-APK bundles (`.xapk` from APKPure, `.apks` from bundletool and SAI, `.apkm` from
+APKMirror) install the same three ways. The installer gives them a type of their own,
+`Dsa.ApkBundle` ("Split APK bundle"), which opens in the APK Installer; `.aab` is only under
+Open with, so the tools that build App Bundles keep opening them. What a file is comes from
+what is in it (`dsa/host/core/src/apk_bundle.rs`), so a renamed bundle installs too. The window
+shows the app as its base APK describes it, with the number of APKs that go (the base and the
+splits) and their size together. Of a bundle's splits, the install takes those this PC's
+Android needs: one ABI (x86_64 first, `arm64-v8a` only when the x86_64 libraries are missing or
+leave some out and ARM translation is on), the density split nearest the main screen's
+density, the splits of the display languages and English, and every feature split. They go to
+Android as one install, the APKs in one `PackageInstaller` session, and the bundle's expansion
+(OBB) files go to `Android/obb/<package>/` once the app is installed. A bundle whose splits are
+signed with other keys, an encrypted bundle (some older `.apkm` files) and an App Bundle are
+refused with their reasons before Android starts.
 
 `dsa apk-info <file.apk>` reads an APK without Android: the binary manifest, the resource table
 (for the name in the default language and the icon in the highest density, or an adaptive
@@ -646,11 +680,12 @@ What keeps the number small:
 - The VM's memory is backed by the pagefile and committed on first touch, and the pages the
   guest frees and reports go back to the host (`vm.rs`). On the Windows builds WSL does this
   on (26100 and later, and earlier ones from a set update revision), the VM has small backing
-  pages and faults 64 KiB at a time, and the guest reports free memory in 128 KiB pieces.
-  Elsewhere it reports 2 MiB pieces (`page_reporting_order`, 5 or 9).
+  pages and faults 64 KiB at a time, and the guest reports every free 4 KiB page, at once.
+  Elsewhere it reports 2 MiB pieces (`page_reporting_order`, 0 or 9).
 - Inside Android, the control daemon has cold pages moved to compressed memory (zram) and the
-  clean caches dropped when no app has been in use for a minute, so that memory is free to
-  report. The agent ends cached apps when the guest goes to sleep with no task open.
+  clean caches dropped on its first look (every 5 seconds) after the last app closes, and
+  page cache beyond the open apps' working set trimmed on the next look that finds it, so
+  that memory is free to report at once. The agent ends cached apps when the guest goes to sleep with no task open.
 - A window host empties its working set when its window is minimized, and the window manager
   does when no window has been shown for 30 seconds.
 - `dsa-wm` empties its working set 30 seconds after the last task window closes, and logs

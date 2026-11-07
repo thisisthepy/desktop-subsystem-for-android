@@ -200,10 +200,7 @@ pub struct DragChunk {
 /// Windows file name cannot hold, and no longer than [`MAX_NAME_BYTES`]. A name with nothing
 /// left becomes `file-<n>`, with an extension from `mime_type` when it is a common one.
 pub fn safe_name(name: &str, mime_type: &str, index: usize) -> String {
-    let last = name
-        .rsplit(['/', '\\'])
-        .next()
-        .unwrap_or_default();
+    let last = name.rsplit(['/', '\\']).next().unwrap_or_default();
     let mut clean: String = last
         .chars()
         .filter(|c| !c.is_control() && !matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*'))
@@ -227,7 +224,11 @@ pub fn safe_name(name: &str, mime_type: &str, index: usize) -> String {
 
 /// Whether `name` is one Windows keeps for a device, such as `CON` or `com1.txt`.
 fn is_reserved_device(name: &str) -> bool {
-    let stem = name.split('.').next().unwrap_or_default().to_ascii_uppercase();
+    let stem = name
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_uppercase();
     matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
         || (stem.len() == 4
             && (stem.starts_with("COM") || stem.starts_with("LPT"))
@@ -355,7 +356,9 @@ mod tests {
 
     #[test]
     fn fr29_a_dragged_file_is_read_whole_in_pieces() {
-        let content: Vec<u8> = (0..(READ_BYTES as usize * 2 + 7)).map(|i| i as u8).collect();
+        let content: Vec<u8> = (0..(READ_BYTES as usize * 2 + 7))
+            .map(|i| i as u8)
+            .collect();
         let source = content.clone();
         let mut reads = 0;
         let mut reader = DragContent::new(4, 1, |read: DragRead| {
@@ -378,12 +381,20 @@ mod tests {
     #[test]
     fn fr29_a_press_that_leaves_the_window_asks_once_from_the_last_place_inside() {
         let mut watch = LeaveWatch::default();
-        assert_eq!(watch.moved((-5.0, 10.0), (200, 100)), None, "no press, no drag");
+        assert_eq!(
+            watch.moved((-5.0, 10.0), (200, 100)),
+            None,
+            "no press, no drag"
+        );
         watch.pressed(true);
         assert_eq!(watch.moved((50.0, 40.0), (200, 100)), None);
         assert_eq!(watch.moved((199.0, 40.0), (200, 100)), None);
         assert_eq!(watch.moved((230.0, 41.0), (200, 100)), Some((199.0, 40.0)));
-        assert_eq!(watch.moved((260.0, 42.0), (200, 100)), None, "once per press");
+        assert_eq!(
+            watch.moved((260.0, 42.0), (200, 100)),
+            None,
+            "once per press"
+        );
         watch.pressed(false);
         watch.pressed(true);
         assert_eq!(watch.moved((10.0, -1.0), (200, 100)), Some((199.0, 40.0)));

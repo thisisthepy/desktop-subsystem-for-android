@@ -22,6 +22,14 @@ data class InstallerResult(
 
 /** One install session of the guest's package installer, which the APK is written into. */
 interface InstallSession {
+    /**
+     * Begins the next APK of a session of several, [name] of [size] bytes: what is written
+     * from here on goes into it. A session of one APK has it begun already.
+     */
+    fun startApk(name: String, size: Long) {
+        throw IllegalStateException("this install session holds one APK")
+    }
+
     /** Adds [data] to the end of the APK. */
     fun write(data: ByteArray)
 
@@ -34,12 +42,76 @@ interface InstallSession {
 
 /** The guest's package installer, as the agent uses it. */
 fun interface PackageInstallerPort {
-    /** Opens a session for a full install of an APK of [size] bytes. */
-    fun open(name: String, size: Long): InstallSession
+    /**
+     * Opens a session for a full install of an APK of [size] bytes, with its native code for
+     * [abi] (the installer's ABI override: [Abis.X86_64] or [Abis.ARM64]); an empty [abi] lets
+     * the package manager choose.
+     */
+    fun open(name: String, size: Long, abi: String): InstallSession
+
+    /**
+     * Opens a session for a full install of an app made of several APKs, [size] bytes together,
+     * as [open] does; [InstallSession.startApk] begins each APK. [name] is the bundle's.
+     */
+    fun openApks(name: String, size: Long, abi: String): InstallSession {
+        throw IllegalStateException("this agent installs no apps made of several APKs")
+    }
 
     companion object {
-        val NONE = PackageInstallerPort { _, _ -> throw IllegalStateException("this agent installs no APKs") }
+        val NONE = PackageInstallerPort { _, _, _ -> throw IllegalStateException("this agent installs no APKs") }
     }
+}
+
+/**
+ * Where the expansion (OBB) files of an app the host installs go. They cannot be part of an
+ * install session, so each is kept aside while it arrives and moved into the app's folder
+ * under Android/obb/ once the app is installed, where the app reads it as it would one a
+ * store put there.
+ */
+interface ExpansionFiles {
+    /** Begins keeping the expansion file [name] aside; its bytes go to the stream returned. */
+    fun stage(name: String): java.io.OutputStream
+
+    /** Moves the files [names] kept aside into [packageName]'s folder under Android/obb/. */
+    fun place(packageName: String, names: List<String>)
+
+    /** Drops the files [names] kept aside. */
+    fun discard(names: List<String>)
+
+    companion object {
+        val NONE = object : ExpansionFiles {
+            override fun stage(name: String): java.io.OutputStream =
+                throw IllegalStateException("this agent keeps no expansion files")
+
+            override fun place(packageName: String, names: List<String>): Unit =
+                throw IllegalStateException("this agent keeps no expansion files")
+
+            override fun discard(names: List<String>) {}
+        }
+    }
+}
+
+/** The folder an app's expansion files go in, and the names files of an install may have. */
+object InstallFileNames {
+    /** [packageName]'s folder under Android/obb/ of the shared storage at [storage]. */
+    fun obbFolder(storage: java.io.File, packageName: String): java.io.File =
+        java.io.File(java.io.File(java.io.File(storage, "Android"), "obb"), packageName)
+
+    /** Whether [name] is a file name, without a folder, that ends in [ending] after something. */
+    fun valid(name: String, ending: String): Boolean =
+        name.length in (ending.length + 1)..255 &&
+            name.endsWith(ending, ignoreCase = true) &&
+            '/' !in name && '\\' !in name &&
+            name.none { it.isISOControl() }
+}
+
+/** The ABIs the host may ask an app to be installed for. */
+object Abis {
+    const val X86_64 = "x86_64"
+    const val ARM64 = "arm64-v8a"
+
+    /** Whether [abi] is one the host may ask for: empty, which leaves it to Android, or one of the two above. */
+    fun allowed(abi: String): Boolean = abi.isEmpty() || abi == X86_64 || abi == ARM64
 }
 
 /** The values of android.content.pm.PackageInstaller's STATUS_ constants and the legacy codes used here. */
@@ -94,10 +166,30 @@ class ApkInstaller(
     private val log: Log,
     private val post: (() -> Unit) -> Unit,
     private val onInstalled: () -> Unit = {},
+    private val expansionFiles: ExpansionFiles = ExpansionFiles.NONE,
 ) {
-    private class Transfer(val id: Int, val name: String, val size: Long, val session: InstallSession) {
+    /** One file of an install of several, as InstallApk names it. */
+    private data class Part(val name: String, val size: Long, val obb: Boolean)
+
+    private class Transfer(
+        val id: Int,
+        val name: String,
+        val size: Long,
+        val session: InstallSession,
+        val parts: List<Part> = emptyList(),
+    ) {
         var received = 0L
         var committed = false
+
+        /** The part being written, and how much of it is. */
+        var part = 0
+        var partWritten = 0L
+
+        /** Where the expansion file being written goes, while one is. */
+        var obb: java.io.OutputStream? = null
+
+        /** The expansion files kept aside so far. */
+        val staged = mutableListOf<String>()
     }
 
     private var transfer: Transfer? = null
@@ -127,11 +219,22 @@ class ApkInstaller(
                 fail(running, InstallStatus.INSTALL_STATUS_OTHER, "another install began before this one was whole")
             }
         }
-        if (install.size <= 0 || install.size > MAX_APK_BYTES) {
+        val parts = install.partsList.map { Part(it.name, it.size, it.obb) }
+        if (parts.isEmpty() && (install.size <= 0 || install.size > MAX_APK_BYTES)) {
             return result(id, InstallStatus.INSTALL_STATUS_INVALID_APK, "", "the APK is ${install.size} bytes; Android takes APKs of 1 byte to ${MAX_APK_BYTES / (1024 * 1024)} MiB")
         }
+        partsProblem(install.size, parts)?.let { why ->
+            return result(id, InstallStatus.INSTALL_STATUS_INVALID_APK, "", why)
+        }
+        if (!Abis.allowed(install.abi)) {
+            return result(id, InstallStatus.INSTALL_STATUS_OTHER, "", "the host asked for the ABI ${install.abi.take(32)}, which is neither ${Abis.X86_64} nor ${Abis.ARM64}")
+        }
         val session = try {
-            installer.open(install.name, install.size)
+            if (parts.isEmpty()) {
+                installer.open(install.name, install.size, install.abi)
+            } else {
+                installer.openApks(install.name, parts.filter { !it.obb }.sumOf { it.size }, install.abi)
+            }
         } catch (e: Exception) {
             log.warn("could not open an install session for ${install.name}", e)
             val storage = e is java.io.IOException && e.message?.contains("space", ignoreCase = true) == true
@@ -142,8 +245,76 @@ class ApkInstaller(
                 "Android could not begin the install: ${e.message ?: e.javaClass.simpleName}",
             )
         }
-        transfer = Transfer(id, install.name, install.size, session)
-        log.info("installing ${install.name} (${install.size} bytes) from the host")
+        val running = Transfer(id, install.name, install.size, session, parts)
+        transfer = running
+        if (parts.isNotEmpty()) {
+            try {
+                beginPart(running)
+            } catch (e: Exception) {
+                log.warn("could not begin ${parts[0].name} of ${install.name}", e)
+                return fail(running, InstallStatus.INSTALL_STATUS_OTHER, "Android could not begin the install: ${e.message ?: e.javaClass.simpleName}")
+            }
+        }
+        val abi = if (install.abi.isEmpty()) "" else " for ${install.abi}"
+        val files = if (parts.isEmpty()) "" else ", ${parts.size} files"
+        log.info("installing ${install.name} (${install.size} bytes$files) from the host$abi")
+    }
+
+    /**
+     * Why the files of an install of several cannot be installed, or null when they can: the
+     * APKs come first, each file has a name of its kind and some bytes, no name is there
+     * twice, and they add up to the [size] announced.
+     */
+    private fun partsProblem(size: Long, parts: List<Part>): String? {
+        if (parts.isEmpty()) return null
+        if (parts.size > MAX_PARTS) return "the install has ${parts.size} files; Android takes at most $MAX_PARTS together"
+        if (parts.none { !it.obb }) return "the install has no APK"
+        val firstObb = parts.indexOfFirst { it.obb }
+        if (firstObb >= 0 && parts.drop(firstObb).any { !it.obb }) return "an APK of the install comes after an expansion file"
+        for ((index, part) in parts.withIndex()) {
+            val kind = if (part.obb) "an expansion file" else "an APK"
+            if (!InstallFileNames.valid(part.name, if (part.obb) ".obb" else ".apk")) return "${part.name.take(64)} is not the name of $kind"
+            if (part.size <= 0) return "${part.name} is empty"
+            if (!part.obb && part.size > MAX_APK_BYTES) return "${part.name} is ${part.size} bytes; Android takes APKs up to ${MAX_APK_BYTES / (1024 * 1024)} MiB"
+            if (parts.take(index).any { it.name.equals(part.name, ignoreCase = true) }) return "${part.name} is in the install twice"
+        }
+        val total = parts.sumOf { it.size }
+        if (total > MAX_INSTALL_BYTES) return "the install is $total bytes; Android takes up to ${MAX_INSTALL_BYTES / (1024 * 1024)} MiB at once"
+        if (total != size) return "the files of the install add up to $total bytes, not the $size announced"
+        return null
+    }
+
+    /** Begins the part of the install the transfer is at: an APK of the session, or an expansion file kept aside. */
+    private fun beginPart(running: Transfer) {
+        val part = running.parts[running.part]
+        if (part.obb) {
+            running.staged += part.name
+            running.obb = expansionFiles.stage(part.name)
+        } else {
+            running.session.startApk(part.name, part.size)
+        }
+    }
+
+    /** Writes [data] into the install: the one APK, or across its files in order. */
+    private fun store(running: Transfer, data: ByteArray) {
+        if (running.parts.isEmpty()) return running.session.write(data)
+        var at = 0
+        while (at < data.size) {
+            val part = running.parts[running.part]
+            val count = minOf(part.size - running.partWritten, (data.size - at).toLong()).toInt()
+            val piece = data.copyOfRange(at, at + count)
+            val obb = running.obb
+            if (obb != null) obb.write(piece) else running.session.write(piece)
+            running.partWritten += count
+            at += count
+            if (running.partWritten == part.size) {
+                running.obb?.close()
+                running.obb = null
+                running.part += 1
+                running.partWritten = 0
+                if (running.part < running.parts.size) beginPart(running)
+            }
+        }
     }
 
     private fun chunk(chunk: ApkChunk) {
@@ -159,7 +330,7 @@ class ApkInstaller(
             return fail(running, InstallStatus.INSTALL_STATUS_OTHER, "more than the ${running.size} bytes announced arrived")
         }
         try {
-            running.session.write(chunk.data.toByteArray())
+            store(running, chunk.data.toByteArray())
         } catch (e: Exception) {
             log.warn("could not write a piece of ${running.name} into its install session", e)
             val storage = e is java.io.IOException
@@ -192,10 +363,50 @@ class ApkInstaller(
         if (reason == InstallStatus.INSTALL_STATUS_SUCCESS) {
             log.info("installed ${answer.packageName ?: running.name}")
             onInstalled()
+            placeExpansionFiles(running, answer.packageName ?: "")?.let { why ->
+                return result(running.id, InstallStatus.INSTALL_STATUS_OTHER, answer.packageName ?: "", why)
+            }
         } else {
             log.warn("did not install ${running.name}: $reason (${answer.message})")
+            discardExpansionFiles(running)
         }
         result(running.id, reason, answer.packageName ?: "", answer.message ?: "")
+    }
+
+    /**
+     * Moves the installed app's expansion files into its folder under Android/obb/. Returns
+     * why they are not there, or null when they are or the app has none.
+     */
+    private fun placeExpansionFiles(running: Transfer, packageName: String): String? {
+        if (running.staged.isEmpty()) return null
+        if (packageName.isEmpty()) {
+            discardExpansionFiles(running)
+            return "the app is installed, but Android did not say its package, so its expansion files have no folder under Android/obb/"
+        }
+        return try {
+            expansionFiles.place(packageName, running.staged.toList())
+            log.info("put ${running.staged.size} expansion files in Android/obb/$packageName")
+            null
+        } catch (e: Exception) {
+            log.warn("could not put the expansion files of $packageName in Android/obb/$packageName", e)
+            discardExpansionFiles(running)
+            "$packageName is installed, but its expansion files could not be put in Android/obb/$packageName: ${e.message ?: e.javaClass.simpleName}"
+        }
+    }
+
+    private fun discardExpansionFiles(running: Transfer) {
+        try {
+            running.obb?.close()
+        } catch (e: Exception) {
+            log.warn("could not close an expansion file of ${running.name}", e)
+        }
+        running.obb = null
+        if (running.staged.isEmpty()) return
+        try {
+            expansionFiles.discard(running.staged.toList())
+        } catch (e: Exception) {
+            log.warn("could not drop the expansion files of ${running.name}", e)
+        }
     }
 
     private fun cancel(id: Int) {
@@ -226,6 +437,7 @@ class ApkInstaller(
         } catch (e: Exception) {
             log.warn("could not abandon the install session of ${running.name}", e)
         }
+        discardExpansionFiles(running)
     }
 
     private fun progress(running: Transfer) {
@@ -247,5 +459,11 @@ class ApkInstaller(
     companion object {
         /** The largest APK the host sends; it refuses larger ones itself. */
         const val MAX_APK_BYTES = 2L * 1024 * 1024 * 1024
+
+        /** The most an install of several files holds, all of them together. */
+        const val MAX_INSTALL_BYTES = 8L * 1024 * 1024 * 1024
+
+        /** The most files one install holds. */
+        const val MAX_PARTS = 256
     }
 }

@@ -100,7 +100,8 @@ impl FileTransfer {
 /// What becomes of one path dropped on an app's window.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Dropped {
-    /// An APK: it goes to the install flow, as opening it would.
+    /// An APK, a bundle of APKs or an App Bundle: it goes to the install flow, as opening it
+    /// would.
     Install(PathBuf),
     /// Any other file: it is shared with the window's app.
     Share(PathBuf),
@@ -117,11 +118,7 @@ pub fn dropped(paths: &[PathBuf]) -> Vec<Dropped> {
             if !path.is_file() {
                 return Dropped::Skipped(path.clone(), "only files can be sent to an app".into());
             }
-            let apk = path
-                .extension()
-                .and_then(|extension| extension.to_str())
-                .is_some_and(|extension| extension.eq_ignore_ascii_case("apk"));
-            if apk {
+            if crate::apk_bundle::is_install_file(path) {
                 Dropped::Install(path.clone())
             } else {
                 Dropped::Share(path.clone())
@@ -193,6 +190,13 @@ mod tests {
         assert_eq!(outcome[1], Dropped::Install(apk));
         assert!(matches!(&outcome[2], Dropped::Skipped(path, _) if *path == folder));
         assert!(matches!(&outcome[3], Dropped::Skipped(path, _) if *path == gone));
+        // Bundles of APKs go to the install flow too, which also says why an App Bundle is not
+        // installed.
+        for name in ["game.xapk", "game.apks", "game.APKM", "game.aab"] {
+            let bundle = dir.join(name);
+            std::fs::write(&bundle, b"PK").unwrap();
+            assert_eq!(dropped(&[bundle.clone()]), [Dropped::Install(bundle)]);
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 

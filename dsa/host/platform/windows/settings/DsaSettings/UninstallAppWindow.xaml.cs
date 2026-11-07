@@ -1,7 +1,9 @@
 using System.ComponentModel;
 using System.IO;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Interop;
+using System.Windows.Media.Animation;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
@@ -12,8 +14,8 @@ namespace Dsa.Settings;
 
 /// <summary>
 /// The window Windows' list of installed apps opens to uninstall an Android app. Windows has
-/// already asked, so it uninstalls at once, shows how it ended, and closes itself after success. It follows the theme Windows uses for apps, as the
-/// APK install window does.
+/// already asked, so it uninstalls at once, shows how it ended, and closes itself after success. It follows the theme Windows uses for apps, as
+/// setup does.
 /// </summary>
 public partial class UninstallAppWindow : Window
 {
@@ -39,7 +41,7 @@ public partial class UninstallAppWindow : Window
         ProgressDetail.Text = App.Text.Get("UninstallWindow_BusyDetail");
         CloseButton.Content = App.Text.Get("UninstallWindow_Close");
         System.Windows.Automation.AutomationProperties.SetName(CaptionClose, App.Text.Get("UninstallWindow_Close"));
-        ApkInstallWindow.Marquee(ProgressMarquee);
+        Marquee(ProgressMarquee);
         _vm.PropertyChanged += (_, _) => Render();
         Render();
         SourceInitialized += (_, _) =>
@@ -149,5 +151,33 @@ public partial class UninstallAppWindow : Window
             e.Cancel = true;
         }
         base.OnClosing(e);
+    }
+
+    /// <summary>Fills a 3 px strip with an indicator that slides across it, for a step that
+    /// has no measure, in the progress bar's colours.</summary>
+    private static void Marquee(Grid strip)
+    {
+        var track = new Border { Height = 1, VerticalAlignment = VerticalAlignment.Center };
+        track.SetResourceReference(Border.BackgroundProperty, "Track");
+        var indicator = new Border
+        {
+            Width = 120,
+            Height = 3,
+            CornerRadius = new CornerRadius(1.5),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            RenderTransform = new TranslateTransform(-120, 0),
+        };
+        indicator.SetResourceReference(Border.BackgroundProperty, "Accent");
+        strip.Children.Add(track);
+        strip.Children.Add(indicator);
+        strip.SizeChanged += (_, _) =>
+        {
+            var slide = new DoubleAnimation(-120, Math.Max(strip.ActualWidth, 1), TimeSpan.FromSeconds(1.6))
+            {
+                RepeatBehavior = RepeatBehavior.Forever,
+                EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut },
+            };
+            indicator.RenderTransform.BeginAnimation(TranslateTransform.XProperty, slide);
+        };
     }
 }

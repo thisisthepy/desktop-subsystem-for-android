@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::manifest::{ImageEntry, Manifest};
+use super::versions::{target_major, Channel};
 
 /// The image a user runs now.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -41,6 +42,19 @@ pub fn check(
     manifest: &Manifest,
     failed: &[String],
 ) -> Result<(), String> {
+    check_for(installed, image, manifest, failed, false)
+}
+
+/// [`check`], with `older_allowed` set when the user agreed to erase their data to move to an
+/// older major version: then an image of a lower major is allowed, whatever its build.
+pub fn check_for(
+    installed: &InstalledImage,
+    image: &ImageEntry,
+    manifest: &Manifest,
+    failed: &[String],
+    older_allowed: bool,
+) -> Result<(), String> {
+    let older = image.android_major < installed.android_major;
     if !manifest.supported_majors.contains(&image.android_major) {
         return Err(format!(
             "Android {} ({}) is not a supported version (supported: {})",
@@ -49,14 +63,14 @@ pub fn check(
             majors(manifest)
         ));
     }
-    if image.android_major < installed.android_major {
+    if older && !older_allowed {
         return Err(format!(
             "{} is Android {}, older than the installed Android {}; Android cannot move user \
              data to an older major version",
             image.version, image.android_major, installed.android_major
         ));
     }
-    if (image.android_major, image.build) <= (installed.android_major, installed.build) {
+    if !older && (image.android_major, image.build) <= (installed.android_major, installed.build) {
         return Err(format!(
             "{} is not newer than the installed {}",
             image.version, installed.version
@@ -83,10 +97,29 @@ fn majors(manifest: &Manifest) -> String {
 /// Chooses the newest image `check` allows. A user on a version that lost support moves to
 /// the newest supported one, the same as everyone else.
 pub fn decide(installed: &InstalledImage, manifest: &Manifest, failed: &[String]) -> Decision {
+    decide_for(installed, manifest, failed, Channel::Latest, false)
+}
+
+/// [`decide`] for a computer that follows `channel`. On a chosen major only images of that
+/// major are taken (of the major it moves up to, once it lost support), so a newer major does
+/// not replace the user's choice. `older_allowed` is set once the user agreed to erase their
+/// data for an older major.
+pub fn decide_for(
+    installed: &InstalledImage,
+    manifest: &Manifest,
+    failed: &[String],
+    channel: Channel,
+    older_allowed: bool,
+) -> Decision {
+    let target = target_major(channel, &manifest.supported_majors);
     let newest = manifest
         .images
         .iter()
-        .filter(|image| check(installed, image, manifest, failed).is_ok())
+        .filter(|image| match channel {
+            Channel::Latest => true,
+            Channel::Major(_) => Some(image.android_major) == target,
+        })
+        .filter(|image| check_for(installed, image, manifest, failed, older_allowed).is_ok())
         .max_by_key(|image| (image.android_major, image.build));
     match newest {
         Some(image) => Decision::Apply(image.clone()),

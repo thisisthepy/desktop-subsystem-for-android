@@ -6,9 +6,10 @@
 //! `\\127.0.0.1@<port>\<token>`. The token is the first part of the path and the service
 //! makes a new one for each session, so only someone the service told can open the files.
 //!
-//! The "DSA Files" Start menu shortcut runs the installed window host with
-//! [`ANDROID_FILES_ARGUMENT`], and the settings app's button runs `dsa files open`; both ask
-//! the service for the address, starting Android when it is not running, and open it.
+//! The settings app's button runs `dsa files open`, which asks the service for the address,
+//! starting Android when it is not running, and opens it. The installed window host does the
+//! same with [`ANDROID_FILES_ARGUMENT`], which a "DSA Files" shortcut an earlier version made
+//! and the user pinned still runs.
 //!
 //! That address changes with every session, so nothing can keep it. Explorer's navigation
 //! pane keeps "Android" instead ([`register_in_navigation_pane`]): a folder shortcut, as WSL's
@@ -75,6 +76,11 @@ pub const NAVIGATION_CLSID: &str = "{6F1D4E2A-3B7C-4D85-9A1E-7C2B5D8F0A43}";
 /// The name of the entry, as Explorer shows it.
 pub const NAVIGATION_NAME: &str = "Android";
 
+/// Where Explorer sorts the entry in its navigation pane: directly below WSL's "Linux", whose
+/// installer gives it 119 (0x77). Entries with the same number sort by name, so one more keeps
+/// this entry below it.
+pub const NAVIGATION_SORT_ORDER: u32 = 0x78;
+
 /// The value, beside the entry in the user's own classes, that holds the user's key.
 pub const KEY_VALUE: &str = "DsaFilesKey";
 
@@ -105,10 +111,35 @@ pub fn navigation_values(
     use RegValue::{Dword, Text};
     vec![
         ("", None, Text(NAVIGATION_NAME.into())),
-        // Shown in the navigation pane, after Quick access, OneDrive and This PC.
+        // The name and tooltip in the user's display language, from the window host's
+        // string table.
+        (
+            "",
+            Some("LocalizedString"),
+            Text(format!(
+                "@{icon},-{}",
+                dsa_exe_resources::shell::NAVIGATION_NAME
+            )),
+        ),
+        (
+            "",
+            Some("InfoTip"),
+            Text(format!(
+                "@{icon},-{}",
+                dsa_exe_resources::shell::NAVIGATION_TIP
+            )),
+        ),
+        // Shown in the navigation pane, directly below WSL's "Linux".
         ("", Some("System.IsPinnedToNameSpaceTree"), Dword(1)),
-        ("", Some("SortOrderIndex"), Dword(0x42)),
-        ("DefaultIcon", None, Text(format!("{icon},0"))),
+        ("", Some("SortOrderIndex"), Dword(NAVIGATION_SORT_ORDER)),
+        (
+            "DefaultIcon",
+            None,
+            Text(format!(
+                "{icon},-{}",
+                dsa_exe_resources::FILES_ICON_GROUP_ID
+            )),
+        ),
         (
             "InProcServer32",
             None,
@@ -140,12 +171,35 @@ pub enum RegValue {
     Dword(u32),
 }
 
+/// Whether the entry a user already has is what [`navigation_values`] would write, by the
+/// values that change between versions and between paths. `stored` reads a value by subkey and
+/// name. An entry an earlier version wrote fails this, so it is written again: the user's entry
+/// takes the place of the machine's, so the installer cannot correct it.
+pub fn entry_is_current(
+    icon: &str,
+    target: &str,
+    stored: impl Fn(&str, Option<&str>) -> Option<RegValue>,
+) -> bool {
+    navigation_values(icon, target)
+        .into_iter()
+        .filter(|(subkey, name, _)| {
+            matches!(
+                (*subkey, *name),
+                ("Instance\\InitPropertyBag", Some("TargetFolderPath"))
+                    | ("DefaultIcon", None)
+                    | ("", Some("InfoTip"))
+                    | ("", Some("SortOrderIndex"))
+            )
+        })
+        .all(|(subkey, name, value)| stored(subkey, name).as_ref() == Some(&value))
+}
+
 #[cfg(windows)]
 mod registry {
     use windows_sys::Win32::Foundation::ERROR_SUCCESS;
     use windows_sys::Win32::System::Registry::{
         RegCloseKey, RegCreateKeyExW, RegGetValueW, RegSetValueExW, HKEY, KEY_READ, KEY_WRITE,
-        REG_DWORD, REG_EXPAND_SZ, REG_OPTION_NON_VOLATILE, REG_SZ, RRF_RT_REG_SZ,
+        REG_DWORD, REG_EXPAND_SZ, REG_OPTION_NON_VOLATILE, REG_SZ, RRF_RT_REG_DWORD, RRF_RT_REG_SZ,
     };
 
     fn wide(text: &str) -> Vec<u16> {
@@ -211,6 +265,25 @@ mod registry {
         Some(String::from_utf16_lossy(&buffer[..length]))
     }
 
+    pub fn dword(root: HKEY, path: &str, name: &str) -> Option<u32> {
+        let (path_w, name_w) = (wide(path), wide(name));
+        let mut number = 0u32;
+        let mut size = 4u32;
+        // SAFETY: NUL-terminated names and four bytes of space.
+        let code = unsafe {
+            RegGetValueW(
+                root,
+                path_w.as_ptr(),
+                name_w.as_ptr(),
+                RRF_RT_REG_DWORD,
+                std::ptr::null_mut(),
+                (&mut number as *mut u32).cast(),
+                &mut size,
+            )
+        };
+        (code == ERROR_SUCCESS).then_some(number)
+    }
+
     pub fn set(key: &Key, name: Option<&str>, value: &super::RegValue) -> Result<(), String> {
         let name_w = name.map(wide);
         let name_ptr = name_w.as_ref().map_or(std::ptr::null(), |n| n.as_ptr());
@@ -262,7 +335,8 @@ mod registry {
 /// Puts "Android" in the current user's Explorer navigation pane, pointing at the files door
 /// under the user's key, and returns the door's path. The key is made the first time and kept
 /// beside the entry in the user's own classes, which only the user and the service can read.
-/// The window manager does this each time it starts; the "DSA Files" shortcut does it too.
+/// The window manager does this each time it starts, which also corrects an entry an earlier
+/// version wrote; [`ANDROID_FILES_ARGUMENT`] does it too.
 #[cfg(windows)]
 pub fn register_in_navigation_pane() -> Result<String, String> {
     use windows_sys::Win32::System::Registry::HKEY_CURRENT_USER;
@@ -279,15 +353,19 @@ pub fn register_in_navigation_pane() -> Result<String, String> {
         .and_then(|exe| exe.parent().map(|dir| dir.join("dsa-app-window.exe")))
         .map(|exe| exe.display().to_string())
         .unwrap_or_else(|| "dsa-app-window.exe".into());
-    let unchanged = registry::text(
-        HKEY_CURRENT_USER,
-        &format!("{base}\\Instance\\InitPropertyBag"),
-        "TargetFolderPath",
-    )
-    .as_deref()
-        == Some(target.as_str())
-        && registry::text(HKEY_CURRENT_USER, &format!("{base}\\DefaultIcon"), "").as_deref()
-            == Some(format!("{icon},0").as_str());
+    let unchanged = entry_is_current(&icon, &target, |subkey, name| {
+        let path = if subkey.is_empty() {
+            base.clone()
+        } else {
+            format!("{base}\\{subkey}")
+        };
+        let name = name.unwrap_or("");
+        if name == "SortOrderIndex" {
+            registry::dword(HKEY_CURRENT_USER, &path, name).map(RegValue::Dword)
+        } else {
+            registry::text(HKEY_CURRENT_USER, &path, name).map(RegValue::Text)
+        }
+    });
     if unchanged {
         return Ok(target);
     }
@@ -390,6 +468,18 @@ mod tests {
         };
         assert_eq!(value("", None), Some(RegValue::Text("Android".into())));
         assert_eq!(
+            value("", Some("InfoTip")),
+            Some(RegValue::Text(
+                r"@C:\Program Files\DSA\dsa-app-window.exe,-108".into()
+            ))
+        );
+        assert_eq!(
+            value("", Some("LocalizedString")),
+            Some(RegValue::Text(
+                r"@C:\Program Files\DSA\dsa-app-window.exe,-107".into()
+            ))
+        );
+        assert_eq!(
             value("", Some("System.IsPinnedToNameSpaceTree")),
             Some(RegValue::Dword(1))
         );
@@ -404,9 +494,41 @@ mod tests {
         assert_eq!(
             value("DefaultIcon", None),
             Some(RegValue::Text(
-                r"C:\Program Files\DSA\dsa-app-window.exe,0".into()
+                r"C:\Program Files\DSA\dsa-app-window.exe,-3".into()
             ))
         );
+    }
+
+    #[test]
+    fn fr29_android_sorts_directly_below_wsls_linux() {
+        // The value WSL's installer gives "Linux", and the number the pane sorts by.
+        const LINUX_SORT_ORDER: u32 = 0x77;
+        assert_eq!(NAVIGATION_SORT_ORDER, LINUX_SORT_ORDER + 1);
+        let values = navigation_values("icon.exe", "target");
+        let order = values
+            .iter()
+            .find(|(s, n, _)| s.is_empty() && *n == Some("SortOrderIndex"))
+            .map(|(_, _, v)| v.clone());
+        assert_eq!(order, Some(RegValue::Dword(NAVIGATION_SORT_ORDER)));
+    }
+
+    #[test]
+    fn fr29_an_entry_an_earlier_version_wrote_is_written_again() {
+        let values = navigation_values("icon.exe", "target");
+        let current = |order: Option<u32>| {
+            entry_is_current("icon.exe", "target", |subkey, name| {
+                if name == Some("SortOrderIndex") {
+                    return order.map(RegValue::Dword);
+                }
+                values
+                    .iter()
+                    .find(|(s, n, _)| *s == subkey && *n == name)
+                    .map(|(_, _, v)| v.clone())
+            })
+        };
+        assert!(current(Some(NAVIGATION_SORT_ORDER)));
+        assert!(!current(Some(0x42)));
+        assert!(!current(None));
     }
 
     #[test]

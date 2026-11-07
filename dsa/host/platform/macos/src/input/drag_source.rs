@@ -62,7 +62,10 @@ impl DragState {
         })();
         if let Err(error) = written {
             let _ = std::fs::remove_file(path);
-            return Err(format!("{} could not be copied from Android: {error}", path.display()));
+            return Err(format!(
+                "{} could not be copied from Android: {error}",
+                path.display()
+            ));
         }
         Ok(())
     }
@@ -95,7 +98,8 @@ impl DragState {
             if let Err(error) = ended {
                 eprintln!("dsa-app-window: the drag ended, but Android was not told: {error}");
             }
-            let providers = std::mem::take(&mut *self.providers.lock().unwrap_or_else(|e| e.into_inner()));
+            let providers =
+                std::mem::take(&mut *self.providers.lock().unwrap_or_else(|e| e.into_inner()));
             let mut map = PROVIDERS.lock().unwrap_or_else(|e| e.into_inner());
             for provider in providers {
                 map.remove(&provider);
@@ -122,7 +126,10 @@ unsafe extern "C-unwind" fn file_name(
     let name = PROVIDERS
         .lock()
         .ok()
-        .and_then(|map| map.get(&(provider as usize)).map(|(_, _, name)| name.clone()))
+        .and_then(|map| {
+            map.get(&(provider as usize))
+                .map(|(_, _, name)| name.clone())
+        })
         .unwrap_or_else(|| "file".into());
     Retained::autorelease_return(ns_string(&name))
 }
@@ -134,10 +141,10 @@ unsafe extern "C-unwind" fn write_promise(
     url: *mut AnyObject,
     handler: *mut block2::Block<dyn Fn(*mut AnyObject)>,
 ) {
-    let found = PROVIDERS
-        .lock()
-        .ok()
-        .and_then(|map| map.get(&(provider as usize)).map(|(drag, item, _)| (Arc::clone(drag), *item)));
+    let found = PROVIDERS.lock().ok().and_then(|map| {
+        map.get(&(provider as usize))
+            .map(|(drag, item, _)| (Arc::clone(drag), *item))
+    });
     let path: *mut AnyObject = if url.is_null() {
         std::ptr::null_mut()
     } else {
@@ -185,7 +192,9 @@ unsafe extern "C-unwind" fn operation_queue(
             Ok(queue_class) => msg_send![queue_class, new],
             Err(_) => None,
         };
-        queue.map(|queue| Retained::into_raw(queue) as usize).unwrap_or(0)
+        queue
+            .map(|queue| Retained::into_raw(queue) as usize)
+            .unwrap_or(0)
     }) as *mut AnyObject
 }
 
@@ -219,7 +228,8 @@ fn delegate() -> Result<*mut AnyObject, String> {
     let class = delegate_class()?;
     let delegate = *DELEGATE.get_or_init(|| unsafe {
         let made: Option<Retained<AnyObject>> = msg_send![class, new];
-        made.map(|made| Retained::into_raw(made) as usize).unwrap_or(0)
+        made.map(|made| Retained::into_raw(made) as usize)
+            .unwrap_or(0)
     });
     if delegate == 0 {
         return Err("AppKit could not make the file promise delegate".into());
@@ -311,7 +321,8 @@ pub fn begin(view: &AnyObject, offer: DragOffer, client: HostApiClient) -> Resul
         if let Some(text) = text {
             let pasteboard_item: Option<Retained<AnyObject>> =
                 msg_send![class(c"NSPasteboardItem")?, new];
-            let pasteboard_item = pasteboard_item.ok_or("AppKit could not make a pasteboard item")?;
+            let pasteboard_item =
+                pasteboard_item.ok_or("AppKit could not make a pasteboard item")?;
             let _: bool = msg_send![
                 &*pasteboard_item,
                 setString: &*ns_string(&text),
@@ -348,6 +359,10 @@ pub fn begin(view: &AnyObject, offer: DragOffer, client: HostApiClient) -> Resul
 
 /// The task view's `draggingSession:sourceOperationMaskForDraggingContext:`: a copy, inside
 /// the app or out of it.
+///
+/// # Safety
+///
+/// AppKit calls this as an Objective-C method on a task view; it reads none of its pointers.
 pub unsafe extern "C-unwind" fn source_operations(
     _this: &AnyObject,
     _: Sel,
@@ -358,6 +373,11 @@ pub unsafe extern "C-unwind" fn source_operations(
 }
 
 /// The task view's `draggingSession:endedAtPoint:operation:`.
+///
+/// # Safety
+///
+/// AppKit calls this as an Objective-C method with `this` a live task view; the session
+/// pointer is never dereferenced.
 pub unsafe extern "C-unwind" fn session_ended(
     this: &AnyObject,
     _: Sel,

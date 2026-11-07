@@ -41,6 +41,8 @@ class AgentApplication : Application() {
             null
         }
         val dragCatcher = AndroidDragCatcher(this, log)
+        val installer = AndroidPackageInstaller(this, log)
+        val uninstaller = AndroidPackageUninstaller(this, log)
         val agent = Agent(
             ownPackage = packageName,
             tasks = AndroidTaskSource(this, log),
@@ -66,6 +68,7 @@ class AgentApplication : Application() {
             frameTrace = frameTrace,
             touchSounds = AndroidTouchSounds(this),
             systemSettings = AndroidSystemSettings(this),
+            deviceName = AndroidDeviceName(this),
             browserRole = AndroidBrowserRole(this, log),
             guestBrowser = AndroidGuestBrowser(this, log),
             fileStore = io.github.thisisthepy.dsa.agent.files.TransferStore(hostFilesDir(this)),
@@ -75,9 +78,18 @@ class AgentApplication : Application() {
             notifications = AndroidNotifications(this, log),
             media = AndroidMediaSessions(this, log, android.os.Handler(thread.looper)),
             stopper = AndroidAppStopper(this, log),
-            packageInstaller = AndroidPackageInstaller(this, log),
-            packageUninstaller = AndroidPackageUninstaller(this, log),
+            packageInstaller = installer,
+            expansionFiles = AndroidExpansionFiles(
+                java.io.File(cacheDir, "expansion-files"),
+                @Suppress("DEPRECATION") android.os.Environment.getExternalStorageDirectory(),
+                log,
+            ),
+            packageUninstaller = uninstaller,
+            packageReinstaller = AndroidPackageReinstaller(this, installer, uninstaller, AndroidApks()),
+            crashRecords = AndroidCrashRecords(this, log),
+            arm64Supported = { "arm64-v8a" in android.os.Build.SUPPORTED_64_BIT_ABIS },
             packages = AndroidPackageInfo(this),
+            googleDeviceId = AndroidGoogleDeviceId(this),
             widgets = AndroidWidgets(this, log),
             appProcesses = AndroidAppProcesses(this),
             widgetStore = AndroidWidgetStore(this),

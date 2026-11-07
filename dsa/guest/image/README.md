@@ -21,7 +21,8 @@ default is x86_64. The arm64 guest runs no 32-bit ARM code, because the target h
 | `dsa-memory.rc` | Turns on the zram swap and tunes the kernel for it |
 | `dsa-channel-manifest.xml` | The vendor manifest entry declaring the daemon's binder service |
 | `dsa-trace.rc` | Turns on main thread timing in every app when the input trace is on |
-| `dsa-arm-translation.rc`, `arm-translation-on.prop`, `arm-translation-off.prop` | Use an ARM translation package the user installed, only on a boot the host marks (`../arm-translation/README.md`) |
+| `dsa-arm-translation.rc`, `arm-translation-on.prop`, `arm-translation-off.prop` | Use an ARM translation package (the one the user installed, or the image's default one), only on a boot the host marks (`../arm-translation/README.md`) |
+| `dsa-gapps.rc`, `gapps-on.prop`, `gapps-off.prop` | Lay the Google apps the user installed (`dsa gapps install`) over `/product` and `/system_ext`, only on a boot the host marks |
 | `sepolicy/` | Policy added to the image: vsock for graphics, the control daemon's domain and binder service, the memory controls (`memory.cil`), the audio module's socket to the host (`audio.cil`), and what the agent needs to force Doze and set the battery (`agent.cil`) |
 
 ```
@@ -46,7 +47,9 @@ aapt2 from the Android SDK's build-tools for the framework overlay.
   text input goes through the host's input method.
 - Apps a desktop has no use for are removed too (`UNNEEDED_APPS` in `make-image.py`, each
   with its reason): telephony apps without a modem, screen savers and wallpaper pickers, the
-  launcher's search widget, Bluetooth MIDI, and developer and demo apps. Each is a leaf that
+  launcher's search widget, Bluetooth MIDI, the old AOSP Calendar, Gallery and Music apps
+  (no longer maintained upstream; the user installs their own), and developer and demo apps.
+  Each is a leaf that
   nothing else needs; WebView, the providers, PackageInstaller, PermissionController,
   DocumentsUI and the other apps that apps call stay. `make-image.py` prints each file it
   removes.
@@ -90,8 +93,17 @@ aapt2 from the Android SDK's build-tools for the framework overlay.
   `speed`, the others with `speed-profile` when the APK carries a profile and `speed`
   otherwise. It prints the size each app adds. `check-image.py` fails an image whose compiled
   app is missing, was made for other dex checksums than the APK's, uses another filter, boot
-  image or set of shared libraries. PermissionController is not compiled: it is inside the
-  permission APEX, where ART takes no odex.
+  image or set of shared libraries. The apps whose dex it edits (`EDITED_APPS`: Settings and
+  Files) are compiled with `--abort-on-hard-verifier-error`, so an edited method the verifier
+  rejects stops the build instead of closing the app when it loads. PermissionController is
+  not compiled: it is inside the permission APEX, where ART takes no odex.
+- The apps the published build itself compiled into their own partition (KeyChain,
+  SettingsProvider, Telecom and a few more on Android 16) keep their odex, vdex and app image:
+  signing leaves an APK's dex as it is. `make-image.py` records them from the published
+  target_files (`META/dsa_prebuilt_oat.json`), and compiles any of them whose dex it changes
+  again, with the filter, shared libraries and boot image the published build used.
+  `check-image.py` fails an image where one of them lost a file, or has one made for another
+  dex, another boot image or another filter.
 - A static overlay (`/vendor/overlay/DsaFrameworkOverlay.apk`) sets the framework's tap
   timeout to 0. A view inside anything that scrolls, which includes every list row, waits that
   long before it shows that it is pressed, in case the touch becomes a scroll, so a mouse
@@ -104,18 +116,64 @@ aapt2 from the Android SDK's build-tools for the framework overlay.
   framework draws the button's hover layer and ripple around the button's centre, and they
   showed 8 dp left of the circle at every density. The replacement keeps the 56 dp and puts
   8 dp on each side of the circle. aapt2 builds it the same way as the framework overlay.
+  The same overlay replaces the list every Settings preference screen shows its rows in
+  (androidx.preference's `preference_recyclerview`) with one that keeps 24 dp below the last
+  row. Settings takes the space under a list only from the navigation bar's inset
+  (SettingsLib's `EdgeToEdgeUtils` pads the content view by it), and a DSA window has no
+  navigation bar, so the last row sat on the window's bottom edge. The space is inside the
+  list, so rows still scroll to the edge. The overlay names what it replaces in a resource
+  map (`android:resourcesMap`), which makes the framework rewrite the layout's id and style
+  attribute to Settings' own.
+- The lists that set their own padding get the same 24 dp, edited in the apps themselves
+  (`LIST_BOTTOM_MARGIN_DP`). Settings' home page: on Android 16 its
+  `TopLevelSettings.onCreateRecyclerView` no longer calls `setPadding(0, 0, 0, 0)` over the
+  overlay's layout; on Android 17, `isRunningInFreeformWindow` says yes (the host draws the
+  caption), so Android's own freeform padding applies, and the overlay sets that
+  `dashboard_padding_bottom` to 24 dp. Settings' All apps list gets `paddingBottom` in its
+  compiled `manage_applications_apps.xml`. PermissionController's `preference_recyclerview`
+  gets it too; the app declares `<overlayable>`, so no overlay may replace its layouts, and it
+  lives in the permission APEX, which `make-image.py` unpacks with otatools' `deapexer`,
+  edits and packs with `apexer` before signing, as signing itself packs it, and checks again
+  after signing. Files (DocumentsUI) on Android 16 pads its list's bottom by the height of
+  the bar below it, and by 0 in windows without one: `getSaveLayoutHeight` now returns at
+  least 24 dp in pixels. Android 17's Files keeps 48 dp of its own. The dex edits keep each
+  method's size; `check-image.py` fails an image without them.
 - With the input trace on (`androidboot.hardware.dsa_input_trace=1`), `dsa-trace.rc` makes every
   app's main thread log each message it takes 16 ms or more to handle, or starts 16 ms or more
   late.
-- ARM app translation stays off unless the user installs a translation package
-  (`dsa arm-translation install`). The product `build.prop` ends with an import of
+- ARM app translation stays off unless the host turns it on. The product `build.prop` ends
+  with an import of
   `/system/etc/dsa/arm-translation-${ro.boot.dsa.arm_translation:-off}.prop`: the "off" file
-  sets nothing, and the "on" file, which the host selects through the bootconfig only while a
-  package is installed and on, names the native bridge and adds `arm64-v8a` to the ABIs. Then
-  `dsa-arm-translation.rc` mounts the package's erofs image from
-  `/data/vendor/dsa/arm-translation/system.img` over `/system`'s `lib64`, `bin` and `etc` before
-  the zygote starts, and registers its binfmt_misc handlers. `sepolicy/arm-translation.cil`
-  lets init do so; dsa-channeld writes and removes the image.
+  sets nothing; the "on" file, which the host selects while the user has a translation package
+  installed (`dsa arm-translation install`) and on, and the "default" file (the same lines),
+  which it selects while they have none and the image has a default package, name the native
+  bridge and add `arm64-v8a` after `x86_64` to the ABIs. Then `dsa-arm-translation.rc` mounts
+  the package's erofs image (the user's from `/data/vendor/dsa/arm-translation/system.img`, or
+  the default one from `/system/etc/dsa/arm-translation/default.img`) over `/system`'s `lib64`,
+  `bin` and `etc` before the zygote starts, mounts binfmt_misc and registers the package's
+  handlers. `sepolicy/arm-translation.cil` lets init do so; dsa-channeld writes and removes the
+  user's image. Only an x86_64 image made with `--arm-translation` has the default package and
+  its "default" file, so a boot told to use one on any other image stays x86_64 only.
+- With `--framework` (a folder from the "Framework build" workflow), SurfaceFlinger, libhwui
+  and libEGL are builds of the image's own source with DSA's recovery from a GPU device loss
+  (`../framework/patches`). When the host's GPU resets, SurfaceFlinger and every app's renderer
+  drop their GPU context, build a new one once the GPU answers, and draw every window again,
+  instead of aborting and restarting the framework. The files must come from the image's own
+  build number and architecture; `image.json` lists their SHA-256 under `framework`, and
+  `check-image.py` finds them in the image. `sepolicy/gpu-reset.cil` lets SurfaceFlinger tell
+  the apps of a reset through `debug.dsa.gpu.resets`.
+- Google Play stays out of the image. A user who wants it runs `dsa gapps install` (or the
+  settings app's Google Play item): the host downloads LiteGapps' Core build for this Android
+  and sends an erofs image of its apps, permission lists, system configuration and framework
+  files, which dsa-channeld keeps at `/data/vendor/dsa/gapps/system.img`. While one is installed
+  the host puts `androidboot.dsa.gapps=on` in the bootconfig. Then `dsa-gapps.rc` mounts the
+  image and lays its `product` and `system_ext` folders over `/product` and `/system_ext`
+  before the zygote starts, so each app's privileged permission list stays in its own
+  partition, where the package manager reads it. The product `build.prop` imports
+  `/system/etc/dsa/gapps-${ro.boot.dsa.gapps:-off}.prop` just before the ARM translation
+  import: the "on" file sets the fingerprint of the oem partition, which the image does not
+  have, so the boot is an upgrade and the package manager installs the new system apps for every
+  user and grants their default permissions. `sepolicy/gapps.cil` lets init do so.
 - Cuttlefish's `seriallogging.rc` is removed. Its logger writes to a virtio console Hyper-V
   does not have, and init would restart it every five seconds for as long as the guest runs.
 - `sepolicy/memory.cil` lets the audio HAL and the software codecs share memory through
@@ -175,14 +233,15 @@ aapt2 from the Android SDK's build-tools for the framework overlay.
   the kernel's early boot and a panic, which the host keeps as the VM's console log.
 - The image reports DSA's device identity instead of Cuttlefish's, in every partition's
   `build.prop` and in the generic ramdisk's: manufacturer `thisisthepy`, brand `DSA`, model
-  `Desktop Subsystem for Android`, device and product name `dsa_x86_64`,
-  `ro.build.characteristics=tablet`, and `user` in every fingerprint. The product
-  `build.prop` ends with `import` lines that take these properties from
-  `/second_stage_resources/system/etc/ramdisk/build.prop`. When a user changes the identity
-  in the settings, the host appends a small cpio archive with that file to the boot's
-  initrd; first stage init keeps it for the second stage, and init reads it before the
+  `Desktop Subsystem for Android`, device and product name `dsa_x86_64` (`dsa_arm64` in an
+  arm64 image), `ro.build.characteristics=tablet`, and `user` in every fingerprint. The
+  product `build.prop` ends with `import` lines that take these properties, and the chip's
+  (`ro.soc.*`), from `/second_stage_resources/system/etc/ramdisk/build.prop`. At every boot
+  the host appends a small cpio archive with that file to the boot's initrd, holding the
+  computer's manufacturer, brand, model, model name and chip, and what the user changed in
+  the settings; first stage init keeps it for the second stage, and init reads it before the
   property service locks `ro.*`. `image.json` names the build's release, ID, incremental
-  version and tags under `identity`, so the host can compose a fingerprint.
+  version and tags under `identity`, and its `arch`, so the host can compose a fingerprint.
 - Every APK, APEX and verified boot image is re-signed. The published build is signed with
   AOSP's test keys, whose private halves are public.
 

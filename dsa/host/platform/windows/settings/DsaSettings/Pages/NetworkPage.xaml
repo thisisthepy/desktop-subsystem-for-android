@@ -16,7 +16,7 @@
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
             <StackPanel Style="{StaticResource PageContent}">
                 <ui:InfoBar Title="{l:Text SettingsErrorBar.Title}" Severity="Error" IsClosable="False"
-                            IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" />
+                            IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" Margin="0,0,0,4" />
 
                 <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Globe24}">
                     <ui:CardControl.Header>
@@ -29,7 +29,7 @@
                                Click="OnRefresh" />
                 </ui:CardControl>
                 <ui:InfoBar Title="{l:Text NetworkProblemBar.Title}" Severity="Warning" IsClosable="False"
-                            IsOpen="{Binding HasNetworkProblem, Mode=OneWay}" Message="{Binding NetworkProblem, Mode=OneWay}" />
+                            IsOpen="{Binding HasNetworkProblem, Mode=OneWay}" Message="{Binding NetworkProblem, Mode=OneWay}" Margin="0,0,0,4" />
 
                 <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Info24}"
                                 Visibility="{Binding HasNetworkDetails, Converter={StaticResource Visible}}">
@@ -45,17 +45,11 @@
                                 <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
                             <TextBlock Grid.Row="0" Grid.Column="0" Text="{l:Text NetworkAddressLabel.Text}" Margin="0,0,16,4" />
-                            <ui:TextBox IsTextSelectionEnabled="True" MinHeight="0" Grid.Row="0" Grid.Column="1" Text="{Binding NetworkAddresses, Mode=OneWay}" IsReadOnly="True"
-                                     FontFamily="Consolas" BorderThickness="0" Background="Transparent" Padding="0"
-                                     Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                            <TextBox Style="{StaticResource SelectableText}" Grid.Row="0" Grid.Column="1" Margin="0,0,0,4" Text="{Binding NetworkAddresses, Mode=OneWay}" />
                             <TextBlock Grid.Row="1" Grid.Column="0" Text="{l:Text NetworkDnsLabel.Text}" Margin="0,0,16,4" />
-                            <ui:TextBox IsTextSelectionEnabled="True" MinHeight="0" Grid.Row="1" Grid.Column="1" Text="{Binding NetworkDns, Mode=OneWay}" IsReadOnly="True"
-                                     FontFamily="Consolas" BorderThickness="0" Background="Transparent" Padding="0"
-                                     Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                            <TextBox Style="{StaticResource SelectableText}" Grid.Row="1" Grid.Column="1" Margin="0,0,0,4" Text="{Binding NetworkDns, Mode=OneWay}" />
                             <TextBlock Grid.Row="2" Grid.Column="0" Text="{l:Text NetworkGatewayLabel.Text}" Margin="0,0,16,0" />
-                            <ui:TextBox IsTextSelectionEnabled="True" MinHeight="0" Grid.Row="2" Grid.Column="1" Text="{Binding NetworkGateway, Mode=OneWay}" IsReadOnly="True"
-                                     FontFamily="Consolas" BorderThickness="0" Background="Transparent" Padding="0"
-                                     Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                            <TextBox Style="{StaticResource SelectableText}" Grid.Row="2" Grid.Column="1" Text="{Binding NetworkGateway, Mode=OneWay}" />
                         </Grid>
                     </ui:CardControl.Header>
                 </ui:CardControl>
@@ -73,7 +67,7 @@
                 </ui:CardControl>
                 <ui:InfoBar Title="{l:Text NetworkRestartBar.Title}" Message="{l:Text NetworkRestartBar.Message}"
                             Severity="Informational" IsClosable="False"
-                            IsOpen="{Binding NetworkRestartNeeded, Mode=OneWay}" />
+                            IsOpen="{Binding NetworkRestartNeeded, Mode=OneWay}" Margin="0,0,0,4" />
             </StackPanel>
         </ScrollViewer>
     </Grid>

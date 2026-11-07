@@ -1,0 +1,200 @@
+# Builds SurfaceFlinger, libhwui and libEGL with DSA's GPU device loss recovery (the patches in
+# dsa/guest/framework/patches) for each Android version in dsa/guest/framework/framework-lock.json
+# and each guest architecture, and keeps them as the artifacts the image release lays over the
+# published build (make-image.py --framework).
+#
+# The image takes these three files in place of the published build's, beside that build's own
+# libraries, so each is built from the exact source of the build the image is made from: the
+# lock pins every project to the commit the build's manifest names, and its release
+# configuration, Clang and Rust. It runs on GitHub's standard runners: like the translator
+# build, it fetches only the projects the lock lists (each at its pinned commit, the large ones
+# in part) and builds only the three install paths.
+#
+# It runs by hand, and when the lock or the patches change on develop. Each build's compiler
+# cache is kept between runs, also when a run fails or times out, so a run that stops partway
+# makes the next one shorter.
+
+name: Framework build
+
+on:
+  workflow_dispatch:
+    inputs:
+      android:
+        description: "Build only this version (android16 or android17); empty for every version in the lock"
+        required: false
+        default: ""
+      arch:
+        description: "Build only this architecture (x86_64 or arm64); empty for both"
+        required: false
+        default: ""
+  push:
+    branches: [develop]
+    paths:
+      - dsa/guest/framework/framework-lock.json
+      - dsa/guest/framework/patches/**
+
+concurrency:
+  group: framework-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  versions:
+    name: Check the lock and the patches (ubuntu-24.04)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      android: ${{ steps.read.outputs.android }}
+      arch: ${{ steps.read.outputs.arch }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: List the versions and architectures
+        id: read
+        env:
+          ONLY_ANDROID: ${{ inputs.android }}
+          ONLY_ARCH: ${{ inputs.arch }}
+        run: |
+          all="$(uv run dsa/guest/framework/framework_lock.py versions)"
+          if [[ -n "$ONLY_ANDROID" ]]; then
+            echo "$all" | jq -e --arg v "$ONLY_ANDROID" 'index($v) != null' >/dev/null \
+              || { echo "::error::the lock has no $ONLY_ANDROID; it has $all"; exit 1; }
+            all="$(jq -cn --arg v "$ONLY_ANDROID" '[$v]')"
+          fi
+          arches='["x86_64","arm64"]'
+          if [[ -n "$ONLY_ARCH" ]]; then
+            echo "$arches" | jq -e --arg a "$ONLY_ARCH" 'index($a) != null' >/dev/null \
+              || { echo "::error::the architecture must be x86_64 or arm64, not $ONLY_ARCH"; exit 1; }
+            arches="$(jq -cn --arg a "$ONLY_ARCH" '[$a]')"
+          fi
+          echo "android=$all" >> "$GITHUB_OUTPUT"
+          echo "arch=$arches" >> "$GITHUB_OUTPUT"
+
+      # Every pinned commit must be the one the published build was made from; a commit that
+      # is not would build files that do not match the libraries beside them in the image.
+      - name: Check the lock against each build's manifest
+        run: |
+          for android in $(uv run dsa/guest/framework/framework_lock.py versions | jq -r '.[]'); do
+            url="$(jq -r --arg a "$android" '.versions[] | select(.android == $a) | .manifest.url' dsa/guest/framework/framework-lock.json)"
+            curl -fsSL --retry 8 --retry-all-errors -o "$RUNNER_TEMP/manifest-$android.xml" "$url"
+            uv run dsa/guest/framework/framework_lock.py check-manifest "$android" "$RUNNER_TEMP/manifest-$android.xml"
+          done
+
+      - name: Check the patches apply to the pinned source
+        run: |
+          for android in $(uv run dsa/guest/framework/framework_lock.py versions | jq -r '.[]'); do
+            .github/scripts/framework/check-patches.sh "$android" "$RUNNER_TEMP/patch-check-$android"
+          done
+
+  framework:
+    name: Build the framework (ubuntu-24.04, ${{ matrix.android }}, ${{ matrix.arch }})
+    needs: versions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    strategy:
+      fail-fast: false
+      matrix:
+        android: ${{ fromJSON(needs.versions.outputs.android) }}
+        arch: ${{ fromJSON(needs.versions.outputs.arch) }}
+    env:
+      ANDROID_BRANCH: ${{ matrix.android }}
+      CCACHE_DIR: /tmp/dsa-ccache
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Make room on the runner
+        run: .github/scripts/translator/free-disk.sh dsa-framework
+
+      - name: Install the build tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends ccache jq
+          ccache --version | head -1
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Read the pins
+        id: pins
+        run: |
+          version="$(uv run dsa/guest/framework/framework_lock.py version "$ANDROID_BRANCH")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "the framework $version for ${{ matrix.arch }}"
+
+      - name: Restore the compiler cache
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/dsa-ccache
+          key: framework-ccache-${{ matrix.android }}-${{ matrix.arch }}-${{ hashFiles('dsa/guest/framework/framework-lock.json') }}-${{ github.run_id }}
+          restore-keys: |
+            framework-ccache-${{ matrix.android }}-${{ matrix.arch }}-${{ hashFiles('dsa/guest/framework/framework-lock.json') }}-
+            framework-ccache-${{ matrix.android }}-${{ matrix.arch }}-
+
+      - name: Fetch the pinned source
+        run: |
+          start=$SECONDS
+          uv run .github/scripts/translator/fetch-source.py --lock dsa/guest/framework/framework-lock.json \
+            --android "$ANDROID_BRANCH" --top "$DSA_TRANSLATOR_WORK/aosp"
+          echo "fetched in $(( (SECONDS - start) / 60 )) minutes"
+          du -sh "$DSA_TRANSLATOR_WORK/aosp"
+          du -sh "$DSA_TRANSLATOR_WORK"/aosp/prebuilts/* 2>/dev/null | sort -h | tail -5
+          df -h / /mnt
+
+      - name: Build SurfaceFlinger, libhwui and libEGL
+        id: build
+        timeout-minutes: 300
+        run: |
+          start=$SECONDS
+          .github/scripts/framework/build.sh "$DSA_TRANSLATOR_WORK/aosp" "$ANDROID_BRANCH" "${{ matrix.arch }}"
+          echo "built in $(( (SECONDS - start) / 60 )) minutes"
+          du -sh "$DSA_TRANSLATOR_WORK/aosp/out"
+          df -h / /mnt
+
+      - name: Keep the compiler cache
+        if: always() && steps.pins.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: /tmp/dsa-ccache
+          key: framework-ccache-${{ matrix.android }}-${{ matrix.arch }}-${{ hashFiles('dsa/guest/framework/framework-lock.json') }}-${{ github.run_id }}
+
+      - name: Collect the files the image takes
+        id: collect
+        run: |
+          out="$DSA_TRANSLATOR_WORK/framework"
+          uv run dsa/guest/framework/collect.py --android "$ANDROID_BRANCH" --arch "${{ matrix.arch }}" \
+            --product-out "$DSA_TRANSLATOR_WORK/aosp/out/target/product/dsa_framework" \
+            --top "$DSA_TRANSLATOR_WORK/aosp" --out "$out"
+          find "$out" -type f -exec ls -l {} +
+          echo "out=$out" >> "$GITHUB_OUTPUT"
+
+      - name: Keep the framework files
+        uses: actions/upload-artifact@v4
+        with:
+          name: framework-${{ matrix.android }}-${{ matrix.arch }}-${{ steps.pins.outputs.version }}
+          path: ${{ steps.collect.outputs.out }}/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Keep the build's logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: framework-logs-${{ matrix.android }}-${{ matrix.arch }}
+          path: |
+            ${{ env.DSA_TRANSLATOR_WORK }}/aosp/out/error.log
+            ${{ env.DSA_TRANSLATOR_WORK }}/aosp/out/soong.log
+            ${{ env.DSA_TRANSLATOR_WORK }}/aosp/out/verbose.log*
+            ${{ env.DSA_TRANSLATOR_WORK }}/aosp/out/soong_ui.log*
+            ${{ env.DSA_TRANSLATOR_WORK }}/aosp/out/soong/soong.variables
+            ${{ env.DSA_TRANSLATOR_WORK }}/aosp/.dsa-targets
+            ${{ env.DSA_TRANSLATOR_WORK }}/aosp/.dsa-sources.json
+            ${{ env.DSA_TRANSLATOR_WORK }}/aosp/.dsa-patches.json
+          if-no-files-found: ignore
+          # The .dsa-* files start with a dot, which upload-artifact skips unless told otherwise.
+          include-hidden-files: true
+          retention-days: 30

@@ -1633,3 +1633,388 @@ fn fr10_minimizing_and_closing_every_task_window_tells_the_guest_none_is_shown()
     unsafe { PostMessageW(open[0].hwnd as HWND, WM_CLOSE, 0, 0) };
     wait_for_shown(&running, false);
 }
+
+/// Fingers and a pen put into the machine's real input with Windows' synthetic pointer
+/// devices, so they reach a task window the way a touchscreen's and a pen's do: through the
+/// window's hit test and its pointer messages, not as messages posted to it.
+///
+/// They move the machine's real input, so they are ignored unless asked for, and the
+/// Installer test workflow asks for them on its Windows runners, where nobody is using the
+/// desktop.
+mod real_input {
+    use super::*;
+    use std::ffi::c_void;
+    use windows_sys::Win32::UI::Input::Pointer::{
+        POINTER_FLAG_DOWN, POINTER_FLAG_INCONTACT, POINTER_FLAG_INRANGE, POINTER_FLAG_UP,
+        POINTER_FLAG_UPDATE, POINTER_PEN_INFO, POINTER_TOUCH_INFO,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        IsIconic, WindowFromPoint, HTMINBUTTON, HWND_TOPMOST, PEN_FLAG_BARREL, PEN_FLAG_ERASER,
+        PEN_MASK_PRESSURE, PEN_MASK_TILT_X, PEN_MASK_TILT_Y, POINTER_INPUT_TYPE, PT_PEN, PT_TOUCH,
+        SWP_NOSIZE, TOUCH_MASK_CONTACTAREA, TOUCH_MASK_PRESSURE, WM_NCHITTEST,
+    };
+
+    /// One contact of a synthetic pointer device's frame (`POINTER_TYPE_INFO`).
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    union Contact {
+        touch: POINTER_TOUCH_INFO,
+        pen: POINTER_PEN_INFO,
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct PointerTypeInfo {
+        kind: POINTER_INPUT_TYPE,
+        contact: Contact,
+    }
+
+    /// `POINTER_FEEDBACK_NONE`: Windows draws no touch or pen feedback for the contacts.
+    const NO_FEEDBACK: i32 = 3;
+
+    // user32's synthetic pointer devices, declared as user32 exports them, so the tests need
+    // no more of windows-sys than the pointer structures.
+    #[link(name = "user32")]
+    extern "system" {
+        fn CreateSyntheticPointerDevice(
+            kind: POINTER_INPUT_TYPE,
+            max_count: u32,
+            mode: i32,
+        ) -> *mut c_void;
+        fn InjectSyntheticPointerInput(
+            device: *mut c_void,
+            info: *const PointerTypeInfo,
+            count: u32,
+        ) -> i32;
+        fn DestroySyntheticPointerDevice(device: *mut c_void);
+    }
+
+    /// A synthetic touchscreen or pen, gone when dropped.
+    struct Device(*mut c_void);
+
+    impl Device {
+        fn new(kind: POINTER_INPUT_TYPE, contacts: u32) -> Device {
+            // SAFETY: plain values; the device is destroyed when dropped.
+            let device = unsafe { CreateSyntheticPointerDevice(kind, contacts, NO_FEEDBACK) };
+            assert!(
+                !device.is_null(),
+                "Windows would not make a synthetic pointer device of type {kind} on this \
+                 machine: {}",
+                std::io::Error::last_os_error()
+            );
+            Device(device)
+        }
+
+        /// Puts one frame of contacts into the machine's input, and gives Windows a moment
+        /// to deliver it, as a digitizer's next frame would come.
+        fn inject(&self, frame: &[PointerTypeInfo]) {
+            // SAFETY: the frame outlives the call and holds `frame.len()` contacts.
+            let injected =
+                unsafe { InjectSyntheticPointerInput(self.0, frame.as_ptr(), frame.len() as u32) };
+            assert_ne!(
+                injected,
+                0,
+                "Windows refused synthetic pointer input: {}",
+                std::io::Error::last_os_error()
+            );
+            thread::sleep(Duration::from_millis(16));
+        }
+    }
+
+    impl Drop for Device {
+        fn drop(&mut self) {
+            // SAFETY: made by CreateSyntheticPointerDevice and destroyed once.
+            unsafe { DestroySyntheticPointerDevice(self.0) };
+        }
+    }
+
+    const DOWN: u32 = POINTER_FLAG_DOWN | POINTER_FLAG_INRANGE | POINTER_FLAG_INCONTACT;
+    const MOVING: u32 = POINTER_FLAG_UPDATE | POINTER_FLAG_INRANGE | POINTER_FLAG_INCONTACT;
+    const HOVERING: u32 = POINTER_FLAG_UPDATE | POINTER_FLAG_INRANGE;
+    /// A finger that lifts is gone; a pen that lifts stays in range, hovering.
+    const LIFTED: u32 = POINTER_FLAG_UP;
+    const PEN_LIFTED: u32 = POINTER_FLAG_UP | POINTER_FLAG_INRANGE;
+
+    fn finger(id: u32, flags: u32, at: POINT) -> PointerTypeInfo {
+        // SAFETY: plain data, for which all zero is a valid value.
+        let mut touch: POINTER_TOUCH_INFO = unsafe { std::mem::zeroed() };
+        touch.pointerInfo.pointerType = PT_TOUCH;
+        touch.pointerInfo.pointerId = id;
+        touch.pointerInfo.pointerFlags = flags;
+        touch.pointerInfo.ptPixelLocation = at;
+        touch.touchMask = TOUCH_MASK_CONTACTAREA | TOUCH_MASK_PRESSURE;
+        touch.rcContact = RECT {
+            left: at.x - 2,
+            top: at.y - 2,
+            right: at.x + 2,
+            bottom: at.y + 2,
+        };
+        touch.pressure = if flags & POINTER_FLAG_INCONTACT != 0 {
+            512
+        } else {
+            0
+        };
+        PointerTypeInfo {
+            kind: PT_TOUCH,
+            contact: Contact { touch },
+        }
+    }
+
+    fn pen(flags: u32, pen_flags: u32, pressure: u32, at: POINT) -> PointerTypeInfo {
+        // SAFETY: plain data, for which all zero is a valid value.
+        let mut pen: POINTER_PEN_INFO = unsafe { std::mem::zeroed() };
+        pen.pointerInfo.pointerType = PT_PEN;
+        pen.pointerInfo.pointerFlags = flags;
+        pen.pointerInfo.ptPixelLocation = at;
+        pen.penFlags = pen_flags;
+        pen.penMask = PEN_MASK_PRESSURE | PEN_MASK_TILT_X | PEN_MASK_TILT_Y;
+        pen.pressure = pressure;
+        pen.tiltX = 30;
+        pen.tiltY = -20;
+        PointerTypeInfo {
+            kind: PT_PEN,
+            contact: Contact { pen },
+        }
+    }
+
+    /// A task window on top of every other window, and where its client area begins on the
+    /// screen, once the window is the one under `points` (client points).
+    fn window_on_top(running: &Running, points: &[(i32, i32)]) -> (HWND, POINT) {
+        let open = windows_of(running, 1);
+        let hwnd = open[0].hwnd as HWND;
+        unsafe { SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE) };
+        let mut origin = POINT { x: 0, y: 0 };
+        unsafe { ClientToScreen(hwnd, &mut origin) };
+        wait_for(
+            "the task window to be the window under the contacts",
+            || {
+                points
+                    .iter()
+                    .all(|&(x, y)| {
+                        let at = POINT {
+                            x: origin.x + x,
+                            y: origin.y + y,
+                        };
+                        let under = unsafe { WindowFromPoint(at) };
+                        under == hwnd
+                    })
+                    .then_some(())
+            },
+        );
+        (hwnd, origin)
+    }
+
+    fn on_screen(origin: POINT, (x, y): (i32, i32)) -> POINT {
+        POINT {
+            x: origin.x + x,
+            y: origin.y + y,
+        }
+    }
+
+    /// The pointer events the fake Android was given by `tool`, once `done` holds for them.
+    fn given(
+        running: &Running,
+        tool: PointerTool,
+        what: &str,
+        done: impl Fn(&[PointerEvent]) -> bool,
+    ) -> Vec<PointerEvent> {
+        wait_for(what, || {
+            let events: Vec<PointerEvent> = running
+                .android
+                .pointers
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|event| event.tool == tool)
+                .copied()
+                .collect();
+            done(&events).then_some(events)
+        })
+    }
+
+    fn count(events: &[PointerEvent], action: PointerAction) -> usize {
+        events.iter().filter(|event| event.action == action).count()
+    }
+
+    #[test]
+    #[ignore = "moves the machine's real touch input; the Installer test workflow runs it"]
+    fn fr5_real_fingers_on_a_task_window_reach_its_task_as_ten_touch_pointers_and_a_pinch() {
+        let running = start(None);
+        running.android.start();
+        running
+            .android
+            .publish(TaskEvent::Updated(task(7, "Paint", 800, 600)));
+        let open = windows_of(&running, 1);
+        let (width, height) = client_size(open[0].hwnd);
+        // Ten fingers in a row across the lower half, below the title bar, which spread
+        // apart as a pinch does.
+        let row = height * 3 / 4;
+        let at = |index: i32, spread: i32| {
+            let middle = width / 2;
+            (middle + (index * 2 - 9) * (width / 40 + spread), row)
+        };
+        let wide: Vec<(i32, i32)> = (0..10).map(|index| at(index, 6)).collect();
+        let (_, origin) = window_on_top(&running, &wide);
+
+        let fingers = Device::new(PT_TOUCH, 10);
+        let frame = |flags: u32, spread: i32| -> Vec<PointerTypeInfo> {
+            (0..10)
+                .map(|index| finger(index as u32, flags, on_screen(origin, at(index, spread))))
+                .collect()
+        };
+        fingers.inject(&frame(DOWN, 0));
+        for spread in 1..=6 {
+            fingers.inject(&frame(MOVING, spread));
+        }
+        fingers.inject(&frame(LIFTED, 6));
+
+        let events = given(
+            &running,
+            PointerTool::Touch,
+            "ten fingers to lift",
+            |events| count(events, PointerAction::Up) + count(events, PointerAction::Cancel) >= 10,
+        );
+        assert_eq!(count(&events, PointerAction::Cancel), 0, "{events:?}");
+        let downs: Vec<&PointerEvent> = events
+            .iter()
+            .filter(|event| event.action == PointerAction::Down)
+            .collect();
+        assert_eq!(downs.len(), 10, "{events:?}");
+        let mut ids: Vec<u32> = downs.iter().map(|event| event.pointer_id).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(
+            ids.len(),
+            10,
+            "each finger keeps its own pointer: {events:?}"
+        );
+        assert!(count(&events, PointerAction::Move) >= 10, "{events:?}");
+        assert!(events.iter().all(|event| event.task_id == 7));
+        // Each finger lands on the task pixel under it.
+        for down in &downs {
+            let nearest = (0..10)
+                .map(|index| at(index, 0))
+                .map(|(x, y)| (down.x - x as f32).abs() + (down.y - y as f32).abs())
+                .fold(f32::MAX, f32::min);
+            assert!(
+                nearest <= 2.0,
+                "a finger landed away from every contact: {down:?}"
+            );
+        }
+        // A finger is touch from start to end: Windows made no mouse input from it.
+        let mouse = running
+            .android
+            .pointers
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|event| {
+                event.tool == PointerTool::Mouse
+                    && matches!(event.action, PointerAction::Down | PointerAction::Up)
+            })
+            .count();
+        assert_eq!(mouse, 0, "a finger reached the task as a mouse");
+    }
+
+    #[test]
+    #[ignore = "moves the machine's real pen input; the Installer test workflow runs it"]
+    fn fr5_a_real_pen_on_a_task_window_reaches_its_task_with_its_pressure_barrel_and_eraser() {
+        let running = start(None);
+        running.android.start();
+        running
+            .android
+            .publish(TaskEvent::Updated(task(7, "Paint", 800, 600)));
+        let open = windows_of(&running, 1);
+        let (width, height) = client_size(open[0].hwnd);
+        let point = (width / 2, height * 3 / 4);
+        let (_, origin) = window_on_top(&running, &[point]);
+        let at = on_screen(origin, point);
+
+        let stylus = Device::new(PT_PEN, 1);
+        stylus.inject(&[pen(HOVERING, PEN_FLAG_BARREL, 0, at)]);
+        stylus.inject(&[pen(DOWN, PEN_FLAG_BARREL, 512, at)]);
+        stylus.inject(&[pen(
+            MOVING,
+            PEN_FLAG_BARREL,
+            768,
+            on_screen(origin, (point.0 + 20, point.1)),
+        )]);
+        stylus.inject(&[pen(
+            PEN_LIFTED,
+            PEN_FLAG_BARREL,
+            0,
+            on_screen(origin, (point.0 + 20, point.1)),
+        )]);
+        stylus.inject(&[pen(HOVERING, PEN_FLAG_ERASER, 0, at)]);
+        stylus.inject(&[pen(DOWN, PEN_FLAG_ERASER, 512, at)]);
+        stylus.inject(&[pen(PEN_LIFTED, PEN_FLAG_ERASER, 0, at)]);
+
+        let tip = given(&running, PointerTool::Pen, "the pen to lift", |events| {
+            count(events, PointerAction::Up) >= 1
+        });
+        let down = tip
+            .iter()
+            .find(|event| event.action == PointerAction::Down)
+            .copied()
+            .unwrap_or_else(|| panic!("the pen never pressed: {tip:?}"));
+        assert!((down.pressure - 0.5).abs() <= 0.05, "{down:?}");
+        assert_ne!(down.buttons & buttons::STYLUS_PRIMARY, 0, "{down:?}");
+        assert_eq!((down.tilt_x, down.tilt_y), (30.0, -20.0), "{down:?}");
+        assert!((down.x - point.0 as f32).abs() <= 2.0, "{down:?}");
+        assert!((down.y - point.1 as f32).abs() <= 2.0, "{down:?}");
+        assert!(count(&tip, PointerAction::HoverMove) >= 1, "{tip:?}");
+        let eraser = given(
+            &running,
+            PointerTool::Eraser,
+            "the eraser to lift",
+            |events| count(events, PointerAction::Up) >= 1,
+        );
+        assert_eq!(count(&eraser, PointerAction::Down), 1, "{eraser:?}");
+    }
+
+    #[test]
+    #[ignore = "moves the machine's real touch input; the Installer test workflow runs it"]
+    fn fr5_a_real_finger_on_the_minimize_button_minimizes_the_task_window() {
+        let running = start(None);
+        running.android.start();
+        running
+            .android
+            .publish(TaskEvent::Updated(task(7, "Paint", 800, 600)));
+        let open = windows_of(&running, 1);
+        let hwnd = open[0].hwnd as HWND;
+        let (width, _) = client_size(open[0].hwnd);
+        let mut origin = POINT { x: 0, y: 0 };
+        unsafe { ClientToScreen(hwnd, &mut origin) };
+        // The minimize button, wherever the title bar puts it.
+        let button = (0..width)
+            .step_by(2)
+            .flat_map(|x| (0..64).step_by(2).map(move |y| (x, y)))
+            .find(|&(x, y)| {
+                let at = on_screen(origin, (x, y));
+                let code = unsafe { SendMessageW(hwnd, WM_NCHITTEST, 0, lparam(at.x, at.y)) };
+                code == HTMINBUTTON as isize
+            })
+            .expect("the title bar has a minimize button");
+        let (_, origin) = window_on_top(&running, &[button]);
+        let at = on_screen(origin, button);
+
+        let fingers = Device::new(PT_TOUCH, 1);
+        fingers.inject(&[finger(0, DOWN, at)]);
+        fingers.inject(&[finger(0, LIFTED, at)]);
+
+        wait_for(
+            "a tap on the minimize button to minimize the window",
+            || (unsafe { IsIconic(hwnd) } != 0).then_some(()),
+        );
+        assert!(
+            running
+                .android
+                .pointers
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|event| event.action != PointerAction::Down),
+            "a tap on the title bar reached the task"
+        );
+    }
+}

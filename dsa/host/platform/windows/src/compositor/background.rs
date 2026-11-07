@@ -577,8 +577,8 @@ mod win {
         RegisterClassExW, RegisterWindowMessageW, SetForegroundWindow, SetMenuDefaultItem,
         TrackPopupMenuEx, TranslateMessage, HICON, ICONINFO, IDI_APPLICATION, MF_SEPARATOR,
         MF_STRING, MSG, SM_CXSMICON, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_APP,
-        WM_CLOSE, WM_COMMAND, WM_CONTEXTMENU, WM_DESTROY, WM_INITDIALOG, WM_NULL, WNDCLASSEXW,
-        WS_POPUP,
+        WM_CLOSE, WM_COMMAND, WM_CONTEXTMENU, WM_DESTROY, WM_INITDIALOG, WM_NULL, WM_SETTINGCHANGE,
+        WNDCLASSEXW, WS_POPUP,
     };
 
     use super::{
@@ -595,10 +595,17 @@ mod win {
     const NIN_SELECT: u32 = 0x0400;
     const NIN_KEYSELECT: u32 = 0x0401;
 
+    /// DSA's own notification area icon, in one colour: dark for a light taskbar, white for
+    /// a dark one. An app whose icon cannot be read shows it.
+    const TRAY_FOR_LIGHT_TASKBAR: &[u8] = include_bytes!("../../resources/icons/tray-light.ico");
+    const TRAY_FOR_DARK_TASKBAR: &[u8] = include_bytes!("../../resources/icons/tray-dark.ico");
+
     struct Icon {
         id: u32,
         app: BackgroundApp,
         icon: HICON,
+        /// Whether it is DSA's own icon, drawn for the taskbar's theme, rather than the app's.
+        themed: bool,
         /// Whether the icon is known by its GUID, or by the window and ID: Windows refuses
         /// a GUID it has seen with another program's path, as after DSA moved.
         by_guid: bool,
@@ -816,6 +823,25 @@ mod win {
                 unsafe { DestroyWindow(hwnd) };
                 0
             }
+            WM_SETTINGCHANGE => {
+                // The taskbar's theme changed: DSA's own icons are drawn again in its colour.
+                let area = setting_name(lparam);
+                if area == "ImmersiveColorSet" {
+                    let apps: Vec<BackgroundApp> = with_state(|s| {
+                        s.icons
+                            .values()
+                            .filter(|icon| icon.themed)
+                            .map(|icon| icon.app.clone())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                    for app in apps {
+                        show(app);
+                    }
+                }
+                // SAFETY: the default handling of a message of this window.
+                unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+            }
             WM_DESTROY => {
                 // SAFETY: ends this thread's message loop.
                 unsafe { PostQuitMessage(0) };
@@ -872,6 +898,23 @@ mod win {
         }
     }
 
+    /// The setting area a `WM_SETTINGCHANGE` names, or an empty string.
+    fn setting_name(lparam: LPARAM) -> String {
+        let text = lparam as *const u16;
+        if text.is_null() {
+            return String::new();
+        }
+        let mut length = 0;
+        // SAFETY: for WM_SETTINGCHANGE the parameter is null or a NUL-terminated string,
+        // read up to its NUL and never past 256 units.
+        unsafe {
+            while length < 256 && *text.add(length) != 0 {
+                length += 1;
+            }
+            String::from_utf16_lossy(std::slice::from_raw_parts(text, length))
+        }
+    }
+
     fn copy_text(target: &mut [u16], text: &str) {
         let units: Vec<u16> = text.encode_utf16().take(target.len() - 1).collect();
         target[..units.len()].copy_from_slice(&units);
@@ -908,13 +951,14 @@ mod win {
         }) else {
             return;
         };
-        let handle = make_icon(controller, &app.icon_png);
+        let (handle, themed) = make_icon(controller, &app.icon_png);
         let package = app.package_name.clone();
         if let Some((id, by_guid)) = known {
             let icon = Icon {
                 id,
                 app,
                 icon: handle,
+                themed,
                 by_guid,
             };
             let data = icon_data(controller, &icon, &package);
@@ -936,6 +980,7 @@ mod win {
             id,
             app,
             icon: handle,
+            themed,
             by_guid: true,
         };
         let mut data = icon_data(controller, &icon, &package);
@@ -993,15 +1038,64 @@ mod win {
         }
     }
 
-    /// An icon of the notification area's size from the app's PNG, else the default
-    /// application icon.
-    fn make_icon(controller: HWND, png: &[u8]) -> HICON {
+    /// Whether the taskbar uses the light theme (Windows' "default app mode" is separate).
+    fn taskbar_is_light() -> bool {
+        use windows_sys::Win32::System::Registry::{
+            RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD,
+        };
+        let path = wide(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+        let name = wide("SystemUsesLightTheme");
+        let mut value = 0u32;
+        let mut size = std::mem::size_of::<u32>() as u32;
+        // SAFETY: NUL-terminated strings and a DWORD with its size, all outliving the call.
+        let status = unsafe {
+            RegGetValueW(
+                HKEY_CURRENT_USER,
+                path.as_ptr(),
+                name.as_ptr(),
+                RRF_RT_REG_DWORD,
+                null_mut(),
+                (&mut value as *mut u32).cast(),
+                &mut size,
+            )
+        };
+        status == 0 && value == 1
+    }
+
+    /// The PNG image of DSA's own notification area icon for the taskbar's theme: the
+    /// smallest of its sizes that is at least `size` pixels, else its largest.
+    fn dsa_tray_png(size: u32) -> Option<Vec<u8>> {
+        let file = if taskbar_is_light() {
+            TRAY_FOR_LIGHT_TASKBAR
+        } else {
+            TRAY_FOR_DARK_TASKBAR
+        };
+        let images = dsa_exe_resources::parse_ico(file).ok()?;
+        let side = |image: &dsa_exe_resources::IconImage| match image.width {
+            0 => 256,
+            width => u32::from(width),
+        };
+        images
+            .iter()
+            .filter(|image| side(image) >= size)
+            .min_by_key(|image| side(image))
+            .or_else(|| images.iter().max_by_key(|image| side(image)))
+            .map(|image| image.data.clone())
+    }
+
+    /// An icon of the notification area's size from the app's PNG, else DSA's own icon for
+    /// the taskbar's theme, else the default application icon. The flag says whether it is
+    /// DSA's own icon, which changes with the taskbar's theme.
+    fn make_icon(controller: HWND, png: &[u8]) -> (HICON, bool) {
         // SAFETY: plain calls; the DPI of a window of this thread.
         let size = unsafe {
             let dpi = GetDpiForWindow(controller).max(96);
             GetSystemMetricsForDpi(SM_CXSMICON, dpi).max(16)
         } as u32;
-        let pixels = if png.starts_with(b"\x89PNG") {
+        let decode = |png: &[u8]| {
+            if !png.starts_with(b"\x89PNG") {
+                return None;
+            }
             with_state(|s| {
                 s.decoder
                     .as_ref()
@@ -1009,12 +1103,14 @@ mod win {
             })
             .flatten()
             .and_then(Result::ok)
-        } else {
-            None
+        };
+        let (pixels, themed) = match decode(png) {
+            Some(pixels) => (Some(pixels), false),
+            None => (dsa_tray_png(size).and_then(|png| decode(&png)), true),
         };
         let fallback = || {
             // SAFETY: a system icon, which is never destroyed.
-            unsafe { LoadIconW(null_mut(), IDI_APPLICATION) }
+            (unsafe { LoadIconW(null_mut(), IDI_APPLICATION) }, false)
         };
         let Some(pixels) = pixels else {
             return fallback();
@@ -1057,7 +1153,7 @@ mod win {
             if icon.is_null() {
                 fallback()
             } else {
-                icon
+                (icon, themed)
             }
         }
     }

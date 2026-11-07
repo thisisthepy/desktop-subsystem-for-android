@@ -1,0 +1,23 @@
+# Google Play, when the user installed it (dsa gapps install). The host adds
+# androidboot.dsa.gapps=on to the boot's bootconfig only while a Google apps image is
+# installed. The image (erofs) is on the user's disk, where dsa-channeld wrote it. Here init
+# mounts it through a loop device and lays its product and system_ext folders over /product and
+# /system_ext, before the zygote starts. The package manager then finds Google's apps in those
+# partitions' app and priv-app folders, and each app's privileged permission list, default
+# permissions and system configuration in the same partition's etc folder, which is the only
+# place it reads them from for that partition's apps. The fingerprint that makes the boot an
+# upgrade comes from /system/etc/dsa/gapps-on.prop, which the product build.prop imports on the
+# same condition. A system script, because only init itself may lay anything over a partition.
+on post-fs-data && property:ro.boot.dsa.gapps=on
+    mkdir /data/vendor/dsa 0771 system system
+    mkdir /data/vendor/dsa/gapps 0770 system system
+    mkdir /mnt/dsa-gapps 0755 root root
+    mount erofs loop@/data/vendor/dsa/gapps/system.img /mnt/dsa-gapps ro nodev nosuid context=u:object_r:system_file:s0
+    mount overlay overlay /product ro nodev nosuid lowerdir=/mnt/dsa-gapps/product:/product
+    mount overlay overlay /system_ext ro nodev nosuid lowerdir=/mnt/dsa-gapps/system_ext:/system_ext
+
+# Without the image the directory still exists, so dsa-channeld can write one the user installs
+# while Android runs; it takes effect at the next start.
+on post-fs-data
+    mkdir /data/vendor/dsa 0771 system system
+    mkdir /data/vendor/dsa/gapps 0770 system system

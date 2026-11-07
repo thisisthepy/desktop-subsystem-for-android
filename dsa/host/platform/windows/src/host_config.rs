@@ -11,9 +11,9 @@
 //! }
 //! ```
 //!
-//! Without `memory_mb`, which an installation leaves out, the VM may grow to 3 GiB, or to the
-//! limit the user set (`dsa settings set memory-limit <MiB>`), never past the computer's
-//! memory. It holds only what Android uses.
+//! Without `memory_mb`, which an installation leaves out, the VM starts at 3 GiB and grows to the
+//! limit the user set (`dsa settings set memory-limit <MiB>`), or with none to the computer's
+//! memory less what Windows keeps. It holds only what Android uses.
 //!
 //! The service runs one VM per user. Each user's VM is named after the user's SID and lets
 //! only that user (and SYSTEM) use its Hyper-V sockets. Its disk is in the user's own
@@ -152,13 +152,16 @@ fn default_page_reporting_order() -> u8 {
     page_reporting_order_for_build(windows_build())
 }
 
-/// The free page reporting order for a Windows build and update revision, as WSL chooses it:
-/// 5 (128 KiB) where the VM can have fine-grained memory, 9 (2 MiB) elsewhere or when the build
-/// is unknown. A guest's free memory is scattered, so the smaller the pieces it may report,
-/// the more of it the host gets back, but the host can only take pieces as small as it backs.
+/// The free page reporting order for a Windows build and update revision: 0 (4 KiB, one page)
+/// where the VM can have fine-grained memory, which the host backs in 4 KiB pages, and 9
+/// (2 MiB) elsewhere or when the build is unknown. A guest's free memory is scattered, so the
+/// smaller the pieces it may report, the more of it the host gets back and the sooner: a
+/// freed page goes back at once instead of waiting for compaction to gather a whole block.
+/// The host can only take pieces as small as it backs; a Hyper-V that refuses small pieces
+/// makes the guest's balloon driver fall back to 2 MiB by itself. WSL uses 5 (128 KiB).
 pub fn page_reporting_order_for_build(build: Option<(u32, u32)>) -> u8 {
     match build {
-        Some((build, revision)) if crate::vm::fine_grained_memory_supported(build, revision) => 5,
+        Some((build, revision)) if crate::vm::fine_grained_memory_supported(build, revision) => 0,
         _ => 9,
     }
 }

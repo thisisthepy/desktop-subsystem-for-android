@@ -31,6 +31,197 @@ class ImageLayoutTests(unittest.TestCase):
         cil = (Path(__file__).parent / "sepolicy" / "channeld.cil").read_text()
         self.assertRegex(cil, r"\(allow dsa_channeld pstorefs \(dir \([^)]*\bsetattr\b[^)]*\bremove_name\b")
         self.assertRegex(cil, r"\(allow dsa_channeld pstorefs \(file \([^)]*\bunlink\b")
+
+    # The SELinux type and class of every kernel file dsa-channeld opens, as the guest's kernel
+    # labels it. A path the daemon opens that is not listed here fails the test below, so a
+    # new read cannot ship without its rule (the refused /proc/vmstat read went unnoticed).
+    CHANNELD_KERNEL_PATHS = {
+        "/proc/bootconfig": [("proc_bootconfig", "file")],
+        "/sys/fs/pstore": [("pstorefs", "dir"), ("pstorefs", "file")],
+        "/proc/meminfo": [("proc_meminfo", "file")],
+        "/proc/pressure/memory": [("proc_pressure_mem", "file")],
+        "/proc/vmstat": [("proc_vmstat", "file")],
+        # The process listing and each app process's /proc/<pid>/cmdline.
+        "/proc": [("proc", "dir"), ("appdomain", "dir"), ("appdomain", "file")],
+        "/proc/{}/cmdline": [("appdomain", "file")],
+    }
+    # The modes init runs the same binary in, each in a domain of its own.
+    CHANNELD_SOURCE_DOMAINS = {
+        "share_mount.rs": ("dsa_sharemount", "files.cil"),
+        "android_files.rs": ("dsa_files", "files.cil"),
+        "webdav.rs": ("dsa_files", "files.cil"),
+    }
+
+    def test_nfr2_every_kernel_file_channeld_opens_has_an_allow_rule(self):
+        here = Path(__file__).parent
+        src = here.parent / "channeld" / "src"
+        literal = re.compile(r'"(/(?:proc|sys)(?:/[^"]*)?)"')
+        found = 0
+        for source in sorted(src.glob("*.rs")):
+            domain, policy_file = self.CHANNELD_SOURCE_DOMAINS.get(
+                source.name, ("dsa_channeld", "channeld.cil")
+            )
+            policy = (here / "sepolicy" / policy_file).read_text()
+            for number, line in enumerate(source.read_text().splitlines(), 1):
+                if line.strip().startswith("//"):
+                    continue
+                for path in literal.findall(line):
+                    if path.startswith("/proc/self/"):
+                        # A process's own /proc entries are every domain's to read.
+                        continue
+                    where = f"{source.name}:{number} opens {path}"
+                    self.assertIn(
+                        path,
+                        self.CHANNELD_KERNEL_PATHS,
+                        f"{where}, which this test does not know: add its SELinux type here "
+                        f"and an allow rule for {domain} to sepolicy/{policy_file}",
+                    )
+                    found += 1
+                    for target, cls in self.CHANNELD_KERNEL_PATHS[path]:
+                        perm = "search" if cls == "dir" else "read"
+                        self.assertRegex(
+                            policy,
+                            rf"\(allow\s+{domain}\s+{target}\s+\(\s*{cls}\s+\([^)]*\b{perm}\b",
+                            f"{where}, but sepolicy/{policy_file} does not let {domain} "
+                            f"{perm} {target} ({cls})",
+                        )
+        self.assertGreaterEqual(found, 5, "the scan found none of the daemon's kernel reads")
+
+    # Every folder on the way down to a place on /data the daemon uses, with the label the
+    # Android 16 and 17 file_contexts give it. /data/media is media_userdir_file, not the
+    # storage's own label; a policy without it refused every request to the file server.
+    CHANNELD_DATA_PATHS = {
+        "/data/media/0": ["system_data_root_file", "media_userdir_file", "media_rw_data_file"],
+        "/data/vendor/dsa/arm-translation": ["system_data_root_file", "vendor_data_file"],
+        "/data/vendor/dsa/gapps": ["system_data_root_file", "vendor_data_file"],
+    }
+    # Paths the daemon names but never opens, so no folder on their way needs a rule. The
+    # Google apps mount point is only compared with the mount points /proc/self/mounts lists.
+    CHANNELD_NAMED_NOT_OPENED = {"/mnt/dsa-gapps"}
+
+    # What each file system call in the file sharing jobs asks of the storage's label
+    # (media_rw_data_file), as {class: permissions}. A call not listed here fails the test, so
+    # a new operation cannot ship without its rule.
+    STORAGE_CALLS = {
+        "dsa_files": {
+            "fs::symlink_metadata": {"dir": "getattr", "file": "getattr", "lnk_file": "getattr"},
+            "fs::metadata": {"dir": "search getattr", "file": "getattr"},
+            ".is_dir": {"dir": "getattr", "file": "getattr"},
+            ".exists": {"dir": "getattr", "file": "getattr"},
+            "fs::read_link": {"lnk_file": "read"},
+            "fs::read_dir": {"dir": "search read open"},
+            "File::open": {"file": "read open"},
+            "File::create": {"dir": "search write add_name", "file": "create write open"},
+            "fs::create_dir": {"dir": "create write add_name"},
+            "fs::remove_file": {"dir": "write remove_name", "file": "unlink", "lnk_file": "unlink"},
+            "fs::remove_dir_all": {
+                "dir": "search read open write remove_name rmdir",
+                "file": "unlink",
+                "lnk_file": "unlink",
+            },
+            "fs::rename": {
+                "dir": "write add_name remove_name rename reparent",
+                "file": "rename",
+                "lnk_file": "rename",
+            },
+            "fs::copy": {"dir": "write add_name", "file": "create read write open getattr setattr"},
+            "File::from": {},
+        },
+        "dsa_sharemount": {
+            ".is_dir": {"dir": "getattr"},
+            "fs::remove_dir": {"dir": "write remove_name rmdir"},
+            "DirBuilder::new": {"dir": "search create write add_name"},
+            "chown": {"dir": "setattr"},
+            "libc::mount": {"dir": "mounton"},
+            "fs::read_to_string": {},
+            "File::from": {},
+        },
+    }
+
+    @staticmethod
+    def _production_lines(source):
+        """The lines of a Rust source above its test module, without comments."""
+        for number, line in enumerate(source.read_text().splitlines(), 1):
+            if line.strip().startswith("#[cfg(test)]"):
+                return
+            if not line.strip().startswith("//"):
+                yield number, line
+
+    @staticmethod
+    def _granted(policy, domain, target):
+        """{class: set of permissions} the policy allows `domain` on `target`."""
+        granted = {}
+        rule = rf"\(allow\s+{domain}\s+{target}\s+\(\s*(\w+)\s+\(([^)]*)\)\s*\)\s*\)"
+        for cls, perms in re.findall(rule, policy):
+            granted.setdefault(cls, set()).update(perms.split())
+        return granted
+
+    def test_fr29_every_place_on_data_channeld_uses_can_be_reached(self):
+        here = Path(__file__).parent
+        literal = re.compile(r'"(/(?:data|storage|sdcard|mnt)(?:/[^"]*)?)"')
+        found = 0
+        for source in sorted((here.parent / "channeld" / "src").glob("*.rs")):
+            domain, policy_file = self.CHANNELD_SOURCE_DOMAINS.get(
+                source.name, ("dsa_channeld", "channeld.cil")
+            )
+            policy = (here / "sepolicy" / policy_file).read_text()
+            for number, line in self._production_lines(source):
+                for path in literal.findall(line):
+                    if path in self.CHANNELD_NAMED_NOT_OPENED:
+                        continue
+                    where = f"{source.name}:{number} uses {path}"
+                    known = [p for p in self.CHANNELD_DATA_PATHS if path.startswith(p)]
+                    self.assertTrue(
+                        known,
+                        f"{where}, which this test does not know: add the label of every "
+                        f"folder on its way here and allow {domain} to search them in "
+                        f"sepolicy/{policy_file}",
+                    )
+                    found += 1
+                    for target in self.CHANNELD_DATA_PATHS[known[0]]:
+                        self.assertIn(
+                            "search",
+                            self._granted(policy, domain, target).get("dir", set()),
+                            f"{where}, but sepolicy/{policy_file} does not let {domain} "
+                            f"search {target} (dir) on the way",
+                        )
+        self.assertGreaterEqual(found, 2, "the scan found none of the daemon's places on /data")
+
+    def test_fr29_the_file_sharing_jobs_are_allowed_exactly_the_storage_calls_they_make(self):
+        here = Path(__file__).parent
+        policy = (here / "sepolicy" / "files.cil").read_text()
+        call = re.compile(r"(\b(?:fs|File|DirBuilder|libc)::\w+|\.is_dir|\.exists|\bchown)\(")
+        for domain, calls in self.STORAGE_CALLS.items():
+            needed = {}
+            sources = [s for s, (d, _) in self.CHANNELD_SOURCE_DOMAINS.items() if d == domain]
+            for name in sources:
+                source = here.parent / "channeld" / "src" / name
+                for number, line in self._production_lines(source):
+                    if line.lstrip().startswith("use "):
+                        continue
+                    for used in call.findall(line):
+                        if used.startswith("libc::") and used != "libc::mount":
+                            # Sockets and unmounts, which other rules cover.
+                            continue
+                        self.assertIn(
+                            used,
+                            calls,
+                            f"{name}:{number} calls {used}, which this test does not know: say "
+                            f"what it asks of media_rw_data_file and allow it to {domain} in "
+                            "sepolicy/files.cil",
+                        )
+                        for cls, perms in calls[used].items():
+                            needed.setdefault(cls, set()).update(perms.split())
+            granted = self._granted(policy, domain, "media_rw_data_file")
+            granted.pop("filesystem", None)
+            for cls in sorted(set(needed) | set(granted)):
+                self.assertEqual(
+                    granted.get(cls, set()),
+                    needed.get(cls, set()),
+                    f"sepolicy/files.cil gives {domain} on media_rw_data_file ({cls}) other "
+                    "permissions than its calls need",
+                )
+
     def test_fr1_selects_vendor_apexes_without_the_cuttlefish_launcher(self):
         cmdline = make_image.kernel_cmdline(f"blkdevparts={make_image.SYSTEM_DISK_GUID}:1@0(misc)")
         self.assertIn("androidboot.boot_devices=vmbus", cmdline)
@@ -275,6 +466,16 @@ class ImageLayoutTests(unittest.TestCase):
                 )
                 # When otatools is not supplied, precompiled_sepolicy is removed so the device compiles at boot
                 self.assertNotIn("VENDOR/etc/selinux/precompiled_sepolicy", archive.namelist())
+
+    def test_fr3_the_agent_reaches_the_control_channel_in_android_17s_per_sdk_app_domain(self):
+        rules = make_image.CHANNELD_POLICY.read_text()
+        android17 = "(type platform_app)\n(type platform_app_36)\n"
+        patched = make_image.with_versioned_app_domains(rules, android17)
+        self.assertIn("(allow platform_app_36 dsa_channel_service (service_manager (find)))", patched)
+        self.assertIn("(allow platform_app dsa_channel_service (service_manager (find)))", patched)
+        self.assertNotIn("platform_app_36_36", patched)
+        # Android 16 has no such domain, so nothing is added that its policy cannot compile.
+        self.assertEqual(make_image.with_versioned_app_domains(rules, "(type platform_app)\n"), rules)
 
     def test_pr3_the_graphics_allocator_can_open_the_drm_device(self):
         plat_cil = "(typeattribute hal_graphics_allocator_server)\n(type graphics_device)\n"
@@ -1018,6 +1219,33 @@ class ImageLayoutTests(unittest.TestCase):
                     fs_config,
                 )
 
+    def test_fr11_the_agent_holds_the_storage_permissions_that_open_android_obb_to_it(self):
+        # The agent puts the expansion files of an app the host installs in the app's folder
+        # under Android/obb/, which Android opens to an installer only while it holds the
+        # storage permissions. They are runtime permissions, so the image grants them.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = self._target_files_with_system_ext(root)
+            agent = root / "agent.apk"
+            agent.write_bytes(b"PK agent")
+            modified = root / "modified.zip"
+            make_image.modify(source, modified, agent=agent)
+            with zipfile.ZipFile(modified) as archive:
+                granted = archive.read(
+                    "SYSTEM_EXT/etc/default-permissions/default-permissions-dsa-agent.xml"
+                ).decode()
+                fs_config = archive.read("META/system_ext_filesystem_config.txt").decode().splitlines()
+        self.assertIn('<exception package="io.github.thisisthepy.dsa.agent">', granted)
+        for permission in ["READ_EXTERNAL_STORAGE", "WRITE_EXTERNAL_STORAGE"]:
+            self.assertIn(f'<permission name="android.permission.{permission}"', granted)
+        self.assertIn("system_ext/etc/default-permissions 0 0 755 capabilities=0x0", fs_config)
+        self.assertIn(
+            "system_ext/etc/default-permissions/default-permissions-dsa-agent.xml 0 0 644 capabilities=0x0",
+            fs_config,
+        )
+        manifest = (make_image.REPO / "dsa/guest/agent/src/main/AndroidManifest.xml").read_text()
+        self.assertIn('android.permission.WRITE_EXTERNAL_STORAGE', manifest)
+
     def test_fr10_the_agent_may_put_the_guest_into_doze_and_set_its_battery(self):
         # The agent calls the deviceidle and battery shell commands over binder, handing
         # system_server the descriptors the commands write to.
@@ -1087,8 +1315,12 @@ class ImageLayoutTests(unittest.TestCase):
         listed = (agent / "privapp-permissions-dsa-agent.xml").read_text()
         requested = set(re.findall(r'<uses-permission android:name="([^"]+)"', manifest))
         granted = set(re.findall(r'<permission name="([^"]+)"', listed))
+        # Runtime permissions are not privileged: the image grants them by default instead.
+        defaults = (agent / "default-permissions-dsa-agent.xml").read_text()
+        runtime = set(re.findall(r'<permission name="([^"]+)"', defaults))
         self.assertTrue(requested)
-        self.assertEqual(requested, granted)
+        self.assertEqual(requested - runtime, granted)
+        self.assertFalse(runtime & granted)
         self.assertEqual(make_image.AGENT_PERMISSIONS_SOURCE.read_text(), listed)
 
     def test_fr3_an_agent_needs_a_system_ext_partition(self):
@@ -1974,6 +2206,13 @@ class GuestMemoryTests(unittest.TestCase):
             self.assertNotRegex(policy, r"\(allow \S+ proc \(file \([^)]*write")
             # The agent reads zram's statistics for its memory report.
             self.assertIn("(allow platform_app sysfs_zram (file (read open getattr)))", policy)
+            # And the online memory blocks, which plain sysfs would keep from it.
+            self.assertIn(
+                '(genfscon sysfs "/devices/system/memory" (u object_r dsa_sysfs_memory', policy
+            )
+            for app in ("system_app", "platform_app"):
+                self.assertIn(f"(allow {app} dsa_sysfs_memory (dir (search read open getattr)))", policy)
+                self.assertIn(f"(allow {app} dsa_sysfs_memory (file (read open getattr)))", policy)
 
     def test_fr5_the_audio_hal_and_software_codecs_can_share_memory_through_memfds(self):
         # Refused, libcutils falls back to an ashmem device DSA's kernel does not have: audio
@@ -2036,7 +2275,12 @@ class GuestMemoryTests(unittest.TestCase):
             rc = archive.read("VENDOR/etc/init/dsa-channeld.rc").decode()
             start = rc.index("on property:vendor.dsa.memory.reclaim=1 && property:sys.boot_completed=1")
             trigger = rc[start:rc.index("on property:vendor.dsa.memory.trim=1")]
-            self.assertEqual(trigger.count('write /sys/fs/cgroup/memory.reclaim "256M swappiness=200"'), 4)
+            self.assertEqual(
+                trigger.count('write /sys/fs/cgroup/memory.reclaim "${vendor.dsa.memory.reclaim_step}M swappiness=200"'), 4
+            )
+            self.assertNotIn("256M", trigger)
+            contexts = archive.read("VENDOR/etc/selinux/vendor_property_contexts").decode().splitlines()
+            self.assertIn("vendor.dsa.memory.reclaim_step u:object_r:dsa_memory_prop:s0 exact int", contexts)
             self.assertLess(trigger.rindex("cgroup/memory.reclaim"), trigger.index("drop_caches"))
             self.assertLess(trigger.index("drop_caches"), trigger.index("compact_memory"))
 
@@ -2052,7 +2296,7 @@ class GuestMemoryTests(unittest.TestCase):
     def test_nfr1_the_secure_element_service_is_removed(self):
         self.assertTrue(make_image.removed("SYSTEM/app/SecureElement/SecureElement.apk"))
 
-    def test_nfr2_a_gradual_trim_reclaims_a_bounded_slice_from_the_coldest_pages_and_reads_memory_pressure(self):
+    def test_nfr2_a_trim_reclaims_the_coldest_pages_and_compacts_so_they_are_reported_at_once(self):
         with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp), channeld=True) as archive:
             contexts = archive.read("VENDOR/etc/selinux/vendor_property_contexts").decode().splitlines()
             self.assertIn("vendor.dsa.memory.trim u:object_r:dsa_memory_prop:s0 exact bool", contexts)
@@ -2061,7 +2305,10 @@ class GuestMemoryTests(unittest.TestCase):
             self.assertIn("vendor.dsa.memory.trim_size u:object_r:dsa_memory_prop:s0 exact int", contexts)
             self.assertIn('write /sys/fs/cgroup/memory.reclaim "${vendor.dsa.memory.trim_size}M swappiness=0"', trigger)
             self.assertNotIn("drop_caches", trigger)
-            self.assertNotIn("compact_memory", trigger)
+            # What the trim freed is scattered: compacting gathers it into whole blocks that free
+            # page reporting hands back now, not when background compaction gets to it.
+            self.assertLess(trigger.index("cgroup/memory.reclaim"), trigger.index("write /proc/sys/vm/compact_memory 1"))
+            self.assertLess(trigger.index("compact_memory"), trigger.index("setprop vendor.dsa.memory.trim 0"))
             self.assertIn("(allow vendor_init cgroup_v2 (file (write open getattr)))", archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode())
             self.assertIn("setprop vendor.dsa.memory.trim 0", trigger)
             policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
@@ -2078,6 +2325,7 @@ class GuestMemoryTests(unittest.TestCase):
             self.assertEqual(contexts.count(make_image.TRIM_PROPERTY_CONTEXT), 1)
         all_of_them = (
             make_image.RECLAIM_PROPERTY_CONTEXT + "\n"
+            + make_image.RECLAIM_STEP_PROPERTY_CONTEXT + "\n"
             + make_image.TRIM_PROPERTY_CONTEXT + "\n"
             + make_image.TRIM_SIZE_PROPERTY_CONTEXT + "\n"
             + make_image.BOOT_PROPERTY_CONTEXT + "\n"
@@ -2101,10 +2349,14 @@ class GuestMemoryTests(unittest.TestCase):
             self.assertIn("(allow dsa_channeld dsa_boot_prop (file (read open getattr map)))", policy)
 
     def test_nfr1_apps_a_desktop_has_no_use_for_are_removed_and_the_ones_apps_need_are_kept(self):
-        removed = ["Dialer", "messaging", "Stk", "BasicDreams", "LiveWallpapersPicker", "QuickSearchBox"]
+        removed = ["Dialer", "messaging", "Stk", "BasicDreams", "LiveWallpapersPicker", "QuickSearchBox",
+                   "Calendar", "Gallery2", "Music"]
         kept = [
             "SYSTEM/app/webview/webview.apk",
             "SYSTEM/priv-app/ContactsProvider/ContactsProvider.apk",
+            "SYSTEM/priv-app/CalendarProvider/CalendarProvider.apk",
+            "SYSTEM/priv-app/DownloadProvider/DownloadProvider.apk",
+            "SYSTEM/priv-app/MusicFX/MusicFX.apk",
             "SYSTEM/priv-app/PackageInstaller/PackageInstaller.apk",
             "SYSTEM/priv-app/DocumentsUI/DocumentsUI.apk",
             "SYSTEM/app/PrintSpooler/PrintSpooler.apk",
@@ -2133,7 +2385,8 @@ class GuestMemoryTests(unittest.TestCase):
                 self.assertIn(f'name="{Path(name).name}"', certs)
         for needed in ["webview", "ContactsProvider", "PackageInstaller", "PermissionController",
                        "DocumentsUI", "PrintSpooler", "Settings", "Provision", "Telecom",
-                       "TeleService", "DeskClock"]:
+                       "TeleService", "DeskClock", "CalendarProvider", "DownloadProvider",
+                       "MusicFX"]:
             self.assertNotIn(needed, make_image.REMOVED_APPS)
 
 
@@ -2386,6 +2639,73 @@ class SettingsWithoutBluetoothTests(unittest.TestCase):
             ("Preference", "flash_notifications_preference_accessibility"),
         ])
 
+    def test_fr1_the_connected_devices_screen_opens_without_saved_bluetooth_devices(self):
+        # Settings died opening Connected devices: the previously connected devices list
+        # asked the null default adapter isEnabled() in SavedBluetoothDeviceUpdater.forceUpdate,
+        # from PreviouslyConnectedDevicePreferenceController.displayPreference. Its category goes,
+        # and with it the controller, so the fragment's use() returns null and onAttach must not
+        # call init on it.
+        self.assertIn(
+            PREVIOUSLY_CONNECTED,
+            make_image.SETTINGS_CONTROLLERS_WITHOUT_BLUETOOTH["res/xml/connected_devices.xml"],
+        )
+        self.assertIn(("skip call", PREVIOUSLY_CONNECTED_INIT),
+                      make_image.SETTINGS_CODE_WITHOUT_BLUETOOTH[CONNECTED_DEVICES_ON_ATTACH])
+        dex = connected_devices_dex()
+        apk = self.modified_settings({
+            "classes2.dex": dex,
+            "res/xml/connected_devices.xml": compiled_xml(CONNECTED_DEVICES_SCREEN),
+        })
+        with zipfile.ZipFile(io.BytesIO(apk)) as archive:
+            edited = archive.read("classes2.dex")
+            screen = archive.read("res/xml/connected_devices.xml")
+        original = dex_code(dex, CONNECTED_DEVICES_ON_ATTACH)
+        code = dex_code(edited, CONNECTED_DEVICES_ON_ATTACH)
+        # Only the init call (three code units, from unit 11) is gone; use() and its cast stay.
+        self.assertEqual(code[:22], original[:22])
+        self.assertEqual(code[22:28], bytes(6))
+        self.assertEqual(code[28:], original[28:])
+        self.assert_dex_is_sealed(edited)
+        self.assertEqual(make_image.edit_dex(edited, make_image.SETTINGS_CODE_WITHOUT_BLUETOOTH)[1], [])
+        self.assertEqual(elements(screen), [
+            ("PreferenceScreen", "connected_devices_screen"),
+            ("PreferenceCategory", "connected_device_list"),
+            ("UntitledPreferenceCategory", None),
+            ("Preference", "connection_preferences"),
+        ])
+
+    def test_fr1_the_saved_and_hearing_devices_pages_open_without_bluetooth(self):
+        # Search still opens both pages. The saved devices list calls the same forceUpdate on
+        # the null adapter, and the available hearing devices list registers with the null
+        # LocalBluetoothManager in onStart. Both go from their screens, and their fragments'
+        # onAttach must not call init on the use() lookup that now returns null.
+        for xml, controller, fragment, init in [
+            ("res/xml/previously_connected_devices.xml", SAVED_DEVICES, SAVED_DEVICES_ON_ATTACH,
+             SAVED_DEVICES_INIT),
+            ("res/xml/accessibility_hearing_aids.xml", AVAILABLE_HEARING, HEARING_AIDS_ON_ATTACH,
+             AVAILABLE_HEARING_INIT),
+        ]:
+            with self.subTest(xml=xml):
+                self.assertIn(controller, make_image.SETTINGS_CONTROLLERS_WITHOUT_BLUETOOTH[xml])
+                self.assertIn(("skip call", init), make_image.SETTINGS_CODE_WITHOUT_BLUETOOTH[fragment])
+                dex = on_attach_dex(fragment, init)
+                screen = preference("PreferenceScreen", "screen", children=[
+                    preference("PreferenceCategory", "devices", controller),
+                    preference("Preference", "stays"),
+                ])
+                apk = self.modified_settings({"classes.dex": dex, xml: compiled_xml(screen)})
+                with zipfile.ZipFile(io.BytesIO(apk)) as archive:
+                    edited = archive.read("classes.dex")
+                    edited_screen = archive.read(xml)
+                code = dex_code(edited, fragment)
+                original = dex_code(dex, fragment)
+                self.assertEqual(code[:22], original[:22])
+                self.assertEqual(code[22:28], bytes(6))
+                self.assertEqual(code[28:], original[28:])
+                self.assert_dex_is_sealed(edited)
+                self.assertEqual(elements(edited_screen),
+                                 [("PreferenceScreen", "screen"), ("Preference", "stays")])
+
     def test_fr1_a_dex_edit_that_would_break_the_method_is_refused(self):
         dex = settings_dex()
         with self.assertRaises(ValueError):
@@ -2443,6 +2763,27 @@ ACCESSIBILITY_SCREEN = preference("PreferenceScreen", "accessibility_settings_sc
 ])
 
 
+PREVIOUSLY_CONNECTED = "com.android.settings.connecteddevice.PreviouslyConnectedDevicePreferenceController"
+PREVIOUSLY_CONNECTED_INIT = ("Lcom/android/settings/connecteddevice/PreviouslyConnectedDevicePreferenceController;"
+                             "->init")
+CONNECTED_DEVICES_ON_ATTACH = ("Lcom/android/settings/connecteddevice/ConnectedDeviceDashboardFragment;"
+                               "->onAttach")
+
+# The part of Android 16's connected devices screen that matters here: the previously
+# connected devices category with its "see all" entry, between entries that stay.
+CONNECTED_DEVICES_SCREEN = preference("PreferenceScreen", "connected_devices_screen", children=[
+    preference("PreferenceCategory", "connected_device_list",
+               "com.android.settings.connecteddevice.ConnectedDeviceGroupController"),
+    preference("PreferenceCategory", "previously_connected_devices", PREVIOUSLY_CONNECTED, children=[
+        preference("Preference", "previously_connected_devices_see_all"),
+    ]),
+    ("UntitledPreferenceCategory", [], [
+        preference("Preference", "connection_preferences",
+                   "com.android.settings.connecteddevice.AdvancedConnectedDeviceController"),
+    ]),
+])
+
+
 def uleb128(value):
     out = b""
     while True:
@@ -2454,10 +2795,10 @@ def uleb128(value):
             return out + bytes([byte])
 
 
-def dex_file(methods, code):
-    """A dex file with the methods [(class, name, shorty)] it refers to, and the code
-    {method index: (registers, instructions)} of those it defines, laid out as d8 lays it out:
-    the header, the id tables, then the data."""
+def dex_file(methods, code, fields=()):
+    """A dex file with the methods [(class, name, shorty)] and fields [(class, name, type)] it
+    refers to, and the code {method index: (registers, instructions)} of those it defines,
+    laid out as d8 lays it out: the header, the id tables, then the data."""
     strings, types, protos = [], [], []
 
     def string(text):
@@ -2479,6 +2820,7 @@ def dex_file(methods, code):
         return protos.index(shorty)
 
     method_ids = [(type_(cls), proto(shorty), string(name)) for cls, name, shorty in methods]
+    field_ids = [(type_(cls), type_(kind), string(name)) for cls, name, kind in fields]
     classes = {}
     for index in sorted(code):
         classes.setdefault(method_ids[index][0], []).append(index)
@@ -2486,7 +2828,8 @@ def dex_file(methods, code):
     string_off = 0x70
     type_off = string_off + 4 * len(strings)
     proto_off = type_off + 4 * len(types)
-    method_off = proto_off + 12 * len(protos)
+    field_off = proto_off + 12 * len(protos)
+    method_off = field_off + 8 * len(field_ids)
     class_off = method_off + 8 * len(method_ids)
     data_off = class_off + 32 * len(classes)
 
@@ -2513,13 +2856,14 @@ def dex_file(methods, code):
     tables = b"".join(struct.pack("<I", offset) for offset in string_data)
     tables += b"".join(struct.pack("<I", strings.index(t)) for t in types)
     tables += b"".join(struct.pack("<III", strings.index(s), types.index(s[0]), 0) for s in protos)
+    tables += b"".join(struct.pack("<HHI", *ids) for ids in field_ids)
     tables += b"".join(struct.pack("<HHI", *ids) for ids in method_ids)
     tables += b"".join(struct.pack("<8I", cls, 1, 0xFFFFFFFF, 0, 0xFFFFFFFF, 0, class_data[cls], 0)
                        for cls in classes)
     size = data_off + len(data)
     header = struct.pack("<8sI20s20I", b"dex\n035\0", 0, bytes(20), size, 0x70, 0x12345678, 0, 0, 0,
                          len(strings), string_off, len(types), type_off, len(protos), proto_off,
-                         0, 0, len(method_ids), method_off, len(classes), class_off,
+                         len(field_ids), field_off, len(method_ids), method_off, len(classes), class_off,
                          len(data), data_off)
     dex = bytearray(header + tables + data)
     dex[12:32] = hashlib.sha1(bytes(dex[32:])).digest()
@@ -2560,6 +2904,45 @@ def settings_dex():
         "0e00"  # return-void
     )
     return dex_file(methods, {0: (3, audio_sharing_supported), 3: (2, on_attach)})
+
+
+SAVED_DEVICES = "com.android.settings.connecteddevice.SavedDeviceGroupController"
+SAVED_DEVICES_INIT = "Lcom/android/settings/connecteddevice/SavedDeviceGroupController;->init"
+SAVED_DEVICES_ON_ATTACH = ("Lcom/android/settings/connecteddevice/PreviouslyConnectedDeviceDashboardFragment;"
+                           "->onAttach")
+AVAILABLE_HEARING = "com.android.settings.accessibility.AvailableHearingDevicePreferenceController"
+AVAILABLE_HEARING_INIT = ("Lcom/android/settings/accessibility/AvailableHearingDevicePreferenceController;"
+                          "->init")
+HEARING_AIDS_ON_ATTACH = "Lcom/android/settings/accessibility/AccessibilityHearingAidsFragment;->onAttach"
+
+
+def on_attach_dex(fragment, init):
+    """A fragment's onAttach in Android 16's Settings.apk as d8 compiled it, cut down to the
+    use(Controller.class).init(this) call that reaches a controller."""
+    cls, name = fragment.split("->")
+    init_cls, init_name = init.split("->")
+    methods = [
+        (cls, name, "VL"),
+        ("Lcom/android/settings/dashboard/DashboardFragment;", "onAttach", "VL"),
+        ("Lcom/android/settings/dashboard/DashboardFragment;", "use", "LL"),
+        (init_cls, init_name, "VL"),
+    ]
+    on_attach = bytes.fromhex(
+        "6f200100 1000"  # invoke-super {v0, v1}, DashboardFragment.onAttach
+        "1c010000"  # const-class v1, the controller
+        "6e200200 1000"  # invoke-virtual {v0, v1}, use
+        "0c01"  # move-result-object v1
+        "1f010000"  # check-cast v1, the controller
+        "6e200300 0100"  # invoke-virtual {v1, v0}, init
+        "0e00"  # return-void
+    )
+    return dex_file(methods, {0: (2, on_attach)})
+
+
+def connected_devices_dex():
+    """ConnectedDeviceDashboardFragment.onAttach, cut down to the call that reaches the
+    previously connected devices controller."""
+    return on_attach_dex(CONNECTED_DEVICES_ON_ATTACH, PREVIOUSLY_CONNECTED_INIT)
 
 
 def dex_code(dex, method):
@@ -2664,6 +3047,41 @@ class TouchLatencyTests(unittest.TestCase):
             self.assertEqual(certs.count('name="DsaSettingsOverlay.apk"'), 1)
             self.assertIn("vendor/overlay/DsaSettingsOverlay.apk 0 0 644 capabilities=0x0", fs_config)
             self.assertEqual(fs_config.count("vendor/overlay 0 0 755"), 1)
+
+    def test_fr22_settings_lists_keep_room_below_their_last_row_without_a_navigation_bar(self):
+        # The window reports no bottom inset, and Settings' list keeps no space of its own:
+        # androidx.preference's preference_recyclerview has paddingBottom 0dp.
+        ns = "{http://schemas.android.com/apk/res/android}"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_image.settings_overlay_sources(root / "src")
+            manifest = ET.fromstring((root / "src/AndroidManifest.xml").read_text())
+            overlay = manifest.find("overlay")
+            self.assertEqual(overlay.get(ns + "targetPackage"), "com.android.settings")
+            resources_map = overlay.get(ns + "resourcesMap")
+            self.assertTrue(resources_map.startswith("@xml/"))
+
+            listing = ET.fromstring((root / "src/res/layout/preference_recyclerview.xml").read_text())
+            self.assertEqual(listing.tag, "androidx.recyclerview.widget.RecyclerView")
+            self.assertGreaterEqual(int(listing.get(ns + "paddingBottom").removesuffix("dp")), 24)
+            self.assertEqual(listing.get(ns + "paddingTop"), "0dp")
+            # The rows scroll into the space, so only the end of the list stops short.
+            self.assertEqual(listing.get(ns + "clipToPadding"), "false")
+            self.assertEqual(listing.get(ns + "layout_height"), "match_parent")
+            # Settings' own id and list style, as in the layout this replaces.
+            self.assertEqual(listing.get(ns + "id"), "@+id/recycler_view")
+            self.assertEqual(listing.get("style"), "?attr/preferenceFragmentListStyle")
+
+            values = ET.fromstring((root / "src/res/values/dsa.xml").read_text())
+            self.assertIn("preferenceFragmentListStyle", [a.get("name") for a in values.findall("attr")])
+
+            # Only a resource map makes the framework rewrite the overlay's references to its id
+            # and attribute into Settings' ids; matching by name does not.
+            mapping = ET.fromstring((root / "src/res/xml" / (resources_map.removeprefix("@xml/") + ".xml")).read_text())
+            items = {item.get("target"): item.get("value") for item in mapping.findall("item")}
+            for target in ["layout/preference_recyclerview", "id/recycler_view",
+                           "attr/preferenceFragmentListStyle", "drawable/settingslib_expressive_icon_back"]:
+                self.assertEqual(items.get(target), "@" + target)
 
     def test_fr5_the_settings_overlay_is_built_against_the_images_own_framework(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(make_image, "run") as run:
@@ -2949,7 +3367,7 @@ class DeviceIdentityTests(unittest.TestCase):
         imports = [line for line in lines if line.startswith("import ")]
         prop = "/second_stage_resources/system/etc/ramdisk/build.prop"
         for key in ["ro.product.*", "ro.build.characteristics", "ro.build.fingerprint",
-                    "ro.system.build.fingerprint", "ro.vendor.build.fingerprint"]:
+                    "ro.system.build.fingerprint", "ro.vendor.build.fingerprint", "ro.soc.*"]:
             self.assertIn(f"import {prop} {key}", imports)
         # The imports come last, so they win over every value read before them.
         self.assertTrue(all(line.startswith(("import ", "#")) for line in lines[-len(imports):]))
@@ -3162,6 +3580,655 @@ class CompiledSystemAppTests(unittest.TestCase):
         self.assertIn(".files | keys[]", fetch)
 
 
+ANDROID_ID = 0x010100D0
+ANDROID_PADDING_TOP = 0x010100D7
+ANDROID_PADDING_BOTTOM = 0x010100D9
+ANDROID_VISIBILITY = 0x010100DC
+ANDROID_CLIP_TO_PADDING = 0x010100EB
+RECYCLER_VIEW = "androidx.recyclerview.widget.RecyclerView"
+TYPE_REFERENCE, TYPE_DIMENSION, TYPE_INT_DEC, TYPE_BOOLEAN = 0x01, 0x05, 0x10, 0x12
+
+
+def compiled_layout(root):
+    """Compiles a layout, (tag, [(name, resource id, type, data)], [children]), the way aapt2
+    lays one out: the framework attribute names first in the string pool, with their
+    resource ids in the resource map, and each element's attributes in resource id order."""
+    attributes = {}
+
+    def collect(node):
+        tag, attrs, children = node
+        for name, resource_id, _, _ in attrs:
+            attributes[resource_id] = name
+        for child in children:
+            collect(child)
+
+    collect(root)
+    strings = [attributes[i] for i in sorted(attributes)]
+
+    def index(text):
+        if text not in strings:
+            strings.append(text)
+        return strings.index(text)
+
+    index("android")
+    index(ANDROID_NS)
+    data, offsets = b"", []
+
+    def element(node):
+        tag, attrs, children = node
+        body = struct.pack("<IIHHHHHH", 0xFFFFFFFF, index(tag), 20, 20, len(attrs),
+                           1 + [a[1] for a in sorted(attrs, key=lambda a: a[1])].index(ANDROID_ID)
+                           if any(a[1] == ANDROID_ID for a in attrs) else 0, 0, 0)
+        for name, resource_id, kind, value in sorted(attrs, key=lambda a: a[1]):
+            body += struct.pack("<IIIHBBI", index(ANDROID_NS), index(name), 0xFFFFFFFF, 8, 0, kind, value)
+        start = struct.pack("<HHIII", 0x0102, 16, 16 + len(body), 1, 0xFFFFFFFF) + body
+        end_body = struct.pack("<II", 0xFFFFFFFF, index(tag))
+        end = struct.pack("<HHIII", 0x0103, 16, 16 + len(end_body), 1, 0xFFFFFFFF) + end_body
+        return start + b"".join(element(child) for child in children) + end
+
+    elements_data = element(root)
+    for text in strings:
+        offsets.append(len(data))
+        encoded = text.encode("utf-8")
+        data += bytes([len(text), len(encoded)]) + encoded + b"\0"
+    data += b"\0" * (-len(data) % 4)
+    strings_start = 28 + 4 * len(strings)
+    pool = struct.pack("<HHIIIIII", 0x0001, 28, strings_start + len(data), len(strings), 0, 0x100,
+                       strings_start, 0)
+    pool += b"".join(struct.pack("<I", offset) for offset in offsets) + data
+    ids = [i for i in sorted(attributes)]
+    resource_map = struct.pack("<HHI", 0x0180, 8, 8 + 4 * len(ids)) + struct.pack(f"<{len(ids)}I", *ids)
+    namespace = struct.pack("<II", index("android"), index(ANDROID_NS))
+    ns_start = struct.pack("<HHIII", 0x0100, 16, 24, 1, 0xFFFFFFFF) + namespace
+    ns_end = struct.pack("<HHIII", 0x0101, 16, 24, 1, 0xFFFFFFFF) + namespace
+    tree = pool + resource_map + ns_start + elements_data + ns_end
+    return struct.pack("<HHI", 0x0003, 8, 8 + len(tree)) + tree
+
+
+def layout_attributes(axml):
+    """[(tag, id index, [(name, type, data)])] of each element in a compiled layout, in order."""
+    strings = make_image.xml_strings(axml, 8)
+    found = []
+    offset = 8
+    while offset < len(axml):
+        chunk_type, header_size, size = struct.unpack_from("<HHI", axml, offset)
+        if chunk_type == 0x0102:
+            _, name, start, attribute_size, count, id_index = struct.unpack_from("<IIHHHH", axml, offset + header_size)
+            attrs = []
+            for i in range(count):
+                _, attribute, _, _, _, kind, value = struct.unpack_from(
+                    "<IIIHBBI", axml, offset + header_size + start + i * attribute_size)
+                attrs.append((strings[attribute], kind, value))
+            found.append((strings[name], id_index, attrs))
+        offset += size
+    return found
+
+
+def dp(value):
+    return value << 8 | 0x01
+
+
+ALL_APPS_LAYOUT = ("androidx.constraintlayout.widget.ConstraintLayout", [], [
+    (RECYCLER_VIEW, [("id", ANDROID_ID, TYPE_REFERENCE, 0x7F0A00DA),
+                     ("visibility", ANDROID_VISIBILITY, TYPE_INT_DEC, 1),
+                     ("clipToPadding", ANDROID_CLIP_TO_PADDING, TYPE_BOOLEAN, 0)], []),
+    ("LinearLayout", [("id", ANDROID_ID, TYPE_REFERENCE, 0x7F0A07E9),
+                      ("paddingTop", ANDROID_PADDING_TOP, TYPE_DIMENSION, dp(12)),
+                      ("paddingBottom", ANDROID_PADDING_BOTTOM, TYPE_DIMENSION, dp(12))], []),
+])
+PREFERENCE_LIST_LAYOUT = (RECYCLER_VIEW, [("id", ANDROID_ID, TYPE_REFERENCE, 0x7F0A03AB),
+                                          ("paddingTop", ANDROID_PADDING_TOP, TYPE_DIMENSION, dp(0)),
+                                          ("paddingBottom", ANDROID_PADDING_BOTTOM, TYPE_DIMENSION, dp(0)),
+                                          ("clipToPadding", ANDROID_CLIP_TO_PADDING, TYPE_BOOLEAN, 0)], [])
+
+TOP_LEVEL_SETTINGS = "Lcom/android/settings/homepage/TopLevelSettings;"
+DOCUMENTS = "Lcom/android/documentsui"
+SAVE_LAYOUT_HEIGHT = f"{DOCUMENTS}/dirlist/DirectoryFragment;->getSaveLayoutHeight"
+
+
+def top_level_settings_dex():
+    """Android 16's and Android 17's TopLevelSettings methods that set the home list's padding,
+    as d8 compiled them in Settings.apk, cut down to the instructions that matter."""
+    methods = [
+        (TOP_LEVEL_SETTINGS, "onCreateRecyclerView", "LLLL"),
+        ("Landroidx/preference/PreferenceFragmentCompat;", "onCreateRecyclerView", "LLLL"),
+        ("Landroid/view/ViewGroup;", "setVerticalScrollBarEnabled", "VZ"),
+        ("Landroid/view/ViewGroup;", "setPadding", "VIIII"),
+        (TOP_LEVEL_SETTINGS, "isRunningInFreeformWindow", "ZL"),
+        ("Landroid/view/View;", "getRootWindowInsets", "L"),
+        ("Landroid/view/WindowInsets$Type;", "captionBar", "I"),
+        ("Landroid/view/WindowInsets;", "isVisible", "ZI"),
+    ]
+    on_create_recycler_view = bytes.fromhex(
+        "6f400100 1032"  # invoke-super {v0, v1, v2, v3}, PreferenceFragmentCompat.onCreateRecyclerView
+        "0c01"  # move-result-object v1
+        "1202"  # const/4 v2, 0
+        "6e200200 2100"  # invoke-virtual {v1, v2}, setVerticalScrollBarEnabled
+        "6e520300 0102"  # invoke-virtual {v1, v0, v2, v0, v2}, setPadding (0, 0, 0, 0 on Android 16)
+        "1101"  # return-object v1
+    )
+    is_running_in_freeform_window = bytes.fromhex(
+        "6e100500 0100"  # invoke-virtual {v1}, getRootWindowInsets
+        "0c00"  # move-result-object v0
+        "38000b00"  # if-eqz v0, :none
+        "71000600 0000"  # invoke-static {}, captionBar
+        "0a01"  # move-result v1
+        "6e200700 1000"  # invoke-virtual {v0, v1}, isVisible
+        "0a00"  # move-result v0
+        "0f00"  # return v0
+        "1200"  # :none const/4 v0, 0
+        "0f00"  # return v0
+    )
+    return dex_file(methods, {0: (4, on_create_recycler_view), 4: (2, is_running_in_freeform_window)})
+
+
+DOCUMENTS_METHODS = [
+    (f"{DOCUMENTS}/dirlist/DirectoryFragment;", "getSaveLayoutHeight", "I"),
+    (f"{DOCUMENTS}/util/FlagUtils;", "isUseMaterial3FlagEnabled", "Z"),
+    (f"{DOCUMENTS}/dirlist/DirectoryFragment;", "getBaseActivity", "L"),
+    (f"{DOCUMENTS}/util/Material3Config;", "getRes", "II"),
+    ("Landroidx/appcompat/app/AppCompatActivity;", "findViewById", "LI"),
+    ("Landroid/view/View;", "getHeight", "I"),
+    ("Landroidx/fragment/app/Fragment;", "getResources", "L"),
+    ("Landroid/content/res/Resources;", "getDisplayMetrics", "L"),
+]
+DOCUMENTS_FIELDS = [
+    (f"{DOCUMENTS}/R$id;", "bottom_container", "I"),
+    (f"{DOCUMENTS}/R$id;", "container_save", "I"),
+    ("Landroid/util/DisplayMetrics;", "density", "F"),
+]
+
+
+def documentsui_dex(code=None):
+    """DirectoryFragment.getSaveLayoutHeight in Android 16's DocumentsUI.apk, as d8 compiled it:
+    the height of the bar below the list (the Material 3 bottom bar, or the save bar), or 0
+    without one."""
+    def bar(field):
+        return (
+            "6e100200 0200"  # invoke-virtual {v2}, getBaseActivity
+            "0c02"  # move-result-object v2
+            f"6000{field:02x}00"  # sget v0, the bar's id
+            "71100300 0000"  # invoke-static {v0}, Material3Config.getRes
+            "0a00"  # move-result v0
+            "6e200400 0200"  # invoke-virtual {v2, v0}, findViewById
+            "0c02"  # move-result-object v2
+            "39020300"  # if-nez v2, :bar
+            "0f01"  # return v1 (0)
+            "6e100500 0200"  # :bar invoke-virtual {v2}, getHeight
+            "0a02"  # move-result v2
+            "0f02"  # return v2
+        )
+    original = bytes.fromhex(
+        "71000100 0000"  # invoke-static {}, isUseMaterial3FlagEnabled
+        "0a00"  # move-result v0
+        "1201"  # const/4 v1, 0
+        "38001800"  # if-eqz v0, :legacy
+        + bar(0) + bar(1))
+    return dex_file(DOCUMENTS_METHODS, {0: (3, code or original)}, DOCUMENTS_FIELDS)
+
+
+def run_dalvik(dex, method, args, calls, statics):
+    """Runs a method of a dex file with the few instructions these edits use: `args` are its
+    arguments, `calls` gives what each method it calls returns ({"Lclass;->name": function}),
+    and `statics` each static field's value. Objects are dicts of their fields."""
+    defined, refs = make_image.dex_methods(dex)
+    _, _, fields = make_image.dex_ids(dex)
+    (code_off, _), = defined[method]
+    registers, ins = struct.unpack_from("<HH", dex, code_off)
+    (count,) = struct.unpack_from("<I", dex, code_off + 12)
+    code = struct.unpack_from(f"<{count}H", dex, code_off + 16)
+    v = [None] * (registers - ins) + list(args)
+    result, pc = None, 0
+
+    def f32(x):
+        return struct.unpack("<f", struct.pack("<f", x))[0]
+
+    def s16(x):
+        return x - 0x10000 if x & 0x8000 else x
+
+    while True:
+        unit = code[pc]
+        op, a, b, aa = unit & 0xFF, unit >> 8 & 0xF, unit >> 12, unit >> 8
+        if op == 0x00:
+            pc += 1
+        elif op in (0x0A, 0x0C):
+            v[aa], pc = result, pc + 1
+        elif op == 0x0F:
+            return v[aa]
+        elif op == 0x12:
+            v[a], pc = (b ^ 8) - 8, pc + 1
+        elif op == 0x15:
+            v[aa], pc = struct.unpack("<f", struct.pack("<I", code[pc + 1] << 16))[0], pc + 2
+        elif op == 0x28:
+            pc += aa - 0x100 if aa & 0x80 else aa
+        elif op == 0x35:
+            pc += s16(code[pc + 1]) if v[a] >= v[b] else 2
+        elif op in (0x38, 0x39):
+            zero = v[aa] in (0, None, False)
+            pc += s16(code[pc + 1]) if zero == (op == 0x38) else 2
+        elif op == 0x52:
+            v[a], pc = v[b][fields[code[pc + 1]].split("->")[1]], pc + 2
+        elif op == 0x60:
+            v[aa], pc = statics[fields[code[pc + 1]]], pc + 2
+        elif op in (0x6E, 0x71):
+            passed = [code[pc + 2] >> (4 * i) & 0xF for i in range(4)] + [a]
+            result = calls[refs[code[pc + 1]]](*[v[r] for r in passed[:b]])
+            pc += 3
+        elif op == 0x87:
+            v[a], pc = int(v[b]), pc + 1
+        elif op == 0xC6:
+            v[a], pc = f32(v[a] + v[b]), pc + 1
+        elif op == 0xC8:
+            v[a], pc = f32(v[a] * v[b]), pc + 1
+        else:
+            raise AssertionError(f"opcode {op:#x} is not one the edits use")
+
+
+def save_layout_height(dex, material3, bars, density):
+    """What getSaveLayoutHeight returns in a window whose bars ({id field: height}) are there,
+    on a display of `density`."""
+    ids = {f"{DOCUMENTS}/R$id;->bottom_container": 1, f"{DOCUMENTS}/R$id;->container_save": 2}
+    names = {1: "bottom_container", 2: "container_save"}
+    activity = {"bars": bars}
+    calls = {
+        f"{DOCUMENTS}/util/FlagUtils;->isUseMaterial3FlagEnabled": lambda: material3,
+        f"{DOCUMENTS}/dirlist/DirectoryFragment;->getBaseActivity": lambda this: activity,
+        f"{DOCUMENTS}/util/Material3Config;->getRes": lambda res: res,
+        "Landroidx/appcompat/app/AppCompatActivity;->findViewById": (
+            lambda act, res: {"height": act["bars"][names[res]]} if names[res] in act["bars"] else None),
+        "Landroid/view/View;->getHeight": lambda view: view["height"],
+        "Landroidx/fragment/app/Fragment;->getResources": lambda this: {"density": density},
+        "Landroid/content/res/Resources;->getDisplayMetrics": lambda res: {"density": res["density"]},
+    }
+    return run_dalvik(dex, SAVE_LAYOUT_HEIGHT, [{"fragment": True}], calls, ids)
+
+
+class ListBottomMarginTests(unittest.TestCase):
+    """The lists that set their own padding, or that no overlay may reach, keep room below
+    their last row in a window without a navigation bar."""
+
+    @staticmethod
+    def apk(files):
+        return SettingsWithoutBluetoothTests.apk(files)
+
+    def modified(self, files):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "target-files.zip"
+            with zipfile.ZipFile(source, "w") as archive:
+                for name, data in files.items():
+                    archive.writestr(name, data)
+            modified = root / "modified.zip"
+            make_image.modify(source, modified)
+            with zipfile.ZipFile(modified) as archive:
+                return {name: archive.read(name) for name in archive.namelist()}
+
+    def test_fr22_settings_home_list_on_android_16_keeps_the_room_its_layout_gives(self):
+        # TopLevelSettings.onCreateRecyclerView set the list's padding to (0, 0, 0, 0) over the
+        # layout's, which the Settings overlay gives 24 dp at the bottom.
+        self.assertIn(("skip call", "Landroid/view/ViewGroup;->setPadding"), make_image.SETTINGS_CODE_LIST_MARGIN[
+            f"{TOP_LEVEL_SETTINGS}->onCreateRecyclerView"])
+        dex = top_level_settings_dex()
+        settings = self.modified({make_image.SETTINGS_APP: self.apk({"classes2.dex": dex})})[make_image.SETTINGS_APP]
+        with zipfile.ZipFile(io.BytesIO(settings)) as archive:
+            edited = archive.read("classes2.dex")
+        original = dex_code(dex, f"{TOP_LEVEL_SETTINGS}->onCreateRecyclerView")
+        code = dex_code(edited, f"{TOP_LEVEL_SETTINGS}->onCreateRecyclerView")
+        # Only the setPadding call (three code units, from unit 8) is gone; the scroll bar stays off.
+        self.assertEqual(code[:16], original[:16])
+        self.assertEqual(code[16:22], bytes(6))
+        self.assertEqual(code[22:], original[22:])
+        SettingsWithoutBluetoothTests.assert_dex_is_sealed(self, edited)
+        self.assertEqual(make_image.apk_edits_left(settings, code=make_image.SETTINGS_CODE_LIST_MARGIN), [])
+        self.assertNotEqual(make_image.apk_edits_left(self.apk({"classes2.dex": dex}),
+                                                      code=make_image.SETTINGS_CODE_LIST_MARGIN), [])
+
+    def test_fr22_settings_home_list_on_android_17_takes_its_freeform_padding_at_24_dp(self):
+        # Android 17 pads the home list's bottom by dashboard_padding_bottom (16 dp) only when
+        # the window shows a caption bar, which a DSA window's host draws outside the guest.
+        dex = top_level_settings_dex()
+        edited, changed = make_image.edit_dex(dex, make_image.SETTINGS_CODE_LIST_MARGIN)
+        self.assertIn(f"{TOP_LEVEL_SETTINGS}->isRunningInFreeformWindow", changed)
+        code = dex_code(edited, f"{TOP_LEVEL_SETTINGS}->isRunningInFreeformWindow")
+        self.assertEqual(code[:4], bytes.fromhex("12100f00"))  # const/4 v0, 1; return v0
+        self.assertEqual(make_image.edit_dex(edited, make_image.SETTINGS_CODE_LIST_MARGIN)[1], [])
+        ns = "{http://schemas.android.com/apk/res/android}"
+        for home_padding in (True, False):
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                make_image.settings_overlay_sources(root / "src", home_padding=home_padding)
+                values = ET.fromstring((root / "src/res/values/dsa.xml").read_text())
+                dimens = {d.get("name"): d.text for d in values.findall("dimen")}
+                manifest = ET.fromstring((root / "src/AndroidManifest.xml").read_text())
+                resources_map = manifest.find("overlay").get(ns + "resourcesMap").removeprefix("@xml/")
+                mapping = ET.fromstring((root / "src/res/xml" / (resources_map + ".xml")).read_text())
+                targets = [item.get("target") for item in mapping.findall("item")]
+            if home_padding:
+                self.assertEqual(dimens, {"dashboard_padding_bottom": "24dp"})
+                self.assertIn("dimen/dashboard_padding_bottom", targets)
+            else:
+                # Android 16's Settings has no such dimen, and idmap2 would warn on every boot.
+                self.assertEqual(dimens, {})
+                self.assertNotIn("dimen/dashboard_padding_bottom", targets)
+
+    def test_fr22_the_overlay_pads_the_home_list_only_for_a_settings_that_reads_the_dimen(self):
+        methods = [(TOP_LEVEL_SETTINGS, "setPaddingHorizontal", "VI")]
+        with_dimen = dex_file(methods, {0: (1, bytes.fromhex("0e00"))},
+                              [("Lcom/android/settings/R$dimen;", "dashboard_padding_bottom", "I")])
+        without = dex_file(methods, {0: (1, bytes.fromhex("0e00"))})
+        self.assertTrue(make_image.settings_has_home_padding(self.apk({"classes2.dex": with_dimen})))
+        self.assertFalse(make_image.settings_has_home_padding(self.apk({"classes2.dex": without})))
+
+    def test_fr22_settings_all_apps_list_keeps_room_below_its_last_row(self):
+        # manage_applications_apps' RecyclerView has no padding, and nothing sets it in code.
+        layout = compiled_layout(ALL_APPS_LAYOUT)
+        settings = self.modified({make_image.SETTINGS_APP: self.apk({
+            "res/layout/manage_applications_apps.xml": layout})})[make_image.SETTINGS_APP]
+        with zipfile.ZipFile(io.BytesIO(settings)) as archive:
+            edited = archive.read("res/layout/manage_applications_apps.xml")
+        found = layout_attributes(edited)
+        self.assertEqual(found[1], (RECYCLER_VIEW, 1, [
+            ("id", TYPE_REFERENCE, 0x7F0A00DA),
+            ("paddingBottom", TYPE_DIMENSION, dp(24)),
+            ("visibility", TYPE_INT_DEC, 1),
+            ("clipToPadding", TYPE_BOOLEAN, 0),
+        ]))
+        # The other elements are as they were.
+        self.assertEqual(found[2], layout_attributes(layout)[2])
+        self.assertEqual(struct.unpack_from("<I", edited, 4)[0], len(edited))
+        self.assertEqual(make_image.set_xml_dimensions(edited, make_image.SETTINGS_LIST_DIMENSIONS[
+            "res/layout/manage_applications_apps.xml"])[1], 0)
+        self.assertEqual(make_image.apk_edits_left(settings, dimensions=make_image.SETTINGS_LIST_DIMENSIONS), [])
+
+    def test_fr22_an_attribute_the_layout_never_names_is_refused(self):
+        layout = compiled_layout((RECYCLER_VIEW, [("id", ANDROID_ID, TYPE_REFERENCE, 1)], []))
+        with self.assertRaises(ValueError):
+            make_image.set_xml_dimensions(layout, [(RECYCLER_VIEW, ANDROID_PADDING_BOTTOM, 24)])
+
+    def test_fr22_permission_controller_lists_keep_room_below_their_last_row(self):
+        # PermissionController's preference_recyclerview has paddingBottom 0dp, and the app's
+        # <overlayable> keeps any overlay from replacing it.
+        apk = self.apk({"res/layout/preference_recyclerview.xml": compiled_layout(PREFERENCE_LIST_LAYOUT)})
+        edited = make_image.edit_permission_controller_apk(apk, "PermissionController.apk")
+        with zipfile.ZipFile(io.BytesIO(edited)) as archive:
+            (tag, _, attrs), = layout_attributes(archive.read("res/layout/preference_recyclerview.xml"))
+        self.assertEqual(tag, RECYCLER_VIEW)
+        self.assertIn(("paddingBottom", TYPE_DIMENSION, dp(24)), attrs)
+        self.assertIn(("paddingTop", TYPE_DIMENSION, dp(0)), attrs)
+        self.assertIn(("clipToPadding", TYPE_BOOLEAN, 0), attrs)
+        self.assertEqual(make_image.apk_edits_left(edited, dimensions=make_image.PERMISSION_CONTROLLER_DIMENSIONS), [])
+        self.assertNotEqual(make_image.apk_edits_left(apk, dimensions=make_image.PERMISSION_CONTROLLER_DIMENSIONS), [])
+
+    @staticmethod
+    def fake_apex_tools(calls):
+        """deapexer, apexer and apex_compression_tool for an APEX whose payload image is a zip
+        of its files. Each command is added to `calls`."""
+        def run(*cmd, **kw):
+            calls.append([str(c) for c in cmd])
+            tool = Path(str(cmd[0])).name
+            if tool == "deapexer":
+                apex, out = Path(cmd[-2]), Path(cmd[-1])
+                with zipfile.ZipFile(apex) as outer, zipfile.ZipFile(io.BytesIO(outer.read("apex_payload.img"))) as payload:
+                    payload.extractall(out)
+            elif tool == "apexer":
+                folder, image = Path(cmd[-2]), Path(cmd[-1])
+                with zipfile.ZipFile(image, "w") as payload:
+                    for f in sorted(folder.rglob("*")):
+                        if f.is_file():
+                            payload.write(f, f.relative_to(folder).as_posix())
+            elif tool == "apex_compression_tool":
+                source, out = Path(cmd[cmd.index("--input") + 1]), Path(cmd[cmd.index("--output") + 1])
+                with zipfile.ZipFile(out, "w") as capex:
+                    capex.writestr("original_apex", source.read_bytes())
+            else:
+                raise AssertionError(f"unexpected tool {tool}")
+        return run
+
+    @staticmethod
+    def permission_capex(controller):
+        payload = io.BytesIO()
+        with zipfile.ZipFile(payload, "w") as image:
+            image.writestr("apex_manifest.pb", b"manifest")
+            image.writestr("priv-app/PermissionController@BP4A/PermissionController.apk", controller)
+            image.writestr("priv-app/SafetyCenterResources@BP4A/SafetyCenterResources.apk", b"resources")
+        apex = io.BytesIO()
+        with zipfile.ZipFile(apex, "w") as outer:
+            outer.writestr("apex_manifest.pb", b"manifest")
+            outer.writestr("apex_build_info.pb", b"build info")
+            outer.writestr("apex_payload.img", payload.getvalue())
+        capex = io.BytesIO()
+        with zipfile.ZipFile(capex, "w") as outer:
+            outer.writestr("original_apex", apex.getvalue())
+        return capex.getvalue()
+
+    @staticmethod
+    def capex_payload(capex):
+        with zipfile.ZipFile(io.BytesIO(capex)) as outer, zipfile.ZipFile(io.BytesIO(outer.read("original_apex"))) as apex:
+            with zipfile.ZipFile(io.BytesIO(apex.read("apex_payload.img"))) as payload:
+                return {n: payload.read(n) for n in payload.namelist()}, apex.read("apex_build_info.pb")
+
+    def test_fr22_the_permission_apex_is_packed_again_with_the_edited_controller(self):
+        controller = self.apk({"res/layout/preference_recyclerview.xml": compiled_layout(PREFERENCE_LIST_LAYOUT)})
+        capex = self.permission_capex(controller)
+        name = "SYSTEM/apex/com.android.permission.capex"
+        self.assertIn(name, make_image.PERMISSION_APEXES)
+        calls = []
+        with tempfile.TemporaryDirectory() as tmp, patch.object(make_image, "run", self.fake_apex_tools(calls)):
+            edited = make_image.edit_permission_apex(capex, name, Path(tmp) / "otatools", Path(tmp))
+            files, build_info = self.capex_payload(edited)
+            apexer, = [c for c in calls if Path(c[0]).name == "apexer"]
+            self.assertIn("--payload_only", apexer)
+            # The APEX's own manifest and build information (file contexts, filesystem,
+            # ownership), as signing packs it.
+            self.assertEqual(Path(apexer[apexer.index("--build_info") + 1]).name, "apex_build_info.pb")
+            self.assertEqual(Path(apexer[apexer.index("--manifest") + 1]).name, "apex_manifest.pb")
+            self.assertTrue(apexer[apexer.index("--key") + 1].endswith("testkey_rsa4096.pem"))
+            self.assertTrue(any(Path(c[0]).name == "apex_compression_tool" for c in calls))
+            # Signing finds the problems that remain in what it packed.
+            signed = Path(tmp) / "signed.zip"
+            for apex, found in [(edited, False), (capex, True)]:
+                with zipfile.ZipFile(signed, "w") as z:
+                    z.writestr(name, apex)
+                problems = make_image.permission_controller_problems(signed, Path(tmp) / "otatools", Path(tmp), {})
+                self.assertEqual(bool(problems), found, problems)
+        self.assertEqual(build_info, b"build info")
+        # apexer writes the manifest into the payload itself.
+        self.assertNotIn("apex_manifest.pb", files)
+        self.assertEqual(files["priv-app/SafetyCenterResources@BP4A/SafetyCenterResources.apk"], b"resources")
+        with zipfile.ZipFile(io.BytesIO(files["priv-app/PermissionController@BP4A/PermissionController.apk"])) as apk:
+            (_, _, attrs), = layout_attributes(apk.read("res/layout/preference_recyclerview.xml"))
+        self.assertIn(("paddingBottom", TYPE_DIMENSION, dp(24)), attrs)
+
+    def test_fr22_without_otatools_the_permission_apex_is_left_as_it_is(self):
+        capex = self.permission_capex(b"controller")
+        with patch.object(make_image, "run") as run:
+            self.assertEqual(make_image.edit_permission_apex(
+                capex, "SYSTEM/apex/com.android.permission.capex", None, Path(".")), capex)
+        run.assert_not_called()
+
+    def test_fr22_files_on_android_16_keeps_room_below_its_list_without_a_bar_below_it(self):
+        # DirectoryFragment pads its list's bottom by getSaveLayoutHeight: the bar below the
+        # list, or 0 in a wide window that has none.
+        dex = documentsui_dex()
+        self.assertEqual(save_layout_height(dex, True, {}, 1.5), 0)
+        docs = "SYSTEM/priv-app/DocumentsUI/DocumentsUI.apk"
+        apk = self.modified({docs: self.apk({"classes.dex": dex})})[docs]
+        with zipfile.ZipFile(io.BytesIO(apk)) as archive:
+            edited = archive.read("classes.dex")
+        SettingsWithoutBluetoothTests.assert_dex_is_sealed(self, edited)
+        self.assertEqual(len(dex_code(edited, SAVE_LAYOUT_HEIGHT)), len(dex_code(dex, SAVE_LAYOUT_HEIGHT)))
+        for material3 in (True, False):
+            bar = "bottom_container" if material3 else "container_save"
+            with self.subTest(material3=material3):
+                # 24 dp, rounded as getDimensionPixelSize rounds.
+                self.assertEqual(save_layout_height(edited, material3, {}, 1.0), 24)
+                self.assertEqual(save_layout_height(edited, material3, {}, 1.5), 36)
+                self.assertEqual(save_layout_height(edited, material3, {}, 2.625), 63)
+                # A bar taller than the margin keeps the list above it.
+                self.assertEqual(save_layout_height(edited, material3, {bar: 120}, 1.5), 120)
+                self.assertEqual(save_layout_height(edited, material3, {bar: 0}, 1.5), 36)
+        self.assertEqual(make_image.edit_dex(edited, make_image.DOCUMENTSUI_CODE)[1], [])
+        self.assertEqual(make_image.apk_edits_left(apk, code=make_image.DOCUMENTSUI_CODE), [])
+
+    def test_fr22_a_files_app_built_from_other_sources_is_refused(self):
+        dex = documentsui_dex(code=bytes.fromhex("1200" "0f00" + "0000" * 49))
+        with self.assertRaises(ValueError):
+            make_image.edit_dex(dex, make_image.DOCUMENTSUI_CODE)
+        self.assertNotEqual(make_image.apk_edits_left(self.apk({"classes.dex": dex}),
+                                                      code=make_image.DOCUMENTSUI_CODE), [])
+
+    def test_fr22_dalvik_assembly_matches_what_d8_writes(self):
+        dex = documentsui_dex()
+        code, outs = make_image.assemble_dex([
+            "invoke-static {}, Lcom/android/documentsui/util/FlagUtils;->isUseMaterial3FlagEnabled",
+            "move-result v0",
+            "const/4 v1, 0",
+            "if-eqz v0, :next",
+            "sget v0, Lcom/android/documentsui/R$id;->container_save",
+            "invoke-virtual {v2, v0}, Landroidx/appcompat/app/AppCompatActivity;->findViewById",
+            ":next",
+            "const/high16 v1, 0x41c00000",
+            "if-ge v2, v0, :next",
+            "goto :next",
+        ], dex)
+        self.assertEqual(code, bytes.fromhex(
+            "71000100 0000" "0a00" "1201" "38000700" "60000100" "6e200400 0200"
+            "1501c041" "3502feff" "28fc"))
+        self.assertEqual(outs, 2)
+        with self.assertRaises(ValueError):
+            make_image.assemble_dex(["sget v0, Lcom/android/documentsui/R$id;->missing"], dex)
+
+    def test_fr22_check_image_rejects_lists_without_their_room(self):
+        check_script = Path(__file__).with_name("check-image.py")
+        settings = self.apk({"classes2.dex": top_level_settings_dex(),
+                             "res/layout/manage_applications_apps.xml": compiled_layout(ALL_APPS_LAYOUT)})
+        docs = self.apk({"classes.dex": documentsui_dex()})
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            img_dir = root / "image"
+            img_dir.mkdir()
+            keys_dir = root / "keys"
+            keys_dir.mkdir()
+            (img_dir / "image.json").write_text(json.dumps({"files": {}, "kernel_cmdline": ""}))
+            (img_dir / "initrd.img").write_bytes(gzip.compress(b""))
+            outputs = []
+            for settings_apk, docs_apk in [(settings, docs), (make_image.edit_settings_apk(settings, "Settings.apk"),
+                                                              make_image.edit_documentsui_apk(docs, "DocumentsUI.apk"))]:
+                with zipfile.ZipFile(img_dir / "signed-target_files.zip", "w") as archive:
+                    archive.writestr("SYSTEM/build.prop", "ro.debuggable=0\n")
+                    archive.writestr("META/apkcerts.txt", "")
+                    archive.writestr(make_image.SETTINGS_APP, settings_apk)
+                    archive.writestr("SYSTEM/priv-app/DocumentsUI/DocumentsUI.apk", docs_apk)
+                outputs.append(subprocess.run([sys.executable, str(check_script), str(img_dir), str(keys_dir)],
+                                              capture_output=True, text=True).stdout)
+        self.assertIn("TopLevelSettings;->onCreateRecyclerView", outputs[0])
+        self.assertIn("manage_applications_apps.xml", outputs[0])
+        self.assertIn("getSaveLayoutHeight", outputs[0])
+        self.assertNotIn("sits on the window's bottom edge", outputs[1])
+
+
+PUBLISHED_KEYCHAIN = "SYSTEM/app/KeyChain/KeyChain.apk"
+
+
+class PublishedOdexTests(unittest.TestCase):
+    """The apps the published build shipped compiled keep a valid odex in the image."""
+
+    def published(self, apk, filter="speed", checksums="i;2/cb8fc4a6:i;2/f8c5165e", art=False, vdex_for=None):
+        files = {
+            apk: fake_apk(b"dex\n035\0keychain"),
+            make_image.FRAMEWORK_ODEX: fake_odex(**{"bootclasspath": BOOTCLASSPATH,
+                                                     "bootclasspath-checksums": "i;2/cb8fc4a6:i;2/f8c5165e"}),
+        }
+        odex, vdex = make_image.oat_files(apk)
+        files[odex] = fake_odex(**{"bootclasspath": BOOTCLASSPATH, "bootclasspath-checksums": checksums,
+                                    "classpath": "PCL[]", "compiler-filter": filter})
+        files[vdex] = fake_vdex(make_image.apk_dex_checksums(vdex_for or files[apk]))
+        if art:
+            files[odex[:-len(".odex")] + ".art"] = b"art"
+        return files
+
+    @staticmethod
+    def archive(files):
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as z:
+            for name, data in files.items():
+                z.writestr(name, data)
+        return zipfile.ZipFile(io.BytesIO(buffer.getvalue()))
+
+    def test_fr5_the_published_builds_own_odex_files_are_recorded(self):
+        files = self.published(PUBLISHED_KEYCHAIN, art=True)
+        # system_other is not on the guest's disk, and a removed app is not in the image.
+        files["SYSTEM_OTHER/system/app/Stk/oat/x86_64/Stk.odex"] = fake_odex(**{"compiler-filter": "verify"})
+        files["SYSTEM/app/Stk/Stk.apk"] = fake_apk(b"dex\n035\0stk")
+        removed = "VENDOR/priv-app/CuttlefishService/CuttlefishService.apk"
+        files[removed] = fake_apk(b"dex\n035\0cf")
+        files["VENDOR/priv-app/CuttlefishService/oat/x86_64/CuttlefishService.odex"] = fake_odex(
+            **{"compiler-filter": "verify"})
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "target-files.zip"
+            with zipfile.ZipFile(source, "w") as archive:
+                for name, data in files.items():
+                    archive.writestr(name, data)
+            make_image.modify(source, root / "modified.zip")
+            with zipfile.ZipFile(root / "modified.zip") as archive:
+                record = json.loads(archive.read(make_image.PREBUILT_OAT_RECORD))
+                self.assertEqual(make_image.prebuilt_oat_problems(archive), [])
+        self.assertEqual(record, {PUBLISHED_KEYCHAIN: {
+            "files": ["SYSTEM/app/KeyChain/oat/x86_64/KeyChain.odex", "SYSTEM/app/KeyChain/oat/x86_64/KeyChain.vdex",
+                      "SYSTEM/app/KeyChain/oat/x86_64/KeyChain.art"],
+            "filter": "speed", "classpath": "PCL[]"}})
+
+    def record(self, files, art=False):
+        record = make_image.prebuilt_oat(files, lambda n: files[n])
+        files[make_image.PREBUILT_OAT_RECORD] = json.dumps(record).encode()
+        return files
+
+    def test_fr5_an_app_whose_dex_changed_is_compiled_again_as_the_published_build_compiled_it(self):
+        unchanged = self.record(self.published(PUBLISHED_KEYCHAIN))
+        self.assertEqual(make_image.compile_jobs(unchanged, lambda n: unchanged[n]), [])
+        edited = self.record(self.published(PUBLISHED_KEYCHAIN, art=True))
+        edited[PUBLISHED_KEYCHAIN] = fake_apk(b"dex\n035\0edited")
+        self.assertEqual(make_image.compile_jobs(edited, lambda n: edited[n]),
+                         [(PUBLISHED_KEYCHAIN, "speed", "PCL[]", True)])
+        cmd = make_image.dex2oat_command(
+            "dex2oatd64", "/o/KeyChain.apk", "/system/app/KeyChain/KeyChain.apk", "/o/KeyChain.odex", Path("/r"),
+            BOOTCLASSPATH, ["/system/framework/boot.art"], ("PCL[]", "PCL[]"), "speed", app_image="/o/KeyChain.art")
+        self.assertIn("--app-image-file=/o/KeyChain.art", cmd)
+        self.assertIn("--compiler-filter=speed", cmd)
+        # The apps users open come first, with their own filters.
+        settings = {make_image.SETTINGS_APP: fake_apk(b"dex\n035\0settings")}
+        self.assertEqual(make_image.compile_jobs(settings, lambda n: settings[n]),
+                         [(make_image.SETTINGS_APP, None, make_image.DEFAULT_CLASS_LOADER_CONTEXT, False)])
+
+    def test_fr5_the_apps_whose_dex_is_edited_are_compiled_after_the_edits(self):
+        # Their published odex, in system_other, was made for the unedited dex; dex2oat
+        # verifies the edited methods as it compiles them.
+        for apk in make_image.EDITED_APPS:
+            self.assertIn(apk, make_image.COMPILED_APPS)
+        self.assertIn("SYSTEM/priv-app/DocumentsUI/DocumentsUI.apk", make_image.EDITED_APPS)
+        self.assertIn(make_image.SETTINGS_APP, make_image.EDITED_APPS)
+
+    def test_fr5_check_rejects_a_published_odex_that_is_gone_or_no_longer_matches(self):
+        good = self.record(self.published(PUBLISHED_KEYCHAIN))
+        self.assertEqual(make_image.prebuilt_oat_problems(self.archive(good)), [])
+        odex, vdex = make_image.oat_files(PUBLISHED_KEYCHAIN)
+        for change, words in [
+            (lambda f: f.pop(odex), "lost"),
+            (lambda f: f.pop(PUBLISHED_KEYCHAIN), "is gone"),
+            (lambda f: f.update({vdex: fake_vdex([1])}), "dex checksums"),
+            (lambda f: f.update({odex: fake_odex(**{"compiler-filter": "verify", "bootclasspath-checksums":
+                                                    "i;2/cb8fc4a6:i;2/f8c5165e"})}), "published build compiled it"),
+            (lambda f: f.update({odex: fake_odex(**{"compiler-filter": "speed", "bootclasspath-checksums":
+                                                    "i;2/00000000:i;2/f8c5165e"})}), "boot image"),
+            (lambda f: f.pop(make_image.PREBUILT_OAT_RECORD), "is missing"),
+        ]:
+            files = dict(good)
+            change(files)
+            problems = make_image.prebuilt_oat_problems(self.archive(files))
+            self.assertTrue(any(words in p for p in problems), (words, problems))
+
+
 def fake_kernel(arch):
     """The first page of a kernel file: a bzImage's setup header or an arm64 Image's magic."""
     data = bytearray(0x1000)
@@ -3232,6 +4299,18 @@ class Arm64GuestTests(unittest.TestCase):
         self.assertIn("--instruction-set=arm64", cmd)
         self.assertIn("--instruction-set-variant=generic", cmd)
         self.assertNotIn("--instruction-set=x86_64", cmd)
+
+    def test_fr17_an_arm64_image_names_its_device_dsa_arm64(self):
+        make_image.use_arch("arm64")
+        props = make_image.edit_identity(
+            "ro.product.vendor.device=vsoc_arm64_only\n"
+            "ro.product.name=aosp_cf_arm64_only_phone\n"
+            "ro.build.fingerprint=generic/aosp_cf/vsoc:16/BP4A/15581820:userdebug/test-keys\n")
+        self.assertIn("ro.product.vendor.device=dsa_arm64", props)
+        self.assertIn("ro.product.name=dsa_arm64", props)
+        self.assertIn("ro.build.fingerprint=DSA/dsa_arm64/dsa_arm64:16/BP4A/15581820:user/test-keys", props)
+        make_image.use_arch("x86_64")
+        self.assertEqual(make_image.IDENTITY["device"], "dsa_x86_64")
 
     def test_fr27_x86_64_stays_the_default(self):
         self.assertEqual(make_image.DEFAULT_ARCH, "x86_64")
@@ -3341,7 +4420,7 @@ class Arm64GuestTests(unittest.TestCase):
 class ArmTranslationImageTests(unittest.TestCase):
     """The image's half of ARM app translation: nothing is on unless the host says a package is."""
 
-    def _modify(self, root):
+    def _modify(self, root, arm_translation=None):
         source = root / "target-files.zip"
         with zipfile.ZipFile(source, "w") as archive:
             archive.writestr("SYSTEM/etc/selinux/plat_sepolicy.cil", "(type init)\n")
@@ -3349,8 +4428,19 @@ class ArmTranslationImageTests(unittest.TestCase):
             archive.writestr("META/filesystem_config.txt", "system/bin/sh 0 2000 755 capabilities=0x0\n")
             archive.writestr("PRODUCT/etc/build.prop", "ro.product.product.name=dsa\nro.dalvik.vm.native.bridge=0\n")
         modified = root / "modified.zip"
-        make_image.modify(source, modified)
+        make_image.modify(source, modified, arm_translation=arm_translation)
         return zipfile.ZipFile(modified)
+
+    @staticmethod
+    def _sections(rc):
+        """Each action of an init script: its trigger line and its command lines."""
+        sections = []
+        for line in rc.splitlines():
+            if line.startswith("on "):
+                sections.append((line, []))
+            elif line.strip() and not line.lstrip().startswith("#") and sections:
+                sections[-1][1].append(line.strip())
+        return sections
 
     def test_fr25_the_product_props_import_the_bridge_only_when_the_host_turns_it_on(self):
         with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
@@ -3376,28 +4466,118 @@ class ArmTranslationImageTests(unittest.TestCase):
             for rule in make_image.ARM_TRANSLATION_FS_CONFIG:
                 self.assertIn(rule, config)
 
+    def test_fr25_x86_64_stays_first_in_every_abi_list_when_translation_is_on(self):
+        # The package manager and the stores take the first ABI an app has code for, so an app
+        # with x86_64 code runs without the translator only while x86_64 comes first.
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
+            on = archive.read("SYSTEM/etc/dsa/arm-translation-on.prop").decode().splitlines()
+            lists = {}
+            for line in on:
+                name, _, value = line.partition("=")
+                if not line.startswith("#") and ".cpu.abilist" in name:
+                    lists[name] = value.split(",")
+            for name in [
+                "ro.product.cpu.abilist",
+                "ro.product.cpu.abilist64",
+                "ro.product.product.cpu.abilist",
+                "ro.product.product.cpu.abilist64",
+            ]:
+                self.assertIn(name, lists)
+            for name, abis in lists.items():
+                self.assertEqual(abis, ["x86_64", "arm64-v8a"], name)
+
     def test_fr25_the_package_is_mounted_over_system_only_when_the_host_turns_it_on(self):
         rc = (Path(make_image.__file__).with_name("dsa-arm-translation.rc")).read_text()
-        trigger = "on post-fs-data && property:ro.boot.dsa.arm_translation=on\n"
-        before, after = rc.split(trigger, 1)
-        section, rest = after.split("\n\n", 1)
-        self.assertIn("mount erofs loop@/data/vendor/dsa/arm-translation/system.img /mnt/dsa-arm-translation ro",
-                      section)
-        for directory in ["lib64", "bin", "etc"]:
-            self.assertIn(
-                f"mount overlay overlay /system/{directory} ro nodev nosuid "
-                f"lowerdir=/mnt/dsa-arm-translation/system/{directory}:/system/{directory}",
-                section,
-            )
-        self.assertIn("/proc/sys/fs/binfmt_misc/register", section)
+        sections = dict(self._sections(rc))
+        images = {
+            "on": "/data/vendor/dsa/arm-translation/system.img",
+            "default": "/system/etc/dsa/arm-translation/default.img",
+        }
+        for value, image in images.items():
+            section = sections[f"on post-fs-data && property:ro.boot.dsa.arm_translation={value}"]
+            self.assertIn(f"mount erofs loop@{image} /mnt/dsa-arm-translation ro nodev nosuid "
+                          "context=u:object_r:system_lib_file:s0", section)
+            for directory in ["lib64", "bin", "etc"]:
+                self.assertIn(
+                    f"mount overlay overlay /system/{directory} ro nodev nosuid "
+                    f"lowerdir=/mnt/dsa-arm-translation/system/{directory}:/system/{directory}",
+                    section,
+                )
+            # Nothing else in Android mounts binfmt_misc, so the handlers are registered only
+            # once it is mounted here.
+            mount = section.index("mount binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc nodev noexec nosuid")
+            for rule in ["arm64_exe", "arm64_dyn"]:
+                register = section.index(f"copy /mnt/dsa-arm-translation/system/etc/binfmt_misc/{rule} "
+                                         "/proc/sys/fs/binfmt_misc/register")
+                self.assertGreater(register, mount)
         # Every mount waits for the host's word.
-        self.assertNotIn("mount ", before)
-        self.assertNotIn("mount ", rest)
+        for trigger, commands in self._sections(rc):
+            if trigger not in {f"on post-fs-data && property:ro.boot.dsa.arm_translation={value}"
+                               for value in images}:
+                self.assertFalse([c for c in commands if c.startswith("mount ")], trigger)
         with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
             self.assertEqual(archive.read("SYSTEM/etc/init/dsa-arm-translation.rc").decode(), rc)
             policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
             self.assertIn("(allow init system_lib_file (dir (mounton)))", policy)
+            self.assertIn("(allow init proc (dir (mounton)))", policy)
+            self.assertIn("(allow init binfmt_miscfs (filesystem (mount)))", policy)
             self.assertIn("(allow init binfmt_miscfs (file (write open getattr)))", policy)
+
+    def test_fr25_an_image_made_with_a_default_package_carries_it_in_its_system_partition(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package = DefaultArmTranslationTests._package(root)
+            with self._modify(root, arm_translation=package) as archive:
+                self.assertEqual(archive.read("SYSTEM/etc/dsa/arm-translation/default.img"),
+                                 (package / "system.img").read_bytes())
+                # The default package is laid over the system as a user's is.
+                self.assertEqual(archive.read("SYSTEM/etc/dsa/arm-translation-default.prop"),
+                                 archive.read("SYSTEM/etc/dsa/arm-translation-on.prop"))
+                config = archive.read("META/filesystem_config.txt").decode()
+                for rule in make_image.ARM_TRANSLATION_DEFAULT_FS_CONFIG:
+                    self.assertIn(rule, config)
+            # Without one, a boot told to use the default has no properties to import, so it
+            # stays x86_64 only.
+            (root / "modified.zip").unlink()
+            with self._modify(root) as archive:
+                names = archive.namelist()
+                self.assertNotIn("SYSTEM/etc/dsa/arm-translation/default.img", names)
+                self.assertNotIn("SYSTEM/etc/dsa/arm-translation-default.prop", names)
+                config = archive.read("META/filesystem_config.txt").decode()
+                for rule in make_image.ARM_TRANSLATION_DEFAULT_FS_CONFIG:
+                    self.assertNotIn(rule, config)
+
+    def test_fr25_check_image_wants_the_default_package_in_the_system_partition_of_an_x86_64_image_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package = DefaultArmTranslationTests._package(root)
+            out = root / "image"
+            out.mkdir()
+            entry = make_image.default_arm_translation(package, "x86_64", out)
+            self.assertEqual(entry["system_image"], "/system/etc/dsa/arm-translation/default.img")
+            on = (Path(make_image.__file__).with_name("arm-translation-on.prop")).read_bytes()
+            good = {
+                "SYSTEM/etc/dsa/arm-translation/default.img": (package / "system.img").read_bytes(),
+                "SYSTEM/etc/dsa/arm-translation-default.prop": on,
+            }
+
+            def check(manifest, files):
+                return make_image.check_builtin_arm_translation(manifest, list(files), files.__getitem__)
+
+            x86 = {"arch": "x86_64", "arm_translation": entry}
+            self.assertEqual(check(x86, good), [])
+            self.assertTrue(check(x86, {}), "described but not carried")
+            changed = dict(good, **{"SYSTEM/etc/dsa/arm-translation/default.img": b"other"})
+            self.assertTrue(check(x86, changed), "not the described package")
+            other_props = dict(good, **{"SYSTEM/etc/dsa/arm-translation-default.prop": b"ro.x=1\n"})
+            self.assertTrue(check(x86, other_props))
+            self.assertEqual(check({"arch": "x86_64"}, {}), [])
+            self.assertTrue(check({"arch": "x86_64"}, good), "carried but not described")
+            # An arm64 image runs ARM apps itself: no default package, described or carried.
+            self.assertEqual(check({"arch": "arm64"}, {}), [])
+            self.assertTrue(check({"arch": "arm64"}, good))
+            for name, data in good.items():
+                self.assertTrue(check({"arch": "arm64"}, {name: data}), name)
 
     def test_fr25_check_image_rejects_an_image_that_turns_a_bridge_on_by_itself(self):
         check_script = Path(__file__).with_name("check-image.py")
@@ -3409,15 +4589,19 @@ class ArmTranslationImageTests(unittest.TestCase):
             keys_dir.mkdir()
             (img_dir / "image.json").write_text(json.dumps({"files": {}, "kernel_cmdline": ""}))
             (img_dir / "initrd.img").write_bytes(gzip.compress(b""))
+            on_trigger = "on post-fs-data && property:ro.boot.dsa.arm_translation=on\n"
+            default_trigger = "on post-fs-data && property:ro.boot.dsa.arm_translation=default\n"
             outputs = []
-            for complete in [False, True]:
+            # Three images: one without the translation files, one whose rc only mounts an
+            # installed package and never the default translator, and a complete one.
+            for rc in [None, on_trigger, on_trigger + default_trigger]:
+                complete = rc is not None
                 with zipfile.ZipFile(img_dir / "signed-target_files.zip", "w") as archive:
                     archive.writestr("META/apkcerts.txt", "")
                     bridge = "0" if complete else "libhoudini.so"
                     archive.writestr("SYSTEM/build.prop", f"ro.debuggable=0\nro.dalvik.vm.native.bridge={bridge}\n")
                     if complete:
-                        archive.writestr("SYSTEM/etc/init/dsa-arm-translation.rc",
-                                         "on post-fs-data && property:ro.boot.dsa.arm_translation=on\n")
+                        archive.writestr("SYSTEM/etc/init/dsa-arm-translation.rc", rc)
                         archive.writestr("SYSTEM/etc/dsa/arm-translation-on.prop", "")
                         archive.writestr("SYSTEM/etc/dsa/arm-translation-off.prop", "")
                         archive.writestr("PRODUCT/etc/build.prop", make_image.add_arm_translation_import(""))
@@ -3427,10 +4611,291 @@ class ArmTranslationImageTests(unittest.TestCase):
                     [sys.executable, str(check_script), str(img_dir), str(keys_dir)],
                     capture_output=True, text=True,
                 ).stdout)
+        missing, without_default, whole = outputs
         for problem in ["dsa-arm-translation.rc is missing", "does not end with the ARM translation import",
                         "sets ro.dalvik.vm.native.bridge=libhoudini.so"]:
-            self.assertIn(problem, outputs[0])
-            self.assertNotIn(problem, outputs[1])
+            self.assertIn(problem, missing)
+            self.assertNotIn(problem, without_default)
+            self.assertNotIn(problem, whole)
+        # Checked only once the rc is there: a missing rc is reported as missing above.
+        laid_over = "never lays the image's default ARM translation package"
+        self.assertIn(laid_over, without_default)
+        self.assertNotIn(laid_over, whole)
+
+    def test_fr32_the_product_props_import_the_google_play_properties_before_the_arm_ones(self):
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
+            product = archive.read("PRODUCT/etc/build.prop").decode().splitlines()
+            self.assertEqual(product[-2:], [
+                "import /system/etc/dsa/gapps-${ro.boot.dsa.gapps:-off}.prop",
+                "import /system/etc/dsa/arm-translation-${ro.boot.dsa.arm_translation:-off}.prop",
+            ])
+            self.assertEqual(product.count(product[-2]), 1)
+            on = archive.read("SYSTEM/etc/dsa/gapps-on.prop").decode().splitlines()
+            props = [line for line in on if line and not line.startswith("#")]
+            self.assertEqual([line.split("=", 1)[0] for line in props], ["ro.oem.build.fingerprint"])
+            off = archive.read("SYSTEM/etc/dsa/gapps-off.prop").decode().splitlines()
+            self.assertEqual([line for line in off if line and not line.startswith("#")], [])
+            config = archive.read("META/filesystem_config.txt").decode()
+            for rule in make_image.GAPPS_FS_CONFIG:
+                self.assertIn(rule, config)
+
+    def test_fr32_the_google_apps_are_laid_over_only_when_the_host_says_they_are_installed(self):
+        rc = (Path(make_image.__file__).with_name("dsa-gapps.rc")).read_text()
+        trigger = "on post-fs-data && property:ro.boot.dsa.gapps=on\n"
+        before, after = rc.split(trigger, 1)
+        section, rest = after.split("\n\n", 1)
+        self.assertIn("mount erofs loop@/data/vendor/dsa/gapps/system.img /mnt/dsa-gapps ro nodev nosuid "
+                      "context=u:object_r:system_file:s0", section)
+        for partition in ["product", "system_ext"]:
+            self.assertIn(
+                f"mount overlay overlay /{partition} ro nodev nosuid "
+                f"lowerdir=/mnt/dsa-gapps/{partition}:/{partition}",
+                section,
+            )
+        # Every mount waits for the host's word.
+        self.assertNotIn("mount ", before)
+        self.assertNotIn("mount ", rest)
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
+            self.assertEqual(archive.read("SYSTEM/etc/init/dsa-gapps.rc").decode(), rc)
+            policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+            self.assertIn("(allow init system_file (filesystem (relabelto associate)))", policy)
+            self.assertIn("(allow system_file labeledfs (filesystem (associate)))", policy)
+
+    def test_fr32_x86_64_stays_the_first_abi_when_arm_translation_is_on(self):
+        on = (Path(make_image.__file__).with_name("arm-translation-on.prop")).read_text().splitlines()
+        abilists = [line.split("=", 1)[1] for line in on if ".cpu.abilist" in line.split("=", 1)[0]]
+        self.assertTrue(abilists)
+        for abilist in abilists:
+            self.assertEqual(abilist.split(",")[0], "x86_64", abilist)
+
+    def test_fr32_check_image_rejects_an_image_that_lays_the_google_apps_over_by_itself(self):
+        check_script = Path(__file__).with_name("check-image.py")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            img_dir = root / "image"
+            img_dir.mkdir()
+            keys_dir = root / "keys"
+            keys_dir.mkdir()
+            (img_dir / "image.json").write_text(json.dumps({"files": {}, "kernel_cmdline": ""}))
+            (img_dir / "initrd.img").write_bytes(gzip.compress(b""))
+            gapps_rc = (Path(make_image.__file__).with_name("dsa-gapps.rc")).read_text()
+            outputs = []
+            for case in ["missing", "always", "arm-first", "good"]:
+                with zipfile.ZipFile(img_dir / "signed-target_files.zip", "w") as archive:
+                    archive.writestr("META/apkcerts.txt", "")
+                    archive.writestr("SYSTEM/build.prop", "ro.debuggable=0\n")
+                    abilist = "arm64-v8a,x86_64" if case == "arm-first" else "x86_64,arm64-v8a"
+                    archive.writestr("SYSTEM/etc/dsa/arm-translation-on.prop",
+                                     f"ro.product.cpu.abilist={abilist}\n")
+                    if case == "missing":
+                        archive.writestr("PRODUCT/etc/build.prop", "ro.product.product.name=dsa\n")
+                    else:
+                        rc = gapps_rc if case != "always" else "on post-fs-data\n    mount overlay overlay /product ro\n"
+                        archive.writestr("SYSTEM/etc/init/dsa-gapps.rc", rc)
+                        archive.writestr("SYSTEM/etc/dsa/gapps-on.prop", "ro.oem.build.fingerprint=x\n")
+                        archive.writestr("SYSTEM/etc/dsa/gapps-off.prop", "# nothing\n")
+                        archive.writestr("PRODUCT/etc/build.prop",
+                                         make_image.add_arm_translation_import(make_image.add_gapps_import("")))
+                outputs.append(subprocess.run(
+                    [sys.executable, str(check_script), str(img_dir), str(keys_dir)],
+                    capture_output=True, text=True,
+                ).stdout)
+        missing, always, arm_first, good = outputs
+        for problem in ["dsa-gapps.rc is missing", "does not import the Google Play properties"]:
+            self.assertIn(problem, missing)
+            self.assertNotIn(problem, good)
+        self.assertIn("without waiting for the host", always)
+        self.assertNotIn("without waiting for the host", good)
+        self.assertIn("x86_64 is not the ABI apps are installed for first", arm_first)
+        self.assertNotIn("x86_64 is not the ABI apps are installed for first", good)
+
+
+class DefaultArmTranslationTests(unittest.TestCase):
+    """The default translator an x86_64 image's release carries (the Translator build's
+    Digitalis package), and that an arm64 image never carries one."""
+
+    @staticmethod
+    def _package(root, **changes):
+        package = Path(root) / "package"
+        package.mkdir(exist_ok=True)
+        description = {"name": "Digitalis", "version": "17-abefbe2b1600", "library": "libberberis_arm64.so",
+                       "abis": ["arm64-v8a"], "license": "Apache-2.0", **changes}
+        (package / "arm-translation.json").write_text(json.dumps(description))
+        image = bytearray(4096)
+        image[1024:1028] = (0xE0F5E1E2).to_bytes(4, "little")
+        (package / "system.img").write_bytes(bytes(image))
+        return package
+
+    def test_fr25_the_x86_64_release_carries_the_default_package_that_image_json_describes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "image"
+            out.mkdir()
+            entry = make_image.default_arm_translation(self._package(tmp), "x86_64", out)
+            self.assertEqual(entry["file"], "arm-translation.zip")
+            self.assertEqual((entry["name"], entry["version"], entry["abis"], entry["license"]),
+                             ("Digitalis", "17-abefbe2b1600", ["arm64-v8a"], "Apache-2.0"))
+            with zipfile.ZipFile(out / "arm-translation.zip") as z:
+                self.assertEqual(sorted(z.namelist()), ["arm-translation.json", "system.img"])
+            self.assertEqual(entry["system_image"], "/system/etc/dsa/arm-translation/default.img")
+            self.assertEqual(entry["system_image_sha256"],
+                             hashlib.sha256((Path(tmp) / "package/system.img").read_bytes()).hexdigest())
+            manifest = {"arch": "x86_64", "files": {}, "arm_translation": entry}
+            self.assertEqual(make_image.check_default_arm_translation(manifest, out), [])
+            # The host uses only a default package image.json says is in the system partition.
+            elsewhere = dict(entry, system_image="/data/default.img")
+            self.assertTrue(make_image.check_default_arm_translation(
+                {"arch": "x86_64", "files": {}, "arm_translation": elsewhere}, out))
+            # The zip is what install takes, so a changed one is caught before it is published.
+            with zipfile.ZipFile(out / "arm-translation.zip", "a") as z:
+                z.writestr("extra", "x")
+            self.assertTrue(make_image.check_default_arm_translation(manifest, out))
+
+    def test_fr25_an_arm64_image_never_takes_or_carries_a_translator(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "image"
+            out.mkdir()
+            with self.assertRaises(SystemExit):
+                make_image.default_arm_translation(self._package(tmp), "arm64", out)
+            self.assertFalse((out / "arm-translation.zip").exists())
+            self.assertEqual(make_image.check_default_arm_translation({"arch": "arm64", "files": {}}, out), [])
+            entry = {"file": "arm-translation.zip", "name": "Digitalis"}
+            self.assertTrue(make_image.check_default_arm_translation(
+                {"arch": "arm64", "files": {}, "arm_translation": entry}, out))
+            (out / "arm-translation.zip").write_bytes(b"PK")
+            self.assertTrue(make_image.check_default_arm_translation({"arch": "arm64", "files": {}}, out))
+
+    def test_fr25_make_image_refuses_a_translator_for_an_arm64_image_before_making_it(self):
+        script = Path(__file__).with_name("make-image.py")
+        with tempfile.TemporaryDirectory() as tmp:
+            result = subprocess.run(
+                [sys.executable, str(script), "--major", "17", "--arch", "arm64", "--keys", tmp,
+                 "--inputs", tmp, "--out", tmp, "--arm-translation", str(self._package(tmp))],
+                capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("takes no ARM translation package", result.stderr)
+            self.assertFalse(any(Path(tmp).glob("17.*")), "nothing is made for the arm64 image")
+
+    def test_fr25_a_default_package_the_host_would_refuse_is_not_released(self):
+        for changes in [{"abis": ["arm64-v8a", "armeabi-v7a"]}, {"library": "../libx.so"}, {"name": ""},
+                        {"version": " 17"}]:
+            with tempfile.TemporaryDirectory() as tmp:
+                out = Path(tmp) / "image"
+                out.mkdir()
+                with self.assertRaises(SystemExit, msg=str(changes)):
+                    make_image.default_arm_translation(self._package(tmp, **changes), "x86_64", out)
+        with tempfile.TemporaryDirectory() as tmp:
+            package = self._package(tmp)
+            (package / "system.img").write_bytes(bytes(4096))
+            out = Path(tmp) / "image"
+            out.mkdir()
+            with self.assertRaises(SystemExit):
+                make_image.default_arm_translation(package, "x86_64", out)
+
+
+class FrameworkImageTests(unittest.TestCase):
+    """The patched SurfaceFlinger, libhwui and libEGL from the Framework build, which recover
+    from a GPU device loss, in place of the published build's own."""
+
+    @staticmethod
+    def _elf(machine, body):
+        header = bytearray(64)
+        header[:4] = b"\x7fELF"
+        header[4] = 2
+        header[5] = 1
+        header[18:20] = machine.to_bytes(2, "little")
+        return bytes(header) + body
+
+    def _framework(self, root, build_id="16373615", arch="x86_64", machine=62):
+        folder = root / "framework"
+        files = {}
+        for name in make_image.FRAMEWORK_FILES:
+            data = self._elf(machine, b"patched " + name.encode())
+            (folder / name).parent.mkdir(parents=True, exist_ok=True)
+            (folder / name).write_bytes(data)
+            files[name] = {"size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+        (folder / "framework.json").write_text(json.dumps({
+            "android": "android17", "android_major": 17, "build_id": build_id, "release": "cp2a",
+            "arch": arch, "version": "17-0123456789ab", "files": files}))
+        return folder
+
+    def _source(self, root, names=None):
+        source = root / "target-files.zip"
+        with zipfile.ZipFile(source, "w") as archive:
+            archive.writestr("SYSTEM/etc/selinux/plat_sepolicy.cil", "(type surfaceflinger)\n")
+            archive.writestr("SYSTEM/build.prop", "ro.debuggable=1\n")
+            for name in make_image.FRAMEWORK_FILES if names is None else names:
+                archive.writestr(name, self._elf(62, b"published " + name.encode()))
+        return source
+
+    def test_nfr5_the_framework_replaces_surfaceflinger_libhwui_and_libegl(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payloads, description = make_image.checked_framework(self._framework(root), "16373615", 17, "x86_64")
+            self.assertEqual(sorted(payloads), sorted(["SYSTEM/bin/surfaceflinger", "SYSTEM/lib64/libhwui.so",
+                                                       "SYSTEM/lib64/libEGL.so"]))
+            modified = root / "modified.zip"
+            make_image.modify(self._source(root), modified, framework=payloads)
+            with zipfile.ZipFile(modified) as archive:
+                for name, data in payloads.items():
+                    self.assertEqual(archive.read(name), data)
+                policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+                self.assertIn(make_image.GPU_RESET_RULE, policy)
+            entry = make_image.framework_entry(description)
+            self.assertEqual(entry["build_id"], "16373615")
+            self.assertEqual(entry["files"], {n: hashlib.sha256(d).hexdigest() for n, d in payloads.items()})
+
+    def test_nfr5_without_the_framework_the_image_keeps_the_builds_files_and_policy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            modified = root / "modified.zip"
+            make_image.modify(self._source(root), modified)
+            with zipfile.ZipFile(modified) as archive:
+                self.assertIn(b"published", archive.read("SYSTEM/lib64/libhwui.so"))
+                policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+                self.assertNotIn(make_image.GPU_RESET_RULE, policy)
+
+    def test_nfr5_the_framework_must_replace_files_the_build_has(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payloads, _ = make_image.checked_framework(self._framework(root), "16373615", 17, "x86_64")
+            source = self._source(root, names=["SYSTEM/bin/surfaceflinger"])
+            with self.assertRaisesRegex(ValueError, "libEGL.so, SYSTEM/lib64/libhwui.so, which the patched"):
+                make_image.modify(source, root / "modified.zip", framework=payloads)
+
+    def test_nfr5_a_framework_built_for_another_build_or_architecture_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with self.assertRaisesRegex(SystemExit, "image is made from build 16373615"):
+                make_image.checked_framework(self._framework(root, build_id="1"), "16373615", 17, "x86_64")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with self.assertRaisesRegex(SystemExit, "built for arm64, not x86_64"):
+                make_image.checked_framework(self._framework(root, arch="arm64", machine=183),
+                                             "16373615", 17, "x86_64")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            folder = self._framework(root)
+            (folder / "SYSTEM/lib64/libhwui.so").write_bytes(self._elf(62, b"something else"))
+            with self.assertRaisesRegex(SystemExit, "libhwui.so is not the file framework.json describes"):
+                make_image.checked_framework(folder, "16373615", 17, "x86_64")
+
+    def test_nfr5_check_image_finds_the_framework_build_files_in_the_image(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payloads, description = make_image.checked_framework(self._framework(root), "16373615", 17, "x86_64")
+            modified = root / "modified.zip"
+            make_image.modify(self._source(root), modified, framework=payloads)
+            manifest = {"arch": "x86_64", "source": {"build_id": "16373615"},
+                        "framework": make_image.framework_entry(description)}
+            with zipfile.ZipFile(modified) as archive:
+                self.assertEqual(make_image.check_framework(manifest, archive.namelist(), archive.read), [])
+            # The build's own files, or a policy without the rule, are found.
+            with zipfile.ZipFile(self._source(root)) as archive:
+                problems = make_image.check_framework(manifest, archive.namelist(), archive.read)
+            self.assertEqual(len([p for p in problems if "not the framework build's file" in p]), 3)
+            self.assertTrue(any("never hear of a GPU reset" in p for p in problems), problems)
+            # An image without a framework has nothing to check.
+            self.assertEqual(make_image.check_framework({"arch": "x86_64"}, [], None), [])
 
 
 if __name__ == "__main__":

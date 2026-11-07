@@ -1,0 +1,28 @@
+[package]
+name = "dsa-settings-linux"
+version = "0.1.0"
+description = "DSA Settings for Linux: a GTK 4 and libadwaita client of the local API, in the style of GNOME Settings"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "dsa-settings"
+path = "src/main.rs"
+
+[dependencies]
+# The local API through the same client the dsa command is: it parses the same arguments,
+# reaches the service over its Unix socket and prints the same JSON the other settings apps
+# read. Nothing about a setting is checked, stored or worked out here.
+dsa-cli = { path = "../../../cli" }
+dsa-host-core.workspace = true
+serde_json = "1"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# The window. Only Linux builds it; the view models above build and test everywhere.
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = { package = "gtk4", version = "0.9", features = ["v4_12"] }
+adw = { package = "libadwaita", version = "0.7", features = ["v1_4"] }

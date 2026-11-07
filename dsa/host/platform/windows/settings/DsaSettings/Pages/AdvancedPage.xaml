@@ -16,7 +16,7 @@
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
             <StackPanel Style="{StaticResource PageContent}">
                 <ui:InfoBar Title="{l:Text SettingsErrorBar.Title}" Severity="Error" IsClosable="False"
-                            IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" />
+                            IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" Margin="0,0,0,4" />
 
                 <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Clipboard24}">
                     <ui:CardControl.Header>
@@ -131,8 +131,40 @@
                 </ui:CardControl>
                 <ui:InfoBar Title="{l:Text ArmRestartBar.Title}" Message="{l:Text ArmRestartBar.Message}"
                             Severity="Informational" IsClosable="False"
-                            IsOpen="{Binding ArmRestartNeeded, Mode=OneWay}" />
-                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Delete24}">
+                            IsOpen="{Binding ArmRestartNeeded, Mode=OneWay}" Margin="0,0,0,4" />
+                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon ArrowDownload24}"
+                                Visibility="{Binding ShowsGoogleArm, Converter={StaticResource Visible}}">
+                    <ui:CardControl.Header>
+                        <StackPanel>
+                            <TextBlock Text="{l:Text ArmGoogleCard.Header}" Style="{StaticResource CardTitle}" />
+                            <TextBlock Text="{l:Text ArmGoogleCard.Description}" Style="{StaticResource CardDescription}" />
+                        </StackPanel>
+                    </ui:CardControl.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <ui:ProgressRing IsIndeterminate="True" Width="20" Height="20" Margin="0,0,12,0"
+                                         Visibility="{Binding IsFetchingGoogleArm, Converter={StaticResource Visible}}" />
+                        <ui:HyperlinkButton Content="{l:Text ArmGoogleTermsLink.Content}" Click="OnOpenGoogleArmTerms"
+                                            Margin="0,0,8,0" />
+                        <ui:Button Content="{l:Text ArmGoogleButton.Content}" Click="OnFetchGoogleArm"
+                                   IsEnabled="{Binding CanFetchGoogleArm, Mode=OneWay}" />
+                    </StackPanel>
+                </ui:CardControl>
+                <ui:InfoBar Title="{l:Text ArmGoogleFetchingBar.Title}" Message="{l:Text ArmGoogleFetchingBar.Message}"
+                            Severity="Informational" IsClosable="False"
+                            IsOpen="{Binding IsFetchingGoogleArm, Mode=OneWay}" Margin="0,0,0,4" />
+                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon ArrowReset24}"
+                                Visibility="{Binding HasArmDefault, Converter={StaticResource Visible}}">
+                    <ui:CardControl.Header>
+                        <StackPanel>
+                            <TextBlock Text="{l:Text ArmDefaultCard.Header}" Style="{StaticResource CardTitle}" />
+                            <TextBlock Text="{Binding ArmDefaultDescription, Mode=OneWay}" Style="{StaticResource CardDescription}" />
+                        </StackPanel>
+                    </ui:CardControl.Header>
+                    <ui:Button Content="{l:Text ArmDefaultButton.Content}" Click="OnUseDefaultArmTranslator"
+                               IsEnabled="{Binding CanUseDefaultArmTranslator, Mode=OneWay}" />
+                </ui:CardControl>
+                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Delete24}"
+                                Visibility="{Binding ShowsArmRemove, Converter={StaticResource Visible}}">
                     <ui:CardControl.Header>
                         <StackPanel>
                             <TextBlock Text="{l:Text ArmRemoveCard.Header}" Style="{StaticResource CardTitle}" />
@@ -141,6 +173,76 @@
                     </ui:CardControl.Header>
                     <ui:Button Content="{l:Text ArmRemoveButton.Content}" Click="OnRemoveArmTranslation"
                                IsEnabled="{Binding CanRemoveArmTranslation, Mode=OneWay}" />
+                </ui:CardControl>
+
+                <TextBlock Text="{l:Text GappsHeader.Text}" Style="{StaticResource SectionHeader}" />
+                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon ShoppingBag24}">
+                    <ui:CardControl.Header>
+                        <StackPanel>
+                            <TextBlock Text="{l:Text GappsCard.Header}" Style="{StaticResource CardTitle}" />
+                            <TextBlock Text="{Binding GappsStatus, Mode=OneWay}" Style="{StaticResource CardDescription}" />
+                            <TextBlock Text="{Binding GappsSource, Mode=OneWay}" Style="{StaticResource CardDescription}"
+                                       Visibility="{Binding HasGappsSource, Converter={StaticResource Visible}}" />
+                            <TextBlock Text="{l:Text GappsCard.Description}" Style="{StaticResource CardDescription}" />
+                        </StackPanel>
+                    </ui:CardControl.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <ui:ProgressRing IsIndeterminate="True" Width="20" Height="20" Margin="0,0,12,0"
+                                         Visibility="{Binding IsInstallingGapps, Converter={StaticResource Visible}}" />
+                        <ui:Button Content="{l:Text GappsInstallButton.Content}" Click="OnInstallGapps"
+                                   IsEnabled="{Binding CanInstallGapps, Mode=OneWay}" />
+                    </StackPanel>
+                </ui:CardControl>
+                <ui:InfoBar Title="{l:Text GappsInstallingBar.Title}" Message="{l:Text GappsInstallingBar.Message}"
+                            Severity="Informational" IsClosable="False"
+                            IsOpen="{Binding IsInstallingGapps, Mode=OneWay}" Margin="0,0,0,4" />
+                <ui:InfoBar Title="{l:Text GappsRestartBar.Title}" Message="{l:Text GappsRestartBar.Message}"
+                            Severity="Informational" IsClosable="False"
+                            IsOpen="{Binding GappsRestartNeeded, Mode=OneWay}" Margin="0,0,0,4" />
+                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Delete24}">
+                    <ui:CardControl.Header>
+                        <StackPanel>
+                            <TextBlock Text="{l:Text GappsRemoveCard.Header}" Style="{StaticResource CardTitle}" />
+                            <TextBlock Text="{l:Text GappsRemoveCard.Description}" Style="{StaticResource CardDescription}" />
+                        </StackPanel>
+                    </ui:CardControl.Header>
+                    <ui:Button Content="{l:Text GappsRemoveButton.Content}" Click="OnRemoveGapps"
+                               IsEnabled="{Binding CanRemoveGapps, Mode=OneWay}" />
+                </ui:CardControl>
+                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Info24}">
+                    <ui:CardControl.Header>
+                        <StackPanel>
+                            <TextBlock Text="{l:Text GappsTermsCard.Header}" Style="{StaticResource CardTitle}" />
+                            <TextBlock Text="{l:Text GappsTermsCard.Description}" Style="{StaticResource CardDescription}" />
+                        </StackPanel>
+                    </ui:CardControl.Header>
+                    <ui:HyperlinkButton Content="{l:Text GappsTermsLink.Content}" Click="OnOpenGappsTerms" />
+                </ui:CardControl>
+                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon PersonAccounts24}">
+                    <ui:CardControl.Header>
+                        <StackPanel>
+                            <TextBlock Text="{l:Text GappsRegisterCard.Header}" Style="{StaticResource CardTitle}" />
+                            <TextBlock Text="{l:Text GappsRegisterCard.Description}" Style="{StaticResource CardDescription}" />
+                            <TextBlock Text="{Binding GappsDeviceIdText, Mode=OneWay}" Style="{StaticResource CardDescription}"
+                                       Visibility="{Binding ShowsGappsDeviceIdHint, Converter={StaticResource Visible}}" />
+                            <Border Style="{StaticResource CodeBlock}"
+                                    Visibility="{Binding HasGappsDeviceId, Converter={StaticResource Visible}}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox x:Name="GappsDeviceIdBox" Style="{StaticResource SelectableCode}" VerticalAlignment="Center"
+                                             Text="{Binding GappsDeviceId, Mode=OneWay}"
+                                             AutomationProperties.Name="{l:Text GappsDeviceIdLabel.Text}" />
+                                    <ui:Button x:Name="GappsDeviceIdCopyButton" Grid.Column="1" Margin="8,0,0,0" MinWidth="32" Width="32" Height="32" Padding="0"
+                                               Appearance="Transparent" Icon="{ui:SymbolIcon Copy24}" Click="OnCopyGappsDeviceId"
+                                               ToolTip="{l:Text CopyButton.ToolTip}" AutomationProperties.Name="{l:Text CopyButton.ToolTip}" />
+                                </Grid>
+                            </Border>
+                        </StackPanel>
+                    </ui:CardControl.Header>
+                    <ui:HyperlinkButton Content="{l:Text GappsRegisterLink.Content}" Click="OnOpenGappsRegistration" />
                 </ui:CardControl>
 
                 <TextBlock Text="{l:Text DeveloperHeader.Text}" Style="{StaticResource SectionHeader}" />
@@ -154,21 +256,44 @@
                     <ui:ToggleSwitch x:Name="DeveloperModeSwitch" IsChecked="{Binding DeveloperMode, Mode=OneWay}"
                                      IsEnabled="{Binding CanChange, Mode=OneWay}" Click="OnDeveloperModeToggled" />
                 </ui:CardControl>
+                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon ArrowSync24}">
+                    <ui:CardControl.Header>
+                        <StackPanel>
+                            <TextBlock Text="{l:Text AdbAutoConnectCard.Header}" Style="{StaticResource CardTitle}" />
+                            <TextBlock Text="{l:Text AdbAutoConnectCard.Description}" Style="{StaticResource CardDescription}" />
+                            <TextBlock Text="{Binding AdbAutoConnectStateText, Mode=OneWay}"
+                                       Style="{StaticResource CardDescription}" Margin="0,4,0,0" />
+                        </StackPanel>
+                    </ui:CardControl.Header>
+                    <ui:ToggleSwitch x:Name="AdbAutoConnectSwitch" IsChecked="{Binding AdbAutoConnect, Mode=OneWay}"
+                                     IsEnabled="{Binding CanChange, Mode=OneWay}" Click="OnAdbAutoConnectToggled"
+                                     AutomationProperties.Name="{l:Text AdbAutoConnectCard.Header}" />
+                </ui:CardControl>
                 <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon PlugConnected24}">
                     <ui:CardControl.Header>
                         <StackPanel>
                             <TextBlock Text="{l:Text AdbCard.Header}" Style="{StaticResource CardTitle}" />
                             <TextBlock Text="{l:Text AdbCard.Description}" Style="{StaticResource CardDescription}" />
-                            <ui:TextBox IsTextSelectionEnabled="True" MinHeight="0" Text="{Binding AdbConnect, Mode=OneWay}" FontFamily="Consolas" IsReadOnly="True"
-                                     BorderThickness="0" Background="Transparent" Padding="0,4,0,0"
-                                     Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                            <Border Style="{StaticResource CodeBlock}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox x:Name="AdbCommand" Style="{StaticResource SelectableCode}" VerticalAlignment="Center"
+                                             Text="{Binding AdbConnect, Mode=OneWay}" />
+                                    <ui:Button x:Name="AdbCopyButton" Grid.Column="1" Margin="8,0,0,0" MinWidth="32" Width="32" Height="32" Padding="0"
+                                               Appearance="Transparent" Icon="{ui:SymbolIcon Copy24}" Click="OnCopyAdbCommand"
+                                               ToolTip="{l:Text CopyButton.ToolTip}" AutomationProperties.Name="{l:Text CopyButton.ToolTip}" />
+                                </Grid>
+                            </Border>
                         </StackPanel>
                     </ui:CardControl.Header>
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="{l:Text AdbPortLabel.Text}" VerticalAlignment="Center" Margin="0,0,8,0" />
-                        <TextBox x:Name="AdbPortBox" Width="90" Text="{Binding AdbPort, Mode=OneWay}"
-                                 IsEnabled="{Binding CanChange, Mode=OneWay}" LostFocus="OnAdbPortChanged"
-                                 KeyDown="OnAdbPortKeyDown" />
+                        <TextBlock Text="{l:Text AdbPortLabel.Text}" Style="{StaticResource CardTitle}" VerticalAlignment="Center" Margin="0,0,8,0" />
+                        <ui:TextBox x:Name="AdbPortBox" Width="90" ClearButtonEnabled="False" Text="{Binding AdbPort, Mode=OneWay}"
+                                    IsEnabled="{Binding CanChange, Mode=OneWay}" LostFocus="OnAdbPortChanged"
+                                    KeyDown="OnAdbPortKeyDown" AutomationProperties.Name="{l:Text AdbPortLabel.Text}" />
                     </StackPanel>
                 </ui:CardControl>
 
@@ -231,10 +356,9 @@
                         <StackPanel>
                             <TextBlock Text="{l:Text CommandLineCard.Header}" Style="{StaticResource CardTitle}" />
                             <TextBlock Text="{l:Text CommandLineCard.Description}" Style="{StaticResource CardDescription}" />
+                            <TextBox Style="{StaticResource SelectableCode}" Margin="0,8,0,0" Text="dsa status | dsa settings | dsa memory" />
                         </StackPanel>
                     </ui:CardControl.Header>
-                    <ui:TextBox IsTextSelectionEnabled="True" MinHeight="0" Text="dsa status | dsa settings | dsa memory" FontFamily="Consolas" IsReadOnly="True"
-                             BorderThickness="0" Background="Transparent" Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
                 </ui:CardControl>
             </StackPanel>
         </ScrollViewer>

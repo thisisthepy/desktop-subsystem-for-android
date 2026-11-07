@@ -17,10 +17,12 @@ on:
   workflow_dispatch:
 
 concurrency:
-  # A newer push to develop holds every older one, so only the newest is checked. Runs
-  # that never finish are avoided by checking compile and lint before each push.
+  # On develop a run in progress finishes and only the newest waiting run stays: GitHub
+  # keeps one pending run per group, so a newer merge replaces the one still waiting.
+  # The newest run tests everything the dropped ones held. Anywhere else, such as a pull
+  # request, a newer run still replaces the older one.
   group: test-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/develop' }}
 
 permissions:
   contents: read
@@ -49,19 +51,30 @@ jobs:
       gnss: ${{ steps.find.outputs.gnss }}
       sensors: ${{ steps.find.outputs.sensors }}
       camera: ${{ steps.find.outputs.camera }}
+    permissions:
+      contents: read
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
         with:
-          # The whole history, so a push can be compared with the commit before it.
+          # The whole history, so a push can be compared with the last commit that passed.
           fetch-depth: 0
 
       - name: Compare with the base
         id: find
         run: |
-          before="${{ github.event.before }}"
+          # A newer push replaces a run still waiting, so the push before this one may never
+          # have been tested: a push is compared with the newest develop commit whose run
+          # passed, not with the commit before it.
+          before=""
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            before="$(gh run list --repo "${{ github.repository }}" --workflow test.yml               --branch develop --event push --status success --limit 1               --json headSha --jq '.[0].headSha // ""' || true)"
+          fi
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             git diff --name-only HEAD^1 HEAD > "$RUNNER_TEMP/changed"
-          elif [[ "${{ github.event_name }}" == "push" && -n "$before" && ! "$before" =~ ^0+$ ]] && git cat-file -e "$before" 2>/dev/null; then
+          elif [[ "${{ github.event_name }}" == "push" && -n "$before" ]] && git merge-base --is-ancestor "$before" HEAD 2>/dev/null; then
             git diff --name-only "$before" HEAD > "$RUNNER_TEMP/changed"
           else
             echo ".github/workflows/test.yml" > "$RUNNER_TEMP/changed"
@@ -82,6 +95,11 @@ jobs:
           part 'dsa/(guest/agent|protocol)/' agent
           part 'dsa/(Cargo\.(toml|lock)|host/(core|cli)/)|\.github/scripts/apk/' apk
           part 'dsa/protocol/' protocol
+          # The generated protocol code is checked on every push to develop whatever the
+          # comparison found: it takes a minute, and stale code breaks every host build.
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            echo "protocol=true" >> "$GITHUB_OUTPUT"
+          fi
           part 'dsa/host/platform/windows/settings/' settings
           part 'dsa/(guest/hwcomposer|protocol)/' hwcomposer
           part 'dsa/(guest/codec2|protocol)/' codec2
@@ -108,6 +126,32 @@ jobs:
           git config --global user.email "ci@example.invalid"
           git config --global user.name "CI"
           ./scripts/check.sh
+
+  # The icons, from the master SVGs in dsa/brand/: they render, every shipped icon file is
+  # there, and each holds every size it must, both as committed and as rendered now.
+  brand:
+    name: Check the brand icons
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Check every shipped icon holds every size
+        run: uv run dsa/brand/check.py
+
+      - name: Render every icon from the masters
+        run: |
+          uv run dsa/brand/generate.py --out "$RUNNER_TEMP/brand"
+          uv run dsa/brand/check.py --out "$RUNNER_TEMP/brand"
+
+      - name: Keep the rendered icons
+        uses: actions/upload-artifact@v4
+        with:
+          name: brand-icons
+          path: ${{ runner.temp }}/brand
 
   rust:
     name: Test the Rust code (${{ matrix.os }})
@@ -138,6 +182,15 @@ jobs:
 
       - name: Show the host target
         run: rustc -vV
+
+      # The Linux settings app is a member of the workspace and links GTK 4 and libadwaita.
+      # erofs-utils reads back the erofs images the host writes (the Google apps' image), the
+      # way the guest's kernel will.
+      - name: Install GTK 4, libadwaita and erofs-utils
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev erofs-utils
 
       - name: Check formatting
         run: cargo fmt --all --check
@@ -170,6 +223,21 @@ jobs:
         with:
           name: caption-pictures
           path: .scratch/caption-pictures
+
+      # Pictures of a widget's menu (the menu and its Resize submenu) and of its More button
+      # at rest, hovered and pressed, in both themes at 100% and 150%, kept with the run.
+      - name: Draw the widget menu pictures
+        if: runner.os == 'Windows'
+        env:
+          DSA_WIDGET_MENU_PICTURES: ${{ github.workspace }}/.scratch/widget-menu-pictures
+        run: cargo test -p dsa-host-windows --lib fr12_pictures_of_the_widget_menu_and_its_more_button
+
+      - name: Keep the widget menu pictures
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: widget-menu-pictures-${{ matrix.os }}
+          path: .scratch/widget-menu-pictures
 
       # Registers dsa-hostd as a real Windows service, reaches it through its named pipe and
       # stops it. The runner's account is an administrator, which this needs.
@@ -220,9 +288,16 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install a headless Wayland compositor and libxkbcommon
+        timeout-minutes: 20
         run: |
+          # A stalled download held the job for its whole 30 minutes: each try gets 5 minutes,
+          # and man-db's trigger, the slowest part of an install on the runners, is skipped.
+          echo 'man-db man-db/auto-update boolean false' | sudo debconf-set-selections
           sudo apt-get update
-          sudo apt-get install -y weston libxkbcommon0
+          for try in 1 2 3; do
+            timeout 300 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y weston libxkbcommon0 && break
+            test "$try" -lt 3 || exit 1
+          done
 
       - name: Run the Linux host's tests
         run: cargo test --no-fail-fast -p dsa-host-linux
@@ -271,11 +346,92 @@ jobs:
   # The macOS host on Apple silicon: its tests, the vsock transport over socket pairs, and
   # dsa-hostd signed with the virtualization entitlement and checked by the framework itself.
   # GitHub's macOS runners are VMs without nested virtualization, so no Android boots here.
+  # DSA Settings for Linux: its view models and translations without a display, its desktop
+  # files, and the app itself in a headless Wayland session with no DSA service to reach,
+  # where it must open its window, say the service is not running and keep running.
+  linux-settings:
+    name: Test the Linux settings app (ubuntu-latest)
+    needs: changes
+    if: needs.changes.outputs.linux == 'true' || needs.changes.outputs.unix == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: dsa
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install GTK 4, libadwaita, gettext and the desktop file checkers
+        timeout-minutes: 20
+        run: |
+          # A stalled download held the job for its whole 30 minutes: each try gets 5 minutes,
+          # and man-db's trigger, the slowest part of an install on the runners, is skipped.
+          echo 'man-db man-db/auto-update boolean false' | sudo debconf-set-selections
+          sudo apt-get update
+          for try in 1 2 3; do
+            timeout 300 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y libgtk-4-dev libadwaita-1-dev \
+              gettext desktop-file-utils appstream weston && break
+            test "$try" -lt 3 || exit 1
+          done
+
+      - name: Run the settings app's tests
+        run: cargo test --no-fail-fast -p dsa-settings-linux
+
+      - name: Lint the settings app
+        run: cargo clippy -p dsa-settings-linux --all-targets -- -D warnings
+
+      - name: Build the settings app
+        run: cargo build -p dsa-settings-linux --bin dsa-settings
+
+      - name: Check the translations, the desktop entry and the AppStream entry
+        working-directory: dsa/host/platform/linux/settings
+        run: |
+          for po in po/*.po; do
+            msgfmt --check --statistics -o /dev/null "$po"
+          done
+          desktop-file-validate data/io.github.thisisthepy.DSA.Settings.desktop
+          # The packages fill in the version and the date (build-packages.sh); the check reads
+          # the file as a package ships it.
+          sed -e "s|@VERSION@|0.0.0|g" -e "s|@DATE@|$(date -u +%Y-%m-%d)|g"             data/io.github.thisisthepy.DSA.Settings.metainfo.xml > "$RUNNER_TEMP/io.github.thisisthepy.DSA.Settings.metainfo.xml"
+          appstreamcli validate --no-net --explain "$RUNNER_TEMP/io.github.thisisthepy.DSA.Settings.metainfo.xml"
+
+      - name: Run the settings app against the headless session
+        run: |
+          export XDG_RUNTIME_DIR="$RUNNER_TEMP/runtime"
+          mkdir -p -m 0700 "$XDG_RUNTIME_DIR"
+          weston --backend=headless --socket=wayland-dsa --idle-time=0 &
+          for _ in $(seq 50); do
+            [[ -S "$XDG_RUNTIME_DIR/wayland-dsa" ]] && break
+            sleep 0.2
+          done
+          export WAYLAND_DISPLAY=wayland-dsa GDK_BACKEND=wayland
+          export DSA_SOCKET="$RUNNER_TEMP/no-service.sock"
+          export XDG_DATA_HOME="$RUNNER_TEMP/data"
+          export LANGUAGE=ko
+          for page in general memory apps logs about; do
+            set +e
+            timeout 5 dbus-run-session -- target/debug/dsa-settings --page "$page" \
+              2> "$RUNNER_TEMP/settings-$page.log"
+            code=$?
+            set -e
+            cat "$RUNNER_TEMP/settings-$page.log"
+            if [[ "$code" -ne 124 ]]; then
+              echo "::error::the settings app ended with code $code on the $page page instead of running"
+              exit 1
+            fi
+            if grep -q "panicked\|CRITICAL" "$RUNNER_TEMP/settings-$page.log"; then
+              echo "::error::the settings app reported a crash or a GTK critical on the $page page"
+              exit 1
+            fi
+          done
+
   macos-host:
-    name: Test the macOS host (macos-14)
+    name: Test the macOS host (macos-latest)
     needs: changes
     if: needs.changes.outputs.macos == 'true'
-    runs-on: macos-14
+    # macos-14 runners are no longer handed out: every job asking for one was cancelled
+    # without ever starting.
+    runs-on: macos-latest
     timeout-minutes: 30
     defaults:
       run:
@@ -332,6 +488,27 @@ jobs:
           echo "{\"image_dir\": \"$image\", \"data_dir\": \"$RUNNER_TEMP/user\"}" > "$RUNNER_TEMP/dsa-hostd.json"
           target/release/dsa-hostd check "$RUNNER_TEMP/dsa-hostd.json"
 
+      # The settings app (SwiftUI): its view models' tests against a fake dsa, then the app
+      # as the package builds it, and the committed icon as iconutil reads it.
+      - name: Test the settings app
+        run: swift test --package-path host/platform/macos/settings --scratch-path target/dsa-settings
+
+      - name: Build the settings app
+        run: |
+          swift build -c release --package-path host/platform/macos/settings --scratch-path target/dsa-settings
+          bin="$(swift build -c release --package-path host/platform/macos/settings --scratch-path target/dsa-settings --show-bin-path)"
+          test -x "$bin/dsa-settings"
+          iconutil -c iconset -o "$RUNNER_TEMP/DSA.iconset" host/platform/macos/packaging/icon/DSA.icns
+          # Every size from 16 to 1024 px, by name: the icon also holds a 64 px image (icp6),
+          # so a count of the files proves nothing either way.
+          ls "$RUNNER_TEMP/DSA.iconset"
+          for size in 16x16 16x16@2x 32x32 32x32@2x 128x128 128x128@2x 256x256 256x256@2x 512x512 512x512@2x; do
+            test -s "$RUNNER_TEMP/DSA.iconset/icon_$size.png"
+          done
+          xcrun xcstringstool compile host/platform/macos/settings/Resources/Localizable.xcstrings \
+            --output-directory "$RUNNER_TEMP/strings"
+          plutil -lint "$RUNNER_TEMP/strings/en.lproj/Localizable.strings" "$RUNNER_TEMP/strings/ko.lproj/Localizable.strings"
+
   # The Linux host's VM and its ports: the vsock suite over vsock loopback standing in for a
   # guest, and the launcher against the crosvm DSA ships, under KVM: the runner's own kernel
   # for the control socket's commands, and the published Android image until its control
@@ -381,18 +558,24 @@ jobs:
           sudo chmod 666 /dev/kvm /dev/vhost-vsock
           ls -l /dev/kvm /dev/vhost-vsock
 
+      # With an init that loads the virtio balloon driver and idles, so the VM can be
+      # resized through its balloon.
       - name: Give crosvm a kernel to boot
+        working-directory: .
         run: |
           kernel="$RUNNER_TEMP/vmlinuz"
           sudo cp "/boot/vmlinuz-$(uname -r)" "$kernel"
           sudo chmod 644 "$kernel"
+          bash .github/scripts/linux-vm-test/make-test-initrd.sh "$(uname -r)" "$RUNNER_TEMP/test-initrd.img"
           echo "DSA_CROSVM_TEST_KERNEL=$kernel" >> "$GITHUB_ENV"
+          echo "DSA_CROSVM_TEST_INITRD=$RUNNER_TEMP/test-initrd.img" >> "$GITHUB_ENV"
 
       - name: Download the newest published Android image
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag="$(gh release list -R "${{ github.repository }}" -L 50 --json tagName -q '[.[] | select(.tagName | startswith("android-17"))][0].tagName')"
+          tag="$(gh release list -R "${{ github.repository }}" -L 50 --json tagName -q '[.[] | select(.tagName | startswith("android-17") and (endswith("-arm64") | not))][0].tagName')"
+          test -n "$tag" || { echo "no published x86_64 Android 17 image release"; exit 1; }
           echo "image release: $tag"
           image="$RUNNER_TEMP/image"
           mkdir -p "$image"
@@ -515,7 +698,7 @@ jobs:
         run: dsa/protocol/cpp/test.sh
 
   settings-app:
-    name: Test and build the settings app (${{ matrix.os }}, ${{ matrix.rid }})
+    name: Test and build the settings app and APK Installer (${{ matrix.os }}, ${{ matrix.rid }})
     needs: changes
     if: needs.changes.outputs.settings == 'true'
     strategy:
@@ -545,6 +728,10 @@ jobs:
       # The WPF app itself, as the installer publishes it.
       - name: Build the app
         run: dotnet publish DsaSettings/DsaSettings.csproj -c Release -r ${{ matrix.rid }} -o ../../../../target/settings-app
+
+      # The APK Installer, into the same folder, as the installer publishes it.
+      - name: Build the APK Installer
+        run: dotnet publish DsaApkInstaller/DsaApkInstaller.csproj -c Release -r ${{ matrix.rid }} -o ../../../../target/settings-app
 
   hwcomposer:
     name: Test the guest hwcomposer's task rules (ubuntu-latest)
@@ -682,7 +869,7 @@ jobs:
     name: Report the test result
     if: always()
     needs:
-      [changes, repository, rust, unix-socket, macos-host, linux-host, linux-vm, agent, apk-reader, protocol, settings-app, hwcomposer, codec2, power-hal, gnss-hal, sensors, camera]
+      [changes, repository, brand, rust, unix-socket, macos-host, linux-host, linux-settings, linux-vm, agent, apk-reader, protocol, settings-app, hwcomposer, codec2, power-hal, gnss-hal, sensors, camera]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

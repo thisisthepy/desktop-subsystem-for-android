@@ -61,6 +61,24 @@ typedef struct dsa_gfx_gpu_info {
 /* Fills `info`. Returns 0 on success, -1 when the renderer is not initialised. */
 DSA_GFX_EXPORT int dsa_gfx_get_gpu_info(dsa_gfx_gpu_info* info);
 
+/* Where the renderer's warnings ('W'), errors ('E') and fatal errors ('F') go: one line each,
+ * from any thread, with the source file and line first. A fatal error is passed on before
+ * the renderer acts on it, so the embedder's log says why even when the process then ends.
+ * Set it before dsa_gfx_init to see what the start says; NULL stops it. */
+typedef void (*dsa_gfx_log_fn)(void* context, char severity, const char* message);
+DSA_GFX_EXPORT void dsa_gfx_set_log_callback(dsa_gfx_log_fn cb, void* context);
+
+/* A GPU reset loses every Vulkan device on the GPU. The renderer then answers the guest's
+ * calls on its lost devices with VK_ERROR_DEVICE_LOST, so the guest can make new ones, and
+ * makes its own device again, with every color buffer at its size, before its next
+ * operation. dsa_gfx_device_generation says how many times it has made its device again.
+ *
+ * dsa_gfx_simulate_device_loss makes every device's queue and fence calls fail with
+ * VK_ERROR_DEVICE_LOST, as a reset does, so a test can see this on any driver. Returns 0, or
+ * -1 when the renderer is not running. */
+DSA_GFX_EXPORT int dsa_gfx_simulate_device_loss(void);
+DSA_GFX_EXPORT uint64_t dsa_gfx_device_generation(void);
+
 /* Initializes the host gfxstream renderer (Vulkan only, surfaceless). */
 DSA_GFX_EXPORT int dsa_gfx_init(uint32_t width, uint32_t height);
 
@@ -213,8 +231,10 @@ DSA_GFX_EXPORT int dsa_gfx_set_display_iosurface_callbacks(dsa_display_iosurface
                                                            dsa_display_pixels_fn fallback,
                                                            void* context);
 /* The display's frames are shown nowhere now: the presentation lets go of what it holds for
- * it (on macOS, the imported IOSurfaces), so their memory goes back. Does nothing when there
- * is nothing to let go of. */
+ * it (on Windows, the Direct3D texture it imported; on macOS, the imported IOSurfaces), so
+ * their memory goes back at once. A closed task draws no more frames, so without this the
+ * import, and the embedder's texture behind it, would stay until the backend stops. Does
+ * nothing when there is nothing to let go of. */
 DSA_GFX_EXPORT void dsa_gfx_forget_display(uint32_t display_id);
 
 /* Writes the LUID of the GPU the renderer runs on (8 bytes, as a Windows LUID). Returns 0 on
@@ -227,6 +247,25 @@ DSA_GFX_EXPORT void dsa_gfx_channel_destroy(void* channel);
 DSA_GFX_EXPORT int dsa_gfx_channel_write(void* channel, const void* buf, size_t size);
 DSA_GFX_EXPORT int dsa_gfx_channel_read(void* channel, void* buf, size_t size, size_t* out_read, uint32_t timeout_ms);
 DSA_GFX_EXPORT void dsa_gfx_channel_stop(void* channel);
+
+/* What the renderer holds, by owner: its live Vulkan allocations by kind (memory only the GPU
+ * sees, memory the host's CPU maps, which holds the guest's host-visible memory, and memory
+ * imported from another API, such as a task window's Direct3D texture), the largest one, and
+ * how many guest processes have their process pipe open. Allocations made while the renderer
+ * started are not counted. */
+typedef struct dsa_gfx_memory_stats {
+    uint64_t device_local_bytes;
+    uint64_t host_visible_bytes;
+    uint64_t imported_bytes;
+    uint64_t largest_bytes;
+    uint32_t device_local_count;
+    uint32_t host_visible_count;
+    uint32_t imported_count;
+    int32_t guest_processes;
+} dsa_gfx_memory_stats;
+
+/* Fills `stats`. Returns 0 on success, -1 when the renderer is not running. */
+DSA_GFX_EXPORT int dsa_gfx_get_memory_stats(dsa_gfx_memory_stats* stats);
 
 #ifdef __cplusplus
 }

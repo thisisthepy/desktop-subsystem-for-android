@@ -12,6 +12,16 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" PrivateAssets="all" />
   </ItemGroup>
 
+  <!-- The settings app's library, not referenced because it is for Windows only: a test reads
+       which resource keys it defines. -->
+  <ItemGroup>
+    <PackageDownload Include="WPF-UI" Version="[3.0.5]" />
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>WpfUiAssembly</_Parameter1>
+      <_Parameter2>$(NuGetPackageRoot)wpf-ui/3.0.5/lib/net8.0-windows7.0/Wpf.Ui.dll</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\DsaSettings.Core\DsaSettings.Core.csproj" />
   </ItemGroup>

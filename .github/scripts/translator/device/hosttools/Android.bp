@@ -1,0 +1,21 @@
+// Host modules every Python build tool depends on in Soong, which the tree does not carry.
+// Soong makes each python_binary_host depend on libsqlite (for the launcher) and on the
+// protobuf compiler aprotoc. The launcher the build uses is the prebuilt one in
+// prebuilts/build-tools, which links neither (its only needs are glibc's), and none of the
+// Python tools the translator build runs has .proto sources. Building the real ones would
+// take external/sqlite with host ICU, and external/protobuf with abseil.
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+cc_library_host_shared {
+    name: "libsqlite",
+    srcs: ["empty.c"],
+    stl: "none",
+}
+
+sh_binary_host {
+    name: "aprotoc",
+    src: "aprotoc.sh",
+}

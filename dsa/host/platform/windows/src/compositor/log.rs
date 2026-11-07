@@ -110,6 +110,68 @@ pub fn input_trace_to(logger: Option<Arc<CompositorLogger>>) {
     }
 }
 
+/// Where the graphics renderer's lines go.
+static RENDERER_LOG: OnceLock<Arc<CompositorLogger>> = OnceLock::new();
+
+/// Sends the graphics renderer's warnings, errors and fatal errors to `logger`.
+pub fn renderer_log_to(logger: Option<Arc<CompositorLogger>>) {
+    if let Some(logger) = logger {
+        let _ = RENDERER_LOG.set(logger);
+    }
+}
+
+/// How one of the graphics renderer's lines reads in the log: `severity` is the renderer's
+/// `W`, `E` or `F`. Other severities are not written.
+pub fn renderer_line(severity: u8, message: &str) -> Option<String> {
+    let message = message.trim_end();
+    match severity {
+        b'F' => Some(format!(
+            "graphics renderer fatal error (the renderer ends what it was doing): {message}"
+        )),
+        b'E' => Some(format!("graphics renderer error: {message}")),
+        b'W' => Some(format!("graphics renderer warning: {message}")),
+        _ => None,
+    }
+}
+
+/// Writes one of the graphics renderer's lines, from any of its threads.
+pub fn renderer_log(severity: u8, message: &str) {
+    if let Some(line) = renderer_line(severity, message) {
+        note(RENDERER_LOG.get().map(|logger| &**logger), &line);
+    }
+}
+
+/// How a panic reads in the log: the thread, where it panicked, and what it said.
+pub fn panic_line(thread: Option<&str>, location: Option<(&str, u32)>, message: &str) -> String {
+    let thread = thread.unwrap_or("unnamed");
+    match location {
+        Some((file, line)) => format!("panic in thread '{thread}' at {file}:{line}: {message}"),
+        None => format!("panic in thread '{thread}': {message}"),
+    }
+}
+
+/// Writes every panic to `logger` before Rust's own report, so the log says why a thread, or
+/// the process, ended even though the process has no console.
+pub fn log_panics_to(logger: Option<Arc<CompositorLogger>>) {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let payload = info.payload();
+        let message = payload
+            .downcast_ref::<&str>()
+            .map(|text| text.to_string())
+            .or_else(|| payload.downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "(no message)".to_string());
+        let thread = std::thread::current();
+        let line = panic_line(
+            thread.name(),
+            info.location().map(|at| (at.file(), at.line())),
+            &message,
+        );
+        note(logger.as_deref(), &line);
+        previous(info);
+    }));
+}
+
 /// The trace settings this process read from the service: (input trace, resize trace).
 static TRACE_SETTINGS: OnceLock<(bool, bool)> = OnceLock::new();
 
@@ -280,4 +342,50 @@ pub fn trace_forget(task_id: i32) {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .forget(task_id);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nfr5_a_fatal_renderer_error_is_logged_with_its_reason() {
+        assert_eq!(
+            renderer_line(
+                b'F',
+                "VulkanStream.cpp:98: VulkanStream can't allocate UINT32_MAX bytes\n"
+            )
+            .as_deref(),
+            Some(
+                "graphics renderer fatal error (the renderer ends what it was doing): \
+                 VulkanStream.cpp:98: VulkanStream can't allocate UINT32_MAX bytes"
+            )
+        );
+        assert_eq!(
+            renderer_line(b'E', "A Vulkan device was lost.").as_deref(),
+            Some("graphics renderer error: A Vulkan device was lost.")
+        );
+        assert_eq!(
+            renderer_line(b'W', "slow").as_deref(),
+            Some("graphics renderer warning: slow")
+        );
+        assert_eq!(renderer_line(b'I', "Destroyed VkDevice"), None);
+        assert_eq!(renderer_line(b'V', "verbose"), None);
+    }
+
+    #[test]
+    fn nfr5_a_panic_is_logged_with_its_thread_place_and_message() {
+        assert_eq!(
+            panic_line(
+                Some("dsa-wm-hosts"),
+                Some(("src/compositor/hosts.rs", 42)),
+                "boom"
+            ),
+            "panic in thread 'dsa-wm-hosts' at src/compositor/hosts.rs:42: boom"
+        );
+        assert_eq!(
+            panic_line(None, None, "boom"),
+            "panic in thread 'unnamed': boom"
+        );
+    }
 }

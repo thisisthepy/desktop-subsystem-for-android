@@ -21,30 +21,36 @@ on property:sys.boot_completed=1
 # while, or the guest holds mostly cache. A guest with memory to spare is never short, so the
 # kernel would never swap by itself: first it is asked to move cold pages to zram, a quarter at
 # a time because init does nothing else during a command. Writing to the root cgroup covers
-# every process, and "swappiness=200" prefers anonymous pages. Then the clean page cache and
-# the reclaimable kernel caches are dropped, and compaction leaves whole blocks free, which free
-# page reporting hands back to Hyper-V. Nothing is lost: what left is read back when needed.
+# every process, and "swappiness=200" prefers anonymous pages. vendor.dsa.memory.reclaim_step
+# says how many MiB each quarter takes: together half the anonymous memory, the coldest, so the
+# pages of the processes still running are not swapped out only to come straight back. Then the
+# clean page cache and the reclaimable kernel caches are dropped, and compaction leaves whole
+# blocks free, which free page reporting hands back to Hyper-V. Nothing is lost: what left is read back when needed.
 # It waits for boot to finish, so a boot still under way does not swap out what it is using;
 # a request made before then stays set, and runs when boot completes.
 on property:vendor.dsa.memory.reclaim=1 && property:sys.boot_completed=1
-    write /sys/fs/cgroup/memory.reclaim "256M swappiness=200"
-    write /sys/fs/cgroup/memory.reclaim "256M swappiness=200"
-    write /sys/fs/cgroup/memory.reclaim "256M swappiness=200"
-    write /sys/fs/cgroup/memory.reclaim "256M swappiness=200"
+    write /sys/fs/cgroup/memory.reclaim "${vendor.dsa.memory.reclaim_step}M swappiness=200"
+    write /sys/fs/cgroup/memory.reclaim "${vendor.dsa.memory.reclaim_step}M swappiness=200"
+    write /sys/fs/cgroup/memory.reclaim "${vendor.dsa.memory.reclaim_step}M swappiness=200"
+    write /sys/fs/cgroup/memory.reclaim "${vendor.dsa.memory.reclaim_step}M swappiness=200"
     write /proc/sys/vm/drop_caches 3
     write /proc/sys/vm/compact_memory 1
     setprop vendor.dsa.memory.reclaim 0
 
-# The gradual trim: dsa-channeld sets this whenever page cache has grown past the guest's
-# working set and the guest is not under memory pressure, whether or not the host is short.
-# vendor.dsa.memory.trim_size says how many MiB (at most 128). The kernel takes them from the
+# The working set trim: dsa-channeld sets this on the first look that finds page cache grown
+# past the guest's working set (an app closed, or files were read), while the guest is not
+# under memory pressure, whether or not the host is short. vendor.dsa.memory.trim_size says
+# how many MiB: all of the excess at once. The kernel takes them from the
 # root cgroup, which every process's memory is charged under, coldest pages first, so the hot
 # pages of running apps and system_server stay. "swappiness=0" takes page cache only: app
 # memory moves to zram in the idle reclaim, not while an app is in use. The root's file is
 # root's, unlike those of the groups libprocessgroup makes, so init's vendor scripts can always
-# open it.
+# open it. The pages it frees are scattered among pages in use, and free page reporting hands
+# back only whole free blocks, so compaction then gathers them and they go back to the host at
+# once rather than whenever background compaction gets to them.
 on property:vendor.dsa.memory.trim=1
     write /sys/fs/cgroup/memory.reclaim "${vendor.dsa.memory.trim_size}M swappiness=0"
+    write /proc/sys/vm/compact_memory 1
     setprop vendor.dsa.memory.trim 0
 
 # Developer mode. dsa-channeld sets vendor.dsa.adb as the host says: 1 while the user's

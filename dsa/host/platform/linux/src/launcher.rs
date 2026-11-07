@@ -26,7 +26,7 @@ use dsa_host_core::session::{GuestLauncher, GuestStall};
 use dsa_protocol::auth::{bootconfig_entry, BootSecret};
 
 use crate::console::{boot_header, capture, Tail};
-use crate::crosvm::{balloon_bytes, GuestArch, NetworkBackend, VmConfig, SHUTDOWN_SEQUENCE};
+use crate::crosvm::{virtio_mem_bytes, GuestArch, NetworkBackend, VmConfig, SHUTDOWN_SEQUENCE};
 use crate::crosvm_control::{Control, Request};
 use crate::image::ImageFiles;
 use crate::network::{place_tap, VmNetwork};
@@ -53,8 +53,9 @@ pub struct BootPlan {
 
 /// Supplies the plan of each boot.
 pub type PlanSource = Box<dyn FnMut() -> Result<BootPlan, String> + Send>;
-/// Supplies more bootconfig lines (`key = "value"`) for each boot, beside the secret.
-pub type BootconfigSource = Box<dyn FnMut() -> String + Send>;
+/// Supplies more bootconfig lines (`key = "value"`) for each boot of the image whose files it
+/// is given, beside the secret.
+pub type BootconfigSource = Box<dyn FnMut(&ImageFiles) -> String + Send>;
 /// Supplies the properties each boot hands Android in its initrd, if any.
 pub type BootProperties = Box<dyn FnMut(&ImageFiles) -> Option<String> + Send>;
 /// Says what the VM cannot run without and is missing, and tries to provide it.
@@ -99,8 +100,8 @@ struct RunningVm {
     console_input: Option<ChildStdin>,
     control: Control,
     readers: Vec<JoinHandle<()>>,
-    /// The memory it started with and may grow to, in MiB, when it may grow. It is made at
-    /// the second, with the balloon holding the rest.
+    /// The memory it started with and may grow to, in MiB, when it may grow. It boots with
+    /// the first, and the rest is its virtio-mem region.
     memory: Option<(u64, u64)>,
 }
 
@@ -270,7 +271,11 @@ impl LinuxVmLauncher {
         if let Some(properties) = self.boot_properties.as_mut().and_then(|p| p(files)) {
             image = append_overlay(&image, &ramdisk_overlay(&properties));
         }
-        let more = self.bootconfig.as_mut().map(|b| b()).unwrap_or_default();
+        let more = self
+            .bootconfig
+            .as_mut()
+            .map(|b| b(files))
+            .unwrap_or_default();
         let text = format!("{}{more}", bootconfig_entry(secret));
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -439,9 +444,12 @@ impl LinuxVmLauncher {
             console_input,
             control: Control::new(self.crosvm.clone(), control_socket.clone()),
             readers,
-            memory: memory_max_mb
-                .map(|max| (u64::from(plan.memory_mb), u64::from(max)))
-                .filter(|(base, max)| max > base),
+            memory: match config.memory_layout() {
+                (base, Some(region)) => {
+                    Some((u64::from(base), u64::from(base) + u64::from(region)))
+                }
+                (_, None) => None,
+            },
         };
         // crosvm has loaded the kernel and the initrd once the guest kernel prints, and it
         // serves its control socket by then.
@@ -486,8 +494,8 @@ impl GuestLauncher for LinuxVmLauncher {
         }
         let mut started = self.start_vm(secret);
         if started.is_err() && self.grow && self.vmm_tail.contains("guest memory") {
-            // A host that cannot map the VM at its largest size: it keeps its starting size.
-            self.memory_growth_failed("crosvm could not make the VM at its largest size");
+            // A host that cannot map the VM's virtio-mem region: it keeps its starting size.
+            self.memory_growth_failed("crosvm could not make the VM's hot-pluggable memory");
             started = self.start_vm(secret);
         }
         if started.is_err() {
@@ -533,7 +541,9 @@ impl GuestLauncher for LinuxVmLauncher {
     fn exited(&mut self) -> Option<String> {
         let vm = self.vm.as_mut()?;
         let status = vm.child.try_wait().ok().flatten()?;
-        Some(format!("the Android VM exited during boot (crosvm {status})"))
+        Some(format!(
+            "the Android VM exited during boot (crosvm {status})"
+        ))
     }
 
     fn diagnostics(&mut self) -> Option<String> {
@@ -604,7 +614,9 @@ impl GuestLauncher for LinuxVmLauncher {
         self.vm.as_ref()?.memory
     }
 
-    /// Lets the balloon out to give the guest more, or takes memory back into it.
+    /// Asks the guest to plug in memory up to `mb` MiB, or to unplug back down to it: the
+    /// virtio-mem requested size is what `mb` adds to the memory the VM booted with. The guest
+    /// plugs or unplugs blocks to reach it, and crosvm frees each unplugged block at once.
     fn set_memory_mb(&mut self, mb: u64) -> Result<(), String> {
         let vm = self.vm.as_mut().ok_or("the Android VM is not running")?;
         let (base, max) = vm
@@ -612,8 +624,8 @@ impl GuestLauncher for LinuxVmLauncher {
             .ok_or("the Android VM keeps the size it started with")?;
         let mb = mb.clamp(base, max);
         vm.control
-            .send(Request::Balloon {
-                bytes: balloon_bytes(max, mb),
+            .send(Request::VirtioMem {
+                bytes: virtio_mem_bytes(base, mb),
             })
             .map_err(|e| format!("the Android VM's memory could not be set to {mb} MiB: {e}"))
     }

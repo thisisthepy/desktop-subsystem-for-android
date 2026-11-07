@@ -83,6 +83,10 @@ fn cut(text: String, chars: usize) -> String {
     text.chars().take(chars).collect()
 }
 
+/// What the keys of the host's own notifications start with, such as the offer to run an app
+/// as ARM. A guest's keys start with its user ID, so a guest can never post one of these.
+pub const HOST_KEY_PREFIX: &str = "dsa:";
+
 /// Whether `key` is one the host keeps: not empty, and not longer than [`MAX_KEY_BYTES`].
 pub fn valid_key(key: &str) -> bool {
     !key.is_empty() && key.len() <= MAX_KEY_BYTES
@@ -94,6 +98,12 @@ pub fn checked(message: control::GuestNotification) -> Result<Notification, Stri
         return Err(format!(
             "a key of {} bytes; keys are 1 to {MAX_KEY_BYTES} bytes",
             message.key.len()
+        ));
+    }
+    if message.key.starts_with(HOST_KEY_PREFIX) {
+        return Err(format!(
+            "a key that starts with {HOST_KEY_PREFIX:?}, which only the host's own notifications \
+             have"
         ));
     }
     let icon_png = if message.icon_png.len() > MAX_ICON_BYTES {
@@ -229,6 +239,17 @@ mod tests {
             title: title.into(),
             ..Notification::default()
         }
+    }
+
+    #[test]
+    fn fr25_a_guest_cannot_post_a_notification_with_a_key_of_the_hosts_own() {
+        let message = |key: &str| control::GuestNotification {
+            key: key.into(),
+            title: "Install again".into(),
+            ..Default::default()
+        };
+        assert!(checked(message("dsa:run-as-arm:offer:com.example.game")).is_err());
+        assert!(checked(message("0|com.example.game|1|null|10100")).is_ok());
     }
 
     #[test]

@@ -1,12 +1,13 @@
 //! The installer's association of .apk files with the APK install window, read from its
-//! source: a double-clicked APK must reach the settings app with the argument that opens the
-//! install window, and the window host must take the same argument from earlier releases.
+//! source: a double-clicked APK must reach APK Installer, the install window's own app, with
+//! the argument it reads, and the window host must take the same argument from earlier
+//! releases.
 #![cfg(windows)]
 
 use dsa_host_windows::app_window::apk_install::{install_request, INSTALL_APK_ARGUMENT};
 
 const INSTALLER: &str = include_str!("../installer/dsa.wxs");
-const SETTINGS_APP: &str = include_str!("../settings/DsaSettings/App.xaml.cs");
+const APK_INSTALLER: &str = include_str!("../settings/DsaApkInstaller/App.xaml.cs");
 
 #[test]
 fn fr11_opening_an_apk_opens_the_install_window_with_the_install_argument() {
@@ -21,13 +22,13 @@ fn fr11_opening_an_apk_opens_the_install_window_with_the_install_argument() {
         .expect("the command that opens an APK");
     assert!(
         command.contains(&format!(
-            "DsaSettings.exe&quot; {INSTALL_APK_ARGUMENT} &quot;%1&quot;"
+            "DsaApkInstaller.exe&quot; {INSTALL_APK_ARGUMENT} &quot;%1&quot;"
         )),
         "{command}"
     );
     assert!(
-        SETTINGS_APP.contains(&format!("InstallApkArgument = \"{INSTALL_APK_ARGUMENT}\"")),
-        "the settings app does not take {INSTALL_APK_ARGUMENT}"
+        APK_INSTALLER.contains(&format!("InstallApkArgument = \"{INSTALL_APK_ARGUMENT}\"")),
+        "APK Installer does not take {INSTALL_APK_ARGUMENT}"
     );
     // What Explorer passes is what the window host reads.
     let args = vec![

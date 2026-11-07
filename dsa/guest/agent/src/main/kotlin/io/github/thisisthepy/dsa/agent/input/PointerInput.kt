@@ -16,7 +16,26 @@ data class InjectedPointer(
     val x: Float,
     val y: Float,
     val pressure: Float,
+    /** AXIS_TILT: radians from upright, from 0 to pi/2. 0 for anything but a pen. */
+    val tilt: Float = 0f,
+    /** AXIS_ORIENTATION of a pen: the way its tip points, in radians from up, clockwise. */
+    val orientation: Float = 0f,
 )
+
+/**
+ * A pen's tilt from the host, in degrees from upright toward the right and toward the user,
+ * as the framework reads a tablet's two tilt axes: the angle from upright and the way the
+ * tip points (the input reader's own conversion of a tilt X and a tilt Y).
+ */
+fn penTilt(tiltXDegrees: Float, tiltYDegrees: Float): Pair<Float, Float> {
+    if (!tiltXDegrees.isFinite() || !tiltYDegrees.isFinite()) return 0f to 0f
+    val x = Math.toRadians(tiltXDegrees.coerceIn(-90f, 90f).toDouble())
+    val y = Math.toRadians(tiltYDegrees.coerceIn(-90f, 90f).toDouble())
+    if (x == 0.0 && y == 0.0) return 0f to 0f
+    val tilt = Math.acos(Math.cos(x) * Math.cos(y))
+    val orientation = Math.atan2(-Math.sin(x), Math.sin(y))
+    return tilt.toFloat() to orientation.toFloat()
+}
 
 /** A motion event for the framework to dispatch, as MotionEvent.obtain takes it. */
 data class InjectedMotion(
@@ -65,6 +84,17 @@ interface InputInjector {
  * - Fingers are SOURCE_TOUCHSCREEN, and a pen is SOURCE_STYLUS. Every finger that is down
  *   goes in each event of the touch: the second finger is ACTION_POINTER_DOWN, a move carries
  *   them all, and lifting all but the last is ACTION_POINTER_UP.
+ * - The fingers on every task window are one touch of the display, as they would be on a
+ *   phone's screen: a finger on a second window while one is down on the first is that
+ *   touch's next pointer, and the framework splits the touch between the windows. Two touches
+ *   from one device at once would make the second ACTION_DOWN cancel the first.
+ * - Each finger gets the lowest pointer ID the touch does not use. The host's IDs tell its
+ *   fingers apart but can be any number, and the input dispatcher refuses a motion event
+ *   with a pointer ID above 31. A touch carries at most [MAX_POINTERS] fingers, as a
+ *   MotionEvent does; fingers beyond that are left out.
+ * - Scrolling and flinging with a finger are moves of a touch, never ACTION_SCROLL, so an
+ *   app sees the drag and its speed as it would from a touchscreen.
+ * - A pen's tilt is AXIS_TILT and AXIS_ORIENTATION, as the framework reads a tablet's.
  *
  * Positions are relative to the task, and the task's place is where the agent last told
  * the host it is, which is where the host draws it. An event for a task the host was not
@@ -85,13 +115,27 @@ class PointerInput(
         var hovering = false
     }
 
+    /** A finger or a pen that is down: the task it is on, and the pointer the framework sees. */
+    private class Contact(val taskId: Int, val pointer: InjectedPointer)
+
     private class Touch(val source: Int, val deviceId: Int, val downTime: Long) {
         /** The pointers down, in the order they went down, by the host's pointer ID. */
-        val pointers = LinkedHashMap<Int, InjectedPointer>()
+        val pointers = LinkedHashMap<Int, Contact>()
+
+        /** The pointers in the order of their IDs, as a touchscreen of the guest lists them. */
+        fun ordered(): List<InjectedPointer> = pointers.values.map { it.pointer }.sortedBy { it.id }
+
+        /** The lowest pointer ID no pointer of this touch has. */
+        fun freeId(): Int {
+            val used = pointers.values.mapTo(HashSet()) { it.pointer.id }
+            return (0 until MAX_POINTERS).first { it !in used }
+        }
     }
 
     private val mice = HashMap<Int, Mouse>()
-    private val touches = HashMap<Int, Touch>()
+
+    /** The touch of the display going on now, whichever task windows its fingers are on. */
+    private var touch: Touch? = null
     private val penHovering = HashMap<Int, Boolean>()
     private val unknownTasks = HashSet<Int>()
     private var failing = false
@@ -124,7 +168,14 @@ class PointerInput(
     /** Forgets the gestures of every task not in [taskIds], as tasks end. */
     fun retainTasks(taskIds: Set<Int>) {
         mice.keys.retainAll(taskIds)
-        touches.keys.retainAll(taskIds)
+        touch?.let { gesture ->
+            // A finger on a task that ended has nowhere to lift: the touch is called off, so
+            // the next one begins cleanly.
+            if (gesture.pointers.values.any { it.taskId !in taskIds }) {
+                sendTouch(gesture, MotionEvent.ACTION_CANCEL, 0)
+                touch = null
+            }
+        }
         penHovering.keys.retainAll(taskIds)
         unknownTasks.removeAll(taskIds)
     }
@@ -225,25 +276,28 @@ class PointerInput(
         }
     }
 
+    private fun sendTouch(gesture: Touch, action: Int, buttons: Int) {
+        inject(
+            InjectedMotion(
+                action = action,
+                source = gesture.source,
+                deviceId = gesture.deviceId,
+                downTime = gesture.downTime,
+                buttonState = buttons,
+                actionButton = 0,
+                pointers = gesture.ordered(),
+            ),
+        )
+    }
+
     private fun contact(event: PointerEvent, x: Float, y: Float, source: Int, deviceId: Int, toolType: Int) {
         val taskId = event.taskId
         val pressure = event.pressure.coerceIn(0f, 1f)
-        val pointer = InjectedPointer(event.pointerId, toolType, x, y, pressure)
         val buttons = event.buttons and STYLUS_BUTTONS
-        val touch = touches[taskId]
-        fun send(gesture: Touch, action: Int) {
-            inject(
-                InjectedMotion(
-                    action = action,
-                    source = gesture.source,
-                    deviceId = gesture.deviceId,
-                    downTime = gesture.downTime,
-                    buttonState = buttons,
-                    actionButton = 0,
-                    pointers = gesture.pointers.values.toList(),
-                ),
-            )
-        }
+        val gesture = touch
+        val (tilt, orientation) =
+            if (source == InputDevice.SOURCE_STYLUS) penTilt(event.tiltX, event.tiltY) else 0f to 0f
+        fun pointer(id: Int, pressure: Float) = InjectedPointer(id, toolType, x, y, pressure, tilt, orientation)
         fun hover(action: Int) {
             inject(
                 InjectedMotion(
@@ -253,48 +307,57 @@ class PointerInput(
                     downTime = injector.now(),
                     buttonState = buttons,
                     actionButton = 0,
-                    pointers = listOf(pointer.copy(pressure = 0f)),
+                    pointers = listOf(pointer(0, 0f)),
                 ),
             )
         }
+        // The touch this event belongs to, and the contact it moves or lifts at its new place;
+        // null when the pointer is not down.
+        val held = gesture?.takeIf { it.source == source }?.let { current ->
+            current.pointers[event.pointerId]?.let { contact ->
+                current to Contact(contact.taskId, pointer(contact.pointer.id, pressure))
+            }
+        }
         when (event.action) {
             PointerAction.POINTER_ACTION_DOWN -> {
-                if (touch == null) {
+                if (gesture == null) {
                     if (penHovering.remove(taskId) == true) hover(MotionEvent.ACTION_HOVER_EXIT)
-                    val gesture = Touch(source, deviceId, injector.now())
-                    gesture.pointers[event.pointerId] = pointer
-                    touches[taskId] = gesture
-                    send(gesture, MotionEvent.ACTION_DOWN)
+                    val started = Touch(source, deviceId, injector.now())
+                    started.pointers[event.pointerId] = Contact(taskId, pointer(0, pressure))
+                    touch = started
+                    sendTouch(started, MotionEvent.ACTION_DOWN, buttons)
                 } else {
-                    // One gesture comes from one device; a pen while fingers are down waits.
-                    if (touch.source != source || event.pointerId in touch.pointers) return
-                    touch.pointers[event.pointerId] = pointer
-                    send(touch, pointerAction(MotionEvent.ACTION_POINTER_DOWN, touch, event.pointerId))
+                    // One touch comes from one device; a pen while fingers are down waits.
+                    if (gesture.source != source || event.pointerId in gesture.pointers) return
+                    if (gesture.pointers.size >= MAX_POINTERS) return
+                    gesture.pointers[event.pointerId] =
+                        Contact(taskId, pointer(gesture.freeId(), pressure))
+                    sendTouch(gesture, pointerAction(MotionEvent.ACTION_POINTER_DOWN, gesture, event.pointerId), buttons)
                 }
             }
             PointerAction.POINTER_ACTION_MOVE -> {
-                if (touch == null || touch.source != source || event.pointerId !in touch.pointers) return
-                touch.pointers[event.pointerId] = pointer
-                send(touch, MotionEvent.ACTION_MOVE)
+                val (current, contact) = held ?: return
+                current.pointers[event.pointerId] = contact
+                sendTouch(current, MotionEvent.ACTION_MOVE, buttons)
             }
             PointerAction.POINTER_ACTION_UP -> {
-                if (touch == null || touch.source != source || event.pointerId !in touch.pointers) return
-                touch.pointers[event.pointerId] = pointer
-                if (touch.pointers.size == 1) {
-                    send(touch, MotionEvent.ACTION_UP)
-                    touches.remove(taskId)
+                val (current, contact) = held ?: return
+                current.pointers[event.pointerId] = contact
+                if (current.pointers.size == 1) {
+                    sendTouch(current, MotionEvent.ACTION_UP, buttons)
+                    touch = null
                 } else {
-                    send(touch, pointerAction(MotionEvent.ACTION_POINTER_UP, touch, event.pointerId))
-                    touch.pointers.remove(event.pointerId)
+                    sendTouch(current, pointerAction(MotionEvent.ACTION_POINTER_UP, current, event.pointerId), buttons)
+                    current.pointers.remove(event.pointerId)
                 }
             }
             PointerAction.POINTER_ACTION_CANCEL -> {
-                if (touch == null || touch.source != source) return
-                send(touch, MotionEvent.ACTION_CANCEL)
-                touches.remove(taskId)
+                val (current, _) = held ?: return
+                sendTouch(current, MotionEvent.ACTION_CANCEL, buttons)
+                touch = null
             }
             PointerAction.POINTER_ACTION_HOVER_MOVE -> {
-                if (touch != null || source != InputDevice.SOURCE_STYLUS) return
+                if (gesture != null || source != InputDevice.SOURCE_STYLUS) return
                 if (penHovering[taskId] != true) {
                     penHovering[taskId] = true
                     hover(MotionEvent.ACTION_HOVER_ENTER)
@@ -304,13 +367,16 @@ class PointerInput(
             PointerAction.POINTER_ACTION_HOVER_EXIT -> {
                 if (penHovering.remove(taskId) == true) hover(MotionEvent.ACTION_HOVER_EXIT)
             }
+            // A finger scrolls by moving; only a mouse's wheel is a scroll.
             PointerAction.POINTER_ACTION_SCROLL -> Unit
             else -> log.warn("dropped pointer input with an action the agent does not know (${event.actionValue})")
         }
     }
 
+    /** [action] for the host's pointer [pointerId], with that pointer's index in the event. */
     private fun pointerAction(action: Int, touch: Touch, pointerId: Int): Int {
-        val index = touch.pointers.keys.indexOf(pointerId)
+        val id = touch.pointers.getValue(pointerId).pointer.id
+        val index = touch.ordered().indexOfFirst { it.id == id }
         return action or (index shl MotionEvent.ACTION_POINTER_INDEX_SHIFT)
     }
 
@@ -336,6 +402,9 @@ class PointerInput(
         const val MOUSE_DEVICE = 0x44534101
         const val TOUCH_DEVICE = 0x44534102
         const val PEN_DEVICE = 0x44534103
+
+        /** The most pointers one MotionEvent carries (the framework's MAX_POINTERS). */
+        const val MAX_POINTERS = 16
 
         // The host's button bits are the framework's MotionEvent.BUTTON_* values.
         private val BUTTONS = intArrayOf(

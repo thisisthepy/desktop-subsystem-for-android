@@ -21,7 +21,11 @@
 //! with a frame of that size: a size the user drags to goes to the guest, the window keeps the
 //! size of the frame it shows until the app has drawn a new one, and then takes that frame's
 //! size and shows it in the same commit. It follows the mouse as fast as the app draws, and a
-//! frame is never stretched, cropped or shown with a margin.
+//! frame is never stretched, and never cropped or shown with a margin while the user resizes.
+//! The one size it takes before a frame of it is the one Windows suggests when the window
+//! moves to a monitor of another scale: kept at the old size, the window would be moved back
+//! to the monitor it came from, and its scale and size would flap. Until the app draws the new
+//! size, it shows its last frame 1:1.
 //!
 //! A window also follows how its app asks to be shown ([`ModeState`]): an app that fills the
 //! screen gets a window that covers its monitor with no title bar, and one in
@@ -40,7 +44,9 @@ use std::thread::{self, JoinHandle};
 use dsa_host_core::compositor::task_windows::fit_within;
 use dsa_host_core::compositor::window_hosts::{FromHost, ToHost};
 use dsa_host_core::compositor::window_mode::{picture_in_picture_place, ModeState, WindowMode};
-use dsa_host_core::compositor::window_sizing::{maximized_position, min_client_size};
+use dsa_host_core::compositor::window_sizing::{
+    maximized_position, min_client_size, rescaled_rect,
+};
 use dsa_host_core::input::InputEvent;
 use windows_sys::Win32::Foundation::{
     GetLastError, ERROR_CLASS_ALREADY_EXISTS, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM,
@@ -109,6 +115,9 @@ const WM_APP_COMMANDS: u32 = WM_APP + 1;
 const WM_APP_QUIT: u32 = WM_APP + 2;
 /// Sent to a task window when a frame of another size than the window's is kept for it.
 const WM_APP_FRAME_READY: u32 = WM_APP + 4;
+/// Sent to a task window when the color its title bar's band is filled with changes: the
+/// color in `wparam`, and `lparam` 0 when the band is left as the app draws it.
+const WM_APP_BAND_COLOUR: u32 = WM_APP + 5;
 
 /// The message window's timer, which reports windows left showing a frame of an older size.
 const TICK_TIMER: usize = 1;
@@ -256,6 +265,9 @@ struct WindowData {
     /// Whether the window is sizing itself (for Android, or for a change of mode) rather than
     /// being sized by the user.
     self_sizing: Cell<bool>,
+    /// Whether the window is taking the size the desktop suggests for its monitor's new scale,
+    /// which it takes at once rather than wait for a frame of it.
+    rescaling: Cell<bool>,
 }
 
 /// The UI thread's state, reached from the message window's procedure.
@@ -572,6 +584,15 @@ unsafe extern "system" fn task_window_proc(
             }
             0
         }
+        WM_APP_BAND_COLOUR => {
+            // The app's frames show whether it leaves the title bar's band empty.
+            if let Some(data) = window_data(hwnd) {
+                let fill = (lparam != 0).then_some(wparam as u32);
+                let presenter = data.presenter.borrow().clone();
+                data.caption.set_fill(hwnd, fill, presenter.as_deref());
+            }
+            0
+        }
         WM_GETMINMAXINFO => {
             let Some(data) = window_data(hwnd) else {
                 return DefWindowProcW(hwnd, message, wparam, lparam);
@@ -666,33 +687,56 @@ unsafe extern "system" fn task_window_proc(
                 if titled(data) {
                     data.caption.report_height(hwnd, &*data.report);
                 }
+                // A splash still up keeps its icon sharp and its size on the new monitor.
+                if let Some(presenter) = data.presenter.borrow().as_deref() {
+                    presenter.splash_dpi_changed(dpi.max(96));
+                }
             }
             // A per-monitor aware window is handed the rectangle that keeps its size in
-            // points on the new monitor, and applies it itself, within what Android can
-            // draw.
+            // points on the new monitor, and takes it at once (keep_to_frame), within what
+            // Android can draw and the new monitor's work area. The guest's display can be
+            // larger than any monitor, and a window larger than its monitor reaches onto the
+            // next one, which can change its scale again.
             let suggested = &*(lparam as *const RECT);
-            let (mut width, mut height) = (
-                suggested.right - suggested.left,
-                suggested.bottom - suggested.top,
-            );
+            let zoomed = IsZoomed(hwnd) != 0;
+            let mut limit = (i32::MAX, i32::MAX);
             if let Some(max) = data.and_then(|data| data.max_client.get()) {
-                let (max_width, max_height) = outer_size(max, dpi.max(96), IsZoomed(hwnd) != 0);
-                width = width.min(max_width);
-                height = height.min(max_height);
+                limit = outer_size(max, dpi.max(96), zoomed);
             }
+            // A maximized window is kept to its monitor by Windows, and one that fills its
+            // monitor covers more than the work area.
+            if !zoomed && data.is_some_and(titled) {
+                if let Some(work) = work_area(suggested) {
+                    limit = (
+                        limit.0.min(work.right - work.left),
+                        limit.1.min(work.bottom - work.top),
+                    );
+                }
+            }
+            let (x, y, width, height) = rescaled_rect(
+                (
+                    suggested.left,
+                    suggested.top,
+                    suggested.right - suggested.left,
+                    suggested.bottom - suggested.top,
+                ),
+                limit,
+            );
             if let Some(data) = data {
                 data.self_sizing.set(true);
+                data.rescaling.set(true);
             }
             SetWindowPos(
                 hwnd,
                 std::ptr::null_mut(),
-                suggested.left,
-                suggested.top,
+                x,
+                y,
                 width,
                 height,
                 SWP_NOZORDER | SWP_NOACTIVATE,
             );
             if let Some(data) = data {
+                data.rescaling.set(false);
                 data.self_sizing.set(false);
                 if titled(data) {
                     data.caption.paint(hwnd, data.presenter.borrow().as_deref());
@@ -813,6 +857,15 @@ unsafe fn keep_to_frame(hwnd: HWND, data: &WindowData, pos: &mut WINDOWPOS) {
     let Some(presenter) = data.presenter.borrow().clone() else {
         return;
     };
+    // The size the desktop suggests for a new monitor scale is taken at once. Kept at the old
+    // frame's size, the window would be too large or too small for the new monitor by the
+    // ratio of the scales, the desktop would find it on the monitor it came from, change its
+    // scale back and suggest the size scaled the other way, and the window and its task would
+    // flap between the two sizes.
+    if data.rescaling.get() {
+        presenter.scale_changed(proposed);
+        return;
+    }
     let Some(size) = presenter.size_for(proposed) else {
         return;
     };
@@ -1180,6 +1233,11 @@ impl Ui {
                     ToHost::Retitle { task_id, title } => {
                         if let Some(hwnd) = self.open.get(&task_id) {
                             SetWindowTextW(*hwnd, wide(&title).as_ptr());
+                            // The title bar shows the name too.
+                            if let Some(data) = window_data(*hwnd) {
+                                let presenter = data.presenter.borrow().clone();
+                                data.caption.set_title(*hwnd, &title, presenter.as_deref());
+                            }
                         }
                     }
                     ToHost::Resize {
@@ -1334,7 +1392,7 @@ impl Ui {
             min_client: Cell::new(None),
             reporting: Cell::new(false),
             minimized: Cell::new(false),
-            caption: CaptionWindow::new(task_id, TASK_STYLE, TASK_EX_STYLE),
+            caption: CaptionWindow::new(task_id, TASK_STYLE, TASK_EX_STYLE, ICON_ID),
             drag_edges: Cell::new((false, false)),
             following: Cell::new(false),
             mode: Cell::new(ModeState::new()),
@@ -1342,6 +1400,7 @@ impl Ui {
             resizable: Cell::new(true),
             restore: Cell::new(None),
             self_sizing: Cell::new(false),
+            rescaling: Cell::new(false),
         }));
         let class = wide(TASK_CLASS);
         let hwnd = CreateWindowExW(
@@ -1404,6 +1463,17 @@ impl Ui {
                 // drops the message.
                 unsafe { PostMessageW(window as HWND, WM_APP_FRAME_READY, 0, 0) };
             }));
+            presenter.on_band_colour(Box::new(move |fill| {
+                // SAFETY: as above.
+                unsafe {
+                    PostMessageW(
+                        window as HWND,
+                        WM_APP_BAND_COLOUR,
+                        fill.unwrap_or(0) as WPARAM,
+                        LPARAM::from(fill.is_some()),
+                    )
+                };
+            }));
             self.setup
                 .presenters
                 .lock()
@@ -1424,7 +1494,8 @@ impl Ui {
         if let Some(data) = window_data(hwnd) {
             data.caption.extend_frame(hwnd);
             data.caption.report_height(hwnd, &*self.setup.report);
-            data.caption.paint(hwnd, data.presenter.borrow().as_deref());
+            data.caption
+                .set_title(hwnd, title, data.presenter.borrow().as_deref());
             // Until the app's first frame the window shows the app's icon on a splash
             // background, never the desktop through an empty window. It is on the screen
             // before the window is shown.

@@ -107,6 +107,57 @@ public class DeviceIdentityViewModelTests
         Assert.Equal("Identity_Reset", vm.Message);
     }
 
+    private const string ComputerReport =
+        "{\"chosen\":{\"model\":\"\"}," +
+        "\"effective\":{\"manufacturer\":\"Samsung\",\"brand\":\"Samsung\",\"model\":\"NT960XGP-G72AG\"," +
+        "\"device\":\"dsa_x86_64\",\"name\":\"dsa_x86_64\",\"characteristics\":\"tablet\"," +
+        "\"model_name\":\"Galaxy Book4 Ultra\",\"device_name\":\"BREW-BOOK\",\"soc_manufacturer\":\"Intel\",\"soc_model\":\"\"}," +
+        "\"sources\":{\"manufacturer\":\"computer\",\"brand\":\"computer\",\"model\":\"computer\",\"device\":\"dsa\"," +
+        "\"model_name\":\"computer\",\"device_name\":\"computer\",\"soc_manufacturer\":\"computer\",\"soc_model\":\"dsa\"}}";
+
+    [Fact]
+    public async Task Fr17_the_page_shows_the_computers_values_and_where_each_default_came_from()
+    {
+        var cli = new FakeCli()
+            .Answer("settings device --json", ComputerReport)
+            .Answer("status --json", "{\"state\":\"Stopped\",\"last_reason\":null,\"update_notice\":null,\"problem\":null}");
+        var vm = Model(cli);
+        await vm.LoadAsync();
+        Assert.False(vm.HasError, vm.Error);
+        Assert.Equal("NT960XGP-G72AG", vm.Field("model").Placeholder);
+        Assert.Equal("computer", vm.Field("model").Origin);
+        Assert.Equal("Identity_FromComputer", vm.Field("model").OriginText);
+        Assert.Equal("dsa", vm.Field("device").Origin);
+        Assert.Equal("Identity_FromDsa", vm.Field("device").OriginText);
+        // A source the report does not name is DSA's.
+        Assert.Equal("dsa", vm.Field("fingerprint.type").Origin);
+
+        Assert.Equal(new[] { "model_name", "device_name", "soc_manufacturer", "soc_model" },
+            vm.ComputerValues.Select(v => v.Key));
+        Assert.Equal("Galaxy Book4 Ultra", vm.Computer("model_name").Value);
+        Assert.Equal("BREW-BOOK", vm.Computer("device_name").Value);
+        Assert.Equal("Identity_FromComputer", vm.Computer("device_name").OriginText);
+        Assert.Equal("Intel", vm.Computer("soc_manufacturer").Value);
+        // A value the computer does not say says so.
+        Assert.Equal("Identity_NotSaid", vm.Computer("soc_model").Value);
+        Assert.Equal("Identity_FromDsa", vm.Computer("soc_model").OriginText);
+    }
+
+    [Fact]
+    public async Task Fr17_reset_returns_a_field_to_the_computers_value()
+    {
+        var cli = new FakeCli()
+            .Answer("settings device --json", ComputerReport.Replace("{\"model\":\"\"}", "{\"model\":\"My tablet\"}"))
+            .Answer("status --json", "{\"state\":\"Stopped\",\"last_reason\":null,\"update_notice\":null,\"problem\":null}")
+            .Answer("settings reset device --json", ComputerReport);
+        var vm = Model(cli);
+        await vm.LoadAsync();
+        Assert.Equal("My tablet", vm.Field("model").Value);
+        await vm.ResetAsync();
+        Assert.Equal("", vm.Field("model").Value);
+        Assert.Equal("NT960XGP-G72AG", vm.Field("model").Placeholder);
+    }
+
     [Fact]
     public async Task Fr17_a_refusal_from_the_service_is_shown()
     {

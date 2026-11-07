@@ -134,6 +134,17 @@ class AndroidKernelConfigTests(unittest.TestCase):
         for option in ["CONFIG_HYPERV_BALLOON=y", "CONFIG_PAGE_REPORTING=y", "CONFIG_COMPACTION=y"]:
             self.assertIn(option, config)
 
+    def test_nfr2_freed_pages_are_reported_to_the_host_without_a_delay(self):
+        # Upstream waits two seconds before each reporting pass and again after each pass that
+        # used up its budget, so a large free reached the host over many seconds. The patch
+        # makes every pass start at once, for Hyper-V's and virtio's balloon alike.
+        for path in [CONFIG, VIRTIO_CONFIG]:
+            self.assertIn("CONFIG_PAGE_REPORTING=y", path.read_text())
+        patch = (PATCHES / "page-reporting-no-delay.patch").read_text()
+        self.assertIn("+++ b/mm/page_reporting.c", patch)
+        self.assertIn("-#define PAGE_REPORTING_DELAY	(2 * HZ)", patch)
+        self.assertIn("+#define PAGE_REPORTING_DELAY	0", patch)
+
     def test_nfr1_the_guest_can_swap_to_zram(self):
         config = CONFIG.read_text()
         for option in [
@@ -253,6 +264,21 @@ class AndroidKernelConfigTests(unittest.TestCase):
         ]:
             self.assertIn(option, config)
         self.assertIn("CONFIG_PCI_HOST_GENERIC=y", ARM64_CONFIG.read_text())
+
+    def test_nfr2_hotplugged_memory_holds_its_own_page_structs(self):
+        # The Linux host boots the VM small and plugs memory in with virtio-mem. Without
+        # hot-plug and hot-remove the guest never sees the memory or cannot give it back;
+        # without memmap_on_memory the page structs of plugged memory come out of the small
+        # boot memory; without auto-online plugged memory stays offline and unused.
+        lines = fragment_lines(VIRTIO_CONFIG)
+        for option in [
+            "CONFIG_MEMORY_HOTPLUG=y",
+            "CONFIG_MEMORY_HOTREMOVE=y",
+            "CONFIG_MHP_MEMMAP_ON_MEMORY=y",
+            "CONFIG_MHP_DEFAULT_ONLINE_TYPE_ONLINE_AUTO=y",
+            "CONFIG_VIRTIO_MEM=y",
+        ]:
+            self.assertIn(option, lines)
 
     def test_fr27_the_arm64_kernel_uses_4k_pages(self):
         # The host's free page reporting order counts 4 KiB pages (5 is 128 KiB), and

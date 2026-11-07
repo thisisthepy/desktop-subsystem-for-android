@@ -69,8 +69,13 @@ public sealed partial class GeneralViewModel : ObservableObject
 
     public SessionState State => _status?.State ?? SessionState.Unknown;
     public string StateText => _text.Get($"State_{State}");
-    public string LastReason => _status?.LastReason ?? "";
+    /// <summary>Why Android last stopped, as a short sentence in the user's language.</summary>
+    public string LastReason => HasLastReason ? _text.Get(StopReasonText.KeyFor(_status!.LastReason!)) : "";
     public bool HasLastReason => !string.IsNullOrEmpty(_status?.LastReason);
+    /// <summary>The service's own words for it, shown only when the user asks for the details.
+    /// A stop on request has none worth showing.</summary>
+    public string LastReasonDetail => HasLastReasonDetail ? _status!.LastReason! : "";
+    public bool HasLastReasonDetail => HasLastReason && StopReasonText.KeyFor(_status!.LastReason!) != StopReasonText.Requested;
     public string Problem => _status?.Problem ?? "";
     public bool HasProblem => !string.IsNullOrEmpty(_status?.Problem);
     public string UpdateNotice => _status?.UpdateNotice ?? "";
@@ -183,6 +188,13 @@ public sealed partial class SettingsViewModel : ObservableObject
     public int AdbPort => _settings?.AdbPort ?? SettingsInfo.DefaultAdbPort;
     /// <summary>The command that connects adb, shown while developer mode is on.</summary>
     public string AdbConnect => _settings?.AdbConnect ?? $"adb connect 127.0.0.1:{SettingsInfo.DefaultAdbPort}";
+    /// <summary>Whether developer mode's port is attached to this PC's adb server by itself, so
+    /// adb and Android Studio list Android without adb connect.</summary>
+    public bool AdbAutoConnect => _settings?.AdbAutoConnect ?? true;
+    /// <summary>Where auto-connect stands, as the service last reported it.</summary>
+    public AdbAutoConnectState AdbAutoConnectState => _settings?.AdbAutoConnectState ?? AdbAutoConnectState.Off;
+    /// <summary>Where auto-connect stands, in the user's language.</summary>
+    public string AdbAutoConnectStateText => _text.Get($"AdbAutoConnect_{AdbAutoConnectState}");
     /// <summary>Whether Android uses an installed ARM translation package from its next
     /// start.</summary>
     public bool ArmTranslation => _settings?.ArmTranslation ?? true;
@@ -190,6 +202,20 @@ public sealed partial class SettingsViewModel : ObservableObject
     public bool ArmSupported => _arm?.Supported ?? false;
     public bool HasArmPackage => _arm?.Package is not null;
     public bool CanRemoveArmTranslation => CanChange && HasArmPackage;
+    /// <summary>Whether the image carries a default translator. Only an x86_64 image does; an
+    /// arm64 one runs ARM apps itself.</summary>
+    public bool HasArmDefault => _arm?.Default is not null;
+    /// <summary>The remove card shows only where there is no default translator: where there
+    /// is one, removing the package is going back to it, which its own card does.</summary>
+    public bool ShowsArmRemove => !HasArmDefault;
+    /// <summary>Whether the default translator can be chosen again: a package is installed in
+    /// its place.</summary>
+    public bool CanUseDefaultArmTranslator => CanChange && HasArmDefault && HasArmPackage;
+    /// <summary>What the default translator is, and what going back to it does.</summary>
+    public string ArmDefaultDescription => _arm?.Default is { } d
+        ? string.Format(System.Globalization.CultureInfo.CurrentCulture, _text.Get("Arm_DefaultDescription"),
+            d.Name, d.Version, d.License.Length > 0 ? d.License : _text.Get("Arm_NoLicense"))
+        : "";
     public bool ArmRestartNeeded => _arm?.RestartNeeded ?? false;
     /// <summary>One line on whether ARM apps run, and with what.</summary>
     public string ArmStatus
@@ -197,16 +223,23 @@ public sealed partial class SettingsViewModel : ObservableObject
         get
         {
             var culture = System.Globalization.CultureInfo.CurrentCulture;
-            if (_arm?.Package is not { } package)
+            if (_arm?.Translator is { } translator)
             {
-                return _text.Get("Arm_NotSupported");
+                var license = translator.License.Length > 0 ? translator.License : _text.Get("Arm_NoLicense");
+                var template = translator.Source == ArmSource.Default
+                    ? _text.Get("Arm_SupportedDefault")
+                    : _text.Get("Arm_Supported");
+                return string.Format(culture, template, translator.Name, translator.Version, license);
             }
-            if (!_arm.Enabled)
+            if (_arm is { Enabled: false, Package: { } package })
             {
                 return string.Format(culture, _text.Get("Arm_TurnedOff"), package.Name, package.Version);
             }
-            var license = package.License.Length > 0 ? package.License : _text.Get("Arm_NoLicense");
-            return string.Format(culture, _text.Get("Arm_Supported"), package.Name, package.Version, license);
+            if (_arm is { Enabled: false, Default: { } builtIn })
+            {
+                return string.Format(culture, _text.Get("Arm_DefaultTurnedOff"), builtIn.Name, builtIn.Version);
+            }
+            return _text.Get("Arm_NotSupported");
         }
     }
     /// <summary>The ABIs the running Android installs apps for, or that it is not running.</summary>
@@ -339,6 +372,28 @@ public sealed partial class SettingsViewModel : ObservableObject
         await LoadArmTranslationAsync().ConfigureAwait(true);
     }
 
+    /// <summary>Goes back to the image's default translator: the package installed in its
+    /// place is removed, from the next start of Android.</summary>
+    public async Task UseDefaultArmTranslatorAsync()
+    {
+        _busy = true;
+        _error = null;
+        ChangedAll();
+        try
+        {
+            _arm = await _service.UseDefaultArmTranslatorAsync().ConfigureAwait(true);
+        }
+        catch (Exception e)
+        {
+            _error = Format.Problem(_text, e);
+        }
+        finally
+        {
+            _busy = false;
+            ChangedAll();
+        }
+    }
+
     public async Task RemoveArmTranslationAsync()
     {
         _busy = true;
@@ -363,6 +418,7 @@ public sealed partial class SettingsViewModel : ObservableObject
     {
         await ChangeAsync(_service.SettingsAsync).ConfigureAwait(true);
         await LoadArmTranslationAsync().ConfigureAwait(true);
+        await LoadGappsAsync().ConfigureAwait(true);
         try
         {
             _gpus = await _service.GpusAsync().ConfigureAwait(true);
@@ -431,6 +487,34 @@ public sealed partial class SettingsViewModel : ObservableObject
     public Task SetDeveloperModeAsync(bool on) =>
         on == DeveloperMode && Loaded ? Task.CompletedTask : ChangeAsync(() => _service.SetDeveloperModeAsync(on));
 
+    public Task SetAdbAutoConnectAsync(bool on) =>
+        on == AdbAutoConnect && Loaded ? Task.CompletedTask : ChangeAsync(() => _service.SetAdbAutoConnectAsync(on));
+
+    /// <summary>Reads where auto-connect stands again, as a timer does while the page is shown
+    /// and developer mode is on. Only the state is taken, so a value being typed is kept.</summary>
+    public async Task PollAdbAutoConnectAsync()
+    {
+        if (_busy || _settings is not { DeveloperMode: true })
+        {
+            return;
+        }
+        try
+        {
+            var now = await _service.SettingsAsync().ConfigureAwait(true);
+            if (_busy || _settings is null || now.AdbAutoConnectState == _settings.AdbAutoConnectState)
+            {
+                return;
+            }
+            _settings = _settings with { AdbAutoConnectState = now.AdbAutoConnectState };
+            Changed(nameof(AdbAutoConnectState));
+            Changed(nameof(AdbAutoConnectStateText));
+        }
+        catch (Exception)
+        {
+            // The state stays as last read; the next tick asks again.
+        }
+    }
+
     /// <summary>Picks the loopback port adb connects to. Text that is not a port from 1 to
     /// 65535 changes nothing.</summary>
     public Task SetAdbPortAsync(string text)
@@ -459,8 +543,8 @@ public enum InstallSeverity
     Error,
 }
 
-/// <summary>APK files dropped on the window: each is installed in Android in turn, and the bar
-/// at the top of the window says how it went.</summary>
+/// <summary>APK files and split-APK bundles dropped on the window: each is installed in Android
+/// in turn, and the bar at the top of the window says how it went.</summary>
 public sealed class InstallViewModel : ObservableObject
 {
     private readonly DsaService _service;
@@ -492,9 +576,13 @@ public sealed class InstallViewModel : ObservableObject
     public string Title => _title;
     public string Message => _message;
 
-    /// <summary>Whether <paramref name="path"/> names an APK file.</summary>
+    /// <summary>The extensions of what goes to the APK Installer: APKs, the split-APK bundles
+    /// it installs, and App Bundles, for which it says why it does not.</summary>
+    public static readonly string[] InstallExtensions = { ".apk", ".xapk", ".apks", ".apkm", ".aab" };
+
+    /// <summary>Whether <paramref name="path"/> names an APK file or a bundle of APKs.</summary>
     public static bool IsApk(string path) =>
-        path.EndsWith(".apk", StringComparison.OrdinalIgnoreCase);
+        InstallExtensions.Any(extension => path.EndsWith(extension, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>Whether a drop of <paramref name="paths"/> would install anything, so the
     /// window shows a drop is welcome.</summary>

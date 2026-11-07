@@ -7,6 +7,10 @@
 #   notes-old.apk      the same app at 4.1 (41), signed with the same key
 #   notes-other.apk    the same app at 4.3 (43), signed with another key
 #   adaptive.apk       "Adaptive", com.example.adaptive, an adaptive icon (a colour and an image)
+#   vector.apk         "Vector", com.example.vector, an adaptive icon (a colour and a vector
+#                      drawable)
+#   many.apk           "Many", com.example.many 3.20.8107, 40 permissions, native code only for
+#                      armeabi-v7a, an icon with transparent corners and a colour profile
 #
 # and beside each, <name>.sha256: the signer's SHA-256 digest as apksigner prints it.
 #
@@ -32,7 +36,8 @@ aapt2="$tools/aapt2$exe"
 zipalign="$tools/zipalign$exe"
 apksigner="$tools/apksigner$bat"
 keytool="keytool"
-if [ -n "${JAVA_HOME:-}" ]; then keytool="$JAVA_HOME/bin/keytool"; fi
+jar="jar"
+if [ -n "${JAVA_HOME:-}" ]; then keytool="$JAVA_HOME/bin/keytool"; jar="$JAVA_HOME/bin/jar"; fi
 echo "build tools: $tools"
 echo "platform: $platform"
 
@@ -53,17 +58,22 @@ app() {
   cat >"$work/$name-manifest.xml" <<EOF
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="$package">
-    <uses-permission android:name="android.permission.CAMERA" />
-    <uses-permission android:name="android.permission.INTERNET" />
+$(for permission in ${permissions:-CAMERA INTERNET}; do echo "    <uses-permission android:name=\"android.permission.$permission\" />"; done)
     <application android:label="@string/app_name" android:icon="@mipmap/ic_launcher" />
 </manifest>
 EOF
   rm -rf "$work/$name-compiled"
   mkdir -p "$work/$name-compiled"
-  "$aapt2" compile --dir "$res" -o "$work/$name-compiled"
+  # --no-crunch keeps an icon's bytes as they are, colour profile and all.
+  "$aapt2" compile ${no_crunch:+--no-crunch} --dir "$res" -o "$work/$name-compiled"
   "$aapt2" link -I "$platform/android.jar" --manifest "$work/$name-manifest.xml" \
     --min-sdk-version 26 --target-sdk-version 34 --version-code "$code" --version-name "$version" \
     -o "$work/$name-unaligned.apk" "$work/$name-compiled"/*.flat
+  if [ -n "${native_abi:-}" ]; then
+    mkdir -p "$work/$name-native/lib/$native_abi"
+    printf 'not really code' >"$work/$name-native/lib/$native_abi/libnative.so"
+    (cd "$work/$name-native" && "$jar" uf "$work/$name-unaligned.apk" lib)
+  fi
   "$zipalign" -f 4 "$work/$name-unaligned.apk" "$work/$name-aligned.apk"
   "$apksigner" sign --ks "$work/$signer.jks" --ks-pass pass:testpass --key-pass pass:testpass \
     --ks-key-alias "$signer" --out "$out/$name.apk" "$work/$name-aligned.apk"
@@ -113,5 +123,54 @@ cat >"$adaptive_res/mipmap-anydpi-v26/ic_launcher.xml" <<'EOF'
 EOF
 cp "$here/foreground.png" "$adaptive_res/mipmap-xxxhdpi/ic_launcher_foreground.png"
 app adaptive com.example.adaptive Adaptive 1 1.0 notes "$adaptive_res"
+
+# An adaptive icon as most apps made since Android 8 have it, Chrome among them: a colour
+# behind a vector drawable, with a group that moves its paths and a fill from a colour
+# resource.
+vector_res="$work/vector-res"
+mkdir -p "$vector_res/values" "$vector_res/mipmap-anydpi-v26" "$vector_res/drawable"
+cat >"$vector_res/values/strings.xml" <<'EOF'
+<resources>
+    <string name="app_name">Vector</string>
+    <color name="ic_launcher_background">#FFFFFFFF</color>
+    <color name="ring">#FFDB4437</color>
+</resources>
+EOF
+cat >"$vector_res/mipmap-anydpi-v26/ic_launcher.xml" <<'EOF'
+<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>
+EOF
+cat >"$vector_res/drawable/ic_launcher_foreground.xml" <<'EOF'
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <group android:translateX="30" android:translateY="30">
+        <path android:fillColor="@color/ring"
+            android:pathData="M24,0A24,24 0,1 1,24 48A24,24 0,1 1,24 0z" />
+        <path android:fillColor="#FF4285F4"
+            android:pathData="M24,14a10,10 0,1 1,-.01 0z" />
+    </group>
+</vector>
+EOF
+app vector com.example.vector Vector 1 1.0 notes "$vector_res"
+
+many_res="$work/many-res"
+mkdir -p "$many_res/values" "$many_res/mipmap-xxxhdpi"
+cat >"$many_res/values/strings.xml" <<'EOF'
+<resources><string name="app_name">Many</string></resources>
+EOF
+cp "$here/icon-corners.png" "$many_res/mipmap-xxxhdpi/ic_launcher.png"
+permissions="CAMERA RECORD_AUDIO ACCESS_FINE_LOCATION ACCESS_COARSE_LOCATION READ_CONTACTS WRITE_CONTACTS
+  READ_CALENDAR WRITE_CALENDAR READ_SMS SEND_SMS RECEIVE_SMS READ_CALL_LOG WRITE_CALL_LOG READ_PHONE_STATE
+  CALL_PHONE READ_MEDIA_AUDIO READ_MEDIA_IMAGES READ_MEDIA_VIDEO POST_NOTIFICATIONS BLUETOOTH_CONNECT
+  BLUETOOTH_SCAN BODY_SENSORS GET_ACCOUNTS INTERNET ACCESS_NETWORK_STATE ACCESS_WIFI_STATE CHANGE_WIFI_STATE
+  CHANGE_NETWORK_STATE FOREGROUND_SERVICE MODIFY_AUDIO_SETTINGS QUERY_ALL_PACKAGES RECEIVE_BOOT_COMPLETED
+  REQUEST_INSTALL_PACKAGES SCHEDULE_EXACT_ALARM SYSTEM_ALERT_WINDOW USE_BIOMETRIC USE_FULL_SCREEN_INTENT
+  VIBRATE WAKE_LOCK WRITE_SETTINGS"
+no_crunch=1 native_abi=armeabi-v7a app many com.example.many Many 8107 3.20.8107 notes "$many_res"
 
 rm -rf "$work"

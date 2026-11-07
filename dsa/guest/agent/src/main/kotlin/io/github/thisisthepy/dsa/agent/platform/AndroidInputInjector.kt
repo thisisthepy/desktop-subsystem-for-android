@@ -52,6 +52,8 @@ class AndroidInputInjector(context: Context) : InputInjector {
                 y = pointer.y
                 pressure = pointer.pressure
                 size = 1f
+                orientation = pointer.orientation
+                if (pointer.tilt != 0f) setAxisValue(MotionEvent.AXIS_TILT, pointer.tilt)
                 if (motion.vscroll != 0f) setAxisValue(MotionEvent.AXIS_VSCROLL, motion.vscroll)
                 if (motion.hscroll != 0f) setAxisValue(MotionEvent.AXIS_HSCROLL, motion.hscroll)
             }

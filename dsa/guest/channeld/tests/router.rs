@@ -462,6 +462,13 @@ fn fr2_the_agent_is_told_by_its_domain_and_its_process() {
         Ok(())
     );
     assert_eq!(agent_caller(Some("u:r:system_app:s0"), agent), Ok(()));
+    // Android 17's domain for a platform app that targets SDK 36.
+    assert_eq!(
+        agent_caller(Some("u:r:platform_app_36:s0:c512,c768"), agent),
+        Ok(())
+    );
+    assert!(agent_caller(Some("u:r:platform_app_x:s0"), agent).is_err());
+    assert!(agent_caller(Some("u:r:platform_app_:s0"), agent).is_err());
 
     // The hwcomposer, and an agent whose certificates the package manager no longer trusts.
     assert!(agent_caller(Some("u:r:hal_graphics_composer_default:s0"), agent).is_err());

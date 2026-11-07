@@ -205,6 +205,66 @@ def probe_init_without_vulkan(dll_path):
     print(json.dumps({"init": result}))
 
 
+class MemoryStats(ctypes.Structure):
+    _fields_ = [
+        ("device_local_bytes", ctypes.c_uint64),
+        ("host_visible_bytes", ctypes.c_uint64),
+        ("imported_bytes", ctypes.c_uint64),
+        ("largest_bytes", ctypes.c_uint64),
+        ("device_local_count", ctypes.c_uint32),
+        ("host_visible_count", ctypes.c_uint32),
+        ("imported_count", ctypes.c_uint32),
+        ("guest_processes", ctypes.c_int32),
+    ]
+
+
+def probe_memory_stats(dll_path):
+    """Starts the renderer, reads its memory accounting, and prints it as JSON. Runs in a
+    process of its own, because the renderer starts once per process."""
+    if hasattr(os, "add_dll_directory"):
+        os.add_dll_directory(str(Path(dll_path).parent))
+    lib = ctypes.CDLL(dll_path)
+    lib.dsa_gfx_init.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
+    lib.dsa_gfx_init.restype = ctypes.c_int
+    lib.dsa_gfx_get_memory_stats.argtypes = [ctypes.POINTER(MemoryStats)]
+    lib.dsa_gfx_get_memory_stats.restype = ctypes.c_int
+    lib.dsa_gfx_teardown.argtypes = []
+    lib.dsa_gfx_teardown.restype = None
+    before = lib.dsa_gfx_get_memory_stats(ctypes.byref(MemoryStats()))
+    init = lib.dsa_gfx_init(256, 256)
+    stats = MemoryStats()
+    running = lib.dsa_gfx_get_memory_stats(ctypes.byref(stats))
+    lib.dsa_gfx_teardown()
+    after = lib.dsa_gfx_get_memory_stats(ctypes.byref(MemoryStats()))
+    print(json.dumps({
+        "init": init,
+        "before": before,
+        "running": running,
+        "after": after,
+        "processes": stats.guest_processes,
+    }))
+
+
+class RendererMemoryTests(unittest.TestCase):
+    def test_nfr2_the_renderer_reports_its_memory_only_while_it_runs(self):
+        env_path = os.environ.get("GFXSTREAM_BACKEND_PATH")
+        if not env_path or not Path(env_path).exists():
+            self.skipTest("GFXSTREAM_BACKEND_PATH is not set or library does not exist.")
+        completed = subprocess.run(
+            [sys.executable, __file__, "--probe-memory", str(Path(env_path).resolve())],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        result = json.loads(completed.stdout.strip().splitlines()[-1])
+        self.assertEqual(result["init"], 0, result)
+        self.assertEqual(result["before"], -1, result)
+        self.assertEqual(result["running"], 0, result)
+        self.assertEqual(result["after"], -1, result)
+        self.assertEqual(result["processes"], 0, result)
+
+
 class RendererWithoutVulkanTests(unittest.TestCase):
     def test_pr3_renderer_survives_a_host_without_a_vulkan_driver(self):
         env_path = os.environ.get("GFXSTREAM_BACKEND_PATH")
@@ -252,22 +312,28 @@ class RenderGpuSelectionTests(unittest.TestCase):
         self.assertEqual(result["select_after_init"], -1)
         return result
 
+    # The one GPU the runner has: Lavapipe's Vulkan device is called "llvmpipe (LLVM ...)",
+    # and on a Mac runner MoltenVK shows "Apple Paravirtual device".
+    gpu_name = os.environ.get("DSA_TEST_GPU_NAME", "llvmpipe").lower()
+
     def test_pr3_renderer_runs_on_the_gpu_asked_for(self):
-        # Lavapipe's Vulkan device is called "llvmpipe (LLVM ...)".
-        result = self.run_probe(DSA_GFX_GPU_NAME, "LLVMPIPE")
+        # Asked in another case, so the match is not case sensitive.
+        result = self.run_probe(DSA_GFX_GPU_NAME, self.gpu_name.upper())
         self.assertEqual(result["matched"], 1)
-        self.assertIn("llvmpipe", result["name"].lower())
+        self.assertIn(self.gpu_name, result["name"].lower())
 
     def test_pr3_renderer_ranks_the_gpus_when_none_matches(self):
         # No GPU has this LUID, so the renderer ranks them and says it did.
         result = self.run_probe(DSA_GFX_GPU_LUID, "ffffffffffffff7f")
         self.assertEqual(result["matched"], 0)
-        self.assertIn("llvmpipe", result["name"].lower())
+        self.assertIn(self.gpu_name, result["name"].lower())
 
 
 if __name__ == "__main__":
     if len(sys.argv) == 5 and sys.argv[1] == "--probe-gpu":
         probe_gpu_selection(sys.argv[2], int(sys.argv[3]), sys.argv[4])
+    elif len(sys.argv) == 3 and sys.argv[1] == "--probe-memory":
+        probe_memory_stats(sys.argv[2])
     elif len(sys.argv) == 3 and sys.argv[1] == "--probe-init-without-vulkan":
         probe_init_without_vulkan(sys.argv[2])
     else:

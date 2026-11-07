@@ -9,6 +9,7 @@ cd "$repo_root"
 
 uv run dsa/graphics/test_fetch.py
 uv run dsa/graphics/test_hvsocket_patch.py
+uv run dsa/graphics/test_stream_loss_patch.py
 uv run dsa/graphics/test_build.py
 uv run dsa/graphics/test_check_guest_driver.py
 uv run dsa/graphics/host/test_host_build.py

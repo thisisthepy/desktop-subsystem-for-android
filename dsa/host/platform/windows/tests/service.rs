@@ -233,6 +233,7 @@ fn fr14_a_new_image_that_does_not_boot_is_undone_by_the_service() {
         notices: Default::default(),
         boot_timeout: Duration::from_secs(10),
         trial_running: Arc::new(AtomicBool::new(false)),
+        check_now: Default::default(),
     };
     let sid = current_user_sid().unwrap();
     let android = create_user_android(&config, "service test", &sid, Some(&updates), None).unwrap();

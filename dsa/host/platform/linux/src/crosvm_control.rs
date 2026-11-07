@@ -1,9 +1,9 @@
 //! crosvm's control socket: the commands the host sends a running VM.
 //!
 //! The host runs the same crosvm program with a command and the VM's socket
-//! (`crosvm balloon <bytes> <socket>`, `crosvm suspend <socket>`, ...), which is crosvm's own
-//! client for its socket. It resizes the VM through the balloon, suspends and resumes it
-//! (freezing, only when the user chose it), and stops it.
+//! (`crosvm virtio-mem <bytes> <socket>`, `crosvm suspend <socket>`, ...), which is crosvm's own
+//! client for its socket. It resizes the VM through its virtio-mem device, suspends and resumes
+//! it (freezing, only when the user chose it), and stops it.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -16,8 +16,9 @@ pub const COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
 /// A command for a running VM.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Request {
-    /// Sets the balloon to this many bytes: the guest has its memory less this.
-    Balloon { bytes: u64 },
+    /// Asks the guest to have this many bytes of the virtio-mem region plugged, above the
+    /// memory it booted with.
+    VirtioMem { bytes: u64 },
     /// Stops every virtual processor, keeping the VM's memory.
     Suspend,
     /// Lets a suspended VM run again.
@@ -30,7 +31,7 @@ pub enum Request {
 pub fn args(request: Request, socket: &Path) -> Vec<String> {
     let socket = socket.to_string_lossy().into_owned();
     match request {
-        Request::Balloon { bytes } => vec!["balloon".into(), bytes.to_string(), socket],
+        Request::VirtioMem { bytes } => vec!["virtio-mem".into(), bytes.to_string(), socket],
         Request::Suspend => vec!["suspend".into(), socket],
         Request::Resume => vec!["resume".into(), socket],
         Request::Stop => vec!["stop".into(), socket],
@@ -97,11 +98,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn nfr2_resizing_sets_the_balloon_through_the_control_socket() {
+    fn nfr2_resizing_sets_the_virtio_mem_request_through_the_control_socket() {
         let socket = Path::new("/run/user/1000/dsa/crosvm.sock");
         assert_eq!(
-            args(Request::Balloon { bytes: 1 << 30 }, socket),
-            ["balloon", "1073741824", "/run/user/1000/dsa/crosvm.sock"]
+            args(Request::VirtioMem { bytes: 1 << 30 }, socket),
+            ["virtio-mem", "1073741824", "/run/user/1000/dsa/crosvm.sock"]
         );
         assert_eq!(args(Request::Suspend, socket)[0], "suspend");
         assert_eq!(args(Request::Resume, socket)[0], "resume");
@@ -130,7 +131,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("dsa-crosvm-control-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let control = Control::new(fake_crosvm(&dir), dir.join("vm.sock"));
-        control.send(Request::Balloon { bytes: 4096 }).unwrap();
+        control.send(Request::VirtioMem { bytes: 4096 }).unwrap();
         control.send(Request::Resume).unwrap();
         let refused = control.send(Request::Suspend).unwrap_err();
         assert!(refused.contains("no VM"), "{refused}");
@@ -139,7 +140,7 @@ mod tests {
         assert_eq!(
             calls,
             format!(
-                "balloon 4096 {s}\nresume {s}\nsuspend {s}\n",
+                "virtio-mem 4096 {s}\nresume {s}\nsuspend {s}\n",
                 s = sock.display()
             )
         );

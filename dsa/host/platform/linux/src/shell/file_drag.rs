@@ -33,10 +33,7 @@ pub fn drags_root() -> PathBuf {
 /// earlier drags left that are older than [`LEFTOVER_AGE`].
 pub fn drag_folder(root: &Path, drag_id: u32) -> io::Result<PathBuf> {
     remove_leftovers(root, LEFTOVER_AGE);
-    let folder = root.join(format!(
-        "{FOLDER_PREFIX}{}-{drag_id}",
-        std::process::id()
-    ));
+    let folder = root.join(format!("{FOLDER_PREFIX}{}-{drag_id}", std::process::id()));
     if folder.exists() {
         fs::remove_dir_all(&folder)?;
     }
@@ -101,7 +98,10 @@ pub fn materialize(
             for path in paths.iter().chain(std::iter::once(&path)) {
                 let _ = fs::remove_file(path);
             }
-            return Err(format!("{} could not be copied from Android: {error}", item.name));
+            return Err(format!(
+                "{} could not be copied from Android: {error}",
+                item.name
+            ));
         }
         paths.push(path);
     }
@@ -135,8 +135,17 @@ pub fn uri_list(paths: &[PathBuf]) -> String {
             use std::os::unix::ffi::OsStrExt;
             path.as_os_str().as_bytes().to_vec()
         };
+        // A Windows path is named "file:///C:/..." (RFC 8089): the drive gets a slash before it.
         #[cfg(not(unix))]
-        let bytes = path.to_string_lossy().replace('\\', "/").into_bytes();
+        let bytes = {
+            let path = path.to_string_lossy().replace('\\', "/");
+            if path.starts_with('/') {
+                path
+            } else {
+                format!("/{path}")
+            }
+            .into_bytes()
+        };
         for byte in bytes {
             if byte.is_ascii_alphanumeric() || b"/-._~".contains(&byte) {
                 list.push(byte as char);

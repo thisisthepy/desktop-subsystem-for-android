@@ -58,6 +58,13 @@ public  final class Envelope extends
     ARM_TRANSLATION_REMOVE(152),
     ARM_TRANSLATION_QUERY(153),
     ARM_TRANSLATION_STATE(154),
+    GAPPS_INSTALL(400),
+    GAPPS_CHUNK(401),
+    GAPPS_REMOVE(402),
+    GAPPS_QUERY(403),
+    GAPPS_STATE(404),
+    GOOGLE_DEVICE_ID_QUERY(405),
+    GOOGLE_DEVICE_ID(406),
     DEVICE_IDLE(42),
     HOST_MEMORY(43),
     HOST_SLEEP(44),
@@ -144,6 +151,7 @@ public  final class Envelope extends
     CAMERA_ERROR(267),
     SET_TASK_CAPTION(155),
     SYSTEM_SETTINGS(340),
+    DEVICE_NAME(383),
     GAMEPAD_CONNECTED(341),
     GAMEPAD_DISCONNECTED(342),
     GAMEPAD_STATE(343),
@@ -155,6 +163,9 @@ public  final class Envelope extends
     DRAG_READ(352),
     DRAG_DATA(353),
     DRAG_END(354),
+    REINSTALL_APP(380),
+    REINSTALL_RESULT(381),
+    NATIVE_LIBRARY_CRASH(382),
     BODY_NOT_SET(0);
     private final int value;
     private BodyCase(int value) {
@@ -208,6 +219,13 @@ public  final class Envelope extends
         case 152: return ARM_TRANSLATION_REMOVE;
         case 153: return ARM_TRANSLATION_QUERY;
         case 154: return ARM_TRANSLATION_STATE;
+        case 400: return GAPPS_INSTALL;
+        case 401: return GAPPS_CHUNK;
+        case 402: return GAPPS_REMOVE;
+        case 403: return GAPPS_QUERY;
+        case 404: return GAPPS_STATE;
+        case 405: return GOOGLE_DEVICE_ID_QUERY;
+        case 406: return GOOGLE_DEVICE_ID;
         case 42: return DEVICE_IDLE;
         case 43: return HOST_MEMORY;
         case 44: return HOST_SLEEP;
@@ -294,6 +312,7 @@ public  final class Envelope extends
         case 267: return CAMERA_ERROR;
         case 155: return SET_TASK_CAPTION;
         case 340: return SYSTEM_SETTINGS;
+        case 383: return DEVICE_NAME;
         case 341: return GAMEPAD_CONNECTED;
         case 342: return GAMEPAD_DISCONNECTED;
         case 343: return GAMEPAD_STATE;
@@ -305,6 +324,9 @@ public  final class Envelope extends
         case 352: return DRAG_READ;
         case 353: return DRAG_DATA;
         case 354: return DRAG_END;
+        case 380: return REINSTALL_APP;
+        case 381: return REINSTALL_RESULT;
+        case 382: return NATIVE_LIBRARY_CRASH;
         case 0: return BODY_NOT_SET;
         default: return null;
       }
@@ -2221,6 +2243,356 @@ public  final class Envelope extends
    */
   private void clearArmTranslationState() {
     if (bodyCase_ == 154) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int GAPPS_INSTALL_FIELD_NUMBER = 400;
+  /**
+   * <code>.dsa.control.v1.GappsInstall gapps_install = 400;</code>
+   */
+  @java.lang.Override
+  public boolean hasGappsInstall() {
+    return bodyCase_ == 400;
+  }
+  /**
+   * <code>.dsa.control.v1.GappsInstall gapps_install = 400;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.GappsInstall getGappsInstall() {
+    if (bodyCase_ == 400) {
+       return (io.github.thisisthepy.dsa.control.v1.GappsInstall) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.GappsInstall.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.GappsInstall gapps_install = 400;</code>
+   */
+  private void setGappsInstall(io.github.thisisthepy.dsa.control.v1.GappsInstall value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 400;
+  }
+  /**
+   * <code>.dsa.control.v1.GappsInstall gapps_install = 400;</code>
+   */
+  private void mergeGappsInstall(io.github.thisisthepy.dsa.control.v1.GappsInstall value) {
+    value.getClass();
+  if (bodyCase_ == 400 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.GappsInstall.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.GappsInstall.newBuilder((io.github.thisisthepy.dsa.control.v1.GappsInstall) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 400;
+  }
+  /**
+   * <code>.dsa.control.v1.GappsInstall gapps_install = 400;</code>
+   */
+  private void clearGappsInstall() {
+    if (bodyCase_ == 400) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int GAPPS_CHUNK_FIELD_NUMBER = 401;
+  /**
+   * <code>.dsa.control.v1.GappsChunk gapps_chunk = 401;</code>
+   */
+  @java.lang.Override
+  public boolean hasGappsChunk() {
+    return bodyCase_ == 401;
+  }
+  /**
+   * <code>.dsa.control.v1.GappsChunk gapps_chunk = 401;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.GappsChunk getGappsChunk() {
+    if (bodyCase_ == 401) {
+       return (io.github.thisisthepy.dsa.control.v1.GappsChunk) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.GappsChunk.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.GappsChunk gapps_chunk = 401;</code>
+   */
+  private void setGappsChunk(io.github.thisisthepy.dsa.control.v1.GappsChunk value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 401;
+  }
+  /**
+   * <code>.dsa.control.v1.GappsChunk gapps_chunk = 401;</code>
+   */
+  private void mergeGappsChunk(io.github.thisisthepy.dsa.control.v1.GappsChunk value) {
+    value.getClass();
+  if (bodyCase_ == 401 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.GappsChunk.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.GappsChunk.newBuilder((io.github.thisisthepy.dsa.control.v1.GappsChunk) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 401;
+  }
+  /**
+   * <code>.dsa.control.v1.GappsChunk gapps_chunk = 401;</code>
+   */
+  private void clearGappsChunk() {
+    if (bodyCase_ == 401) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int GAPPS_REMOVE_FIELD_NUMBER = 402;
+  /**
+   * <code>.dsa.control.v1.GappsRemove gapps_remove = 402;</code>
+   */
+  @java.lang.Override
+  public boolean hasGappsRemove() {
+    return bodyCase_ == 402;
+  }
+  /**
+   * <code>.dsa.control.v1.GappsRemove gapps_remove = 402;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.GappsRemove getGappsRemove() {
+    if (bodyCase_ == 402) {
+       return (io.github.thisisthepy.dsa.control.v1.GappsRemove) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.GappsRemove.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.GappsRemove gapps_remove = 402;</code>
+   */
+  private void setGappsRemove(io.github.thisisthepy.dsa.control.v1.GappsRemove value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 402;
+  }
+  /**
+   * <code>.dsa.control.v1.GappsRemove gapps_remove = 402;</code>
+   */
+  private void mergeGappsRemove(io.github.thisisthepy.dsa.control.v1.GappsRemove value) {
+    value.getClass();
+  if (bodyCase_ == 402 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.GappsRemove.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.GappsRemove.newBuilder((io.github.thisisthepy.dsa.control.v1.GappsRemove) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 402;
+  }
+  /**
+   * <code>.dsa.control.v1.GappsRemove gapps_remove = 402;</code>
+   */
+  private void clearGappsRemove() {
+    if (bodyCase_ == 402) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int GAPPS_QUERY_FIELD_NUMBER = 403;
+  /**
+   * <code>.dsa.control.v1.GappsQuery gapps_query = 403;</code>
+   */
+  @java.lang.Override
+  public boolean hasGappsQuery() {
+    return bodyCase_ == 403;
+  }
+  /**
+   * <code>.dsa.control.v1.GappsQuery gapps_query = 403;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.GappsQuery getGappsQuery() {
+    if (bodyCase_ == 403) {
+       return (io.github.thisisthepy.dsa.control.v1.GappsQuery) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.GappsQuery.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.GappsQuery gapps_query = 403;</code>
+   */
+  private void setGappsQuery(io.github.thisisthepy.dsa.control.v1.GappsQuery value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 403;
+  }
+  /**
+   * <code>.dsa.control.v1.GappsQuery gapps_query = 403;</code>
+   */
+  private void mergeGappsQuery(io.github.thisisthepy.dsa.control.v1.GappsQuery value) {
+    value.getClass();
+  if (bodyCase_ == 403 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.GappsQuery.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.GappsQuery.newBuilder((io.github.thisisthepy.dsa.control.v1.GappsQuery) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 403;
+  }
+  /**
+   * <code>.dsa.control.v1.GappsQuery gapps_query = 403;</code>
+   */
+  private void clearGappsQuery() {
+    if (bodyCase_ == 403) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int GAPPS_STATE_FIELD_NUMBER = 404;
+  /**
+   * <code>.dsa.control.v1.GappsState gapps_state = 404;</code>
+   */
+  @java.lang.Override
+  public boolean hasGappsState() {
+    return bodyCase_ == 404;
+  }
+  /**
+   * <code>.dsa.control.v1.GappsState gapps_state = 404;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.GappsState getGappsState() {
+    if (bodyCase_ == 404) {
+       return (io.github.thisisthepy.dsa.control.v1.GappsState) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.GappsState.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.GappsState gapps_state = 404;</code>
+   */
+  private void setGappsState(io.github.thisisthepy.dsa.control.v1.GappsState value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 404;
+  }
+  /**
+   * <code>.dsa.control.v1.GappsState gapps_state = 404;</code>
+   */
+  private void mergeGappsState(io.github.thisisthepy.dsa.control.v1.GappsState value) {
+    value.getClass();
+  if (bodyCase_ == 404 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.GappsState.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.GappsState.newBuilder((io.github.thisisthepy.dsa.control.v1.GappsState) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 404;
+  }
+  /**
+   * <code>.dsa.control.v1.GappsState gapps_state = 404;</code>
+   */
+  private void clearGappsState() {
+    if (bodyCase_ == 404) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int GOOGLE_DEVICE_ID_QUERY_FIELD_NUMBER = 405;
+  /**
+   * <code>.dsa.control.v1.GoogleDeviceIdQuery google_device_id_query = 405;</code>
+   */
+  @java.lang.Override
+  public boolean hasGoogleDeviceIdQuery() {
+    return bodyCase_ == 405;
+  }
+  /**
+   * <code>.dsa.control.v1.GoogleDeviceIdQuery google_device_id_query = 405;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.GoogleDeviceIdQuery getGoogleDeviceIdQuery() {
+    if (bodyCase_ == 405) {
+       return (io.github.thisisthepy.dsa.control.v1.GoogleDeviceIdQuery) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.GoogleDeviceIdQuery.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.GoogleDeviceIdQuery google_device_id_query = 405;</code>
+   */
+  private void setGoogleDeviceIdQuery(io.github.thisisthepy.dsa.control.v1.GoogleDeviceIdQuery value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 405;
+  }
+  /**
+   * <code>.dsa.control.v1.GoogleDeviceIdQuery google_device_id_query = 405;</code>
+   */
+  private void mergeGoogleDeviceIdQuery(io.github.thisisthepy.dsa.control.v1.GoogleDeviceIdQuery value) {
+    value.getClass();
+  if (bodyCase_ == 405 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.GoogleDeviceIdQuery.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.GoogleDeviceIdQuery.newBuilder((io.github.thisisthepy.dsa.control.v1.GoogleDeviceIdQuery) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 405;
+  }
+  /**
+   * <code>.dsa.control.v1.GoogleDeviceIdQuery google_device_id_query = 405;</code>
+   */
+  private void clearGoogleDeviceIdQuery() {
+    if (bodyCase_ == 405) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int GOOGLE_DEVICE_ID_FIELD_NUMBER = 406;
+  /**
+   * <code>.dsa.control.v1.GoogleDeviceId google_device_id = 406;</code>
+   */
+  @java.lang.Override
+  public boolean hasGoogleDeviceId() {
+    return bodyCase_ == 406;
+  }
+  /**
+   * <code>.dsa.control.v1.GoogleDeviceId google_device_id = 406;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.GoogleDeviceId getGoogleDeviceId() {
+    if (bodyCase_ == 406) {
+       return (io.github.thisisthepy.dsa.control.v1.GoogleDeviceId) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.GoogleDeviceId.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.GoogleDeviceId google_device_id = 406;</code>
+   */
+  private void setGoogleDeviceId(io.github.thisisthepy.dsa.control.v1.GoogleDeviceId value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 406;
+  }
+  /**
+   * <code>.dsa.control.v1.GoogleDeviceId google_device_id = 406;</code>
+   */
+  private void mergeGoogleDeviceId(io.github.thisisthepy.dsa.control.v1.GoogleDeviceId value) {
+    value.getClass();
+  if (bodyCase_ == 406 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.GoogleDeviceId.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.GoogleDeviceId.newBuilder((io.github.thisisthepy.dsa.control.v1.GoogleDeviceId) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 406;
+  }
+  /**
+   * <code>.dsa.control.v1.GoogleDeviceId google_device_id = 406;</code>
+   */
+  private void clearGoogleDeviceId() {
+    if (bodyCase_ == 406) {
       bodyCase_ = 0;
       body_ = null;
     }
@@ -6526,6 +6898,56 @@ public  final class Envelope extends
     }
   }
 
+  public static final int DEVICE_NAME_FIELD_NUMBER = 383;
+  /**
+   * <code>.dsa.control.v1.DeviceName device_name = 383;</code>
+   */
+  @java.lang.Override
+  public boolean hasDeviceName() {
+    return bodyCase_ == 383;
+  }
+  /**
+   * <code>.dsa.control.v1.DeviceName device_name = 383;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.DeviceName getDeviceName() {
+    if (bodyCase_ == 383) {
+       return (io.github.thisisthepy.dsa.control.v1.DeviceName) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.DeviceName.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.DeviceName device_name = 383;</code>
+   */
+  private void setDeviceName(io.github.thisisthepy.dsa.control.v1.DeviceName value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 383;
+  }
+  /**
+   * <code>.dsa.control.v1.DeviceName device_name = 383;</code>
+   */
+  private void mergeDeviceName(io.github.thisisthepy.dsa.control.v1.DeviceName value) {
+    value.getClass();
+  if (bodyCase_ == 383 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.DeviceName.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.DeviceName.newBuilder((io.github.thisisthepy.dsa.control.v1.DeviceName) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 383;
+  }
+  /**
+   * <code>.dsa.control.v1.DeviceName device_name = 383;</code>
+   */
+  private void clearDeviceName() {
+    if (bodyCase_ == 383) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
   public static final int GAMEPAD_CONNECTED_FIELD_NUMBER = 341;
   /**
    * <code>.dsa.control.v1.GamepadConnected gamepad_connected = 341;</code>
@@ -7071,6 +7493,156 @@ public  final class Envelope extends
    */
   private void clearDragEnd() {
     if (bodyCase_ == 354) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int REINSTALL_APP_FIELD_NUMBER = 380;
+  /**
+   * <code>.dsa.control.v1.ReinstallApp reinstall_app = 380;</code>
+   */
+  @java.lang.Override
+  public boolean hasReinstallApp() {
+    return bodyCase_ == 380;
+  }
+  /**
+   * <code>.dsa.control.v1.ReinstallApp reinstall_app = 380;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.ReinstallApp getReinstallApp() {
+    if (bodyCase_ == 380) {
+       return (io.github.thisisthepy.dsa.control.v1.ReinstallApp) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.ReinstallApp.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.ReinstallApp reinstall_app = 380;</code>
+   */
+  private void setReinstallApp(io.github.thisisthepy.dsa.control.v1.ReinstallApp value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 380;
+  }
+  /**
+   * <code>.dsa.control.v1.ReinstallApp reinstall_app = 380;</code>
+   */
+  private void mergeReinstallApp(io.github.thisisthepy.dsa.control.v1.ReinstallApp value) {
+    value.getClass();
+  if (bodyCase_ == 380 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.ReinstallApp.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.ReinstallApp.newBuilder((io.github.thisisthepy.dsa.control.v1.ReinstallApp) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 380;
+  }
+  /**
+   * <code>.dsa.control.v1.ReinstallApp reinstall_app = 380;</code>
+   */
+  private void clearReinstallApp() {
+    if (bodyCase_ == 380) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int REINSTALL_RESULT_FIELD_NUMBER = 381;
+  /**
+   * <code>.dsa.control.v1.ReinstallResult reinstall_result = 381;</code>
+   */
+  @java.lang.Override
+  public boolean hasReinstallResult() {
+    return bodyCase_ == 381;
+  }
+  /**
+   * <code>.dsa.control.v1.ReinstallResult reinstall_result = 381;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.ReinstallResult getReinstallResult() {
+    if (bodyCase_ == 381) {
+       return (io.github.thisisthepy.dsa.control.v1.ReinstallResult) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.ReinstallResult.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.ReinstallResult reinstall_result = 381;</code>
+   */
+  private void setReinstallResult(io.github.thisisthepy.dsa.control.v1.ReinstallResult value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 381;
+  }
+  /**
+   * <code>.dsa.control.v1.ReinstallResult reinstall_result = 381;</code>
+   */
+  private void mergeReinstallResult(io.github.thisisthepy.dsa.control.v1.ReinstallResult value) {
+    value.getClass();
+  if (bodyCase_ == 381 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.ReinstallResult.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.ReinstallResult.newBuilder((io.github.thisisthepy.dsa.control.v1.ReinstallResult) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 381;
+  }
+  /**
+   * <code>.dsa.control.v1.ReinstallResult reinstall_result = 381;</code>
+   */
+  private void clearReinstallResult() {
+    if (bodyCase_ == 381) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int NATIVE_LIBRARY_CRASH_FIELD_NUMBER = 382;
+  /**
+   * <code>.dsa.control.v1.NativeLibraryCrash native_library_crash = 382;</code>
+   */
+  @java.lang.Override
+  public boolean hasNativeLibraryCrash() {
+    return bodyCase_ == 382;
+  }
+  /**
+   * <code>.dsa.control.v1.NativeLibraryCrash native_library_crash = 382;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.NativeLibraryCrash getNativeLibraryCrash() {
+    if (bodyCase_ == 382) {
+       return (io.github.thisisthepy.dsa.control.v1.NativeLibraryCrash) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.NativeLibraryCrash.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.NativeLibraryCrash native_library_crash = 382;</code>
+   */
+  private void setNativeLibraryCrash(io.github.thisisthepy.dsa.control.v1.NativeLibraryCrash value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 382;
+  }
+  /**
+   * <code>.dsa.control.v1.NativeLibraryCrash native_library_crash = 382;</code>
+   */
+  private void mergeNativeLibraryCrash(io.github.thisisthepy.dsa.control.v1.NativeLibraryCrash value) {
+    value.getClass();
+  if (bodyCase_ == 382 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.NativeLibraryCrash.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.NativeLibraryCrash.newBuilder((io.github.thisisthepy.dsa.control.v1.NativeLibraryCrash) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 382;
+  }
+  /**
+   * <code>.dsa.control.v1.NativeLibraryCrash native_library_crash = 382;</code>
+   */
+  private void clearNativeLibraryCrash() {
+    if (bodyCase_ == 382) {
       bodyCase_ = 0;
       body_ = null;
     }
@@ -9008,6 +9580,342 @@ public  final class Envelope extends
     public Builder clearArmTranslationState() {
       copyOnWrite();
       instance.clearArmTranslationState();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.GappsInstall gapps_install = 400;</code>
+     */
+    @java.lang.Override
+    public boolean hasGappsInstall() {
+      return instance.hasGappsInstall();
+    }
+    /**
+     * <code>.dsa.control.v1.GappsInstall gapps_install = 400;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.GappsInstall getGappsInstall() {
+      return instance.getGappsInstall();
+    }
+    /**
+     * <code>.dsa.control.v1.GappsInstall gapps_install = 400;</code>
+     */
+    public Builder setGappsInstall(io.github.thisisthepy.dsa.control.v1.GappsInstall value) {
+      copyOnWrite();
+      instance.setGappsInstall(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.GappsInstall gapps_install = 400;</code>
+     */
+    public Builder setGappsInstall(
+        io.github.thisisthepy.dsa.control.v1.GappsInstall.Builder builderForValue) {
+      copyOnWrite();
+      instance.setGappsInstall(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.GappsInstall gapps_install = 400;</code>
+     */
+    public Builder mergeGappsInstall(io.github.thisisthepy.dsa.control.v1.GappsInstall value) {
+      copyOnWrite();
+      instance.mergeGappsInstall(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.GappsInstall gapps_install = 400;</code>
+     */
+    public Builder clearGappsInstall() {
+      copyOnWrite();
+      instance.clearGappsInstall();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.GappsChunk gapps_chunk = 401;</code>
+     */
+    @java.lang.Override
+    public boolean hasGappsChunk() {
+      return instance.hasGappsChunk();
+    }
+    /**
+     * <code>.dsa.control.v1.GappsChunk gapps_chunk = 401;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.GappsChunk getGappsChunk() {
+      return instance.getGappsChunk();
+    }
+    /**
+     * <code>.dsa.control.v1.GappsChunk gapps_chunk = 401;</code>
+     */
+    public Builder setGappsChunk(io.github.thisisthepy.dsa.control.v1.GappsChunk value) {
+      copyOnWrite();
+      instance.setGappsChunk(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.GappsChunk gapps_chunk = 401;</code>
+     */
+    public Builder setGappsChunk(
+        io.github.thisisthepy.dsa.control.v1.GappsChunk.Builder builderForValue) {
+      copyOnWrite();
+      instance.setGappsChunk(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.GappsChunk gapps_chunk = 401;</code>
+     */
+    public Builder mergeGappsChunk(io.github.thisisthepy.dsa.control.v1.GappsChunk value) {
+      copyOnWrite();
+      instance.mergeGappsChunk(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.GappsChunk gapps_chunk = 401;</code>
+     */
+    public Builder clearGappsChunk() {
+      copyOnWrite();
+      instance.clearGappsChunk();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.GappsRemove gapps_remove = 402;</code>
+     */
+    @java.lang.Override
+    public boolean hasGappsRemove() {
+      return instance.hasGappsRemove();
+    }
+    /**
+     * <code>.dsa.control.v1.GappsRemove gapps_remove = 402;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.GappsRemove getGappsRemove() {
+      return instance.getGappsRemove();
+    }
+    /**
+     * <code>.dsa.control.v1.GappsRemove gapps_remove = 402;</code>
+     */
+    public Builder setGappsRemove(io.github.thisisthepy.dsa.control.v1.GappsRemove value) {
+      copyOnWrite();
+      instance.setGappsRemove(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.GappsRemove gapps_remove = 402;</code>
+     */
+    public Builder setGappsRemove(
+        io.github.thisisthepy.dsa.control.v1.GappsRemove.Builder builderForValue) {
+      copyOnWrite();
+      instance.setGappsRemove(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.GappsRemove gapps_remove = 402;</code>
+     */
+    public Builder mergeGappsRemove(io.github.thisisthepy.dsa.control.v1.GappsRemove value) {
+      copyOnWrite();
+      instance.mergeGappsRemove(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.GappsRemove gapps_remove = 402;</code>
+     */
+    public Builder clearGappsRemove() {
+      copyOnWrite();
+      instance.clearGappsRemove();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.GappsQuery gapps_query = 403;</code>
+     */
+    @java.lang.Override
+    public boolean hasGappsQuery() {
+      return instance.hasGappsQuery();
+    }
+    /**
+     * <code>.dsa.control.v1.GappsQuery gapps_query = 403;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.GappsQuery getGappsQuery() {
+      return instance.getGappsQuery();
+    }
+    /**
+     * <code>.dsa.control.v1.GappsQuery gapps_query = 403;</code>
+     */
+    public Builder setGappsQuery(io.github.thisisthepy.dsa.control.v1.GappsQuery value) {
+      copyOnWrite();
+      instance.setGappsQuery(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.GappsQuery gapps_query = 403;</code>
+     */
+    public Builder setGappsQuery(
+        io.github.thisisthepy.dsa.control.v1.GappsQuery.Builder builderForValue) {
+      copyOnWrite();
+      instance.setGappsQuery(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.GappsQuery gapps_query = 403;</code>
+     */
+    public Builder mergeGappsQuery(io.github.thisisthepy.dsa.control.v1.GappsQuery value) {
+      copyOnWrite();
+      instance.mergeGappsQuery(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.GappsQuery gapps_query = 403;</code>
+     */
+    public Builder clearGappsQuery() {
+      copyOnWrite();
+      instance.clearGappsQuery();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.GappsState gapps_state = 404;</code>
+     */
+    @java.lang.Override
+    public boolean hasGappsState() {
+      return instance.hasGappsState();
+    }
+    /**
+     * <code>.dsa.control.v1.GappsState gapps_state = 404;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.GappsState getGappsState() {
+      return instance.getGappsState();
+    }
+    /**
+     * <code>.dsa.control.v1.GappsState gapps_state = 404;</code>
+     */
+    public Builder setGappsState(io.github.thisisthepy.dsa.control.v1.GappsState value) {
+      copyOnWrite();
+      instance.setGappsState(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.GappsState gapps_state = 404;</code>
+     */
+    public Builder setGappsState(
+        io.github.thisisthepy.dsa.control.v1.GappsState.Builder builderForValue) {
+      copyOnWrite();
+      instance.setGappsState(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.GappsState gapps_state = 404;</code>
+     */
+    public Builder mergeGappsState(io.github.thisisthepy.dsa.control.v1.GappsState value) {
+      copyOnWrite();
+      instance.mergeGappsState(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.GappsState gapps_state = 404;</code>
+     */
+    public Builder clearGappsState() {
+      copyOnWrite();
+      instance.clearGappsState();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.GoogleDeviceIdQuery google_device_id_query = 405;</code>
+     */
+    @java.lang.Override
+    public boolean hasGoogleDeviceIdQuery() {
+      return instance.hasGoogleDeviceIdQuery();
+    }
+    /**
+     * <code>.dsa.control.v1.GoogleDeviceIdQuery google_device_id_query = 405;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.GoogleDeviceIdQuery getGoogleDeviceIdQuery() {
+      return instance.getGoogleDeviceIdQuery();
+    }
+    /**
+     * <code>.dsa.control.v1.GoogleDeviceIdQuery google_device_id_query = 405;</code>
+     */
+    public Builder setGoogleDeviceIdQuery(io.github.thisisthepy.dsa.control.v1.GoogleDeviceIdQuery value) {
+      copyOnWrite();
+      instance.setGoogleDeviceIdQuery(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.GoogleDeviceIdQuery google_device_id_query = 405;</code>
+     */
+    public Builder setGoogleDeviceIdQuery(
+        io.github.thisisthepy.dsa.control.v1.GoogleDeviceIdQuery.Builder builderForValue) {
+      copyOnWrite();
+      instance.setGoogleDeviceIdQuery(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.GoogleDeviceIdQuery google_device_id_query = 405;</code>
+     */
+    public Builder mergeGoogleDeviceIdQuery(io.github.thisisthepy.dsa.control.v1.GoogleDeviceIdQuery value) {
+      copyOnWrite();
+      instance.mergeGoogleDeviceIdQuery(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.GoogleDeviceIdQuery google_device_id_query = 405;</code>
+     */
+    public Builder clearGoogleDeviceIdQuery() {
+      copyOnWrite();
+      instance.clearGoogleDeviceIdQuery();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.GoogleDeviceId google_device_id = 406;</code>
+     */
+    @java.lang.Override
+    public boolean hasGoogleDeviceId() {
+      return instance.hasGoogleDeviceId();
+    }
+    /**
+     * <code>.dsa.control.v1.GoogleDeviceId google_device_id = 406;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.GoogleDeviceId getGoogleDeviceId() {
+      return instance.getGoogleDeviceId();
+    }
+    /**
+     * <code>.dsa.control.v1.GoogleDeviceId google_device_id = 406;</code>
+     */
+    public Builder setGoogleDeviceId(io.github.thisisthepy.dsa.control.v1.GoogleDeviceId value) {
+      copyOnWrite();
+      instance.setGoogleDeviceId(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.GoogleDeviceId google_device_id = 406;</code>
+     */
+    public Builder setGoogleDeviceId(
+        io.github.thisisthepy.dsa.control.v1.GoogleDeviceId.Builder builderForValue) {
+      copyOnWrite();
+      instance.setGoogleDeviceId(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.GoogleDeviceId google_device_id = 406;</code>
+     */
+    public Builder mergeGoogleDeviceId(io.github.thisisthepy.dsa.control.v1.GoogleDeviceId value) {
+      copyOnWrite();
+      instance.mergeGoogleDeviceId(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.GoogleDeviceId google_device_id = 406;</code>
+     */
+    public Builder clearGoogleDeviceId() {
+      copyOnWrite();
+      instance.clearGoogleDeviceId();
       return this;
     }
 
@@ -13140,6 +14048,54 @@ public  final class Envelope extends
     }
 
     /**
+     * <code>.dsa.control.v1.DeviceName device_name = 383;</code>
+     */
+    @java.lang.Override
+    public boolean hasDeviceName() {
+      return instance.hasDeviceName();
+    }
+    /**
+     * <code>.dsa.control.v1.DeviceName device_name = 383;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.DeviceName getDeviceName() {
+      return instance.getDeviceName();
+    }
+    /**
+     * <code>.dsa.control.v1.DeviceName device_name = 383;</code>
+     */
+    public Builder setDeviceName(io.github.thisisthepy.dsa.control.v1.DeviceName value) {
+      copyOnWrite();
+      instance.setDeviceName(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.DeviceName device_name = 383;</code>
+     */
+    public Builder setDeviceName(
+        io.github.thisisthepy.dsa.control.v1.DeviceName.Builder builderForValue) {
+      copyOnWrite();
+      instance.setDeviceName(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.DeviceName device_name = 383;</code>
+     */
+    public Builder mergeDeviceName(io.github.thisisthepy.dsa.control.v1.DeviceName value) {
+      copyOnWrite();
+      instance.mergeDeviceName(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.DeviceName device_name = 383;</code>
+     */
+    public Builder clearDeviceName() {
+      copyOnWrite();
+      instance.clearDeviceName();
+      return this;
+    }
+
+    /**
      * <code>.dsa.control.v1.GamepadConnected gamepad_connected = 341;</code>
      */
     @java.lang.Override
@@ -13667,6 +14623,150 @@ public  final class Envelope extends
       return this;
     }
 
+    /**
+     * <code>.dsa.control.v1.ReinstallApp reinstall_app = 380;</code>
+     */
+    @java.lang.Override
+    public boolean hasReinstallApp() {
+      return instance.hasReinstallApp();
+    }
+    /**
+     * <code>.dsa.control.v1.ReinstallApp reinstall_app = 380;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.ReinstallApp getReinstallApp() {
+      return instance.getReinstallApp();
+    }
+    /**
+     * <code>.dsa.control.v1.ReinstallApp reinstall_app = 380;</code>
+     */
+    public Builder setReinstallApp(io.github.thisisthepy.dsa.control.v1.ReinstallApp value) {
+      copyOnWrite();
+      instance.setReinstallApp(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ReinstallApp reinstall_app = 380;</code>
+     */
+    public Builder setReinstallApp(
+        io.github.thisisthepy.dsa.control.v1.ReinstallApp.Builder builderForValue) {
+      copyOnWrite();
+      instance.setReinstallApp(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ReinstallApp reinstall_app = 380;</code>
+     */
+    public Builder mergeReinstallApp(io.github.thisisthepy.dsa.control.v1.ReinstallApp value) {
+      copyOnWrite();
+      instance.mergeReinstallApp(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ReinstallApp reinstall_app = 380;</code>
+     */
+    public Builder clearReinstallApp() {
+      copyOnWrite();
+      instance.clearReinstallApp();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.ReinstallResult reinstall_result = 381;</code>
+     */
+    @java.lang.Override
+    public boolean hasReinstallResult() {
+      return instance.hasReinstallResult();
+    }
+    /**
+     * <code>.dsa.control.v1.ReinstallResult reinstall_result = 381;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.ReinstallResult getReinstallResult() {
+      return instance.getReinstallResult();
+    }
+    /**
+     * <code>.dsa.control.v1.ReinstallResult reinstall_result = 381;</code>
+     */
+    public Builder setReinstallResult(io.github.thisisthepy.dsa.control.v1.ReinstallResult value) {
+      copyOnWrite();
+      instance.setReinstallResult(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ReinstallResult reinstall_result = 381;</code>
+     */
+    public Builder setReinstallResult(
+        io.github.thisisthepy.dsa.control.v1.ReinstallResult.Builder builderForValue) {
+      copyOnWrite();
+      instance.setReinstallResult(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ReinstallResult reinstall_result = 381;</code>
+     */
+    public Builder mergeReinstallResult(io.github.thisisthepy.dsa.control.v1.ReinstallResult value) {
+      copyOnWrite();
+      instance.mergeReinstallResult(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ReinstallResult reinstall_result = 381;</code>
+     */
+    public Builder clearReinstallResult() {
+      copyOnWrite();
+      instance.clearReinstallResult();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.NativeLibraryCrash native_library_crash = 382;</code>
+     */
+    @java.lang.Override
+    public boolean hasNativeLibraryCrash() {
+      return instance.hasNativeLibraryCrash();
+    }
+    /**
+     * <code>.dsa.control.v1.NativeLibraryCrash native_library_crash = 382;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.NativeLibraryCrash getNativeLibraryCrash() {
+      return instance.getNativeLibraryCrash();
+    }
+    /**
+     * <code>.dsa.control.v1.NativeLibraryCrash native_library_crash = 382;</code>
+     */
+    public Builder setNativeLibraryCrash(io.github.thisisthepy.dsa.control.v1.NativeLibraryCrash value) {
+      copyOnWrite();
+      instance.setNativeLibraryCrash(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.NativeLibraryCrash native_library_crash = 382;</code>
+     */
+    public Builder setNativeLibraryCrash(
+        io.github.thisisthepy.dsa.control.v1.NativeLibraryCrash.Builder builderForValue) {
+      copyOnWrite();
+      instance.setNativeLibraryCrash(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.NativeLibraryCrash native_library_crash = 382;</code>
+     */
+    public Builder mergeNativeLibraryCrash(io.github.thisisthepy.dsa.control.v1.NativeLibraryCrash value) {
+      copyOnWrite();
+      instance.mergeNativeLibraryCrash(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.NativeLibraryCrash native_library_crash = 382;</code>
+     */
+    public Builder clearNativeLibraryCrash() {
+      copyOnWrite();
+      instance.clearNativeLibraryCrash();
+      return this;
+    }
+
     // @@protoc_insertion_point(builder_scope:dsa.control.v1.Envelope)
   }
   @java.lang.Override
@@ -13820,9 +14920,20 @@ public  final class Envelope extends
             io.github.thisisthepy.dsa.control.v1.DragData.class,
             io.github.thisisthepy.dsa.control.v1.DragEnd.class,
             io.github.thisisthepy.dsa.control.v1.ImeDeleteSurrounding.class,
+            io.github.thisisthepy.dsa.control.v1.ReinstallApp.class,
+            io.github.thisisthepy.dsa.control.v1.ReinstallResult.class,
+            io.github.thisisthepy.dsa.control.v1.NativeLibraryCrash.class,
+            io.github.thisisthepy.dsa.control.v1.DeviceName.class,
+            io.github.thisisthepy.dsa.control.v1.GappsInstall.class,
+            io.github.thisisthepy.dsa.control.v1.GappsChunk.class,
+            io.github.thisisthepy.dsa.control.v1.GappsRemove.class,
+            io.github.thisisthepy.dsa.control.v1.GappsQuery.class,
+            io.github.thisisthepy.dsa.control.v1.GappsState.class,
+            io.github.thisisthepy.dsa.control.v1.GoogleDeviceIdQuery.class,
+            io.github.thisisthepy.dsa.control.v1.GoogleDeviceId.class,
           };
           java.lang.String info =
-              "\u0000\u0087\u0001\u0000\u0001\u0179\u0087\u0000\u0000\u0000\u0001<\u0000\u0002<" +
+              "\u0000\u0092\u0001\u0000\u0001\u0196\u0092\u0000\u0000\u0000\u0001<\u0000\u0002<" +
               "\u0000\u0003<\u0000\u0004<\u0000\u0005<\u0000\u0006<\u0000\u0007<\u0000\b<\u0000" +
               "\t<\u0000\n<\u0000\u000b<\u0000\f<\u0000\r<\u0000\u000f<\u0000\u0010<\u0000\u0011" +
               "<\u0000\u0012<\u0000\u0013<\u0000\u0014<\u0000\u0015<\u0000\u0016<\u0000\u0017<\u0000" +
@@ -13840,7 +14951,8 @@ public  final class Envelope extends
               "\u0104<\u0000\u0105<\u0000\u0106<\u0000\u0107<\u0000\u0108<\u0000\u0109<\u0000\u010a" +
               "<\u0000\u010b<\u0000\u0122<\u0000\u0123<\u0000\u0154<\u0000\u0155<\u0000\u0156<\u0000" +
               "\u0157<\u0000\u0158<\u0000\u015e<\u0000\u015f<\u0000\u0160<\u0000\u0161<\u0000\u0162" +
-              "<\u0000\u0179<\u0000";
+              "<\u0000\u0179<\u0000\u017c<\u0000\u017d<\u0000\u017e<\u0000\u017f<\u0000\u0190<\u0000" +
+              "\u0191<\u0000\u0192<\u0000\u0193<\u0000\u0194<\u0000\u0195<\u0000\u0196<\u0000";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through

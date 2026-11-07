@@ -28,6 +28,30 @@ class FakeWidgetPlatform : WidgetPlatform {
     val configuring = mutableMapOf<Int, (Boolean) -> Unit>()
     var frame: (Int, Int, Int, ByteArray) -> Unit = { _, _, _, _ -> }
     var changed: () -> Unit = {}
+    var failed: (Int) -> Unit = {}
+
+    /**
+     * The widget IDs a view listens to. Like Android's widget host, it starts empty in every
+     * process: the views an earlier agent made are gone with it, and [update] drops an update
+     * for an ID nothing listens to.
+     */
+    val listening = mutableSetOf<Int>()
+
+    /** Updates [update] dropped because no view listened to their widget. */
+    val dropped = mutableListOf<Int>()
+
+    /** How many of the next [show] calls fail to draw, as a window that does not open. */
+    var failingShows = 0
+
+    /** The widget's app sent new views: the widget draws [png] if a view listens to it. */
+    fun update(widgetId: Int, png: ByteArray) {
+        if (widgetId !in listening) {
+            dropped += widgetId
+            return
+        }
+        val size = shown.last { it.first == widgetId }.second
+        frame(widgetId, size.width, size.height, png)
+    }
 
     override fun providers() = offered.toList()
     override fun placedIds() = bound.keys.toList()
@@ -41,6 +65,7 @@ class FakeWidgetPlatform : WidgetPlatform {
 
     override fun delete(widgetId: Int) {
         bound.remove(widgetId)
+        listening.remove(widgetId)
         deleted += widgetId
     }
 
@@ -50,6 +75,12 @@ class FakeWidgetPlatform : WidgetPlatform {
 
     override fun show(widgetId: Int, size: WidgetSize) {
         shown += widgetId to size
+        if (failingShows > 0) {
+            failingShows--
+            failed(widgetId)
+            return
+        }
+        listening += widgetId
     }
 
     override fun pointer(widgetId: Int, action: PointerAction, pointerId: Int, x: Float, y: Float) {
@@ -60,9 +91,10 @@ class FakeWidgetPlatform : WidgetPlatform {
         this.dozing += dozing
     }
 
-    override fun start(frame: (Int, Int, Int, ByteArray) -> Unit, changed: () -> Unit) {
+    override fun start(frame: (Int, Int, Int, ByteArray) -> Unit, changed: () -> Unit, failed: (Int) -> Unit) {
         this.frame = frame
         this.changed = changed
+        this.failed = failed
     }
 }
 
@@ -265,9 +297,10 @@ class WidgetManagerTest {
         scheduler.runDue()
         assertEquals(1, sent.size)
         assertEquals(180, sent[0].widgetFrame.width)
-        // A new connection gets the image again.
-        manager.connected()
+        // A new connection gets the image again, as it connects, and only once: the same
+        // image drawn again after it is not sent twice.
         sent.clear()
+        manager.connected()
         platform.frame(1, 180, 110, png)
         scheduler.runDue()
         assertEquals(1, sent.count { it.hasWidgetFrame() })
@@ -348,9 +381,9 @@ class WidgetManagerTest {
     fun fr12_widgets_start_once_the_user_is_unlocked_and_the_host_keeps_them_meanwhile() {
         var unlocked = false
         val locked = object : WidgetPlatform by platform {
-            override fun start(frame: (Int, Int, Int, ByteArray) -> Unit, changed: () -> Unit) {
+            override fun start(frame: (Int, Int, Int, ByteArray) -> Unit, changed: () -> Unit, failed: (Int) -> Unit) {
                 check(unlocked) { "User 0 must be unlocked for widgets to be available" }
-                platform.start(frame, changed)
+                platform.start(frame, changed, failed)
             }
             override fun placedIds(): List<Int> {
                 check(unlocked) { "User 0 must be unlocked for widgets to be available" }
@@ -375,6 +408,116 @@ class WidgetManagerTest {
         assertEquals(listOf(3), platform.shown.map { it.first })
         assertEquals(listOf(Envelope.BodyCase.WIDGET_UPDATED, Envelope.BodyCase.WIDGET_LIST), sent.map { it.bodyCase })
         assertEquals(listOf(3), sent[1].widgetList.widgetIdsList)
+    }
+
+    @Test
+    fun fr12_widgets_start_the_moment_the_user_is_unlocked_without_waiting_for_a_retry() {
+        var unlocked = false
+        var readyCallback: (() -> Unit)? = null
+        val waiting = object : WidgetPlatform by platform {
+            override fun whenReady(ready: () -> Unit) {
+                if (unlocked) ready() else readyCallback = ready
+            }
+            override fun start(frame: (Int, Int, Int, ByteArray) -> Unit, changed: () -> Unit, failed: (Int) -> Unit) {
+                check(unlocked) { "User 0 must be unlocked for widgets to be available" }
+                platform.start(frame, changed, failed)
+            }
+        }
+        platform.offered += clock()
+        platform.bound[3] = "com.example.clock/.ClockWidget"
+        val retries = mutableListOf<() -> Unit>()
+        val manager = WidgetManager(waiting, store, { frame -> sent += decode(frame); true }, log, { connected })
+        manager.start(later = { retries += it }) { it() }
+        manager.connected()
+        // Locked: the widget host is not even tried, so nothing fails and nothing is sent.
+        assertTrue(sent.isEmpty())
+        assertTrue(retries.isEmpty())
+        assertTrue(log.lines.isEmpty())
+        assertTrue(platform.shown.isEmpty())
+        // Unlocked: the widgets start then, with no retry in between.
+        unlocked = true
+        readyCallback!!()
+        assertTrue(retries.isEmpty())
+        assertEquals(listOf(3), platform.shown.map { it.first })
+        assertEquals(listOf(Envelope.BodyCase.WIDGET_UPDATED, Envelope.BodyCase.WIDGET_LIST), sent.map { it.bodyCase })
+        // A second signal starts nothing again.
+        readyCallback!!()
+        assertEquals(1, platform.shown.size)
+    }
+
+    @Test
+    fun fr12_placed_widgets_listen_and_draw_again_after_the_agent_restarts() {
+        // Widgets 2 and 3 were placed before the agent or Android restarted. Android kept the
+        // IDs; the agent kept a size for 2 only. The new process has no views yet.
+        platform.offered += clock()
+        platform.bound[2] = "com.example.clock/.ClockWidget"
+        platform.bound[3] = "com.example.clock/.ClockWidget"
+        store.save(2, WidgetSize(600, 340, 320, 300, 170))
+        connected = false
+        started()
+        // Every placed widget has a view listening before the host is even there, so the
+        // updates its app sends at boot are not dropped.
+        assertEquals(setOf(2, 3), platform.listening)
+        platform.update(3, byteArrayOf(0x89.toByte(), 3))
+        platform.update(2, byteArrayOf(0x89.toByte(), 2))
+        scheduler.runDue()
+        assertTrue(platform.dropped.isEmpty())
+        connected = true
+        manager.connected()
+        val frames = sent.filter { it.hasWidgetFrame() }.map { it.widgetFrame }
+        assertEquals(setOf(2, 3), frames.map { it.widgetId }.toSet())
+        assertEquals(600, frames.single { it.widgetId == 2 }.width)
+        // The clock ticks: each new image reaches the host as it is drawn.
+        sent.clear()
+        platform.update(2, byteArrayOf(0x89.toByte(), 2, 1))
+        platform.update(2, byteArrayOf(0x89.toByte(), 2, 2))
+        scheduler.runDue()
+        assertEquals(2, sent.count { it.hasWidgetFrame() && it.widgetFrame.widgetId == 2 })
+    }
+
+    @Test
+    fun fr12_a_widget_whose_drawing_failed_is_tried_again_until_it_listens() {
+        platform.offered += clock()
+        platform.bound[3] = "com.example.clock/.ClockWidget"
+        platform.failingShows = 2
+        manager.start(later = { work -> scheduler.postDelayed(1000, work) }) { work -> scheduler.post(work) }
+        scheduler.runDue()
+        assertTrue(3 !in platform.listening)
+        platform.update(3, byteArrayOf(1))
+        assertEquals(listOf(3), platform.dropped)
+        scheduler.advance(1000)
+        scheduler.runDue()
+        assertTrue(3 !in platform.listening)
+        scheduler.advance(1000)
+        scheduler.runDue()
+        assertTrue(3 in platform.listening)
+        manager.connected()
+        platform.update(3, byteArrayOf(0x89.toByte(), 7))
+        scheduler.runDue()
+        assertEquals(3, sent.last { it.hasWidgetFrame() }.widgetFrame.widgetId)
+        // A removed widget is not tried again.
+        platform.failingShows = 1
+        manager.handle(Envelope.newBuilder().setResizeWidget(ResizeWidget.newBuilder().setWidgetId(3).setWidth(200).setHeight(100).setDensityDpi(160).setWidthDp(200).setHeightDp(100)).build())
+        scheduler.runDue()
+        manager.handle(Envelope.newBuilder().setRemoveWidget(RemoveWidget.newBuilder().setWidgetId(3)).build())
+        val shows = platform.shown.size
+        scheduler.advance(5000)
+        scheduler.runDue()
+        assertEquals(shows, platform.shown.size)
+    }
+
+    @Test
+    fun fr12_a_click_reaches_a_widget_restored_after_a_restart() {
+        platform.offered += clock()
+        platform.bound[5] = "com.example.clock/.ClockWidget"
+        started()
+        manager.connected()
+        manager.handle(
+            Envelope.newBuilder().setWidgetPointer(
+                WidgetPointer.newBuilder().setWidgetId(5).setAction(PointerAction.POINTER_ACTION_DOWN).setX(4f).setY(5f),
+            ).build(),
+        )
+        assertEquals(listOf("5 POINTER_ACTION_DOWN 4.0,5.0"), platform.pointers)
     }
 
     @Test

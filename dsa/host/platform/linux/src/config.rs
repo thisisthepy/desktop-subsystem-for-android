@@ -38,9 +38,11 @@ fn default_socket() -> PathBuf {
 fn default_machine_dir() -> PathBuf {
     DEFAULT_MACHINE_DIR.into()
 }
-/// Free page reporting in 2 MiB blocks, the size of a transparent huge page on the host.
+/// Free page reporting of every free 4 KiB page: memory the guest frees goes back to the host
+/// at once, without waiting for compaction to gather it into 2 MiB blocks. crosvm returns each
+/// reported range to the host as it comes.
 fn default_page_reporting_order() -> u8 {
-    9
+    0
 }
 
 /// A path that may be written as an empty string, which means none, so a package can fill in
@@ -89,7 +91,7 @@ pub struct HostConfig {
     /// The VM's starting memory in MiB, whatever the user's limit, for tests and development.
     #[serde(default)]
     pub memory_mb: Option<u32>,
-    /// Whether the VM may grow while it runs (the balloon lets memory out). Off, it keeps its
+    /// Whether the VM may grow while it runs (virtio-mem plugs memory in). Off, it keeps its
     /// starting size.
     #[serde(default = "default_true")]
     pub grow_memory: bool,
@@ -223,7 +225,8 @@ mod tests {
         assert_eq!(config.control_port, 5000);
         assert_eq!(config.log_port, 5001);
         assert!(config.grow_memory && config.network && config.sandbox);
-        assert_eq!(config.page_reporting_order, 9);
+        // Freed memory goes back in pieces as small as a page, so none waits in the guest.
+        assert_eq!(config.page_reporting_order, 0);
         assert_eq!(
             config.settings_dir(),
             PathBuf::from("/var/lib/dsa/settings")

@@ -25,7 +25,10 @@ pub mod adapter;
 pub mod audio;
 pub mod background;
 pub mod clipboard;
+pub mod committed;
 pub mod display_gpu;
+pub mod fluent;
+pub mod fluent_menu;
 pub mod frames;
 pub mod gamepads;
 pub mod hosts;
@@ -41,6 +44,7 @@ pub mod single_instance;
 pub mod system_settings;
 pub mod tasks;
 pub mod trim;
+pub mod widget_automation;
 pub mod widget_menu;
 pub mod widgets;
 pub mod window_marks;
@@ -1013,6 +1017,10 @@ impl Compositor {
         let logger = self.logger.clone();
         let log = |message: &str| note(logger.as_deref(), message);
         let router = Arc::new(FrameRouter::new());
+        if let Some(presenter) = &self.presenter {
+            let presenter = Arc::clone(presenter);
+            router.on_forget(Box::new(move |display| presenter.forget_display(display)));
+        }
         let mut luid = None;
         let gpu = match &self.presenter {
             None => None,
@@ -1074,6 +1082,7 @@ impl Compositor {
         let manager_stop = Arc::new(AtomicBool::new(false));
         let idle = Arc::new(Mutex::new(IdleTrim::new(IDLE_TRIM_DELAY, Instant::now())));
         let trim_gpu = gpu.clone();
+        let trim_renderer = self.presenter.clone();
         let quiet_router = Arc::clone(&router);
         let setup = ManagerSetup {
             events: events_rx,
@@ -1124,7 +1133,14 @@ impl Compositor {
             .name("dsa-wm-trim".into())
             .spawn(move || {
                 let quiet_for = Box::new(move || quiet_router.quiet_for());
-                trim::run(trim_idle, trim_gpu, quiet_for, trim_stop, trim_logger)
+                trim::run(
+                    trim_idle,
+                    trim_gpu,
+                    trim_renderer,
+                    quiet_for,
+                    trim_stop,
+                    trim_logger,
+                )
             })
             .map_err(|e| log(&format!("could not start the idle memory trim: {e}")))
             .ok();

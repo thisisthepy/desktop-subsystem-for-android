@@ -15,8 +15,7 @@ use std::sync::OnceLock;
 use dsa_host_core::drag::LeaveWatch;
 use dsa_host_core::ime::ImeCursor;
 use dsa_host_core::input::{
-    ContactPhase, InputEvent, MouseButton, PointerMapper, PointerTool, WindowGeometry,
-    WindowInput,
+    ContactPhase, InputEvent, MouseButton, PointerMapper, PointerTool, WindowGeometry, WindowInput,
 };
 use dsa_host_core::keys::{keycode, KeyInput, KeyMapper};
 use objc2::msg_send;
@@ -25,7 +24,9 @@ use objc2::runtime::{AnyClass, AnyObject, AnyProtocol, Bool, ClassBuilder, Sel};
 use objc2::sel;
 
 use super::keys::{guest_key, locks, modifier_change, ModifierChange};
-use super::pointer::{button, client_pixel, pen_pressure, scroll_notches, SUBTYPE_TABLET_POINT};
+use super::pointer::{
+    button, client_pixel, pen_pressure, pen_tilt, scroll_notches, SUBTYPE_TABLET_POINT,
+};
 use super::text_input::TextInputClient;
 use crate::objc::{class, ns_string, string_of, CGPoint, CGRect, CGSize, NSRange, NOT_FOUND};
 
@@ -118,6 +119,12 @@ unsafe fn event_position(view: &AnyObject, event: *mut AnyObject) -> (f64, f64) 
     client_pixel((point.x, point.y), bounds.size.height, view_scale(view))
 }
 
+/// A tablet event's tilt, as AppKit scales it: -1 to 1 on each axis, y up.
+unsafe fn event_tilt(event: *mut AnyObject) -> (f64, f64) {
+    let tilt: CGPoint = msg_send![event, tilt];
+    (tilt.x, tilt.y)
+}
+
 unsafe fn modifier_flags(event: *mut AnyObject) -> u64 {
     let flags: usize = msg_send![event, modifierFlags];
     flags as u64
@@ -166,6 +173,7 @@ unsafe fn mouse_button(view: &AnyObject, event: *mut AnyObject, down: bool) {
                 position,
                 pressure: pen_pressure(pressure),
                 buttons: 0,
+                tilt: pen_tilt(event_tilt(event)),
             },
         );
         return;
@@ -216,6 +224,7 @@ unsafe extern "C-unwind" fn mouse_moved(this: &AnyObject, _: Sel, event: *mut An
                 position,
                 pressure: pen_pressure(pressure),
                 buttons: 0,
+                tilt: pen_tilt(event_tilt(event)),
             },
         );
         return;

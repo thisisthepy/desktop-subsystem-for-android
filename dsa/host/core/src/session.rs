@@ -73,8 +73,9 @@
 //! removed. What the user does with one ([`Session::notification_action`]) goes back to the
 //! guest: a click first wakes a guest in Doze, as a shown window does, so the app opens on a
 //! screen that is on, and a dismissal waits for a frozen guest to be thawed.
-//! APKs from the host go to the guest with [`Session::install_apk`], streamed in chunks paced
-//! by the agent's progress reports, one install at a time; a second waits for the first.
+//! APKs from the host go to the guest with [`Session::install_apk`], and apps made of several
+//! APKs and expansion files with [`Session::install_parts`], streamed in chunks paced by the
+//! agent's progress reports, one install at a time; a second waits for the first.
 //!
 //! The widgets the agent hosts go to every [`Session::watch_widgets`] watcher, with what each
 //! one shows ([`crate::widgets`]). They are kept while the guest is stopped, so their windows
@@ -114,7 +115,8 @@ use crate::accessibility::{
     AccessibilityWatch, ActionRequest, ActionResult, GuestAccessibility, TreeUpdate,
 };
 use crate::adb_bridge::{AdbBridge, BridgeStream, GuestAdb};
-use crate::apk::{self, InstallOutcome, InstalledPackage};
+use crate::adb_discovery::{AdbAdvertise, AdbServerLink, AutoConnectState, AutoConnectWatcher};
+use crate::apk::{self, InstallOutcome, InstallPart, InstalledPackage};
 use crate::apps::UninstallOutcome;
 use crate::arm_translation::GuestArmTranslation;
 use crate::background::{
@@ -123,10 +125,11 @@ use crate::background::{
 };
 use crate::clipboard;
 use crate::clock_trace::ClockTrace;
-use crate::file_share::{self, ShareHost, Sharing, SharingNow};
 use crate::drag::{self, DragChunk, DragItem, DragOffer, DragOut, DragRead};
+use crate::file_share::{self, ShareHost, Sharing, SharingNow};
 use crate::files::{self, FileAction, FileTransfer};
 use crate::gamepads::{GamepadEvent, GamepadRumble, GamepadTable};
+use crate::gapps::GuestGapps;
 use crate::guest_log::{
     serve_log_connection, DiagnosticsEvent, LogDumpEvent, LogEntry, LogFilter, LogHub,
     LogPortMessage, LogWatch, STREAM_TAIL,
@@ -137,6 +140,7 @@ use crate::keys::KeyEvent;
 use crate::links::{self, LinkGate};
 use crate::location::{LocationEvent, LocationHub, Wanted};
 use crate::memory::{GrowthAction, GuestMemory, GuestMemoryReport, GuestPressure, MemoryGrowth};
+use crate::native_abi::{self, NativeLibraries, RunAsArmOutcome, RunAsArmStatus};
 use crate::notifications::{self, Notification, NotificationAction, NotificationEvent, RateLimit};
 use crate::power::PowerState;
 use crate::power_hints::PowerHint;
@@ -574,6 +578,9 @@ enum Command {
     HostWoke(SystemTime),
 }
 
+/// Says the device name a guest is given: the computer's name, as its last boot found it.
+pub type DeviceNameSource = Arc<dyn Fn() -> Option<String> + Send + Sync>;
+
 struct Shared {
     status: Mutex<(SessionState, Option<StopReason>)>,
     vm_id: Mutex<Option<String>>,
@@ -620,6 +627,13 @@ struct Shared {
     arm_translation: Mutex<Option<Sender<control::ArmTranslationState>>>,
     /// Held for the length of an exchange about ARM translation, so they go one at a time.
     arm_translation_turn: Mutex<()>,
+    /// Who waits for the control daemon's word on the Google apps, while one exchange is under
+    /// way.
+    gapps: Mutex<Option<Sender<control::GappsState>>>,
+    /// Held for the length of an exchange about the Google apps, so they go one at a time.
+    gapps_turn: Mutex<()>,
+    /// Who waits for the agent's word on the Google Services Framework Android ID.
+    device_id: Mutex<Option<Sender<String>>>,
     /// The widgets the agent hosts and who is watching them.
     widgets: Mutex<WidgetHub>,
     /// The requests about widgets waiting for the agent's answer, by request ID.
@@ -640,6 +654,11 @@ struct Shared {
     uninstalls: Mutex<HashMap<u32, Sender<UninstallOutcome>>>,
     /// The ID of the last uninstall.
     last_uninstall: AtomicU32,
+    /// The installs of an app again with another ABI waiting for the agent's answer, by
+    /// request ID.
+    reinstalls: Mutex<HashMap<u32, Sender<control::ReinstallResult>>>,
+    /// The ID of the last install of an app again, whoever asked for it.
+    last_reinstall: AtomicU32,
     /// Who waits for the agent's next list of installed apps.
     app_refreshes: Mutex<Vec<Sender<()>>>,
     /// Who watches each task's accessibility tree.
@@ -665,6 +684,8 @@ struct Shared {
     /// The token in the address of the guest's shared storage on the host, while the host
     /// serves it.
     android_files_token: Mutex<Option<String>>,
+    /// Says the device name the guest's agent is given each time it connects.
+    device_name: Mutex<Option<DeviceNameSource>>,
 }
 
 /// Opens a stream to the guest's adbd in the VM with the given runtime ID: the platform's
@@ -844,6 +865,22 @@ impl Shared {
             .retain(|watcher| watcher.send(event.clone()).is_ok());
     }
 
+    /// The installed app `package`, as the guest last listed it.
+    fn installed_app(&self, package: &str) -> Option<AppInfo> {
+        let hub = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
+        hub.table
+            .installed()?
+            .into_iter()
+            .find(|app| app.package_name == package)
+    }
+
+    /// The ID of the next install of an app again.
+    fn next_reinstall(&self) -> u32 {
+        self.last_reinstall
+            .fetch_add(1, Ordering::Relaxed)
+            .wrapping_add(1)
+    }
+
     /// Records the name and icon of an installed app, for the list that names it next.
     fn describe_installed(&self, app: AppInfo) {
         let mut hub = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
@@ -903,6 +940,29 @@ impl Shared {
                 let _ = waiting.send(state);
             }
             None => eprintln!("arm translation: dropped the guest's word, which nobody waits for"),
+        }
+    }
+
+    /// Hands the control daemon's word on the Google apps to whoever waits for it.
+    fn gapps_event(&self, state: control::GappsState) {
+        let waiting = self.gapps.lock().unwrap_or_else(|e| e.into_inner());
+        match waiting.as_ref() {
+            Some(waiting) => {
+                let _ = waiting.send(state);
+            }
+            None => eprintln!("gapps: dropped the guest's word, which nobody waits for"),
+        }
+    }
+
+    /// Hands the agent's Google Services Framework Android ID to whoever asked for it.
+    fn device_id_event(&self, id: String) {
+        if let Some(waiting) = self
+            .device_id
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+        {
+            let _ = waiting.send(id);
         }
     }
 
@@ -1068,6 +1128,16 @@ pub struct Session {
     android_files_connect: Mutex<Option<AdbConnect>>,
     /// The loopback bridge to the guest's shared storage, once a client has asked for it.
     android_files_bridge: Mutex<Option<AdbBridge>>,
+    /// The user's auto-connect setting: whether developer mode's port is attached to the
+    /// user's adb server by itself. On unless the user turned it off.
+    adb_auto_connect: AtomicBool,
+    /// What attaches developer mode's port to the user's adb server, once the platform says
+    /// how to reach that server.
+    adb_watcher: Mutex<Option<AutoConnectWatcher>>,
+    /// How the platform advertises developer mode's port over mDNS, when it can.
+    adb_advertise: Mutex<Option<AdbAdvertise>>,
+    /// The advertisement of developer mode's port and the port it names, while it lasts.
+    adb_advert: Mutex<Option<(u16, Box<dyn Send>)>>,
 }
 
 impl Session {
@@ -1102,6 +1172,9 @@ impl Session {
             install_turn: Mutex::new(()),
             arm_translation: Mutex::new(None),
             arm_translation_turn: Mutex::new(()),
+            gapps: Mutex::new(None),
+            gapps_turn: Mutex::new(()),
+            device_id: Mutex::new(None),
             widgets: Mutex::new(WidgetHub::default()),
             widget_requests: Mutex::new(HashMap::new()),
             last_widget_request: AtomicU32::new(0),
@@ -1112,6 +1185,8 @@ impl Session {
             last_drag_request: AtomicU32::new(0),
             uninstalls: Mutex::new(HashMap::new()),
             last_uninstall: AtomicU32::new(0),
+            reinstalls: Mutex::new(HashMap::new()),
+            last_reinstall: AtomicU32::new(0),
             app_refreshes: Mutex::new(Vec::new()),
             accessibility: Mutex::new(AccessibilityHub::default()),
             power_hint_watchers: Mutex::new(Vec::new()),
@@ -1123,6 +1198,7 @@ impl Session {
             file_sharing: Arc::new(Mutex::new(Sharing::default())),
             share_server: Mutex::new(None),
             android_files_token: Mutex::new(None),
+            device_name: Mutex::new(None),
         });
         let freeze_delay = config.freeze_after.unwrap_or(DEFAULT_FREEZE_AFTER);
         let (commands, command_rx) = mpsc::channel();
@@ -1169,6 +1245,7 @@ impl Session {
             notifications: HashMap::new(),
             notification_limit: RateLimit::new(Instant::now()),
             dismissals: Vec::new(),
+            offered_reinstalls: HashMap::new(),
             host_asleep: None,
             sleep_waiters: Vec::new(),
             clock_pending: None,
@@ -1187,6 +1264,10 @@ impl Session {
             adb_bridge: Mutex::new(None),
             android_files_connect: Mutex::new(None),
             android_files_bridge: Mutex::new(None),
+            adb_auto_connect: AtomicBool::new(true),
+            adb_watcher: Mutex::new(None),
+            adb_advertise: Mutex::new(None),
+            adb_advert: Mutex::new(None),
         }
     }
 
@@ -1245,7 +1326,9 @@ impl Session {
         } else if bridge.take().is_some() {
             eprintln!("developer mode: off; the adb port is closed");
         }
+        let open = bridge.as_ref().map(|(_, bridge)| bridge.address().port());
         drop(bridge);
+        self.follow_adb_port(open);
         if self.shared.developer_mode.swap(on, Ordering::SeqCst) != on {
             send_quietly(
                 &self.shared,
@@ -1254,6 +1337,96 @@ impl Session {
             );
         }
         Ok(())
+    }
+
+    /// Lets developer mode attach its port to the user's adb server, reached through `link`,
+    /// so adb lists the guest without `adb connect`. It watches from now on, while developer
+    /// mode and the auto-connect setting are both on.
+    pub fn set_adb_server(&self, link: AdbServerLink) {
+        let shared = Arc::clone(&self.shared);
+        // Android answers adb once it has booted with its agent connected; frozen, starting or
+        // stopping, it does not.
+        let guest_ready: Arc<dyn Fn() -> bool + Send + Sync> = Arc::new(move || {
+            matches!(
+                shared.status.lock().unwrap_or_else(|e| e.into_inner()).0,
+                SessionState::Active | SessionState::Dozing
+            )
+        });
+        match AutoConnectWatcher::start(link, guest_ready, crate::adb_discovery::POLL_INTERVAL) {
+            Ok(watcher) => {
+                watcher.set_auto_connect(self.adb_auto_connect.load(Ordering::SeqCst));
+                watcher.set_developer_mode(self.adb_address().map(|address| address.port()));
+                *self.adb_watcher.lock().unwrap_or_else(|e| e.into_inner()) = Some(watcher);
+            }
+            Err(error) => {
+                eprintln!("adb auto-connect: cannot watch the adb server ({error}); adb connect still works")
+            }
+        }
+    }
+
+    /// Lets developer mode advertise its port over mDNS through `advertise`, while it is on.
+    pub fn set_adb_advertise(&self, advertise: AdbAdvertise) {
+        *self.adb_advertise.lock().unwrap_or_else(|e| e.into_inner()) = Some(advertise);
+        self.follow_adb_port(self.adb_address().map(|address| address.port()));
+    }
+
+    /// Turns the user's auto-connect setting on or off. Off, the host sends the adb server
+    /// nothing more, and a device already attached stays as it is.
+    pub fn adb_auto_connect(&self, on: bool) {
+        self.adb_auto_connect.store(on, Ordering::SeqCst);
+        if let Some(watcher) = self
+            .adb_watcher
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+        {
+            watcher.set_auto_connect(on);
+        }
+    }
+
+    /// Where auto-connect stands: off, waiting for an adb server or for Android, attached, or
+    /// detached by the user.
+    pub fn adb_auto_connect_state(&self) -> AutoConnectState {
+        self.adb_watcher
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .map_or(AutoConnectState::Off, AutoConnectWatcher::state)
+    }
+
+    /// Points auto-connect and the mDNS advertisement at developer mode's port, or ends both
+    /// when it is closed.
+    fn follow_adb_port(&self, open: Option<u16>) {
+        if let Some(watcher) = self
+            .adb_watcher
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+        {
+            watcher.set_developer_mode(open);
+        }
+        let mut advert = self.adb_advert.lock().unwrap_or_else(|e| e.into_inner());
+        if advert.as_ref().map(|(port, _)| *port) == open {
+            return;
+        }
+        // The old advertisement ends before a new one names another port.
+        *advert = None;
+        let Some(port) = open else {
+            return;
+        };
+        let advertise = self
+            .adb_advertise
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        if let Some(handle) = advertise.and_then(|advertise| advertise(port)) {
+            eprintln!(
+                "developer mode: advertised {} over mDNS as {} on 127.0.0.1 only",
+                crate::adb_discovery::mdns_instance_name(port),
+                crate::adb_discovery::MDNS_SERVICE_TYPE
+            );
+            *advert = Some((port, handle));
+        }
     }
 
     /// Shares the user's host folders named in `folders` with the guest while `on`, as the
@@ -1570,9 +1743,50 @@ impl Session {
         size: u64,
         content: &mut dyn Read,
     ) -> Result<InstallOutcome, SessionError> {
+        self.install_apk_for(name, size, None, content)
+    }
+
+    /// Installs an APK as [`install_apk`](Self::install_apk) does, with its native code for
+    /// `abi` (`x86_64` or `arm64-v8a`), which the agent gives the package installer as its ABI
+    /// override. `None` leaves the choice to the package manager.
+    pub fn install_apk_for(
+        &self,
+        name: &str,
+        size: u64,
+        abi: Option<&str>,
+        content: &mut dyn Read,
+    ) -> Result<InstallOutcome, SessionError> {
         apk::check_name(name)
             .and_then(|()| apk::check_size(size))
             .map_err(SessionError::InstallRefused)?;
+        self.install(name, size, abi, &[], content)
+    }
+
+    /// Installs an app made of several files in the guest: the APKs of `parts` go into one
+    /// install session, with their native code for `abi` as in
+    /// [`install_apk_for`](Self::install_apk_for), and the agent copies the expansion files
+    /// among them into the app's folder under `Android/obb/` once the app is installed. Their
+    /// bytes are read from `content` one after another, in the order of `parts`; `name` is the
+    /// bundle they come from, for the log. Otherwise as [`install_apk`](Self::install_apk).
+    pub fn install_parts(
+        &self,
+        name: &str,
+        parts: &[InstallPart],
+        abi: Option<&str>,
+        content: &mut dyn Read,
+    ) -> Result<InstallOutcome, SessionError> {
+        let size = apk::check_parts(name, parts).map_err(SessionError::InstallRefused)?;
+        self.install(name, size, abi, parts, content)
+    }
+
+    fn install(
+        &self,
+        name: &str,
+        size: u64,
+        abi: Option<&str>,
+        parts: &[InstallPart],
+        content: &mut dyn Read,
+    ) -> Result<InstallOutcome, SessionError> {
         let _turn = self
             .shared
             .install_turn
@@ -1596,8 +1810,19 @@ impl Session {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .insert(transfer_id, tx);
-        eprintln!("install: sending {name} ({size} bytes) to Android as install {transfer_id}");
-        let result = self.send_apk(transfer_id, name, size, content, &events);
+        eprintln!(
+            "install: sending {name} ({size} bytes, {} files) as install {transfer_id}{}",
+            parts.len().max(1),
+            abi.map(|abi| format!(", for {abi}")).unwrap_or_default()
+        );
+        let announce = control::InstallApk {
+            transfer_id,
+            name: name.to_string(),
+            size,
+            abi: abi.unwrap_or_default().to_string(),
+            parts: parts.iter().map(InstallPart::to_control).collect(),
+        };
+        let result = self.send_apk(announce, content, &events);
         self.shared
             .installs
             .lock()
@@ -1610,20 +1835,18 @@ impl Session {
         result
     }
 
+    /// Announces the install `install` and sends its content, paced by the agent's progress.
     fn send_apk(
         &self,
-        transfer_id: u32,
-        name: &str,
-        size: u64,
+        install: control::InstallApk,
         content: &mut dyn Read,
         events: &Receiver<InstallEvent>,
     ) -> Result<InstallOutcome, SessionError> {
+        let transfer_id = install.transfer_id;
+        let size = install.size;
+        let name = install.name.clone();
         self.send(dsa_protocol::encode(&control::Envelope {
-            body: Some(Body::InstallApk(control::InstallApk {
-                transfer_id,
-                name: name.to_string(),
-                size,
-            })),
+            body: Some(Body::InstallApk(install)),
         }))?;
         let window = apk::CHUNK_BYTES as u64 * apk::CHUNKS_IN_FLIGHT;
         let mut sent = 0u64;
@@ -1754,14 +1977,56 @@ impl Session {
         content: &mut dyn Read,
         events: &Receiver<control::ArmTranslationState>,
     ) -> Result<GuestArmTranslation, SessionError> {
-        self.send(dsa_protocol::encode(&control::Envelope {
-            body: Some(Body::ArmTranslationInstall(
-                control::ArmTranslationInstall {
+        let begin = Body::ArmTranslationInstall(control::ArmTranslationInstall {
+            transfer_id,
+            size,
+            sha256: sha256.to_vec(),
+        });
+        let state = self.send_image(
+            "the ARM translation image",
+            transfer_id,
+            size,
+            content,
+            begin,
+            &|offset, data| {
+                Body::ArmTranslationChunk(control::ArmTranslationChunk {
                     transfer_id,
-                    size,
-                    sha256: sha256.to_vec(),
-                },
-            )),
+                    offset,
+                    data,
+                })
+            },
+            events,
+            &|state: &control::ArmTranslationState| {
+                (
+                    state.transfer_id,
+                    state.received,
+                    state.done,
+                    state.error.clone(),
+                )
+            },
+        )?;
+        Ok(guest_arm_translation(state))
+    }
+
+    /// Sends an image the control daemon keeps on the user's disk: `begin`, then `size` bytes
+    /// of `content` as the chunks `chunk` makes, in pieces of [`apk::CHUNK_BYTES`] and never
+    /// more than [`apk::CHUNKS_IN_FLIGHT`] ahead of what the daemon says it has written.
+    /// `answer` reads the daemon's answers as (transfer, bytes written, done, error). Returns
+    /// the answer that says the image is in place.
+    #[allow(clippy::too_many_arguments)]
+    fn send_image<S>(
+        &self,
+        what: &str,
+        transfer_id: u32,
+        size: u64,
+        content: &mut dyn Read,
+        begin: Body,
+        chunk: &dyn Fn(u64, Vec<u8>) -> Body,
+        events: &Receiver<S>,
+        answer: &dyn Fn(&S) -> (u32, u64, bool, String),
+    ) -> Result<S, SessionError> {
+        self.send(dsa_protocol::encode(&control::Envelope {
+            body: Some(begin),
         }))?;
         let window = apk::CHUNK_BYTES as u64 * apk::CHUNKS_IN_FLIGHT;
         let mut sent = 0u64;
@@ -1773,30 +2038,29 @@ impl Session {
                 let mut data = vec![0u8; length];
                 if let Err(error) = content.read_exact(&mut data) {
                     return Err(SessionError::InstallRefused(format!(
-                        "the ARM translation image did not arrive whole: {error}"
+                        "{what} did not arrive whole: {error}"
                     )));
                 }
                 self.send(dsa_protocol::encode(&control::Envelope {
-                    body: Some(Body::ArmTranslationChunk(control::ArmTranslationChunk {
-                        transfer_id,
-                        offset: sent,
-                        data,
-                    })),
+                    body: Some(chunk(sent, data)),
                 }))?;
                 sent += length as u64;
             }
             match events.recv_timeout(INSTALL_POLL) {
-                Ok(state) if state.transfer_id == transfer_id => {
-                    if !state.error.is_empty() {
-                        return Err(SessionError::InstallRefused(state.error));
+                Ok(state) => {
+                    let (id, received, done, error) = answer(&state);
+                    if id != transfer_id {
+                        continue;
                     }
-                    if state.done {
-                        return Ok(guest_arm_translation(state));
+                    if !error.is_empty() {
+                        return Err(SessionError::InstallRefused(error));
                     }
-                    written = written.max(state.received);
+                    if done {
+                        return Ok(state);
+                    }
+                    written = written.max(received);
                     waited = Duration::ZERO;
                 }
-                Ok(_) => {}
                 Err(RecvTimeoutError::Timeout) => {
                     let state = self.state();
                     if !matches!(
@@ -1808,8 +2072,8 @@ impl Session {
                     waited += INSTALL_POLL;
                     if waited >= CHUNK_TIMEOUT {
                         return Err(SessionError::InstallRefused(format!(
-                            "Android has not answered about the ARM translation image for {} s; \
-                             it may be busy, try again",
+                            "Android has not answered about {what} for {} s; it may be busy, \
+                             try again",
                             CHUNK_TIMEOUT.as_secs()
                         )));
                     }
@@ -1871,6 +2135,144 @@ impl Session {
             .arm_translation
             .lock()
             .unwrap_or_else(|e| e.into_inner()) = None;
+        answer
+    }
+
+    /// Sends the Google apps' system image, `size` bytes read from `content` whose SHA-256 is
+    /// `sha256`, to the guest's control daemon, which keeps it on the user's disk for the next
+    /// boot. Returns where the Google apps stand once the image is in place, or why it is not.
+    /// Needs a running guest.
+    pub fn install_gapps(
+        &self,
+        size: u64,
+        sha256: &[u8],
+        content: &mut dyn Read,
+    ) -> Result<GuestGapps, SessionError> {
+        let _turn = self
+            .shared
+            .gapps_turn
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let state = self.state();
+        if !matches!(
+            state,
+            SessionState::Active | SessionState::Dozing | SessionState::Frozen
+        ) {
+            return Err(SessionError::NotActive(state));
+        }
+        let transfer_id = self
+            .shared
+            .last_install
+            .fetch_add(1, Ordering::Relaxed)
+            .wrapping_add(1);
+        let (tx, events) = mpsc::channel();
+        *self.shared.gapps.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx);
+        eprintln!("gapps: sending a {size} byte image to Android as transfer {transfer_id}");
+        let begin = Body::GappsInstall(control::GappsInstall {
+            transfer_id,
+            size,
+            sha256: sha256.to_vec(),
+        });
+        let result = self.send_image(
+            "the Google apps image",
+            transfer_id,
+            size,
+            content,
+            begin,
+            &|offset, data| {
+                Body::GappsChunk(control::GappsChunk {
+                    transfer_id,
+                    offset,
+                    data,
+                })
+            },
+            &events,
+            &|state: &control::GappsState| {
+                (
+                    state.transfer_id,
+                    state.received,
+                    state.done,
+                    state.error.clone(),
+                )
+            },
+        );
+        *self.shared.gapps.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        match &result {
+            Ok(_) => eprintln!("gapps: the image is in place for the next start of Android"),
+            Err(why) => eprintln!("gapps: the image did not reach Android: {why}"),
+        }
+        result.map(guest_gapps)
+    }
+
+    /// Asks the guest's control daemon to remove the Google apps' image.
+    pub fn remove_gapps(&self) -> Result<GuestGapps, SessionError> {
+        let state = self.gapps_exchange(Body::GappsRemove(control::GappsRemove {}))?;
+        if state.error.is_empty() {
+            Ok(guest_gapps(state))
+        } else {
+            Err(SessionError::InstallRefused(state.error))
+        }
+    }
+
+    /// Asks the guest where the Google apps stand, with the Google Services Framework Android
+    /// ID when they run. Needs a guest that is active or dozing: a frozen one is not thawed
+    /// for it.
+    pub fn gapps(&self) -> Result<GuestGapps, SessionError> {
+        let state = self.state();
+        if !matches!(state, SessionState::Active | SessionState::Dozing) {
+            return Err(SessionError::NotActive(state));
+        }
+        let mut guest = self
+            .gapps_exchange(Body::GappsQuery(control::GappsQuery {}))
+            .map(guest_gapps)?;
+        if guest.active {
+            guest.device_id = self.google_device_id();
+        }
+        Ok(guest)
+    }
+
+    /// The Google Services Framework Android ID the agent reads, or empty when it does not
+    /// answer in time or there is none yet.
+    fn google_device_id(&self) -> String {
+        let (tx, answers) = mpsc::channel();
+        *self
+            .shared
+            .device_id
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(tx);
+        let sent = self.send(dsa_protocol::encode(&control::Envelope {
+            body: Some(Body::GoogleDeviceIdQuery(control::GoogleDeviceIdQuery {})),
+        }));
+        let id = match sent {
+            Ok(()) => answers.recv_timeout(DEVICE_ID_WAIT).unwrap_or_default(),
+            Err(_) => String::new(),
+        };
+        *self
+            .shared
+            .device_id
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = None;
+        id
+    }
+
+    /// Sends `body` to the control daemon and waits for its GappsState.
+    fn gapps_exchange(&self, body: Body) -> Result<control::GappsState, SessionError> {
+        let _turn = self
+            .shared
+            .gapps_turn
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let (tx, events) = mpsc::channel();
+        *self.shared.gapps.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx);
+        let sent = self.send(dsa_protocol::encode(&control::Envelope {
+            body: Some(body),
+        }));
+        let answer = sent.and_then(|()| {
+            events.recv_timeout(GAPPS_WAIT).map_err(|_| {
+                SessionError::NoAnswer("Android did not say where the Google apps stand".into())
+            })
+        });
+        *self.shared.gapps.lock().unwrap_or_else(|e| e.into_inner()) = None;
         answer
     }
 
@@ -1951,6 +2353,16 @@ impl Session {
     pub fn set_system_settings(&self, settings: SystemSettings) {
         let input = SystemInput::Settings(settings.checked());
         let _ = self.commands.send(Command::System(input));
+    }
+
+    /// Gives the guest's agent the device name `source` says each time it connects, which the
+    /// agent makes the guest's.
+    pub fn set_device_name_source(&self, source: DeviceNameSource) {
+        *self
+            .shared
+            .device_name
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(source);
     }
 
     /// Passes a change to the host's game controllers on. The session keeps the controllers
@@ -2681,6 +3093,72 @@ impl Session {
         result
     }
 
+    /// Installs the app `package` again from its APKs in the guest, with its native code for
+    /// arm64-v8a (`on`, run through the translator) or for x86_64, and says how it went. The
+    /// app keeps its data; when Android cannot keep it, the answer says so and nothing changes,
+    /// unless `erase_data` is set. Turning it on needs ARM translation in the running guest.
+    /// Waits up to `timeout` for the agent, which copies and checks every APK of the app.
+    pub fn set_run_as_arm(
+        &self,
+        package: &str,
+        on: bool,
+        erase_data: bool,
+        timeout: Duration,
+    ) -> Result<RunAsArmOutcome, SessionError> {
+        if on {
+            let guest = self.arm_translation()?;
+            if !native_abi::translates_arm64(&guest.abilist) {
+                return Ok(RunAsArmOutcome {
+                    package_name: package.to_string(),
+                    status: RunAsArmStatus::TranslationOff,
+                    message: format!("the guest's ABI list is {:?}", guest.abilist),
+                    on: false,
+                });
+            }
+        }
+        let abi = if on {
+            native_abi::ARM64
+        } else {
+            native_abi::X86_64
+        };
+        let request_id = self.shared.next_reinstall();
+        let (tx, answer) = mpsc::channel();
+        self.shared
+            .reinstalls
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(request_id, tx);
+        eprintln!("apps: installing {package} again for {abi} (erase data: {erase_data})");
+        let result = self
+            .send(dsa_protocol::encode(&control::Envelope {
+                body: Some(Body::ReinstallApp(control::ReinstallApp {
+                    request_id,
+                    package_name: package.to_string(),
+                    abi: abi.to_string(),
+                    erase_data,
+                })),
+            }))
+            .and_then(|()| {
+                answer.recv_timeout(timeout).map_err(|_| {
+                    SessionError::NoAnswer(format!(
+                        "Android did not say within {} seconds whether {package} was installed \
+                         again",
+                        timeout.as_secs()
+                    ))
+                })
+            })
+            .map(|result| RunAsArmOutcome::from_control(&result));
+        self.shared
+            .reinstalls
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&request_id);
+        if let Ok(outcome) = &result {
+            eprintln!("apps: {package}: {outcome}");
+        }
+        result
+    }
+
     /// The widgets the apps in the guest offer, in label order, asking the agent and waiting
     /// up to `timeout` for its whole answer. Needs an active session.
     pub fn widget_providers(&self, timeout: Duration) -> Result<Vec<WidgetProvider>, SessionError> {
@@ -3069,6 +3547,19 @@ fn deliver_log(shared: &Shared, commands: &Sender<Command>, message: LogPortMess
 
 impl Drop for Session {
     fn drop(&mut self) {
+        // The adb server lets go of developer mode's port before it closes.
+        drop(
+            self.adb_watcher
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .take(),
+        );
+        drop(
+            self.adb_advert
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .take(),
+        );
         self.shared.log_port_stop.store(true, Ordering::Relaxed);
         let _ = self.commands.send(Command::Shutdown);
         if let Some(worker) = self.worker.take() {
@@ -3101,6 +3592,25 @@ const POLL: Duration = Duration::from_millis(20);
 
 /// How long a question about ARM translation waits for the guest's control daemon.
 const ARM_TRANSLATION_WAIT: Duration = Duration::from_secs(5);
+
+/// How long a question about the Google apps waits for the guest.
+const GAPPS_WAIT: Duration = Duration::from_secs(5);
+
+/// How long the agent has to say the Google Services Framework Android ID, which it reads
+/// at once.
+const DEVICE_ID_WAIT: Duration = Duration::from_secs(2);
+
+/// What the guest's control daemon says of the Google apps, as the host keeps it.
+fn guest_gapps(state: control::GappsState) -> GuestGapps {
+    GuestGapps {
+        installed: state.installed,
+        active: state.active,
+        sdk: state.sdk,
+        abi: state.abi,
+        abilist: state.abilist,
+        device_id: String::new(),
+    }
+}
 
 /// What the guest's control daemon says of ARM translation, as the host keeps it.
 fn guest_arm_translation(state: control::ArmTranslationState) -> GuestArmTranslation {
@@ -3216,6 +3726,9 @@ struct Worker {
     notification_limit: RateLimit,
     /// Dismissals for a frozen guest, sent once it is thawed.
     dismissals: Vec<String>,
+    /// The installs of an app again as ARM that the user asked for from a notification, by
+    /// request ID, with the app's package: their outcome is a notification too.
+    offered_reinstalls: HashMap<u32, String>,
     /// While the host sleeps: when it said it would, and whether the guest's screen was on.
     host_asleep: Option<(Instant, bool)>,
     /// Who waits for the guest to say its data is on disk before the host sleeps.
@@ -3543,6 +4056,134 @@ impl Worker {
         }
     }
 
+    /// Shows one of the host's own notifications, replacing the one with its key.
+    fn post_notice(&mut self, notification: Notification) {
+        self.deliver_notification(notification);
+    }
+
+    /// Removes one of the host's own notifications, if it is shown.
+    fn remove_notice(&mut self, key: &str) {
+        if self.notifications.remove(key).is_some() {
+            self.shared
+                .publish_notification(NotificationEvent::Removed {
+                    key: key.to_string(),
+                });
+        }
+    }
+
+    /// The agent says an app ended because it could not load a native library. When the app's
+    /// APKs on the device hold its ARM code, it does not run as ARM yet, and the guest
+    /// translates ARM code, the user is offered to install it again as ARM.
+    fn native_library_crash(&mut self, crash: control::NativeLibraryCrash) {
+        let package = crash.package_name;
+        if !apk::valid_package_name(&package) {
+            eprintln!("apps: dropped a crash record that names no package");
+            return;
+        }
+        let detail: String = crash.detail.chars().take(512).collect();
+        eprintln!("apps: {package} ended because a native library did not load: {detail}");
+        let Some(app) = self.shared.installed_app(&package) else {
+            eprintln!("apps: {package} is not among the installed apps; nothing is offered");
+            return;
+        };
+        let switch = native_abi::run_as_arm(
+            app.system_app,
+            &app.primary_abi,
+            &app.native_libraries,
+            crash.arm64_supported,
+        );
+        if switch.on {
+            eprintln!("apps: {package} runs as ARM already; nothing is offered");
+            return;
+        }
+        if let Some(why) = switch.unavailable {
+            eprintln!(
+                "apps: {package} cannot run as ARM ({}); nothing is offered",
+                why.code()
+            );
+            return;
+        }
+        self.post_notice(native_abi::Notice::Offer.notification(&app));
+    }
+
+    /// What the user did with one of the host's notifications about running an app as ARM.
+    /// A click on the offer installs the app again as ARM, keeping its data; a click on the
+    /// news that it worked opens the app. Any other click, and any dismissal, removes it.
+    fn act_on_notice(
+        &mut self,
+        notice: native_abi::Notice,
+        package: String,
+        action: &NotificationAction,
+    ) -> Result<(), SessionError> {
+        let key = action.key().to_string();
+        self.remove_notice(&key);
+        if !matches!(action, NotificationAction::Open { .. }) {
+            return Ok(());
+        }
+        match notice {
+            native_abi::Notice::Offer => {
+                self.wake();
+                if !self.running() {
+                    return Err(SessionError::NotActive(self.state()));
+                }
+                let request_id = self.shared.next_reinstall();
+                self.offered_reinstalls.insert(request_id, package.clone());
+                eprintln!("apps: installing {package} again as ARM, as the user asked");
+                self.send_body(Body::ReinstallApp(control::ReinstallApp {
+                    request_id,
+                    package_name: package,
+                    abi: native_abi::ARM64.to_string(),
+                    erase_data: false,
+                }));
+            }
+            native_abi::Notice::Done => {
+                self.hidden_since = Instant::now();
+                self.wake();
+                if !self.running() {
+                    return Err(SessionError::NotActive(self.state()));
+                }
+                self.send_body(Body::LaunchApp(control::LaunchApp {
+                    package_name: package,
+                }));
+            }
+            native_abi::Notice::NeedsErase | native_abi::Notice::Failed => {}
+        }
+        Ok(())
+    }
+
+    /// The agent says how installing an app again went: to whoever waits for it, or, when the
+    /// user asked for it from a notification, as a notification.
+    fn guest_reinstall_result(&mut self, result: control::ReinstallResult) {
+        let waiting = self
+            .shared
+            .reinstalls
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&result.request_id);
+        if let Some(waiting) = waiting {
+            let _ = waiting.send(result);
+            return;
+        }
+        let Some(package) = self.offered_reinstalls.remove(&result.request_id) else {
+            eprintln!(
+                "apps: dropped the agent's answer to reinstall request {}, which nobody waits for",
+                result.request_id
+            );
+            return;
+        };
+        let outcome = RunAsArmOutcome::from_control(&result);
+        eprintln!("apps: {package}: {outcome}");
+        let app = self
+            .shared
+            .installed_app(&package)
+            .unwrap_or_else(|| AppInfo {
+                package_name: package.clone(),
+                label: package.clone(),
+                ..Default::default()
+            });
+        self.post_notice(native_abi::Notice::of_outcome(&outcome).notification(&app));
+    }
+
     /// Takes a notification the guest posted or changed, and hands it to the watchers when its
     /// turn comes. One the same as what the watchers have is not handed again.
     fn guest_notification(&mut self, message: control::GuestNotification) {
@@ -3589,6 +4230,7 @@ impl Worker {
     fn clear_notifications(&mut self) {
         self.notification_limit.clear();
         self.dismissals.clear();
+        self.offered_reinstalls.clear();
         let keys: Vec<String> = self.notifications.drain().map(|(key, _)| key).collect();
         for key in keys {
             self.shared
@@ -3716,6 +4358,10 @@ impl Worker {
         ) || !self.agent_connected
         {
             return Err(SessionError::NotActive(state));
+        }
+        if let Some((notice, package)) = native_abi::Notice::parse(action.key()) {
+            let package = package.to_string();
+            return self.act_on_notice(notice, package, &action);
         }
         let Some(clearable) = self
             .notifications
@@ -4302,6 +4948,16 @@ impl Worker {
             // The host's system settings become the guest's, and its controllers are there.
             self.replay_system_settings();
             self.replay_gamepads();
+            // The computer's name becomes the guest's device name.
+            let source = self
+                .shared
+                .device_name
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
+            if let Some(name) = source.and_then(|source| source()) {
+                self.send_body(Body::DeviceName(control::DeviceName { name }));
+            }
             if !self.screen_on {
                 self.send_body(Body::ScreenState(control::ScreenState { on: false }));
             }
@@ -4887,12 +5543,16 @@ impl Worker {
                     app_bytes: app.app_bytes,
                     data_bytes: app.data_bytes,
                     cache_bytes: app.cache_bytes,
+                    native_libraries: NativeLibraries::from_control(&app.native_libraries),
+                    primary_abi: native_abi::checked_abi(&app.primary_abi),
                 });
             }
             Some(Body::InstalledApps(apps)) => {
                 self.shared.publish_installed(&apps.package_names);
                 self.shared.apps_refreshed();
             }
+            Some(Body::ReinstallResult(result)) => self.guest_reinstall_result(result),
+            Some(Body::NativeLibraryCrash(crash)) => self.native_library_crash(crash),
             Some(Body::UninstallResult(result)) => {
                 let outcome = UninstallOutcome::from_control(&result);
                 let waiting = self
@@ -4966,6 +5626,8 @@ impl Worker {
                 InstallEvent::Progress(progress.received),
             ),
             Some(Body::ArmTranslationState(state)) => self.shared.arm_translation_event(state),
+            Some(Body::GappsState(state)) => self.shared.gapps_event(state),
+            Some(Body::GoogleDeviceId(id)) => self.shared.device_id_event(id.id),
             Some(Body::InstallResult(result)) => self.shared.install_event(
                 result.transfer_id,
                 InstallEvent::Done(InstallOutcome::from_control(&result)),
@@ -5109,6 +5771,11 @@ impl Worker {
             | Some(Body::ArmTranslationChunk(_))
             | Some(Body::ArmTranslationRemove(_))
             | Some(Body::ArmTranslationQuery(_))
+            | Some(Body::GappsInstall(_))
+            | Some(Body::GappsChunk(_))
+            | Some(Body::GappsRemove(_))
+            | Some(Body::GappsQuery(_))
+            | Some(Body::GoogleDeviceIdQuery(_))
             | Some(Body::NotificationClicked(_))
             | Some(Body::NotificationDismissed(_))
             | Some(Body::BackgroundAppAction(_))
@@ -5119,6 +5786,7 @@ impl Worker {
             | Some(Body::PrintJobResult(_))
             | Some(Body::QueryPackage(_))
             | Some(Body::UninstallApp(_))
+            | Some(Body::ReinstallApp(_))
             | Some(Body::RefreshApps(_))
             | Some(Body::OpenAppSettings(_))
             | Some(Body::RequestGuestMemory(_))
@@ -5151,6 +5819,7 @@ impl Worker {
             | Some(Body::LocationStatus(_))
             | Some(Body::LocationFix(_))
             | Some(Body::SystemSettings(_))
+            | Some(Body::DeviceName(_))
             | Some(Body::GamepadConnected(_))
             | Some(Body::GamepadDisconnected(_))
             | Some(Body::GamepadState(_)) => {

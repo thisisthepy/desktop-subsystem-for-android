@@ -65,20 +65,24 @@ use dsa_transport::{Connection, Connector, TransportError};
 use crate::accessibility::{
     AccessibilityWatch, ActionRequest, ActionResult, GuestAccessibility, TreeUpdate,
 };
-use crate::apk::{self, InstallOutcome, InstalledPackage};
+use crate::adb_discovery::AutoConnectState;
+use crate::apk::{self, InstallOutcome, InstallPart, InstalledPackage};
 use crate::app_windows::{self, AppWindowSettings};
 use crate::apps::{self, UninstallOutcome};
-use crate::arm_translation::{self, GuestArmTranslation, Package};
+use crate::arm_translation::{self, GuestArmTranslation, Package, Source, Translator};
 use crate::background::{
     self, BackgroundApp, BackgroundCommand, BackgroundEvent, BackgroundWatch, MediaCommand,
     MediaSession, Playback,
 };
 use crate::data_reset::{UserDataReset, RESET_STOP_WAIT};
-use crate::device_identity::{DeviceIdentity, DeviceIdentityStore, ImageBuild};
+use crate::device_identity::{
+    ComputerSource, DeviceIdentity, DeviceIdentityStore, IdentityReport, ImageBuild,
+};
 use crate::diagnostics::HostFile;
 use crate::drag::{self, DragChunk, DragItem, DragOffer, DragOut, DragRead};
 use crate::files::{self, FileAction, FileTransfer};
 use crate::gamepads::{GamepadEvent, GamepadInfo, GamepadRumble, GamepadState};
+use crate::gapps::{self, GappsPackage, GuestGapps};
 use crate::guest_log::{DiagnosticsEvent, LogDumpEvent, LogEntry, LogFilter, LogWatch};
 use crate::ime::{ImeCursor, ImeEvent};
 use crate::input::{InputEvent, PointerEvent};
@@ -87,6 +91,7 @@ use crate::location::{Fix, LocationEvent, Wanted};
 use crate::memory::{
     snapshot_from_wire, snapshot_to_wire, GuestMemoryReport, HostMemory, MemorySnapshot,
 };
+use crate::native_abi::{self, NativeLibraries, RunAsArmOutcome};
 use crate::notifications::{self, Notification, NotificationAction, NotificationEvent};
 use crate::print::{self, PrintEvent, PrintJob, PrintOutcome, PrintSettings};
 use crate::resize_trace::{self, detail_requested, ResizeTrace, DETAIL_ENV};
@@ -210,6 +215,15 @@ pub trait UserAndroid: Send + Sync {
         } else {
             Ok(())
         }
+    }
+    /// Turns the user's adb auto-connect setting on or off: whether, while developer mode is
+    /// on, the port is attached to the user's adb server by itself.
+    fn adb_auto_connect(&self, on: bool) {
+        let _ = on;
+    }
+    /// Where auto-connect stands for this Android.
+    fn adb_auto_connect_state(&self) -> AutoConnectState {
+        AutoConnectState::Off
     }
     /// Sends a file to this Android, which asks the user which app opens or takes it.
     fn open_file(&self, file: &FileTransfer) -> Result<(), TaskRequestError> {
@@ -352,6 +366,51 @@ pub trait UserAndroid: Send + Sync {
             "this Android does not install APKs".into(),
         ))
     }
+    /// Installs an APK as [`install_apk`](UserAndroid::install_apk) does, with its native code
+    /// for `abi` (`x86_64` or `arm64-v8a`); `None` leaves the choice to Android. An Android
+    /// that cannot be told an ABI installs the APK as Android chooses.
+    fn install_apk_for(
+        &self,
+        name: &str,
+        size: u64,
+        abi: Option<&str>,
+        content: &mut dyn Read,
+    ) -> Result<InstallOutcome, InstallError> {
+        let _ = abi;
+        self.install_apk(name, size, content)
+    }
+    /// Installs an app made of several files, `parts`, whose bytes are read from `content` one
+    /// after another, in this Android, with its native code for `abi` as in
+    /// [`install_apk_for`](UserAndroid::install_apk_for), and returns how the install ended:
+    /// the APKs go into one install session, and the expansion files into the app's folder
+    /// under `Android/obb/`. `name` is the bundle the parts come from. One install runs at a
+    /// time; a second waits.
+    fn install_parts(
+        &self,
+        name: &str,
+        parts: &[InstallPart],
+        abi: Option<&str>,
+        content: &mut dyn Read,
+    ) -> Result<InstallOutcome, InstallError> {
+        let _ = (name, parts, abi, content);
+        Err(InstallError::Refused(
+            "this Android does not install apps made of several APKs".into(),
+        ))
+    }
+    /// Installs the app `package` again from the APKs it has in this Android, with its native
+    /// code for arm64-v8a (`on`) or x86_64, keeping its data; with `erase_data`, also when
+    /// that erases its data. Says how it went.
+    fn set_run_as_arm(
+        &self,
+        package: &str,
+        on: bool,
+        erase_data: bool,
+    ) -> Result<RunAsArmOutcome, TaskRequestError> {
+        let _ = (package, on, erase_data);
+        Err(TaskRequestError::Failed(
+            "this Android cannot install its apps again".into(),
+        ))
+    }
     /// Sends an ARM translation package's system image, `size` bytes read from `content` whose
     /// SHA-256 is `sha256`, to this Android's disk, and returns where translation stands once
     /// the image is in place. The package is used from Android's next start.
@@ -375,6 +434,31 @@ pub trait UserAndroid: Send + Sync {
     /// Where ARM translation stands in this Android while it runs; `None` when it is not
     /// running or does not say.
     fn arm_translation(&self) -> Option<GuestArmTranslation> {
+        None
+    }
+    /// Sends the Google apps' system image, `size` bytes read from `content` whose SHA-256 is
+    /// `sha256`, to this Android's disk, and returns where the Google apps stand once the image
+    /// is in place. The image is used from Android's next start.
+    fn install_gapps(
+        &self,
+        size: u64,
+        sha256: &[u8],
+        content: &mut dyn Read,
+    ) -> Result<GuestGapps, InstallError> {
+        let _ = (size, sha256, content);
+        Err(InstallError::Refused(
+            "this Android cannot take Google's apps".into(),
+        ))
+    }
+    /// Removes the Google apps' image from this Android's disk.
+    fn remove_gapps(&self) -> Result<GuestGapps, InstallError> {
+        Err(InstallError::Refused(
+            "this Android cannot take Google's apps".into(),
+        ))
+    }
+    /// Where the Google apps stand in this Android while it runs, with the Android version
+    /// and processor it reports; `None` when it is not running or does not say.
+    fn gapps(&self) -> Option<GuestGapps> {
         None
     }
     /// What this Android has installed of `package`, if anything: its version and signing
@@ -585,6 +669,12 @@ impl UserAndroid for Session {
     fn developer_mode(&self, on: bool, port: u16) -> Result<(), String> {
         Session::developer_mode(self, on, port)
     }
+    fn adb_auto_connect(&self, on: bool) {
+        Session::adb_auto_connect(self, on)
+    }
+    fn adb_auto_connect_state(&self) -> AutoConnectState {
+        Session::adb_auto_connect_state(self)
+    }
     fn watch_links(&self) -> Option<Receiver<String>> {
         Some(Session::watch_links(self))
     }
@@ -648,13 +738,34 @@ impl UserAndroid for Session {
         size: u64,
         content: &mut dyn Read,
     ) -> Result<InstallOutcome, InstallError> {
-        Session::install_apk(self, name, size, content).map_err(|error| match error {
-            SessionError::NotActive(state) => InstallError::NotRunning(format!(
-                "Android is {state}; start it and install the APK again"
-            )),
-            SessionError::InstallRefused(why) => InstallError::Refused(why),
-            other => InstallError::Refused(format!("the APK did not reach Android: {other}")),
-        })
+        UserAndroid::install_apk_for(self, name, size, None, content)
+    }
+    fn install_apk_for(
+        &self,
+        name: &str,
+        size: u64,
+        abi: Option<&str>,
+        content: &mut dyn Read,
+    ) -> Result<InstallOutcome, InstallError> {
+        Session::install_apk_for(self, name, size, abi, content).map_err(install_error)
+    }
+    fn install_parts(
+        &self,
+        name: &str,
+        parts: &[InstallPart],
+        abi: Option<&str>,
+        content: &mut dyn Read,
+    ) -> Result<InstallOutcome, InstallError> {
+        Session::install_parts(self, name, parts, abi, content).map_err(install_error)
+    }
+    fn set_run_as_arm(
+        &self,
+        package: &str,
+        on: bool,
+        erase_data: bool,
+    ) -> Result<RunAsArmOutcome, TaskRequestError> {
+        Session::set_run_as_arm(self, package, on, erase_data, native_abi::REINSTALL_WAIT)
+            .map_err(request_error)
     }
     fn package_state(&self, package: &str) -> Result<Option<InstalledPackage>, TaskRequestError> {
         Session::package_state(self, package, PACKAGE_QUERY_WAIT).map_err(request_error)
@@ -681,6 +792,20 @@ impl UserAndroid for Session {
     }
     fn arm_translation(&self) -> Option<GuestArmTranslation> {
         Session::arm_translation(self).ok()
+    }
+    fn install_gapps(
+        &self,
+        size: u64,
+        sha256: &[u8],
+        content: &mut dyn Read,
+    ) -> Result<GuestGapps, InstallError> {
+        Session::install_gapps(self, size, sha256, content).map_err(arm_install_error)
+    }
+    fn remove_gapps(&self) -> Result<GuestGapps, InstallError> {
+        Session::remove_gapps(self).map_err(arm_install_error)
+    }
+    fn gapps(&self) -> Option<GuestGapps> {
+        Session::gapps(self).ok()
     }
     fn refresh_apps(&self) -> Result<(), TaskRequestError> {
         Session::refresh_apps(self, apps::REFRESH_WAIT).map_err(request_error)
@@ -710,6 +835,17 @@ fn widget_error(error: SessionError) -> WidgetError {
             TaskRequestError::NotRunning(why) => WidgetError::NotRunning(why),
             TaskRequestError::Failed(why) => WidgetError::Refused(why),
         },
+    }
+}
+
+/// What an install that did not end with Android's answer tells a client.
+fn install_error(error: SessionError) -> InstallError {
+    match error {
+        SessionError::NotActive(state) => InstallError::NotRunning(format!(
+            "Android is {state}; start it and install the app again"
+        )),
+        SessionError::InstallRefused(why) => InstallError::Refused(why),
+        other => InstallError::Refused(format!("the app did not reach Android: {other}")),
     }
 }
 
@@ -985,6 +1121,8 @@ fn app_to_wire(app: AppInfo) -> types::AppInfo {
         app_bytes: app.app_bytes,
         data_bytes: app.data_bytes,
         cache_bytes: app.cache_bytes,
+        native_libraries: app.native_libraries.to_wire(),
+        primary_abi: app.primary_abi,
     }
 }
 
@@ -1001,6 +1139,8 @@ fn app_from_wire(app: types::AppInfo) -> AppInfo {
         app_bytes: app.app_bytes,
         data_bytes: app.data_bytes,
         cache_bytes: app.cache_bytes,
+        primary_abi: app.primary_abi,
+        native_libraries: NativeLibraries::from_wire(&app.native_libraries),
     }
 }
 
@@ -1136,6 +1276,10 @@ const APK_CHUNK_WAIT: Duration = Duration::from_secs(30);
 /// another, and the guest may take minutes to verify and compile a large app.
 const INSTALL_ANSWER_WAIT: Duration = Duration::from_secs(30 * 60);
 
+/// How long a client waits for the service to say where the Google apps stand: the service
+/// asks the running Android, and its agent for the device's Android ID.
+const GAPPS_ANSWER_WAIT: Duration = Duration::from_secs(30);
+
 /// How long a connection that carries links waits for its client before it looks for links
 /// again.
 const LINK_POLL: Duration = Duration::from_millis(100);
@@ -1192,6 +1336,9 @@ pub struct SettingsReport {
     pub facts: ServiceFacts,
     /// The caller's network as it stands now; `None` from a service that does not report it.
     pub network: Option<NetworkStatus>,
+    /// Where adb auto-connect stands for the caller's Android. Off from a service that does
+    /// not report it.
+    pub adb_auto_connect_state: AutoConnectState,
 }
 
 /// How a user's Android reaches the network.
@@ -1250,8 +1397,13 @@ pub type NetworkSource = Arc<dyn Fn(&str, &Settings) -> Option<NetworkStatus> + 
 /// Where ARM translation stands for a user.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArmTranslationStatus {
-    /// The package the user installed, if any.
+    /// The package the user installed (their own or Google's), if any.
     pub package: Option<Package>,
+    /// The default package of the image the user's Android starts from; only an x86_64 image
+    /// has one.
+    pub default: Option<Package>,
+    /// The translator the user's Android uses with these settings, from its next start.
+    pub translator: Option<Translator>,
     /// The user's `arm-translation` setting.
     pub enabled: bool,
     /// What the user's running Android says; `None` when it is not running.
@@ -1271,12 +1423,30 @@ impl ArmTranslationStatus {
             guest_active: guest.active,
             abilist: guest.abilist,
             restart_needed: self.restart_needed,
+            default_package: self.default.as_ref().map(package_to_wire),
+            translator: self
+                .translator
+                .as_ref()
+                .map(|translator| translator.source.as_str())
+                .unwrap_or_default()
+                .to_string(),
         }
     }
 
     fn from_wire(status: types::ArmTranslation) -> ArmTranslationStatus {
+        let package = status.package.map(package_from_wire);
+        let default = status.default_package.map(package_from_wire);
+        let translator = Source::parse(&status.translator).and_then(|source| {
+            let described = match source {
+                Source::Default => default.clone(),
+                Source::User | Source::Google => package.clone(),
+            };
+            described.map(|package| Translator { source, package })
+        });
         ArmTranslationStatus {
-            package: status.package.map(package_from_wire),
+            package,
+            default,
+            translator,
             enabled: status.enabled,
             guest: status.guest_known.then_some(GuestArmTranslation {
                 installed: status.guest_installed,
@@ -1286,6 +1456,96 @@ impl ArmTranslationStatus {
             restart_needed: status.restart_needed,
         }
     }
+}
+
+/// Where Google Play stands for a user.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GappsStatus {
+    /// The build the user installed, if any.
+    pub package: Option<GappsPackage>,
+    /// What the user's running Android says; `None` when it is not running.
+    pub guest: Option<GuestGapps>,
+    /// What is installed applies only once Android starts again.
+    pub restart_needed: bool,
+}
+
+impl GappsStatus {
+    fn to_wire(&self) -> types::Gapps {
+        let guest = self.guest.clone().unwrap_or_default();
+        types::Gapps {
+            package: self.package.as_ref().map(|package| types::GappsPackage {
+                variant: package.variant.clone(),
+                version: package.version.clone(),
+                android_version: package.android_version.clone(),
+                sdk: package.sdk,
+                arch: package.arch.clone(),
+                file: package.file.clone(),
+                source: package.source.clone(),
+                md5: package.md5.clone(),
+            }),
+            guest_known: self.guest.is_some(),
+            guest_installed: guest.installed,
+            guest_active: guest.active,
+            sdk: guest.sdk,
+            abi: guest.abi,
+            abilist: guest.abilist,
+            device_id: guest.device_id,
+            restart_needed: self.restart_needed,
+        }
+    }
+
+    fn from_wire(status: types::Gapps) -> GappsStatus {
+        GappsStatus {
+            package: status.package.map(|package| GappsPackage {
+                variant: package.variant,
+                version: package.version,
+                android_version: package.android_version,
+                sdk: package.sdk,
+                arch: package.arch,
+                file: package.file,
+                source: package.source,
+                md5: package.md5,
+            }),
+            guest: status.guest_known.then_some(GuestGapps {
+                installed: status.guest_installed,
+                active: status.guest_active,
+                sdk: status.sdk,
+                abi: status.abi,
+                abilist: status.abilist,
+                device_id: status.device_id,
+            }),
+            restart_needed: status.restart_needed,
+        }
+    }
+}
+
+fn gapps_progress_to_wire(progress: gapps::Progress) -> types::GappsProgress {
+    let stage = match progress.stage {
+        gapps::Stage::Listing => types::GappsStage::Listing,
+        gapps::Stage::Downloading => types::GappsStage::Downloading,
+        gapps::Stage::Building => types::GappsStage::Building,
+        gapps::Stage::Sending => types::GappsStage::Sending,
+    };
+    types::GappsProgress {
+        stage: stage as i32,
+        done: progress.done,
+        total: progress.total,
+    }
+}
+
+fn gapps_progress_from_wire(progress: &types::GappsProgress) -> Option<gapps::Progress> {
+    let stage = match types::GappsStage::try_from(progress.stage).ok()? {
+        types::GappsStage::Listing => gapps::Stage::Listing,
+        types::GappsStage::Downloading => gapps::Stage::Downloading,
+        types::GappsStage::Building => gapps::Stage::Building,
+        types::GappsStage::Sending => gapps::Stage::Sending,
+        types::GappsStage::Unspecified => return None,
+    };
+    Some(gapps::Progress {
+        stage,
+        done: progress.done,
+        total: progress.total,
+    })
 }
 
 fn package_to_wire(package: &Package) -> types::ArmTranslationPackage {
@@ -1332,14 +1592,27 @@ pub struct HostApiService {
     host_logs: Option<HostLogs>,
     /// Where each user's device identity is kept, and what the image's build says.
     identities: Option<(Arc<dyn DeviceIdentityStore>, ImageBuildSource)>,
+    /// Reads what the computer says it is, for the identity's defaults; without it they are
+    /// DSA's own.
+    computer: Option<ComputerSource>,
     /// What puts a fresh data disk in place of a user's, for a data reset.
     data_reset: Option<Arc<dyn UserDataReset>>,
     /// How long a data reset waits for the user's Android to stop.
     data_reset_wait: Duration,
+    /// Which Android version runs, and choosing another.
+    versions: Option<Arc<dyn crate::update::versions::AndroidVersions>>,
+    /// Where Google Play is downloaded from, and where it is made ready.
+    gapps: Option<gapps::Source>,
+    /// The default ARM translation package of the image each user's Android starts from.
+    default_arm_translation: Option<DefaultArmTranslationSource>,
 }
 
 /// Says what the build of the image a user's Android starts from is, by user.
 pub type ImageBuildSource = Arc<dyn Fn(&str) -> Option<ImageBuild> + Send + Sync>;
+
+/// Says which default ARM translation package the image a user's Android starts from carries,
+/// by user: `None` for an image that has none, as every arm64 image.
+pub type DefaultArmTranslationSource = Arc<dyn Fn(&str) -> Option<Package> + Send + Sync>;
 
 /// Names the host's log files that go in a user's diagnostics archive: the service's own and
 /// those of the processes in that user's session, never another user's.
@@ -1364,9 +1637,38 @@ impl HostApiService {
             placements: Arc::new(MemoryWidgetPlacements::default()),
             host_logs: None,
             identities: None,
+            computer: None,
             data_reset: None,
             data_reset_wait: RESET_STOP_WAIT,
+            versions: None,
+            gapps: None,
+            default_arm_translation: None,
         }
+    }
+
+    /// Reports the default ARM translation package of the image each user's Android starts
+    /// from, as `source` gives it, which their Android uses while they have installed none.
+    pub fn with_default_arm_translation(
+        mut self,
+        source: DefaultArmTranslationSource,
+    ) -> HostApiService {
+        self.default_arm_translation = Some(source);
+        self
+    }
+
+    /// Installs Google Play for users who ask, downloading it through `source`.
+    pub fn with_gapps(mut self, source: gapps::Source) -> HostApiService {
+        self.gapps = Some(source);
+        self
+    }
+
+    /// Lets users see the Android version and choose another through `versions`.
+    pub fn with_android_versions(
+        mut self,
+        versions: Arc<dyn crate::update::versions::AndroidVersions>,
+    ) -> HostApiService {
+        self.versions = Some(versions);
+        self
     }
 
     /// Resets a user's Android data with `reset`, which puts a fresh data disk in place of
@@ -1390,6 +1692,13 @@ impl HostApiService {
         build: ImageBuildSource,
     ) -> HostApiService {
         self.identities = Some((store, build));
+        self
+    }
+
+    /// Takes the defaults of the device identity from what `computer` reads: the computer's
+    /// manufacturer, brand, model, model name, name and chip.
+    pub fn with_computer_identity(mut self, computer: ComputerSource) -> HostApiService {
+        self.computer = Some(computer);
         self
     }
 
@@ -1593,6 +1902,9 @@ impl HostApiService {
                     request.id,
                     install.clone(),
                 );
+            }
+            if let Some(request::Body::InstallGapps(_)) = &request.body {
+                return self.install_gapps(connection, &peer, request.id);
             }
             if let Some(request::Body::WatchLinks(_)) = request.body {
                 return self.watch_links(connection, &peer, request.id);
@@ -2755,6 +3067,21 @@ impl HostApiService {
         }
     }
 
+    fn set_run_as_arm(&self, peer: &Peer, set: types::SetRunAsArm) -> response::Body {
+        if !apk::valid_package_name(&set.package_name) {
+            return not_a_package(&set.package_name);
+        }
+        let android = match self.androids.android(&peer.user) {
+            Ok(android) => android,
+            Err(why) => return error(ErrorCode::Unavailable, why),
+        };
+        match android.set_run_as_arm(&set.package_name, set.on, set.erase_data) {
+            Ok(outcome) => response::Body::RunAsArmResult(outcome.to_wire()),
+            Err(TaskRequestError::NotRunning(why)) => error(ErrorCode::NotRunning, why),
+            Err(TaskRequestError::Failed(why)) => error(ErrorCode::Unavailable, why),
+        }
+    }
+
     fn drag_out(&self, peer: &Peer, out: types::DragOut) -> response::Body {
         let android = match self.androids.android(&peer.user) {
             Ok(android) => android,
@@ -3227,7 +3554,26 @@ impl HostApiService {
                 }),
             );
         };
-        let checked = apk::check_name(&install.name).and_then(|()| apk::check_size(install.size));
+        let parts: Vec<InstallPart> = install
+            .parts
+            .iter()
+            .cloned()
+            .map(InstallPart::from_wire)
+            .collect();
+        let checked = if parts.is_empty() {
+            apk::check_name(&install.name).and_then(|()| apk::check_size(install.size))
+        } else {
+            apk::check_parts(&install.name, &parts).and_then(|total| {
+                if total == install.size {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "the files of {:?} add up to {total} bytes, not the {} announced",
+                        install.name, install.size
+                    ))
+                }
+            })
+        };
         let android = match (checked, self.androids.android(&peer.user)) {
             (Err(why), _) => {
                 eprintln!("install: refused an APK from {}: {why}", peer.user);
@@ -3257,10 +3603,21 @@ impl HostApiService {
             connection.close();
             return;
         }
+        // x86_64 first: arm64-v8a only when the APK's x86_64 libraries leave out some of its
+        // arm64 ones and the running Android translates ARM code. Android is asked only then.
+        let libraries = NativeLibraries::from_wire(&install.native_libraries);
+        let abi = native_abi::choose(&libraries, || {
+            android
+                .arm_translation()
+                .is_some_and(|guest| native_abi::translates_arm64(&guest.abilist))
+        });
         answer(&mut *connection, response::Body::Done(types::Done {}));
         eprintln!(
-            "install: {} asked to install {} ({} bytes)",
-            peer.user, install.name, install.size
+            "install: {} asked to install {} ({} bytes){}",
+            peer.user,
+            install.name,
+            install.size,
+            abi.map(|abi| format!(" as {abi}")).unwrap_or_default()
         );
         let mut content = ApkChunks {
             connection: &mut *connection,
@@ -3269,7 +3626,12 @@ impl HostApiService {
             piece: Vec::new(),
             at: 0,
         };
-        let body = match android.install_apk(&install.name, install.size, &mut content) {
+        let installed = if parts.is_empty() {
+            android.install_apk_for(&install.name, install.size, abi, &mut content)
+        } else {
+            android.install_parts(&install.name, &parts, abi, &mut content)
+        };
+        let body = match installed {
             Ok(outcome) => response::Body::InstallResult(outcome.to_wire()),
             Err(InstallError::NotRunning(why)) => error(ErrorCode::NotRunning, why),
             Err(InstallError::Refused(why)) => error(ErrorCode::InstallRefused, why),
@@ -3303,6 +3665,10 @@ impl HostApiService {
                 }
             }
             Some(request::Body::ResetData(_)) => self.reset_data(peer),
+            Some(request::Body::GetAndroidVersions(_)) => self.android_versions(peer, None),
+            Some(request::Body::UseAndroidVersion(chosen)) => {
+                self.android_versions(peer, Some(chosen))
+            }
             Some(request::Body::SetSettings(set)) => self.set_settings(peer, set),
             Some(request::Body::GetDeviceIdentity(_)) => self.device_identity(peer, None),
             Some(request::Body::SetDeviceIdentity(set)) => {
@@ -3362,6 +3728,7 @@ impl HostApiService {
             Some(request::Body::UninstallApp(uninstall)) => {
                 self.uninstall_app(peer, &uninstall.package_name)
             }
+            Some(request::Body::SetRunAsArm(set)) => self.set_run_as_arm(peer, set),
             Some(request::Body::CloseTask(close)) => self.request(
                 peer,
                 TaskRequest::Close {
@@ -3419,6 +3786,8 @@ impl HostApiService {
             Some(request::Body::ListWidgetProviders(_)) => self.widget_providers(peer),
             Some(request::Body::GetArmTranslation(_)) => self.get_arm_translation(peer),
             Some(request::Body::RemoveArmTranslation(_)) => self.remove_arm_translation(peer),
+            Some(request::Body::GetGapps(_)) => self.get_gapps(peer),
+            Some(request::Body::RemoveGapps(_)) => self.remove_gapps(peer),
             Some(request::Body::GetPackage(get)) => self.package_state(peer, &get.package_name),
             Some(request::Body::DragOut(out)) => self.drag_out(peer, out),
             Some(request::Body::ReadDrag(read)) => self.read_drag(peer, read),
@@ -3473,6 +3842,9 @@ impl HostApiService {
                         | request::Body::InstallArmTranslation(_)
                         | request::Body::GetArmTranslation(_)
                         | request::Body::RemoveArmTranslation(_)
+                        | request::Body::InstallGapps(_)
+                        | request::Body::GetGapps(_)
+                        | request::Body::RemoveGapps(_)
                         | request::Body::WatchLinks(_)
                         | request::Body::OpenFile(_)
                         | request::Body::WatchNotifications(_)
@@ -3503,7 +3875,10 @@ impl HostApiService {
                         | request::Body::WatchGamepads(_)
                         | request::Body::ListAppWindowSettings(_)
                         | request::Body::SetAppWindowSettings(_)
-                        | request::Body::ResetData(_) => unreachable!("answered above"),
+                        | request::Body::ResetData(_)
+                        | request::Body::GetAndroidVersions(_)
+                        | request::Body::UseAndroidVersion(_)
+                        | request::Body::SetRunAsArm(_) => unreachable!("answered above"),
                     }
                     status(android.as_ref())
                 }
@@ -3612,8 +3987,9 @@ impl HostApiService {
 }
 
 impl HostApiService {
-    /// Where ARM translation stands for `peer`: the package they installed, their setting,
-    /// and what their running Android says.
+    /// Where ARM translation stands for `peer`: the package they installed, the image's
+    /// default one, their setting, the translator those choose, and what their running Android
+    /// says.
     fn arm_translation_status(
         &self,
         peer: &Peer,
@@ -3622,19 +3998,33 @@ impl HostApiService {
     ) -> Result<ArmTranslationStatus, String> {
         let package = store.arm_translation(&peer.user)?;
         let enabled = store.get(&peer.user)?.arm_translation;
+        let default = self
+            .default_arm_translation
+            .as_ref()
+            .and_then(|source| source(&peer.user));
+        let translator = arm_translation::choose(package.as_ref(), default.as_ref(), enabled);
         let guest = guest.or_else(|| {
             self.androids
                 .android(&peer.user)
                 .ok()
                 .and_then(|android| android.arm_translation())
         });
+        // A record that cannot be read only takes away telling one translator from another.
+        let booted = store
+            .arm_translation_boot(&peer.user)
+            .unwrap_or_else(|why| {
+                eprintln!("arm translation: {why}");
+                None
+            });
         Ok(ArmTranslationStatus {
             restart_needed: arm_translation::restart_needed(
-                package.as_ref(),
-                enabled,
+                translator.as_ref(),
+                booted.as_ref(),
                 guest.as_ref(),
             ),
             package,
+            default,
+            translator,
             enabled,
             guest,
         })
@@ -3775,6 +4165,181 @@ impl HostApiService {
         connection.close();
     }
 
+    /// Where Google Play stands for `peer`: the build they installed, and what their running
+    /// Android says.
+    fn gapps_status(
+        &self,
+        peer: &Peer,
+        store: &dyn SettingsStore,
+        guest: Option<GuestGapps>,
+    ) -> Result<GappsStatus, String> {
+        let package = store.gapps(&peer.user)?;
+        let guest = guest.or_else(|| {
+            self.androids
+                .android(&peer.user)
+                .ok()
+                .and_then(|android| android.gapps())
+        });
+        Ok(GappsStatus {
+            restart_needed: gapps::restart_needed(package.as_ref(), guest.as_ref()),
+            package,
+            guest,
+        })
+    }
+
+    fn get_gapps(&self, peer: &Peer) -> response::Body {
+        let Some((store, _)) = &self.settings else {
+            return Self::no_settings();
+        };
+        match self.gapps_status(peer, &**store, None) {
+            Ok(status) => response::Body::Gapps(status.to_wire()),
+            Err(why) => error(ErrorCode::Unavailable, why),
+        }
+    }
+
+    /// Removes the caller's Google apps: from their Android's disk when it runs, and from
+    /// their settings, so no later boot lays them over the system.
+    fn remove_gapps(&self, peer: &Peer) -> response::Body {
+        let Some((store, _)) = &self.settings else {
+            return Self::no_settings();
+        };
+        let mut guest = None;
+        if let Ok(android) = self.androids.android(&peer.user) {
+            if matches!(
+                android.state(),
+                SessionState::Active | SessionState::Dozing | SessionState::Frozen
+            ) {
+                match android.remove_gapps() {
+                    Ok(state) => guest = Some(state),
+                    Err(InstallError::NotRunning(why)) => return error(ErrorCode::NotRunning, why),
+                    Err(InstallError::Refused(why)) => return error(ErrorCode::Unavailable, why),
+                }
+            }
+        }
+        if let Err(why) = store.set_gapps(&peer.user, None) {
+            return error(ErrorCode::Unavailable, why);
+        }
+        eprintln!("gapps: {} removed Google Play", peer.user);
+        match self.gapps_status(peer, &**store, guest) {
+            Ok(status) => response::Body::Gapps(status.to_wire()),
+            Err(why) => error(ErrorCode::Unavailable, why),
+        }
+    }
+
+    /// Answers an InstallGapps request: finds the build for the Android the caller runs,
+    /// downloads and checks it, makes its image and sends that to the caller's Android,
+    /// answering with GappsProgress on the way. Once Android has the image the build is
+    /// recorded with the caller's settings, and the last answer says where Google Play stands.
+    /// A build that is refused leaves the settings as they were. The connection ends with the
+    /// install.
+    fn install_gapps(&self, mut connection: Box<dyn Connection>, peer: &Peer, id: u64) {
+        let answer = |connection: &mut dyn Connection, body: response::Body| {
+            let _ = send(
+                connection,
+                Body::Response(Response {
+                    id,
+                    body: Some(body),
+                }),
+            );
+        };
+        let refuse = |mut connection: Box<dyn Connection>, body: response::Body| {
+            answer(&mut *connection, body);
+            connection.close();
+        };
+        let Some((store, _)) = &self.settings else {
+            return refuse(connection, Self::no_settings());
+        };
+        let Some(source) = &self.gapps else {
+            let why = "this service cannot download Google Play; update DSA".to_string();
+            return refuse(connection, error(ErrorCode::Unavailable, why));
+        };
+        let android = match self.androids.android(&peer.user) {
+            Ok(android) => android,
+            Err(why) => return refuse(connection, error(ErrorCode::Unavailable, why)),
+        };
+        let state = android.state();
+        if !matches!(
+            state,
+            SessionState::Active | SessionState::Dozing | SessionState::Frozen
+        ) {
+            let why = format!("Android is {state}; start it and install Google Play again");
+            return refuse(connection, error(ErrorCode::NotRunning, why));
+        }
+        let Some(guest) = android.gapps() else {
+            let why = "Android did not say which version it runs; try again once it has \
+                       finished starting"
+                .to_string();
+            return refuse(connection, error(ErrorCode::NotRunning, why));
+        };
+        let target = match gapps::Target::for_guest(guest.sdk, &guest.abi) {
+            Ok(target) => target,
+            Err(why) => return refuse(connection, error(ErrorCode::InstallRefused, why)),
+        };
+        eprintln!(
+            "gapps: {} is installing Google Play for {} Android at API level {}",
+            peer.user, target.arch, target.sdk
+        );
+        let prepared = source.prepare(&peer.user, &target, &mut |progress| {
+            answer(
+                &mut *connection,
+                response::Body::GappsProgress(gapps_progress_to_wire(progress)),
+            )
+        });
+        let prepared = match prepared {
+            Ok(prepared) => prepared,
+            Err(why) => {
+                eprintln!("gapps: refused the build for {}: {why}", peer.user);
+                return refuse(connection, error(ErrorCode::InstallRefused, why));
+            }
+        };
+        let mut image = match std::fs::File::open(&prepared.image) {
+            Ok(image) => image,
+            Err(e) => {
+                let why = format!("the Google apps image cannot be read: {e}");
+                return refuse(connection, error(ErrorCode::Unavailable, why));
+            }
+        };
+        let size = prepared.size;
+        let mut report = |done: u64| {
+            let news = gapps::Progress {
+                stage: gapps::Stage::Sending,
+                done,
+                total: size,
+            };
+            answer(
+                &mut *connection,
+                response::Body::GappsProgress(gapps_progress_to_wire(news)),
+            )
+        };
+        let installed = android.install_gapps(
+            size,
+            &prepared.sha256,
+            &mut gapps::Reporting::new(&mut image, &mut report),
+        );
+        let body = match installed {
+            Ok(guest) => match store.set_gapps(&peer.user, Some(&prepared.package)) {
+                Ok(()) => {
+                    let package = &prepared.package;
+                    let files = prepared.built.files;
+                    eprintln!(
+                        "gapps: {} installed LiteGapps {} {} ({files} files)",
+                        peer.user, package.variant, package.version
+                    );
+                    match self.gapps_status(peer, &**store, Some(guest)) {
+                        Ok(status) => response::Body::Gapps(status.to_wire()),
+                        Err(why) => error(ErrorCode::Unavailable, why),
+                    }
+                }
+                Err(why) => error(ErrorCode::Unavailable, why),
+            },
+            Err(InstallError::NotRunning(why)) => error(ErrorCode::NotRunning, why),
+            Err(InstallError::Refused(why)) => error(ErrorCode::InstallRefused, why),
+        };
+        drop(prepared);
+        answer(&mut *connection, body);
+        connection.close();
+    }
+
     /// The caller's device identity, after replacing it with `wanted` when there is one.
     fn device_identity(
         &self,
@@ -3796,11 +4361,12 @@ impl HostApiService {
                 Err(why) => return error(ErrorCode::Unavailable, why),
             },
         };
-        let effective = chosen.effective(build(&peer.user).as_ref());
-        response::Body::DeviceIdentity(types::DeviceIdentityReport {
-            chosen: Some(crate::device_identity::to_wire(&chosen)),
-            effective: Some(crate::device_identity::to_wire(&effective)),
-        })
+        let computer = match &self.computer {
+            Some(read) => read().identity(),
+            None => crate::computer_identity::ComputerIdentity::dsa(),
+        };
+        let report = IdentityReport::new(&chosen, build(&peer.user).as_ref(), &computer);
+        response::Body::DeviceIdentity(crate::device_identity::report_to_wire(&report))
     }
 
     /// Answers with the caller's window settings for every app, after replacing one app's
@@ -3844,6 +4410,57 @@ impl HostApiService {
             ErrorCode::Unavailable,
             "this service keeps no settings; update the service".into(),
         )
+    }
+
+    /// Reports the Android version, after choosing `chosen` when there is one.
+    fn android_versions(
+        &self,
+        peer: &Peer,
+        chosen: Option<types::UseAndroidVersion>,
+    ) -> response::Body {
+        use crate::update::versions::{Channel, ChooseError};
+        let Some(versions) = &self.versions else {
+            return error(
+                ErrorCode::Unavailable,
+                "this service does not keep Android images it can update, so the Android \
+                 version cannot be chosen here"
+                    .into(),
+            );
+        };
+        let report = match chosen {
+            None => versions
+                .report()
+                .map_err(|why| error(ErrorCode::Unavailable, why)),
+            Some(_) if versions.needs_administrator() && !peer.administrator => Err(error(
+                ErrorCode::NotAllowed,
+                "only an administrator can choose the Android version; every user of this \
+                 computer runs the same one. Run the command as an administrator."
+                    .into(),
+            )),
+            Some(chosen) => versions
+                .choose(Channel::from_wire(chosen.major), chosen.erase_data)
+                .map_err(|why| match why {
+                    ChooseError::Unsupported(why) => error(ErrorCode::InvalidSetting, why),
+                    ChooseError::DataWouldBeLost(why) => error(ErrorCode::DataWouldBeLost, why),
+                    ChooseError::Store(why) => error(ErrorCode::Unavailable, why),
+                })
+                .inspect(|report| {
+                    eprintln!(
+                        "local API: {} chose Android {} (now {}, moving to {})",
+                        peer.user,
+                        match report.channel {
+                            Channel::Latest => "latest".to_string(),
+                            Channel::Major(major) => major.to_string(),
+                        },
+                        report.android_major,
+                        report.target_major
+                    )
+                }),
+        };
+        match report {
+            Ok(report) => response::Body::AndroidVersions(versions_to_wire(&report)),
+            Err(body) => body,
+        }
     }
 
     /// Erases the caller's Android data: stops their Android and has the platform put a fresh
@@ -3897,10 +4514,22 @@ impl HostApiService {
             Ok(settings) => {
                 let mut wire = settings_to_wire(&settings, &self.facts_now(facts));
                 wire.network = self.network_now(&peer.user, &settings);
+                wire.adb_auto_connect_state = self.adb_auto_connect_now(&peer.user);
                 response::Body::Settings(wire)
             }
             Err(why) => error(ErrorCode::Unavailable, why),
         }
+    }
+
+    /// Where adb auto-connect stands for the caller's Android, or off when it has none.
+    fn adb_auto_connect_now(&self, user: &str) -> String {
+        self.androids
+            .android(user)
+            .map_or(AutoConnectState::Off, |android| {
+                android.adb_auto_connect_state()
+            })
+            .as_str()
+            .to_string()
     }
 
     /// The caller's network as the platform reports it, or "off" when it cannot say (no
@@ -3933,6 +4562,7 @@ impl HostApiService {
             input_trace: wanted.input_trace,
             resize_trace: wanted.resize_trace,
             developer_mode: wanted.developer_mode,
+            adb_auto_connect: wanted.adb_auto_connect,
             arm_translation: wanted.arm_translation,
             file_sharing: wanted.file_sharing,
             shared_folders: wanted.shared_folders,
@@ -3987,6 +4617,7 @@ impl HostApiService {
                     android.share_clipboard(settings.clipboard);
                     android.links_in_android(settings.links_in_android);
                     android.share_folders(settings.file_sharing, settings.shared_folders.clone());
+                    android.adb_auto_connect(settings.adb_auto_connect);
                     if let Err(why) =
                         android.developer_mode(settings.developer_mode, settings.adb_port)
                     {
@@ -4004,9 +4635,8 @@ impl HostApiService {
                 eprintln!(
                     "local API: {} changed the settings: render GPU {}, freeze {}, clipboard \
                      {}, links in Android {}, program updates {}, image updates {}, input \
-                     trace {}, resize trace {}, developer mode {} (adb port {}), file sharing {} \
-                     ({}), advanced \
-                     networking {}",
+                     trace {}, resize trace {}, developer mode {} (adb port {}, auto-connect \
+                     {}), file sharing {} ({}), advanced networking {}",
                     peer.user,
                     settings.render_gpu,
                     on_off(settings.freeze),
@@ -4018,12 +4648,14 @@ impl HostApiService {
                     on_off(settings.resize_trace),
                     on_off(settings.developer_mode),
                     settings.adb_port,
+                    on_off(settings.adb_auto_connect),
                     on_off(settings.file_sharing),
                     settings.shared_folders.join(", "),
                     on_off(settings.advanced_networking)
                 );
                 let mut wire = settings_to_wire(&settings, &self.facts_now(facts));
                 wire.network = self.network_now(&peer.user, &settings);
+                wire.adb_auto_connect_state = self.adb_auto_connect_now(&peer.user);
                 response::Body::Settings(wire)
             }
             Err(why) => error(ErrorCode::InvalidSetting, why),
@@ -4039,12 +4671,11 @@ fn on_off(value: bool) -> &'static str {
     }
 }
 
-fn identity_report(body: response::Body) -> Result<(DeviceIdentity, DeviceIdentity), ClientError> {
+fn identity_report(body: response::Body) -> Result<IdentityReport, ClientError> {
     match body {
-        response::Body::DeviceIdentity(report) => Ok((
-            crate::device_identity::from_wire(report.chosen.unwrap_or_default()),
-            crate::device_identity::from_wire(report.effective.unwrap_or_default()),
-        )),
+        response::Body::DeviceIdentity(report) => {
+            Ok(crate::device_identity::report_from_wire(report))
+        }
         _ => Err(ClientError::Malformed(
             "expected the device identity".into(),
         )),
@@ -4065,6 +4696,8 @@ fn settings_to_wire(settings: &Settings, facts: &ServiceFacts) -> types::Setting
         resize_trace: settings.resize_trace,
         developer_mode: settings.developer_mode,
         adb_port: settings.adb_port.into(),
+        adb_auto_connect: settings.adb_auto_connect,
+        adb_auto_connect_state: String::new(),
         arm_translation: settings.arm_translation,
         file_sharing: settings.file_sharing,
         shared_folders: settings.shared_folders.clone(),
@@ -4095,6 +4728,7 @@ fn settings_from_wire(settings: types::Settings) -> SettingsReport {
             adb_port: crate::settings::normalise_adb_port(
                 u16::try_from(settings.adb_port).unwrap_or(0),
             ),
+            adb_auto_connect: settings.adb_auto_connect,
             arm_translation: settings.arm_translation,
             file_sharing: settings.file_sharing,
             shared_folders: settings.shared_folders,
@@ -4108,6 +4742,38 @@ fn settings_from_wire(settings: types::Settings) -> SettingsReport {
             android_version: Some(settings.android_version).filter(|v| !v.is_empty()),
         },
         network: settings.network.map(NetworkStatus::from_wire),
+        adb_auto_connect_state: AutoConnectState::parse(&settings.adb_auto_connect_state),
+    }
+}
+
+fn versions_to_wire(report: &crate::update::versions::VersionReport) -> types::AndroidVersions {
+    types::AndroidVersions {
+        version: report.version.clone(),
+        android_major: report.android_major,
+        build: report.build,
+        build_id: report.build_id.clone().unwrap_or_default(),
+        security_patch: report.security_patch.clone().unwrap_or_default(),
+        chosen_major: report.channel.to_wire(),
+        supported_majors: report.supported_majors.clone(),
+        target_major: report.target_major,
+        on_trial: report.on_trial,
+        notice: report.notice.clone().unwrap_or_default(),
+    }
+}
+
+fn versions_from_wire(wire: types::AndroidVersions) -> crate::update::versions::VersionReport {
+    let text = |s: String| Some(s).filter(|s| !s.is_empty());
+    crate::update::versions::VersionReport {
+        version: wire.version,
+        android_major: wire.android_major,
+        build: wire.build,
+        build_id: text(wire.build_id),
+        security_patch: text(wire.security_patch),
+        channel: crate::update::versions::Channel::from_wire(wire.chosen_major),
+        supported_majors: wire.supported_majors,
+        target_major: wire.target_major,
+        on_trial: wire.on_trial,
+        notice: text(wire.notice),
     }
 }
 
@@ -4208,6 +4874,20 @@ impl std::fmt::Display for ClientError {
 }
 
 impl std::error::Error for ClientError {}
+
+impl ClientError {
+    /// Whether the service refused to move to an older Android major because that erases
+    /// user data the request did not agree to lose.
+    pub fn data_would_be_lost(&self) -> bool {
+        matches!(
+            self,
+            ClientError::Service {
+                code: ErrorCode::DataWouldBeLost,
+                ..
+            }
+        )
+    }
+}
 
 /// The client end of the local API.
 pub struct HostApiClient {
@@ -4324,6 +5004,38 @@ impl HostApiClient {
     }
 
     /// The settings of the caller's DSA, with what the service says about itself.
+    /// Which Android version runs and which can be chosen.
+    pub fn android_versions(
+        &mut self,
+    ) -> Result<crate::update::versions::VersionReport, ClientError> {
+        let body = request::Body::GetAndroidVersions(types::GetAndroidVersions {});
+        match self.exchange(body, self.timeout)? {
+            response::Body::AndroidVersions(report) => Ok(versions_from_wire(report)),
+            _ => Err(ClientError::Malformed(
+                "expected the Android versions".into(),
+            )),
+        }
+    }
+
+    /// Chooses the Android version this computer follows. `erase_data` agrees to erasing
+    /// every user's Android data when it is older than the running one.
+    pub fn use_android_version(
+        &mut self,
+        channel: crate::update::versions::Channel,
+        erase_data: bool,
+    ) -> Result<crate::update::versions::VersionReport, ClientError> {
+        let body = request::Body::UseAndroidVersion(types::UseAndroidVersion {
+            major: channel.to_wire(),
+            erase_data,
+        });
+        match self.exchange(body, self.timeout)? {
+            response::Body::AndroidVersions(report) => Ok(versions_from_wire(report)),
+            _ => Err(ClientError::Malformed(
+                "expected the Android versions".into(),
+            )),
+        }
+    }
+
     pub fn settings(&mut self) -> Result<SettingsReport, ClientError> {
         match self.exchange(
             request::Body::GetSettings(types::GetSettings {}),
@@ -4337,6 +5049,13 @@ impl HostApiClient {
     /// The device identity the caller chose, and every value as Android reports it from its
     /// next start.
     pub fn device_identity(&mut self) -> Result<(DeviceIdentity, DeviceIdentity), ClientError> {
+        let report = self.device_identity_report()?;
+        Ok((report.chosen, report.effective))
+    }
+
+    /// The caller's device identity in full: what they chose, what Android reports, the
+    /// defaults and where each came from.
+    pub fn device_identity_report(&mut self) -> Result<IdentityReport, ClientError> {
         let body = request::Body::GetDeviceIdentity(types::GetDeviceIdentity {});
         identity_report(self.exchange(body, self.timeout)?)
     }
@@ -4347,6 +5066,16 @@ impl HostApiClient {
         &mut self,
         identity: &DeviceIdentity,
     ) -> Result<(DeviceIdentity, DeviceIdentity), ClientError> {
+        let report = self.set_device_identity_report(identity)?;
+        Ok((report.chosen, report.effective))
+    }
+
+    /// Replaces the caller's device identity with `identity`, and returns it as
+    /// [`device_identity_report`](Self::device_identity_report) does.
+    pub fn set_device_identity_report(
+        &mut self,
+        identity: &DeviceIdentity,
+    ) -> Result<IdentityReport, ClientError> {
         let body = request::Body::SetDeviceIdentity(types::SetDeviceIdentity {
             identity: Some(crate::device_identity::to_wire(identity)),
         });
@@ -4455,6 +5184,63 @@ impl HostApiClient {
         }
     }
 
+    /// Where Google Play stands for the caller.
+    pub fn gapps(&mut self) -> Result<GappsStatus, ClientError> {
+        let body = request::Body::GetGapps(types::GetGapps {});
+        match self.exchange(body, GAPPS_ANSWER_WAIT)? {
+            response::Body::Gapps(status) => Ok(GappsStatus::from_wire(status)),
+            _ => Err(ClientError::Malformed(
+                "expected where Google Play stands".into(),
+            )),
+        }
+    }
+
+    /// Removes the caller's Google apps; Android goes without them from its next start.
+    pub fn remove_gapps(&mut self) -> Result<GappsStatus, ClientError> {
+        let body = request::Body::RemoveGapps(types::RemoveGapps {});
+        match self.exchange(body, INSTALL_ANSWER_WAIT)? {
+            response::Body::Gapps(status) => Ok(GappsStatus::from_wire(status)),
+            _ => Err(ClientError::Malformed(
+                "expected where Google Play stands".into(),
+            )),
+        }
+    }
+
+    /// Installs Google Play for the caller: the service downloads the build for the caller's
+    /// Android and sends its image there, which Android uses from its next start. `progress`
+    /// hears what the service is doing on the way. The connection ends with the install, so
+    /// the client is used up.
+    pub fn install_gapps(
+        mut self,
+        progress: &mut dyn FnMut(gapps::Progress),
+    ) -> Result<GappsStatus, ClientError> {
+        let id = self.next_id;
+        self.next_id += 1;
+        send(
+            &mut *self.connection,
+            Body::Request(Request {
+                id,
+                body: Some(request::Body::InstallGapps(types::InstallGapps {})),
+            }),
+        )
+        .map_err(ClientError::Transport)?;
+        loop {
+            match self.answer(id, INSTALL_ANSWER_WAIT)? {
+                response::Body::GappsProgress(news) => {
+                    if let Some(news) = gapps_progress_from_wire(&news) {
+                        progress(news);
+                    }
+                }
+                response::Body::Gapps(status) => return Ok(GappsStatus::from_wire(status)),
+                _ => {
+                    return Err(ClientError::Malformed(
+                        "expected news of the install or where Google Play stands".into(),
+                    ))
+                }
+            }
+        }
+    }
+
     /// The apps installed in the caller's Android that a launcher lists, in package order;
     /// `None` until it has said which since the service started.
     pub fn installed_apps(&mut self) -> Result<Option<Vec<AppInfo>>, ClientError> {
@@ -4505,6 +5291,30 @@ impl HostApiClient {
             response::Body::UninstallResult(result) => Ok(UninstallOutcome::from_wire(result)),
             _ => Err(ClientError::Malformed(
                 "expected how the uninstall went".into(),
+            )),
+        }
+    }
+
+    /// Installs the app `package` of the caller's Android again with its native code for
+    /// arm64-v8a (`on`) or x86_64, keeping its data unless `erase_data`, and says how it went.
+    pub fn set_run_as_arm(
+        &mut self,
+        package: &str,
+        on: bool,
+        erase_data: bool,
+    ) -> Result<RunAsArmOutcome, ClientError> {
+        match self.exchange(
+            request::Body::SetRunAsArm(types::SetRunAsArm {
+                package_name: package.to_string(),
+                on,
+                erase_data,
+            }),
+            self.timeout
+                .max(native_abi::REINSTALL_WAIT + Duration::from_secs(5)),
+        )? {
+            response::Body::RunAsArmResult(result) => Ok(RunAsArmOutcome::from_wire(result)),
+            _ => Err(ClientError::Malformed(
+                "expected how installing the app again went".into(),
             )),
         }
     }
@@ -4788,9 +5598,48 @@ impl HostApiClient {
     /// error. An error means the APK did not get there. The connection ends with the install,
     /// so the client is used up.
     pub fn install_apk(
+        self,
+        name: &str,
+        size: u64,
+        content: &mut dyn Read,
+    ) -> Result<InstallOutcome, ClientError> {
+        self.install_apk_with_libraries(name, size, &NativeLibraries::new(), content)
+    }
+
+    /// Installs an APK as [`install_apk`](Self::install_apk) does, saying which native
+    /// libraries it holds ([`crate::apk::ApkFile::native_libraries`]), from which the service
+    /// chooses the ABI it is installed for.
+    pub fn install_apk_with_libraries(
+        self,
+        name: &str,
+        size: u64,
+        libraries: &NativeLibraries,
+        content: &mut dyn Read,
+    ) -> Result<InstallOutcome, ClientError> {
+        self.install(name, size, libraries, &[], content)
+    }
+
+    /// Installs an app made of several files in the caller's Android: `parts` names them, and
+    /// their bytes are read from `content` one after another, in that order. `name` is the
+    /// bundle they come from, and `libraries` the native libraries of its APKs among the
+    /// parts, together. Otherwise as [`install_apk`](Self::install_apk).
+    pub fn install_parts(
+        self,
+        name: &str,
+        parts: &[InstallPart],
+        libraries: &NativeLibraries,
+        content: &mut dyn Read,
+    ) -> Result<InstallOutcome, ClientError> {
+        let size = parts.iter().map(|part| part.size).sum();
+        self.install(name, size, libraries, parts, content)
+    }
+
+    fn install(
         mut self,
         name: &str,
         size: u64,
+        libraries: &NativeLibraries,
+        parts: &[InstallPart],
         content: &mut dyn Read,
     ) -> Result<InstallOutcome, ClientError> {
         let id = self.next_id;
@@ -4798,6 +5647,8 @@ impl HostApiClient {
             request::Body::InstallApk(types::InstallApk {
                 name: name.to_string(),
                 size,
+                native_libraries: libraries.to_wire(),
+                parts: parts.iter().map(InstallPart::to_wire).collect(),
             }),
             self.timeout,
         )? {

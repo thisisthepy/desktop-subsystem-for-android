@@ -5,6 +5,6 @@ Name[ko]=DSA 파일
 Comment=Files of your Android, in the file manager
 Comment[ko]=Android의 파일을 파일 관리자에서 봅니다
 Exec=dsa files open
-Icon=folder-remote
+Icon=io.github.thisisthepy.DSA.Files
 Terminal=false
 Categories=System;FileTools;

@@ -227,6 +227,18 @@ std::map<std::string, v1::Envelope> Cases() {
     event->set_buttons(32);
   }
   {
+    v1::PointerEvent* event = cases["pointer_event_pen_tilt"].mutable_pointer_event();
+    event->set_task_id(42);
+    event->set_action(v1::POINTER_ACTION_DOWN);
+    event->set_tool(v1::POINTER_TOOL_PEN);
+    event->set_pointer_id(1);
+    event->set_x(100.0f);
+    event->set_y(200.0f);
+    event->set_pressure(0.5f);
+    event->set_tilt_x(30.0f);
+    event->set_tilt_y(-45.0f);
+  }
+  {
     v1::KeyEvent* event = cases["key_event_ctrl_a_down"].mutable_key_event();
     event->set_task_id(42);
     event->set_action(v1::KEY_ACTION_DOWN);
@@ -340,6 +352,19 @@ std::map<std::string, v1::Envelope> Cases() {
     install->set_transfer_id(3);
     install->set_name("notes.apk");
     install->set_size(1000);
+  }
+  {
+    v1::InstallApk* install = cases["install_apk_split"].mutable_install_apk();
+    install->set_transfer_id(4);
+    install->set_name("notes.xapk");
+    install->set_size(13);
+    v1::InstallPart* base = install->add_parts();
+    base->set_name("base.apk");
+    base->set_size(10);
+    v1::InstallPart* obb = install->add_parts();
+    obb->set_name("main.1.com.example.notes.obb");
+    obb->set_size(3);
+    obb->set_obb(true);
   }
   {
     v1::ApkChunk* chunk = cases["apk_chunk"].mutable_apk_chunk();

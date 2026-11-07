@@ -13,6 +13,7 @@
 //! - [`trial`]: boots a newly staged image and, when it does not finish booting in time,
 //!   goes back to the previous image and starts that instead.
 //!
+//! - [`versions`]: the supported Android versions and the one a computer follows.
 //! - [`service`]: the periodic check and a user's Android that boots a new image on trial.
 //!
 //! Updating DSA itself follows the same pattern:
@@ -31,6 +32,7 @@ pub mod program_service;
 pub mod service;
 pub mod store;
 pub mod trial;
+pub mod versions;
 
 use std::fmt;
 

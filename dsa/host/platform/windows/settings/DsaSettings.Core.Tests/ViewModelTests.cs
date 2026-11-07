@@ -92,7 +92,8 @@ public class ViewModelTests
         Assert.Equal(SessionState.Stopped, vm.State);
         Assert.Equal("State_Stopped", vm.StateText);
         Assert.True(vm.HasLastReason);
-        Assert.Equal("the VM exited", vm.LastReason);
+        Assert.Equal("LastReason_General", vm.LastReason);
+        Assert.Equal("the VM exited", vm.LastReasonDetail);
         Assert.True(vm.CanStart);
         Assert.False(vm.CanStop);
 
@@ -526,6 +527,11 @@ public class ViewModelTests
         Assert.False(vm.Accepts(new[] { @"C:\notes.txt" }));
         Assert.False(vm.Accepts(null));
         Assert.True(vm.Accepts(new[] { @"C:\notes.txt", @"C:\app.APK" }));
+        // Split-APK bundles go to the install as APKs do, and App Bundles to be told why not.
+        foreach (var bundle in new[] { @"C:\app.xapk", @"C:\app.apks", @"C:\app.APKM", @"C:\app.aab" })
+        {
+            Assert.True(vm.Accepts(new[] { bundle }), bundle);
+        }
         await vm.DropAsync(new[] { @"C:\notes.txt" });
         Assert.Empty(cli.Calls);
         Assert.Equal(InstallSeverity.Error, vm.Severity);

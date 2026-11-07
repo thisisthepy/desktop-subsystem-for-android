@@ -283,6 +283,48 @@ fn fr2_dsa_shows_the_guest_console_of_a_failed_start_below_the_status_line() {
 }
 
 #[test]
+fn fr17_dsa_status_says_an_error_code_in_a_sentence_and_keeps_the_raw_line() {
+    use dsa_host_core::host_api::Status;
+    let raw =
+        "the guest did not start: HcsStartComputeSystem failed (HRESULT 0x80070057): {\"Error\":1}";
+    let line = dsa_cli::describe(&Status {
+        state: SessionState::Stopped,
+        last_reason: Some(raw.into()),
+        update_notice: None,
+        problem: None,
+    });
+    assert_eq!(
+        line,
+        format!(
+            "Android: Stopped (last stopped: the host refused the settings for Android's virtual \
+             machine; update or reinstall DSA)\ndetails: {raw}"
+        )
+    );
+}
+
+#[test]
+fn fr17_dsa_status_gives_each_mapped_code_its_sentence() {
+    use dsa_host_core::host_api::Status;
+    for (code, sentence) in [
+        ("0x80370102", "virtualization is off"),
+        ("0xC0351000", "virtualization is off"),
+        ("0x8007000e", "not enough memory"),
+        ("0x80070070", "a disk problem"),
+        ("0x80004005", "Android could not start"),
+    ] {
+        let line = dsa_cli::describe(&Status {
+            state: SessionState::Stopped,
+            last_reason: Some(format!("HcsStartComputeSystem failed (HRESULT {code})")),
+            update_notice: None,
+            problem: None,
+        });
+        let first = line.lines().next().unwrap();
+        assert!(first.contains(sentence), "{code}: {line}");
+        assert!(!first.contains(code), "{code}: {line}");
+    }
+}
+
+#[test]
 fn fr2_dsa_says_what_keeps_a_stalled_android_from_being_ready() {
     use dsa_host_core::host_api::Status;
     let status = Status {
@@ -892,6 +934,47 @@ fn fr19_trace_switches_are_settings_dsa_reads_and_parses() {
 }
 
 #[test]
+fn fr20_adb_auto_connect_is_on_by_default_and_dsa_turns_it_off() {
+    use dsa_cli::Change;
+    assert_eq!(
+        parse(&args("settings set adb-auto-connect off"))
+            .unwrap()
+            .change,
+        Some(Change::AdbAutoConnect(false))
+    );
+    assert_eq!(
+        parse(&args("settings set adb-auto-connect on"))
+            .unwrap()
+            .change,
+        Some(Change::AdbAutoConnect(true))
+    );
+    assert!(parse(&args("settings set adb-auto-connect maybe")).is_err());
+    let ((listener, _, _), endpoint) = local_pair();
+    let _service = settings_service(listener);
+    let settings = json_of(&dsa(&endpoint, "settings --json"));
+    assert_eq!(settings["adb_auto_connect"], true);
+    assert_eq!(settings["adb_auto_connect_state"], "off");
+    let changed = json_of(&dsa(&endpoint, "settings set adb-auto-connect off --json"));
+    assert_eq!(changed["adb_auto_connect"], false);
+    let output = dsa(&endpoint, "settings");
+    assert!(
+        stdout(&output).contains("adb auto-connect: off"),
+        "{}",
+        stdout(&output)
+    );
+}
+
+#[test]
+fn fr20_the_auto_connect_state_is_described_in_words() {
+    use dsa_host_core::adb_discovery::AutoConnectState;
+    assert_eq!(
+        dsa_cli::describe_auto_connect(AutoConnectState::Attached),
+        "adb lists DSA"
+    );
+    assert!(dsa_cli::describe_auto_connect(AutoConnectState::Detached).contains("restarts"));
+}
+
+#[test]
 fn fr20_developer_mode_is_off_by_default_and_dsa_turns_it_on_with_the_adb_address() {
     use dsa_cli::Change;
     assert_eq!(
@@ -945,8 +1028,23 @@ fn fr25_dsa_arm_translation_commands_are_parsed() {
         parse(&args("arm-translation remove")).unwrap().command,
         Cmd::ArmTranslationRemove
     );
+    assert_eq!(
+        parse(&args("arm-translation use-default --json"))
+            .unwrap()
+            .command,
+        Cmd::ArmTranslationUseDefault
+    );
     assert!(parse(&args("arm-translation install")).is_err());
     assert!(parse(&args("arm-translation enable")).is_err());
+    let fetch = parse(&args("arm-translation fetch google")).unwrap();
+    assert_eq!(fetch.command, Cmd::ArmTranslationFetchGoogle);
+    assert!(!fetch.yes, "it asks first");
+    let agreed = parse(&args("arm-translation fetch google --yes --json")).unwrap();
+    assert_eq!(agreed.command, Cmd::ArmTranslationFetchGoogle);
+    assert!(agreed.yes && agreed.json);
+    assert!(parse(&args("arm-translation fetch")).is_err());
+    assert!(parse(&args("arm-translation fetch houdini")).is_err());
+    assert!(parse(&args("arm-translation status --yes")).is_err());
     assert_eq!(
         parse(&args("settings set arm-translation off"))
             .unwrap()
@@ -1006,6 +1104,185 @@ fn fr25_dsa_installs_reports_and_removes_an_arm_translation_package() {
     assert!(!refused.status.success());
     assert!(stderr(&refused).contains("erofs"), "{}", stderr(&refused));
     let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn fr25_dsa_uses_the_images_default_translator_until_a_package_replaces_it() {
+    use dsa_host_core::arm_translation::Package;
+    use dsa_host_core::host_api::{HostApiService, ServiceFacts};
+    use dsa_host_core::settings::MemorySettings;
+    let folder = std::env::temp_dir().join(format!("dsa-cli-arm-default-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&folder);
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(
+        folder.join("arm-translation.json"),
+        r#"{"name": "Translator", "version": "1.0", "library": "libtranslator.so",
+            "abis": ["arm64-v8a"], "license": "Apache-2.0"}"#,
+    )
+    .unwrap();
+    let mut image = vec![0u8; 8192];
+    image[1024..1028].copy_from_slice(&0xE0F5_E1E2u32.to_le_bytes());
+    std::fs::write(folder.join("system.img"), &image).unwrap();
+    let digitalis = Package {
+        name: "Digitalis".into(),
+        version: "17-abefbe2b1600".into(),
+        library: "libberberis_arm64.so".into(),
+        abis: vec!["arm64-v8a".into()],
+        license: "Apache-2.0".into(),
+    };
+    let ((listener, _, _), endpoint) = local_pair();
+    let service = HostApiService::new(Arc::new(FakeAndroids::default()), "test service")
+        .with_settings(Arc::new(MemorySettings::default()), ServiceFacts::default())
+        .with_default_arm_translation(Arc::new(move |_: &str| Some(digitalis.clone())));
+    let _service = RunningService::start_service(listener, service);
+
+    // From the first start, with nothing installed.
+    let first = json_of(&dsa(&endpoint, "arm-translation --json"));
+    assert!(first["package"].is_null(), "{first}");
+    assert_eq!(first["default"]["name"], "Digitalis");
+    assert_eq!(first["translator"]["source"], "default");
+    assert_eq!(first["translator"]["name"], "Digitalis");
+    assert_eq!(first["translator"]["version"], "17-abefbe2b1600");
+    assert_eq!(first["translator"]["license"], "Apache-2.0");
+    assert_eq!(first["supported"], true);
+    assert_eq!(first["restart_needed"], false);
+    let text = stdout(&dsa(&endpoint, "arm-translation"));
+    assert!(
+        text.contains(
+            "ARM apps: supported by Digitalis 17-abefbe2b1600 (Apache-2.0), this Android's default translator"
+        ),
+        "{text}"
+    );
+    let already = stdout(&dsa(&endpoint, "arm-translation use-default"));
+    assert!(
+        already.contains("already uses its default translator"),
+        "{already}"
+    );
+
+    // A package the user installs replaces it, and use-default goes back.
+    let installed = json_of(&dsa(
+        &endpoint,
+        &format!("arm-translation install {} --json", folder.display()),
+    ));
+    assert_eq!(installed["translator"]["source"], "user");
+    assert_eq!(installed["translator"]["name"], "Translator");
+    assert_eq!(installed["default"]["name"], "Digitalis");
+    assert_eq!(installed["restart_needed"], true);
+    let text = stdout(&dsa(&endpoint, "arm-translation status"));
+    assert!(text.contains("the package you installed"), "{text}");
+    assert!(text.contains("dsa arm-translation use-default"), "{text}");
+    let back = json_of(&dsa(&endpoint, "arm-translation use-default --json"));
+    assert!(back["package"].is_null(), "{back}");
+    assert_eq!(back["translator"]["source"], "default");
+    assert_eq!(back["android"]["installed"], false);
+
+    // Turned off, nothing translates, and the default is still offered.
+    let off = dsa(&endpoint, "settings set arm-translation off");
+    assert!(off.status.success(), "{}", stderr(&off));
+    let off = json_of(&dsa(&endpoint, "arm-translation --json"));
+    assert!(off["translator"].is_null(), "{off}");
+    assert_eq!(off["supported"], false);
+    assert_eq!(off["default"]["name"], "Digitalis");
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn fr25_dsa_offers_no_default_translator_where_the_image_has_none() {
+    let ((listener, _, _), endpoint) = local_pair();
+    let _service = settings_service(listener);
+    let none = json_of(&dsa(&endpoint, "arm-translation --json"));
+    assert!(none["default"].is_null(), "{none}");
+    assert!(none["translator"].is_null(), "{none}");
+    let refused = dsa(&endpoint, "arm-translation use-default");
+    assert!(!refused.status.success());
+    assert!(
+        stderr(&refused).contains("no default translator")
+            || stderr(&refused).contains("no default ARM translator"),
+        "{}",
+        stderr(&refused)
+    );
+}
+
+/// `dsa` with Google's repository replaced by the one in `repository`.
+fn dsa_with_repository(endpoint: &str, line: &str, repository: &std::path::Path) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_dsa"))
+        .args(args(line))
+        .args([endpoint_flag(), endpoint])
+        .env("DSA_GOOGLE_REPOSITORY", repository)
+        .output()
+        .expect("running dsa")
+}
+
+#[test]
+fn fr25_dsa_fetches_googles_translator_and_installs_it_only_when_agreed() {
+    use dsa_host_core::arm_translation::google::fixture;
+    let id = std::process::id();
+    let repository = std::env::temp_dir().join(format!("dsa-cli-google-{id}"));
+    let _ = std::fs::remove_dir_all(&repository);
+    let zip = fixture::image_archive(true);
+    fixture::write_repository(&repository, &zip, None, &["36", "37.0"]).unwrap();
+    let ((listener, _, _), endpoint) = local_pair();
+    let _service = settings_service(listener);
+    let status = json_of(&dsa(&endpoint, "arm-translation --json"));
+    assert_eq!(
+        status["google_fetch_available"],
+        dsa_cli::GOOGLE_FETCH_AVAILABLE
+    );
+    let agreed = "arm-translation fetch google --yes --json";
+    if !dsa_cli::GOOGLE_FETCH_AVAILABLE {
+        // An ARM64 computer runs ARM apps itself.
+        let refused = dsa_with_repository(&endpoint, agreed, &repository);
+        assert!(!refused.status.success());
+        assert!(stderr(&refused).contains("ARM64"), "{}", stderr(&refused));
+        let _ = std::fs::remove_dir_all(&repository);
+        return;
+    }
+
+    // Asked with nobody to answer, it says where the download comes from and its terms, and
+    // downloads nothing.
+    let asked = dsa_with_repository(&endpoint, "arm-translation fetch google", &repository);
+    assert!(!asked.status.success());
+    let said = stderr(&asked);
+    assert!(said.contains("Android SDK License"), "{said}");
+    assert!(
+        said.contains("https://developer.android.com/studio/terms"),
+        "{said}"
+    );
+    assert!(said.contains("nothing was changed"), "{said}");
+    let none = json_of(&dsa(&endpoint, "arm-translation --json"));
+    assert!(none["package"].is_null(), "{none}");
+
+    let fetched = json_of(&dsa_with_repository(&endpoint, agreed, &repository));
+    assert_eq!(fetched["package"]["name"], "Google ARM translator");
+    assert_eq!(fetched["package"]["library"], "libndk_translation.so");
+    assert_eq!(fetched["package"]["license"], "Android SDK License");
+    assert_eq!(fetched["package"]["abis"][0], "arm64-v8a");
+    assert_eq!(fetched["android"]["installed"], true);
+    assert_eq!(fetched["restart_needed"], true);
+    let _ = std::fs::remove_dir_all(&repository);
+}
+
+#[test]
+fn fr25_dsa_refuses_googles_image_when_its_hash_differs() {
+    use dsa_host_core::arm_translation::google::fixture;
+    if !dsa_cli::GOOGLE_FETCH_AVAILABLE {
+        return;
+    }
+    let id = std::process::id();
+    let repository = std::env::temp_dir().join(format!("dsa-cli-google-hash-{id}"));
+    let _ = std::fs::remove_dir_all(&repository);
+    let zip = fixture::image_archive(true);
+    let wrong = Some("0123456789012345678901234567890123456789");
+    fixture::write_repository(&repository, &zip, wrong, &["36", "37.0"]).unwrap();
+    let ((listener, _, _), endpoint) = local_pair();
+    let _service = settings_service(listener);
+    let line = "arm-translation fetch google --yes";
+    let refused = dsa_with_repository(&endpoint, line, &repository);
+    assert!(!refused.status.success());
+    assert!(stderr(&refused).contains("SHA-1"), "{}", stderr(&refused));
+    let none = json_of(&dsa(&endpoint, "arm-translation --json"));
+    assert!(none["package"].is_null(), "the stored state is unchanged");
+    let _ = std::fs::remove_dir_all(&repository);
 }
 
 #[test]
@@ -1386,6 +1663,139 @@ fn fr11_dsa_install_refuses_a_file_that_is_no_apk_before_starting_android() {
         stderr(&missing)
     );
     // Android was not started for either.
+    assert!(androids
+        .of(&user)
+        .is_none_or(|android| android.state() == SessionState::Stopped));
+}
+
+/// An APKPure bundle of the notes app: its base APK, which has complete x86_64 and arm64-v8a
+/// libraries, splits for two languages and two densities, and an expansion file.
+fn notes_xapk() -> Vec<u8> {
+    use dsa_host_core::apk_info::fixture::{archive, notes_apk, notes_split};
+    let base = notes_apk();
+    let en = notes_split("config.en", &[]);
+    let fr = notes_split("config.fr", &[]);
+    let mdpi = notes_split("config.mdpi", &[]);
+    let xxxhdpi = notes_split("config.xxxhdpi", &[]);
+    archive(
+        &[
+            ("manifest.json", &b"{}"[..]),
+            ("com.example.notes.apk", &base[..]),
+            ("config.en.apk", &en[..]),
+            ("config.fr.apk", &fr[..]),
+            ("config.mdpi.apk", &mdpi[..]),
+            ("config.xxxhdpi.apk", &xxxhdpi[..]),
+            (
+                "Android/obb/com.example.notes/main.42.com.example.notes.obb",
+                &b"expansion"[..],
+            ),
+        ],
+        b"",
+    )
+}
+
+#[test]
+fn fr11_dsa_install_installs_the_splits_of_an_xapk_this_android_takes_in_one_install() {
+    let ((listener, _, user), endpoint) = local_pair();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    let path = apk_file("Notes.xapk", &notes_xapk());
+
+    let output = dsa_with_path(&endpoint, "install", &path, "--json");
+    assert!(output.status.success(), "{}", stderr(&output));
+    let android = androids.of(&user).unwrap();
+    let installs = android.part_installs.lock().unwrap();
+    assert_eq!(installs.len(), 1);
+    assert_eq!(installs[0].name, "Notes.xapk");
+    let names: Vec<&str> = installs[0]
+        .parts
+        .iter()
+        .map(|part| part.name.as_str())
+        .collect();
+    // The base, one density, English (and the host's language, when it is French), and the
+    // expansion file last.
+    assert_eq!(names[0], "base.apk", "{names:?}");
+    assert!(names.contains(&"split_config.en.apk"), "{names:?}");
+    assert_eq!(
+        names.iter().filter(|name| name.contains("dpi")).count(),
+        1,
+        "{names:?}"
+    );
+    assert_eq!(
+        names.last(),
+        Some(&"main.42.com.example.notes.obb"),
+        "{names:?}"
+    );
+    assert!(installs[0].parts.last().unwrap().obb);
+    // The base APK's x86_64 libraries are whole, so the app is x86_64.
+    assert_eq!(installs[0].abi.as_deref(), Some("x86_64"));
+    assert!(android.installs.lock().unwrap().is_empty());
+}
+
+#[test]
+fn fr11_dsa_apk_info_reads_the_base_of_a_bundle_and_says_what_installing_sends() {
+    let ((listener, _, _), endpoint) = local_pair();
+    let _service = RunningService::start(listener, Arc::new(FakeAndroids::default()));
+    // Told by what is in it, whatever its name.
+    let path = apk_file("notes.zip", &notes_xapk());
+    let json = json_of(&dsa_with_path(&endpoint, "apk-info", &path, "--json"));
+    assert_eq!(json["package"], "com.example.notes");
+    assert_eq!(json["label"], "Notes");
+    assert_eq!(json["format"], "xapk");
+    assert_eq!(json["apks"][0], "base.apk");
+    assert!(json["split_count"].as_u64().unwrap() >= 2, "{json}");
+    assert_eq!(json["obbs"][0], "main.42.com.example.notes.obb");
+    assert!(json["total_size"].as_u64().unwrap() > json["size"].as_u64().unwrap());
+    let text = stdout(&dsa_with_path(&endpoint, "apk-info", &path, ""));
+    assert!(text.contains("split-APK bundle (.xapk)"), "{text}");
+    // One APK says it is one.
+    let apk = apk_file("notes.apk", &dsa_host_core::apk_info::fixture::notes_apk());
+    let json = json_of(&dsa_with_path(&endpoint, "apk-info", &apk, "--json"));
+    assert_eq!(json["format"], "apk");
+    assert_eq!(json["split_count"], 0);
+    assert_eq!(json["total_size"], json["size"]);
+}
+
+#[test]
+fn fr11_dsa_install_refuses_an_app_bundle_and_an_encrypted_bundle_with_their_reasons() {
+    use dsa_host_core::apk_info::fixture::archive;
+    let ((listener, _, user), endpoint) = local_pair();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    let aab = archive(
+        &[
+            ("BundleConfig.pb", &b"\x0a\x00"[..]),
+            ("base/manifest/AndroidManifest.xml", &b"\x03\x00"[..]),
+        ],
+        b"",
+    );
+    let aab = apk_file("notes.aab", &aab);
+    let output = dsa_with_path(&endpoint, "install", &aab, "");
+    assert_eq!(output.status.code(), Some(1));
+    let error = stderr(&output);
+    assert!(
+        error.starts_with("dsa: not installed (app-bundle): notes.aab: "),
+        "{error}"
+    );
+    assert!(error.contains("another key"), "{error}");
+    let sealed = archive(
+        &[
+            ("info.json", &b"{}"[..]),
+            ("base.apk", &b"\x13\x37 sealed"[..]),
+        ],
+        b"",
+    );
+    let sealed = apk_file("notes.apkm", &sealed);
+    for command in ["install", "apk-info"] {
+        let output = dsa_with_path(&endpoint, command, &sealed, "");
+        assert_eq!(output.status.code(), Some(1), "{command}");
+        let error = stderr(&output);
+        assert!(
+            error.starts_with("dsa: not installed (encrypted-bundle): notes.apkm: "),
+            "{command}: {error}"
+        );
+    }
+    // Android was not started for any of them.
     assert!(androids
         .of(&user)
         .is_none_or(|android| android.state() == SessionState::Stopped));
@@ -1788,6 +2198,13 @@ fn fr12_dsa_widgets_says_why_a_widget_was_not_placed() {
 }
 
 fn identity_service(listener: Box<dyn dsa_transport::local::LocalListener>) -> RunningService {
+    identity_service_on(listener, None)
+}
+
+fn identity_service_on(
+    listener: Box<dyn dsa_transport::local::LocalListener>,
+    computer: Option<dsa_host_core::computer_identity::ComputerInfo>,
+) -> RunningService {
     use dsa_host_core::device_identity::{ImageBuild, MemoryDeviceIdentities};
     use dsa_host_core::host_api::HostApiService;
     let build = ImageBuild {
@@ -1795,13 +2212,63 @@ fn identity_service(listener: Box<dyn dsa_transport::local::LocalListener>) -> R
         id: "BP2A".into(),
         incremental: "1.dsaab".into(),
         tags: "release-keys".into(),
+        arch: "x86_64".into(),
     };
-    let service = HostApiService::new(Arc::new(FakeAndroids::default()), "test service")
+    let mut service = HostApiService::new(Arc::new(FakeAndroids::default()), "test service")
         .with_device_identities(
             Arc::new(MemoryDeviceIdentities::default()),
             Arc::new(move |_: &str| Some(build.clone())),
         );
+    if let Some(computer) = computer {
+        service = service.with_computer_identity(Arc::new(move || computer.clone()));
+    }
     RunningService::start_service(listener, service)
+}
+
+#[test]
+fn fr17_dsa_shows_the_computers_identity_and_where_each_default_came_from() {
+    let ((listener, _, _), endpoint) = local_pair();
+    let _service = identity_service_on(
+        listener,
+        Some(dsa_host_core::computer_identity::ComputerInfo {
+            system_manufacturer: "SAMSUNG ELECTRONICS CO., LTD.".into(),
+            system_product: "960XGL".into(),
+            system_family: "Galaxy Book4 Ultra".into(),
+            system_version: "P10ALX".into(),
+            baseboard_product: "NT960XGP-G72AG".into(),
+            computer_name: "BREW-BOOK".into(),
+            cpu_vendor: "GenuineIntel".into(),
+            cpu_name: "Intel(R) Core(TM) Ultra 7 155H".into(),
+        }),
+    );
+    let shown = json_of(&dsa(&endpoint, "settings device --json"));
+    assert_eq!(shown["effective"]["manufacturer"], "Samsung");
+    assert_eq!(shown["effective"]["model"], "NT960XGP-G72AG");
+    assert_eq!(shown["effective"]["model_name"], "Galaxy Book4 Ultra");
+    assert_eq!(shown["effective"]["device_name"], "BREW-BOOK");
+    assert_eq!(shown["effective"]["soc_manufacturer"], "Intel");
+    assert_eq!(shown["effective"]["soc_model"], "Core Ultra 7 155H");
+    assert_eq!(shown["sources"]["model"], "computer");
+    assert_eq!(shown["sources"]["device_name"], "computer");
+    assert_eq!(shown["sources"]["device"], "dsa");
+    assert_eq!(shown["sources"]["fingerprint_type"], "dsa");
+
+    let changed = json_of(&dsa(&endpoint, "settings set device.model Tab --json"));
+    assert_eq!(changed["effective"]["model"], "Tab");
+    assert_eq!(changed["defaults"]["model"], "NT960XGP-G72AG");
+    let reset = json_of(&dsa(&endpoint, "settings reset device.model --json"));
+    assert_eq!(reset["effective"]["model"], "NT960XGP-G72AG");
+
+    let text = stdout(&dsa(&endpoint, "settings device"));
+    assert!(
+        text.contains("model: NT960XGP-G72AG (from this computer)"),
+        "{text}"
+    );
+    assert!(text.contains("device: dsa_x86_64 (DSA's value)"), "{text}");
+    assert!(
+        text.contains("device_name: BREW-BOOK (from this computer)"),
+        "{text}"
+    );
 }
 
 fn dsa_words(endpoint: &str, words: &[&str]) -> Output {
@@ -2011,6 +2478,72 @@ fn fr23_dsa_apps_uninstall_removes_a_user_app_and_refuses_a_system_app() {
 }
 
 #[test]
+fn fr25_dsa_apps_run_as_arm_is_parsed() {
+    use dsa_cli::AppsAction;
+    let line = args("apps run-as-arm com.example.game on");
+    let on = parse(&line).unwrap();
+    assert_eq!(
+        on.apps,
+        Some(AppsAction::RunAsArm("com.example.game".into(), true))
+    );
+    assert!(!on.erase_data);
+    let line = args("apps run-as-arm com.example.game off --erase-data");
+    let erase = parse(&line).unwrap();
+    assert_eq!(
+        erase.apps,
+        Some(AppsAction::RunAsArm("com.example.game".into(), false))
+    );
+    assert!(erase.erase_data);
+    assert!(parse(&args("apps run-as-arm com.example.game")).is_err());
+    assert!(parse(&args("apps run-as-arm com.example.game maybe")).is_err());
+    assert!(parse(&args("apps run-as-arm not/a/package on")).is_err());
+}
+
+#[test]
+fn fr25_dsa_apps_run_as_arm_asks_before_erasing_data_and_lists_the_switch() {
+    let ((listener, _, user), endpoint) = local_pair();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+
+    let off = dsa(&endpoint, "apps run-as-arm com.example.notes on");
+    assert_eq!(off.status.code(), Some(1));
+    assert!(
+        stderr(&off).contains("not changed (translation-off)"),
+        "{}",
+        stderr(&off)
+    );
+    *androids.of(&user).unwrap().translating.lock().unwrap() = true;
+    let asks = dsa(&endpoint, "apps run-as-arm com.example.notes on");
+    assert_eq!(asks.status.code(), Some(1));
+    assert!(
+        stderr(&asks).contains("not changed (data-would-be-erased)"),
+        "{}",
+        stderr(&asks)
+    );
+    let done = dsa(
+        &endpoint,
+        "apps run-as-arm com.example.notes on --erase-data --json",
+    );
+    assert!(done.status.success(), "{}", stderr(&done));
+    let json = json_of(&done);
+    assert_eq!(json["status"], "done");
+    assert_eq!(json["on"], true);
+
+    // The sample apps have no native code, so their switch cannot be changed.
+    let list = json_of(&dsa(&endpoint, "apps list --json"));
+    let notes = list["apps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|app| app["package"] == "com.example.notes")
+        .expect("the notes app")
+        .clone();
+    assert_eq!(notes["run_as_arm"]["available"], false);
+    assert_eq!(notes["run_as_arm"]["reason"], "no-arm-libraries");
+    assert_eq!(notes["native_abis"], serde_json::json!([]));
+}
+
+#[test]
 fn fr23_dsa_apps_settings_opens_androids_app_page_or_its_list_of_apps() {
     let ((listener, _, user), endpoint) = local_pair();
     let androids = Arc::new(FakeAndroids::default());
@@ -2205,8 +2738,15 @@ fn fr30_dsa_app_window_changes_and_resets_an_apps_window_settings() {
 
 #[test]
 fn fr31_there_is_no_run_mode_setting_to_stop_an_idle_android() {
-    for name in ["run-mode continuous", "stop-after 5m", "keep-for-notifications on"] {
-        assert!(parse(&args(&format!("settings set {name}"))).is_err(), "{name}");
+    for name in [
+        "run-mode continuous",
+        "stop-after 5m",
+        "keep-for-notifications on",
+    ] {
+        assert!(
+            parse(&args(&format!("settings set {name}"))).is_err(),
+            "{name}"
+        );
     }
 }
 
@@ -2282,6 +2822,7 @@ fn fr15_settings_say_where_program_updates_come_from() {
             android_version: None,
         },
         network: None,
+        adb_auto_connect_state: Default::default(),
     };
     let text = dsa_cli::describe_settings(&report);
     let line = text
@@ -2293,4 +2834,175 @@ fn fr15_settings_say_where_program_updates_come_from() {
     } else {
         assert!(line.contains("does not update it"), "{line}");
     }
+}
+
+/// Android versions kept in memory: 17 runs, and 16 can be chosen.
+#[derive(Default)]
+struct FakeVersions(std::sync::Mutex<dsa_host_core::update::versions::Channel>);
+
+impl dsa_host_core::update::versions::AndroidVersions for FakeVersions {
+    fn needs_administrator(&self) -> bool {
+        false
+    }
+    fn report(&self) -> Result<dsa_host_core::update::versions::VersionReport, String> {
+        use dsa_host_core::update::versions::{target_major, VersionReport};
+        let channel = *self.0.lock().unwrap();
+        Ok(VersionReport {
+            version: "17.0.0-16373615-8".into(),
+            android_major: 17,
+            build: 1637361508,
+            build_id: Some("16373615".into()),
+            security_patch: Some("2026-06-05".into()),
+            channel,
+            supported_majors: vec![16, 17],
+            target_major: target_major(channel, &[16, 17]).unwrap(),
+            on_trial: false,
+            notice: None,
+        })
+    }
+    fn choose(
+        &self,
+        channel: dsa_host_core::update::versions::Channel,
+        erase_data: bool,
+    ) -> Result<
+        dsa_host_core::update::versions::VersionReport,
+        dsa_host_core::update::versions::ChooseError,
+    > {
+        use dsa_host_core::update::versions::{Channel, ChooseError};
+        if channel == Channel::Major(16) && !erase_data {
+            return Err(ChooseError::DataWouldBeLost("16 is older".into()));
+        }
+        *self.0.lock().unwrap() = channel;
+        self.report().map_err(ChooseError::Store)
+    }
+}
+
+#[test]
+fn fr14_dsa_android_shows_the_version_and_moves_down_only_with_erase_data() {
+    use dsa_host_core::host_api::HostApiService;
+    use dsa_host_core::update::versions::Channel;
+    let ((listener, _, _), endpoint) = local_pair();
+    let service = HostApiService::new(Arc::new(FakeAndroids::default()), "test service")
+        .with_android_versions(Arc::new(FakeVersions::default()));
+    let _service = RunningService::start_service(listener, service);
+
+    let shown = stdout(&dsa(&endpoint, "android version"));
+    assert!(shown.contains("Android 17 (17.0.0-16373615-8)"), "{shown}");
+    assert!(shown.contains("security patch 2026-06-05"), "{shown}");
+    assert!(shown.contains("Supported: Android 16, 17"), "{shown}");
+    let json = json_of(&dsa(&endpoint, "android --json"));
+    assert_eq!(json["android_major"], 17);
+    assert_eq!(json["channel"], "latest");
+
+    let refused = dsa(&endpoint, "android use 16");
+    assert!(!refused.status.success());
+    let warning = stderr(&refused);
+    assert!(warning.contains("accounts"), "{warning}");
+    assert!(warning.contains("--erase-data"), "{warning}");
+    let moved = json_of(&dsa(&endpoint, "android use 16 --erase-data --json"));
+    assert_eq!(moved["channel"], "16");
+    assert_eq!(moved["target_major"], 16);
+
+    let parsed = parse(&args("android use latest")).unwrap();
+    assert_eq!(parsed.command, Cmd::AndroidUse);
+    assert_eq!(parsed.android, Some(Channel::Latest));
+    assert!(parse(&args("android use seventeen")).is_err());
+    assert!(parse(&args("android use")).is_err());
+}
+
+#[test]
+fn fr32_dsa_gapps_commands_are_parsed() {
+    assert_eq!(parse(&args("gapps")).unwrap().command, Cmd::GappsStatus);
+    assert_eq!(
+        parse(&args("gapps --json")).unwrap().command,
+        Cmd::GappsStatus
+    );
+    assert_eq!(
+        parse(&args("gapps status")).unwrap().command,
+        Cmd::GappsStatus
+    );
+    let install = parse(&args("gapps install --progress")).unwrap();
+    assert_eq!(install.command, Cmd::GappsInstall);
+    assert!(install.progress);
+    assert_eq!(
+        parse(&args("gapps remove")).unwrap().command,
+        Cmd::GappsRemove
+    );
+    assert!(parse(&args("gapps enable")).is_err());
+}
+
+/// LiteGapps' file host, from memory: one x86_64 build for API level 36.
+struct FakeLiteGapps(std::collections::HashMap<String, Vec<u8>>);
+
+impl dsa_host_core::update::store::Fetch for FakeLiteGapps {
+    fn fetch(&self, url: &str, out: &mut dyn std::io::Write) -> Result<u64, String> {
+        let body = self.0.get(url).ok_or_else(|| format!("404 for {url}"))?;
+        out.write_all(body).map_err(|e| e.to_string())?;
+        Ok(body.len() as u64)
+    }
+}
+
+fn gapps_service(listener: Box<dyn dsa_transport::local::LocalListener>) -> RunningService {
+    use dsa_host_core::gapps::{listing, md5, package, Source};
+    use dsa_host_core::host_api::{HostApiService, ServiceFacts};
+    use dsa_host_core::settings::MemorySettings;
+    let project = "https://litegapps.test/projects/litegapps";
+    let path =
+        "/litegapps/x86_64/36/core/2026-10-01/LiteGapps-core-x86_64-16.0-20261001-official.zip";
+    let zip = package::fixture::sample();
+    let mut digest = md5::Md5::new();
+    digest.update(&zip);
+    let feed = listing::fixture::feed(&[listing::fixture::item(
+        path,
+        zip.len() as u64,
+        &md5::hex(&digest.finish()),
+    )]);
+    let host = FakeLiteGapps(std::collections::HashMap::from([
+        (
+            format!("{project}/rss?path=/litegapps/x86_64/36/core"),
+            feed.into_bytes(),
+        ),
+        (format!("{project}/files{path}/download"), zip),
+    ]));
+    let work = std::env::temp_dir().join(format!("dsa-cli-gapps-{}", std::process::id()));
+    let service = HostApiService::new(Arc::new(FakeAndroids::default()), "test service")
+        .with_settings(Arc::new(MemorySettings::default()), ServiceFacts::default())
+        .with_gapps(Source::new(Arc::new(host), work).with_project(project));
+    RunningService::start_service(listener, service)
+}
+
+#[test]
+fn fr32_dsa_installs_reports_and_removes_google_play() {
+    let ((listener, _, _), endpoint) = local_pair();
+    let _service = gapps_service(listener);
+    let none = json_of(&dsa(&endpoint, "gapps --json"));
+    assert!(none["package"].is_null());
+    assert_eq!(none["installed"], false);
+    assert!(none["android"].is_null(), "Android is not running yet");
+    assert_eq!(
+        none["registration_url"],
+        "https://www.google.com/android/uncertified/"
+    );
+
+    let installed = json_of(&dsa(&endpoint, "gapps install --json"));
+    assert_eq!(installed["package"]["variant"], "core");
+    assert_eq!(installed["package"]["version"], "20261001");
+    assert_eq!(installed["package"]["android_version"], "16.0");
+    assert_eq!(installed["package"]["arch"], "x86_64");
+    assert_eq!(installed["installed"], true);
+    assert_eq!(installed["android"]["installed"], true);
+    assert_eq!(installed["android"]["active"], false);
+    assert_eq!(installed["restart_needed"], true);
+    let text = stdout(&dsa(&endpoint, "gapps status"));
+    assert!(
+        text.contains("Google Play: LiteGapps core 20261001 for Android 16.0 (x86_64)"),
+        "{text}"
+    );
+    assert!(text.contains("Restart Android"), "{text}");
+    assert!(text.contains("google.com/android/uncertified"), "{text}");
+
+    let removed = json_of(&dsa(&endpoint, "gapps remove --json"));
+    assert!(removed["package"].is_null());
+    assert_eq!(removed["android"]["installed"], false);
+    assert_eq!(removed["restart_needed"], false);
 }

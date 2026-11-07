@@ -1,0 +1,114 @@
+diff --git a/host-common/GfxstreamFatalError.cpp b/host-common/GfxstreamFatalError.cpp
+index 83e6cf8..83d3ec2 100644
+--- a/host-common/GfxstreamFatalError.cpp
++++ b/host-common/GfxstreamFatalError.cpp
+@@ -43,8 +43,9 @@ AbortMessage::AbortMessage(const char *file, const char *function, int line, Fat
+     mOss << "FATAL in " << function << ", err code: " << reason.getAbortCode() << ": ";
+ }
+ 
+-AbortMessage::~AbortMessage() {
+-    OutputLog(stderr, 'F', mFile, mLine, 0, mOss.str().c_str());
++AbortMessage::~AbortMessage() noexcept(false) {
++    // The message is data, not a format: a '%' in it must not be read as one.
++    OutputLog(stderr, 'F', mFile, mLine, 0, "%s", mOss.str().c_str());
+     fflush(stderr);
+     CreateMetricsLogger()->logMetricEvent(GfxstreamVkAbort{.file = mFile,
+                                                            .function = mFunction,
+@@ -52,6 +53,9 @@ AbortMessage::~AbortMessage() {
+                                                            .line = mLine,
+                                                            .abort_reason = mReason.getAbortCode()});
+ 
++    if (guestFatalErrorsThrow()) {
++        throw GuestFatalError(mOss.str());
++    }
+     die();
+ }
+ 
+diff --git a/host-common/GfxstreamFatalErrorAbsl.cpp b/host-common/GfxstreamFatalErrorAbsl.cpp
+index 6d112e7..0aac9f8 100644
+--- a/host-common/GfxstreamFatalErrorAbsl.cpp
++++ b/host-common/GfxstreamFatalErrorAbsl.cpp
+@@ -41,13 +41,19 @@ namespace emugl {
+ AbortMessage::AbortMessage(const char* file, const char* function, int line, FatalError reason)
+     : mFile(file), mFunction(function), mLine(line), mReason(reason) {}
+ 
+-AbortMessage::~AbortMessage() {
++AbortMessage::~AbortMessage() noexcept(false) {
+     CreateMetricsLogger()->logMetricEvent(GfxstreamVkAbort{.file = mFile,
+                                                            .function = mFunction,
+                                                            .msg = mOss.str().c_str(),
+                                                            .line = mLine,
+                                                            .abort_reason = mReason.getAbortCode()});
+ 
++    if (guestFatalErrorsThrow()) {
++        ABSL_LOG(ERROR).AtLocation(mFile, mLine)
++            << "FATAL error in " << mFunction << ": " << mOss.str();
++        throw GuestFatalError(mOss.str());
++    }
++
+     if (customDieFunction) {
+         ABSL_LOG(ERROR).AtLocation(mFile, mLine)
+             << "FATAL error in " << mFunction
+diff --git a/host-common/include/host-common/GfxstreamFatalError.h b/host-common/include/host-common/GfxstreamFatalError.h
+index da99319..1c4c83e 100644
+--- a/host-common/include/host-common/GfxstreamFatalError.h
++++ b/host-common/include/host-common/GfxstreamFatalError.h
+@@ -15,9 +15,12 @@
+ #pragma once
+ 
+ #include <cstdint>
++#include <exception>
+ #include <functional>
+ #include <optional>
+ #include <sstream>
++#include <string>
++#include <utility>
+ 
+ namespace emugl {
+ 
+@@ -46,7 +49,9 @@ class AbortMessage {
+    public:
+     AbortMessage(const char* file, const char* function, int line, FatalError reason);
+ 
+-    [[noreturn]] ~AbortMessage();
++    // Ends the process, or, on a thread inside a ScopedGuestFatalErrors, throws
++    // GuestFatalError with the message.
++    [[noreturn]] ~AbortMessage() noexcept(false);
+ 
+     std::ostream& stream() { return mOss; }
+ 
+@@ -61,6 +66,34 @@ class AbortMessage {
+ // A function that terminates the process should be passed in. When calling the GFXSTREAM_ABORT
+ // macro, the set function will be used to terminate the process instead of std::abort.
+ void setDieFunction(std::optional<std::function<void()>> newDie);
++
++// What a fatal error throws, instead of ending the process, on a thread that serves one
++// guest: the thread ends what it serves (one guest's stream, one guest process's cleanup),
++// so a guest that sends a bad command, or whose GPU device is lost, loses its own rendering
++// and every other guest and the embedder keep running.
++class GuestFatalError : public std::exception {
++   public:
++    explicit GuestFatalError(std::string message) : mMessage(std::move(message)) {}
++    const char* what() const noexcept override { return mMessage.c_str(); }
++
++   private:
++    std::string mMessage;
++};
++
++inline thread_local int tGuestFatalErrorScopes = 0;
++
++// While one lives on a thread, a fatal error on that thread throws GuestFatalError. The
++// thread must catch it where it can end the work of one guest.
++class ScopedGuestFatalErrors {
++   public:
++    ScopedGuestFatalErrors() { ++tGuestFatalErrorScopes; }
++    ~ScopedGuestFatalErrors() { --tGuestFatalErrorScopes; }
++    ScopedGuestFatalErrors(const ScopedGuestFatalErrors&) = delete;
++    ScopedGuestFatalErrors& operator=(const ScopedGuestFatalErrors&) = delete;
++};
++
++// Whether a fatal error on this thread throws GuestFatalError rather than ending the process.
++inline bool guestFatalErrorsThrow() { return tGuestFatalErrorScopes > 0; }
+ }  // namespace emugl
+ 
+ #define GFXSTREAM_ABORT(reason) ::emugl::AbortMessage(__FILE__, __func__, __LINE__, reason).stream()

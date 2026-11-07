@@ -28,6 +28,19 @@ public partial class GeneralPage : Page
 
     private async void OnStop(object sender, RoutedEventArgs e) => await ViewModel.StopAsync();
 
+    /// <summary>Copies what the service reported. The clipboard can be held by another program,
+    /// and then nothing is copied.</summary>
+    private void OnCopyLastReason(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            System.Windows.Clipboard.SetDataObject(ViewModel.LastReasonDetail, copy: true);
+        }
+        catch (System.Runtime.InteropServices.ExternalException)
+        {
+        }
+    }
+
     private async void OnFreeze(object sender, RoutedEventArgs e) => await ViewModel.FreezeAsync();
 
     private async void OnRefresh(object sender, RoutedEventArgs e) => await ViewModel.RefreshAsync();

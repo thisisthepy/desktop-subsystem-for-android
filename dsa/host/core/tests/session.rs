@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use dsa_host_core::apk::{self, InstallStatus};
+use dsa_host_core::apk::{self, InstallPart, InstallStatus};
 use dsa_host_core::apps::UninstallStatus;
 use dsa_host_core::background::{BackgroundCommand, BackgroundEvent, MediaCommand, Playback};
 use dsa_host_core::handshake::ControlHandshake;
@@ -2474,7 +2474,10 @@ fn fr29_a_file_dragged_out_of_a_window_reaches_the_host_whole_with_its_name() {
     );
     let offer = asking.join().unwrap().expect("an answer").expect("a drag");
     assert_eq!(offer.drag_id, 5);
-    assert_eq!(offer.items[0].name, "holiday.jpg", "no path reaches the host");
+    assert_eq!(
+        offer.items[0].name, "holiday.jpg",
+        "no path reaches the host"
+    );
     assert_eq!(offer.items[0].size, Some(content.len() as u64));
 
     let copying = {
@@ -3358,6 +3361,149 @@ fn fr11_the_install_window_learns_the_installed_version_and_signer_from_the_agen
     assert_eq!(asking.join().unwrap().expect("an answer"), None);
 }
 
+fn game_libraries(abi: &str, names: &[&str]) -> dsa_protocol::control::NativeLibraries {
+    dsa_protocol::control::NativeLibraries {
+        abi: abi.into(),
+        names: names.iter().map(|name| name.to_string()).collect(),
+    }
+}
+
+/// Lists one app, `com.example.game`, whose x86_64 libraries leave out one of its arm64 ones.
+fn list_game(agent: &mut Box<dyn Connection>, watch: &dsa_host_core::tasks::TaskWatch) {
+    send_body(
+        agent,
+        Body::InstalledApp(dsa_protocol::control::InstalledApp {
+            package_name: "com.example.game".into(),
+            label: "Game".into(),
+            primary_abi: "x86_64".into(),
+            native_libraries: vec![
+                game_libraries("arm64-v8a", &["libmain.so", "libunity.so"]),
+                game_libraries("x86_64", &["libmain.so"]),
+            ],
+            ..Default::default()
+        }),
+    );
+    send_body(
+        agent,
+        Body::InstalledApps(dsa_protocol::control::InstalledApps {
+            package_names: vec!["com.example.game".into()],
+        }),
+    );
+    loop {
+        if let TaskEvent::Installed(apps) = watch.events.recv_timeout(WAIT).expect("the apps") {
+            assert_eq!(apps[0].primary_abi, "x86_64");
+            assert!(apps[0].native_libraries.has("arm64-v8a"));
+            break;
+        }
+    }
+}
+
+fn game_crash(arm64_supported: bool) -> Body {
+    Body::NativeLibraryCrash(dsa_protocol::control::NativeLibraryCrash {
+        package_name: "com.example.game".into(),
+        detail: "java.lang.UnsatisfiedLinkError: dlopen failed: library \"libunity.so\" not found"
+            .into(),
+        arm64_supported,
+    })
+}
+
+#[test]
+fn fr25_a_native_library_crash_offers_to_run_the_app_as_arm_and_a_click_reinstalls_it() {
+    use dsa_host_core::native_abi::Notice;
+    let (session, mut agent, _launcher) = active_session();
+    let watch = session.watch_notifications();
+    let tasks = session.watch_tasks();
+    list_game(&mut agent, &tasks);
+    // Without a translator there is nothing to offer.
+    send_body(&mut agent, game_crash(false));
+    nothing_for_the_watcher(&watch);
+    send_body(&mut agent, game_crash(true));
+    let offer = match watch.recv_timeout(WAIT).unwrap() {
+        NotificationEvent::Posted(offer) => offer,
+        other => panic!("expected the offer, not {other:?}"),
+    };
+    assert_eq!(offer.key, Notice::Offer.key("com.example.game"));
+    assert_eq!(offer.app_label, "Game");
+    session
+        .notification_action(NotificationAction::Open {
+            key: offer.key.clone(),
+        })
+        .expect("taken");
+    let reinstall = loop {
+        if let Body::ReinstallApp(reinstall) = next_body(&mut agent) {
+            break reinstall;
+        }
+    };
+    assert_eq!(reinstall.package_name, "com.example.game");
+    assert_eq!(reinstall.abi, "arm64-v8a");
+    assert!(
+        !reinstall.erase_data,
+        "the data stays unless the user says otherwise"
+    );
+    assert_eq!(
+        watch.recv_timeout(WAIT).unwrap(),
+        NotificationEvent::Removed { key: offer.key }
+    );
+    send_body(
+        &mut agent,
+        Body::ReinstallResult(dsa_protocol::control::ReinstallResult {
+            request_id: reinstall.request_id,
+            package_name: "com.example.game".into(),
+            status: dsa_protocol::control::ReinstallStatus::Success as i32,
+            message: String::new(),
+            primary_abi: "arm64-v8a".into(),
+        }),
+    );
+    match watch.recv_timeout(WAIT).unwrap() {
+        NotificationEvent::Posted(done) => {
+            assert_eq!(done.key, Notice::Done.key("com.example.game"))
+        }
+        other => panic!("expected the news that it worked, not {other:?}"),
+    }
+}
+
+#[test]
+fn fr25_an_app_that_runs_as_arm_or_has_no_arm_code_is_offered_nothing() {
+    let (session, mut agent, _launcher) = active_session();
+    let watch = session.watch_notifications();
+    let tasks = session.watch_tasks();
+    list_game(&mut agent, &tasks);
+    // A package that is not installed, and one with no ARM code, are offered nothing.
+    send_body(
+        &mut agent,
+        Body::NativeLibraryCrash(dsa_protocol::control::NativeLibraryCrash {
+            package_name: "com.example.missing".into(),
+            detail: "dlopen failed".into(),
+            arm64_supported: true,
+        }),
+    );
+    send_body(
+        &mut agent,
+        Body::InstalledApp(dsa_protocol::control::InstalledApp {
+            package_name: "com.example.game".into(),
+            label: "Game".into(),
+            primary_abi: "arm64-v8a".into(),
+            native_libraries: vec![game_libraries("arm64-v8a", &["libmain.so"])],
+            ..Default::default()
+        }),
+    );
+    send_body(
+        &mut agent,
+        Body::InstalledApps(dsa_protocol::control::InstalledApps {
+            package_names: vec!["com.example.game".into()],
+        }),
+    );
+    loop {
+        if let TaskEvent::Installed(apps) = tasks.events.recv_timeout(WAIT).expect("the apps") {
+            if apps[0].primary_abi == "arm64-v8a" {
+                break;
+            }
+        }
+    }
+    send_body(&mut agent, game_crash(true));
+    nothing_for_the_watcher(&watch);
+}
+
 #[test]
 fn fr23_installed_apps_carry_their_version_dates_sizes_and_kind() {
     let (session, mut agent, _launcher) = active_session();
@@ -3376,6 +3522,7 @@ fn fr23_installed_apps_carry_their_version_dates_sizes_and_kind() {
             app_bytes: 3_000_000,
             data_bytes: 20_000,
             cache_bytes: 1_000,
+            ..Default::default()
         }),
     );
     send_body(
@@ -3596,6 +3743,81 @@ fn fr11_a_second_install_waits_until_the_first_has_ended() {
         ),
     );
     assert!(second.join().unwrap().unwrap().installed());
+}
+
+#[test]
+fn fr11_a_split_install_names_its_parts_and_sends_them_one_after_another() {
+    let (session, mut agent, _launcher) = active_session();
+    let session = Arc::new(session);
+    let base = apk_bytes(apk::CHUNK_BYTES * 2 + 5);
+    let split = apk_bytes(1000);
+    let obb = apk_bytes(77);
+    let parts = vec![
+        part("base.apk", base.len(), false),
+        part("split_config.x86_64.apk", split.len(), false),
+        part("main.42.com.example.notes.obb", obb.len(), true),
+    ];
+    let content = [base, split, obb].concat();
+    let installing = {
+        let session = Arc::clone(&session);
+        let (parts, content) = (parts.clone(), content.clone());
+        let abi = Some("arm64-v8a");
+        thread::spawn(move || session.install_parts("notes.xapk", &parts, abi, &mut &content[..]))
+    };
+    let announced = match next_install_body(&mut agent) {
+        Body::InstallApk(install) => install,
+        other => panic!("expected an install, got {other:?}"),
+    };
+    assert_eq!(announced.name, "notes.xapk");
+    assert_eq!(announced.size, content.len() as u64);
+    assert_eq!(announced.abi, "arm64-v8a");
+    let expected: Vec<_> = parts.iter().map(InstallPart::to_control).collect();
+    assert_eq!(announced.parts, expected);
+    let mut received = Vec::new();
+    while received.len() < content.len() {
+        match next_install_body(&mut agent) {
+            Body::ApkChunk(chunk) => {
+                assert_eq!(chunk.offset, received.len() as u64, "in order");
+                received.extend_from_slice(&chunk.data);
+                send_body(
+                    &mut agent,
+                    install_progress(announced.transfer_id, received.len() as u64),
+                );
+            }
+            other => panic!("expected a piece of the install, got {other:?}"),
+        }
+    }
+    assert!(received == content, "the files arrived changed");
+    send_body(
+        &mut agent,
+        install_result(
+            announced.transfer_id,
+            dsa_protocol::control::InstallStatus::Success,
+            "com.example.notes",
+            "",
+        ),
+    );
+    let outcome = installing.join().unwrap().expect("installed");
+    assert!(outcome.installed());
+}
+
+#[test]
+fn fr11_a_split_install_android_cannot_take_is_refused_before_anything_is_sent() {
+    let (session, mut agent, _launcher) = active_session();
+    let only_obb = [part("main.1.com.example.notes.obb", 3, true)];
+    match session.install_parts("notes.xapk", &only_obb, None, &mut &b"obb"[..]) {
+        Err(SessionError::InstallRefused(why)) => assert!(why.contains("no APK"), "{why}"),
+        other => panic!("expected the install to be refused, got {other:?}"),
+    }
+    nothing_for_the_guest(&mut agent);
+}
+
+fn part(name: &str, size: usize, obb: bool) -> InstallPart {
+    InstallPart {
+        name: name.into(),
+        size: size as u64,
+        obb,
+    }
 }
 
 #[test]
@@ -4349,6 +4571,98 @@ fn fr20_developer_mode_starts_adbd_and_opens_a_loopback_port_that_reaches_it() {
     );
 }
 
+fn wait_until(mut done: impl FnMut() -> bool) -> bool {
+    let deadline = std::time::Instant::now() + WAIT;
+    while std::time::Instant::now() < deadline {
+        if done() {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    false
+}
+
+#[test]
+fn fr20_developer_mode_attaches_its_port_to_the_adb_server_and_detaches_it_when_off() {
+    use dsa_host_core::adb_discovery::{fake::FakeAdbServer, AutoConnectState};
+    let (session, mut agent, _launcher) = active_session();
+    let (connect, _) = fake_adbd();
+    session.set_adb_connect(connect);
+    let server = FakeAdbServer::start();
+    session.set_adb_server(server.link());
+    assert_eq!(session.adb_auto_connect_state(), AutoConnectState::Off);
+
+    session.developer_mode(true, 0).unwrap();
+    assert_eq!(next_body(&mut agent), developer_mode(true));
+    let serial = session.adb_address().unwrap().to_string();
+    assert!(wait_until(
+        || session.adb_auto_connect_state() == AutoConnectState::Attached
+    ));
+    assert_eq!(
+        server.requests_starting("host:connect:"),
+        vec![format!("host:connect:{serial}")]
+    );
+
+    session.developer_mode(false, 0).unwrap();
+    assert!(wait_until(|| !server
+        .requests_starting("host:disconnect:")
+        .is_empty()));
+    assert_eq!(
+        server.requests_starting("host:disconnect:"),
+        vec![format!("host:disconnect:{serial}")]
+    );
+    assert!(wait_until(
+        || session.adb_auto_connect_state() == AutoConnectState::Off
+    ));
+}
+
+#[test]
+fn fr20_with_auto_connect_off_developer_mode_sends_the_adb_server_nothing() {
+    use dsa_host_core::adb_discovery::{fake::FakeAdbServer, AutoConnectState};
+    let (session, mut agent, _launcher) = active_session();
+    let (connect, _) = fake_adbd();
+    session.set_adb_connect(connect);
+    let server = FakeAdbServer::start();
+    session.adb_auto_connect(false);
+    session.set_adb_server(server.link());
+    session.developer_mode(true, 0).unwrap();
+    assert_eq!(next_body(&mut agent), developer_mode(true));
+    thread::sleep(Duration::from_millis(300));
+    assert_eq!(session.adb_auto_connect_state(), AutoConnectState::Off);
+    session.developer_mode(false, 0).unwrap();
+    thread::sleep(Duration::from_millis(100));
+    assert_eq!(server.connections(), 0);
+}
+
+#[test]
+fn fr20_developer_mode_advertises_its_port_over_mdns_while_it_is_on() {
+    struct Advert(u16, Arc<Mutex<Vec<String>>>);
+    impl Drop for Advert {
+        fn drop(&mut self) {
+            self.1.lock().unwrap().push(format!("end {}", self.0));
+        }
+    }
+    let (session, mut agent, _launcher) = active_session();
+    let (connect, _) = fake_adbd();
+    session.set_adb_connect(connect);
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let log = Arc::clone(&seen);
+    session.set_adb_advertise(Arc::new(move |port: u16| {
+        log.lock().unwrap().push(format!("advertise {port}"));
+        Some(Box::new(Advert(port, Arc::clone(&log))) as Box<dyn Send>)
+    }));
+    assert!(seen.lock().unwrap().is_empty(), "nothing while it is off");
+    session.developer_mode(true, 0).unwrap();
+    assert_eq!(next_body(&mut agent), developer_mode(true));
+    let port = session.adb_address().unwrap().port();
+    assert_eq!(*seen.lock().unwrap(), vec![format!("advertise {port}")]);
+    session.developer_mode(false, 0).unwrap();
+    assert_eq!(
+        *seen.lock().unwrap(),
+        vec![format!("advertise {port}"), format!("end {port}")]
+    );
+}
+
 #[test]
 fn fr20_developer_mode_stays_off_without_a_way_to_reach_adbd() {
     let (session, mut agent, _launcher) = active_session();
@@ -4580,6 +4894,45 @@ fn fr30_the_hosts_system_settings_reach_the_agent_when_it_connects_and_on_each_c
 }
 
 #[test]
+fn fr17_the_agent_is_given_the_computers_name_as_the_device_name_each_time_it_connects() {
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.windows_shown(true).unwrap();
+    session.set_device_name_source(std::sync::Arc::new(|| Some("BREW-BOOK".to_string())));
+    session.start();
+    let mut agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    assert_eq!(
+        next_body(&mut agent),
+        Body::DeviceName(dsa_protocol::control::DeviceName {
+            name: "BREW-BOOK".into()
+        })
+    );
+}
+
+#[test]
+fn fr17_without_a_device_name_the_agent_is_told_nothing_of_it() {
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.windows_shown(true).unwrap();
+    session.set_device_name_source(std::sync::Arc::new(|| None));
+    session.set_system_settings(seoul_settings(true));
+    session.start();
+    let mut agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    // The first thing the agent hears is the system settings; no device name comes after.
+    assert_eq!(
+        next_body(&mut agent),
+        Body::SystemSettings(seoul_settings(true).to_control())
+    );
+    session.set_system_settings(seoul_settings(false));
+    assert_eq!(
+        next_body(&mut agent),
+        Body::SystemSettings(seoul_settings(false).to_control())
+    );
+}
+
+#[test]
 fn fr30_a_controller_connected_before_the_guest_reaches_it_and_its_rumble_comes_back() {
     use dsa_host_core::gamepads::{
         buttons, GamepadEvent, GamepadInfo, GamepadRumble, GamepadState,
@@ -4659,5 +5012,9 @@ fn fr31_a_session_is_never_stopped_for_idle_time_after_the_last_window_closes() 
         "an idle Android stays in Doze, so the next app opens without a boot"
     );
     assert_eq!(session.last_reason(), None, "nothing stopped it");
-    assert_eq!(launcher.0.lock().unwrap().freezes, 0, "and nothing froze it");
+    assert_eq!(
+        launcher.0.lock().unwrap().freezes,
+        0,
+        "and nothing froze it"
+    );
 }

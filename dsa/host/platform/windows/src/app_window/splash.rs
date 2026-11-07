@@ -11,24 +11,81 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     DestroyIcon, GetIconInfo, LoadImageW, ICONINFO, IMAGE_ICON, LR_DEFAULTCOLOR,
 };
 
-use crate::compositor::present::SplashImage;
+use windows_sys::Win32::System::LibraryLoader::{
+    FindResourceW, LoadResource, LockResource, SizeofResource,
+};
 
-/// The size the icon is read at; the splash scales it down to the window's.
+use crate::compositor::present::SplashImage;
+use dsa_exe_resources::{RT_RCDATA, SPLASH_ICON_ID};
+
+/// The size the program's icon is read at when it carries no larger image of it.
 const ICON_EDGE: u32 = 256;
 
+/// The largest icon image the splash decodes, in pixels on a side: far above the 512 pixels
+/// the guest draws, and small enough that a broken resource cannot take much memory.
+const MAX_SPLASH_SOURCE: u32 = 2048;
+
 /// The splash of a window of this program on a monitor of `dpi` dots per inch.
+///
+/// The icon is the app's as the guest drew it, at its full size (512 pixels), which the
+/// program carries beside its 256 pixel icon; the splash scales it down to the size it has on
+/// the window's monitor each time it is drawn, so a move to another monitor draws it again
+/// from the same pixels. A program made before it carried that image shows its 256 pixel icon,
+/// never scaled up.
 pub fn image(icon_id: usize, dpi: u32) -> SplashImage {
     let dark = crate::compositor::system_settings::read().dark_mode;
     SplashImage {
         background: splash::background(dark),
-        icon: icon_pixels(icon_id, ICON_EDGE),
+        icon: full_icon().or_else(|| icon_pixels(icon_id, ICON_EDGE)),
         dpi,
+    }
+}
+
+/// The app's icon PNG this program carries for its splash, decoded at its own size, as rows of
+/// premultiplied BGRA pixels. `None` when it carries none or it cannot be read.
+fn full_icon() -> Option<(Vec<u8>, (u32, u32))> {
+    let png = splash_png()?;
+    let (width, height) = crate::compositor::widgets::png::size(png)?;
+    if width > MAX_SPLASH_SOURCE || height > MAX_SPLASH_SOURCE {
+        return None;
+    }
+    let pixels = crate::compositor::widgets::png::with_com(|| {
+        let decoder = crate::compositor::widgets::png::Decoder::new().ok()?;
+        decoder.decode(png, width, height).ok()
+    })?;
+    Some((pixels, (width, height)))
+}
+
+/// The bytes of this program's splash icon resource.
+fn splash_png() -> Option<&'static [u8]> {
+    // SAFETY: integer resource IDs in this program's own module, which stays loaded while it
+    // runs, so the locked resource lives as long as the program.
+    unsafe {
+        let module = GetModuleHandleW(std::ptr::null());
+        let found = FindResourceW(
+            module,
+            SPLASH_ICON_ID as usize as *const u16,
+            RT_RCDATA as usize as *const u16,
+        );
+        if found.is_null() {
+            return None;
+        }
+        let size = SizeofResource(module, found) as usize;
+        let loaded = LoadResource(module, found);
+        if loaded.is_null() || size == 0 {
+            return None;
+        }
+        let data = LockResource(loaded) as *const u8;
+        if data.is_null() {
+            return None;
+        }
+        Some(std::slice::from_raw_parts(data, size))
     }
 }
 
 /// The program's icon `icon_id` (the app's, in an app's copy of the window host), `edge`
 /// pixels square, as rows of premultiplied BGRA pixels. `None` when it cannot be read.
-fn icon_pixels(icon_id: usize, edge: u32) -> Option<(Vec<u8>, (u32, u32))> {
+pub(super) fn icon_pixels(icon_id: usize, edge: u32) -> Option<(Vec<u8>, (u32, u32))> {
     // SAFETY: plain Win32 calls; every handle made here is released here, and GetDIBits
     // writes at most `edge` rows of `edge` 32-bit pixels into a buffer of that size.
     unsafe {

@@ -17,6 +17,7 @@ import io.github.thisisthepy.dsa.control.v1.ApkChunk
 import io.github.thisisthepy.dsa.control.v1.CancelInstall
 import io.github.thisisthepy.dsa.control.v1.Envelope
 import io.github.thisisthepy.dsa.control.v1.InstallApk
+import io.github.thisisthepy.dsa.control.v1.InstallPart
 import io.github.thisisthepy.dsa.control.v1.InstallStatus
 import java.io.ByteArrayOutputStream
 import java.io.IOException
@@ -27,14 +28,22 @@ import org.junit.Test
 
 /** The guest's package installer: keeps what each session was given, and answers a commit when the test says. */
 class FakeInstaller : PackageInstallerPort {
-    inner class Session(val name: String, val size: Long) : InstallSession {
+    inner class Session(val name: String, val size: Long, val abi: String = "") : InstallSession {
         val written = ByteArrayOutputStream()
         var abandoned = false
         var onResult: ((InstallerResult) -> Unit)? = null
 
+        /** The APKs of a session of several, by name, in the order they were begun. */
+        val apks = linkedMapOf<String, ByteArrayOutputStream>()
+        private var current: ByteArrayOutputStream? = null
+
+        override fun startApk(name: String, size: Long) {
+            current = ByteArrayOutputStream().also { apks[name] = it }
+        }
+
         override fun write(data: ByteArray) {
             if (failWrites) throw IOException("No space left on device")
-            written.write(data)
+            (current ?: written).write(data)
         }
 
         override fun commit(onResult: (InstallerResult) -> Unit) {
@@ -58,9 +67,33 @@ class FakeInstaller : PackageInstallerPort {
     var refuseOpen: Exception? = null
     var failWrites = false
 
-    override fun open(name: String, size: Long): InstallSession {
+    override fun open(name: String, size: Long, abi: String): InstallSession {
         refuseOpen?.let { throw it }
-        return Session(name, size).also { sessions += it }
+        return Session(name, size, abi).also { sessions += it }
+    }
+
+    override fun openApks(name: String, size: Long, abi: String): InstallSession {
+        refuseOpen?.let { throw it }
+        return Session(name, size, abi).also { sessions += it }
+    }
+}
+
+/** Where the agent keeps expansion files: keeps what each was given, and what became of it. */
+class FakeExpansionFiles : ExpansionFiles {
+    val staged = linkedMapOf<String, ByteArrayOutputStream>()
+    val placed = mutableListOf<Pair<String, List<String>>>()
+    val discarded = mutableListOf<String>()
+    var refusePlace: Exception? = null
+
+    override fun stage(name: String): java.io.OutputStream = ByteArrayOutputStream().also { staged[name] = it }
+
+    override fun place(packageName: String, names: List<String>) {
+        refusePlace?.let { throw it }
+        placed += packageName to names
+    }
+
+    override fun discard(names: List<String>) {
+        discarded += names
     }
 }
 
@@ -70,6 +103,7 @@ class ApkInstallerTest {
     private val daemon = FakeEndpoint()
     private val log = RecordingLog()
     private val installer = FakeInstaller()
+    private val expansions = FakeExpansionFiles()
     private val launcherApps = FakeLauncherApps()
 
     private fun started(): Agent {
@@ -78,6 +112,7 @@ class ApkInstallerTest {
             AGENT, FakeTasks(), FakeActions(), locator, FakeWindowing(), FakeInjector(), scheduler, log,
             launcherApps = launcherApps,
             packageInstaller = installer,
+            expansionFiles = expansions,
         )
         agent.start()
         scheduler.runDue()
@@ -133,6 +168,143 @@ class ApkInstallerTest {
         assertEquals(7, result.transferId)
         assertEquals(InstallStatus.INSTALL_STATUS_SUCCESS, result.status)
         assertEquals("com.example.notes", result.packageName)
+    }
+
+    private val base = ByteArray(5) { (it + 1).toByte() }
+    private val abiSplit = ByteArray(3) { (it + 20).toByte() }
+    private val obb = ByteArray(4) { (it + 40).toByte() }
+
+    private fun part(name: String, size: Int, obb: Boolean = false) =
+        InstallPart.newBuilder().setName(name).setSize(size.toLong()).setObb(obb)
+
+    /** Sends the notes app as a base, an ABI split and an expansion file, in two pieces that each cross a file's end. */
+    private fun sendSplitApp(id: Int = 9) {
+        deliver(
+            Envelope.newBuilder().setInstallApk(
+                InstallApk.newBuilder().setTransferId(id).setName("notes.xapk").setSize(12).setAbi("x86_64")
+                    .addParts(part("base.apk", base.size))
+                    .addParts(part("split_config.x86_64.apk", abiSplit.size))
+                    .addParts(part("main.42.com.example.notes.obb", obb.size, obb = true)),
+            ),
+        )
+        val content = base + abiSplit + obb
+        chunk(id, 0, content.copyOfRange(0, 7))
+        chunk(id, 7, content.copyOfRange(7, 12))
+    }
+
+    @Test
+    fun fr11_the_apks_of_a_split_app_go_into_one_session_and_its_expansion_file_to_android_obb() {
+        started()
+        sendSplitApp()
+        val session = installer.sessions.single()
+        assertEquals("x86_64", session.abi)
+        // The session is as large as the APKs, without the expansion file.
+        assertEquals(8L, session.size)
+        assertEquals(listOf("base.apk", "split_config.x86_64.apk"), session.apks.keys.toList())
+        assertArrayEquals(base, session.apks.getValue("base.apk").toByteArray())
+        assertArrayEquals(abiSplit, session.apks.getValue("split_config.x86_64.apk").toByteArray())
+        assertArrayEquals(obb, expansions.staged.getValue("main.42.com.example.notes.obb").toByteArray())
+        assertEquals(listOf(7L, 12L), progress().map { it.received })
+        assertTrue("committed once whole", session.onResult != null)
+        assertTrue("not in place before the app is installed", expansions.placed.isEmpty())
+
+        answer(InstallerResult(PackageInstallerStatus.SUCCESS, "INSTALL_SUCCEEDED", "com.example.notes"))
+        assertEquals(listOf("com.example.notes" to listOf("main.42.com.example.notes.obb")), expansions.placed)
+        val result = results().single()
+        assertEquals(InstallStatus.INSTALL_STATUS_SUCCESS, result.status)
+        assertEquals("com.example.notes", result.packageName)
+    }
+
+    @Test
+    fun fr11_the_expansion_files_of_an_app_android_refused_are_dropped() {
+        started()
+        sendSplitApp()
+        answer(InstallerResult(PackageInstallerStatus.FAILURE_INCOMPATIBLE, "INSTALL_FAILED_NO_MATCHING_ABIS", null))
+        assertTrue(expansions.placed.isEmpty())
+        assertEquals(listOf("main.42.com.example.notes.obb"), expansions.discarded)
+        assertEquals(InstallStatus.INSTALL_STATUS_INCOMPATIBLE, results().single().status)
+    }
+
+    @Test
+    fun fr11_expansion_files_that_cannot_be_put_in_place_say_why() {
+        started()
+        expansions.refusePlace = IOException("Permission denied")
+        sendSplitApp()
+        answer(InstallerResult(PackageInstallerStatus.SUCCESS, null, "com.example.notes"))
+        val result = results().single()
+        assertEquals(InstallStatus.INSTALL_STATUS_OTHER, result.status)
+        assertEquals("com.example.notes", result.packageName)
+        assertTrue(result.message, result.message.contains("Android/obb/com.example.notes"))
+        assertTrue(result.message, result.message.contains("Permission denied"))
+        assertEquals(listOf("main.42.com.example.notes.obb"), expansions.discarded)
+    }
+
+    @Test
+    fun fr11_a_cancelled_split_install_drops_its_session_and_expansion_files() {
+        started()
+        deliver(
+            Envelope.newBuilder().setInstallApk(
+                InstallApk.newBuilder().setTransferId(4).setName("notes.xapk").setSize(9)
+                    .addParts(part("base.apk", 5))
+                    .addParts(part("main.1.com.example.notes.obb", 4, obb = true)),
+            ),
+        )
+        chunk(4, 0, ByteArray(7))
+        deliver(Envelope.newBuilder().setCancelInstall(CancelInstall.newBuilder().setTransferId(4)))
+        assertTrue(installer.sessions.single().abandoned)
+        assertEquals(listOf("main.1.com.example.notes.obb"), expansions.discarded)
+        assertEquals(InstallStatus.INSTALL_STATUS_OTHER, results().single().status)
+    }
+
+    @Test
+    fun fr11_parts_android_cannot_take_are_refused_before_a_session_opens() {
+        started()
+        val bad = listOf(
+            listOf(part("main.1.a.obb", 3, obb = true)) to 3L,
+            listOf(part("main.1.a.obb", 3, obb = true), part("base.apk", 3)) to 6L,
+            listOf(part("base.apk", 3), part("../base.apk", 3)) to 6L,
+            listOf(part("base.apk", 3), part("BASE.APK", 3)) to 6L,
+            listOf(part("base.apk", 3), part("main.1.a.apk", 3, obb = true)) to 6L,
+            listOf(part("base.apk", 3)) to 4L,
+        )
+        for ((index, case) in bad.withIndex()) {
+            val (parts, size) = case
+            val install = InstallApk.newBuilder().setTransferId(20 + index).setName("a.xapk").setSize(size)
+            parts.forEach { install.addParts(it) }
+            deliver(Envelope.newBuilder().setInstallApk(install))
+        }
+        assertTrue(installer.sessions.isEmpty())
+        assertEquals(bad.size, results().size)
+        assertTrue(results().all { it.status == InstallStatus.INSTALL_STATUS_INVALID_APK })
+    }
+
+    @Test
+    fun fr11_an_expansion_file_goes_to_the_obb_folder_of_its_package() {
+        val folder = InstallFileNames.obbFolder(java.io.File("/storage/emulated/0"), "com.example.notes")
+        assertEquals("/storage/emulated/0/Android/obb/com.example.notes", folder.invariantSeparatorsPath)
+        assertTrue(InstallFileNames.valid("main.42.com.example.notes.obb", ".obb"))
+        assertTrue(InstallFileNames.valid("patch.42.com.example.notes.OBB", ".obb"))
+        for (name in listOf(".obb", "a/b.obb", "a\\b.obb", "main.obb.apk", "a\nb.obb")) {
+            assertTrue(name, !InstallFileNames.valid(name, ".obb"))
+        }
+    }
+
+    @Test
+    fun fr25_the_abi_the_host_chose_is_the_install_sessions_abi_override() {
+        started()
+        deliver(Envelope.newBuilder().setInstallApk(InstallApk.newBuilder().setTransferId(3).setName("game.apk").setSize(10).setAbi("arm64-v8a")))
+        deliver(Envelope.newBuilder().setInstallApk(InstallApk.newBuilder().setTransferId(4).setName("notes.apk").setSize(10)))
+        assertEquals(listOf("arm64-v8a", ""), installer.sessions.map { it.abi })
+    }
+
+    @Test
+    fun fr25_an_abi_the_guest_cannot_run_is_refused_before_a_session_opens() {
+        started()
+        deliver(Envelope.newBuilder().setInstallApk(InstallApk.newBuilder().setTransferId(5).setName("old.apk").setSize(10).setAbi("armeabi-v7a")))
+        assertTrue(installer.sessions.isEmpty())
+        val result = results().single()
+        assertEquals(5, result.transferId)
+        assertEquals(InstallStatus.INSTALL_STATUS_OTHER, result.status)
     }
 
     @Test

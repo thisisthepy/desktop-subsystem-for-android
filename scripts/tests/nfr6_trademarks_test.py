@@ -51,10 +51,12 @@ class Repository(unittest.TestCase):
         "docs/locales/README_ko.md",
         f"{tm.SETUP_UI}/Text.cs",
         f"{tm.WINDOWS}/installer/dsa.wxs",
+        f"{tm.WINDOWS}/installer/dsa.en-us.wxl",
+        f"{tm.WINDOWS}/installer/dsa.ko-kr.wxl",
         f"{tm.SETTINGS}/Strings.resx",
         f"{tm.SETTINGS}/Strings.ko.resx",
         f"{tm.SETTINGS}/Pages/AboutPage.xaml",
-        f"{tm.SETTINGS}/ApkInstallWindow.xaml.cs",
+        f"{tm.APK_INSTALLER}/InstallerWindow.xaml.cs",
     ]
 
     def setUp(self):
@@ -84,12 +86,16 @@ class Repository(unittest.TestCase):
         self.assertTrue(any("README.md" in p for p in tm.check(self.root)))
 
     def test_nfr6_msi_without_trademark_notice_fails(self):
-        self.edit(f"{tm.WINDOWS}/installer/dsa.wxs", "Android is a trademark of Google LLC.", "")
+        self.edit(f"{tm.WINDOWS}/installer/dsa.en-us.wxl", "Android is a trademark of Google LLC.", "")
+        self.assertTrue(any("dsa.en-us.wxl" in p for p in tm.check(self.root)))
+
+    def test_nfr6_msi_that_drops_its_localized_comments_fails(self):
+        self.edit(f"{tm.WINDOWS}/installer/dsa.wxs", "!(loc.ArpComments)", "DSA")
         self.assertTrue(any("dsa.wxs" in p for p in tm.check(self.root)))
 
     def test_nfr6_apk_install_window_without_notice_fails(self):
-        self.edit(f"{tm.SETTINGS}/ApkInstallWindow.xaml.cs", '"AboutTrademark.Text"', '"Nothing"')
-        self.assertTrue(any("ApkInstallWindow" in p for p in tm.check(self.root)))
+        self.edit(f"{tm.APK_INSTALLER}/InstallerWindow.xaml.cs", '"AboutTrademark.Text"', '"Nothing"')
+        self.assertTrue(any("InstallerWindow" in p for p in tm.check(self.root)))
 
     def test_nfr6_about_page_without_notice_fails(self):
         self.edit(f"{tm.SETTINGS}/Pages/AboutPage.xaml", "AboutIndependent.Text", "AboutSomething.Text")

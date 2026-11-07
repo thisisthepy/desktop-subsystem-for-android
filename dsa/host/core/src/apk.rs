@@ -8,16 +8,24 @@
 //! memory. The agent answers with how the install ended, as an [`InstallStatus`] with the
 //! guest's own words beside it.
 //!
+//! An app that comes as a base APK and split APKs, with any expansion (OBB) files, goes the same
+//! way as one install made of [`InstallPart`]s: their bytes follow one another on the stream,
+//! the agent writes every APK into the same install session, and it copies the expansion files
+//! into the app's folder under `Android/obb/` once the app is installed. What is in a bundle,
+//! and which of its splits a device takes, is [`crate::apk_bundle`]'s.
+//!
 //! Once an app is installed, the agent's report of the apps a launcher lists carries it to the
 //! host like any other installed app, and the window manager gives it a Start menu entry.
 
 use std::fmt;
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
 use dsa_protocol::control;
 use dsa_protocol::host_api::types;
+
+use crate::native_abi::NativeLibraries;
 
 /// The largest APK that is taken, in bytes: 2 GiB.
 ///
@@ -25,6 +33,16 @@ use dsa_protocol::host_api::types;
 /// files, so this takes any real APK while a file dropped by mistake is refused before it
 /// fills the guest's storage.
 pub const MAX_APK_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+
+/// The largest install of several files that is taken, in bytes: 8 GiB, all the parts
+/// together.
+///
+/// Games put gigabytes in their expansion files, which go with the APKs; each APK still has
+/// the limit of [`MAX_APK_BYTES`].
+pub const MAX_INSTALL_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+
+/// The most files one install takes. Real bundles hold a few dozen splits.
+pub const MAX_PARTS: usize = 256;
 
 /// The size of one chunk on the control channel: 128 KiB.
 ///
@@ -232,6 +250,120 @@ impl fmt::Display for InstallOutcome {
     }
 }
 
+/// One file of an install made of several: an APK of a split app, or an expansion file.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct InstallPart {
+    /// The file's name, without any folder: `base.apk`, `split_<name>.apk`, or the expansion
+    /// file's own name, such as `main.42.com.example.game.obb`.
+    pub name: String,
+    pub size: u64,
+    /// An expansion file, which Android gets in `Android/obb/<package>/` once the app is
+    /// installed.
+    pub obb: bool,
+}
+
+impl InstallPart {
+    pub fn to_control(&self) -> control::InstallPart {
+        control::InstallPart {
+            name: self.name.clone(),
+            size: self.size,
+            obb: self.obb,
+        }
+    }
+
+    pub fn to_wire(&self) -> types::InstallPart {
+        types::InstallPart {
+            name: self.name.clone(),
+            size: self.size,
+            obb: self.obb,
+        }
+    }
+
+    pub fn from_wire(part: types::InstallPart) -> InstallPart {
+        InstallPart {
+            name: part.name,
+            size: part.size,
+            obb: part.obb,
+        }
+    }
+}
+
+/// Refuses an install of several files that Android cannot take or that is too large, saying
+/// why, before anything is sent: no APK, an APK after an expansion file, a name that is not a
+/// file's or is taken twice, an empty part, an APK above [`MAX_APK_BYTES`], more than
+/// [`MAX_PARTS`] parts, or more than [`MAX_INSTALL_BYTES`] in all. `name` is the bundle's.
+/// Returns the size of all the parts together.
+pub fn check_parts(name: &str, parts: &[InstallPart]) -> Result<u64, String> {
+    check_file_name(name)?;
+    if !parts.iter().any(|part| !part.obb) {
+        return Err(format!("{name:?} holds no APK to install"));
+    }
+    if parts.len() > MAX_PARTS {
+        return Err(format!(
+            "{name:?} has {} files to install; at most {MAX_PARTS} can be installed together",
+            parts.len()
+        ));
+    }
+    let mut total = 0u64;
+    let mut seen_obb = false;
+    for (index, part) in parts.iter().enumerate() {
+        check_file_name(&part.name)?;
+        let ending = if part.obb { ".obb" } else { ".apk" };
+        if part.name.len() <= ending.len() || !ends_with_ignore_case(&part.name, ending) {
+            return Err(format!(
+                "{:?} does not end in {ending}, so it is not {}",
+                part.name,
+                if part.obb {
+                    "an expansion file"
+                } else {
+                    "an APK"
+                }
+            ));
+        }
+        if parts[..index]
+            .iter()
+            .any(|other| other.name.eq_ignore_ascii_case(&part.name))
+        {
+            return Err(format!("{:?} is in the install twice", part.name));
+        }
+        if part.size == 0 {
+            return Err(format!("{:?} is empty", part.name));
+        }
+        if part.obb {
+            seen_obb = true;
+        } else {
+            if seen_obb {
+                return Err(format!(
+                    "{:?} comes after an expansion file; the APKs go first",
+                    part.name
+                ));
+            }
+            if part.size > MAX_APK_BYTES {
+                return Err(format!(
+                    "{:?} is {} MiB; APKs up to {} MiB can be installed",
+                    part.name,
+                    part.size.div_ceil(1024 * 1024),
+                    MAX_APK_BYTES / (1024 * 1024)
+                ));
+            }
+        }
+        total = total.saturating_add(part.size);
+    }
+    if total > MAX_INSTALL_BYTES {
+        return Err(format!(
+            "{name:?} is {} MiB to install; up to {} MiB can be installed at once",
+            total.div_ceil(1024 * 1024),
+            MAX_INSTALL_BYTES / (1024 * 1024)
+        ));
+    }
+    Ok(total)
+}
+
+fn ends_with_ignore_case(name: &str, ending: &str) -> bool {
+    let tail = &name.as_bytes()[name.len().saturating_sub(ending.len())..];
+    name.len() >= ending.len() && tail.eq_ignore_ascii_case(ending.as_bytes())
+}
+
 /// A package installed in the user's Android, as its package manager describes it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstalledPackage {
@@ -354,6 +486,10 @@ pub struct ApkFile {
     pub name: String,
     pub size: u64,
     pub file: File,
+    /// The native libraries the APK holds, by ABI, which the service chooses the ABI it is
+    /// installed for from. Empty when it has none, or when the file cannot be read as an APK,
+    /// which Android then says.
+    pub native_libraries: NativeLibraries,
 }
 
 impl ApkFile {
@@ -364,8 +500,15 @@ impl ApkFile {
             .file_name()
             .and_then(|name| name.to_str())
             .ok_or_else(|| format!("{} names no file", path.display()))?;
+        ApkFile::open_as(path, name)
+    }
+
+    /// Opens the APK at `path` as [`open`](Self::open) does, under the name `name`, for a
+    /// file whose content says it is an APK while its own name does not end in `.apk`.
+    pub fn open_as(path: &Path, name: &str) -> Result<ApkFile, String> {
         check_name(name)?;
-        let file = File::open(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+        let mut file =
+            File::open(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
         let metadata = file
             .metadata()
             .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
@@ -373,10 +516,14 @@ impl ApkFile {
             return Err(format!("{} is not a file", path.display()));
         }
         check_size(metadata.len())?;
+        let native_libraries = NativeLibraries::read(&mut file).unwrap_or_default();
+        file.seek(SeekFrom::Start(0))
+            .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
         Ok(ApkFile {
             name: name.to_string(),
             size: metadata.len(),
             file,
+            native_libraries,
         })
     }
 
@@ -401,21 +548,30 @@ pub fn check_size(size: u64) -> Result<(), String> {
     Ok(())
 }
 
-/// Refuses a name that is not an APK file's: one that does not end in `.apk`, that has a
-/// folder separator or a control character, or that is longer than [`MAX_NAME_BYTES`].
-pub fn check_name(name: &str) -> Result<(), String> {
+/// Refuses a name that is not a file's: an empty one, one that has a folder separator or a
+/// control character, or one that is longer than [`MAX_NAME_BYTES`].
+pub fn check_file_name(name: &str) -> Result<(), String> {
     if name.len() > MAX_NAME_BYTES {
         return Err(format!(
             "the file's name is longer than {MAX_NAME_BYTES} bytes"
         ));
     }
-    if name.contains(['/', '\\']) || name.chars().any(char::is_control) {
+    if name.is_empty()
+        || name == "."
+        || name == ".."
+        || name.contains(['/', '\\'])
+        || name.chars().any(char::is_control)
+    {
         return Err(format!("{name:?} is not a file name"));
     }
-    let is_apk = name.len() > 4
-        && name
-            .get(name.len() - 4..)
-            .is_some_and(|end| end.eq_ignore_ascii_case(".apk"));
+    Ok(())
+}
+
+/// Refuses a name that is not an APK file's: one that does not end in `.apk`, that has a
+/// folder separator or a control character, or that is longer than [`MAX_NAME_BYTES`].
+pub fn check_name(name: &str) -> Result<(), String> {
+    check_file_name(name)?;
+    let is_apk = name.len() > 4 && ends_with_ignore_case(name, ".apk");
     if !is_apk {
         return Err(format!(
             "{name:?} is not an APK file; only files ending in .apk can be installed"
@@ -445,6 +601,58 @@ mod tests {
         ] {
             assert!(check_name(bad).is_err(), "{bad:?} was accepted");
         }
+    }
+
+    fn part(name: &str, size: u64, obb: bool) -> InstallPart {
+        InstallPart {
+            name: name.into(),
+            size,
+            obb,
+        }
+    }
+
+    #[test]
+    fn fr11_the_files_of_a_split_install_are_checked_before_they_are_sent() {
+        let parts = [
+            part("base.apk", 10, false),
+            part("split_config.x86_64.apk", 5, false),
+            part("main.42.com.example.notes.obb", 3, true),
+        ];
+        assert_eq!(check_parts("notes.xapk", &parts), Ok(18));
+        for (bad, why) in [
+            (vec![part("main.1.a.obb", 3, true)], "no APK"),
+            (
+                vec![part("main.1.a.obb", 3, true), part("base.apk", 1, false)],
+                "APKs go first",
+            ),
+            (
+                vec![part("base.apk", 1, false), part("BASE.APK", 1, false)],
+                "twice",
+            ),
+            (vec![part("base.apk", 0, false)], "empty"),
+            (vec![part("base.zip", 1, false)], "not an APK"),
+            (
+                vec![part("base.apk", 1, false), part("main.obb.apk", 1, true)],
+                "not an expansion file",
+            ),
+            (vec![part("../base.apk", 1, false)], "not a file name"),
+            (vec![part("base.apk", MAX_APK_BYTES + 1, false)], "2048 MiB"),
+            (
+                vec![
+                    part("base.apk", 1, false),
+                    part("main.1.a.obb", MAX_INSTALL_BYTES, true),
+                ],
+                "at once",
+            ),
+        ] {
+            let refused = check_parts("notes.xapk", &bad).unwrap_err();
+            assert!(refused.contains(why), "{bad:?}: {refused}");
+        }
+        assert!(check_parts("a/b.xapk", &parts).is_err());
+        let wire = parts[2].to_wire();
+        assert!(wire.obb);
+        assert_eq!(InstallPart::from_wire(wire), parts[2]);
+        assert_eq!(parts[1].to_control().name, "split_config.x86_64.apk");
     }
 
     #[test]

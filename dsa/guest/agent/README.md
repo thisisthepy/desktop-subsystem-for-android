@@ -96,6 +96,10 @@ nothing. Its one activity is the guest's home, which draws nothing (see "The hom
   widget's view; a click opens its app on the guest's display. The widget IDs outlive the
   agent and the guest, and the size each was drawn at is kept in the agent's preferences.
   Each connection hears of every placed widget (`WidgetUpdated`, then `WidgetList`).
+  Android hands a widget's updates only to a view its host made for that widget ID, so on
+  every start the agent makes a view for each placed widget before anything else about its
+  drawing, and tries again a second later when that fails. When the widget's window cannot
+  open, the widget is drawn without one, in software, each time its app sends new views.
 - **APKs from the host.** `InstallApk` opens a `PackageInstaller` session, each `ApkChunk`
   is written into it in order, and the session is committed once the APK is whole. After
   each chunk the agent reports how far it got (`InstallProgress`), which paces the host, and
@@ -103,7 +107,18 @@ nothing. Its one activity is the guest's home, which draws nothing (see "The hom
   invalid APK, insufficient storage, downgrade, blocked, other) and the installer's own
   message. `INSTALL_PACKAGES` lets the session commit without asking the user; a
   `CancelInstall`, a broken transfer or a new connection abandons the session. An installed
-  app reaches the host's Start menu through the launcher apps report.
+  app reaches the host's Start menu through the launcher apps report. When `InstallApk` names
+  an ABI (`x86_64` or `arm64-v8a`), the session takes it as its ABI override
+  (`SessionParams.abiOverride`, a field the SDK hides that the platform-signed agent may set):
+  the host asks for `arm64-v8a` only when the APK's x86_64 libraries leave out some of its ARM
+  ones and a translator is in place.
+- **Apps of several APKs.** When `InstallApk` lists `parts` (the base APK and the splits of a
+  split-APK bundle the host chose for this device, then any expansion files), their bytes
+  follow one another in the chunks. The agent writes every APK into the same session under
+  its own name, and keeps each expansion (OBB) file aside in its cache. Once the installer
+  has installed the app, the agent copies the expansion files into the app's folder under
+  `Android/obb/<package>/` and says the app is installed; when they cannot go there, it says
+  so with the reason. A failed or cancelled install drops them.
 - **Dragging out of a window.** A one-pixel window of the agent's, above every app and
   taking no input, hears of every drag an app starts with `DRAG_FLAG_GLOBAL` (the window
   manager's private flag for intercepting global drags). When the pointer leaves a task's
@@ -253,6 +268,24 @@ the guest. It answers with `UninstallResult`. `OpenAppSettings` opens Settings' 
 (`ACTION_APPLICATION_DETAILS_SETTINGS`), or its list of apps when no package is named, as a
 task in its own window.
 
+Each app in the report also carries the ABI its native code runs as (the package manager's
+primary CPU ABI) and the library names under `lib/<abi>/` of its base APK and splits
+together, read from their central directories. The host's "Run as ARM" switch asks for an app
+to be installed again with the other ABI (`ReinstallApp`): the agent writes the app's APKs on
+the device into a new session with the ABI override, which replaces the app as an update does
+and keeps its data. When Android refuses that replace in a way only an uninstall gets past
+(`INSTALL_FAILED_UPDATE_INCOMPATIBLE`, `INSTALL_FAILED_SHARED_USER_INCOMPATIBLE`), nothing
+changes and the answer says the data would be erased; with `erase_data` the agent copies the
+APKs to its cache, uninstalls the app and installs the copies. It answers with
+`ReinstallResult`, carrying the ABI Android chose.
+
+The agent also follows the system's crash records (`ACTION_DROPBOX_ENTRY_ADDED`, with
+`READ_LOGS` and `PACKAGE_USAGE_STATS`). When a user app ends because a native library did not
+load (`data_app_crash` or `data_app_native_crash` naming `UnsatisfiedLinkError` or
+`dlopen failed`), it sends `NativeLibraryCrash` with the package, the line that names the
+library, and whether the guest's ABI list holds `arm64-v8a`; the host may then offer to run
+the app as ARM. One app is reported at most once every five minutes.
+
 ## Pointer input
 
 The host sends one `PointerEvent` per pointer as it happens, with the position relative to
@@ -273,6 +306,14 @@ dropped.
 - Fingers are `SOURCE_TOUCHSCREEN` and a pen is `SOURCE_STYLUS` (its eraser end
   `TOOL_TYPE_ERASER`). Every finger down goes in each event of a touch: the second finger
   is `ACTION_POINTER_DOWN`, and lifting all but the last is `ACTION_POINTER_UP`.
+- The fingers on every task window are one touch of the display, as on a phone's screen,
+  and the framework splits it between the windows. Two touches from one device at once
+  would make the second `ACTION_DOWN` cancel the first.
+- Each finger takes the lowest pointer ID its touch does not use. The host's IDs can be
+  any number, and the input dispatcher refuses a pointer ID above 31. A touch carries at
+  most 16 fingers, as a `MotionEvent` does.
+- A finger scrolls and flings by moving: it is never `ACTION_SCROLL`, which only the
+  wheel sends.
 
 Injection rather than a uinput device: a uinput device needs `/dev/uinput` opened by a
 process the SELinux policy allows, which an app is not, and a mouse there reports movement,
@@ -478,6 +519,10 @@ Every permission in `src/main/AndroidManifest.xml` is listed in
 `privapp-permissions-dsa-agent.xml`, which the image installs next to the agent. The
 framework refuses to boot when a privileged app requests a privileged permission its list
 does not grant, so the two must change together; `test_make_image.py` checks that they do.
+The runtime permissions are the exception: `default-permissions-dsa-agent.xml`, which the
+image installs in `system_ext/etc/default-permissions/`, grants them from the first boot.
+The storage permissions are there so that Android lets the agent write the folders under
+`Android/obb/`.
 
 ## Building and testing
 
@@ -508,3 +553,4 @@ The release APK, `build/outputs/apk/release/dsa-agent-release-unsigned.apk`, is 
 | `src/test/` | The unit tests |
 | `hidden-api/` | Compile-only declarations of framework classes outside the SDK |
 | `privapp-permissions-dsa-agent.xml` | The agent's privileged permissions |
+| `default-permissions-dsa-agent.xml` | The runtime permissions the image grants the agent |

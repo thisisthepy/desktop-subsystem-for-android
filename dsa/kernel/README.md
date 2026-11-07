@@ -31,8 +31,15 @@ register, so `patches/vsock-hyperv-first.patch` links Hyper-V's first: it regist
 when VMBus is there and otherwise leaves the place to virtio's.
 
 The patches touch only architecture-neutral code (VMBus's ACPI probe, which Hyper-V uses on
-both architectures, the command-line partition parser, cgroup v1, wakeup sources, shmem),
-so the same set applies to both builds.
+both architectures, the command-line partition parser, cgroup v1, wakeup sources, shmem,
+free page reporting), so the same set applies to both builds.
+
+Memory the guest frees goes back to the host at once. Upstream free page reporting waits two
+seconds before each pass, and again after each pass that used up its budget, so a large
+free reached the host slice by slice over many seconds; `patches/page-reporting-no-delay.patch`
+starts every pass at once. The host chooses the smallest piece reported
+(`page_reporting.page_reporting_order` on the command line): 4 KiB where it backs memory in
+4 KiB pages, so a freed page need not wait for compaction to gather a whole block.
 
 ## Why the WSL kernel
 

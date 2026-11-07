@@ -18,12 +18,19 @@
                  (Text for 14 px and smaller, Display for the page title), with Segoe UI where
                  Windows 10 lacks it and Malgun Gothic for Korean. Every page takes its text
                  styles from here.
-                   Title       28 px Semibold   page title
-                   Body Strong 14 px Semibold   section header
-                   Body        14 px Regular    setting (card) header
-                   Caption     12 px Regular    description, secondary colour -->
+                   Title       28 px   page title
+                   Body Strong 14 px   section header
+                   Body        14 px   setting (card) header
+                   Caption     12 px   description, secondary colour
+                 Malgun Gothic has no Semibold, so a Semibold request draws Korean in its Bold,
+                 even when the Semibold comes from a family name in the list, because WPF applies
+                 that weight to the whole list. The Settings app shows Korean titles in Regular,
+                 so App.OnStartup points the strong fonts at the regular ones in Korean. -->
             <FontFamily x:Key="TextFont">Segoe UI Variable Text, Segoe UI, Malgun Gothic</FontFamily>
             <FontFamily x:Key="DisplayFont">Segoe UI Variable Display, Segoe UI, Malgun Gothic</FontFamily>
+            <FontFamily x:Key="StrongTextFont">Segoe UI Variable Text Semibold, Segoe UI Semibold, Malgun Gothic</FontFamily>
+            <FontFamily x:Key="StrongDisplayFont">Segoe UI Variable Display Semibold, Segoe UI Semibold, Malgun Gothic</FontFamily>
+            <CornerRadius x:Key="CardCornerRadius">8</CornerRadius>
 
             <!-- The page layout of the Windows Settings app and the WinUI Gallery: the title
                  stays above the page while the page scrolls under it, both 56 px from the edges
@@ -42,8 +49,8 @@
                 <Setter Property="MaxWidth" Value="{StaticResource PageMaxWidth}" />
             </Style>
             <Style x:Key="PageTitle" TargetType="TextBlock">
-                <Setter Property="FontFamily" Value="{StaticResource DisplayFont}" />
-                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="FontFamily" Value="{DynamicResource StrongDisplayFont}" />
+                <Setter Property="FontWeight" Value="Normal" />
                 <Setter Property="FontSize" Value="28" />
                 <Setter Property="LineHeight" Value="36" />
                 <Setter Property="VerticalAlignment" Value="Center" />
@@ -51,8 +58,8 @@
                 <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
             </Style>
             <Style x:Key="SectionHeader" TargetType="TextBlock">
-                <Setter Property="FontFamily" Value="{StaticResource TextFont}" />
-                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="FontFamily" Value="{DynamicResource StrongTextFont}" />
+                <Setter Property="FontWeight" Value="Normal" />
                 <Setter Property="FontSize" Value="14" />
                 <Setter Property="LineHeight" Value="20" />
                 <Setter Property="Margin" Value="1,30,0,6" />
@@ -75,10 +82,10 @@
                 <Setter Property="TextWrapping" Value="Wrap" />
                 <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
             </Style>
-            <!-- Subtitle: 20 px Semibold, 28 px line, for a value that leads a card. -->
+            <!-- Subtitle: 20 px, 28 px line, for a value that leads a card. -->
             <Style x:Key="SubtitleText" TargetType="TextBlock">
-                <Setter Property="FontFamily" Value="{StaticResource DisplayFont}" />
-                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="FontFamily" Value="{DynamicResource StrongDisplayFont}" />
+                <Setter Property="FontWeight" Value="Normal" />
                 <Setter Property="FontSize" Value="20" />
                 <Setter Property="LineHeight" Value="28" />
                 <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
@@ -104,35 +111,94 @@
             <sys:String x:Key="ToggleOnText">On</sys:String>
             <sys:String x:Key="ToggleOffText">Off</sys:String>
 
+            <!-- These styles are based on the library's named styles, never on
+                 {StaticResource {x:Type ...}}. Inside this dictionary a style's own type is its own
+                 key, and a style based on that key loses the library's setters: ui:Button fell
+                 back to the default Win32 button template. The library names no style for
+                 ui:InfoBar, so each page sets the info bars' 4 px margin itself. -->
+
             <!-- Pop-ups do not inherit the window's font. -->
-            <Style TargetType="ToolTip" BasedOn="{StaticResource {x:Type ToolTip}}">
+            <Style TargetType="ToolTip" BasedOn="{StaticResource DefaultToolTipStyle}">
                 <Setter Property="FontFamily" Value="{StaticResource TextFont}" />
             </Style>
-            <Style TargetType="ContextMenu" BasedOn="{StaticResource {x:Type ContextMenu}}">
+            <Style TargetType="ContextMenu" BasedOn="{StaticResource UiContextMenu}">
                 <Setter Property="FontFamily" Value="{StaticResource TextFont}" />
             </Style>
 
             <!-- A WinUI button in a settings card is at least 120 px wide (the toolkit's
                  content minimum), so a short label such as "Stop" still reads as a button. -->
-            <Style TargetType="ui:Button" BasedOn="{StaticResource {x:Type ui:Button}}">
+            <Style TargetType="ui:Button" BasedOn="{StaticResource DefaultUiButtonStyle}">
                 <Setter Property="MinWidth" Value="120" />
             </Style>
 
-            <!-- The Settings app's navigation items are 40 px high. -->
-            <Style TargetType="ui:NavigationViewItem" BasedOn="{StaticResource {x:Type ui:NavigationViewItem}}">
-                <Setter Property="MinHeight" Value="40" />
+            <!-- WinUI's text box shows focus by its 2 px accent line alone, and centres its text.
+                 The library adds its 1 px dark focus rectangle around every text box. -->
+            <Style TargetType="ui:TextBox" BasedOn="{StaticResource DefaultUiTextBoxStyle}">
+                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                <Setter Property="FontFamily" Value="{StaticResource TextFont}" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+            </Style>
+            <Style TargetType="TextBox" BasedOn="{StaticResource DefaultTextBoxStyle}">
+                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                <Setter Property="FontFamily" Value="{StaticResource TextFont}" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
             </Style>
 
-            <!-- Info bars stacked on a page keep the cards' 4 px gap. -->
-            <Style TargetType="ui:InfoBar" BasedOn="{StaticResource {x:Type ui:InfoBar}}">
-                <Setter Property="Margin" Value="0,0,0,4" />
+            <!-- A value to read and copy, as WinUI's TextBlock with IsTextSelectionEnabled: plain
+                 text with no frame, no tab stop and no focus mark. WPF's TextBlock cannot be
+                 selected, so this is a read-only TextBox with only its text host. A Decorator
+                 host lets the wheel scroll the page, and the -2 px margin cancels the text host's
+                 own inset, so the text lines up with the text above it. -->
+            <Style x:Key="SelectableText" TargetType="TextBox">
+                <Setter Property="OverridesDefaultStyle" Value="True" />
+                <Setter Property="IsReadOnly" Value="True" />
+                <Setter Property="IsReadOnlyCaretVisible" Value="False" />
+                <Setter Property="IsTabStop" Value="False" />
+                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                <Setter Property="ContextMenu" Value="{DynamicResource DefaultControlContextMenu}" />
+                <Setter Property="Cursor" Value="IBeam" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="FontFamily" Value="{StaticResource TextFont}" />
+                <Setter Property="FontSize" Value="14" />
+                <Setter Property="TextWrapping" Value="Wrap" />
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="TextBox">
+                            <Decorator x:Name="PART_ContentHost" Margin="-2,0,-2,0" />
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+            <!-- Cascadia Mono and Consolas have no Hangul, so Korean falls to Malgun Gothic. -->
+            <Style x:Key="SelectableCode" TargetType="TextBox" BasedOn="{StaticResource SelectableText}">
+                <Setter Property="FontFamily" Value="Cascadia Mono, Consolas, Malgun Gothic" />
+                <Setter Property="FontSize" Value="12" />
+            </Style>
+            <!-- A command to copy: a subtle filled block in the card's text column, on its own row
+                 8 px under the description, as WinUI Gallery frames code it offers to copy. -->
+            <Style x:Key="CodeBlock" TargetType="Border">
+                <Setter Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+                <Setter Property="CornerRadius" Value="4" />
+                <Setter Property="Padding" Value="12,4,4,4" />
+                <Setter Property="Margin" Value="0,8,0,0" />
+            </Style>
+
+            <!-- Task Manager's navigation items: a 36 px highlight every 40 px. -->
+            <Style TargetType="ui:NavigationViewItem" BasedOn="{StaticResource NavigationViewItemDefaultStyle}">
+                <Setter Property="MinHeight" Value="36" />
+                <Setter Property="Margin" Value="0,2,0,2" />
             </Style>
 
             <!-- A settings card as WinUI's SettingsCard draws it: 16 px padding, at least 68 px
                  high, a 20 px icon 20 px before the header, the control 24 px after it on the
                  right. A card that is not a button does not light up under the pointer or when
                  pressed; the library's card does both. -->
-            <Style TargetType="ui:CardControl" BasedOn="{StaticResource {x:Type ui:CardControl}}">
+            <Style TargetType="ui:CardControl" BasedOn="{StaticResource DefaultUiCardControlStyle}">
                 <Setter Property="Background" Value="{DynamicResource CardBackgroundFillColorDefaultBrush}" />
                 <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeColorDefaultBrush}" />
                 <Setter Property="BorderThickness" Value="1" />
@@ -147,7 +213,7 @@
                                     Background="{TemplateBinding Background}"
                                     BorderBrush="{TemplateBinding BorderBrush}"
                                     BorderThickness="{TemplateBinding BorderThickness}"
-                                    CornerRadius="4">
+                                    CornerRadius="{StaticResource CardCornerRadius}">
                                 <Grid VerticalAlignment="Center">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" />
@@ -191,7 +257,7 @@
 
             <!-- A clickable settings card: the same layout, and a 13 px chevron 14 px after the
                  header in place of the library's 16 px one 4 px after it. -->
-            <Style TargetType="ui:CardAction" BasedOn="{StaticResource {x:Type ui:CardAction}}">
+            <Style TargetType="ui:CardAction" BasedOn="{StaticResource DefaultUiCardActionStyle}">
                 <Setter Property="Background" Value="{DynamicResource CardBackgroundFillColorDefaultBrush}" />
                 <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeColorDefaultBrush}" />
                 <Setter Property="BorderThickness" Value="1" />
@@ -206,7 +272,7 @@
                                     Background="{TemplateBinding Background}"
                                     BorderBrush="{TemplateBinding BorderBrush}"
                                     BorderThickness="{TemplateBinding BorderThickness}"
-                                    CornerRadius="4">
+                                    CornerRadius="{StaticResource CardCornerRadius}">
                                 <Grid VerticalAlignment="Center">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" />
@@ -258,9 +324,13 @@
 
             <!-- A toggle switch as the Windows Settings app shows it: "On" or "Off" to the left
                  of the switch, 12 px from it. The library puts the text on the right. The
-                 switch itself is the library's (WPF UI, MIT licence, Leszek Pomianowski and
-                 WPF UI contributors): the same 40 by 20 track, knob and animation. -->
-            <Style TargetType="ui:ToggleSwitch" BasedOn="{StaticResource {x:Type ui:ToggleSwitch}}">
+                 track, its brushes and the animation are the library's (WPF UI, MIT licence,
+                 Leszek Pomianowski and WPF UI contributors). The on fill is the library style's
+                 Background, ToggleSwitchFillOn, so this style must stay based on that style.
+                 The knob is as in WinUI, which the library does not do: 12 px and 4 px from the
+                 end at rest, 14 px under the pointer, and 17 by 14 px when pressed, 3 px from
+                 the end it rests at. -->
+            <Style TargetType="ui:ToggleSwitch" BasedOn="{StaticResource DefaultUiToggleSwitchStyle}">
                 <Setter Property="OnContent" Value="{DynamicResource ToggleOnText}" />
                 <Setter Property="OffContent" Value="{DynamicResource ToggleOffText}" />
                 <Setter Property="Template">
@@ -283,13 +353,13 @@
                                     <Ellipse x:Name="ToggleEllipse" Width="12" Height="12"
                                              Fill="{DynamicResource ToggleSwitchKnobFillOff}">
                                         <Ellipse.RenderTransform>
-                                            <TranslateTransform X="-9" />
+                                            <TranslateTransform X="-10" />
                                         </Ellipse.RenderTransform>
                                     </Ellipse>
                                     <Ellipse x:Name="ActiveToggleEllipse" Width="12" Height="12" Opacity="0"
                                              Fill="{DynamicResource ToggleSwitchKnobFillOn}">
                                         <Ellipse.RenderTransform>
-                                            <TranslateTransform X="-9" />
+                                            <TranslateTransform X="-10" />
                                         </Ellipse.RenderTransform>
                                     </Ellipse>
                                 </Grid>
@@ -303,8 +373,8 @@
                                                 <DoubleAnimation Storyboard.TargetName="ActiveToggleRectangle" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.167" />
                                                 <DoubleAnimation Storyboard.TargetName="ToggleEllipse" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.167" />
                                                 <DoubleAnimation Storyboard.TargetName="ActiveToggleEllipse" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.167" />
-                                                <DoubleAnimation Storyboard.TargetName="ToggleEllipse" Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)" To="9" Duration="0:0:0.167" />
-                                                <DoubleAnimation Storyboard.TargetName="ActiveToggleEllipse" Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)" To="9" Duration="0:0:0.167" />
+                                                <DoubleAnimation Storyboard.TargetName="ToggleEllipse" Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)" To="10" Duration="0:0:0.167" />
+                                                <DoubleAnimation Storyboard.TargetName="ActiveToggleEllipse" Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)" To="10" Duration="0:0:0.167" />
                                             </Storyboard>
                                         </BeginStoryboard>
                                     </Trigger.EnterActions>
@@ -315,8 +385,8 @@
                                                 <DoubleAnimation Storyboard.TargetName="ActiveToggleRectangle" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.167" />
                                                 <DoubleAnimation Storyboard.TargetName="ToggleEllipse" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.167" />
                                                 <DoubleAnimation Storyboard.TargetName="ActiveToggleEllipse" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.167" />
-                                                <DoubleAnimation Storyboard.TargetName="ToggleEllipse" Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)" To="-9" Duration="0:0:0.167" />
-                                                <DoubleAnimation Storyboard.TargetName="ActiveToggleEllipse" Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)" To="-9" Duration="0:0:0.167" />
+                                                <DoubleAnimation Storyboard.TargetName="ToggleEllipse" Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)" To="-10" Duration="0:0:0.167" />
+                                                <DoubleAnimation Storyboard.TargetName="ActiveToggleEllipse" Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.X)" To="-10" Duration="0:0:0.167" />
                                             </Storyboard>
                                         </BeginStoryboard>
                                     </Trigger.ExitActions>
@@ -344,6 +414,8 @@
                                     <Setter TargetName="ToggleRectangle" Property="Fill" Value="{DynamicResource ToggleSwitchFillOffPointerOver}" />
                                     <Setter TargetName="ToggleRectangle" Property="Stroke" Value="{DynamicResource ToggleSwitchStrokeOffPointerOver}" />
                                     <Setter TargetName="ToggleEllipse" Property="Fill" Value="{DynamicResource ToggleSwitchKnobFillOffPointerOver}" />
+                                    <Setter TargetName="ToggleEllipse" Property="Width" Value="14" />
+                                    <Setter TargetName="ToggleEllipse" Property="Height" Value="14" />
                                 </MultiTrigger>
                                 <MultiTrigger>
                                     <MultiTrigger.Conditions>
@@ -353,6 +425,32 @@
                                     </MultiTrigger.Conditions>
                                     <Setter Property="Background" Value="{DynamicResource ToggleSwitchFillOnPointerOver}" />
                                     <Setter TargetName="ActiveToggleEllipse" Property="Fill" Value="{DynamicResource ToggleSwitchKnobFillOnPointerOver}" />
+                                    <Setter TargetName="ActiveToggleEllipse" Property="Width" Value="14" />
+                                    <Setter TargetName="ActiveToggleEllipse" Property="Height" Value="14" />
+                                </MultiTrigger>
+                                <MultiTrigger>
+                                    <MultiTrigger.Conditions>
+                                        <Condition Property="IsPressed" Value="True" />
+                                        <Condition Property="IsChecked" Value="False" />
+                                        <Condition Property="IsEnabled" Value="True" />
+                                    </MultiTrigger.Conditions>
+                                    <Setter TargetName="ToggleRectangle" Property="Fill" Value="{DynamicResource ControlAltFillColorQuarternaryBrush}" />
+                                    <Setter TargetName="ToggleEllipse" Property="Fill" Value="{DynamicResource ToggleSwitchKnobFillOffPressed}" />
+                                    <Setter TargetName="ToggleEllipse" Property="Width" Value="17" />
+                                    <Setter TargetName="ToggleEllipse" Property="Height" Value="14" />
+                                    <Setter TargetName="ToggleEllipse" Property="Margin" Value="3,0,0,0" />
+                                </MultiTrigger>
+                                <MultiTrigger>
+                                    <MultiTrigger.Conditions>
+                                        <Condition Property="IsPressed" Value="True" />
+                                        <Condition Property="IsChecked" Value="True" />
+                                        <Condition Property="IsEnabled" Value="True" />
+                                    </MultiTrigger.Conditions>
+                                    <Setter Property="Background" Value="{DynamicResource AccentButtonBackgroundPressed}" />
+                                    <Setter TargetName="ActiveToggleEllipse" Property="Fill" Value="{DynamicResource ToggleSwitchKnobFillOnPressed}" />
+                                    <Setter TargetName="ActiveToggleEllipse" Property="Width" Value="17" />
+                                    <Setter TargetName="ActiveToggleEllipse" Property="Height" Value="14" />
+                                    <Setter TargetName="ActiveToggleEllipse" Property="Margin" Value="0,0,3,0" />
                                 </MultiTrigger>
                                 <MultiTrigger>
                                     <MultiTrigger.Conditions>

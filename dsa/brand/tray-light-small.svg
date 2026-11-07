@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <!-- The notification area icon at 24 px and below: no inner panel, thicker antennae. -->
+  <path d="M21 14 L15.5 5 M43 14 L48.5 5" stroke="#1b1b1b" stroke-width="6.5" stroke-linecap="round" fill="none"/>
+  <path d="M13 12h38a9 9 0 0 1 9 9v28a9 9 0 0 1-9 9H13a9 9 0 0 1-9-9V21a9 9 0 0 1 9-9z M4 25.5h56v3H4z" fill="#1b1b1b" fill-rule="evenodd"/>
+</svg>

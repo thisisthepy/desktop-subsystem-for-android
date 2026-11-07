@@ -10,12 +10,13 @@ use std::time::{Duration, Instant};
 use ed25519_dalek::VerifyingKey;
 
 use super::manifest::{self, ImageEntry};
-use super::policy::{decide, Decision, InstalledImage};
+use super::policy::{decide_for, Decision, InstalledImage};
 use super::store::{Fetch, ImageStore};
 use super::trial::{self, Boot, Outcome};
+use super::versions::{AndroidVersions, Channel, ChooseError, VersionReport};
 use super::UpdateError;
 use crate::accessibility::{AccessibilityWatch, ActionRequest};
-use crate::apk::{InstallOutcome, InstalledPackage};
+use crate::apk::{InstallOutcome, InstallPart, InstalledPackage};
 use crate::apps::UninstallOutcome;
 use crate::background::{BackgroundApp, BackgroundWatch, MediaSession};
 use crate::host_api::InstallError;
@@ -41,6 +42,58 @@ impl UpdateNotices {
     }
     pub fn get(&self) -> Option<String> {
         self.0.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+}
+
+/// A request for the update service to check for images now rather than at its next turn,
+/// set when the user chooses another Android version.
+#[derive(Default)]
+pub struct CheckNow(AtomicBool);
+
+impl CheckNow {
+    pub fn request(&self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+    /// Whether a check was asked for since the last call.
+    pub fn take(&self) -> bool {
+        self.0.swap(false, Ordering::SeqCst)
+    }
+}
+
+/// The Android version of a service that keeps its images in `store`.
+pub struct StoreVersions {
+    pub store: Arc<ImageStore>,
+    pub notices: Arc<UpdateNotices>,
+    pub check_now: Arc<CheckNow>,
+    /// Whether every user of the computer boots from `store`, so that only an administrator
+    /// may choose for them all. A store a user keeps for themselves is theirs to choose.
+    pub shared_by_users: bool,
+}
+
+impl AndroidVersions for StoreVersions {
+    fn needs_administrator(&self) -> bool {
+        self.shared_by_users
+    }
+
+    fn report(&self) -> Result<VersionReport, String> {
+        self.store
+            .report(self.notices.get())
+            .map_err(|e| e.to_string())
+    }
+
+    fn choose(&self, channel: Channel, erase_data: bool) -> Result<VersionReport, ChooseError> {
+        self.store.choose(channel, erase_data)?;
+        if self.store.switch_pending() {
+            let report = self.report().map_err(ChooseError::Store)?;
+            let notice = format!(
+                "Android {} is chosen; the service downloads it now and it is used the next \
+                 time Android starts",
+                report.target_major
+            );
+            self.notices.set(notice);
+        }
+        self.check_now.request();
+        self.report().map_err(ChooseError::Store)
     }
 }
 
@@ -106,12 +159,19 @@ pub fn check_reporting(
         .map_err(|e| UpdateError::BadSignature(format!("fetching the signature: {e}")))?;
     let signature = String::from_utf8_lossy(&signature);
     let manifest = manifest::verify(&list, &signature, keys)?;
+    let moved_up = store.follow_supported(&manifest.supported_majors)?;
     let state = store.state()?;
     if state.on_trial {
-        return Ok(None);
+        return Ok(moved_up);
     }
-    match decide(&state.current, &manifest, &state.failed) {
-        Decision::UpToDate => Ok(None),
+    match decide_for(
+        &state.current,
+        &manifest,
+        &state.failed,
+        state.channel,
+        state.older_allowed,
+    ) {
+        Decision::UpToDate => Ok(moved_up),
         Decision::Unsupported(why) => Ok(Some(why)),
         Decision::Apply(image) => {
             let total = image.files.iter().map(|file| file.size).sum();
@@ -176,6 +236,15 @@ impl Boot for SessionBoot {
         session.start();
         let mut deadline = Instant::now() + timeout;
         loop {
+            // A session already stalled for the image's sake fails the boot now, even when the
+            // problem changed after the Stalled event (a missing prerequisite that came back,
+            // then an agent that never connects): the event is not sent again for it.
+            if session.state() == SessionState::Stalled {
+                match session.problem() {
+                    Some(BootProblem::Prerequisite(_)) | None => {}
+                    Some(problem) => return Err(problem.to_string()),
+                }
+            }
             // What the guest cannot run without being missing says nothing about the image, so
             // the time on trial starts again once it is there.
             if matches!(session.problem(), Some(BootProblem::Prerequisite(_))) {
@@ -210,11 +279,109 @@ impl Boot for SessionBoot {
     }
 
     fn halt(&mut self) {
-        self.0.stop();
-        self.0
-            .wait_for(SessionState::Stopped, Duration::from_secs(120));
+        // A stop that failed leaves the session in Stopping, where a start is ignored; asking
+        // again retries it, so the previous image is not kept from booting by it.
+        for _ in 0..2 {
+            self.0.stop();
+            if self
+                .0
+                .wait_for(SessionState::Stopped, Duration::from_secs(120))
+            {
+                return;
+            }
+        }
     }
 }
+
+/// A user's rollback while it runs. The guest belongs to it until the previous image has
+/// booted or failed to: a stop asked for meanwhile (`dsa stop`, a restart from the tray) is
+/// remembered and made once the rollback is over. Stopping in the middle used to cancel the
+/// previous image's boot, which left the user with no Android and a rollback reported as
+/// failed although nothing was wrong with the previous image.
+#[derive(Default)]
+pub struct Rollback(Mutex<RollbackState>);
+
+#[derive(Default)]
+struct RollbackState {
+    running: bool,
+    stop_asked: bool,
+}
+
+impl Rollback {
+    fn lock(&self) -> std::sync::MutexGuard<'_, RollbackState> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Whether a rollback runs now.
+    pub fn running(&self) -> bool {
+        self.lock().running
+    }
+
+    fn begin(&self) {
+        *self.lock() = RollbackState {
+            running: true,
+            stop_asked: false,
+        };
+    }
+
+    /// Ends the rollback. Returns whether a stop was asked for while it ran.
+    fn end(&self) -> bool {
+        let mut state = self.lock();
+        state.running = false;
+        std::mem::take(&mut state.stop_asked)
+    }
+
+    /// Remembers a stop while a rollback runs. Returns whether it was put off.
+    fn put_off_stop(&self) -> bool {
+        let mut state = self.lock();
+        if state.running {
+            state.stop_asked = true;
+        }
+        state.running
+    }
+}
+
+/// [`SessionBoot`] for a trial, with the user's rollback to hold stops off while it runs.
+struct TrialBoot {
+    session: SessionBoot,
+    rollback: Arc<Rollback>,
+}
+
+impl Boot for TrialBoot {
+    fn boot(
+        &mut self,
+        image: &InstalledImage,
+        image_dir: &std::path::Path,
+        timeout: Duration,
+    ) -> Result<(), String> {
+        self.session.boot(image, image_dir, timeout)
+    }
+    fn halt(&mut self) {
+        self.session.halt()
+    }
+    fn image_to_blame(&self) -> bool {
+        self.session.image_to_blame()
+    }
+    fn rolling_back(&mut self, on: bool) {
+        if on {
+            self.rollback.begin();
+        } else if self.rollback.end() {
+            self.session.0.stop();
+        }
+    }
+}
+
+/// What happens to an image that failed its trial, in words for the user.
+fn not_retried(failed: &InstalledImage) -> String {
+    format!(
+        "Android {} is not tried again until a newer build of it, or a new version of DSA, \
+         is available",
+        failed.version
+    )
+}
+
+const ROLLING_BACK: &str = "the new Android image did not start, so the service is going back \
+     to the previous one; Android starts with it in a moment";
 
 const NO_IMAGE_YET: &str = "no Android image is installed yet; the service downloads one after \
      installation, and `dsa status` says when it is ready. Start Android again then";
@@ -238,11 +405,23 @@ pub struct UpdatingAndroid {
     pub boot_timeout: Duration,
     /// Set while a trial runs, so two users' starts do not run two trials at once.
     pub trial_running: Arc<AtomicBool>,
+    /// This user's rollback, while one runs.
+    pub rollback: Arc<Rollback>,
 }
 
 impl UserAndroid for UpdatingAndroid {
+    /// While a rollback runs, Android is starting: the failed image's stall and the stop
+    /// between the two boots are steps of that start, not where it ended.
     fn state(&self) -> SessionState {
-        self.session.state()
+        let state = self.session.state();
+        match state {
+            SessionState::Stalled | SessionState::Stopping | SessionState::Stopped
+                if self.rollback.running() =>
+            {
+                SessionState::Starting
+            }
+            _ => state,
+        }
     }
     fn last_reason(&self) -> Option<String> {
         if self.no_image_yet() {
@@ -251,10 +430,15 @@ impl UserAndroid for UpdatingAndroid {
         UserAndroid::last_reason(&*self.session)
     }
     fn problem(&self) -> Option<String> {
+        if self.rollback.running() {
+            return Some(ROLLING_BACK.into());
+        }
         UserAndroid::problem(&*self.session)
     }
     fn stop(&self) {
-        self.session.stop()
+        if !self.rollback.put_off_stop() {
+            self.session.stop()
+        }
     }
     fn update_notice(&self) -> Option<String> {
         self.notices.get()
@@ -311,8 +495,28 @@ impl UserAndroid for UpdatingAndroid {
     fn arm_translation(&self) -> Option<crate::arm_translation::GuestArmTranslation> {
         UserAndroid::arm_translation(&*self.session)
     }
+    fn install_gapps(
+        &self,
+        size: u64,
+        sha256: &[u8],
+        content: &mut dyn std::io::Read,
+    ) -> Result<crate::gapps::GuestGapps, crate::host_api::InstallError> {
+        UserAndroid::install_gapps(&*self.session, size, sha256, content)
+    }
+    fn remove_gapps(&self) -> Result<crate::gapps::GuestGapps, crate::host_api::InstallError> {
+        UserAndroid::remove_gapps(&*self.session)
+    }
+    fn gapps(&self) -> Option<crate::gapps::GuestGapps> {
+        UserAndroid::gapps(&*self.session)
+    }
     fn developer_mode(&self, on: bool, port: u16) -> Result<(), String> {
         UserAndroid::developer_mode(&*self.session, on, port)
+    }
+    fn adb_auto_connect(&self, on: bool) {
+        UserAndroid::adb_auto_connect(&*self.session, on)
+    }
+    fn adb_auto_connect_state(&self) -> crate::adb_discovery::AutoConnectState {
+        UserAndroid::adb_auto_connect_state(&*self.session)
     }
     fn watch_links(&self) -> Option<std::sync::mpsc::Receiver<String>> {
         UserAndroid::watch_links(&*self.session)
@@ -406,8 +610,13 @@ impl UserAndroid for UpdatingAndroid {
         let notices = Arc::clone(&self.notices);
         let running = Arc::clone(&self.trial_running);
         let timeout = self.boot_timeout;
+        let rollback = Arc::clone(&self.rollback);
         thread::spawn(move || {
-            let outcome = trial::start(&store, &mut SessionBoot(session), timeout);
+            let mut guest = TrialBoot {
+                session: SessionBoot(session),
+                rollback,
+            };
+            let outcome = trial::start(&store, &mut guest, timeout);
             notices.set(match outcome {
                 Ok(Outcome::Booted {
                     image,
@@ -425,8 +634,24 @@ impl UserAndroid for UpdatingAndroid {
                     reason,
                     image,
                 }) => format!(
-                    "Android {} did not start ({reason}), so Android {} is in use again",
-                    failed.version, image.version
+                    "Android {} did not start ({reason}), so Android {} is in use again. {}",
+                    failed.version,
+                    image.version,
+                    not_retried(&failed)
+                ),
+                Ok(Outcome::RolledBackNotReady {
+                    failed,
+                    reason,
+                    image,
+                    why,
+                }) => format!(
+                    "Android {} did not start ({reason}), so Android {} is in use again, but \
+                     it has not finished starting yet ({why}). Start Android again (dsa \
+                     start) to boot Android {}. {}",
+                    failed.version,
+                    image.version,
+                    image.version,
+                    not_retried(&failed)
                 ),
                 Ok(Outcome::GaveUp { failed, reason }) => format!(
                     "Android {} did not start ({reason}); no other image is installed. The \
@@ -491,6 +716,32 @@ impl UserAndroid for UpdatingAndroid {
         content: &mut dyn std::io::Read,
     ) -> Result<InstallOutcome, InstallError> {
         UserAndroid::install_apk(&*self.session, name, size, content)
+    }
+    fn install_apk_for(
+        &self,
+        name: &str,
+        size: u64,
+        abi: Option<&str>,
+        content: &mut dyn std::io::Read,
+    ) -> Result<InstallOutcome, InstallError> {
+        UserAndroid::install_apk_for(&*self.session, name, size, abi, content)
+    }
+    fn install_parts(
+        &self,
+        name: &str,
+        parts: &[InstallPart],
+        abi: Option<&str>,
+        content: &mut dyn std::io::Read,
+    ) -> Result<InstallOutcome, InstallError> {
+        UserAndroid::install_parts(&*self.session, name, parts, abi, content)
+    }
+    fn set_run_as_arm(
+        &self,
+        package: &str,
+        on: bool,
+        erase_data: bool,
+    ) -> Result<crate::native_abi::RunAsArmOutcome, TaskRequestError> {
+        UserAndroid::set_run_as_arm(&*self.session, package, on, erase_data)
     }
     fn package_state(&self, package: &str) -> Result<Option<InstalledPackage>, TaskRequestError> {
         UserAndroid::package_state(&*self.session, package)

@@ -1,0 +1,13 @@
+; Desktop Subsystem for Android (DSA)
+; Google Play, when the user installed it (dsa-gapps.rc). When the host says a Google apps image
+; is installed, init mounts the image from /data/vendor/dsa/gapps through a loop device,
+; labelled as system files, as the partitions it lays it over are, and lays it over /product and
+; /system_ext with overlayfs.
+(allow init vendor_data_file (file (read open getattr)))
+(allow init loop_control_device (chr_file (read write open ioctl getattr)))
+(allow init loop_device (blk_file (read open ioctl getattr)))
+(allow init tmpfs (dir (mounton)))
+(allow init system_file (dir (mounton)))
+(allow init labeledfs (filesystem (mount relabelfrom)))
+(allow init system_file (filesystem (relabelto associate)))
+(allow system_file labeledfs (filesystem (associate)))

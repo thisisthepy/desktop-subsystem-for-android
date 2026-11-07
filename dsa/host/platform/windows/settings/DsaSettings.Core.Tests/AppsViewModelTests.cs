@@ -131,6 +131,93 @@ public class AppsViewModelTests
         Assert.Equal(2, vm.Rows.Count);
     }
 
+    // An app with partial x86_64 code, one without native code, and an app that runs as ARM
+    // with nothing to go back to, as dsa apps list --json prints them.
+    private static string ArmList(bool translation) =>
+        "{\"apps\":[" +
+        "{\"package\":\"com.example.game\",\"label\":\"Game\",\"system_app\":false,\"icon_png\":\"\"," +
+        "\"primary_abi\":\"x86_64\",\"native_abis\":[\"arm64-v8a\",\"x86_64\"]," +
+        $"\"run_as_arm\":{{\"on\":false,\"available\":{(translation ? "true" : "false")}," +
+        $"\"reason\":\"{(translation ? "" : "translation-off")}\"}}}}," +
+        "{\"package\":\"com.example.notes\",\"label\":\"Notes\",\"system_app\":false,\"icon_png\":\"\"," +
+        "\"primary_abi\":\"\",\"native_abis\":[]," +
+        "\"run_as_arm\":{\"on\":false,\"available\":false,\"reason\":\"no-arm-libraries\"}}," +
+        "{\"package\":\"com.example.tool\",\"label\":\"Tool\",\"system_app\":false,\"icon_png\":\"\"," +
+        "\"primary_abi\":\"arm64-v8a\",\"native_abis\":[\"arm64-v8a\"]," +
+        "\"run_as_arm\":{\"on\":true,\"available\":false,\"reason\":\"arm-only\"}}]}";
+
+    [Fact]
+    public async Task Fr25_the_run_as_arm_switch_is_off_with_its_reason_when_it_cannot_be_changed()
+    {
+        var (vm, _) = Make(new FakeCli().Answer("apps list --json", ArmList(translation: false)));
+        await vm.RefreshAsync();
+        Assert.False(vm.HasError, vm.Error);
+        var game = vm.Rows.Single(r => r.Package == "com.example.game");
+        Assert.False(game.CanRunAsArm);
+        Assert.Equal("Apps_RunAsArm_translation-off", game.RunAsArmTip);
+        Assert.True(game.HasRunAsArmTip);
+        var notes = vm.Rows.Single(r => r.Package == "com.example.notes");
+        Assert.False(notes.CanRunAsArm);
+        Assert.Equal("Apps_RunAsArm_no-arm-libraries", notes.RunAsArmTip);
+        var tool = vm.Rows.Single(r => r.Package == "com.example.tool");
+        Assert.True(tool.RunAsArm);
+        Assert.False(tool.CanRunAsArm);
+        Assert.Equal("Apps_RunAsArm_arm-only", tool.RunAsArmTip);
+        // An older dsa that says nothing of the switch leaves it off and says so.
+        Assert.Equal("Apps_RunAsArm_unknown", vm.RunAsArmTipOf(RunAsArmSwitch.Unknown));
+        Assert.Null(vm.RunAsArmTipOf(new RunAsArmSwitch(false, true, "")));
+    }
+
+    [Fact]
+    public async Task Fr25_turning_run_as_arm_on_keeps_the_data_or_asks_before_it_goes()
+    {
+        var cli = new FakeCli()
+            .Answer("apps list --json", ArmList(translation: true))
+            .Fail("apps run-as-arm com.example.game on --json",
+                "dsa: not changed (data-would-be-erased): com.example.game: Android cannot change how the app runs and keep its data")
+            .Answer("apps run-as-arm com.example.game on --erase-data --json",
+                "{\"package\":\"com.example.game\",\"status\":\"done\",\"on\":true,\"message\":\"\"}");
+        var (vm, _) = Make(cli);
+        await vm.RefreshAsync();
+        Assert.True(vm.Rows.Single(r => r.Package == "com.example.game").CanRunAsArm);
+
+        // The user keeps the data: nothing is erased.
+        var asked = new List<string>();
+        await vm.SetRunAsArmAsync("com.example.game", true, label =>
+        {
+            asked.Add(label);
+            return Task.FromResult(false);
+        });
+        Assert.Equal(new[] { "Game" }, asked);
+        Assert.Equal("Apps_RunAsArmKept", vm.Message);
+        Assert.DoesNotContain("apps run-as-arm com.example.game on --erase-data --json", cli.Calls);
+
+        // The user lets it go: the app is installed again and its data erased.
+        await vm.SetRunAsArmAsync("com.example.game", true, _ => Task.FromResult(true));
+        Assert.False(vm.HasError, vm.Error);
+        Assert.Contains("apps run-as-arm com.example.game on --erase-data --json", cli.Calls);
+        Assert.Equal("Apps_RunAsArmOn", vm.Message);
+    }
+
+    [Fact]
+    public async Task Fr25_a_switch_that_keeps_the_data_asks_nothing()
+    {
+        var cli = new FakeCli()
+            .Answer("apps list --json", ArmList(translation: true))
+            .Answer("apps run-as-arm com.example.game on --json",
+                "{\"package\":\"com.example.game\",\"status\":\"done\",\"on\":true,\"message\":\"\"}")
+            .Fail("apps run-as-arm com.example.notes on --json",
+                "dsa: not changed (no-libraries): com.example.notes: The app's APKs on the device hold no code for that ABI");
+        var (vm, _) = Make(cli);
+        await vm.RefreshAsync();
+        await vm.SetRunAsArmAsync("com.example.game", true, _ => throw new InvalidOperationException("asked"));
+        Assert.False(vm.HasError, vm.Error);
+        Assert.Equal("Apps_RunAsArmOn", vm.Message);
+        await vm.SetRunAsArmAsync("com.example.notes", true, _ => throw new InvalidOperationException("asked"));
+        Assert.True(vm.HasError);
+        Assert.StartsWith("Apps_RunAsArmNotChanged", vm.Error);
+    }
+
     [Fact]
     public async Task Fr23_a_service_that_cannot_be_reached_is_said_so()
     {

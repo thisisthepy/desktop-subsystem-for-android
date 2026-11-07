@@ -23,9 +23,9 @@
                 <ProgressBar IsIndeterminate="True" Margin="0,8,0,0"
                              Visibility="{Binding IsBusy, Converter={StaticResource Visible}}" />
                 <ui:InfoBar Title="{l:Text AppsErrorBar.Title}" Severity="Error" IsClosable="False"
-                            IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" />
+                            IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" Margin="0,0,0,4" />
                 <ui:InfoBar Title="{l:Text AppsDoneBar.Title}" Severity="Success" IsClosable="False"
-                            IsOpen="{Binding HasMessage, Mode=OneWay}" Message="{Binding Message, Mode=OneWay}" />
+                            IsOpen="{Binding HasMessage, Mode=OneWay}" Message="{Binding Message, Mode=OneWay}" Margin="0,0,0,4" />
 
                 <!-- Android's own list of apps, as WSA's "Manage apps" opened it. -->
                 <ui:CardAction Margin="0,16,0,0" Icon="{ui:SymbolIcon AppsList24}" Click="OnManage"
@@ -55,57 +55,81 @@
                 <ItemsControl ItemsSource="{Binding Rows, Mode=OneWay}">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
-                            <ui:CardControl Margin="0,0,0,4">
-                                <ui:CardControl.Header>
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="*" />
-                                        </Grid.ColumnDefinitions>
-                                        <Grid Width="32" Height="32" Margin="0,0,16,0" VerticalAlignment="Center">
-                                            <ui:SymbolIcon Symbol="Apps24" FontSize="24"
-                                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                                                           Visibility="{Binding NoIcon, Converter={StaticResource Visible}}" />
-                                            <Image Source="{Binding Icon, TargetNullValue={x:Null}}" Stretch="Uniform"
-                                                   RenderOptions.BitmapScalingMode="HighQuality" />
-                                        </Grid>
-                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                            <TextBlock Text="{Binding Label}" Style="{StaticResource CardTitle}"
-                                                       TextTrimming="CharacterEllipsis" />
-                                            <TextBlock Text="{Binding Detail}" Style="{StaticResource CardDescription}" />
-                                        </StackPanel>
+                            <!-- Two lines rather than a settings card: the actions together are
+                                 wider than the page, and a card's header takes only the width its
+                                 control leaves, so it got none and its text wrapped at every
+                                 letter, which made the card taller than the window. -->
+                            <Border Margin="0,0,0,4" Padding="16" CornerRadius="4" BorderThickness="1"
+                                    Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid Width="32" Height="32" Margin="0,0,16,0" VerticalAlignment="Center">
+                                        <ui:SymbolIcon Symbol="Apps24" FontSize="24"
+                                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                                       Visibility="{Binding NoIcon, Converter={StaticResource Visible}}" />
+                                        <Image Source="{Binding Icon, TargetNullValue={x:Null}}" Stretch="Uniform"
+                                               RenderOptions.BitmapScalingMode="HighQuality" />
                                     </Grid>
-                                </ui:CardControl.Header>
-                                <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="{Binding Size}" Style="{StaticResource CardDescription}"
-                                               VerticalAlignment="Center" Margin="0,0,16,0" />
-                                    <ui:Button Content="{l:Text AppsOpenButton.Content}" Tag="{Binding Package}" Click="OnOpen"
-                                               Icon="{ui:SymbolIcon Open24}" Margin="0,0,8,0"
-                                               AutomationProperties.HelpText="{Binding Label}" />
-                                    <ui:Button Content="{l:Text AppsInfoButton.Content}" Tag="{Binding Package}" Click="OnInfo"
-                                               Icon="{ui:SymbolIcon Info24}" Margin="0,0,8,0"
-                                               AutomationProperties.HelpText="{Binding Label}" />
-                                    <ui:Button Content="{l:Text AppsUninstallButton.Content}" Tag="{Binding Package}" Click="OnUninstall"
-                                               Icon="{ui:SymbolIcon Delete24}" IsEnabled="{Binding CanUninstall}"
-                                               ToolTipService.ShowOnDisabled="True"
-                                               ToolTip="{Binding UninstallTip, TargetNullValue={x:Null}}"
-                                               AutomationProperties.HelpText="{Binding Label}" />
-                                    <!-- The app's windows: whether the user resizes them, and the size they open at. -->
-                                    <ui:ToggleSwitch Content="{l:Text AppsResizable.Content}" Tag="{Binding Package}"
-                                                     IsChecked="{Binding Resizable, Mode=OneWay}" Click="OnResizable"
-                                                     Margin="16,0,8,0" VerticalAlignment="Center"
-                                                     ToolTip="{l:Text AppsResizable.ToolTip}"
-                                                     AutomationProperties.HelpText="{Binding Label}" />
-                                    <ComboBox Tag="{Binding Package}" MinWidth="200" VerticalAlignment="Center"
-                                              ItemsSource="{Binding DataContext.StartSizeChoices, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
-                                              DisplayMemberPath="Label"
-                                              SelectedIndex="{Binding StartSizeIndex, Mode=OneWay}"
-                                              SelectionChanged="OnStartSize"
-                                              ToolTip="{l:Text AppsStartSize.ToolTip}"
-                                              AutomationProperties.Name="{l:Text AppsStartSize.ToolTip}"
-                                              AutomationProperties.HelpText="{Binding Label}" />
-                                </StackPanel>
-                            </ui:CardControl>
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Label}" Style="{StaticResource CardTitle}"
+                                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                                                   TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{Binding Detail}" Style="{StaticResource CardDescription}" />
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="2" Text="{Binding Size}" Style="{StaticResource CardDescription}"
+                                               VerticalAlignment="Center" Margin="16,0,0,0" />
+                                    <WrapPanel Grid.Row="1" Grid.ColumnSpan="3" Margin="0,8,0,0" HorizontalAlignment="Right">
+                                        <ui:Button Content="{l:Text AppsOpenButton.Content}" Tag="{Binding Package}" Click="OnOpen"
+                                                   Icon="{ui:SymbolIcon Open24}" Margin="8,4,0,0"
+                                                   AutomationProperties.HelpText="{Binding Label}" />
+                                        <ui:Button Content="{l:Text AppsInfoButton.Content}" Tag="{Binding Package}" Click="OnInfo"
+                                                   Icon="{ui:SymbolIcon Info24}" Margin="8,4,0,0"
+                                                   AutomationProperties.HelpText="{Binding Label}" />
+                                        <ui:Button Content="{l:Text AppsUninstallButton.Content}" Tag="{Binding Package}" Click="OnUninstall"
+                                                   Icon="{ui:SymbolIcon Delete24}" IsEnabled="{Binding CanUninstall}" Margin="8,4,0,0"
+                                                   ToolTipService.ShowOnDisabled="True"
+                                                   ToolTip="{Binding UninstallTip, TargetNullValue={x:Null}}"
+                                                   AutomationProperties.HelpText="{Binding Label}" />
+                                        <!-- The app's windows: whether the user resizes them, and the size they open at. -->
+                                        <ui:ToggleSwitch Content="{l:Text AppsResizable.Content}" Tag="{Binding Package}"
+                                                         IsChecked="{Binding Resizable, Mode=OneWay}" Click="OnResizable"
+                                                         Margin="16,4,0,0" VerticalAlignment="Center"
+                                                         ToolTip="{l:Text AppsResizable.ToolTip}"
+                                                         AutomationProperties.HelpText="{Binding Label}" />
+                                        <ComboBox Tag="{Binding Package}" MinWidth="200" Margin="16,4,0,0" VerticalAlignment="Center"
+                                                  ItemsSource="{Binding DataContext.StartSizeChoices, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                  DisplayMemberPath="Label"
+                                                  SelectedIndex="{Binding StartSizeIndex, Mode=OneWay}"
+                                                  SelectionChanged="OnStartSize"
+                                                  ToolTip="{l:Text AppsStartSize.ToolTip}"
+                                                  AutomationProperties.Name="{l:Text AppsStartSize.ToolTip}"
+                                                  AutomationProperties.HelpText="{Binding Label}" />
+                                        <!-- Whether the app runs its ARM code through the translator. -->
+                                        <ui:ToggleSwitch Content="{l:Text AppsRunAsArm.Content}" Tag="{Binding Package}"
+                                                         IsChecked="{Binding RunAsArm, Mode=OneWay}" Click="OnRunAsArm"
+                                                         IsEnabled="{Binding CanRunAsArm}"
+                                                         Margin="16,4,0,0" VerticalAlignment="Center"
+                                                         ToolTipService.ShowOnDisabled="True"
+                                                         ToolTip="{Binding RunAsArmTip, TargetNullValue={x:Null}}"
+                                                         AutomationProperties.HelpText="{Binding Label}" />
+                                    </WrapPanel>
+                                    <!-- Why the app cannot run as ARM, where the switch is. -->
+                                    <TextBlock Grid.Row="2" Grid.ColumnSpan="3" Text="{Binding RunAsArmTip}"
+                                               Style="{StaticResource CardDescription}" HorizontalAlignment="Right"
+                                               TextWrapping="Wrap" Margin="0,4,0,0"
+                                               Visibility="{Binding HasRunAsArmTip, Converter={StaticResource Visible}}" />
+                                </Grid>
+                            </Border>
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>

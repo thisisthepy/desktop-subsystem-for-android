@@ -21,6 +21,17 @@ public sealed record LogLine(
         ? $"--------- {Dropped} records dropped"
         : string.Format(CultureInfo.InvariantCulture, "{0} {1,5} {2,5} {3} {4}: {5}", Time, Pid, Tid, Priority, Tag, Message);
 
+    // The page's columns. A record that stands for dropped records has only its body.
+    public string TimeColumn => Dropped > 0 ? "" : Time;
+
+    public string PidColumn => Dropped > 0 ? "" : Pid.ToString(CultureInfo.InvariantCulture);
+
+    public string TidColumn => Dropped > 0 ? "" : Tid.ToString(CultureInfo.InvariantCulture);
+
+    public string PriorityColumn => Dropped > 0 ? "" : Priority;
+
+    public string BodyColumn => Dropped > 0 ? Text : $"{Tag}: {Message}";
+
     /// <summary>Reads one line of <c>dsa logcat --json</c>; null for a line that is not a record.</summary>
     public static LogLine? Parse(string json)
     {
@@ -93,6 +104,15 @@ public sealed class LogViewModel : ObservableObject
     /// <summary>The lines shown: those that pass the filter, as of the last time the page was
     /// not paused.</summary>
     public LogLines Lines { get; } = new();
+
+    /// <summary>What copying the selected lines puts on the clipboard: each whole line as the
+    /// log prints it, one per line, in the order the page shows them, whatever order they
+    /// were selected in.</summary>
+    public string CopyText(IEnumerable<LogLine> selected)
+    {
+        var chosen = new HashSet<LogLine>(selected, ReferenceEqualityComparer.Instance);
+        return string.Join(Environment.NewLine, Lines.Where(chosen.Contains).Select(l => l.Text));
+    }
 
     public bool IsReading => _reading is not null;
     public string Error => _error ?? "";

@@ -114,8 +114,8 @@ pub struct AndroidVmConfig {
     /// SIDs, besides SYSTEM, allowed to bind and connect Hyper-V sockets to this VM: the user
     /// the VM runs for.
     pub socket_sids: Vec<String>,
-    /// Free page reporting granularity, as a page order (5 is 128 KiB, 9 is 2 MiB). WSL uses
-    /// 5 on recent Windows builds and 9 on older ones.
+    /// Free page reporting granularity, as a page order (0 is 4 KiB, 5 is 128 KiB, 9 is
+    /// 2 MiB). DSA uses 0 on Windows builds with small backing pages and 9 on older ones.
     pub page_reporting_order: u8,
     /// The named pipe (`\\.\pipe\...`) HCS connects the guest's serial console to. The
     /// host must serve it before the VM starts; without it the VM has no serial port.
@@ -158,6 +158,20 @@ impl NetworkAdapter {
         })
     }
 }
+
+/// Keeps what the guest kernel sets aside at boot small; each of these is memory the guest
+/// never gets back while it runs.
+/// - `swiotlb=2048`: the bounce buffer for devices that cannot reach all of memory, 4 MiB
+///   (2048 slabs of 2 KiB) instead of 64. The kernel makes it whenever memory may reach past
+///   4 GiB, which Hyper-V's hot-add range makes true, but the VMBus disks and network adapter
+///   reach all of memory and bounce nothing.
+/// - `kfence.sample_interval=0`: no KFENCE pool (2 MiB and its metadata) when the kernel has
+///   KFENCE; nobody reads its reports in a user's VM.
+/// - `dhash_entries`, `ihash_entries`, `thash_entries`, `uhash_entries`: the dentry, inode,
+///   TCP and UDP hash tables sized for a desktop guest's few files and connections, not
+///   scaled to its memory (about 8 MiB for 3 GiB, down to under 1 MiB).
+pub const BOOT_MEMORY_CMDLINE: &str = "swiotlb=2048 kfence.sample_interval=0 \
+     dhash_entries=65536 ihash_entries=32768 thash_entries=16384 uhash_entries=1024";
 
 /// The fault cluster for fine-grained memory, as a power of two of 4 KiB pages: 64 KiB. Free
 /// page reporting's order must be at least this, which its least value, 5, is.
@@ -289,9 +303,9 @@ impl AndroidVmConfig {
         if self.processors == 0 {
             return Err(ConfigError("the VM needs at least one processor".into()));
         }
-        if !(5..=10).contains(&self.page_reporting_order) {
+        if self.page_reporting_order > 10 {
             return Err(ConfigError(format!(
-                "page reporting order {} is outside 5 to 10",
+                "page reporting order {} is outside 0 to 10",
                 self.page_reporting_order
             )));
         }
@@ -333,6 +347,8 @@ impl AndroidVmConfig {
             arch.console_cmdline(),
             self.page_reporting_order
         );
+        cmdline.push(' ');
+        cmdline.push_str(BOOT_MEMORY_CMDLINE);
         if self.pstore_disk.is_some() {
             cmdline.push(' ');
             cmdline.push_str(crate::pstore_disk::KERNEL_CMDLINE);

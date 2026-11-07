@@ -729,16 +729,48 @@ message WidgetPointer {
   float y = 5;
 }
 
-// Installs an APK in the caller's Android. The service answers at once: Done when it takes an
-// APK of this name and size, or an error. After Done the client sends the APK's `size` bytes
-// in ApkChunk frames, which are not answered, and the service answers the same request id once
-// more: InstallResult once Android has installed the app or refused it, or an error when the
-// APK did not reach Android. The connection then ends. A second install waits for the first.
-message InstallApk {
-  // The file's name, without any folder. It ends in ".apk".
+// One file of an install made of several: an APK of an app that comes as a base APK and
+// split APKs, or an expansion (OBB) file of that app.
+message InstallPart {
+  // The file's name, without any folder. An APK's ends in ".apk", an expansion file's in ".obb".
   string name = 1;
-  // The APK's length in bytes.
+  // The file's length in bytes.
   uint64 size = 2;
+  // True for an expansion file, which Android gets in the app's folder under Android/obb/ once
+  // the app is installed.
+  bool obb = 3;
+}
+
+// Installs an APK, or an app made of several APKs, in the caller's Android. The service answers
+// at once: Done when it takes an install of this name, size and parts, or an error. After Done
+// the client sends the `size` bytes in ApkChunk frames, which are not answered, and the service
+// answers the same request id once more: InstallResult once Android has installed the app or
+// refused it, or an error when the files did not reach Android. The connection then ends. A
+// second install waits for the first.
+message InstallApk {
+  // The file's name, without any folder. With no parts it ends in ".apk"; with parts it is the
+  // name of the bundle the parts come from, such as "notes.xapk".
+  string name = 1;
+  // The APK's length in bytes, or with parts the sum of their sizes.
+  uint64 size = 2;
+  // The native libraries the APK holds, by ABI, as the client read them from the file's
+  // `lib/` folder. The service chooses the ABI the app is installed for from them: arm64-v8a
+  // when translation is on and the x86_64 libraries leave out some of the arm64 ones,
+  // otherwise what Android chooses. Empty for an APK without native code.
+  repeated NativeLibraries native_libraries = 3;
+  // Empty for one APK. Otherwise the files of the install, in the order their bytes follow one
+  // another in the ApkChunk frames: the APKs first, then any expansion files. The native
+  // libraries are then those of the APKs among them, together.
+  repeated InstallPart parts = 4;
+}
+
+// The native libraries of one ABI: the file names under `lib/<abi>/` of an APK, or of an APK
+// and its splits together.
+message NativeLibraries {
+  // Such as "x86_64" or "arm64-v8a".
+  string abi = 1;
+  // The library file names, such as "libmain.so", in name order, each once.
+  repeated string names = 2;
 }
 
 // Part of an APK's content, on a connection that installs one (InstallApk).
@@ -839,6 +871,11 @@ message PointerEvent {
   // positive `scroll_x` scrolls right.
   float scroll_x = 9;
   float scroll_y = 10;
+  // A pen's tilt, in degrees from upright, from -90 to 90: positive `tilt_x` leans its top
+  // toward the right of the screen, positive `tilt_y` toward the bottom (toward the user).
+  // 0 for a pointer that does not measure it.
+  float tilt_x = 11;
+  float tilt_y = 12;
 }
 
 // What a key did.
@@ -995,6 +1032,54 @@ message AppInfo {
   uint64 app_bytes = 9;
   uint64 data_bytes = 10;
   uint64 cache_bytes = 11;
+  // The ABI the app's native code runs as, such as "x86_64" or "arm64-v8a". Empty for an app
+  // without native code.
+  string primary_abi = 12;
+  // The native libraries the app's APKs on the device hold, base and splits together, by
+  // ABI. Empty for an app without native code.
+  repeated NativeLibraries native_libraries = 13;
+}
+
+// Installs an app of the caller's Android again from the APKs it has there, with its native
+// code for arm64-v8a (`on`, run through the ARM translator) or for x86_64. Android must be
+// running, with translation on to turn it on. The app keeps its data; when Android cannot
+// keep it, the answer is RUN_AS_ARM_STATUS_DATA_WOULD_BE_ERASED and nothing changes, unless
+// `erase_data` is set, which reinstalls the app and erases its data. The answer is
+// RunAsArmResult.
+message SetRunAsArm {
+  string package_name = 1;
+  bool on = 2;
+  bool erase_data = 3;
+}
+
+// How a SetRunAsArm went.
+enum RunAsArmStatus {
+  RUN_AS_ARM_STATUS_UNSPECIFIED = 0;
+  // The app is installed again with the ABI asked for.
+  RUN_AS_ARM_STATUS_SUCCESS = 1;
+  // Android cannot change the app's ABI and keep its data; nothing changed. Asking again
+  // with `erase_data` does it and erases the data.
+  RUN_AS_ARM_STATUS_DATA_WOULD_BE_ERASED = 2;
+  // No app of that package is installed.
+  RUN_AS_ARM_STATUS_NOT_INSTALLED = 3;
+  // The app is part of the Android image.
+  RUN_AS_ARM_STATUS_SYSTEM_APP = 4;
+  // The app's APKs on the device hold no native libraries for that ABI.
+  RUN_AS_ARM_STATUS_NO_LIBRARIES = 5;
+  // ARM translation is not on in the running Android, so the app cannot run as ARM.
+  RUN_AS_ARM_STATUS_TRANSLATION_OFF = 6;
+  // Anything else. The message says what.
+  RUN_AS_ARM_STATUS_OTHER = 7;
+}
+
+// The answer to SetRunAsArm.
+message RunAsArmResult {
+  string package_name = 1;
+  RunAsArmStatus status = 2;
+  // Android's own words, for the log and a bug report.
+  string message = 3;
+  // Whether the app's native code runs as arm64-v8a now.
+  bool on = 4;
 }
 
 // The apps installed in the caller's Android that a launcher lists. The list is kept while
@@ -1258,6 +1343,17 @@ message Settings {
   // The loopback port adb connects to while developer mode is on. 58526 unless the user
   // chooses another; 0 in a request means the default.
   uint32 adb_port = 15;
+  // Whether, while developer mode is on, the service attaches 127.0.0.1:adb_port to the
+  // caller's adb server by itself (as `adb connect` would), so adb and Android Studio list it
+  // with nothing typed. On unless the user turned it off; a client sends back the value it
+  // read. Off, the service sends the adb server nothing.
+  bool adb_auto_connect = 21;
+  // Where auto-connect stands: "off" (developer mode or auto-connect is off),
+  // "waiting-for-server" (no adb server runs), "waiting-for-android" (Android is not running
+  // or adb in Android has not answered yet), "attached" (the adb server lists it) or
+  // "detached" (the user ran adb disconnect; it is attached again when the adb server
+  // restarts). Empty from a service that does not report it. A client cannot change it.
+  string adb_auto_connect_state = 22;
   // Whether the caller's Android uses an installed ARM translation package. On unless the
   // user turned it off; a client sends back the value it read. It applies from the next start
   // of Android, because the ABIs Android installs apps for are fixed at boot.
@@ -1311,6 +1407,44 @@ message NetworkStatus {
 // they are. The answer is Done once the new disk is in place; the next start boots it.
 message ResetData {}
 
+// Asks which Android version runs and which can be chosen. The service answers
+// AndroidVersions.
+message GetAndroidVersions {}
+
+// Chooses the Android version this computer follows. Where every user boots the same image,
+// only an administrator may choose (ERROR_CODE_NOT_ALLOWED otherwise). A major that is not
+// supported is ERROR_CODE_INVALID_SETTING. A major older than the running one erases every
+// user's Android data, since Android cannot read data a newer version wrote, so it needs
+// erase_data (ERROR_CODE_DATA_WOULD_BE_LOST otherwise). The service answers AndroidVersions
+// and downloads the image at once; it is used from the next start.
+message UseAndroidVersion {
+  // The major version to follow; 0 follows the newest supported one.
+  uint32 major = 1;
+  bool erase_data = 2;
+}
+
+// The Android version: what runs, what is chosen, and what can be.
+message AndroidVersions {
+  // The image Android starts from.
+  string version = 1;
+  uint32 android_major = 2;
+  uint64 build = 3;
+  // The AOSP build ID and the security patch level (YYYY-MM-DD); empty when unknown.
+  string build_id = 4;
+  string security_patch = 5;
+  // The chosen major version; 0 follows the newest supported one.
+  uint32 chosen_major = 6;
+  // The supported major versions, oldest first.
+  repeated uint32 supported_majors = 7;
+  // The major the choice leads to; it differs from android_major while a switch waits for
+  // its image.
+  uint32 target_major = 8;
+  // Whether the current image has not finished its first boot yet.
+  bool on_trial = 9;
+  // The latest news about the image; empty when there is none.
+  string notice = 10;
+}
+
 // What an ARM translation package says of itself, from its arm-translation.json.
 message ArmTranslationPackage {
   string name = 1;
@@ -1345,7 +1479,8 @@ message RemoveArmTranslation {}
 
 // Where ARM translation stands for the caller.
 message ArmTranslation {
-  // The installed package; absent when there is none.
+  // The package the caller installed (their own, or Google's translator); absent when there
+  // is none. It is used in place of the default package.
   ArmTranslationPackage package = 1;
   // The arm_translation setting.
   bool enabled = 2;
@@ -1361,6 +1496,94 @@ message ArmTranslation {
   // What is installed and switched on differs from what the running Android booted with, so
   // it applies once Android starts again.
   bool restart_needed = 7;
+  // The default package of the image the caller's Android starts from, which it uses while
+  // the caller has installed none. Only an x86_64 image has one; absent otherwise.
+  ArmTranslationPackage default_package = 8;
+  // The translator the caller's Android uses with these settings, from its next start: "default"
+  // (default_package), "user" (package, the caller's own), "google" (package, Google's
+  // translator), or empty for none.
+  string translator = 9;
+}
+
+// The Google apps package a user installed: LiteGapps' Core build for their Android, which the
+// service downloaded from LiteGapps' file host.
+message GappsPackage {
+  // LiteGapps' name for the build: "core".
+  string variant = 1;
+  // The build's date, yyyymmdd, from its file name.
+  string version = 2;
+  // The Android version the build is for, as LiteGapps names it ("16.0").
+  string android_version = 3;
+  // The Android API level the build is for.
+  uint32 sdk = 4;
+  // The processor architecture the build is for, as LiteGapps names it ("x86_64", "arm64").
+  string arch = 5;
+  // The file the service downloaded.
+  string file = 6;
+  // Where it downloaded it from.
+  string source = 7;
+  // The MD5 digest the file host published for it, which the download matched.
+  string md5 = 8;
+}
+
+// Installs Google Play for the caller's Android: the service finds the newest LiteGapps Core
+// build for the Android version and architecture the running Android reports, downloads it,
+// checks it, makes a system image of its apps and permission files, and sends the image to
+// the caller's Android, which lays it over its system from its next start. While it works it
+// answers the request id with GappsProgress, as often as there is news; it then answers once
+// more with Gapps, or an error. The connection then ends. Android must be running.
+message InstallGapps {}
+
+// Asks where Google Play stands for the caller. Answered with Gapps.
+message GetGapps {}
+
+// Removes the caller's Google apps. Answered with Gapps. Android goes on using an image it
+// has mounted until it restarts.
+message RemoveGapps {}
+
+// What an InstallGapps is doing.
+enum GappsStage {
+  GAPPS_STAGE_UNSPECIFIED = 0;
+  // Reading the file host's list of builds.
+  GAPPS_STAGE_LISTING = 1;
+  // Downloading the build: `done` of `total` bytes.
+  GAPPS_STAGE_DOWNLOADING = 2;
+  // Checking the build and making the system image.
+  GAPPS_STAGE_BUILDING = 3;
+  // Sending the image to Android: `done` of `total` bytes.
+  GAPPS_STAGE_SENDING = 4;
+}
+
+// News of an InstallGapps under way.
+message GappsProgress {
+  GappsStage stage = 1;
+  uint64 done = 2;
+  // 0 when not known.
+  uint64 total = 3;
+}
+
+// Where Google Play stands for the caller.
+message Gapps {
+  // The installed package; absent when there is none.
+  GappsPackage package = 1;
+  // Whether the running Android was asked, and answered: the fields below up to device_id
+  // hold only then.
+  bool guest_known = 2;
+  // The Google apps image is on the user's Android disk.
+  bool guest_installed = 3;
+  // The running Android has the Google apps laid over its system.
+  bool guest_active = 4;
+  // The running Android's API level and primary ABI.
+  uint32 sdk = 5;
+  string abi = 6;
+  // The ABIs the running Android installs apps for, in the order it prefers them.
+  string abilist = 7;
+  // The running Android's Google Services Framework Android ID, in decimal, which Google's
+  // page for uncertified devices asks for; empty until Google's apps have one.
+  string device_id = 8;
+  // What is installed differs from what the running Android booted with, so it applies once
+  // Android starts again.
+  bool restart_needed = 9;
 }
 
 // Asks for the device identity of the caller's Android.
@@ -1373,7 +1596,8 @@ message SetDeviceIdentity {
   DeviceIdentity identity = 1;
 }
 
-// The names and build fingerprint Android reports to apps. An empty value is the image's own.
+// The names and build fingerprint Android reports to apps. An empty value is the default: the
+// computer's manufacturer, brand and model, and DSA's own for the rest.
 message DeviceIdentity {
   string manufacturer = 1;
   string brand = 2;
@@ -1391,6 +1615,16 @@ message DeviceIdentity {
   string fingerprint_incremental = 10;
   string fingerprint_type = 11;
   string fingerprint_tags = 12;
+  // The values below follow the computer and are not chosen: a report carries them, and
+  // SetDeviceIdentity ignores them. The name the product is sold under, such as
+  // "Galaxy Book4 Ultra".
+  string model_name = 13;
+  // Android's device name: the computer's name.
+  string device_name = 14;
+  // The chip's maker and model, such as "Intel" and "Core Ultra 7 155H"; empty when the
+  // computer does not say.
+  string soc_manufacturer = 15;
+  string soc_model = 16;
 }
 
 // The answer to GetDeviceIdentity and SetDeviceIdentity.
@@ -1400,6 +1634,12 @@ message DeviceIdentityReport {
   // Every value as Android reports it from its next start. The fingerprint's release, build ID
   // and incremental version are empty when the image does not say them.
   DeviceIdentity effective = 2;
+  // Every value as Android reports it when the user chooses nothing.
+  DeviceIdentity defaults = 3;
+  // The fields whose default is the computer's, named as `dsa settings set device.<name>`
+  // names them (and model_name, device_name, soc_manufacturer, soc_model). Every other
+  // default is DSA's own.
+  repeated string from_computer = 4;
 }
 
 // Turns the connection into the accessibility tree of one of the caller's task windows, for a
@@ -1522,6 +1762,9 @@ enum ErrorCode {
   // A widget was not placed: its app offers no such widget, Android did not allow it, or the
   // user canceled its setup. The detail says which.
   ERROR_CODE_WIDGET_REFUSED = 9;
+  // Choosing an older Android major version erases user data, and the request did not agree
+  // to that. The detail says what would be lost.
+  ERROR_CODE_DATA_WOULD_BE_LOST = 10;
 }
 
 message Error {
@@ -1703,6 +1946,12 @@ message Request {
     DragOut drag_out = 320;
     ReadDrag read_drag = 321;
     EndDrag end_drag = 322;
+    GetAndroidVersions get_android_versions = 330;
+    UseAndroidVersion use_android_version = 331;
+    InstallGapps install_gapps = 400;
+    GetGapps get_gapps = 401;
+    RemoveGapps remove_gapps = 402;
+    SetRunAsArm set_run_as_arm = 340;
   }
 }
 
@@ -1731,6 +1980,10 @@ message Response {
     AndroidFilesLocation android_files = 90;
     DragOffer drag_offer = 320;
     DragData drag_data = 321;
+    AndroidVersions android_versions = 330;
+    Gapps gapps = 400;
+    GappsProgress gapps_progress = 401;
+    RunAsArmResult run_as_arm_result = 340;
   }
 }
 

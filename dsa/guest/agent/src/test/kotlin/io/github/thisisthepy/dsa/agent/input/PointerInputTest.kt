@@ -229,11 +229,132 @@ class PointerInputTest {
         )
         assertEquals(listOf(1, 2, 2, 2, 1), injector.injected.map { it.pointers.size })
         val move = injector.injected[2]
-        assertEquals(listOf(11, 12), move.pointers.map { it.id })
+        assertEquals(listOf(0, 1), move.pointers.map { it.id })
         assertEquals(310f to 70f, move.pointers[1].let { it.x to it.y })
         assertTrue(injector.injected.all { it.source == InputDevice.SOURCE_TOUCHSCREEN })
         assertTrue(injector.injected.all { event -> event.pointers.all { it.toolType == MotionEvent.TOOL_TYPE_FINGER } })
-        assertEquals(listOf(12), injector.injected.last().pointers.map { it.id })
+        assertEquals(listOf(1), injector.injected.last().pointers.map { it.id })
+    }
+
+    @Test
+    fun fr5_ten_fingers_with_any_host_ids_get_the_pointer_ids_0_to_9() {
+        // Windows numbers its contacts with large IDs; the input dispatcher takes 0 to 31.
+        val hostIds = (0 until 10).map { 1500 + it * 7 }
+        for ((finger, id) in hostIds.withIndex()) {
+            input.handle(touch(PointerAction.POINTER_ACTION_DOWN, id, 20f + finger * 30f, 300f))
+        }
+        val last = injector.injected.last()
+        assertEquals((0 until 10).toList(), last.pointers.map { it.id })
+        assertEquals(
+            listOf(MotionEvent.ACTION_DOWN) +
+                (1 until 10).map { MotionEvent.ACTION_POINTER_DOWN or (it shl MotionEvent.ACTION_POINTER_INDEX_SHIFT) },
+            actions(),
+        )
+        assertTrue(injector.injected.all { event -> event.pointers.all { it.id in 0..31 } })
+        assertEquals((0 until 10).map { 120f + it * 30f to 350f }, last.pointers.map { it.x to it.y })
+    }
+
+    @Test
+    fun fr5_a_lifted_fingers_pointer_id_goes_to_the_next_finger_in_order() {
+        input.handle(touch(PointerAction.POINTER_ACTION_DOWN, 900, 10f, 10f))
+        input.handle(touch(PointerAction.POINTER_ACTION_DOWN, 901, 20f, 10f))
+        input.handle(touch(PointerAction.POINTER_ACTION_DOWN, 902, 30f, 10f))
+        input.handle(touch(PointerAction.POINTER_ACTION_UP, 900, 10f, 10f))
+        input.handle(touch(PointerAction.POINTER_ACTION_DOWN, 903, 40f, 10f))
+
+        val (lift, down) = injector.injected.takeLast(2)
+        assertEquals(MotionEvent.ACTION_POINTER_UP or (0 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT), lift.action)
+        // The new finger takes ID 0 again, and comes first, as a touchscreen lists its pointers.
+        assertEquals(MotionEvent.ACTION_POINTER_DOWN or (0 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT), down.action)
+        assertEquals(listOf(0, 1, 2), down.pointers.map { it.id })
+        assertEquals(listOf(140f, 120f, 130f), down.pointers.map { it.x })
+    }
+
+    @Test
+    fun fr5_a_pinch_moves_both_fingers_in_each_event() {
+        input.handle(touch(PointerAction.POINTER_ACTION_DOWN, 40, 180f, 300f))
+        input.handle(touch(PointerAction.POINTER_ACTION_DOWN, 41, 220f, 300f))
+        for (step in 1..3) {
+            input.handle(touch(PointerAction.POINTER_ACTION_MOVE, 40, 180f - step * 20f, 300f))
+            input.handle(touch(PointerAction.POINTER_ACTION_MOVE, 41, 220f + step * 20f, 300f))
+        }
+        input.handle(touch(PointerAction.POINTER_ACTION_UP, 40, 120f, 300f))
+        input.handle(touch(PointerAction.POINTER_ACTION_UP, 41, 280f, 300f))
+
+        val moves = injector.injected.filter { it.action == MotionEvent.ACTION_MOVE }
+        assertEquals(6, moves.size)
+        assertTrue(moves.all { it.pointers.size == 2 })
+        assertEquals(listOf(220f, 380f), moves.last().pointers.map { it.x })
+        assertEquals(MotionEvent.ACTION_UP, injector.injected.last().action)
+        assertTrue(injector.injected.all { it.downTime == injector.injected.first().downTime })
+    }
+
+    @Test
+    fun fr5_a_finger_drag_and_fling_are_touch_moves_never_a_scroll() {
+        input.handle(touch(PointerAction.POINTER_ACTION_DOWN, 5, 200f, 500f))
+        for (step in 1..5) {
+            injector.clock += 8
+            input.handle(touch(PointerAction.POINTER_ACTION_MOVE, 5, 200f, 500f - step * 80f))
+        }
+        input.handle(touch(PointerAction.POINTER_ACTION_UP, 5, 200f, 100f))
+        // A scroll from a finger is not something a touchscreen does.
+        input.handle(touch(PointerAction.POINTER_ACTION_SCROLL, 5, 200f, 100f))
+
+        assertEquals(
+            listOf(MotionEvent.ACTION_DOWN) + List(5) { MotionEvent.ACTION_MOVE } + MotionEvent.ACTION_UP,
+            actions(),
+        )
+        assertTrue(injector.injected.all { it.source == InputDevice.SOURCE_TOUCHSCREEN && it.vscroll == 0f })
+        assertEquals(1000L, injector.injected.last().downTime)
+    }
+
+    @Test
+    fun fr5_a_held_finger_is_a_down_until_it_lifts_so_the_guest_sees_a_long_press() {
+        input.handle(touch(PointerAction.POINTER_ACTION_DOWN, 5, 200f, 200f))
+        injector.clock += 800
+        input.handle(touch(PointerAction.POINTER_ACTION_UP, 5, 200f, 200f))
+
+        assertEquals(listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP), actions())
+        assertEquals(1000L, injector.injected.last().downTime)
+        assertEquals(0, injector.injected.first().buttonState)
+    }
+
+    @Test
+    fun fr5_fingers_on_two_task_windows_are_one_touch_of_the_display() {
+        input.handle(touch(PointerAction.POINTER_ACTION_DOWN, 60, 10f, 10f).toBuilder().setTaskId(7).build())
+        input.handle(touch(PointerAction.POINTER_ACTION_DOWN, 61, 10f, 10f).toBuilder().setTaskId(8).build())
+        input.handle(touch(PointerAction.POINTER_ACTION_UP, 61, 10f, 10f).toBuilder().setTaskId(8).build())
+        input.handle(touch(PointerAction.POINTER_ACTION_UP, 60, 10f, 10f).toBuilder().setTaskId(7).build())
+
+        assertEquals(
+            listOf(
+                MotionEvent.ACTION_DOWN,
+                MotionEvent.ACTION_POINTER_DOWN or (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT),
+                MotionEvent.ACTION_POINTER_UP or (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT),
+                MotionEvent.ACTION_UP,
+            ),
+            actions(),
+        )
+        assertEquals(listOf(110f to 60f, 610f to 60f), injector.injected[1].pointers.map { it.x to it.y })
+    }
+
+    @Test
+    fun fr5_a_touch_carries_at_most_16_fingers() {
+        for (finger in 0 until 17) input.handle(touch(PointerAction.POINTER_ACTION_DOWN, 100 + finger, finger * 10f, 10f))
+        input.handle(touch(PointerAction.POINTER_ACTION_MOVE, 116, 5f, 5f))
+
+        assertEquals(16, injector.injected.size)
+        assertEquals(16, injector.injected.last().pointers.size)
+    }
+
+    @Test
+    fun fr5_a_task_that_ends_under_a_finger_cancels_the_touch() {
+        input.handle(touch(PointerAction.POINTER_ACTION_DOWN, 1, 10f, 10f))
+        input.retainTasks(setOf(8))
+        input.handle(touch(PointerAction.POINTER_ACTION_UP, 1, 10f, 10f))
+        input.handle(touch(PointerAction.POINTER_ACTION_DOWN, 2, 10f, 10f).toBuilder().setTaskId(8).build())
+
+        assertEquals(listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_DOWN), actions())
     }
 
     @Test
@@ -281,6 +402,36 @@ class PointerInputTest {
         assertEquals(0.25f, injector.injected[3].pointers.single().pressure)
         assertEquals(MotionEvent.TOOL_TYPE_STYLUS, injector.injected[3].pointers.single().toolType)
         assertEquals(MotionEvent.TOOL_TYPE_ERASER, injector.injected[5].pointers.single().toolType)
+    }
+
+    @Test
+    fun fr5_a_pens_tilt_is_the_angle_from_upright_and_the_direction_it_leans() {
+        val pen = PointerTool.POINTER_TOOL_PEN
+        fun tilted(x: Float, y: Float) = event(PointerAction.POINTER_ACTION_HOVER_MOVE, 5f, 5f, tool = pen)
+            .toBuilder().setTiltX(x).setTiltY(y).build()
+        input.handle(tilted(0f, 0f))
+        input.handle(tilted(30f, 0f))
+        input.handle(tilted(0f, 45f))
+        input.handle(tilted(0f, -45f))
+
+        val pointers = injector.injected.drop(1).map { it.pointers.single() }
+        assertEquals(0f, pointers[0].tilt)
+        // Its top leaning right: 30 degrees from upright, its tip pointing left.
+        assertEquals(Math.toRadians(30.0).toFloat(), pointers[1].tilt, 1e-5f)
+        assertEquals((-Math.PI / 2).toFloat(), pointers[1].orientation, 1e-5f)
+        // Leaning toward the user, and away from the user.
+        assertEquals(Math.toRadians(45.0).toFloat(), pointers[2].tilt, 1e-5f)
+        assertEquals(0f, pointers[2].orientation, 1e-5f)
+        assertEquals(Math.PI.toFloat(), kotlin.math.abs(pointers[3].orientation), 1e-5f)
+    }
+
+    @Test
+    fun fr5_a_finger_has_no_tilt() {
+        input.handle(
+            touch(PointerAction.POINTER_ACTION_DOWN, 1, 10f, 10f).toBuilder().setTiltX(40f).setTiltY(10f).build(),
+        )
+
+        assertEquals(0f, injector.injected.single().pointers.single().tilt)
     }
 
     @Test

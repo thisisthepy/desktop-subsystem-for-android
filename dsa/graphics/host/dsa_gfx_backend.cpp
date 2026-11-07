@@ -5,10 +5,12 @@
 
 #include "dsa_gfx_backend.h"
 #include "dsa_gfx_display.h"
+#include "dsa_gfx_memory.h"
 
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <memory>
 #include <mutex>
@@ -18,11 +20,13 @@
 #include "aemu/base/system/System.h"
 #include "gfxstream/virtio-gpu-gfxstream-renderer.h"
 #include "gfxstream/virtio-gpu-gfxstream-renderer-unstable.h"
+#include "host-common/logging.h"
 #include "host-common/opengles.h"
 #include "render-utils/RenderChannel.h"
 #include "render-utils/Renderer.h"
 #include "FrameBuffer.h"
 #include "vulkan/VkCommonOperations.h"
+#include "vulkan/VkDecoderGlobalState.h"
 #include "vulkan/VulkanDispatch.h"
 
 namespace {
@@ -34,6 +38,57 @@ static dsa_color_buffer_post_fn s_color_buffer_post_cb = nullptr;
 static void* s_color_buffer_post_ctx = nullptr;
 
 static void dummy_fence_cb(void*, struct stream_renderer_fence*) {}
+
+/* Where the renderer's warnings, errors and fatal errors go: the embedder's log. Without a
+ * callback they go to standard error, which a process without a console loses. */
+static std::atomic<dsa_gfx_log_fn> s_log_cb{nullptr};
+static std::atomic<void*> s_log_ctx{nullptr};
+
+static const char* file_basename(const char* file) {
+    if (!file) {
+        return "";
+    }
+    const char* base = file;
+    for (const char* at = file; *at; ++at) {
+        if (*at == '/' || *at == '\\') {
+            base = at + 1;
+        }
+    }
+    return base;
+}
+
+static void forward_log(char severity, const char* message) {
+    dsa_gfx_log_fn cb = s_log_cb.load();
+    if (!cb || !message) {
+        return;
+    }
+    cb(s_log_ctx.load(), severity, message);
+}
+
+/* aemu's ERR, WARN and GFXSTREAM_ABORT lines. Verbose and informational lines are left out:
+ * the renderer writes some for every resource. */
+static void forward_gfxstream_log(char severity, const char* file, unsigned int line,
+                                  int64_t /*timestamp_us*/, const char* message) {
+    if (severity != 'W' && severity != 'E' && severity != 'F') {
+        return;
+    }
+    char located[2304];
+    std::snprintf(located, sizeof(located), "%s:%u: %s", file_basename(file), line,
+                  message ? message : "");
+    forward_log(severity, located);
+}
+
+/* The stream renderer's own stream_renderer_error and stream_renderer_warn lines. */
+static void forward_renderer_debug(void*, struct stream_renderer_debug* debug) {
+    if (!debug) {
+        return;
+    }
+    if (debug->debug_type == STREAM_RENDERER_DEBUG_ERROR) {
+        forward_log('E', debug->message);
+    } else if (debug->debug_type == STREAM_RENDERER_DEBUG_WARN) {
+        forward_log('W', debug->message);
+    }
+}
 
 static void internal_on_post(void* context,
                              uint32_t display_id,
@@ -83,13 +138,45 @@ extern "C" DSA_GFX_EXPORT int dsa_gfx_init(uint32_t width, uint32_t height) {
         {STREAM_RENDERER_PARAM_RENDERER_FEATURES, reinterpret_cast<uint64_t>(kFeatures)},
         {STREAM_RENDERER_PARAM_WIN0_WIDTH, width},
         {STREAM_RENDERER_PARAM_WIN0_HEIGHT, height},
+        {STREAM_RENDERER_PARAM_DEBUG_CALLBACK, reinterpret_cast<uint64_t>(forward_renderer_debug)},
     };
 
     int ret = stream_renderer_init(params, sizeof(params) / sizeof(params[0]));
     if (ret == 0) {
         s_initialized.store(true, std::memory_order_release);
+        dsa_gfx_memory_install();
     }
     return ret;
+}
+
+extern "C" DSA_GFX_EXPORT void dsa_gfx_set_log_callback(dsa_gfx_log_fn cb, void* context) {
+    s_log_ctx.store(context);
+    s_log_cb.store(cb);
+    set_gfxstream_logger(cb ? forward_gfxstream_log : nullptr);
+}
+
+extern "C" DSA_GFX_EXPORT int dsa_gfx_simulate_device_loss(void) {
+    if (!s_initialized.load(std::memory_order_acquire)) {
+        return -1;
+    }
+    gfxstream::FrameBuffer* fb = gfxstream::FrameBuffer::getFB();
+    if (!fb || !fb->hasEmulationVk()) {
+        return -1;
+    }
+    gfxstream::vk::VkDecoderGlobalState::get()->loseDevicesForTesting();
+    fb->getEmulationVk().loseDeviceForTesting();
+    return 0;
+}
+
+extern "C" DSA_GFX_EXPORT uint64_t dsa_gfx_device_generation(void) {
+    if (!s_initialized.load(std::memory_order_acquire)) {
+        return 0;
+    }
+    gfxstream::FrameBuffer* fb = gfxstream::FrameBuffer::getFB();
+    if (!fb || !fb->hasEmulationVk()) {
+        return 0;
+    }
+    return fb->getEmulationVk().deviceGeneration();
 }
 
 extern "C" DSA_GFX_EXPORT int dsa_gfx_select_gpu(uint32_t rule, const uint8_t* luid, const char* name) {
@@ -171,6 +258,7 @@ extern "C" DSA_GFX_EXPORT void dsa_gfx_teardown(void) {
         return;
     }
     dsa_gfx_display_shutdown();
+    dsa_gfx_memory_uninstall();
     stream_renderer_teardown();
     s_initialized.store(false, std::memory_order_release);
 }
@@ -216,12 +304,14 @@ extern "C" DSA_GFX_EXPORT int dsa_gfx_process_pipe(dsa_stream_read_fn read_cb,
     }
 
     uint64_t puid = dsa_gfx_on_process_create();
+    dsa_gfx_memory_process_started();
 
     size_t sent = 0;
     while (sent < sizeof(puid)) {
         int n = write_cb(user_data, reinterpret_cast<const char*>(&puid) + sent, sizeof(puid) - sent);
         if (n <= 0) {
             dsa_gfx_on_process_destroy(puid);
+            dsa_gfx_memory_process_ended();
             return -3;
         }
         sent += static_cast<size_t>(n);
@@ -237,6 +327,7 @@ extern "C" DSA_GFX_EXPORT int dsa_gfx_process_pipe(dsa_stream_read_fn read_cb,
     }
 
     dsa_gfx_on_process_destroy(puid);
+    dsa_gfx_memory_process_ended();
     return 0;
 }
 

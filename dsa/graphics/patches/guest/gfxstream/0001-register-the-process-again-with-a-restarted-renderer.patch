@@ -1,0 +1,47 @@
+diff --git a/guest/renderControl_enc/GfxStreamRenderControl.cpp b/guest/renderControl_enc/GfxStreamRenderControl.cpp
+index e4b1c706f..c480b4d1a 100644
+--- a/guest/renderControl_enc/GfxStreamRenderControl.cpp
++++ b/guest/renderControl_enc/GfxStreamRenderControl.cpp
+@@ -73,6 +73,11 @@ static uint64_t getPuid(GfxStreamConnectionManager* mgr) {
+     if (sNeedInit) {
+         GfxStreamTransportType transport = renderControlGetTransport();
+         sProcessStream = mgr->processPipeStream(transport);
++        if (!sProcessStream) {
++            // The renderer does not answer (it may be restarting); the next connection tries
++            // again rather than the process ending here.
++            return 0;
++        }
+         sProcUID = sProcessStream->processPipeInit();
+         sNeedInit = false;
+     }
+@@ -80,6 +85,16 @@ static uint64_t getPuid(GfxStreamConnectionManager* mgr) {
+     return sProcUID;
+ }
+ 
++void renderControlResetProcess() {
++    std::lock_guard<std::mutex> lock(sNeedInitMutex);
++    if (sProcessStream) {
++        sProcessStream->decRef();
++        sProcessStream = nullptr;
++    }
++    sProcUID = 0;
++    sNeedInit = true;
++}
++
+ int32_t renderControlInit(GfxStreamConnectionManager* mgr, void* vkInfo) {
+     ExtendedRCEncoderContext* rcEnc =
+         (ExtendedRCEncoderContext*)mgr->getEncoder(GFXSTREAM_CONNECTION_RENDER_CONTROL);
+diff --git a/guest/renderControl_enc/GfxStreamRenderControl.h b/guest/renderControl_enc/GfxStreamRenderControl.h
+index ec42bf3bf..59b38eedf 100644
+--- a/guest/renderControl_enc/GfxStreamRenderControl.h
++++ b/guest/renderControl_enc/GfxStreamRenderControl.h
+@@ -14,4 +14,9 @@ GfxStreamTransportType renderControlGetTransport();
+ 
+ int32_t renderControlInit(GfxStreamConnectionManager* mgr, void* vkInfo);
+ 
++// Forgets the process's registration with the host renderer (its process pipe and unique id),
++// after the stream to a renderer that restarted ended: the next connection registers the
++// process again, with the renderer that answers now.
++void renderControlResetProcess();
++
+ #endif

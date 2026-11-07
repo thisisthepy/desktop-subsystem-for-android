@@ -13,6 +13,6 @@
 #[cfg(unix)]
 pub mod device_socket;
 pub mod paths;
-pub mod vhdx;
 #[cfg(unix)]
 pub mod socket;
+pub mod vhdx;

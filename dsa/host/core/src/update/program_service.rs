@@ -33,7 +33,7 @@ use super::service::UpdateNotices;
 use super::store::{download_checked, DownloadFailure, Expected, Fetch};
 use super::{from_hex, to_hex};
 use crate::accessibility::{AccessibilityWatch, ActionRequest};
-use crate::apk::{InstallOutcome, InstalledPackage};
+use crate::apk::{InstallOutcome, InstallPart, InstalledPackage};
 use crate::apps::UninstallOutcome;
 use crate::background::{BackgroundApp, BackgroundWatch, MediaSession};
 use crate::host_api::InstallError;
@@ -794,8 +794,28 @@ impl UserAndroid for WithProgramStatus {
     fn arm_translation(&self) -> Option<crate::arm_translation::GuestArmTranslation> {
         self.android.arm_translation()
     }
+    fn install_gapps(
+        &self,
+        size: u64,
+        sha256: &[u8],
+        content: &mut dyn std::io::Read,
+    ) -> Result<crate::gapps::GuestGapps, crate::host_api::InstallError> {
+        self.android.install_gapps(size, sha256, content)
+    }
+    fn remove_gapps(&self) -> Result<crate::gapps::GuestGapps, crate::host_api::InstallError> {
+        self.android.remove_gapps()
+    }
+    fn gapps(&self) -> Option<crate::gapps::GuestGapps> {
+        self.android.gapps()
+    }
     fn developer_mode(&self, on: bool, port: u16) -> Result<(), String> {
         self.android.developer_mode(on, port)
+    }
+    fn adb_auto_connect(&self, on: bool) {
+        self.android.adb_auto_connect(on)
+    }
+    fn adb_auto_connect_state(&self) -> crate::adb_discovery::AutoConnectState {
+        self.android.adb_auto_connect_state()
     }
     fn watch_links(&self) -> Option<std::sync::mpsc::Receiver<String>> {
         self.android.watch_links()
@@ -910,6 +930,32 @@ impl UserAndroid for WithProgramStatus {
         content: &mut dyn std::io::Read,
     ) -> Result<InstallOutcome, InstallError> {
         UserAndroid::install_apk(&*self.android, name, size, content)
+    }
+    fn install_apk_for(
+        &self,
+        name: &str,
+        size: u64,
+        abi: Option<&str>,
+        content: &mut dyn std::io::Read,
+    ) -> Result<InstallOutcome, InstallError> {
+        UserAndroid::install_apk_for(&*self.android, name, size, abi, content)
+    }
+    fn install_parts(
+        &self,
+        name: &str,
+        parts: &[InstallPart],
+        abi: Option<&str>,
+        content: &mut dyn std::io::Read,
+    ) -> Result<InstallOutcome, InstallError> {
+        UserAndroid::install_parts(&*self.android, name, parts, abi, content)
+    }
+    fn set_run_as_arm(
+        &self,
+        package: &str,
+        on: bool,
+        erase_data: bool,
+    ) -> Result<crate::native_abi::RunAsArmOutcome, TaskRequestError> {
+        UserAndroid::set_run_as_arm(&*self.android, package, on, erase_data)
     }
     fn package_state(&self, package: &str) -> Result<Option<InstalledPackage>, TaskRequestError> {
         UserAndroid::package_state(&*self.android, package)

@@ -61,6 +61,39 @@
   <data name="LastReasonBar.Title" xml:space="preserve">
     <value>Last stopped</value>
   </data>
+  <data name="LastReason_Requested" xml:space="preserve">
+    <value>Android was stopped on request. Start it again when you need it.</value>
+  </data>
+  <data name="LastReason_Updating" xml:space="preserve">
+    <value>DSA is being updated. Start Android again when the update finishes.</value>
+  </data>
+  <data name="LastReason_Virtualization" xml:space="preserve">
+    <value>Virtualization is off or Hyper-V is missing. Turn on Virtual Machine Platform, then restart the PC.</value>
+  </data>
+  <data name="LastReason_InvalidConfiguration" xml:space="preserve">
+    <value>Windows refused the settings for Android's virtual machine. Update or reinstall DSA.</value>
+  </data>
+  <data name="LastReason_OutOfMemory" xml:space="preserve">
+    <value>There is not enough memory to start Android. Close other apps and try again.</value>
+  </data>
+  <data name="LastReason_Disk" xml:space="preserve">
+    <value>A disk problem kept Android from starting. Free up space or check the drive, then try again.</value>
+  </data>
+  <data name="LastReason_TimedOut" xml:space="preserve">
+    <value>Android took too long to start. Try starting it again.</value>
+  </data>
+  <data name="LastReason_Lost" xml:space="preserve">
+    <value>Android stopped unexpectedly. Try starting it again.</value>
+  </data>
+  <data name="LastReason_General" xml:space="preserve">
+    <value>Android could not start. Try again, and check the details if it keeps failing.</value>
+  </data>
+  <data name="LastReasonDetails.Header" xml:space="preserve">
+    <value>Details</value>
+  </data>
+  <data name="LastReasonCopy.ToolTip" xml:space="preserve">
+    <value>Copy the details</value>
+  </data>
   <data name="UpdateNoticeBar.Title" xml:space="preserve">
     <value>Update</value>
   </data>
@@ -323,7 +356,7 @@
     <value>Share Windows folders with Android</value>
   </data>
   <data name="FileSharingCard.Description" xml:space="preserve">
-    <value>On by default: the folders chosen below show in Android's shared storage, in the Windows folder, so Android apps can open and save files there. Android apps reach them only with Android's storage permission, and Windows lets them do only what your own account may do.</value>
+    <value>On by default: the folders chosen below show in Android's shared storage, in the Host folder, so Android apps can open and save files there. Android apps reach them only with Android's storage permission, and Windows lets them do only what your own account may do.</value>
   </data>
   <data name="SharedFoldersCard.Header" xml:space="preserve">
     <value>Shared folders</value>
@@ -353,7 +386,7 @@
     <value>Android files</value>
   </data>
   <data name="AndroidFilesCard.Description" xml:space="preserve">
-    <value>Opens Android's shared storage in File Explorer: the files Android apps saved, such as photos and downloads. Android starts if it is not running. The DSA Files entry in the Start menu does the same.</value>
+    <value>Opens Android's shared storage in File Explorer: the files Android apps saved, such as photos and downloads. Android starts if it is not running. Android in File Explorer's navigation pane does the same.</value>
   </data>
   <data name="FilesNote.Text" xml:space="preserve">
     <value>To send a file to an Android app, drag it from File Explorer onto the app's window. An APK you drop is installed.</value>
@@ -371,13 +404,28 @@
     <value>Run apps built only for ARM</value>
   </data>
   <data name="ArmCard.Description" xml:space="preserve">
-    <value>Many Android apps contain code only for ARM processors. They install and run here only with an ARM translation package, which you install with dsa arm-translation install. DSA does not include one yet. This switch decides whether Android uses the installed package; it applies from the next start of Android. Only 64-bit ARM apps (arm64-v8a) can run.</value>
+    <value>Many Android apps contain code only for ARM processors. They install and run here only through an ARM translator. Android uses the open source translator that comes with it, unless you install another ARM translation package (dsa arm-translation install) or Google's translator. This switch decides whether Android uses a translator at all; it applies from the next start of Android. Only 64-bit ARM apps (arm64-v8a) can run.</value>
   </data>
   <data name="ArmRestartBar.Title" xml:space="preserve">
     <value>Restart Android to apply</value>
   </data>
   <data name="ArmRestartBar.Message" xml:space="preserve">
     <value>Android started before this change. Stop and start Android for ARM apps to follow it.</value>
+  </data>
+  <data name="ArmDefaultCard.Header" xml:space="preserve">
+    <value>Use the default translator</value>
+  </data>
+  <data name="ArmDefaultButton.Content" xml:space="preserve">
+    <value>Use</value>
+  </data>
+  <data name="Arm_DefaultDescription" xml:space="preserve">
+    <value>{0} {1} ({2}) comes with this Android and is used unless you install another translator. Going back to it removes the package installed in its place, from the next start of Android.</value>
+  </data>
+  <data name="Arm_SupportedDefault" xml:space="preserve">
+    <value>Supported by {0} {1} ({2}), the translator that comes with this Android.</value>
+  </data>
+  <data name="Arm_DefaultTurnedOff" xml:space="preserve">
+    <value>Not supported: {0} {1} is turned off.</value>
   </data>
   <data name="ArmRemoveCard.Header" xml:space="preserve">
     <value>Remove the ARM translation package</value>
@@ -406,6 +454,108 @@
   <data name="Arm_NotRunning" xml:space="preserve">
     <value>Android is not running, so what it supports now is not known.</value>
   </data>
+  <data name="ArmGoogleCard.Header" xml:space="preserve">
+    <value>Google's ARM translator</value>
+  </data>
+  <data name="ArmGoogleCard.Description" xml:space="preserve">
+    <value>Gets the ARM translator from the Android emulator image Google offers for this Android version and installs it as a translation package. DSA does not include or pass on Google's translator: your computer downloads the image from Google, under Google's Android SDK License, keeps only the translator and deletes the rest (about 2 GB). Nothing is downloaded until you agree. A package built from another translator, such as Digitalis, does the same job.</value>
+  </data>
+  <data name="ArmGoogleButton.Content" xml:space="preserve">
+    <value>Get</value>
+  </data>
+  <data name="ArmGoogleTermsLink.Content" xml:space="preserve">
+    <value>Android SDK License</value>
+  </data>
+  <data name="ArmGoogleConfirm.Title" xml:space="preserve">
+    <value>Get Google's ARM translator?</value>
+  </data>
+  <data name="ArmGoogleConfirm.Action" xml:space="preserve">
+    <value>Accept and download</value>
+  </data>
+  <data name="ArmGoogle_Notice" xml:space="preserve">
+    <value>DSA downloads the Android emulator image for this Android version from Google's SDK repository ({0}) and takes out only its ARM translator. The translator is Google's software, offered under the Android SDK License ({1}); by downloading it you accept those terms. DSA does not ship or pass it on. The image is about 2 GB and is deleted afterwards. The translator works from the next start of Android.</value>
+  </data>
+  <data name="ArmGoogleFetchingBar.Title" xml:space="preserve">
+    <value>Getting Google's ARM translator</value>
+  </data>
+  <data name="ArmGoogleFetchingBar.Message" xml:space="preserve">
+    <value>Downloading about 2 GB from Google and taking the translator out. This takes a few minutes.</value>
+  </data>
+  <data name="GappsHeader.Text" xml:space="preserve">
+    <value>Google Play</value>
+  </data>
+  <data name="GappsCard.Header" xml:space="preserve">
+    <value>Google Play services and Play Store</value>
+  </data>
+  <data name="GappsCard.Description" xml:space="preserve">
+    <value>DSA does not include Google's apps. When you ask, it downloads LiteGapps Core, a public package of Google Play services, the Play Store and the account sync components made for this Android version, and installs it. It applies from the next start of Android.</value>
+  </data>
+  <data name="GappsInstallButton.Content" xml:space="preserve">
+    <value>Install</value>
+  </data>
+  <data name="GappsInstallingBar.Title" xml:space="preserve">
+    <value>Installing Google Play</value>
+  </data>
+  <data name="GappsInstallingBar.Message" xml:space="preserve">
+    <value>Downloading and installing Google Play. This can take several minutes.</value>
+  </data>
+  <data name="GappsRestartBar.Title" xml:space="preserve">
+    <value>Restart Android to apply this</value>
+  </data>
+  <data name="GappsRestartBar.Message" xml:space="preserve">
+    <value>Android started before this change. Stop Android and start it again to apply it to Google Play.</value>
+  </data>
+  <data name="GappsRemoveCard.Header" xml:space="preserve">
+    <value>Remove Google Play</value>
+  </data>
+  <data name="GappsRemoveCard.Description" xml:space="preserve">
+    <value>Deletes Google's apps from Android's disk. They are gone from the next start of Android. Apps you installed from the Play Store stay, but those that need Google Play services may stop working.</value>
+  </data>
+  <data name="GappsRemoveButton.Content" xml:space="preserve">
+    <value>Remove</value>
+  </data>
+  <data name="GappsTermsCard.Header" xml:space="preserve">
+    <value>Google's terms</value>
+  </data>
+  <data name="GappsTermsCard.Description" xml:space="preserve">
+    <value>Google Play services and the Play Store are Google's software and follow Google's terms. DSA does not distribute them: it downloads the public LiteGapps package only when you ask for it.</value>
+  </data>
+  <data name="GappsTermsLink.Content" xml:space="preserve">
+    <value>Google Terms of Service</value>
+  </data>
+  <data name="GappsRegisterCard.Header" xml:space="preserve">
+    <value>Register this device with Google</value>
+  </data>
+  <data name="GappsRegisterCard.Description" xml:space="preserve">
+    <value>Google has not certified Android here, so Google may refuse to sign you in until you register this device. Open the registration page, sign in with your Google account, and enter this device's Android ID. Then restart Android and sign in again.</value>
+  </data>
+  <data name="GappsRegisterLink.Content" xml:space="preserve">
+    <value>Open the registration page</value>
+  </data>
+  <data name="GappsDeviceIdLabel.Text" xml:space="preserve">
+    <value>Android ID</value>
+  </data>
+  <data name="Gapps_NotInstalled" xml:space="preserve">
+    <value>Not installed: Android has no Google Play services or Play Store.</value>
+  </data>
+  <data name="Gapps_Installed" xml:space="preserve">
+    <value>Installed: LiteGapps Core {0} for Android {1} ({2}).</value>
+  </data>
+  <data name="Gapps_InstalledPending" xml:space="preserve">
+    <value>Installed: LiteGapps Core {0} for Android {1} ({2}). It is used from the next start of Android.</value>
+  </data>
+  <data name="Gapps_RemovedPending" xml:space="preserve">
+    <value>Removed: Google's apps leave Android at its next start.</value>
+  </data>
+  <data name="Gapps_Source" xml:space="preserve">
+    <value>Downloaded from LiteGapps: {0}</value>
+  </data>
+  <data name="Gapps_DeviceId" xml:space="preserve">
+    <value>Android ID: {0}</value>
+  </data>
+  <data name="Gapps_NoDeviceId" xml:space="preserve">
+    <value>The Android ID shows here once Google Play is installed and Android has started with it.</value>
+  </data>
   <data name="DeveloperHeader.Text" xml:space="preserve">
     <value>Developer</value>
   </data>
@@ -415,11 +565,35 @@
   <data name="DeveloperModeCard.Description" xml:space="preserve">
     <value>Off by default. When on, adb on this PC can connect to Android without asking in Android, through a port only this PC can reach. Turn it off when you are done.</value>
   </data>
+  <data name="AdbAutoConnectCard.Header" xml:space="preserve">
+    <value>Connect adb automatically</value>
+  </data>
+  <data name="AdbAutoConnectCard.Description" xml:space="preserve">
+    <value>On by default. While developer mode is on, Android shows up in adb devices and Android Studio without running adb connect. If you run adb disconnect, it stays off until the adb server restarts.</value>
+  </data>
+  <data name="AdbAutoConnect_Off" xml:space="preserve">
+    <value>Not connecting: developer mode or automatic connection is off.</value>
+  </data>
+  <data name="AdbAutoConnect_WaitingForServer" xml:space="preserve">
+    <value>Waiting for adb: Android connects when adb starts on this PC.</value>
+  </data>
+  <data name="AdbAutoConnect_WaitingForAndroid" xml:space="preserve">
+    <value>Waiting for Android: it connects once Android is running.</value>
+  </data>
+  <data name="AdbAutoConnect_Attached" xml:space="preserve">
+    <value>Connected: adb lists Android.</value>
+  </data>
+  <data name="AdbAutoConnect_Detached" xml:space="preserve">
+    <value>Disconnected with adb disconnect. Android connects again when the adb server restarts.</value>
+  </data>
   <data name="AdbCard.Header" xml:space="preserve">
     <value>Connect adb</value>
   </data>
   <data name="AdbCard.Description" xml:space="preserve">
     <value>While developer mode is on and Android is running, run this command:</value>
+  </data>
+  <data name="CopyButton.ToolTip" xml:space="preserve">
+    <value>Copy</value>
   </data>
   <data name="AdbPortLabel.Text" xml:space="preserve">
     <value>Port</value>
@@ -449,7 +623,7 @@
     <value>Memory limit</value>
   </data>
   <data name="MemoryLimitCard.Description" xml:space="preserve">
-    <value>The most memory Android may grow to. Android takes memory only as it needs it and gives it back when idle. Automatic lets it grow to 3 GB, never past this PC's memory. Takes effect the next time Android starts.</value>
+    <value>The most memory Android may grow to. Android takes memory only as it needs it and returns it at once when it no longer does. Automatic sets no fixed limit: Android can grow up to this PC's memory less what Windows keeps. Takes effect the next time Android starts.</value>
   </data>
   <data name="MemoryLimit_Auto" xml:space="preserve">
     <value>Automatic</value>
@@ -686,7 +860,7 @@
     <value>{0} was removed from your desktop.</value>
   </data>
   <data name="ApkWindow_Caption" xml:space="preserve">
-    <value>Install an Android app</value>
+    <value>APK Installer</value>
   </data>
   <data name="ApkWindow_Reading" xml:space="preserve">
     <value>Reading the file</value>
@@ -707,16 +881,10 @@
     <value>Close</value>
   </data>
   <data name="ApkWindow_Open" xml:space="preserve">
-    <value>Open</value>
-  </data>
-  <data name="ApkWindow_VersionChip" xml:space="preserve">
-    <value>Version {0}</value>
+    <value>Launch</value>
   </data>
   <data name="ApkWindow_AndroidChip" xml:space="preserve">
     <value>Android {0} or later</value>
-  </data>
-  <data name="ApkWindow_SummaryNew" xml:space="preserve">
-    <value>{0} will be installed in Android. It then appears in the Start menu.</value>
   </data>
   <data name="ApkWindow_SummaryUpdate" xml:space="preserve">
     <value>{0} is installed already. This updates it from version {1} to version {2}. Its data stays.</value>
@@ -729,9 +897,6 @@
   </data>
   <data name="ApkWindow_SummarySignature" xml:space="preserve">
     <value>{0} is installed already, signed with another key than this file. Android does not let an app signed by someone else replace it, which keeps the app's data safe. To use this file, uninstall the app in Android first.</value>
-  </data>
-  <data name="ApkWindow_SummaryUnknown" xml:space="preserve">
-    <value>Android is not running. Installing starts it, then checks whether {0} is installed already.</value>
   </data>
   <data name="ApkWindow_FactPackage" xml:space="preserve">
     <value>Package</value>
@@ -771,9 +936,6 @@
   </data>
   <data name="ApkWindow_Unsigned" xml:space="preserve">
     <value>Not signed. Android installs only signed apps.</value>
-  </data>
-  <data name="ApkWindow_PermissionsHeader" xml:space="preserve">
-    <value>Permissions it asks for ({0})</value>
   </data>
   <data name="ApkWindow_NoPermissions" xml:space="preserve">
     <value>It asks for no permissions.</value>
@@ -815,16 +977,13 @@
     <value>{0} is updated</value>
   </data>
   <data name="ApkWindow_DoneText" xml:space="preserve">
-    <value>Open it now, or later from the Start menu.</value>
+    <value>Launch it now, or later from the Start menu.</value>
   </data>
   <data name="ApkWindow_FailedTitle" xml:space="preserve">
     <value>Not installed</value>
   </data>
   <data name="ApkWindow_NotApkTitle" xml:space="preserve">
     <value>This file cannot be installed</value>
-  </data>
-  <data name="ApkWindow_NotApkText" xml:space="preserve">
-    <value>{0} is not an APK that Android can install: {1}.</value>
   </data>
   <data name="ApkWindow_StartFailed" xml:space="preserve">
     <value>Android did not start, so the app was not installed. {0}</value>
@@ -858,6 +1017,15 @@
   </data>
   <data name="ApkWindow_Reason_other" xml:space="preserve">
     <value>Android did not install the app.</value>
+  </data>
+  <data name="ApkWindow_AbiWarning" xml:space="preserve">
+    <value>This app has code only for {0} processors, not for this PC's. Android runs it only with an ARM translation package, and may refuse to install it.</value>
+  </data>
+  <data name="ApkWindow_LaunchFailedAfterInstall" xml:space="preserve">
+    <value>{0} is installed, but it did not open. {1}</value>
+  </data>
+  <data name="ApkWindow_LaunchWhenReady" xml:space="preserve">
+    <value>Launch when ready</value>
   </data>
   <data name="NavLogs.Content" xml:space="preserve">
     <value>Android log</value>
@@ -947,7 +1115,7 @@
     <value>Reset the device identity?</value>
   </data>
   <data name="IdentityResetConfirmBody" xml:space="preserve">
-    <value>Every value goes back to DSA's own. It applies from the next start of Android.</value>
+    <value>Every value goes back to its default: this computer's, or DSA's own where the computer does not say. It applies from the next start of Android.</value>
   </data>
   <data name="IdentityNamesHeader.Text" xml:space="preserve">
     <value>Device</value>
@@ -972,6 +1140,45 @@
   </data>
   <data name="Identity_Restarted" xml:space="preserve">
     <value>Android started again with this identity.</value>
+  </data>
+  <data name="Identity_FromComputer" xml:space="preserve">
+    <value>Default: from this computer</value>
+  </data>
+  <data name="Identity_FromDsa" xml:space="preserve">
+    <value>Default: DSA's value</value>
+  </data>
+  <data name="Identity_NotSaid" xml:space="preserve">
+    <value>This computer does not say; Android keeps its own.</value>
+  </data>
+  <data name="IdentityComputerHeader.Text" xml:space="preserve">
+    <value>From this computer</value>
+  </data>
+  <data name="IdentityComputerNote.Text" xml:space="preserve">
+    <value>These follow this computer and are read again each time Android starts, so a renamed computer is followed from the next start. Android's own Settings shows the device name and the chip; the model name is shown only here, as Android's Settings has no place for it.</value>
+  </data>
+  <data name="Identity_model_name" xml:space="preserve">
+    <value>Model name</value>
+  </data>
+  <data name="Identity_model_name_Description" xml:space="preserve">
+    <value>The name the computer is sold under (ro.product.marketname).</value>
+  </data>
+  <data name="Identity_device_name" xml:space="preserve">
+    <value>Device name</value>
+  </data>
+  <data name="Identity_device_name_Description" xml:space="preserve">
+    <value>The computer's name, which Settings, Bluetooth and Wi-Fi Direct show for the device.</value>
+  </data>
+  <data name="Identity_soc_manufacturer" xml:space="preserve">
+    <value>Chip manufacturer</value>
+  </data>
+  <data name="Identity_soc_manufacturer_Description" xml:space="preserve">
+    <value>Build.SOC_MANUFACTURER: the maker of the computer's processor.</value>
+  </data>
+  <data name="Identity_soc_model" xml:space="preserve">
+    <value>Chip model</value>
+  </data>
+  <data name="Identity_soc_model_Description" xml:space="preserve">
+    <value>Build.SOC_MODEL: the computer's processor.</value>
   </data>
   <data name="Identity_manufacturer" xml:space="preserve">
     <value>Manufacturer</value>
@@ -1359,5 +1566,182 @@
   </data>
   <data name="Toggle.Off" xml:space="preserve">
     <value>Off</value>
+  </data>
+  <data name="NavAndroid.Content" xml:space="preserve">
+    <value>Android</value>
+  </data>
+  <data name="AndroidTitle.Text" xml:space="preserve">
+    <value>Android</value>
+  </data>
+  <data name="AndroidRunningHeader.Text" xml:space="preserve">
+    <value>Running now</value>
+  </data>
+  <data name="Android_Major" xml:space="preserve">
+    <value>Android {0}</value>
+  </data>
+  <data name="Android_Unknown" xml:space="preserve">
+    <value>Unknown</value>
+  </data>
+  <data name="Android_Supported" xml:space="preserve">
+    <value>Supported versions: Android {0}</value>
+  </data>
+  <data name="Android_Switching" xml:space="preserve">
+    <value>Android {0} is chosen. It is downloaded now and used the next time Android starts.</value>
+  </data>
+  <data name="AndroidSwitchingBar.Title" xml:space="preserve">
+    <value>Changing the Android version</value>
+  </data>
+  <data name="AndroidBuildCard.Header" xml:space="preserve">
+    <value>Build</value>
+  </data>
+  <data name="AndroidPatchCard.Header" xml:space="preserve">
+    <value>Security patch level</value>
+  </data>
+  <data name="AndroidChooseHeader.Text" xml:space="preserve">
+    <value>Android version</value>
+  </data>
+  <data name="AndroidChooseCard.Header" xml:space="preserve">
+    <value>Version to use</value>
+  </data>
+  <data name="AndroidChooseCard.Description" xml:space="preserve">
+    <value>DSA supports the latest two Android versions. Some apps run on only one of them.</value>
+  </data>
+  <data name="Android_ChoiceLatest" xml:space="preserve">
+    <value>Always the newest (now Android {0})</value>
+  </data>
+  <data name="Android_ChoiceMajor" xml:space="preserve">
+    <value>Android {0}</value>
+  </data>
+  <data name="AndroidApplyButton.Content" xml:space="preserve">
+    <value>Change</value>
+  </data>
+  <data name="AndroidChooseNote.Text" xml:space="preserve">
+    <value>Every user of this computer runs the same Android version, so changing it needs an administrator. Security updates for the chosen version keep coming. When a version stops being supported, DSA moves to the next one and keeps your apps.</value>
+  </data>
+  <data name="AndroidUpConfirm.Title" xml:space="preserve">
+    <value>Move to a newer Android?</value>
+  </data>
+  <data name="AndroidUpConfirm.Body" xml:space="preserve">
+    <value>Android {0} is downloaded and used the next time Android starts. Your apps and their data move along. Moving back later erases the data.</value>
+  </data>
+  <data name="AndroidDownConfirm.Title" xml:space="preserve">
+    <value>Erase Android data to move to an older version?</value>
+  </data>
+  <data name="AndroidDownConfirm.Action" xml:space="preserve">
+    <value>Erase data and change</value>
+  </data>
+  <data name="Android_DownWarning" xml:space="preserve">
+    <value>Android {0} is older than the Android {1} that runs now, and Android cannot read data a newer version wrote. Moving erases the Android data of every user of this computer: every app they installed, the accounts they signed in to and the data of every app. Each user's Android then starts as it was first installed. DSA's settings stay. This cannot be undone.</value>
+  </data>
+  <data name="ApkWindow_AbiWarningTitle" xml:space="preserve">
+    <value>This app may not run on this PC</value>
+  </data>
+  <data name="ApkWindow_InstalledTitle" xml:space="preserve">
+    <value>Already installed</value>
+  </data>
+  <data name="ApkWindow_DowngradeTitle" xml:space="preserve">
+    <value>A newer version is installed</value>
+  </data>
+  <data name="ApkWindow_SignatureTitle" xml:space="preserve">
+    <value>Signed with another key</value>
+  </data>
+  <data name="AppsRunAsArm.Content" xml:space="preserve">
+    <value>Run as ARM</value>
+  </data>
+  <data name="Apps_RunAsArm_system-app" xml:space="preserve">
+    <value>Apps that are part of Android run as Android installed them.</value>
+  </data>
+  <data name="Apps_RunAsArm_no-arm-libraries" xml:space="preserve">
+    <value>No APK of this app on the device holds its ARM code.</value>
+  </data>
+  <data name="Apps_RunAsArm_translation-off" xml:space="preserve">
+    <value>ARM translation is not on. Turn it on under ARM apps and restart Android.</value>
+  </data>
+  <data name="Apps_RunAsArm_arm-only" xml:space="preserve">
+    <value>This app has only ARM code, so it always runs as ARM.</value>
+  </data>
+  <data name="Apps_RunAsArm_unknown" xml:space="preserve">
+    <value>This version of DSA cannot say whether the app can run as ARM.</value>
+  </data>
+  <data name="AppsRunAsArmEraseTitle" xml:space="preserve">
+    <value>Erase {0}'s data?</value>
+  </data>
+  <data name="AppsRunAsArmEraseBody" xml:space="preserve">
+    <value>Android cannot change how {0} runs and keep its data. Installing it again erases its data: sign-ins, settings and files it keeps for itself.</value>
+  </data>
+  <data name="AppsRunAsArmEraseButton" xml:space="preserve">
+    <value>Erase and install again</value>
+  </data>
+  <data name="Apps_RunAsArmKept" xml:space="preserve">
+    <value>{0} was left as it was, with its data.</value>
+  </data>
+  <data name="Apps_RunAsArmOn" xml:space="preserve">
+    <value>{0} runs as ARM now.</value>
+  </data>
+  <data name="Apps_RunAsArmOff" xml:space="preserve">
+    <value>{0} runs its x86_64 code now.</value>
+  </data>
+  <data name="Apps_RunAsArmNotChanged" xml:space="preserve">
+    <value>{0} was not installed again: {1} ({2})</value>
+  </data>
+  <data name="Apps_RunAsArmRefused_not-installed" xml:space="preserve">
+    <value>it is no longer installed</value>
+  </data>
+  <data name="Apps_RunAsArmRefused_system-app" xml:space="preserve">
+    <value>it is part of Android</value>
+  </data>
+  <data name="Apps_RunAsArmRefused_no-libraries" xml:space="preserve">
+    <value>its APKs on the device hold no code for that</value>
+  </data>
+  <data name="Apps_RunAsArmRefused_translation-off" xml:space="preserve">
+    <value>ARM translation is not on</value>
+  </data>
+  <data name="Apps_RunAsArmRefused_data-would-be-erased" xml:space="preserve">
+    <value>its data would be erased</value>
+  </data>
+  <data name="Apps_RunAsArmRefused_other" xml:space="preserve">
+    <value>Android refused</value>
+  </data>
+  <data name="ApkWindow_BundleTitle" xml:space="preserve">
+    <value>Split APK bundle</value>
+  </data>
+  <data name="ApkWindow_BundleSummary" xml:space="preserve">
+    <value>{0} comes as several APKs. The {1} this PC needs are installed together, {2} in all.</value>
+  </data>
+  <data name="ApkWindow_BundleSummaryObb" xml:space="preserve">
+    <value>{0} comes as several APKs. The {1} this PC needs are installed together with its expansion files, {2} in all.</value>
+  </data>
+  <data name="ApkWindow_FactApks" xml:space="preserve">
+    <value>APKs</value>
+  </data>
+  <data name="ApkWindow_ApksValue" xml:space="preserve">
+    <value>{0} (the base and {1} splits)</value>
+  </data>
+  <data name="ApkWindow_FactObbs" xml:space="preserve">
+    <value>Expansion files</value>
+  </data>
+  <data name="Install_Reason_app-bundle" xml:space="preserve">
+    <value>it is an Android App Bundle, made to be uploaded to an app store. Get the app as an APK, or as an .xapk, .apks or .apkm bundle.</value>
+  </data>
+  <data name="Install_Reason_encrypted-bundle" xml:space="preserve">
+    <value>the bundle is encrypted, so its APKs cannot be read. Get the app as an APK, or as a newer bundle.</value>
+  </data>
+  <data name="Install_Reason_split-signature-mismatch" xml:space="preserve">
+    <value>a split APK of the bundle is signed with another key than its base APK, so Android would refuse it.</value>
+  </data>
+  <data name="Install_Reason_invalid-bundle" xml:space="preserve">
+    <value>the bundle is not one app that Android can install.</value>
+  </data>
+  <data name="ApkWindow_Reason_app-bundle" xml:space="preserve">
+    <value>It is an Android App Bundle, made to be uploaded to an app store. Get the app as an APK, or as an .xapk, .apks or .apkm bundle.</value>
+  </data>
+  <data name="ApkWindow_Reason_encrypted-bundle" xml:space="preserve">
+    <value>The bundle is encrypted, so its APKs cannot be read. Get the app as an APK, or as a newer bundle.</value>
+  </data>
+  <data name="ApkWindow_Reason_split-signature-mismatch" xml:space="preserve">
+    <value>A split APK of the bundle is signed with another key than its base APK, so Android would refuse it.</value>
+  </data>
+  <data name="ApkWindow_Reason_invalid-bundle" xml:space="preserve">
+    <value>The bundle is not one app that Android can install.</value>
   </data>
 </root>

@@ -21,13 +21,15 @@ use crate::accessibility::{
     AccessibilityWatch, ActionRequest, ActionResult, GuestAccessibility, Node, NodeAction,
     TreeUpdate,
 };
-use crate::apk::{self, InstallOutcome, InstallStatus, InstalledPackage};
+use crate::adb_discovery::AutoConnectState;
+use crate::apk::{self, InstallOutcome, InstallPart, InstallStatus, InstalledPackage};
 use crate::arm_translation::{GuestArmTranslation, Package};
 use crate::background::{
     BackgroundApp, BackgroundCommand, BackgroundEvent, BackgroundHub, BackgroundWatch,
     MediaCommand, MediaSession, Playback,
 };
 use crate::files::{FileAction, FileTransfer, MAX_FILE_BYTES};
+use crate::gapps::{self, GuestGapps};
 use crate::host_api::{
     running_of, stop_every, ClientError, HostApiClient, HostApiService, InstallError,
     ProgramUpdate, ServiceFacts, UpdateProgram, UserAndroid, UserAndroids,
@@ -86,6 +88,10 @@ pub struct FakeAndroid {
     pub developer_mode: Mutex<Vec<(bool, u16)>>,
     /// Set to refuse developer mode, as when the port is taken.
     pub refuse_developer_mode: Mutex<Option<String>>,
+    /// Each word on adb auto-connect, in order.
+    pub adb_auto_connect: Mutex<Vec<bool>>,
+    /// Where it says auto-connect stands.
+    pub adb_auto_connect_state: Mutex<AutoConnectState>,
     /// Each word on file sharing (on, and the folders), in order.
     pub shared_folders: Mutex<Vec<(bool, Vec<String>)>>,
     /// The drags the host ended, and whether each was dropped.
@@ -110,6 +116,9 @@ pub struct FakeAndroid {
     pub background_requests: Mutex<Vec<BackgroundRequest>>,
     /// The APKs it installed or refused, by name, with their whole content, in order.
     pub installs: Mutex<Vec<(String, Vec<u8>)>>,
+    /// The installs of several files it took, in order: the bundle's name, the parts, the ABI
+    /// it was told, and the parts' bytes one after another.
+    pub part_installs: Mutex<Vec<PartInstall>>,
     /// When each install began and ended, by name, in order: `+name` and `-name`.
     pub install_steps: Mutex<Vec<String>>,
     /// How long each install takes once its content is in.
@@ -131,10 +140,18 @@ pub struct FakeAndroid {
     pub accessibility_actions: Mutex<Vec<(i32, ActionRequest)>>,
     /// The ARM translation image on its disk, if any.
     pub arm_image: Mutex<Option<Vec<u8>>>,
+    /// The Google apps' image on its disk, if any.
+    pub gapps_image: Mutex<Option<Vec<u8>>>,
     /// Each app whose settings it was asked to open, in order; `None` for the list of apps.
     pub app_settings: Mutex<Vec<Option<String>>>,
     /// How many times it was asked to read its apps again.
     pub app_refreshes: Mutex<u32>,
+    /// Whether it runs with an ARM translator, so its ABI list holds arm64-v8a.
+    pub translating: Mutex<bool>,
+    /// The ABI each install was given, in order; `None` for one left to Android.
+    pub install_abis: Mutex<Vec<Option<String>>>,
+    /// Each "Run as ARM" change it was asked for: the package, on, and whether its data may go.
+    pub run_as_arm: Mutex<Vec<(String, bool, bool)>>,
 }
 
 /// The system app the fake Android lists, which it refuses to uninstall.
@@ -167,8 +184,18 @@ pub fn sample_installed_apps() -> Vec<crate::tasks::AppInfo> {
             app_bytes: 3_000_000,
             data_bytes: 20_480,
             cache_bytes: 1_024,
+            ..Default::default()
         },
     ]
+}
+
+/// One install of several files the fake Android took.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PartInstall {
+    pub name: String,
+    pub parts: Vec<InstallPart>,
+    pub abi: Option<String>,
+    pub content: Vec<u8>,
 }
 
 /// What the fake Android says of an APK: one whose content starts with [`BAD_APK`] is not an APK
@@ -210,6 +237,8 @@ impl FakeAndroid {
             links_in_android: Mutex::new(Vec::new()),
             developer_mode: Mutex::new(Vec::new()),
             refuse_developer_mode: Mutex::new(None),
+            adb_auto_connect: Mutex::new(Vec::new()),
+            adb_auto_connect_state: Mutex::new(AutoConnectState::Off),
             shared_folders: Mutex::new(Vec::new()),
             ended_drags: Mutex::new(Vec::new()),
             link_watchers: Mutex::new(Vec::new()),
@@ -224,6 +253,7 @@ impl FakeAndroid {
             background: Mutex::new(BackgroundHub::default()),
             background_requests: Mutex::new(Vec::new()),
             installs: Mutex::new(Vec::new()),
+            part_installs: Mutex::new(Vec::new()),
             install_steps: Mutex::new(Vec::new()),
             install_time: Mutex::new(Duration::ZERO),
             install_turn: Mutex::new(()),
@@ -235,8 +265,12 @@ impl FakeAndroid {
             accessibility_watchers: Mutex::new(Vec::new()),
             accessibility_actions: Mutex::new(Vec::new()),
             arm_image: Mutex::new(None),
+            gapps_image: Mutex::new(None),
             app_settings: Mutex::new(Vec::new()),
             app_refreshes: Mutex::new(0),
+            translating: Mutex::new(false),
+            install_abis: Mutex::new(Vec::new()),
+            run_as_arm: Mutex::new(Vec::new()),
         }
     }
 
@@ -379,6 +413,12 @@ impl UserAndroid for FakeAndroid {
         }
         self.developer_mode.lock().unwrap().push((on, port));
         Ok(())
+    }
+    fn adb_auto_connect(&self, on: bool) {
+        self.adb_auto_connect.lock().unwrap().push(on);
+    }
+    fn adb_auto_connect_state(&self) -> AutoConnectState {
+        *self.adb_auto_connect_state.lock().unwrap()
     }
     fn watch_links(&self) -> Option<mpsc::Receiver<String>> {
         let (tx, rx) = mpsc::channel();
@@ -631,11 +671,126 @@ impl UserAndroid for FakeAndroid {
         *self.arm_image.lock().unwrap() = None;
         Ok(self.arm_translation().unwrap_or_default())
     }
-    fn arm_translation(&self) -> Option<GuestArmTranslation> {
-        (self.state() == SessionState::Active).then(|| GuestArmTranslation {
-            installed: self.arm_image.lock().unwrap().is_some(),
+    fn install_gapps(
+        &self,
+        size: u64,
+        sha256: &[u8],
+        content: &mut dyn std::io::Read,
+    ) -> Result<GuestGapps, InstallError> {
+        if self.state() != SessionState::Active {
+            return Err(InstallError::NotRunning("Android is not running".into()));
+        }
+        let mut image = vec![0u8; size as usize];
+        content
+            .read_exact(&mut image)
+            .map_err(|e| InstallError::Refused(format!("the image did not arrive whole: {e}")))?;
+        use sha2::Digest;
+        if sha2::Sha256::digest(&image).as_slice() != sha256 {
+            return Err(InstallError::Refused("its SHA-256 differs".into()));
+        }
+        *self.gapps_image.lock().unwrap() = Some(image);
+        Ok(self.gapps().unwrap_or_default())
+    }
+    fn remove_gapps(&self) -> Result<GuestGapps, InstallError> {
+        *self.gapps_image.lock().unwrap() = None;
+        Ok(self.gapps().unwrap_or_default())
+    }
+    fn gapps(&self) -> Option<GuestGapps> {
+        (self.state() == SessionState::Active).then(|| GuestGapps {
+            installed: self.gapps_image.lock().unwrap().is_some(),
             active: false,
-            abilist: "x86_64".into(),
+            sdk: 36,
+            abi: "x86_64".into(),
+            abilist: "x86_64,arm64-v8a".into(),
+            device_id: String::new(),
+        })
+    }
+    fn arm_translation(&self) -> Option<GuestArmTranslation> {
+        let translating = *self.translating.lock().unwrap();
+        (self.state() == SessionState::Active).then(|| GuestArmTranslation {
+            installed: self.arm_image.lock().unwrap().is_some() || translating,
+            active: translating,
+            abilist: if translating {
+                "x86_64,arm64-v8a".into()
+            } else {
+                "x86_64".into()
+            },
+        })
+    }
+    fn install_parts(
+        &self,
+        name: &str,
+        parts: &[InstallPart],
+        abi: Option<&str>,
+        content: &mut dyn std::io::Read,
+    ) -> Result<InstallOutcome, InstallError> {
+        let _turn = self.install_turn.lock().unwrap();
+        if !matches!(
+            self.state(),
+            SessionState::Active | SessionState::Dozing | SessionState::Frozen
+        ) {
+            return Err(InstallError::NotRunning(format!(
+                "Android is {}, not running",
+                self.state()
+            )));
+        }
+        let size: u64 = parts.iter().map(|part| part.size).sum();
+        let mut bytes = vec![0u8; size as usize];
+        content
+            .read_exact(&mut bytes)
+            .map_err(|e| InstallError::Refused(format!("the files did not arrive whole: {e}")))?;
+        self.part_installs.lock().unwrap().push(PartInstall {
+            name: name.to_string(),
+            parts: parts.to_vec(),
+            abi: abi.map(str::to_string),
+            content: bytes,
+        });
+        Ok(InstallOutcome {
+            status: InstallStatus::Installed,
+            package_name: Some(INSTALLED_PACKAGE.into()),
+            message: String::new(),
+        })
+    }
+    fn install_apk_for(
+        &self,
+        name: &str,
+        size: u64,
+        abi: Option<&str>,
+        content: &mut dyn std::io::Read,
+    ) -> Result<InstallOutcome, InstallError> {
+        self.install_abis
+            .lock()
+            .unwrap()
+            .push(abi.map(str::to_string));
+        self.install_apk(name, size, content)
+    }
+    fn set_run_as_arm(
+        &self,
+        package: &str,
+        on: bool,
+        erase_data: bool,
+    ) -> Result<crate::native_abi::RunAsArmOutcome, TaskRequestError> {
+        use crate::native_abi::{RunAsArmOutcome, RunAsArmStatus};
+        self.running_or().map_err(TaskRequestError::NotRunning)?;
+        self.run_as_arm
+            .lock()
+            .unwrap()
+            .push((package.to_string(), on, erase_data));
+        let status = if package != KNOWN_PACKAGE {
+            RunAsArmStatus::NotInstalled
+        } else if on && !*self.translating.lock().unwrap() {
+            RunAsArmStatus::TranslationOff
+        } else if on && !erase_data {
+            // The fake keeps no data across an ABI change, so it asks first.
+            RunAsArmStatus::DataWouldBeErased
+        } else {
+            RunAsArmStatus::Done
+        };
+        Ok(RunAsArmOutcome {
+            package_name: package.to_string(),
+            on: on && status == RunAsArmStatus::Done,
+            status,
+            message: String::new(),
         })
     }
     fn install_apk(
@@ -1036,6 +1191,10 @@ macro_rules! host_api_conformance {
             $crate::host_api_conformance::device_identity_is_the_callers_own(&mut || $make);
         }
         #[test]
+        fn fr17_the_device_identity_defaults_are_the_computers_and_say_where_they_came_from() {
+            $crate::host_api_conformance::device_identity_defaults_are_the_computers(&mut || $make);
+        }
+        #[test]
         fn fr13_turning_clipboard_sharing_off_and_on_reaches_the_callers_android() {
             $crate::host_api_conformance::clipboard_setting_reaches_the_caller(&mut || $make);
         }
@@ -1048,6 +1207,16 @@ macro_rules! host_api_conformance {
         #[test]
         fn fr11_an_apk_a_client_sends_is_installed_in_the_callers_android() {
             $crate::host_api_conformance::apk_is_installed(&mut || $make);
+        }
+        #[test]
+        fn fr11_the_files_of_a_split_app_reach_the_callers_android_as_one_install() {
+            $crate::host_api_conformance::split_app_is_installed(&mut || $make);
+        }
+        #[test]
+        fn fr11_parts_that_do_not_add_up_or_that_android_cannot_take_are_refused() {
+            $crate::host_api_conformance::wrong_parts_are_refused_before_they_are_sent(&mut || {
+                $make
+            });
         }
         #[test]
         fn fr11_an_apk_android_refuses_is_answered_with_the_reason() {
@@ -1064,6 +1233,14 @@ macro_rules! host_api_conformance {
         #[test]
         fn fr11_a_second_install_waits_for_the_first() {
             $crate::host_api_conformance::installs_run_one_at_a_time(&mut || $make);
+        }
+        #[test]
+        fn fr25_an_apk_with_partial_x86_64_code_is_installed_as_arm64_only_while_translating() {
+            $crate::host_api_conformance::install_abi_follows_the_libraries(&mut || $make);
+        }
+        #[test]
+        fn fr25_run_as_arm_reaches_the_callers_android_and_asks_before_erasing_data() {
+            $crate::host_api_conformance::run_as_arm_reaches_the_caller(&mut || $make);
         }
         #[test]
         fn nfr5_a_client_that_sends_something_else_during_an_install_is_refused() {
@@ -1100,6 +1277,23 @@ macro_rules! host_api_conformance {
         #[test]
         fn fr25_an_unusable_arm_translation_package_is_refused() {
             $crate::host_api_conformance::unusable_arm_translation_is_refused(&mut || $make);
+        }
+        #[test]
+        fn fr25_the_images_default_translator_is_used_until_a_package_replaces_it() {
+            $crate::host_api_conformance::default_arm_translation_reaches_the_caller(&mut || $make);
+        }
+        #[test]
+        fn fr32_google_play_is_installed_reported_and_removed() {
+            $crate::host_api_conformance::gapps_reach_the_caller(&mut || $make);
+        }
+        #[test]
+        fn fr32_a_build_that_is_refused_leaves_the_settings_as_they_were() {
+            $crate::host_api_conformance::refused_gapps_leave_nothing(&mut || $make);
+        }
+        #[test]
+        fn fr20_adb_auto_connect_is_on_by_default_reaches_the_callers_android_and_reports_its_state(
+        ) {
+            $crate::host_api_conformance::adb_auto_connect_reaches_the_caller(&mut || $make);
         }
         #[test]
         fn fr20_a_developer_mode_port_that_cannot_open_is_reported() {
@@ -1993,6 +2187,184 @@ pub fn apk_is_installed(make: MakeLocal<'_>) {
     assert!(installs[0].1 == content, "the APK arrived changed");
 }
 
+pub fn install_abi_follows_the_libraries(make: MakeLocal<'_>) {
+    use crate::native_abi::NativeLibraries;
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    connect(&mut *connector).start().unwrap();
+    let content = sample_apk();
+    let mut partial = NativeLibraries::new();
+    partial.add("x86_64", "libmain.so");
+    partial.add("arm64-v8a", "libmain.so");
+    partial.add("arm64-v8a", "libunity.so");
+    let mut whole = NativeLibraries::new();
+    whole.add("x86_64", "libmain.so");
+    whole.add("arm64-v8a", "libmain.so");
+    let install = |connector: &mut dyn Connector, libraries: &NativeLibraries| {
+        let outcome = connect(connector)
+            .install_apk_with_libraries(
+                "game.apk",
+                content.len() as u64,
+                libraries,
+                &mut &content[..],
+            )
+            .expect("installing");
+        assert_eq!(outcome.status, InstallStatus::Installed);
+    };
+    // Without a translator the partial x86_64 code is all there is.
+    install(&mut *connector, &partial);
+    let android = androids.of(&user).unwrap();
+    *android.translating.lock().unwrap() = true;
+    install(&mut *connector, &partial);
+    install(&mut *connector, &whole);
+    install(&mut *connector, &NativeLibraries::new());
+    assert_eq!(
+        *android.install_abis.lock().unwrap(),
+        vec![
+            Some("x86_64".to_string()),
+            Some("arm64-v8a".to_string()),
+            Some("x86_64".to_string()),
+            None,
+        ]
+    );
+}
+
+pub fn run_as_arm_reaches_the_caller(make: MakeLocal<'_>) {
+    use crate::native_abi::RunAsArmStatus;
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    connect(&mut *connector).start().unwrap();
+    let android = androids.of(&user).unwrap();
+    let off = connect(&mut *connector)
+        .set_run_as_arm(KNOWN_PACKAGE, true, false)
+        .expect("an answer");
+    assert_eq!(off.status, RunAsArmStatus::TranslationOff);
+    *android.translating.lock().unwrap() = true;
+    let asks = connect(&mut *connector)
+        .set_run_as_arm(KNOWN_PACKAGE, true, false)
+        .expect("an answer");
+    assert_eq!(asks.status, RunAsArmStatus::DataWouldBeErased);
+    assert!(!asks.on);
+    let done = connect(&mut *connector)
+        .set_run_as_arm(KNOWN_PACKAGE, true, true)
+        .expect("an answer");
+    assert_eq!(done.status, RunAsArmStatus::Done);
+    assert!(done.on);
+    let missing = connect(&mut *connector)
+        .set_run_as_arm("com.example.missing", true, true)
+        .expect("an answer");
+    assert_eq!(missing.status, RunAsArmStatus::NotInstalled);
+    assert_eq!(
+        android.run_as_arm.lock().unwrap().last(),
+        Some(&("com.example.missing".to_string(), true, true))
+    );
+    // A name that is no package never reaches Android.
+    let before = android.run_as_arm.lock().unwrap().len();
+    assert!(connect(&mut *connector)
+        .set_run_as_arm("not a package", true, false)
+        .is_err());
+    assert_eq!(android.run_as_arm.lock().unwrap().len(), before);
+}
+
+pub fn split_app_is_installed(make: MakeLocal<'_>) {
+    use crate::native_abi::NativeLibraries;
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    connect(&mut *connector).start().unwrap();
+    let base = sample_apk();
+    let parts = vec![
+        InstallPart {
+            name: "base.apk".into(),
+            size: base.len() as u64,
+            obb: false,
+        },
+        InstallPart {
+            name: "split_config.x86_64.apk".into(),
+            size: 3,
+            obb: false,
+        },
+        InstallPart {
+            name: "main.42.com.example.notes.obb".into(),
+            size: 5,
+            obb: true,
+        },
+    ];
+    let content = [&base[..], b"abi", b"games"].concat();
+    let mut libraries = NativeLibraries::new();
+    libraries.add("x86_64", "libnotes.so");
+    let outcome = connect(&mut *connector)
+        .install_parts("notes.xapk", &parts, &libraries, &mut &content[..])
+        .expect("installing");
+    assert!(outcome.installed(), "{outcome:?}");
+    let android = androids.of(&user).unwrap();
+    let installs = android.part_installs.lock().unwrap();
+    assert_eq!(installs.len(), 1);
+    assert_eq!(installs[0].name, "notes.xapk");
+    assert_eq!(installs[0].parts, parts);
+    assert_eq!(installs[0].abi.as_deref(), Some("x86_64"));
+    assert!(installs[0].content == content, "the files arrived changed");
+    assert!(android.installs.lock().unwrap().is_empty());
+}
+
+pub fn wrong_parts_are_refused_before_they_are_sent(make: MakeLocal<'_>) {
+    use crate::native_abi::NativeLibraries;
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    connect(&mut *connector).start().unwrap();
+    let part = |name: &str, size: u64, obb: bool| InstallPart {
+        name: name.into(),
+        size,
+        obb,
+    };
+    for parts in [
+        vec![part("main.1.com.example.notes.obb", 3, true)],
+        vec![part("base.apk", 3, false), part("base.apk", 3, false)],
+        vec![part("base.txt", 3, false)],
+    ] {
+        let mut never = Unread;
+        let none = NativeLibraries::new();
+        match connect(&mut *connector).install_parts("notes.xapk", &parts, &none, &mut never) {
+            Err(ClientError::Service { code, detail }) => {
+                assert_eq!(code, ErrorCode::InstallRefused, "{detail}");
+            }
+            other => panic!("expected {parts:?} to be refused, got {other:?}"),
+        }
+    }
+    // A client whose parts add up to another size than it announces is refused as well.
+    let mut connection = connector.connect(WAIT).unwrap();
+    client_connect(&mut *connection, &local_hello(Role::Client, "client"), WAIT).unwrap();
+    let request = types::Request {
+        id: 8,
+        body: Some(types::request::Body::InstallApk(types::InstallApk {
+            name: "notes.xapk".into(),
+            size: 10,
+            native_libraries: Vec::new(),
+            parts: vec![part("base.apk", 3, false).to_wire()],
+        })),
+    };
+    send(&mut *connection, envelope::Body::Request(request)).unwrap();
+    let response = match decode(&connection.recv(Some(WAIT)).expect("an answer")) {
+        Ok(types::Envelope {
+            body: Some(envelope::Body::Response(response)),
+        }) => response,
+        other => panic!("expected an answer, got {other:?}"),
+    };
+    assert_eq!(response.id, 8);
+    match response.body {
+        Some(types::response::Body::Error(error)) => {
+            let detail = &error.detail;
+            assert!(detail.contains("add up to 3 bytes"), "{detail}");
+        }
+        other => panic!("expected the install to be refused, got {other:?}"),
+    }
+    let android = androids.of(&user).unwrap();
+    assert!(android.part_installs.lock().unwrap().is_empty());
+}
+
 pub fn refused_apk_has_its_reason(make: MakeLocal<'_>) {
     let (listener, mut connector, _) = make();
     let androids = Arc::new(FakeAndroids::default());
@@ -2101,6 +2473,8 @@ pub fn malformed_install_is_refused(make: MakeLocal<'_>) {
         body: Some(types::request::Body::InstallApk(types::InstallApk {
             name: "notes.apk".into(),
             size: 1000,
+            native_libraries: Vec::new(),
+            parts: Vec::new(),
         })),
     };
     send(&mut *connection, envelope::Body::Request(request)).unwrap();
@@ -2203,6 +2577,7 @@ pub fn device_identity_is_the_callers_own(make: MakeLocal<'_>) {
         id: "BP2A".into(),
         incremental: "1.dsaab".into(),
         tags: "release-keys".into(),
+        arch: "x86_64".into(),
     };
     let service = HostApiService::new(Arc::new(FakeAndroids::default()), "test service")
         .with_device_identities(store.clone(), Arc::new(move |_: &str| Some(build.clone())));
@@ -2247,6 +2622,73 @@ pub fn device_identity_is_the_callers_own(make: MakeLocal<'_>) {
         .set_device_identity(&DeviceIdentity::default())
         .unwrap();
     assert!(chosen.is_default());
+}
+
+pub fn device_identity_defaults_are_the_computers(make: MakeLocal<'_>) {
+    use crate::computer_identity::ComputerInfo;
+    use crate::device_identity::{DeviceIdentity, Field, ImageBuild, MemoryDeviceIdentities};
+    let (listener, mut connector, _user) = make();
+    let build = ImageBuild {
+        release: "16".into(),
+        id: "BP2A".into(),
+        incremental: "1.dsaab".into(),
+        tags: "release-keys".into(),
+        arch: "x86_64".into(),
+    };
+    let service = HostApiService::new(Arc::new(FakeAndroids::default()), "test service")
+        .with_device_identities(
+            Arc::new(MemoryDeviceIdentities::default()),
+            Arc::new(move |_: &str| Some(build.clone())),
+        )
+        .with_computer_identity(Arc::new(|| ComputerInfo {
+            system_manufacturer: "SAMSUNG ELECTRONICS CO., LTD.".into(),
+            system_product: "960XGL".into(),
+            system_family: "Galaxy Book4 Ultra".into(),
+            system_version: "P10ALX".into(),
+            baseboard_product: "NT960XGP-G72AG".into(),
+            computer_name: "BREW-BOOK".into(),
+            cpu_vendor: "GenuineIntel".into(),
+            cpu_name: "Intel(R) Core(TM) Ultra 7 155H".into(),
+        }));
+    let _service = RunningService::start_service(listener, service);
+    let mut client = connect(&mut *connector);
+
+    let report = client.device_identity_report().unwrap();
+    assert_eq!(report.effective.manufacturer, "Samsung");
+    assert_eq!(report.effective.brand, "Samsung");
+    assert_eq!(report.effective.model, "NT960XGP-G72AG");
+    assert_eq!(report.computer.model_name, "Galaxy Book4 Ultra");
+    assert_eq!(report.computer.device_name, "BREW-BOOK");
+    assert_eq!(report.computer.soc_manufacturer, "Intel");
+    assert_eq!(report.computer.soc_model, "Core Ultra 7 155H");
+    assert_eq!(
+        report.effective.fingerprint,
+        "Samsung/dsa_x86_64/dsa_x86_64:16/BP2A/1.dsaab:user/release-keys"
+    );
+    for key in [
+        "manufacturer",
+        "brand",
+        "model",
+        "model_name",
+        "device_name",
+    ] {
+        assert_eq!(report.origin(key), "computer", "{key}");
+    }
+    for key in ["device", "name", "characteristics", "fingerprint.type"] {
+        assert_eq!(report.origin(key), "dsa", "{key}");
+    }
+
+    // The user's choice wins, and the defaults stay what the computer says.
+    let mut wanted = DeviceIdentity::default();
+    wanted.set(Field::Model, "My tablet").unwrap();
+    let report = client.set_device_identity_report(&wanted).unwrap();
+    assert_eq!(report.effective.model, "My tablet");
+    assert_eq!(report.defaults.model, "NT960XGP-G72AG");
+    // Resetting gives the computer's value back.
+    let report = client
+        .set_device_identity_report(&DeviceIdentity::default())
+        .unwrap();
+    assert_eq!(report.effective.model, "NT960XGP-G72AG");
 }
 
 pub fn clipboard_setting_reaches_the_caller(make: MakeLocal<'_>) {
@@ -2514,6 +2956,43 @@ pub fn developer_mode_reaches_the_caller(make: MakeLocal<'_>) {
     );
 }
 
+pub fn adb_auto_connect_reaches_the_caller(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let store = Arc::new(MemorySettings::default());
+    let androids = Arc::new(FakeAndroids::default());
+    let service =
+        HostApiService::new(androids.clone(), "test service").with_settings(store.clone(), facts());
+    let _service = RunningService::start_service(listener, service);
+    let mut client = connect(&mut *connector);
+    let fresh = client.settings().unwrap();
+    assert!(fresh.settings.adb_auto_connect, "on by default");
+    assert_eq!(fresh.adb_auto_connect_state, AutoConnectState::Off);
+    *androids
+        .of(&user)
+        .unwrap()
+        .adb_auto_connect_state
+        .lock()
+        .unwrap() = AutoConnectState::Attached;
+    assert_eq!(
+        client.settings().unwrap().adb_auto_connect_state,
+        AutoConnectState::Attached
+    );
+    let off = client
+        .set_settings(&Settings {
+            developer_mode: true,
+            adb_auto_connect: false,
+            ..Settings::default()
+        })
+        .expect("turning auto-connect off");
+    assert!(!off.settings.adb_auto_connect);
+    assert_eq!(off.adb_auto_connect_state, AutoConnectState::Attached);
+    assert!(!store.get(&user).unwrap().adb_auto_connect);
+    assert_eq!(
+        *androids.of(&user).unwrap().adb_auto_connect.lock().unwrap(),
+        vec![false]
+    );
+}
+
 fn arm_package() -> Package {
     Package {
         name: "Translator".into(),
@@ -2572,6 +3051,234 @@ pub fn arm_translation_reaches_the_caller(make: MakeLocal<'_>) {
     assert!(!removed.restart_needed);
     assert!(android.arm_image.lock().unwrap().is_none());
     assert_eq!(store.arm_translation(&user).unwrap(), None);
+}
+
+fn default_arm_package() -> Package {
+    Package {
+        name: "Digitalis".into(),
+        version: "17-abefbe2b1600".into(),
+        library: "libberberis_arm64.so".into(),
+        abis: vec!["arm64-v8a".into()],
+        license: "Apache-2.0".into(),
+    }
+}
+
+pub fn default_arm_translation_reaches_the_caller(make: MakeLocal<'_>) {
+    use crate::arm_translation::Source;
+    use sha2::Digest;
+    let (listener, mut connector, _) = make();
+    let store = Arc::new(MemorySettings::default());
+    let androids = Arc::new(FakeAndroids::default());
+    let service = HostApiService::new(androids.clone(), "test service")
+        .with_settings(store.clone(), facts())
+        .with_default_arm_translation(Arc::new(|_: &str| Some(default_arm_package())));
+    let _service = RunningService::start_service(listener, service);
+    let mut client = connect(&mut *connector);
+    let first = client
+        .arm_translation()
+        .expect("asking where translation stands");
+    assert_eq!(first.package, None);
+    assert_eq!(first.default, Some(default_arm_package()));
+    let translator = first.translator.clone().expect("the default translates");
+    assert_eq!(translator.source, Source::Default);
+    assert_eq!(translator.package, default_arm_package());
+    assert!(!first.restart_needed, "Android is not running");
+
+    client.start().unwrap();
+    let image: Vec<u8> = (0..4096u32).map(|i| (i % 251) as u8).collect();
+    let installed = connect(&mut *connector)
+        .install_arm_translation(
+            &arm_package(),
+            image.len() as u64,
+            &sha2::Sha256::digest(&image),
+            &mut image.as_slice(),
+        )
+        .expect("installing the package");
+    let translator = installed
+        .translator
+        .clone()
+        .expect("the package translates");
+    assert_eq!(translator.source, Source::User);
+    assert_eq!(translator.package, arm_package());
+    assert_eq!(
+        installed.default,
+        Some(default_arm_package()),
+        "still offered"
+    );
+    assert!(installed.restart_needed);
+
+    // Removing the package brings the default back.
+    let removed = client
+        .remove_arm_translation()
+        .expect("removing the package");
+    assert_eq!(removed.package, None);
+    assert_eq!(
+        removed.translator.map(|translator| translator.source),
+        Some(Source::Default)
+    );
+    let off = client
+        .set_settings(&Settings {
+            arm_translation: false,
+            ..Settings::default()
+        })
+        .unwrap();
+    assert!(!off.settings.arm_translation);
+    let off = client.arm_translation().unwrap();
+    assert_eq!(off.translator, None, "turned off");
+    assert_eq!(off.default, Some(default_arm_package()));
+
+    // An image without a default package (every arm64 image) offers none.
+    let (listener, mut connector, _) = make();
+    let service = HostApiService::new(Arc::new(FakeAndroids::default()), "test service")
+        .with_settings(Arc::new(MemorySettings::default()), facts())
+        .with_default_arm_translation(Arc::new(|_: &str| None));
+    let _arm64 = RunningService::start_service(listener, service);
+    let none = connect(&mut *connector).arm_translation().unwrap();
+    assert_eq!((none.default, none.translator), (None, None));
+}
+
+/// Serves LiteGapps' file host from memory: the feed of x86_64 builds for API level 36, and
+/// `zip` as its one build.
+struct FakeLiteGapps(HashMap<String, Vec<u8>>);
+
+const FAKE_PROJECT: &str = "https://litegapps.test/projects/litegapps";
+
+impl FakeLiteGapps {
+    fn new(zip: &[u8], md5: &str) -> FakeLiteGapps {
+        let path =
+            "/litegapps/x86_64/36/core/2026-10-01/LiteGapps-core-x86_64-16.0-20261001-official.zip";
+        let feed = gapps::listing::fixture::feed(&[gapps::listing::fixture::item(
+            path,
+            zip.len() as u64,
+            md5,
+        )]);
+        FakeLiteGapps(HashMap::from([
+            (
+                format!("{FAKE_PROJECT}/rss?path=/litegapps/x86_64/36/core"),
+                feed.into_bytes(),
+            ),
+            (format!("{FAKE_PROJECT}/files{path}/download"), zip.to_vec()),
+        ]))
+    }
+}
+
+impl crate::update::store::Fetch for FakeLiteGapps {
+    fn fetch(&self, url: &str, out: &mut dyn std::io::Write) -> Result<u64, String> {
+        let body = self.0.get(url).ok_or_else(|| format!("404 for {url}"))?;
+        out.write_all(body).map_err(|e| e.to_string())?;
+        Ok(body.len() as u64)
+    }
+}
+
+fn md5_of(data: &[u8]) -> String {
+    let mut md5 = gapps::md5::Md5::new();
+    md5.update(data);
+    gapps::md5::hex(&md5.finish())
+}
+
+/// A service with settings in memory and Google Play served from `lite`.
+fn gapps_service(
+    androids: Arc<FakeAndroids>,
+    store: Arc<MemorySettings>,
+    lite: FakeLiteGapps,
+    name: &str,
+) -> HostApiService {
+    let work = std::env::temp_dir().join(format!(
+        "dsa-conformance-gapps-{name}-{}",
+        std::process::id()
+    ));
+    let source = gapps::Source::new(Arc::new(lite), work).with_project(FAKE_PROJECT);
+    HostApiService::new(androids, "test service")
+        .with_settings(store, facts())
+        .with_gapps(source)
+}
+
+pub fn gapps_reach_the_caller(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let store = Arc::new(MemorySettings::default());
+    let androids = Arc::new(FakeAndroids::default());
+    let zip = gapps::package::fixture::sample();
+    let lite = FakeLiteGapps::new(&zip, &md5_of(&zip));
+    let service = gapps_service(androids.clone(), store.clone(), lite, "reach");
+    let _service = RunningService::start_service(listener, service);
+    let mut client = connect(&mut *connector);
+    let none = client.gapps().expect("asking where Google Play stands");
+    assert_eq!(none.package, None);
+    assert!(none.guest.is_none(), "Android is not running");
+    assert!(!none.restart_needed);
+
+    client.start().unwrap();
+    let mut stages = Vec::new();
+    let installed = connect(&mut *connector)
+        .install_gapps(&mut |news| stages.push(news.stage))
+        .expect("installing Google Play");
+    for stage in [
+        gapps::Stage::Listing,
+        gapps::Stage::Downloading,
+        gapps::Stage::Building,
+    ] {
+        assert!(stages.contains(&stage), "{stage:?} in {stages:?}");
+    }
+    let package = installed.package.clone().expect("the build is recorded");
+    assert_eq!(package.version, "20261001");
+    assert_eq!(package.android_version, "16.0");
+    assert_eq!((package.arch.as_str(), package.sdk), ("x86_64", 36));
+    assert_eq!(package.md5, md5_of(&zip));
+    let guest = installed
+        .guest
+        .clone()
+        .expect("the running Android answered");
+    assert!(guest.installed);
+    assert!(
+        !guest.active,
+        "the Google apps are used from the next start"
+    );
+    assert!(installed.restart_needed);
+    assert_eq!(store.gapps(&user).unwrap(), Some(package));
+    let android = androids.of(&user).unwrap();
+    let image = android.gapps_image.lock().unwrap().clone().unwrap();
+    let files = crate::erofs::read::files(&image);
+    assert!(files.contains_key("product/priv-app/GmsCore/GmsCore.apk"));
+    assert!(files
+        .keys()
+        .all(|path| path.starts_with("product/") || path.starts_with("system_ext/")));
+
+    let status = client.gapps().unwrap();
+    assert!(status.package.is_some());
+    assert!(status.restart_needed);
+
+    let removed = client.remove_gapps().expect("removing Google Play");
+    assert_eq!(removed.package, None);
+    assert!(!removed.restart_needed, "this boot never had them");
+    assert!(android.gapps_image.lock().unwrap().is_none());
+    assert_eq!(store.gapps(&user).unwrap(), None);
+}
+
+pub fn refused_gapps_leave_nothing(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let store = Arc::new(MemorySettings::default());
+    let androids = Arc::new(FakeAndroids::default());
+    let zip = gapps::package::fixture::sample();
+    // The file host publishes another digest than the download has.
+    let lite = FakeLiteGapps::new(&zip, "00000000000000000000000000000000");
+    let service = gapps_service(androids.clone(), store.clone(), lite, "refused");
+    let _service = RunningService::start_service(listener, service);
+    connect(&mut *connector).start().unwrap();
+    match connect(&mut *connector).install_gapps(&mut |_| {}) {
+        Err(ClientError::Service { code, detail }) => {
+            assert_eq!(code, ErrorCode::InstallRefused);
+            assert!(detail.contains("MD5"), "{detail}");
+        }
+        other => panic!("expected the build to be refused, got {other:?}"),
+    }
+    assert_eq!(store.gapps(&user).unwrap(), None);
+    assert!(androids
+        .of(&user)
+        .unwrap()
+        .gapps_image
+        .lock()
+        .unwrap()
+        .is_none());
 }
 
 pub fn unusable_arm_translation_is_refused(make: MakeLocal<'_>) {

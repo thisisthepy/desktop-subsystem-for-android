@@ -22,6 +22,7 @@ use dsa_host_core::drag::{DragOffer, DragOut};
 use dsa_host_core::files::{FileAction, FileTransfer};
 use dsa_host_core::host_api::HostApiClient;
 use dsa_host_core::input::InputEvent;
+use dsa_host_core::native_abi::in_user_language;
 use dsa_host_core::notifications::{NotificationAction, NotificationEvent};
 use dsa_host_core::tasks::{AppInfo, TaskEvent, TaskRequest};
 use dsa_host_unix::socket::UnixLocalConnector;
@@ -94,6 +95,19 @@ fn drain(read: &OwnedFd) {
     let mut buffer = [0u8; 64];
     // SAFETY: reads into a valid buffer from a non-blocking pipe.
     while unsafe { libc::read(read.as_raw_fd(), buffer.as_mut_ptr().cast(), buffer.len()) } > 0 {}
+}
+
+/// Whether the session reads Korean: the language gettext would choose its messages in, from
+/// `LC_ALL`, `LC_MESSAGES` or `LANG`, the first that is set.
+fn reads_korean() -> bool {
+    reads_korean_in(|name| std::env::var(name).ok())
+}
+
+fn reads_korean_in(var: impl Fn(&str) -> Option<String>) -> bool {
+    ["LC_ALL", "LC_MESSAGES", "LANG"]
+        .into_iter()
+        .find_map(|name| var(name).filter(|value| !value.is_empty()))
+        .is_some_and(|locale| locale.starts_with("ko"))
 }
 
 fn connector() -> UnixLocalConnector {
@@ -274,7 +288,10 @@ fn ask_drag_out(to_main: ToMain, out: DragOut, serial: u32) {
                 }
             }
             Ok(None) => {}
-            Err(why) => log(&format!("a drag out of task {} did not start: {why}", out.task_id)),
+            Err(why) => log(&format!(
+                "a drag out of task {} did not start: {why}",
+                out.task_id
+            )),
         }
     });
 }
@@ -372,6 +389,7 @@ fn show_notifications(requests: Sender<Request>, icons: PathBuf) {
         loop {
             match stream.next(Duration::from_secs(1)) {
                 Ok(Some(NotificationEvent::Posted(notification))) => {
+                    let notification = in_user_language(notification, reads_korean());
                     let notify = match shown.lock() {
                         Ok(shown) => shown.notify(&notification),
                         Err(_) => continue,
@@ -780,5 +798,25 @@ pub fn one_shot(action: &str, package: &str) -> Result<(), String> {
             .map(|_| ())
             .map_err(|error| error.to_string()),
         other => Err(format!("unknown action {other}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fr25_the_run_as_arm_notices_follow_the_sessions_language() {
+        let korean = |name: &str| (name == "LANG").then(|| "ko_KR.UTF-8".to_string());
+        let english = |name: &str| (name == "LANG").then(|| "en_US.UTF-8".to_string());
+        // LC_ALL comes first, as gettext reads it.
+        let both = |name: &str| match name {
+            "LC_ALL" => Some("en_GB.UTF-8".to_string()),
+            "LANG" => Some("ko_KR.UTF-8".to_string()),
+            _ => None,
+        };
+        assert!(reads_korean_in(korean));
+        assert!(!reads_korean_in(english));
+        assert!(!reads_korean_in(both));
     }
 }

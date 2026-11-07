@@ -595,3 +595,124 @@ fn fr15_a_bundled_image_replaces_an_update_still_on_trial_keeping_the_good_one()
     );
     assert!(state.on_trial);
 }
+
+/// A guest that records every step the trial takes, in order, and boots only the images
+/// named in `boots`.
+struct RecordingGuest {
+    boots: Vec<String>,
+    steps: Vec<String>,
+}
+
+impl Boot for RecordingGuest {
+    fn boot(&mut self, image: &InstalledImage, _: &Path, _: Duration) -> Result<(), String> {
+        self.steps.push(format!("boot {}", image.version));
+        if self.boots.contains(&image.version) {
+            Ok(())
+        } else {
+            Err(format!("{} stalled", image.version))
+        }
+    }
+    fn halt(&mut self) {
+        self.steps.push("halt".into());
+    }
+    fn rolling_back(&mut self, on: bool) {
+        self.steps.push(format!("rolling back {on}"));
+    }
+}
+
+#[test]
+fn fr14_the_rollback_holds_the_guest_from_halting_the_failed_image_to_booting_the_previous() {
+    let (store, _, _) = staged_store();
+    let mut guest = RecordingGuest {
+        boots: vec!["16.0.1".into()],
+        steps: vec![],
+    };
+    let outcome = trial::start(&store, &mut guest, Duration::from_secs(120)).unwrap();
+    assert!(matches!(outcome, Outcome::RolledBack { .. }), "{outcome:?}");
+    assert_eq!(
+        guest.steps,
+        [
+            "boot 16.0.2",
+            "rolling back true",
+            "halt",
+            "boot 16.0.1",
+            "rolling back false"
+        ]
+    );
+}
+
+#[test]
+fn fr14_a_previous_image_that_does_not_finish_booting_stays_current_and_the_failed_one_marked() {
+    let (store, root, manifest) = staged_store();
+    let mut guest = RecordingGuest {
+        boots: vec![],
+        steps: vec![],
+    };
+    let outcome = trial::start(&store, &mut guest, Duration::from_secs(120)).unwrap();
+    match outcome {
+        Outcome::RolledBackNotReady {
+            failed,
+            reason,
+            image,
+            why,
+        } => {
+            assert_eq!(failed.version, "16.0.2");
+            assert_eq!(reason, "16.0.2 stalled");
+            assert_eq!(image.version, "16.0.1");
+            assert_eq!(why, "16.0.1 stalled");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(
+        guest.steps.last().map(String::as_str),
+        Some("rolling back false")
+    );
+    // The previous image stays current, out of trial, so the next start boots it plainly.
+    let state = store.state().unwrap();
+    assert_eq!(state.current.version, "16.0.1");
+    assert!(!state.on_trial);
+    assert_eq!(state.failed, ["16.0.2"]);
+    assert!(root.join("images/16.0.1").exists());
+    let mut next = RecordingGuest {
+        boots: vec!["16.0.1".into()],
+        steps: vec![],
+    };
+    let outcome = trial::start(&store, &mut next, Duration::from_secs(120)).unwrap();
+    assert!(
+        matches!(
+            outcome,
+            Outcome::Booted {
+                confirmed: false,
+                ..
+            }
+        ),
+        "{outcome:?}"
+    );
+    assert_eq!(next.steps, ["boot 16.0.1"]);
+    assert_eq!(
+        decide(&state.current, &manifest, &state.failed),
+        Decision::UpToDate
+    );
+}
+
+#[test]
+fn fr14_a_failed_image_is_skipped_until_a_newer_build_of_it_is_offered() {
+    let (store, _, mut manifest) = staged_store();
+    let mut guest = RecordingGuest {
+        boots: vec!["16.0.1".into()],
+        steps: vec![],
+    };
+    trial::start(&store, &mut guest, Duration::from_secs(120)).unwrap();
+    let state = store.state().unwrap();
+    assert_eq!(
+        decide(&state.current, &manifest, &state.failed),
+        Decision::UpToDate,
+        "the failed build is not offered again"
+    );
+    let newer = image("16.0.3", 16, 3, b"third image");
+    manifest.images.push(newer.clone());
+    assert_eq!(
+        decide(&state.current, &manifest, &state.failed),
+        Decision::Apply(newer)
+    );
+}

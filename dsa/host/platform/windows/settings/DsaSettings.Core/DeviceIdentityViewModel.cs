@@ -28,7 +28,7 @@ public sealed class IdentityField : ObservableObject
     public string Label => _text.Get($"Identity_{JsonKey}");
     public string Description => _text.Get($"Identity_{JsonKey}_Description");
 
-    /// <summary>What the user typed; empty means the image's own value.</summary>
+    /// <summary>What the user typed; empty means the default: the computer's value or DSA's.</summary>
     public string Value
     {
         get => _value;
@@ -51,11 +51,46 @@ public sealed class IdentityField : ObservableObject
 
     internal string Saved => _saved;
 
-    internal void Load(string chosen, string effective)
+    /// <summary>Where the default came from: <c>computer</c> or <c>dsa</c>.</summary>
+    public string Origin { get; private set; } = "dsa";
+    /// <summary>Where the default came from, for people: this computer, or DSA's own value.</summary>
+    public string OriginText => DeviceIdentityViewModel.OriginText(_text, Origin);
+
+    internal void Load(string chosen, string effective, string origin)
     {
         _saved = chosen;
         _value = chosen;
         _effective = effective;
+        Origin = origin;
+        ChangedAll();
+    }
+}
+
+/// <summary>A value Android reports that follows the computer and is not chosen: the model
+/// name, the device name and the chip.</summary>
+public sealed class ComputerValue : ObservableObject
+{
+    private readonly ITextSource _text;
+
+    internal ComputerValue(string key, ITextSource text)
+    {
+        Key = key;
+        _text = text;
+    }
+
+    /// <summary>The key in dsa's JSON.</summary>
+    public string Key { get; }
+    public string Label => _text.Get($"Identity_{Key}");
+    public string Description => _text.Get($"Identity_{Key}_Description");
+    /// <summary>The value; when the computer does not say, a note that Android keeps its own.</summary>
+    public string Value { get; private set; } = "";
+    public string Origin { get; private set; } = "dsa";
+    public string OriginText => DeviceIdentityViewModel.OriginText(_text, Origin);
+
+    internal void Load(string value, string origin)
+    {
+        Value = value.Length > 0 ? value : _text.Get("Identity_NotSaid");
+        Origin = origin;
         ChangedAll();
     }
 }
@@ -153,7 +188,19 @@ public sealed class DeviceIdentityViewModel : ObservableObject
         }
         Names = new ObservableCollection<IdentityField>(Keys.Take(6).Select(k => _fields[k]));
         FingerprintParts = new ObservableCollection<IdentityField>(Keys.Skip(6).Take(5).Select(k => _fields[k]));
+        ComputerValues = new ObservableCollection<ComputerValue>(ComputerKeys.Select(k => new ComputerValue(k, text)));
     }
+
+    /// <summary>The values that follow the computer, in the order the page shows them.</summary>
+    public static readonly string[] ComputerKeys = { "model_name", "device_name", "soc_manufacturer", "soc_model" };
+
+    /// <summary>The model name, the device name and the chip, which follow the computer.</summary>
+    public ObservableCollection<ComputerValue> ComputerValues { get; }
+
+    public ComputerValue Computer(string key) => ComputerValues.First(v => v.Key == key);
+
+    internal static string OriginText(ITextSource text, string origin) =>
+        text.Get(origin == "computer" ? "Identity_FromComputer" : "Identity_FromDsa");
 
     /// <summary>Manufacturer, brand, model, device, product name and form factor.</summary>
     public ObservableCollection<IdentityField> Names { get; }
@@ -237,9 +284,15 @@ public sealed class DeviceIdentityViewModel : ObservableObject
                 && o.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String
                 ? v.GetString() ?? ""
                 : "";
+        // A service from before the computer's identity says no source: every default is DSA's.
+        string Origin(string key) => Text(report, "sources", key) is "computer" ? "computer" : "dsa";
         foreach (var field in _fields.Values)
         {
-            field.Load(Text(report, "chosen", field.JsonKey), Text(report, "effective", field.JsonKey));
+            field.Load(Text(report, "chosen", field.JsonKey), Text(report, "effective", field.JsonKey), Origin(field.JsonKey));
+        }
+        foreach (var value in ComputerValues)
+        {
+            value.Load(Text(report, "effective", value.Key), Origin(value.Key));
         }
         _loaded = true;
     }
@@ -284,7 +337,7 @@ public sealed class DeviceIdentityViewModel : ObservableObject
     });
 
     /// <summary>Sends each value the user changed: a typed one is set, an emptied one goes
-    /// back to the image's own.</summary>
+    /// back to the default.</summary>
     public Task SaveAsync() => Run(async () =>
     {
         if (HasProblems)
@@ -307,7 +360,7 @@ public sealed class DeviceIdentityViewModel : ObservableObject
         }
     });
 
-    /// <summary>Puts every value back to the image's own.</summary>
+    /// <summary>Puts every value back to the default: the computer's, or DSA's own where the computer says nothing.</summary>
     public Task ResetAsync() => Run(async () =>
     {
         Show(await RunJsonAsync("settings", "reset", "device").ConfigureAwait(true));

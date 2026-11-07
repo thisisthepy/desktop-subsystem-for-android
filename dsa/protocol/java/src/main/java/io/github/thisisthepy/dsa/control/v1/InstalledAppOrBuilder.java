@@ -124,4 +124,55 @@ public interface InstalledAppOrBuilder extends
    * @return The cacheBytes.
    */
   long getCacheBytes();
+
+  /**
+   * <pre>
+   * The ABI the app's native code runs as (the package manager's primary CPU ABI), such as
+   * "x86_64" or "arm64-v8a". Empty for an app without native code.
+   * </pre>
+   *
+   * <code>string primary_abi = 12;</code>
+   * @return The primaryAbi.
+   */
+  java.lang.String getPrimaryAbi();
+  /**
+   * <pre>
+   * The ABI the app's native code runs as (the package manager's primary CPU ABI), such as
+   * "x86_64" or "arm64-v8a". Empty for an app without native code.
+   * </pre>
+   *
+   * <code>string primary_abi = 12;</code>
+   * @return The bytes for primaryAbi.
+   */
+  com.google.protobuf.ByteString
+      getPrimaryAbiBytes();
+
+  /**
+   * <pre>
+   * The native libraries the app's APKs on the device hold, base and splits together, by
+   * ABI, in ABI order. Empty for an app without native code.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.NativeLibraries native_libraries = 13;</code>
+   */
+  java.util.List<io.github.thisisthepy.dsa.control.v1.NativeLibraries> 
+      getNativeLibrariesList();
+  /**
+   * <pre>
+   * The native libraries the app's APKs on the device hold, base and splits together, by
+   * ABI, in ABI order. Empty for an app without native code.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.NativeLibraries native_libraries = 13;</code>
+   */
+  io.github.thisisthepy.dsa.control.v1.NativeLibraries getNativeLibraries(int index);
+  /**
+   * <pre>
+   * The native libraries the app's APKs on the device hold, base and splits together, by
+   * ABI, in ABI order. Empty for an app without native code.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.NativeLibraries native_libraries = 13;</code>
+   */
+  int getNativeLibrariesCount();
 }

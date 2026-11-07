@@ -41,6 +41,13 @@ inline uint64_t shadowBlockHash(const uint8_t* data, size_t size) {
             lanes[lane] = (lanes[lane] ^ words[lane]) * kPrime;
         }
     }
+    // Up to 31 bytes are left: whole words go into the lanes one by one, and the last few
+    // bytes into a word of their own. The tail word holds 8 bytes, so it never takes more.
+    for (int lane = 0; size - at >= sizeof(uint64_t); at += sizeof(uint64_t), lane++) {
+        uint64_t word;
+        std::memcpy(&word, data + at, sizeof(word));
+        lanes[lane] = (lanes[lane] ^ word) * kPrime;
+    }
     uint64_t tail = 0;
     if (at != size) {
         std::memcpy(&tail, data + at, size - at);

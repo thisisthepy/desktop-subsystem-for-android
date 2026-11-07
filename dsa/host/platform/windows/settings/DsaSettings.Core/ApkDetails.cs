@@ -5,14 +5,25 @@ using System.Text.Json;
 
 namespace Dsa.Settings.Core;
 
-/// <summary>One layer of an adaptive icon: an image, a colour, or something the window does
-/// not draw.</summary>
-public sealed record ApkIconLayer(byte[]? Png, uint? Color);
+/// <summary>One path of a vector drawable: its path data in the SVG path syntax, its fill
+/// and stroke as 0xAARRGGBB (null for none), and the transform of the groups it is in, as
+/// a, b, c, d, e, f (x' = a x + c y + e, y' = b x + d y + f).</summary>
+public sealed record ApkVectorPath(string Data, uint? Fill, uint? Stroke, double StrokeWidth, bool EvenOdd,
+    IReadOnlyList<double> Transform);
 
-/// <summary>An app's launcher icon: one image, or an adaptive icon's two layers.</summary>
-public sealed record ApkIcon(byte[]? Png, ApkIconLayer? Background, ApkIconLayer? Foreground)
+/// <summary>A vector drawable: its viewport, how far it is inset in its bounds (a fraction of
+/// each side), and its paths.</summary>
+public sealed record ApkVector(double Width, double Height, double Inset, IReadOnlyList<ApkVectorPath> Paths);
+
+/// <summary>One layer of an adaptive icon: an image, a colour, a vector drawable, or
+/// something the window does not draw.</summary>
+public sealed record ApkIconLayer(byte[]? Png, uint? Color, ApkVector? Vector = null);
+
+/// <summary>An app's launcher icon: one image, a vector drawable, or an adaptive icon's two
+/// layers.</summary>
+public sealed record ApkIcon(byte[]? Png, ApkIconLayer? Background, ApkIconLayer? Foreground, ApkVector? Vector = null)
 {
-    public bool IsAdaptive => Png is null;
+    public bool IsAdaptive => Png is null && Vector is null;
 }
 
 /// <summary>A permission an app asks for, in plain words.</summary>
@@ -34,7 +45,9 @@ public enum ApkInstallKind
 }
 
 /// <summary>What <c>dsa apk-info</c> says of an APK: the file's own information, and when
-/// Android runs, what it has of the app.</summary>
+/// Android runs, what it has of the app. Of a split-APK bundle, the information is its base
+/// APK's, and <see cref="Apks"/>, <see cref="Obbs"/> and <see cref="TotalSize"/> say what
+/// installing it sends.</summary>
 public sealed record ApkDetails(
     string Package,
     string? Label,
@@ -52,8 +65,20 @@ public sealed record ApkDetails(
     IReadOnlyList<string> Abis,
     bool AndroidRunning,
     InstalledApp? Installed,
-    ApkInstallKind Kind)
+    ApkInstallKind Kind,
+    string Format = "apk",
+    IReadOnlyList<string>? Apks = null,
+    int SplitCount = 0,
+    IReadOnlyList<string>? Obbs = null,
+    long TotalSize = 0)
 {
+    /// <summary>Whether the file is a split-APK bundle rather than one APK.</summary>
+    public bool IsBundle => Format != "apk";
+
+    /// <summary>The size of everything installing the file sends: the APK, or the bundle's
+    /// chosen APKs and its expansion files together.</summary>
+    public long InstallSize => TotalSize > 0 ? TotalSize : Size;
+
     /// <summary>Reads the JSON <c>dsa apk-info --json</c> prints.</summary>
     public static ApkDetails Parse(string json)
     {
@@ -84,6 +109,10 @@ public sealed record ApkDetails(
             scheme = Text(signer, "scheme");
             sha256 = Text(signer, "sha256");
         }
+        static List<string> Names(JsonElement root, string name) =>
+            root.TryGetProperty(name, out var list) && list.ValueKind == JsonValueKind.Array
+                ? list.EnumerateArray().Where(n => n.ValueKind == JsonValueKind.String).Select(n => n.GetString()!).ToList()
+                : new List<string>();
         var kind = Text(root, "install") switch
         {
             "new" => ApkInstallKind.New,
@@ -110,7 +139,12 @@ public sealed record ApkDetails(
             abis,
             Text(root, "android") == "running",
             installed,
-            kind);
+            kind,
+            Text(root, "format") ?? "apk",
+            Names(root, "apks"),
+            (int)Long(root, "split_count"),
+            Names(root, "obbs"),
+            Long(root, "total_size"));
     }
 
     private static ApkIcon? ReadIcon(JsonElement icon)
@@ -125,8 +159,46 @@ public sealed record ApkDetails(
             "adaptive" => new ApkIcon(null,
                 icon.TryGetProperty("background", out var b) ? ReadLayer(b) : null,
                 icon.TryGetProperty("foreground", out var f) ? ReadLayer(f) : null),
+            "vector" => ReadVector(icon) is { } vector ? new ApkIcon(null, null, null, vector) : null,
             _ => null,
         };
+    }
+
+    private static uint? Argb(JsonElement element, string name)
+    {
+        var text = Text(element, name)?.TrimStart('#');
+        return text is not null && uint.TryParse(text, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var argb)
+            ? argb
+            : null;
+    }
+
+    private static double Number(JsonElement element, string name, double fallback) =>
+        element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number ? value.GetDouble() : fallback;
+
+    /// <summary>A vector drawable as <c>dsa apk-info</c> prints it; null when it draws nothing.</summary>
+    private static ApkVector? ReadVector(JsonElement vector)
+    {
+        var width = Number(vector, "width", 0);
+        var height = Number(vector, "height", 0);
+        if (width <= 0 || height <= 0 || !vector.TryGetProperty("paths", out var paths) || paths.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+        var read = new List<ApkVectorPath>();
+        foreach (var path in paths.EnumerateArray())
+        {
+            if (path.ValueKind != JsonValueKind.Object || Text(path, "data") is not { } data)
+            {
+                continue;
+            }
+            var transform = path.TryGetProperty("transform", out var t) && t.ValueKind == JsonValueKind.Array
+                && t.GetArrayLength() == 6 && t.EnumerateArray().All(n => n.ValueKind == JsonValueKind.Number)
+                ? t.EnumerateArray().Select(n => n.GetDouble()).ToList()
+                : new List<double> { 1, 0, 0, 1, 0, 0 };
+            read.Add(new ApkVectorPath(data, Argb(path, "fill"), Argb(path, "stroke"), Number(path, "stroke_width", 0),
+                path.TryGetProperty("even_odd", out var e) && e.ValueKind == JsonValueKind.True, transform));
+        }
+        return read.Count > 0 ? new ApkVector(width, height, Number(vector, "inset", 0), read) : null;
     }
 
     private static ApkIconLayer? ReadLayer(JsonElement layer)
@@ -140,10 +212,9 @@ public sealed record ApkDetails(
             case "image":
                 return Bytes(layer, "png") is { } png ? new ApkIconLayer(png, null) : null;
             case "color":
-                var text = Text(layer, "color")?.TrimStart('#');
-                return text is not null && uint.TryParse(text, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var argb)
-                    ? new ApkIconLayer(null, argb)
-                    : null;
+                return Argb(layer, "color") is { } argb ? new ApkIconLayer(null, argb) : null;
+            case "vector":
+                return ReadVector(layer) is { } vector ? new ApkIconLayer(null, null, vector) : null;
             default:
                 return null;
         }

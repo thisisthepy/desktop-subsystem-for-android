@@ -567,6 +567,7 @@ struct GfxstreamWire {
 impl GfxstreamWire {
     const RC_GET_RENDERER_VERSION: u32 = 10000;
     const RC_SET_PUID: u32 = 10033;
+    const RC_CREATE_COLOR_BUFFER: u32 = 10012;
 
     const VK_CREATE_INSTANCE: u32 = 20000;
     const VK_ENUMERATE_PHYSICAL_DEVICES: u32 = 20002;
@@ -577,6 +578,7 @@ impl GfxstreamWire {
     const VK_GET_IMAGE_MEMORY_REQUIREMENTS: u32 = 20031;
     const VK_CREATE_IMAGE_VIEW: u32 = 20057;
     const VK_GET_IMAGE_MEMORY_REQUIREMENTS_2: u32 = 20144;
+    const VK_DEVICE_WAIT_IDLE: u32 = 20020;
 
     fn new(mut connection: Box<dyn Connection>) -> GfxstreamWire {
         // Every stream starts with the guest's client flags.
@@ -634,6 +636,20 @@ impl GfxstreamWire {
         u64::from_be_bytes(self.read(8).try_into().unwrap())
     }
 
+    /// Whether the host ended this stream: the guest sees its connection close.
+    fn closed(&mut self) -> bool {
+        let deadline = std::time::Instant::now() + WAIT;
+        while std::time::Instant::now() < deadline {
+            match self.connection.recv(Some(Duration::from_millis(100))) {
+                Ok(frame) if frame.is_empty() => return true,
+                Ok(_) => continue,
+                Err(dsa_transport::TransportError::Timeout) => continue,
+                Err(_) => return true,
+            }
+        }
+        false
+    }
+
     fn renderer_version(&mut self) -> i32 {
         self.render_control(Self::RC_GET_RENDERER_VERSION, &[]);
         self.read_u32() as i32
@@ -682,6 +698,8 @@ impl VkBody {
 
 const VK_SUCCESS: u32 = 0;
 const VK_INCOMPLETE: u32 = 5;
+const VK_ERROR_DEVICE_LOST: u32 = -4i32 as u32;
+const GL_RGBA: u32 = 0x1908;
 const VK_STRUCTURE_TYPE_APPLICATION_INFO: u32 = 0;
 const VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO: u32 = 1;
 const VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO: u32 = 2;
@@ -929,4 +947,179 @@ fn nfr5_unknown_vulkan_image_is_rejected_without_reaching_the_driver() {
     cmd_thread.join().expect("command stream ends");
     pipe.close();
     pipe_thread.join().expect("process pipe ends");
+}
+
+/// The renderer for the NFR-5 renderer tests, or `None` (the test is skipped) when
+/// `GFXSTREAM_BACKEND_PATH` does not name one.
+fn test_renderer() -> Option<Arc<GfxstreamAdapter>> {
+    let dll_path = match std::env::var("GFXSTREAM_BACKEND_PATH") {
+        Ok(path) if !path.is_empty() => std::path::PathBuf::from(path),
+        _ => {
+            eprintln!("skipping: GFXSTREAM_BACKEND_PATH not set");
+            return None;
+        }
+    };
+    if !dll_path.exists() {
+        eprintln!("skipping: library not found at {}", dll_path.display());
+        return None;
+    }
+    let adapter = Arc::new(GfxstreamAdapter::new(Some(dll_path)));
+    assert!(adapter.is_available(), "the host renderer loads");
+    Some(adapter)
+}
+
+/// One guest process on `adapter`: its process pipe, which stays open (closing it ends the
+/// process on the host), and its puid.
+struct GuestProcess {
+    pipe: Box<dyn Connection>,
+    thread: thread::JoinHandle<()>,
+    puid: u64,
+}
+
+impl GuestProcess {
+    fn start(adapter: &Arc<GfxstreamAdapter>) -> GuestProcess {
+        let (mut pipe_server, mut pipe_client) = memory::pair();
+        let pipe_adapter = Arc::clone(adapter);
+        let thread = thread::spawn(move || {
+            let conn = pipe_server.accept(WAIT).expect("accept process pipe");
+            pipe_adapter
+                .serve_stream(GraphicsStreamKind::ProcessPipe, conn)
+                .expect("serve process pipe");
+        });
+        let mut pipe = pipe_client.connect(WAIT).expect("connect process pipe");
+        pipe.send(&100i32.to_le_bytes()).expect("send confirm code");
+        let puid = u64::from_le_bytes(
+            pipe.recv(Some(WAIT))
+                .expect("receive puid")
+                .try_into()
+                .expect("an 8-byte puid"),
+        );
+        GuestProcess { pipe, thread, puid }
+    }
+
+    /// A command stream of this process, and the thread that serves it.
+    fn stream(&self, adapter: &Arc<GfxstreamAdapter>) -> (GfxstreamWire, thread::JoinHandle<()>) {
+        let (mut cmd_server, mut cmd_client) = memory::pair();
+        let cmd_adapter = Arc::clone(adapter);
+        let thread = thread::spawn(move || {
+            let conn = cmd_server.accept(WAIT).expect("accept command stream");
+            cmd_adapter
+                .serve_stream(GraphicsStreamKind::Command, conn)
+                .expect("serve command stream");
+        });
+        let mut wire =
+            GfxstreamWire::new(cmd_client.connect(WAIT).expect("connect command stream"));
+        wire.render_control(GfxstreamWire::RC_SET_PUID, &self.puid.to_le_bytes());
+        (wire, thread)
+    }
+
+    fn end(mut self) {
+        self.pipe.close();
+        self.thread.join().expect("process pipe ends");
+    }
+}
+
+fn device_wait_idle(wire: &mut GfxstreamWire, device: u64) -> u32 {
+    wire.vulkan(
+        GfxstreamWire::VK_DEVICE_WAIT_IDLE,
+        &VkBody::default().u64(device).done(),
+    );
+    wire.read_u32()
+}
+
+#[test]
+fn nfr5_a_guest_command_the_renderer_cannot_carry_out_ends_only_its_stream() {
+    let Some(adapter) = test_renderer() else {
+        return;
+    };
+
+    // A guest that sends a layer name of 4 GiB: the decoder cannot allocate it, and it used
+    // to end the whole process with every window in it.
+    let bad = GuestProcess::start(&adapter);
+    let (mut wire, bad_thread) = bad.stream(&adapter);
+    assert!(wire.renderer_version() > 0, "renderControl answers");
+    let mut create_instance = VkBody::default()
+        .s_type(VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO)
+        .u32(0) // flags
+        .ptr(false) // pApplicationInfo
+        .u32(1) // enabledLayerCount
+        .done();
+    create_instance.extend_from_slice(&1u32.to_be_bytes()); // one layer name
+    create_instance.extend_from_slice(&u32::MAX.to_be_bytes()); // of u32::MAX bytes
+    wire.vulkan(GfxstreamWire::VK_CREATE_INSTANCE, &create_instance);
+    assert!(
+        wire.closed(),
+        "the renderer ends the stream of the guest that sent it"
+    );
+    bad_thread.join().expect("the bad guest's stream ends");
+    bad.end();
+
+    // Another guest is served as before: the renderer, and the process, are still there.
+    let good = GuestProcess::start(&adapter);
+    let (mut wire, good_thread) = good.stream(&adapter);
+    assert!(
+        wire.renderer_version() > 0,
+        "the renderer serves other guests"
+    );
+    let device = create_vulkan_device(&mut wire);
+    assert_eq!(device_wait_idle(&mut wire, device), VK_SUCCESS);
+    drop(wire);
+    good_thread.join().expect("command stream ends");
+    good.end();
+}
+
+#[test]
+fn nfr5_a_lost_device_is_reported_to_the_guest_and_made_again() {
+    let Some(adapter) = test_renderer() else {
+        return;
+    };
+    let process = GuestProcess::start(&adapter);
+    let (mut wire, cmd_thread) = process.stream(&adapter);
+    assert!(wire.renderer_version() > 0, "renderControl answers");
+    let lost = create_vulkan_device(&mut wire);
+    assert_eq!(device_wait_idle(&mut wire, lost), VK_SUCCESS);
+    let before = adapter.device_generation();
+
+    // What a GPU reset does to every device on the GPU: their queue and fence calls fail.
+    assert!(
+        adapter.simulate_device_loss(),
+        "the renderer can lose its devices"
+    );
+
+    // The guest's call on its lost device gets the loss, where it used to end the process.
+    assert_eq!(
+        device_wait_idle(&mut wire, lost),
+        VK_ERROR_DEVICE_LOST,
+        "the guest learns its device is lost"
+    );
+    assert!(
+        wire.renderer_version() > 0,
+        "the renderer keeps serving the guest"
+    );
+
+    // The renderer's own device is made again at its next operation, and buffers work.
+    let args = [64u32, 64, GL_RGBA]
+        .iter()
+        .flat_map(|value| value.to_le_bytes())
+        .collect::<Vec<u8>>();
+    wire.render_control(GfxstreamWire::RC_CREATE_COLOR_BUFFER, &args);
+    assert_ne!(
+        wire.read_u32(),
+        0,
+        "a color buffer is made on the new device"
+    );
+    assert_eq!(
+        adapter.device_generation(),
+        before + 1,
+        "the renderer made its device again"
+    );
+
+    // The guest makes a new device of its own, as it does after a loss, and it works.
+    let made_again = create_vulkan_device(&mut wire);
+    assert_ne!(made_again, lost, "the guest has a new device");
+    assert_eq!(device_wait_idle(&mut wire, made_again), VK_SUCCESS);
+
+    drop(wire);
+    cmd_thread.join().expect("command stream ends");
+    process.end();
 }

@@ -5,6 +5,13 @@
 //! task's frames, reconnects when the VM restarts, and exits cleanly on sign-out.
 #![windows_subsystem = "windows"]
 
+/// Counts what the window manager's own code allocates, so its memory breakdown can tell that
+/// apart from what drivers and the renderer hold in the same heap.
+#[cfg(windows)]
+#[global_allocator]
+static ALLOCATOR: dsa_host_windows::compositor::committed::CountingAllocator =
+    dsa_host_windows::compositor::committed::CountingAllocator;
+
 #[cfg(not(windows))]
 fn main() -> std::process::ExitCode {
     eprintln!("dsa-wm runs on Windows only");
@@ -76,6 +83,10 @@ fn main() {
     }
 
     dsa_host_windows::compositor::log::input_trace_to(logger.clone());
+    // A panic, and a fatal error in the graphics renderer, say why in the log before the
+    // process ends: it has no console.
+    dsa_host_windows::compositor::log::log_panics_to(logger.clone());
+    dsa_host_windows::compositor::log::renderer_log_to(logger.clone());
 
     let config = CompositorConfig::default();
 

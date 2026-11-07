@@ -161,7 +161,10 @@ impl State {
         client: HostApiClient,
         serial: u32,
     ) {
-        let surface = self.windows.get(&task_id).map(|window| window.surface.clone());
+        let surface = self
+            .windows
+            .get(&task_id)
+            .map(|window| window.surface.clone());
         let source_data = Arc::new(DragOutSource {
             offer,
             client: Mutex::new(client),

@@ -1,0 +1,9 @@
+# Google Play, imported from the product build.prop when the host has said
+# androidboot.dsa.gapps=on (dsa-gapps.rc lays the Google apps over /product and /system_ext).
+# The package manager takes a boot whose partitions' fingerprints differ from the last boot's as
+# an upgrade: it scans the system apps again, installs the ones that appeared for every user,
+# and grants Google's apps the runtime permissions their default-permissions files list, which
+# it does only on a first boot or an upgrade. The image has no oem partition, so its
+# fingerprint is DSA's to set: it changes the digest the package manager compares and nothing an
+# app reads. Removing Google Play changes it back, which is an upgrade too.
+ro.oem.build.fingerprint=DSA/gapps/on:user/release-keys

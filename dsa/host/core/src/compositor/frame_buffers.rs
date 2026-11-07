@@ -35,6 +35,33 @@ pub fn swapchain_buffers() -> u32 {
     3
 }
 
+/// How long a shown window goes without a new frame before its swapchain lets its third
+/// buffer go. A still window needs no free buffer to copy into, and the buffer holds a whole
+/// frame of the task's size; the next frame brings it back.
+pub const IDLE_SWAPCHAIN_DELAY: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// How many buffers a shown window's swapchain keeps when its last frame came `quiet_for`
+/// ago: the fewest a flip-model swapchain can have once the window is still.
+pub fn wanted_swapchain_buffers(quiet_for: std::time::Duration) -> u32 {
+    if quiet_for >= IDLE_SWAPCHAIN_DELAY {
+        2
+    } else {
+        swapchain_buffers()
+    }
+}
+
+/// How many buffers a window's swapchain is to have once a frame arrives, `since_last` after
+/// the one before (`None` for its first frame), when it was to have `wanted`. A lone frame of
+/// a still window is shown with the two buffers it has: taking the third back means resizing
+/// the swapchain, which takes longer than waiting for the next vertical blank. A second frame
+/// soon after says the window is drawing again, and the third buffer comes back.
+pub fn buffers_after_frame(wanted: u32, since_last: Option<std::time::Duration>) -> u32 {
+    match since_last {
+        Some(gap) if gap >= IDLE_SWAPCHAIN_DELAY => wanted,
+        _ => swapchain_buffers(),
+    }
+}
+
 /// What a swapchain whose buffers are `current` pixels (`None` when there is none) needs to
 /// show frames from a texture of `texture` pixels. The buffers follow the texture, which is
 /// the largest a frame can be, never a frame's own size, so a window resize changes nothing
@@ -152,6 +179,30 @@ impl HiddenBuffers {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nfr2_a_still_window_keeps_two_buffers_and_a_drawing_one_three() {
+        use std::time::Duration;
+        assert_eq!(
+            wanted_swapchain_buffers(Duration::ZERO),
+            swapchain_buffers()
+        );
+        assert_eq!(wanted_swapchain_buffers(Duration::from_millis(500)), 3);
+        assert_eq!(wanted_swapchain_buffers(IDLE_SWAPCHAIN_DELAY), 2);
+        assert_eq!(wanted_swapchain_buffers(Duration::from_secs(60)), 2);
+        assert!(IDLE_SWAPCHAIN_DELAY <= Duration::from_secs(2));
+    }
+
+    #[test]
+    fn nfr2_a_lone_frame_of_a_still_window_does_not_take_its_third_buffer_back() {
+        use std::time::Duration;
+        // The first frame, and frames in quick succession, get all three buffers.
+        assert_eq!(buffers_after_frame(3, None), 3);
+        assert_eq!(buffers_after_frame(2, Some(Duration::from_millis(16))), 3);
+        // A frame after a still spell keeps the two buffers the window has.
+        assert_eq!(buffers_after_frame(2, Some(IDLE_SWAPCHAIN_DELAY)), 2);
+        assert_eq!(buffers_after_frame(3, Some(Duration::from_secs(10))), 3);
+    }
 
     #[test]
     fn nfr1_a_minimized_window_lets_its_buffers_go_once_and_holds_its_frames() {

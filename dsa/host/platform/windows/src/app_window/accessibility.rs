@@ -156,7 +156,7 @@ impl Shared {
     }
 }
 
-fn not_available() -> Error {
+pub(crate) fn not_available() -> Error {
     Error::from_hresult(HRESULT(UIA_E_ELEMENTNOTAVAILABLE as i32))
 }
 
@@ -165,11 +165,11 @@ fn invalid_operation() -> Error {
 }
 
 /// No element: S_OK with a null pointer, as UI Automation expects for "nothing there".
-fn none<T>() -> windows::core::Result<T> {
+pub(crate) fn none<T>() -> windows::core::Result<T> {
     Err(Error::empty())
 }
 
-fn variant_i4(value: i32) -> VARIANT {
+pub(crate) fn variant_i4(value: i32) -> VARIANT {
     let mut variant = VARIANT::default();
     // SAFETY: writing the tag and the matching member of a fresh VARIANT.
     unsafe {
@@ -180,7 +180,7 @@ fn variant_i4(value: i32) -> VARIANT {
     variant
 }
 
-fn variant_bool(value: bool) -> VARIANT {
+pub(crate) fn variant_bool(value: bool) -> VARIANT {
     let mut variant = VARIANT::default();
     // SAFETY: as above.
     unsafe {
@@ -191,7 +191,7 @@ fn variant_bool(value: bool) -> VARIANT {
     variant
 }
 
-fn variant_str(value: &str) -> VARIANT {
+pub(crate) fn variant_str(value: &str) -> VARIANT {
     let mut variant = VARIANT::default();
     // SAFETY: as above; the caller owns the string with the VARIANT.
     unsafe {
@@ -202,7 +202,7 @@ fn variant_str(value: &str) -> VARIANT {
     variant
 }
 
-fn variant_empty() -> VARIANT {
+pub(crate) fn variant_empty() -> VARIANT {
     let mut variant = VARIANT::default();
     // SAFETY: as above.
     unsafe {
@@ -216,7 +216,7 @@ fn runtime_id(epoch: u32, id: u32) -> [i32; 3] {
     [UiaAppendRuntimeId as i32, epoch as i32, id as i32]
 }
 
-fn safe_array(values: &[i32]) -> windows::core::Result<*mut SAFEARRAY> {
+pub(crate) fn safe_array(values: &[i32]) -> windows::core::Result<*mut SAFEARRAY> {
     // SAFETY: a new vector of 4-byte integers, each element written once.
     unsafe {
         let array = SafeArrayCreateVector(VT_I4, 0, values.len() as u32);

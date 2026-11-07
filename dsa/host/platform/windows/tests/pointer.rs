@@ -2,16 +2,22 @@
 //! rules turn them into the guest's pointer events.
 #![cfg(windows)]
 
-use dsa_host_core::input::{buttons, ContactPhase, MouseButton, PointerTool};
-use dsa_host_windows::app_window::pointer::{
-    contact_phase, made_from_touch_or_pen, message_point, mouse_button, pen_tool_and_buttons,
-    pressure, wheel_notches,
+use dsa_host_core::input::{
+    buttons, ContactPhase, MouseButton, PointerMapper, PointerTool, WindowGeometry, WindowInput,
 };
+use dsa_host_windows::app_window::pointer::{
+    contact_phase, made_from_touch_or_pen, message_point, mouse_button, pen_input, pen_tilt,
+    pen_tool_and_buttons, pressure, touch_input, wheel_notches,
+};
+use dsa_protocol::control;
+use windows_sys::Win32::Foundation::POINT;
 use windows_sys::Win32::UI::Input::Pointer::{
-    POINTER_FLAG_CANCELED, POINTER_FLAG_INCONTACT, POINTER_FLAG_INRANGE,
+    POINTER_FLAG_CANCELED, POINTER_FLAG_DOWN, POINTER_FLAG_INCONTACT, POINTER_FLAG_INRANGE,
+    POINTER_FLAG_UP, POINTER_FLAG_UPDATE, POINTER_PEN_INFO, POINTER_TOUCH_INFO,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    PEN_FLAG_BARREL, PEN_FLAG_ERASER, PEN_FLAG_INVERTED, WM_LBUTTONDOWN, WM_LBUTTONUP,
+    PEN_FLAG_BARREL, PEN_FLAG_ERASER, PEN_FLAG_INVERTED, PEN_MASK_PRESSURE, PEN_MASK_TILT_X,
+    PEN_MASK_TILT_Y, PT_PEN, PT_TOUCH, TOUCH_MASK_PRESSURE, WM_LBUTTONDOWN, WM_LBUTTONUP,
     WM_MBUTTONDOWN, WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_POINTERCAPTURECHANGED,
     WM_POINTERDOWN, WM_POINTERLEAVE, WM_POINTERUP, WM_POINTERUPDATE, WM_RBUTTONDOWN, WM_RBUTTONUP,
     WM_XBUTTONDOWN, WM_XBUTTONUP,
@@ -150,20 +156,13 @@ fn fr5_pressure_runs_from_0_to_1() {
     assert_eq!(pressure(5000), 1.0);
 }
 
-#[test]
-fn fr5_windows_hands_a_windows_contacts_over_without_holding_them_back() {
-    use dsa_host_windows::app_window::pointer::{
-        deliver_contacts_at_once, tablet_service_property, TABLET_SERVICE_FLAGS,
-    };
-    use windows_sys::Win32::UI::Input::Touch::{IsTouchWindow, TWF_WANTPALM};
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DestroyWindow, GetPropW, WS_POPUP,
-    };
-
+/// A hidden window of this thread, for the tests that check how a window is set up.
+fn hidden_window() -> windows_sys::Win32::Foundation::HWND {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{CreateWindowExW, WS_POPUP};
     let class: Vec<u16> = "STATIC\0".encode_utf16().collect();
-    // SAFETY: a hidden window of this thread, destroyed below.
-    unsafe {
-        let hwnd = CreateWindowExW(
+    // SAFETY: the class name outlives the call; the caller destroys the window.
+    let hwnd = unsafe {
+        CreateWindowExW(
             0,
             class.as_ptr(),
             std::ptr::null(),
@@ -176,16 +175,251 @@ fn fr5_windows_hands_a_windows_contacts_over_without_holding_them_back() {
             std::ptr::null_mut(),
             std::ptr::null_mut(),
             std::ptr::null(),
-        );
-        assert!(!hwnd.is_null());
+        )
+    };
+    assert!(!hwnd.is_null());
+    hwnd
+}
+
+#[test]
+fn fr5_windows_hands_a_windows_contacts_over_without_holding_them_back() {
+    use dsa_host_windows::app_window::pointer::{
+        deliver_contacts_at_once, tablet_service_property, TABLET_SERVICE_FLAGS,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{DestroyWindow, GetPropW};
+
+    let hwnd = hidden_window();
+    // SAFETY: a live window of this thread, destroyed below.
+    unsafe {
         deliver_contacts_at_once(hwnd);
-        let mut flags = 0;
-        assert_ne!(IsTouchWindow(hwnd, &mut flags), 0);
-        assert_ne!(flags & TWF_WANTPALM, 0);
         assert_eq!(
             GetPropW(hwnd, tablet_service_property().as_ptr()) as usize,
             TABLET_SERVICE_FLAGS
         );
         DestroyWindow(hwnd);
     }
+}
+
+/// A finger on a touchscreen did nothing in an app: the window was registered for
+/// `WM_TOUCH`, so Windows sent its fingers as `WM_TOUCH` rather than as pointer messages,
+/// and the mouse messages it then made from them were dropped as made from touch.
+#[test]
+fn fr5_a_task_window_takes_its_fingers_as_pointer_messages_not_wm_touch() {
+    use dsa_host_windows::app_window::pointer::deliver_contacts_at_once;
+    use windows_sys::Win32::UI::Input::Touch::IsTouchWindow;
+    use windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow;
+
+    let hwnd = hidden_window();
+    // SAFETY: a live window of this thread, destroyed below.
+    unsafe {
+        deliver_contacts_at_once(hwnd);
+        let mut flags = 0;
+        assert_eq!(
+            IsTouchWindow(hwnd, &mut flags),
+            0,
+            "a window registered for WM_TOUCH gets no pointer messages for its fingers"
+        );
+        DestroyWindow(hwnd);
+    }
+}
+
+fn touch_info(pointer_id: u32, flags: u32, screen: (i32, i32)) -> POINTER_TOUCH_INFO {
+    // SAFETY: plain data, for which all zero is a valid value.
+    let mut touch: POINTER_TOUCH_INFO = unsafe { std::mem::zeroed() };
+    touch.pointerInfo.pointerType = PT_TOUCH;
+    touch.pointerInfo.pointerId = pointer_id;
+    touch.pointerInfo.pointerFlags = flags;
+    touch.pointerInfo.ptPixelLocation = POINT {
+        x: screen.0,
+        y: screen.1,
+    };
+    touch
+}
+
+const DOWN: u32 = POINTER_FLAG_INRANGE | POINTER_FLAG_INCONTACT | POINTER_FLAG_DOWN;
+const MOVING: u32 = POINTER_FLAG_INRANGE | POINTER_FLAG_INCONTACT | POINTER_FLAG_UPDATE;
+const LIFTED: u32 = POINTER_FLAG_UP;
+
+#[test]
+fn fr5_a_fingers_pointer_message_is_a_touch_contact_in_client_pixels() {
+    // The client area begins at (1000, 400) on the screen.
+    let mut touch = touch_info(1503, DOWN, (1250, 700));
+    assert_eq!(
+        touch_input(WM_POINTERDOWN, &touch, (1000, 400)),
+        Some(WindowInput::Contact {
+            tool: PointerTool::Touch,
+            pointer_id: 1503,
+            phase: ContactPhase::Down,
+            position: (250.0, 300.0),
+            pressure: None,
+            buttons: 0,
+            tilt: (0.0, 0.0),
+        })
+    );
+    touch.touchMask = TOUCH_MASK_PRESSURE;
+    touch.pressure = 256;
+    let Some(WindowInput::Contact { pressure, .. }) =
+        touch_input(WM_POINTERDOWN, &touch, (1000, 400))
+    else {
+        panic!("a finger down is a contact");
+    };
+    assert_eq!(pressure, Some(0.25));
+    // A finger held past the window's left edge goes on, as the mouse does.
+    let left = touch_info(1503, MOVING, (990, 700));
+    let Some(WindowInput::Contact { position, .. }) =
+        touch_input(WM_POINTERUPDATE, &left, (1000, 400))
+    else {
+        panic!("a moving finger is a contact");
+    };
+    assert_eq!(position, (-10.0, 300.0));
+    // A finger that is not touching is nothing.
+    let away = touch_info(
+        1503,
+        POINTER_FLAG_INRANGE | POINTER_FLAG_UPDATE,
+        (1250, 700),
+    );
+    assert_eq!(touch_input(WM_POINTERUPDATE, &away, (1000, 400)), None);
+}
+
+/// The window at 200%: its client pixels are the task's pixels, so a finger lands on the
+/// task pixel under it, below the title bar as above it.
+#[test]
+fn fr5_at_200_percent_a_finger_lands_on_the_task_pixel_under_it() {
+    let origin = (2000, 800);
+    let geometry = WindowGeometry {
+        client: (1600, 1200),
+        task: (1600, 1200),
+    };
+    let mut mapper = PointerMapper::new(3);
+    for (screen, expected) in [
+        ((2000, 800), (0.0, 0.0)),
+        ((2000 + 1599, 800 + 1199), (1599.0, 1199.0)),
+        // Under the title bar band, which is part of the client area.
+        ((2000 + 800, 800 + 70), (800.0, 70.0)),
+    ] {
+        let input = touch_input(WM_POINTERDOWN, &touch_info(5, DOWN, screen), origin)
+            .expect("a finger down is a contact");
+        let event = mapper.handle(input, geometry).events[0];
+        assert_eq!((event.x, event.y), expected, "a finger at {screen:?}");
+    }
+}
+
+/// Ten fingers, a pinch, and every finger lifted: each finger keeps its own pointer from
+/// the window's messages to the control channel, in the order the fingers touched.
+#[test]
+fn fr5_ten_fingers_and_a_pinch_reach_the_control_channel_finger_by_finger() {
+    let origin = (300, 200);
+    let geometry = WindowGeometry {
+        client: (800, 600),
+        task: (800, 600),
+    };
+    let mut mapper = PointerMapper::new(7);
+    let mut sent = Vec::new();
+    let mut feed = |message: u32, touch: POINTER_TOUCH_INFO| {
+        let input = touch_input(message, &touch, origin).expect("a touching finger");
+        for event in mapper.handle(input, geometry).events {
+            sent.push(event.to_control());
+        }
+    };
+    let ids: Vec<u32> = (0..10).map(|finger| 700 + finger * 3).collect();
+    let at = |finger: usize, spread: i32| {
+        (
+            origin.0 + 400 + (finger as i32 - 5) * (30 + spread),
+            origin.1 + 400,
+        )
+    };
+    for (finger, &id) in ids.iter().enumerate() {
+        feed(WM_POINTERDOWN, touch_info(id, DOWN, at(finger, 0)));
+    }
+    for step in 1..=3 {
+        for (finger, &id) in ids.iter().enumerate() {
+            feed(
+                WM_POINTERUPDATE,
+                touch_info(id, MOVING, at(finger, step * 5)),
+            );
+        }
+    }
+    for (finger, &id) in ids.iter().enumerate() {
+        feed(WM_POINTERUP, touch_info(id, LIFTED, at(finger, 15)));
+    }
+
+    assert_eq!(sent.len(), 50);
+    assert!(sent.iter().all(|event| event.task_id == 7
+        && event.tool == control::PointerTool::Touch as i32
+        && event.buttons == 0));
+    let downs: Vec<u32> = sent[..10].iter().map(|event| event.pointer_id).collect();
+    assert_eq!(downs, ids);
+    assert!(sent[..10]
+        .iter()
+        .all(|event| event.action == control::PointerAction::Down as i32));
+    assert!(sent[10..40]
+        .iter()
+        .all(|event| event.action == control::PointerAction::Move as i32));
+    assert!(sent[40..]
+        .iter()
+        .all(|event| event.action == control::PointerAction::Up as i32));
+    // The pinch spreads the fingers apart around the middle of the window.
+    assert_eq!((sent[0].x, sent[0].y), (250.0, 400.0));
+    assert_eq!((sent[39].x, sent[39].y), (400.0 + 4.0 * 45.0, 400.0));
+    assert_eq!((sent[40].x, sent[40].y), (400.0 - 5.0 * 45.0, 400.0));
+    // Without a measured pressure, a touching finger presses fully.
+    assert!(sent[..40].iter().all(|event| event.pressure == 1.0));
+}
+
+#[test]
+fn fr5_a_pens_pointer_message_brings_its_pressure_barrel_button_eraser_and_hover() {
+    // SAFETY: plain data, for which all zero is a valid value.
+    let mut pen: POINTER_PEN_INFO = unsafe { std::mem::zeroed() };
+    pen.pointerInfo.pointerType = PT_PEN;
+    pen.pointerInfo.pointerId = 9;
+    pen.pointerInfo.ptPixelLocation = POINT { x: 140, y: 260 };
+    pen.pointerInfo.pointerFlags = POINTER_FLAG_INRANGE | POINTER_FLAG_UPDATE;
+    pen.penFlags = PEN_FLAG_BARREL;
+    pen.penMask = PEN_MASK_PRESSURE;
+    pen.pressure = 0;
+    assert_eq!(
+        pen_input(WM_POINTERUPDATE, &pen, (100, 200)),
+        Some(WindowInput::Contact {
+            tool: PointerTool::Pen,
+            pointer_id: 9,
+            phase: ContactPhase::Hover,
+            position: (40.0, 60.0),
+            pressure: Some(0.0),
+            buttons: buttons::STYLUS_PRIMARY,
+            tilt: (0.0, 0.0),
+        })
+    );
+    pen.pointerInfo.pointerFlags = DOWN;
+    pen.penFlags = PEN_FLAG_ERASER;
+    pen.penMask = PEN_MASK_PRESSURE | PEN_MASK_TILT_X | PEN_MASK_TILT_Y;
+    pen.pressure = 768;
+    pen.tiltX = 30;
+    pen.tiltY = -45;
+    assert_eq!(
+        pen_input(WM_POINTERDOWN, &pen, (100, 200)),
+        Some(WindowInput::Contact {
+            tool: PointerTool::Eraser,
+            pointer_id: 9,
+            phase: ContactPhase::Down,
+            position: (40.0, 60.0),
+            pressure: Some(0.75),
+            buttons: 0,
+            tilt: (30.0, -45.0),
+        })
+    );
+}
+
+#[test]
+fn fr5_a_pens_tilt_is_read_only_on_the_axes_it_measures() {
+    // SAFETY: plain data, for which all zero is a valid value.
+    let mut pen: POINTER_PEN_INFO = unsafe { std::mem::zeroed() };
+    pen.tiltX = 40;
+    pen.tiltY = -20;
+    assert_eq!(pen_tilt(&pen), (0.0, 0.0));
+    pen.penMask = PEN_MASK_TILT_X;
+    assert_eq!(pen_tilt(&pen), (40.0, 0.0));
+    pen.penMask = PEN_MASK_TILT_X | PEN_MASK_TILT_Y;
+    assert_eq!(pen_tilt(&pen), (40.0, -20.0));
+    pen.tiltX = 300;
+    assert_eq!(pen_tilt(&pen), (90.0, -20.0));
 }

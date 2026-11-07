@@ -48,7 +48,9 @@ public sealed record SettingsInfo(
     bool AdvancedNetworking = false,
     NetworkInfo? Network = null,
     bool FileSharing = true,
-    IReadOnlyList<string>? SharedFolders = null)
+    IReadOnlyList<string>? SharedFolders = null,
+    bool AdbAutoConnect = true,
+    AdbAutoConnectState AdbAutoConnectState = AdbAutoConnectState.Off)
 {
     /// <summary>The Windows folders that can be shared with Android, in the order the service
     /// keeps them.</summary>
@@ -73,6 +75,23 @@ public sealed record SettingsInfo(
         "discrete" => RenderGpuKind.Discrete,
         _ => RenderGpuKind.Named,
     };
+}
+
+/// <summary>Where attaching developer mode's port to this computer's adb server stands, as
+/// the service reports it.</summary>
+public enum AdbAutoConnectState
+{
+    /// <summary>Developer mode or auto-connect is off.</summary>
+    Off,
+    /// <summary>No adb server runs on this computer yet.</summary>
+    WaitingForServer,
+    /// <summary>Android is not running, or adb in Android has not answered yet.</summary>
+    WaitingForAndroid,
+    /// <summary>The adb server lists DSA.</summary>
+    Attached,
+    /// <summary>The user ran adb disconnect; DSA is attached again when the adb server
+    /// restarts.</summary>
+    Detached,
 }
 
 /// <summary>How Android reaches the network.</summary>
@@ -104,14 +123,34 @@ public sealed record ArmPackageInfo(string Name, string Version, string Library,
 /// <summary>What the running Android says of ARM translation.</summary>
 public sealed record ArmGuestInfo(bool Installed, bool Active, string Abilist);
 
+/// <summary>Where an ARM translator comes from.</summary>
+public enum ArmSource
+{
+    /// <summary>The default translator the image of this Android carries.</summary>
+    Default,
+    /// <summary>A package the user installed.</summary>
+    User,
+    /// <summary>Google's translator, which the user fetched.</summary>
+    Google,
+}
+
+/// <summary>The ARM translator Android uses: where it comes from, its name, version and
+/// licence.</summary>
+public sealed record ArmTranslatorInfo(ArmSource Source, string Name, string Version, string License);
+
 /// <summary>Whether apps built only for 64-bit ARM can run: the package the user installed,
-/// the setting, what the running Android booted with, and whether a restart is due.</summary>
+/// the setting, what the running Android booted with, whether a restart is due, whether
+/// Google's translator can be fetched here, the default package the image carries (only an
+/// x86_64 image has one), and the translator Android uses from its next start.</summary>
 public sealed record ArmTranslationInfo(
     ArmPackageInfo? Package,
     bool Enabled,
     bool Supported,
     ArmGuestInfo? Android,
-    bool RestartNeeded);
+    bool RestartNeeded,
+    bool GoogleFetchAvailable = false,
+    ArmPackageInfo? Default = null,
+    ArmTranslatorInfo? Translator = null);
 
 /// <summary>What a host process does for the user's Android.</summary>
 public enum HostRole

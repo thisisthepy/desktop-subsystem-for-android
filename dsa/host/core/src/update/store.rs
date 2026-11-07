@@ -20,7 +20,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::manifest::{is_plain_name, ImageEntry, Manifest};
-use super::policy::{check, InstalledImage};
+use super::policy::{check_for, InstalledImage};
+use super::versions::{self, Channel, ChooseError, VersionReport};
 use super::{from_hex, to_hex, UpdateError};
 
 /// Downloads a URL.
@@ -58,6 +59,17 @@ pub struct State {
     /// image's, so a new build of the host tries those images again.
     #[serde(default)]
     pub failed_build: Option<String>,
+    /// Which images this computer takes: the newest major, or one the user chose.
+    #[serde(default)]
+    pub channel: Channel,
+    /// Set once the user agreed to erase their data to move to an older major; cleared when
+    /// that image is staged.
+    #[serde(default)]
+    pub older_allowed: bool,
+    /// The supported majors the last release list named. Empty until one was read; then this
+    /// build's own list stands in.
+    #[serde(default)]
+    pub supported_majors: Vec<u32>,
 }
 
 /// What [`ImageStore::recover`] found and did.
@@ -199,6 +211,9 @@ impl ImageStore {
                 on_trial: false,
                 failed: Vec::new(),
                 failed_build: None,
+                channel: Channel::Latest,
+                older_allowed: false,
+                supported_majors: Vec::new(),
             })?;
         }
         store.state()?;
@@ -267,7 +282,14 @@ impl ImageStore {
                 state.current.version
             )));
         }
-        check(&state.current, image, manifest, &state.failed).map_err(UpdateError::Refused)?;
+        check_for(
+            &state.current,
+            image,
+            manifest,
+            &state.failed,
+            state.older_allowed,
+        )
+        .map_err(UpdateError::Refused)?;
         let staging = self
             .root
             .join("images")
@@ -292,7 +314,120 @@ impl ImageStore {
         let previous = std::mem::replace(&mut state.current, InstalledImage::of(image));
         state.previous = Some(previous);
         state.on_trial = true;
+        state.older_allowed = false;
         self.write_state(&state)
+    }
+
+    /// The supported majors: those the last release list named, or this build's own.
+    pub fn supported_majors(&self) -> Result<Vec<u32>, UpdateError> {
+        let state = self.state()?;
+        Ok(if state.supported_majors.is_empty() {
+            versions::supported_majors()
+        } else {
+            state.supported_majors
+        })
+    }
+
+    /// Records the supported majors a verified release list names. A chosen major that is not
+    /// among them any more moves up to the one [`versions::target_major`] names; the news for
+    /// the user is returned.
+    pub fn follow_supported(&self, supported: &[u32]) -> Result<Option<String>, UpdateError> {
+        let mut state = self.state()?;
+        let mut sorted = supported.to_vec();
+        sorted.sort_unstable();
+        sorted.dedup();
+        let mut notice = None;
+        if let Channel::Major(chosen) = state.channel {
+            if !sorted.contains(&chosen) {
+                if let Some(next) = versions::target_major(state.channel, &sorted) {
+                    state.channel = Channel::Major(next);
+                    notice = Some(format!(
+                        "Android {chosen} is no longer supported, so this computer moves up to \
+                         Android {next}; apps and their data are kept"
+                    ));
+                }
+            }
+        }
+        if sorted != state.supported_majors || notice.is_some() {
+            state.supported_majors = sorted;
+            self.write_state(&state)?;
+        }
+        Ok(notice)
+    }
+
+    /// Chooses which images this computer takes. A channel that leads to an older major than
+    /// the current image is taken only with `erase_data`, since Android cannot read data a
+    /// newer major wrote.
+    pub fn choose(&self, channel: Channel, erase_data: bool) -> Result<(), ChooseError> {
+        let store = |e: UpdateError| ChooseError::Store(e.to_string());
+        let supported = self.supported_majors().map_err(store)?;
+        let list = supported
+            .iter()
+            .map(|m| m.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        if let Channel::Major(major) = channel {
+            if !supported.contains(&major) {
+                return Err(ChooseError::Unsupported(format!(
+                    "Android {major} is not a supported version (supported: {list})"
+                )));
+            }
+        }
+        let mut state = self.state().map_err(store)?;
+        let target = versions::target_major(channel, &supported)
+            .ok_or_else(|| ChooseError::Unsupported("no Android version is supported".into()))?;
+        let older = target < state.current.android_major;
+        if older && !erase_data {
+            return Err(ChooseError::DataWouldBeLost(format!(
+                "Android {target} is older than the installed Android {}, and Android cannot \
+                 read data a newer version wrote. Moving to it erases the Android data of every \
+                 user of this computer: the apps they installed, their accounts and every \
+                 app's data. Agree to that to move (dsa android use {target} --erase-data)",
+                state.current.android_major
+            )));
+        }
+        state.channel = channel;
+        state.older_allowed = older;
+        self.write_state(&state).map_err(store)
+    }
+
+    /// The Android version as a user sees it, reading the build ID and security patch from
+    /// the current image's `image.json`.
+    pub fn report(&self, notice: Option<String>) -> Result<VersionReport, UpdateError> {
+        let state = self.state()?;
+        let supported = self.supported_majors()?;
+        let details = fs::read(self.image_dir(&state.current.version).join("image.json"))
+            .ok()
+            .and_then(|text| serde_json::from_slice::<serde_json::Value>(&text).ok());
+        let source = |key: &str| {
+            details
+                .as_ref()
+                .and_then(|d| d["source"][key].as_str().map(str::to_string))
+                .filter(|v| !v.is_empty())
+        };
+        Ok(VersionReport {
+            build_id: source("build_id"),
+            security_patch: source("security_patch"),
+            target_major: versions::target_major(state.channel, &supported)
+                .unwrap_or(state.current.android_major),
+            version: state.current.version,
+            android_major: state.current.android_major,
+            build: state.current.build,
+            channel: state.channel,
+            supported_majors: supported,
+            on_trial: state.on_trial,
+            notice,
+        })
+    }
+
+    /// Whether the chosen channel leads to another major than the current image: a switch
+    /// the user asked for, which the update service runs even with image updates off.
+    pub fn switch_pending(&self) -> bool {
+        let (Ok(state), Ok(supported)) = (self.state(), self.supported_majors()) else {
+            return false;
+        };
+        versions::target_major(state.channel, &supported)
+            .is_some_and(|target| target != state.current.android_major)
     }
 
     /// Records that the current image booted: it stays, and images other than it and the

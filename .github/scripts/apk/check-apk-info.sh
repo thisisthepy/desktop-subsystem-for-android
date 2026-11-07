@@ -29,7 +29,7 @@ fingerprint() {
   tr -d '\r\n' <"$dir/$1.sha256" | tr '[:lower:]' '[:upper:]' | sed 's/../&:/g; s/:$//'
 }
 
-for name in notes notes-old notes-other adaptive; do
+for name in notes notes-old notes-other adaptive vector; do
   "$dsa" apk-info "$dir/$name.apk" --json "${endpoint[@]}" >"$dir/$name.json"
   "$dsa" apk-info "$dir/$name.apk" "${endpoint[@]}"
   echo
@@ -59,6 +59,15 @@ check adaptive .icon.kind adaptive
 check adaptive .icon.background.kind color
 check adaptive .icon.background.color '#FF3DDC84'
 check adaptive .icon.foreground.kind image
+# The foreground a vector drawable: drawn by the host, not left out.
+check vector .icon.kind adaptive
+check vector .icon.background.color '#FFFFFFFF'
+check vector .icon.foreground.kind vector
+check vector '.icon.foreground.paths | length' 2
+check vector '.icon.foreground.paths[0].fill' '#FFDB4437'
+# The translation is compared as numbers: jq keeps the 30.0 dsa writes for a float, so a
+# joined string would test how the number is spelled rather than its value.
+check vector '.icon.foreground.paths[0].transform[4:6] == [30, 30]' true
 
 if [ "$(fingerprint notes)" = "$(fingerprint notes-other)" ]; then
   echo "::error::the two keys made the same signer"

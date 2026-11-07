@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="dsa/host/platform/windows/settings/DsaSettings/Assets/logo.png" width="112" height="112" alt="DSA logo">
+<img src=".github/assets/dsa-logo.png" width="112" height="112" alt="DSA logo">
 
 # Desktop Subsystem for Android™
 
@@ -65,7 +65,8 @@ rough edges. Linux, macOS and ARM64 Windows are in progress (see
   idle memory returned to the host. Freezing Android is an option, off by default.
 - Host devices lent to Android: GPU (Vulkan remoting through gfxstream, OpenGL ES through
   ANGLE), audio, video codecs, microphone, camera, location, sensors and power.
-- An optional ARM translation layer, installed separately, for ARM-only apps on x64.
+- An ARM translation layer for ARM-only apps on x64: the open source translator Digitalis
+  comes with the x64 image, and Google's translator or another package can replace it.
 - Signed automatic updates of both the Android image and DSA itself, with a failed image
   rolled back to the last good one.
 - Each Windows user gets their own Android and data disk, in their own profile.
@@ -73,7 +74,9 @@ rough edges. Linux, macOS and ARM64 Windows are in progress (see
   identity, updates, developer mode with adb, Android's live log and diagnostics.
 
 **Not shipped:** Google Play services or an app store (their licences make them a user's
-choice), and any of Microsoft's WSA binaries.
+choice), and any of Microsoft's WSA binaries. A user who wants Google Play installs it from
+DSA Settings or with `dsa gapps install`: DSA then downloads the public LiteGapps Core package
+for that user's Android and lays it over the system. Google's apps follow Google's terms.
 
 ## Supported platforms
 
@@ -89,7 +92,9 @@ choice), and any of Microsoft's WSA binaries.
 DSA supports the newest two Android major versions: today Android 16 and Android 17. A
 version leaves support when the second newer major ships, so Android 16 is supported until
 Android 18 is released. The image updater moves each user to a supported version and never
-to a lower major.
+to a lower major on its own. You can choose either supported version in the settings app
+or with `dsa android use`; moving to the older one erases the Android data, because Android
+cannot read data a newer version wrote.
 
 <p align="center">
   <img src=".github/assets/android-support.svg" alt="Timeline of the Android versions DSA supports: Android 16 and 17 from DSA 0.1.0 in October 2026, Android 18 and 19 expected in 2027 and 2028" width="860">
@@ -116,7 +121,7 @@ Open an Android app from the Start menu, or use the `dsa` command:
 
 ```
 dsa status                          # Android's state and any pending update
-dsa install app.apk                 # install an APK
+dsa install app.apk                 # install an APK, or a split-APK bundle (.xapk, .apks, .apkm)
 dsa apps list                       # the installed apps
 dsa launch com.android.settings     # open an app in its own window
 dsa settings set clipboard off      # change a setting (DSA Settings has the same switches)
@@ -126,6 +131,13 @@ dsa logs collect -o diag.zip        # everything a problem report needs, as one 
 
 `dsa` with no arguments lists every command. Android's log stays in memory and flows to the
 host only while something reads it. Attach `diag.zip` to a problem report.
+
+## User guides
+
+Step-by-step guides cover installing, apps and windows, APKs, files, Android versions,
+settings, memory, developer mode, troubleshooting and uninstalling:
+[docs/guides](docs/guides/README.md). The [introduction page](docs/guides/intro/index.html)
+explains the project for newcomers.
 
 ## Architecture
 

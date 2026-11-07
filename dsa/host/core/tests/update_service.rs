@@ -230,6 +230,8 @@ fn updating_android(
         while !finished.load(Ordering::Relaxed) {
             let boot_secret = secret.lock().unwrap().clone();
             if let (SessionState::Starting, Some(boot_secret)) = (watched.state(), boot_secret) {
+                // A real agent takes a while; long enough for a test to act during the boot.
+                thread::sleep(Duration::from_millis(300));
                 if let Ok(mut agent) = connector.connect(WAIT) {
                     let _ = guest_connect(
                         &mut *agent,
@@ -264,6 +266,7 @@ fn updating_android(
             notices: Arc::new(UpdateNotices::default()),
             boot_timeout: Duration::from_secs(5),
             trial_running: Arc::new(AtomicBool::new(false)),
+            rollback: Default::default(),
         },
         done,
     )
@@ -315,7 +318,8 @@ fn fr14_a_new_image_that_does_not_boot_is_undone_and_the_session_started_again()
     let notice = wait_for_notice(&android);
     assert!(
         notice.starts_with("Android 16.0.2 did not start")
-            && notice.ends_with("Android 16.0.1 is in use again"),
+            && notice.contains("Android 16.0.1 is in use again")
+            && notice.contains("Android 16.0.2 is not tried again"),
         "{notice}"
     );
     assert!(
@@ -326,6 +330,149 @@ fn fr14_a_new_image_that_does_not_boot_is_undone_and_the_session_started_again()
     assert_eq!(state.current.version, "16.0.1");
     assert_eq!(state.failed, ["16.0.2"]);
     done.store(true, Ordering::Relaxed);
+}
+
+#[test]
+fn fr14_a_stop_asked_for_during_the_rollback_does_not_cancel_it() {
+    let store = fresh_store();
+    check(
+        &store,
+        &server(&[16], &[("16.0.2", 16, 2)], &key()),
+        "mem://list.json",
+        &trusted(),
+    )
+    .unwrap();
+    let (android, done) = updating_android(&store, &["16.0.2"]);
+    android.start();
+    let deadline = Instant::now() + WAIT;
+    while !android.rollback.running() {
+        assert!(Instant::now() < deadline, "no rollback began");
+        thread::sleep(Duration::from_millis(1));
+    }
+    // What `dsa start --wait` reads meanwhile: Android is still starting, and why.
+    assert_eq!(android.state(), SessionState::Starting);
+    let problem = android.problem().unwrap_or_default();
+    assert!(
+        problem.contains("going back to the previous one"),
+        "{problem}"
+    );
+    // `dsa stop`, or a restart from the tray, in the middle of the rollback.
+    android.stop();
+
+    let notice = wait_for_notice(&android);
+    assert!(
+        notice.contains("Android 16.0.1 is in use again") && !notice.contains("failed too"),
+        "{notice}"
+    );
+    let state = store.state().unwrap();
+    assert_eq!(state.current.version, "16.0.1");
+    assert!(!state.on_trial);
+    assert_eq!(state.failed, ["16.0.2"]);
+    // The stop is made once the previous image has booted.
+    assert!(
+        android.session.wait_for(SessionState::Stopped, WAIT),
+        "the stop asked for is made after the rollback"
+    );
+    // And the next start boots the previous image plainly.
+    android.start();
+    assert!(android.session.wait_for(SessionState::Active, WAIT));
+    done.store(true, Ordering::Relaxed);
+}
+
+#[test]
+fn fr14_a_new_image_whose_agent_never_connects_is_given_up_within_bounded_time() {
+    let store = fresh_store();
+    check(
+        &store,
+        &server(&[16], &[("16.0.2", 16, 2)], &key()),
+        "mem://list.json",
+        &trusted(),
+    )
+    .unwrap();
+    let (listener, mut connector) = memory::pair();
+    let secret = Arc::new(Mutex::new(None));
+    let session = Arc::new(Session::new(
+        StoreLauncher {
+            store: Arc::clone(&store),
+            broken: Vec::new(),
+            other_keys: false,
+            secret: Arc::clone(&secret),
+        },
+        Box::new(listener),
+        ControlHandshake::new("test host", WAIT),
+        SessionConfig {
+            connect_timeout: WAIT,
+            stop_timeout: WAIT,
+            agent_timeout: Duration::from_millis(100),
+            ..SessionConfig::default()
+        },
+    ));
+    let android = UpdatingAndroid {
+        session,
+        store: Arc::clone(&store),
+        notices: Arc::new(UpdateNotices::default()),
+        // Far longer than the test waits: the agent's own deadline is what ends the trial.
+        boot_timeout: Duration::from_secs(600),
+        trial_running: Arc::new(AtomicBool::new(false)),
+        rollback: Default::default(),
+    };
+    let began = Instant::now();
+    android.start();
+
+    // Each boot's daemon reports Android booted; only the previous image's agent connects.
+    let mut last = None;
+    for agent_connected in [false, true] {
+        let deadline = Instant::now() + WAIT;
+        let boot_secret = loop {
+            let current = secret.lock().unwrap().clone();
+            if let Some(boot_secret) = current {
+                if last.as_ref() != Some(&boot_secret) {
+                    break boot_secret;
+                }
+            }
+            assert!(Instant::now() < deadline, "the guest was not started");
+            thread::sleep(Duration::from_millis(5));
+        };
+        last = Some(boot_secret.clone());
+        let mut daemon = connector.connect(WAIT).unwrap();
+        guest_connect(
+            &mut *daemon,
+            &local_hello(Role::Guest, "daemon"),
+            &boot_secret,
+            WAIT,
+        )
+        .unwrap();
+        daemon
+            .send(&dsa_protocol::encode(&dsa_protocol::control::Envelope {
+                body: Some(dsa_protocol::control::envelope::Body::GuestBoot(
+                    dsa_protocol::control::GuestBoot {
+                        boot_completed: true,
+                        agent_connected,
+                    },
+                )),
+            }))
+            .unwrap();
+        if agent_connected {
+            let notice = wait_for_notice(&android);
+            assert!(
+                notice.starts_with("Android 16.0.2 did not start")
+                    && notice.contains("agent has not reached the control channel")
+                    && notice.contains("Android 16.0.1 is in use again"),
+                "{notice}"
+            );
+            assert!(android.session.wait_for(SessionState::Active, WAIT));
+        }
+        // Held until the boot ends, as a connection is.
+        std::mem::forget(daemon);
+    }
+    assert!(
+        began.elapsed() < Duration::from_secs(60),
+        "the trial took {:?}",
+        began.elapsed()
+    );
+    let state = store.state().unwrap();
+    assert_eq!(state.current.version, "16.0.1");
+    assert_eq!(state.failed, ["16.0.2"]);
 }
 
 #[test]
@@ -362,6 +509,7 @@ fn fr14_a_new_image_on_a_disk_from_other_keys_is_neither_blamed_nor_kept() {
         notices: Arc::new(UpdateNotices::default()),
         boot_timeout: WAIT,
         trial_running: Arc::new(AtomicBool::new(false)),
+        rollback: Default::default(),
     };
     android.start();
 

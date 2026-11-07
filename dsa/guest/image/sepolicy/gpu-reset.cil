@@ -1,0 +1,6 @@
+; Desktop Subsystem for Android (DSA)
+; The patched framework (make-image.py --framework): after a GPU device loss SurfaceFlinger
+; counts the reset in debug.dsa.gpu.resets, which the apps' renderers wait on, because their
+; devices went with the same GPU. Every domain may read debug properties, and SurfaceFlinger
+; already reaches the property service; it may now set this label too.
+(allow surfaceflinger debug_prop (property_service (set)))

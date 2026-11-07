@@ -23,6 +23,7 @@
     <p>Android is a trademark of Google LLC.</p>
   </description>
   <launchable type="desktop-id">dsa.desktop</launchable>
+  <icon type="stock">io.github.thisisthepy.DSA</icon>
   <url type="homepage">https://github.com/thisisthepy/desktop-subsystem-for-android</url>
   <url type="bugtracker">https://github.com/thisisthepy/desktop-subsystem-for-android/issues</url>
   <categories>

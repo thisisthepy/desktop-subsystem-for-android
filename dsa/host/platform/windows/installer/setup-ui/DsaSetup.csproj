@@ -38,6 +38,5 @@
   <ItemGroup>
     <Resource Include="assets\logo.png" />
     <Resource Include="assets\logo.ico" />
-    <None Remove="assets\make-logo.py" />
   </ItemGroup>
 </Project>

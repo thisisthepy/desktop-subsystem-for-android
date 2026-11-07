@@ -26,6 +26,7 @@ fn notes() -> AppInfo {
         app_bytes: 3_000_000,
         data_bytes: 20_480,
         cache_bytes: 1_024,
+        ..Default::default()
     }
 }
 

@@ -78,9 +78,9 @@ pub struct AndroidVmLauncher {
     networking: Option<crate::hcn::VmNetworking>,
 }
 
-/// Supplies more bootconfig lines (`key = "value"`) for each boot. See
-/// [`AndroidVmLauncher::with_bootconfig`].
-pub type BootconfigSource = Box<dyn FnMut() -> String + Send>;
+/// Supplies more bootconfig lines (`key = "value"`) for each boot of the VM configured so.
+/// See [`AndroidVmLauncher::with_bootconfig`].
+pub type BootconfigSource = Box<dyn FnMut(&AndroidVmConfig) -> String + Send>;
 
 /// See [`AndroidVmLauncher::with_boot_properties`].
 pub type BootProperties = Box<dyn FnMut(&AndroidVmConfig) -> Option<String> + Send>;
@@ -263,8 +263,8 @@ impl AndroidVmLauncher {
     }
 
     /// Asks `source` at each start for more bootconfig lines, beside the boot's secret: what
-    /// the guest is to know before its init reads any property, such as whether to use an
-    /// installed ARM translation package.
+    /// the guest is to know before its init reads any property, such as which ARM translation
+    /// package to use. It is given the VM's configuration, whose files say which image boots.
     pub fn with_bootconfig(mut self, source: BootconfigSource) -> AndroidVmLauncher {
         self.bootconfig = Some(source);
         self
@@ -391,7 +391,7 @@ impl GuestLauncher for AndroidVmLauncher {
         let more = self
             .bootconfig
             .as_mut()
-            .map(|source| source())
+            .map(|source| source(&config))
             .unwrap_or_default();
         let properties = self
             .boot_properties

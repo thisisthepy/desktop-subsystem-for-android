@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <!-- The APK Installer's symbolic icon for GNOME: the open cardboard box as a one colour
+       outline on the 16 px grid; the panel recolours it. -->
+  <path d="M2 6.5L9.5 9V15L2 12.5Z M9.5 9L14 7V13L9.5 15 M2 6.5L6 4.5L14 7 M2 6.5L1 3L4.5 1.5L6 4.5 M6 4.5L7 1L15 3.5L14 7 M9.5 9L12 9.2L15.5 7.6L14 7" fill="none" stroke="#2e3436" stroke-width="1" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

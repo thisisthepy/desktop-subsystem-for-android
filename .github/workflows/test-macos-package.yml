@@ -1,6 +1,7 @@
 # Builds the macOS host, checks its code on macOS (the parts that call the macOS frameworks
 # build only there), and packages it: DSA.app signed with the virtualization entitlement,
-# in an installer package and a disk image. The package is checked for what it must carry.
+# in an installer package and a disk image, with the settings app (SwiftUI) as the bundle's own
+# program. The package is checked for what it must carry.
 name: macOS package test
 
 on:
@@ -18,10 +19,12 @@ on:
   workflow_dispatch:
 
 concurrency:
-  # A newer push to develop holds every older one, so only the newest is checked. Runs
-  # that never finish are avoided by checking compile and lint before each push.
+  # On develop a run in progress finishes and only the newest waiting run stays: GitHub
+  # keeps one pending run per group, so a newer merge replaces the one still waiting.
+  # The newest run tests everything the dropped ones held. Anywhere else, such as a pull
+  # request, a newer run still replaces the older one.
   group: test-macos-package-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/develop' }}
 
 permissions:
   contents: read
@@ -46,6 +49,9 @@ jobs:
       - name: Build the macOS host's programs
         run: cargo build --release -p dsa-host-macos -p dsa-cli
 
+      - name: Run the settings app's tests
+        run: swift test --package-path host/platform/macos/settings --scratch-path target/dsa-settings
+
       - name: Package DSA.app, the installer package and the disk image
         run: |
           bash host/platform/macos/packaging/build-app.sh 0.1.0 target/release ../.scratch/macos-package
@@ -54,8 +60,44 @@ jobs:
         working-directory: .scratch/macos-package
         run: |
           plutil -lint DSA.app/Contents/Info.plist
-          test "$(plutil -extract CFBundleExecutable raw DSA.app/Contents/Info.plist)" = dsa-app-window
-          test -x DSA.app/Contents/MacOS/dsa-app-window
+          # Opening DSA.app opens the settings app: its window, menu bar item and Dock icon.
+          test "$(plutil -extract CFBundleExecutable raw DSA.app/Contents/Info.plist)" = dsa-settings
+          test -x DSA.app/Contents/MacOS/dsa-settings
+          lipo -archs DSA.app/Contents/MacOS/dsa-settings | grep -Fq arm64
+          # The window host each app's bundle copies ships in DSA.app too.
+          # It lives in a helper bundle with its own identity, never as DSA.app itself, so opening
+          # DSA.app always starts the settings app.
+          test ! -e DSA.app/Contents/MacOS/dsa-app-window
+          helper="DSA.app/Contents/Helpers/DSA App Window.app"
+          test -x "$helper/Contents/MacOS/dsa-app-window"
+          plutil -lint "$helper/Contents/Info.plist"
+          test "$(plutil -extract CFBundleIdentifier raw "$helper/Contents/Info.plist")" = org.thisisthepy.dsa.window-host
+          test "$(plutil -extract CFBundleExecutable raw "$helper/Contents/Info.plist")" = dsa-app-window
+          test "$(plutil -extract CFBundleIdentifier raw DSA.app/Contents/Info.plist)" != org.thisisthepy.dsa.window-host
+          codesign --verify --strict "$helper"
+          test -s "$helper/Contents/Resources/DSA.icns"
+          # The layered Icon Composer source of the icon, with each layer it names.
+          # plutil -lint reads only property lists, so the JSON is checked with jq.
+          jq -e .groups DSA.icon/icon.json > /dev/null
+          test -s DSA.icon/Assets/window.png
+          test -s DSA.icon/Assets/title-bar.png
+          grep -Fq window.png DSA.icon/icon.json
+          grep -Fq title-bar.png DSA.icon/icon.json
+          # The menu bar's template image, at 1x and 2x.
+          test -s DSA.app/Contents/Resources/MenuBarTemplate.png
+          test -s DSA.app/Contents/Resources/MenuBarTemplate@2x.png
+          # The icon holds every size from 16 to 1024 px.
+          test "$(plutil -extract CFBundleIconFile raw DSA.app/Contents/Info.plist)" = DSA
+          iconutil -c iconset -o icon-check.iconset DSA.app/Contents/Resources/DSA.icns
+          for size in 16x16 16x16@2x 32x32 32x32@2x 128x128 128x128@2x 256x256 256x256@2x 512x512 512x512@2x; do
+            test -s "icon-check.iconset/icon_$size.png"
+          done
+          # The settings app speaks English and Korean.
+          plutil -extract CFBundleLocalizations xml1 -o - DSA.app/Contents/Info.plist | grep -Fq '<string>ko</string>'
+          for language in en ko; do
+            plutil -lint "DSA.app/Contents/Resources/$language.lproj/Localizable.strings"
+          done
+          plutil -convert json -o - DSA.app/Contents/Resources/ko.lproj/Localizable.strings | grep -Fq '"NavGeneral.Content"'
           test -x DSA.app/Contents/MacOS/dsa
           # The window manager ships beside the service, which starts it through its agent.
           test -x DSA.app/Contents/MacOS/dsa-wm
@@ -84,15 +126,17 @@ jobs:
           codesign -d --entitlements - --xml DSA.app > entitlements.plist
           tr -d ' \t\n' < entitlements.plist \
             | grep -Fq '<key>com.apple.security.virtualization</key><true/>'
-          lipo -archs DSA.app/Contents/MacOS/dsa-app-window | grep -Fq arm64
+          lipo -archs "DSA.app/Contents/Helpers/DSA App Window.app/Contents/MacOS/dsa-app-window" | grep -Fq arm64
 
       - name: Check the installer package installs DSA.app into Applications
         working-directory: .scratch/macos-package
         run: |
           pkgutil --check-signature DSA-0.1.0.pkg || true
-          pkgutil --payload-files DSA-0.1.0.pkg | grep -Fq './DSA.app/Contents/MacOS/dsa-app-window'
+          pkgutil --payload-files DSA-0.1.0.pkg | grep -Fq './DSA.app/Contents/Helpers/DSA App Window.app/Contents/MacOS/dsa-app-window'
           pkgutil --payload-files DSA-0.1.0.pkg | grep -Fq './DSA.app/Contents/Info.plist'
           pkgutil --payload-files DSA-0.1.0.pkg | grep -Fq './DSA.app/Contents/MacOS/dsa-devices'
+          pkgutil --payload-files DSA-0.1.0.pkg | grep -Fq './DSA.app/Contents/MacOS/dsa-settings'
+          pkgutil --payload-files DSA-0.1.0.pkg | grep -Fq './DSA.app/Contents/Resources/DSA.icns'
 
       - name: Check the disk image holds DSA.app
         working-directory: .scratch/macos-package
@@ -100,7 +144,9 @@ jobs:
           hdiutil verify DSA-0.1.0.dmg
           mount="$(mktemp -d "$RUNNER_TEMP/dsa-dmg.XXXXXX")"
           hdiutil attach -nobrowse -readonly -mountpoint "$mount" DSA-0.1.0.dmg
-          test -x "$mount/DSA.app/Contents/MacOS/dsa-app-window"
+          test -x "$mount/DSA.app/Contents/Helpers/DSA App Window.app/Contents/MacOS/dsa-app-window"
+          test -x "$mount/DSA.app/Contents/MacOS/dsa-settings"
+          test -s "$mount/DSA.app/Contents/Resources/DSA.icns"
           codesign --verify --strict "$mount/DSA.app"
           hdiutil detach "$mount"
 
@@ -111,4 +157,5 @@ jobs:
           path: |
             .scratch/macos-package/DSA-0.1.0.pkg
             .scratch/macos-package/DSA-0.1.0.dmg
+            .scratch/macos-package/DSA.icon
           if-no-files-found: error

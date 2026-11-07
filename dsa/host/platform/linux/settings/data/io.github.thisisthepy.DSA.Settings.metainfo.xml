@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- What the software center shows for DSA Settings, the settings app of the Linux host. -->
+<component type="desktop-application">
+  <id>io.github.thisisthepy.DSA.Settings</id>
+  <name>DSA Settings</name>
+  <name xml:lang="ko">DSA 설정</name>
+  <summary>Settings of Desktop Subsystem for Android</summary>
+  <summary xml:lang="ko">Desktop Subsystem for Android의 설정</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>Apache-2.0</project_license>
+  <developer id="io.github.thisisthepy">
+    <name>thisisthepy</name>
+  </developer>
+  <description>
+    <p>
+      DSA Settings starts and stops Android™, shows its state and how much memory it takes,
+      and changes how Desktop Subsystem for Android works: the apps and their windows, the
+      widgets on the desktop, the apps that run in the background, the shared folders, the
+      network, the Android version, the device identity, developer mode and the logs.
+    </p>
+    <p xml:lang="ko">
+      DSA 설정은 Android™를 시작하고 끄며, 상태와 메모리 사용량을 보여 주고,
+      Desktop Subsystem for Android의 동작을 바꿉니다. 앱과 앱 창, 바탕 화면의 위젯,
+      백그라운드에서 실행 중인 앱, 공유 폴더, 네트워크, Android 버전, 기기 정보,
+      개발자 모드와 로그를 다룹니다.
+    </p>
+    <p>Android is a trademark of Google LLC.</p>
+  </description>
+  <launchable type="desktop-id">io.github.thisisthepy.DSA.Settings.desktop</launchable>
+  <icon type="stock">io.github.thisisthepy.DSA.Settings</icon>
+  <url type="homepage">https://github.com/thisisthepy/desktop-subsystem-for-android</url>
+  <url type="bugtracker">https://github.com/thisisthepy/desktop-subsystem-for-android/issues</url>
+  <categories>
+    <category>Settings</category>
+    <category>System</category>
+  </categories>
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+    <control>touch</control>
+  </supports>
+  <provides>
+    <binary>dsa-settings</binary>
+  </provides>
+  <translation type="gettext">dsa-settings</translation>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="@VERSION@" date="@DATE@"/>
+  </releases>
+</component>

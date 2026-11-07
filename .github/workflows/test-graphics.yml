@@ -16,10 +16,12 @@ on:
   workflow_dispatch:
 
 concurrency:
-  # A newer push to develop holds every older one, so only the newest is checked. Runs
-  # that never finish are avoided by checking compile and lint before each push.
+  # On develop a run in progress finishes and only the newest waiting run stays: GitHub
+  # keeps one pending run per group, so a newer merge replaces the one still waiting.
+  # The newest run tests everything the dropped ones held. Anywhere else, such as a pull
+  # request, a newer run still replaces the older one.
   group: test-graphics-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/develop' }}
 
 permissions:
   contents: read
@@ -144,9 +146,13 @@ jobs:
 
       - name: Run host renderer smoke test on software Vulkan
         env:
-          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
           GFXSTREAM_BACKEND_PATH: ${{ github.workspace }}/.scratch/build-host/dist/bin/libgfxstream_backend.so
-        run: uv run dsa/graphics/host/test_host_renderer.py
+        run: |
+          # Mesa names the manifest lvp_icd.json since 25, and lvp_icd.x86_64.json before it.
+          icd="$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -n 1)"
+          test -f "$icd"
+          export VK_ICD_FILENAMES="$icd" VK_DRIVER_FILES="$icd"
+          uv run dsa/graphics/host/test_host_renderer.py
 
       - name: Keep the host renderer library and headers
         uses: actions/upload-artifact@v4
@@ -270,6 +276,26 @@ jobs:
         run: |
           cargo test -p dsa-host-windows --test window_manager -- nfr5_unknown_vulkan_image_is_rejected_without_reaching_the_driver --nocapture
 
+      - name: Check a guest command the renderer cannot carry out ends only that guest's stream
+        shell: pwsh
+        working-directory: dsa
+        env:
+          VK_ICD_FILENAMES: ${{ env.LVP_ICD }}
+          VK_DRIVER_FILES: ${{ env.LVP_ICD }}
+          GFXSTREAM_BACKEND_PATH: ${{ github.workspace }}\.scratch\build-host\dist\bin\gfxstream_backend.dll
+        run: |
+          cargo test -p dsa-host-windows --test window_manager -- nfr5_a_guest_command_the_renderer_cannot_carry_out_ends_only_its_stream --nocapture
+
+      - name: Check the renderer survives a lost GPU device and makes it again
+        shell: pwsh
+        working-directory: dsa
+        env:
+          VK_ICD_FILENAMES: ${{ env.LVP_ICD }}
+          VK_DRIVER_FILES: ${{ env.LVP_ICD }}
+          GFXSTREAM_BACKEND_PATH: ${{ github.workspace }}\.scratch\build-host\dist\bin\gfxstream_backend.dll
+        run: |
+          cargo test -p dsa-host-windows --test window_manager -- nfr5_a_lost_device_is_reported_to_the_guest_and_made_again --nocapture
+
       - name: Keep the host renderer library and headers
         uses: actions/upload-artifact@v4
         with:
@@ -323,9 +349,11 @@ jobs:
         run: |
           export VK_ICD_FILENAMES="$(brew --prefix molten-vk)/etc/vulkan/icd.d/MoltenVK_icd.json"
           export DYLD_FALLBACK_LIBRARY_PATH="$(brew --prefix vulkan-loader)/lib:$(brew --prefix molten-vk)/lib"
-          # gfxstream turns on Vulkan portability, which the loader needs to show MoltenVK,
-          # only when it is told the driver is MoltenVK.
+          # gfxstream itself turns on the Vulkan portability the loader needs to show
+          # MoltenVK; this names the driver for the parts of gfxstream that ask.
           export ANDROID_EMU_VK_ICD=moltenvk
+          # The GPU the selection tests look for: MoltenVK's device on the runner, not Lavapipe.
+          export DSA_TEST_GPU_NAME=apple
           uv run dsa/graphics/host/test_host_renderer.py
 
       - name: Keep the host renderer library and headers

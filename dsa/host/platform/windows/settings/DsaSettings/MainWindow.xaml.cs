@@ -19,6 +19,7 @@ public partial class MainWindow : FluentWindow
         ["background"] = typeof(BackgroundPage),
         ["display"] = typeof(DisplayPage),
         ["updates"] = typeof(UpdatesPage),
+        ["network"] = typeof(NetworkPage),
         ["advanced"] = typeof(AdvancedPage),
         ["device"] = typeof(DeviceIdentityPage),
         ["about"] = typeof(AboutPage),
@@ -83,11 +84,14 @@ public partial class MainWindow : FluentWindow
         if (DroppedFiles(e) is { } files)
         {
             e.Handled = true;
-            // Each APK opens in the APK install window, as it does from Explorer; the bar names
-            // any other file, which is not installed.
+            // Each APK opens in the APK Installer, as it does from Explorer; the bar names any
+            // other file, which is not installed.
             foreach (var apk in files.Where(Dsa.Settings.Core.InstallViewModel.IsApk))
             {
-                ApkInstallWindow.Open(apk);
+                if (Shell.OpenApkInstaller(apk) is { } why)
+                {
+                    await Shell.Tell(App.Text.Get("ApkWindow_Caption"), why);
+                }
             }
             var others = files.Where(f => !Dsa.Settings.Core.InstallViewModel.IsApk(f)).ToList();
             if (others.Count > 0)
@@ -203,7 +207,7 @@ public partial class MainWindow : FluentWindow
     }
 
     /// <summary>The page to open with: <c>--page memory</c> (general, memory, background,
-    /// display, updates, advanced, device, about, widgets or logs) opens another than General.</summary>
+    /// display, updates, network, advanced, device, about, widgets or logs) opens another than General.</summary>
     private static Type StartPage()
     {
         var args = Environment.GetCommandLineArgs();

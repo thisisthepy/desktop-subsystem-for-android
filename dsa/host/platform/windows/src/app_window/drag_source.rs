@@ -22,8 +22,8 @@ use dsa_host_core::host_api::HostApiClient;
 use windows::core::{implement, Ref, BOOL, HRESULT, PCWSTR};
 use windows::Win32::Foundation::{
     DRAGDROP_S_CANCEL, DRAGDROP_S_DROP, DRAGDROP_S_USEDEFAULTCURSORS, DV_E_FORMATETC, E_FAIL,
-    E_INVALIDARG, E_NOTIMPL, HGLOBAL, OLE_E_ADVISENOTSUPPORTED, S_FALSE, S_OK,
-    STG_E_INVALIDFUNCTION,
+    E_INVALIDARG, E_NOTIMPL, HGLOBAL, OLE_E_ADVISENOTSUPPORTED, STG_E_INVALIDFUNCTION, S_FALSE,
+    S_OK,
 };
 use windows::Win32::System::Com::{
     IAdviseSink, IDataObject, IDataObject_Impl, IEnumFORMATETC, IEnumSTATDATA,
@@ -92,7 +92,10 @@ fn ask(api: &ApiConnect, note: &Arc<dyn Fn(&str) + Send + Sync>, hwnd: isize, ou
     let mut client = match HostApiClient::connect(&mut *connector, BUILD, Duration::from_secs(5)) {
         Ok(client) => client,
         Err(error) => {
-            note(&format!("a drag out of task {}: the DSA service cannot be reached: {error}", out.task_id));
+            note(&format!(
+                "a drag out of task {}: the DSA service cannot be reached: {error}",
+                out.task_id
+            ));
             return;
         }
     };
@@ -100,7 +103,10 @@ fn ask(api: &ApiConnect, note: &Arc<dyn Fn(&str) + Send + Sync>, hwnd: isize, ou
         Ok(Some(offer)) => offer,
         Ok(None) => return,
         Err(error) => {
-            note(&format!("a drag out of task {} did not start: {error}", out.task_id));
+            note(&format!(
+                "a drag out of task {} did not start: {error}",
+                out.task_id
+            ));
             return;
         }
     };
@@ -239,7 +245,10 @@ impl DataObject {
             descriptor_format: registered("FileGroupDescriptorW"),
             contents_format: registered("FileContents"),
             descriptor,
-            files: files.iter().map(|(index, item)| (*index, item.size)).collect(),
+            files: files
+                .iter()
+                .map(|(index, item)| (*index, item.size))
+                .collect(),
             text,
             drag_id: offer.drag_id,
             client,
@@ -309,9 +318,8 @@ impl IDataObject_Impl for DataObject_Impl {
         if wanted.cfFormat == CF_UNICODETEXT.0 {
             let text = self.text.as_deref().unwrap_or_default();
             // SAFETY: u16 is plain data; the slice is viewed as its bytes.
-            let bytes = unsafe {
-                std::slice::from_raw_parts(text.as_ptr() as *const u8, text.len() * 2)
-            };
+            let bytes =
+                unsafe { std::slice::from_raw_parts(text.as_ptr() as *const u8, text.len() * 2) };
             return hglobal_medium(bytes);
         }
         let (item, size) = self.files[wanted.lindex as usize];
@@ -465,7 +473,10 @@ impl IStream_Impl for GuestFile_Impl {
         } else if origin == STREAM_SEEK_CUR {
             i128::from(self.position.get())
         } else if origin == STREAM_SEEK_END {
-            i128::from(self.size.ok_or(windows::core::Error::from(STG_E_INVALIDFUNCTION))?)
+            i128::from(
+                self.size
+                    .ok_or(windows::core::Error::from(STG_E_INVALIDFUNCTION))?,
+            )
         } else {
             return Err(STG_E_INVALIDFUNCTION.into());
         };
@@ -507,7 +518,7 @@ impl IStream_Impl for GuestFile_Impl {
         Err(STG_E_INVALIDFUNCTION.into())
     }
 
-    fn UnlockRegion(&self, _offset: u64, _len: u64, _kind: &LOCKTYPE) -> windows::core::Result<()> {
+    fn UnlockRegion(&self, _offset: u64, _len: u64, _kind: u32) -> windows::core::Result<()> {
         Err(STG_E_INVALIDFUNCTION.into())
     }
 
@@ -560,11 +571,14 @@ pub fn file_group_descriptor(files: &[(&str, Option<u64>)]) -> Vec<u8> {
         let mut flags = FD_ATTRIBUTES | FD_PROGRESSUI;
         if let Some(size) = size {
             flags |= FD_FILESIZE;
-            entry[SIZE_HIGH_AT..SIZE_HIGH_AT + 4].copy_from_slice(&((size >> 32) as u32).to_le_bytes());
-            entry[SIZE_HIGH_AT + 4..SIZE_HIGH_AT + 8].copy_from_slice(&(*size as u32).to_le_bytes());
+            entry[SIZE_HIGH_AT..SIZE_HIGH_AT + 4]
+                .copy_from_slice(&((size >> 32) as u32).to_le_bytes());
+            entry[SIZE_HIGH_AT + 4..SIZE_HIGH_AT + 8]
+                .copy_from_slice(&(*size as u32).to_le_bytes());
         }
         entry[0..4].copy_from_slice(&flags.to_le_bytes());
-        entry[ATTRIBUTES_AT..ATTRIBUTES_AT + 4].copy_from_slice(&FILE_ATTRIBUTE_NORMAL.to_le_bytes());
+        entry[ATTRIBUTES_AT..ATTRIBUTES_AT + 4]
+            .copy_from_slice(&FILE_ATTRIBUTE_NORMAL.to_le_bytes());
         for (i, unit) in descriptor_name(name).iter().enumerate() {
             entry[NAME_AT + i * 2..NAME_AT + i * 2 + 2].copy_from_slice(&unit.to_le_bytes());
         }
@@ -589,7 +603,10 @@ fn descriptor_name(name: &str) -> Vec<u16> {
         .take(limit - extension.len())
         .collect();
     // Never end on the first half of a surrogate pair.
-    if stem.last().is_some_and(|unit| (0xd800..0xdc00).contains(unit)) {
+    if stem
+        .last()
+        .is_some_and(|unit| (0xd800..0xdc00).contains(unit))
+    {
         stem.pop();
     }
     stem.extend(extension);
@@ -621,10 +638,17 @@ mod tests {
         let flags = u32::from_le_bytes(first[0..4].try_into().unwrap());
         assert_ne!(flags & FD_FILESIZE, 0);
         let high = u32::from_le_bytes(first[SIZE_HIGH_AT..SIZE_HIGH_AT + 4].try_into().unwrap());
-        let low = u32::from_le_bytes(first[SIZE_HIGH_AT + 4..SIZE_HIGH_AT + 8].try_into().unwrap());
+        let low = u32::from_le_bytes(
+            first[SIZE_HIGH_AT + 4..SIZE_HIGH_AT + 8]
+                .try_into()
+                .unwrap(),
+        );
         assert_eq!((u64::from(high) << 32) | u64::from(low), 5_000_000_000);
         let second = &bytes[4 + DESCRIPTOR_BYTES..];
-        assert_eq!(u32::from_le_bytes(second[0..4].try_into().unwrap()) & FD_FILESIZE, 0);
+        assert_eq!(
+            u32::from_le_bytes(second[0..4].try_into().unwrap()) & FD_FILESIZE,
+            0
+        );
     }
 
     #[test]

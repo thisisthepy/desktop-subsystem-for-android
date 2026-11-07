@@ -43,7 +43,13 @@ git -C $GfxstreamDir clean -fdx
 # up behind it for seconds while a window is resized. Without 0011 the renderer's
 # spin-wait has no processor hint on ARM64, and the lavapipe test driver is looked for under
 # its x86_64 name. Without 0012 a host with no usable Vulkan driver crashes the renderer
-# while it falls back from Vulkan. A patch that does not apply stops the fetch.
+# while it falls back from Vulkan. Without 0013 the renderer on macOS never enables
+# Vulkan portability, so the loader hides MoltenVK and Vulkan does not start. Without 0014
+# a renderer that asks for Vulkan only and cannot start it crashes instead of failing. Without 0015
+# a GPU reset, or one guest's command the renderer cannot carry out, ends the window manager and
+# every window with it; with it the guest's calls get VK_ERROR_DEVICE_LOST, the renderer makes
+# its device again, and a bad command ends only that guest's stream. A patch that does not apply
+# stops the fetch.
 $PatchDir = Join-Path $RepoRoot "dsa/graphics/patches"
 $Patches = @(Get-ChildItem -Path $PatchDir -Filter "0001-*.patch") +
     @(Get-ChildItem -Path $PatchDir -Filter "0004-*.patch") +
@@ -53,7 +59,10 @@ $Patches = @(Get-ChildItem -Path $PatchDir -Filter "0001-*.patch") +
     @(Get-ChildItem -Path $PatchDir -Filter "0009-*.patch") +
     @(Get-ChildItem -Path $PatchDir -Filter "0010-*.patch") +
     @(Get-ChildItem -Path $PatchDir -Filter "0011-*.patch") +
-    @(Get-ChildItem -Path $PatchDir -Filter "0012-*.patch")
+    @(Get-ChildItem -Path $PatchDir -Filter "0012-*.patch") +
+    @(Get-ChildItem -Path $PatchDir -Filter "0013-*.patch") +
+    @(Get-ChildItem -Path $PatchDir -Filter "0014-*.patch") +
+    @(Get-ChildItem -Path $PatchDir -Filter "0015-*.patch")
 foreach ($Patch in $Patches) {
     Write-Host "Applying patch: $($Patch.Name)"
     git -C $GfxstreamDir apply --recount $Patch.FullName
@@ -73,7 +82,8 @@ git -C $AemuDir reset --hard $AemuRevision
 git -C $AemuDir clean -fdx
 
 # Apply the checked-in aemu patches (patches/aemu). Without 0001 aemu does not compile for
-# ARM64 Windows: it calls the x86-only _mm_pause there.
+# ARM64 Windows: it calls the x86-only _mm_pause there. Without 0002 every fatal error ends the
+# process; with it one on a thread that serves a guest ends only what that thread serves.
 foreach ($Patch in @(Get-ChildItem -Path (Join-Path $PatchDir "aemu") -Filter "*.patch" | Sort-Object Name)) {
     Write-Host "Applying aemu patch: $($Patch.Name)"
     git -C $AemuDir apply --recount $Patch.FullName

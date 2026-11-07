@@ -1,0 +1,75 @@
+<Page
+    x:Class="Dsa.Settings.Pages.AndroidPage"
+    ScrollViewer.CanContentScroll="False"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    xmlns:l="clr-namespace:Dsa.Settings">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <Grid Style="{StaticResource PageHeader}">
+            <TextBlock Text="{l:Text AndroidTitle.Text}" Style="{StaticResource PageTitle}" />
+        </Grid>
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel Style="{StaticResource PageContent}">
+                <ProgressBar IsIndeterminate="True" Margin="0,0,0,4"
+                             Visibility="{Binding IsBusy, Converter={StaticResource Visible}}" />
+                <ui:InfoBar Title="{l:Text SettingsErrorBar.Title}" Severity="Error" IsClosable="False"
+                            IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" Margin="0,0,0,4" />
+                <ui:InfoBar Title="{l:Text AndroidSwitchingBar.Title}" Severity="Informational" IsClosable="False"
+                            IsOpen="{Binding IsSwitching, Mode=OneWay}" Message="{Binding SwitchingText, Mode=OneWay}"
+                            Margin="0,0,0,4" />
+                <ui:InfoBar Title="{l:Text UpdateNoticeBar.Title}" Severity="Informational" IsClosable="False"
+                            IsOpen="{Binding HasNotice, Mode=OneWay}" Message="{Binding Notice, Mode=OneWay}"
+                            Margin="0,0,0,4" />
+
+                <TextBlock Text="{l:Text AndroidRunningHeader.Text}" Style="{StaticResource SectionHeader}" />
+                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Phone24}">
+                    <ui:CardControl.Header>
+                        <StackPanel>
+                            <TextBlock Text="{Binding VersionText, Mode=OneWay}" Style="{StaticResource CardTitle}" />
+                            <TextBlock Text="{Binding ImageVersion, Mode=OneWay}" Style="{StaticResource CardDescription}" />
+                        </StackPanel>
+                    </ui:CardControl.Header>
+                </ui:CardControl>
+                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Wrench24}">
+                    <ui:CardControl.Header>
+                        <TextBlock Text="{l:Text AndroidBuildCard.Header}" Style="{StaticResource CardTitle}" />
+                    </ui:CardControl.Header>
+                    <TextBlock Text="{Binding BuildId, Mode=OneWay}" />
+                </ui:CardControl>
+                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Shield24}">
+                    <ui:CardControl.Header>
+                        <TextBlock Text="{l:Text AndroidPatchCard.Header}" Style="{StaticResource CardTitle}" />
+                    </ui:CardControl.Header>
+                    <TextBlock Text="{Binding SecurityPatch, Mode=OneWay}" />
+                </ui:CardControl>
+
+                <TextBlock Text="{l:Text AndroidChooseHeader.Text}" Style="{StaticResource SectionHeader}" />
+                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon ArrowSwap24}">
+                    <ui:CardControl.Header>
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="{l:Text AndroidChooseCard.Header}" Style="{StaticResource CardTitle}" />
+                                <ui:SymbolIcon Symbol="Shield24" Margin="6,0,0,0" ToolTip="{l:Text AdminShield.ToolTip}" />
+                            </StackPanel>
+                            <TextBlock Text="{l:Text AndroidChooseCard.Description}" Style="{StaticResource CardDescription}" />
+                            <TextBlock Text="{Binding SupportedText, Mode=OneWay}" Style="{StaticResource CardDescription}" />
+                        </StackPanel>
+                    </ui:CardControl.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <ComboBox x:Name="Choice" MinWidth="200" ItemsSource="{Binding Choices}" DisplayMemberPath="Label"
+                                  SelectedIndex="{Binding SelectedIndex, Mode=TwoWay}"
+                                  AutomationProperties.Name="{l:Text AndroidChooseCard.Header}" />
+                        <ui:Button Content="{l:Text AndroidApplyButton.Content}" Appearance="Primary" Margin="8,0,0,0"
+                                   IsEnabled="{Binding CanApply, Mode=OneWay}" Click="OnApply" />
+                    </StackPanel>
+                </ui:CardControl>
+                <TextBlock Text="{l:Text AndroidChooseNote.Text}" Style="{StaticResource Note}" />
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</Page>

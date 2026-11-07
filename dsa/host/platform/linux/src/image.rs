@@ -74,10 +74,58 @@ pub fn copy_sparse(from: &Path, to: &Path) -> io::Result<()> {
         if buf[..len].iter().any(|&b| b != 0) {
             target.seek(SeekFrom::Start(at))?;
             target.write_all(&buf[..len])?;
+        } else {
+            leave_hole(&target, at, len as u64)?;
         }
         at += len as u64;
     }
     target.sync_all()
+}
+
+/// Makes sure the range `at..at + len` of `file`, which nothing was written to, takes no
+/// blocks. On Linux a file grown with `set_len` is a hole already. On APFS a copy made that
+/// way was found to take a block for every byte, so on macOS the range is punched out.
+#[cfg(not(target_os = "macos"))]
+fn leave_hole(_file: &File, _at: u64, _len: u64) -> io::Result<()> {
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn leave_hole(file: &File, at: u64, len: u64) -> io::Result<()> {
+    use std::os::unix::io::AsRawFd;
+
+    /// `F_PUNCHHOLE` in `<sys/fcntl.h>`.
+    const F_PUNCHHOLE: libc::c_int = 99;
+    /// `struct fpunchhole` in `<sys/fcntl.h>`.
+    #[repr(C)]
+    struct FPunchhole {
+        fp_flags: libc::c_uint,
+        reserved: libc::c_uint,
+        fp_offset: libc::off_t,
+        fp_length: libc::off_t,
+    }
+    // The range must be whole file system blocks; a tail shorter than one stays allocated.
+    const BLOCK: u64 = 4096;
+    let len = len / BLOCK * BLOCK;
+    if len == 0 || at % BLOCK != 0 {
+        return Ok(());
+    }
+    let hole = FPunchhole {
+        fp_flags: 0,
+        reserved: 0,
+        fp_offset: at as libc::off_t,
+        fp_length: len as libc::off_t,
+    };
+    // SAFETY: `hole` is a valid `struct fpunchhole` that outlives the call.
+    if unsafe { libc::fcntl(file.as_raw_fd(), F_PUNCHHOLE, &hole) } == -1 {
+        let error = io::Error::last_os_error();
+        // A file system without holes (HFS+, exFAT) keeps the zeroes: the disk reads the
+        // same, it only takes more room.
+        if error.raw_os_error() != Some(libc::ENOTSUP) {
+            return Err(error);
+        }
+    }
+    Ok(())
 }
 
 /// Writes the disk `from` holds (VHDX or raw) to `to` as a sparse raw disk, through a
@@ -215,8 +263,8 @@ mod making {
         match template {
             Some(template) => write_raw_disk(template, disk)?,
             None => {
-                let file = File::create(disk)
-                    .map_err(|e| format!("creating {}: {e}", disk.display()))?;
+                let file =
+                    File::create(disk).map_err(|e| format!("creating {}: {e}", disk.display()))?;
                 file.set_len(u64::from(size_gb) << 30)
                     .map_err(|e| format!("sizing {}: {e}", disk.display()))?;
             }

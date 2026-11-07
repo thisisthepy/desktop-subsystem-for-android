@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The package's own words in English. Every word Windows shows after installation
+     (context menu, Start menu descriptions, the navigation pane, the service description)
+     comes from dsa-app-window.exe's string table in the user's display language instead;
+     these are the plain fallbacks and the text of the package's own tables. -->
+<WixLocalization Culture="en-US" Language="1033" xmlns="http://wixtoolset.org/schemas/v4/wxl">
+    <String Id="ArpComments" Value="Desktop Subsystem for Android is an independent open source project, not affiliated with, endorsed by or sponsored by Microsoft or Google. Android is a trademark of Google LLC." />
+    <String Id="SettingsShortcutDescription" Value="Settings and state of Desktop Subsystem for Android" />
+    <String Id="ApkFileType" Value="APK app package" />
+    <String Id="ApkBundleType" Value="Split APK bundle" />
+</WixLocalization>

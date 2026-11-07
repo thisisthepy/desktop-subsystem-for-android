@@ -40,9 +40,23 @@
                             IsOpen="{Binding HasProblem, Mode=OneWay}" Message="{Binding Problem, Mode=OneWay}" Margin="0,0,0,4" />
                 <ui:InfoBar Title="{l:Text LastReasonBar.Title}" Severity="Warning" IsClosable="False"
                             IsOpen="{Binding HasLastReason, Mode=OneWay}" Message="{Binding LastReason, Mode=OneWay}" Margin="0,0,0,4" />
+                <Expander Header="{l:Text LastReasonDetails.Header}" IsExpanded="False" Margin="0,0,0,4"
+                          Visibility="{Binding HasLastReasonDetail, Converter={StaticResource Visible}}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto">
+                            <TextBox Text="{Binding LastReasonDetail, Mode=OneWay}" Style="{StaticResource SelectableCode}" />
+                        </ScrollViewer>
+                        <ui:Button Grid.Column="1" Icon="{ui:SymbolIcon Copy24}" Margin="8,0,0,0" VerticalAlignment="Top"
+                                   ToolTip="{l:Text LastReasonCopy.ToolTip}" Click="OnCopyLastReason" />
+                    </Grid>
+                </Expander>
                 <ui:InfoBar Title="{l:Text UpdateNoticeBar.Title}" Severity="Informational" IsClosable="False"
-                            IsOpen="{Binding HasUpdateNotice, Mode=OneWay}" Message="{Binding UpdateNotice, Mode=OneWay}" />
-                <ui:CardControl Margin="0,4,0,0" Icon="{ui:SymbolIcon Snooze24}">
+                            IsOpen="{Binding HasUpdateNotice, Mode=OneWay}" Message="{Binding UpdateNotice, Mode=OneWay}" Margin="0,0,0,4" />
+                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Snooze24}">
                     <ui:CardControl.Header>
                         <StackPanel>
                             <TextBlock Text="{l:Text FreezeNowCard.Header}" Style="{StaticResource CardTitle}" />

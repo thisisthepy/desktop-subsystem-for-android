@@ -276,6 +276,80 @@ message InstalledApp {
   uint64 app_bytes = 9;
   uint64 data_bytes = 10;
   uint64 cache_bytes = 11;
+  // The ABI the app's native code runs as (the package manager's primary CPU ABI), such as
+  // "x86_64" or "arm64-v8a". Empty for an app without native code.
+  string primary_abi = 12;
+  // The native libraries the app's APKs on the device hold, base and splits together, by
+  // ABI, in ABI order. Empty for an app without native code.
+  repeated NativeLibraries native_libraries = 13;
+}
+
+// The native libraries of one ABI: the file names under `lib/<abi>/` of an APK, or of an APK
+// and its splits together.
+message NativeLibraries {
+  // Such as "x86_64" or "arm64-v8a".
+  string abi = 1;
+  // The library file names, such as "libmain.so", in name order, each once.
+  repeated string names = 2;
+}
+
+// Host to guest: install an app again from the APKs it has on the device (base and splits),
+// with its native code for `abi`, as the "Run as ARM" switch of the host's settings does. The
+// agent replaces the installed app, which keeps its data. When Android will not replace it
+// with the other ABI, the agent answers REINSTALL_STATUS_DATA_WOULD_BE_ERASED and changes
+// nothing, unless `erase_data` is set: then it keeps a copy of the APKs, uninstalls the app
+// (its data goes) and installs the copy. Answered with ReinstallResult of the same
+// `request_id`.
+message ReinstallApp {
+  uint32 request_id = 1;
+  string package_name = 2;
+  // "arm64-v8a" or "x86_64".
+  string abi = 3;
+  bool erase_data = 4;
+}
+
+// How an install with another ABI went. The reasons are stable, so the host can say in the
+// user's language what went wrong; the message beside them gives the guest's own words.
+enum ReinstallStatus {
+  REINSTALL_STATUS_UNSPECIFIED = 0;
+  // The app is installed again, with its native code for the ABI asked for.
+  REINSTALL_STATUS_SUCCESS = 1;
+  // Android will not replace the app with the other ABI while it keeps its data; nothing
+  // changed. Asking again with `erase_data` reinstalls it and erases its data.
+  REINSTALL_STATUS_DATA_WOULD_BE_ERASED = 2;
+  // No app of that package is installed.
+  REINSTALL_STATUS_NOT_INSTALLED = 3;
+  // The app is part of the Android image, which is not installed again.
+  REINSTALL_STATUS_SYSTEM_APP = 4;
+  // The app's APKs on the device hold no native libraries for that ABI.
+  REINSTALL_STATUS_NO_LIBRARIES = 5;
+  // Anything else. The message says what.
+  REINSTALL_STATUS_OTHER = 6;
+}
+
+// Guest to host, from the agent: how a ReinstallApp went.
+message ReinstallResult {
+  uint32 request_id = 1;
+  string package_name = 2;
+  ReinstallStatus status = 3;
+  // The guest's own words, for the log and a bug report.
+  string message = 4;
+  // The ABI the app's native code runs as now; empty when it has none or is not installed.
+  string primary_abi = 5;
+}
+
+// Guest to host, from the agent: an app ended because it could not load one of its native
+// libraries (an UnsatisfiedLinkError, or "dlopen failed"), as the system's crash record
+// says. The host offers to install the app again as arm64-v8a when it can. The agent sends
+// one for an app at most every few minutes.
+message NativeLibraryCrash {
+  string package_name = 1;
+  // The line of the crash record that names the library, for the log; at most 512
+  // characters.
+  string detail = 2;
+  // Whether the guest's ABI list holds arm64-v8a this boot (a translator is in place), so
+  // the app could run as ARM.
+  bool arm64_supported = 3;
 }
 
 // Host to guest: read the installed apps again, sizes included, and send the InstalledApp of
@@ -382,6 +456,11 @@ message PointerEvent {
   // positive `scroll_x` scrolls right.
   float scroll_x = 9;
   float scroll_y = 10;
+  // A pen's tilt, in degrees from upright, from -90 to 90: positive `tilt_x` leans its top
+  // toward the right of the screen, positive `tilt_y` toward the bottom (toward the user).
+  // 0 for a pointer that does not measure it.
+  float tilt_x = 11;
+  float tilt_y = 12;
 }
 
 // What a key did.
@@ -683,6 +762,70 @@ message ArmTranslationState {
   string abilist = 7;
 }
 
+// Host to guest, to the control daemon: the system image (erofs) of the Google apps the user
+// chose to install follows in GappsChunk messages of the same `transfer_id`, in order. The
+// daemon keeps it on the user's disk as it keeps an ARM translation package's image: beside
+// any image already there, checked for its length and SHA-256 once all `size` bytes have
+// arrived, and only then in the old one's place. It answers each chunk with GappsState. The
+// guest lays the image over its product and system_ext partitions from its next boot, when
+// the host says one is installed. One transfer at a time; a new one drops an unfinished one.
+message GappsInstall {
+  uint32 transfer_id = 1;
+  uint64 size = 2;
+  // The SHA-256 digest of the whole image.
+  bytes sha256 = 3;
+}
+
+// Host to guest: part of the image a GappsInstall announced.
+message GappsChunk {
+  uint32 transfer_id = 1;
+  // Where `data` starts in the image.
+  uint64 offset = 2;
+  bytes data = 3;
+}
+
+// Host to guest, to the control daemon: remove the Google apps image. The guest goes on using
+// an image it has mounted until it restarts. Answered with GappsState.
+message GappsRemove {}
+
+// Host to guest, to the control daemon: asks for GappsState.
+message GappsQuery {}
+
+// Guest to host, from the control daemon: where the Google apps stand in the guest. It answers
+// each of the messages above.
+message GappsState {
+  // The transfer this answers, or 0.
+  uint32 transfer_id = 1;
+  // How many bytes of that transfer the daemon has written.
+  uint64 received = 2;
+  // The transfer is complete and its image checked and in place.
+  bool done = 3;
+  // Non-empty when the transfer or the removal failed: why, in words a person can act on. A
+  // failed transfer leaves the image that was there before.
+  string error = 4;
+  // A Google apps image is on the user's disk.
+  bool installed = 5;
+  // This boot runs with the image laid over the system.
+  bool active = 6;
+  // The guest's API level (ro.build.version.sdk), which the image must be built for.
+  uint32 sdk = 7;
+  // The guest's primary ABI (ro.product.cpu.abi), which the image must be built for.
+  string abi = 8;
+  // The ABIs the package manager installs apps for, in the order it prefers them
+  // (ro.product.cpu.abilist).
+  string abilist = 9;
+}
+
+// Host to guest, to the agent: asks for GoogleDeviceId.
+message GoogleDeviceIdQuery {}
+
+// Guest to host, from the agent: the Google Services Framework Android ID, which Google's page
+// for uncertified devices asks for, in decimal; empty while Google's apps are not installed or
+// have not made one yet. It answers GoogleDeviceIdQuery.
+message GoogleDeviceId {
+  string id = 1;
+}
+
 // Guest to host, from the agent: a notification an app posted, or a new version of one it
 // posted before under the same key, which replaces it. Only notifications a person would see
 // come: not the ongoing notice of a foreground service, and not a group's summary, whose
@@ -923,6 +1066,19 @@ enum InstallStatus {
   INSTALL_STATUS_OTHER = 8;
 }
 
+// One file of an install made of several: an APK of an app that comes as a base APK and
+// split APKs, or an expansion (OBB) file of that app.
+message InstallPart {
+  // The file's name, without any folder, such as "base.apk", "split_config.x86_64.apk" or
+  // "main.42.com.example.game.obb". No two parts of an install have the same name.
+  string name = 1;
+  // The file's length in bytes.
+  uint64 size = 2;
+  // True for an expansion file. The agent copies it into the app's folder under Android/obb/
+  // once the app is installed, rather than writing it into the install session.
+  bool obb = 3;
+}
+
 // Host to guest: install an APK, whose content follows in ApkChunk messages of the same
 // `transfer_id`, in order. The agent writes them into an install session as they come and
 // commits it once it has all `size` bytes. The host sends at most a few chunks ahead of the
@@ -934,6 +1090,16 @@ message InstallApk {
   string name = 2;
   // The APK's length in bytes.
   uint64 size = 3;
+  // The ABI to install the app's native code for, which the agent gives the package
+  // installer as its ABI override: "x86_64" or "arm64-v8a". Empty lets the package manager
+  // take the first ABI of the guest's list the APK has code for. The host chooses arm64-v8a
+  // only while translation is on and the APK's x86_64 libraries leave out some of its arm64
+  // ones.
+  string abi = 4;
+  // Empty for one APK. Otherwise the files of the install, in the order their bytes follow one
+  // another in the chunks: the APKs first, which the agent writes into one install session,
+  // then any expansion files. `size` is then the sum of their sizes.
+  repeated InstallPart parts = 5;
 }
 
 // Host to guest: part of the APK an InstallApk announced.
@@ -1922,6 +2088,13 @@ message SystemSettings {
   fixed32 accent_color = 7;
 }
 
+// Host to guest: the computer's name, which the agent makes the guest's device name: the name
+// Settings shows, and the one Bluetooth and Wi-Fi Direct show other devices when the guest has
+// them. Sent each time the agent connects. Empty leaves the guest's as it is.
+message DeviceName {
+  string name = 1;
+}
+
 // Host to guest, for the control daemon: a game controller was connected to the host, or was
 // already there when the guest connected. The daemon makes it a gamepad input device in the
 // guest, which apps see as any USB or Bluetooth gamepad.
@@ -2033,6 +2206,13 @@ message Envelope {
     ArmTranslationRemove arm_translation_remove = 152;
     ArmTranslationQuery arm_translation_query = 153;
     ArmTranslationState arm_translation_state = 154;
+    GappsInstall gapps_install = 400;
+    GappsChunk gapps_chunk = 401;
+    GappsRemove gapps_remove = 402;
+    GappsQuery gapps_query = 403;
+    GappsState gapps_state = 404;
+    GoogleDeviceIdQuery google_device_id_query = 405;
+    GoogleDeviceId google_device_id = 406;
     DeviceIdle device_idle = 42;
     HostMemory host_memory = 43;
     HostSleep host_sleep = 44;
@@ -2119,6 +2299,7 @@ message Envelope {
     CameraError camera_error = 267;
     SetTaskCaption set_task_caption = 155;
     SystemSettings system_settings = 340;
+    DeviceName device_name = 383;
     GamepadConnected gamepad_connected = 341;
     GamepadDisconnected gamepad_disconnected = 342;
     GamepadState gamepad_state = 343;
@@ -2130,5 +2311,8 @@ message Envelope {
     DragRead drag_read = 352;
     DragData drag_data = 353;
     DragEnd drag_end = 354;
+    ReinstallApp reinstall_app = 380;
+    ReinstallResult reinstall_result = 381;
+    NativeLibraryCrash native_library_crash = 382;
   }
 }

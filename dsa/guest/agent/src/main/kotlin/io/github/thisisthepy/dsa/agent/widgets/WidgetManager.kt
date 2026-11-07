@@ -100,7 +100,13 @@ interface WidgetPlatform {
      */
     fun configure(widgetId: Int, done: (Boolean) -> Unit)
 
-    /** Draws the widget at [size] from now on, and tells its app the size. */
+    /**
+     * Draws the widget at [size] from now on, and tells its app the size. Before anything else
+     * the widget's view is made and registered with the framework, which drops every update
+     * of a widget ID no view of its host listens to. It is called for every placed widget
+     * each time the agent starts, since the views of an earlier process are gone. When the
+     * widget cannot be drawn, the platform calls the `failed` callback given to [start].
+     */
     fun show(widgetId: Int, size: WidgetSize)
 
     /** Hands pointer input to the widget's view. */
@@ -111,9 +117,22 @@ interface WidgetPlatform {
 
     /**
      * Starts the platform: [frame] is called, on any thread, with each new image of a widget as
-     * a PNG; [changed] when the installed widgets may have changed, as when an app is removed.
+     * a PNG; [changed] when the installed widgets may have changed, as when an app is removed;
+     * [failed], on any thread, when a widget [show] was asked to draw could not be, so it is
+     * tried again.
      */
-    fun start(frame: (widgetId: Int, width: Int, height: Int, png: ByteArray) -> Unit, changed: () -> Unit)
+    fun start(
+        frame: (widgetId: Int, width: Int, height: Int, png: ByteArray) -> Unit,
+        changed: () -> Unit,
+        failed: (widgetId: Int) -> Unit,
+    )
+
+    /**
+     * Calls [ready], on any thread, once the framework keeps widgets: Android keeps them only
+     * once the user's storage is unlocked, which comes some time after the agent starts. It
+     * is called at once when that has happened already.
+     */
+    fun whenReady(ready: () -> Unit) = ready()
 
     companion object {
         val NONE = object : WidgetPlatform {
@@ -127,7 +146,7 @@ interface WidgetPlatform {
             override fun show(widgetId: Int, size: WidgetSize) = Unit
             override fun pointer(widgetId: Int, action: PointerAction, pointerId: Int, x: Float, y: Float) = Unit
             override fun dozing(dozing: Boolean) = Unit
-            override fun start(frame: (Int, Int, Int, ByteArray) -> Unit, changed: () -> Unit) = Unit
+            override fun start(frame: (Int, Int, Int, ByteArray) -> Unit, changed: () -> Unit, failed: (Int) -> Unit) = Unit
         }
     }
 }
@@ -227,6 +246,10 @@ class WidgetManager(
     private val isConnected: () -> Boolean,
 ) {
     private var post: (() -> Unit) -> Unit = { it() }
+    private var later: (() -> Unit) -> Unit = {}
+
+    /** The widgets waiting to be shown again after drawing them failed. */
+    private val retrying = mutableSetOf<Int>()
     private val shown = mutableMapOf<Int, WidgetSize>()
     private val lastFrame = mutableMapOf<Int, ByteArray>()
 
@@ -248,23 +271,58 @@ class WidgetManager(
     /** Whether a start was refused and is being tried again. */
     private var waiting = false
 
+    /** Whether the host connected before the widget host started, so it is told once it has. */
+    private var missedConnection = false
+
+    /** Whether a later start is scheduled already. */
+    private var startScheduled = false
+
+    /** Why the last start was refused, so each new reason is logged once. */
+    private var refusal: String? = null
+
     /**
      * Starts drawing the placed widgets; [post] runs work on the agent's thread. The agent
-     * starts before the user's storage is unlocked, and Android keeps widgets until then, so
-     * a refused start runs again through [later] until it succeeds. Until it has, the host
-     * hears nothing about widgets: an empty list would make it remove the ones placed.
+     * starts before the user's storage is unlocked, and Android keeps no widgets until then,
+     * so the widget host starts when the platform says the user is unlocked
+     * ([WidgetPlatform.whenReady]), at once from there. A start refused all the same runs
+     * again through [later] until it succeeds. Until it has, the host hears nothing about
+     * widgets: an empty list would make it remove the ones placed.
      */
     fun start(later: (() -> Unit) -> Unit = {}, post: (() -> Unit) -> Unit) {
         this.post = post
+        this.later = later
+        try {
+            // Ready already: the widget host starts now, as part of this call. Ready later:
+            // it starts on the agent's thread then.
+            var calling = true
+            platform.whenReady { if (calling) begin() else post { begin() } }
+            calling = false
+        } catch (e: Exception) {
+            log.warn("cannot hear when the user is unlocked; starting the widget host by trying", e)
+            begin()
+        }
+    }
+
+    private fun begin() {
+        if (started) return
         try {
             platform.start(
                 frame = { id, width, height, png -> post { frame(id, width, height, png) } },
                 changed = { post { if (isConnected()) announce() else prune() } },
+                failed = { id -> post { retry(id) } },
             )
         } catch (e: Exception) {
-            if (!waiting) log.warn("the widget host did not start yet; trying again until it does", e)
+            val why = "${e.javaClass.name}: ${e.message}"
+            if (why != refusal) log.warn("the widget host did not start yet; trying again until it does", e)
+            refusal = why
             waiting = true
-            later { start(later, post) }
+            if (!startScheduled) {
+                startScheduled = true
+                later {
+                    startScheduled = false
+                    begin()
+                }
+            }
             return
         }
         started = true
@@ -275,7 +333,8 @@ class WidgetManager(
             val size = sizes[id] ?: platform.info(id)?.let(WidgetSize::defaultOf) ?: continue
             show(id, size)
         }
-        if (waiting && isConnected()) announce()
+        if ((waiting || missedConnection) && isConnected()) announce()
+        missedConnection = false
         waiting = false
     }
 
@@ -317,7 +376,10 @@ class WidgetManager(
     /** The host connected: it hears of every placed widget and what each shows now. */
     fun connected() {
         lastFrame.clear()
-        if (!started) return
+        if (!started) {
+            missedConnection = true
+            return
+        }
         announce()
         for ((id, image) in drawn.toList()) {
             if (id in shown) frame(id, image.width, image.height, image.png)
@@ -350,7 +412,26 @@ class WidgetManager(
 
     private fun show(id: Int, size: WidgetSize) {
         shown[id] = size
-        attempt("drawing widget $id") { platform.show(id, size) }
+        try {
+            platform.show(id, size)
+        } catch (e: Exception) {
+            log.warn("drawing widget $id failed; trying again", e)
+            retry(id)
+        }
+    }
+
+    /**
+     * A placed widget could not be drawn: it is shown again a little later, until it is, so a
+     * widget never stays without a view listening to its updates.
+     */
+    private fun retry(id: Int) {
+        if (id !in shown || !retrying.add(id)) return
+        later {
+            retrying.remove(id)
+            val size = shown[id] ?: return@later
+            if (id !in placed()) return@later
+            show(id, size)
+        }
     }
 
     /** Acts on the frame if it is about widgets. False for any other frame. */

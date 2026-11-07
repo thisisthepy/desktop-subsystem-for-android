@@ -69,6 +69,8 @@ struct Presenter {
     std::condition_variable wake;
     /* The newest frame set for each display, waiting to be shown. */
     std::map<uint32_t, PendingFrame> pending;
+    /* Displays that lost their window: their imported textures go on the next pass. */
+    std::vector<uint32_t> forget;
     bool stopping = false;
     std::thread thread;
 
@@ -81,6 +83,8 @@ struct Presenter {
     VkCommandPool pool = VK_NULL_HANDLE;
     VkCommandBuffer commands = VK_NULL_HANDLE;
     VkFence fence = VK_NULL_HANDLE;
+    /* The renderer's device these objects were made on (VkEmulation::deviceGeneration). */
+    uint64_t generation = 0;
 };
 
 std::mutex s_presenter_mutex;
@@ -258,6 +262,21 @@ bool import_target(VkEmulation& emu, void* handle, uint32_t width, uint32_t heig
     return true;
 }
 
+/* The renderer made a new device after a GPU reset: everything made on the old one went with
+ * it, so it is forgotten, not destroyed, and made again on the new one as frames come. */
+void follow_device(VkEmulation& emu, Presenter& presenter) {
+    const uint64_t generation = emu.deviceGeneration();
+    if (presenter.generation == generation) {
+        return;
+    }
+    presenter.generation = generation;
+    presenter.targets.clear();
+    presenter.pool = VK_NULL_HANDLE;
+    presenter.commands = VK_NULL_HANDLE;
+    presenter.fence = VK_NULL_HANDLE;
+    log_once("the renderer made a new Vulkan device after a GPU reset; task windows follow it");
+}
+
 bool ensure_commands(VkEmulation& emu, Presenter& presenter) {
     if (presenter.commands != VK_NULL_HANDLE) {
         return true;
@@ -322,6 +341,12 @@ void present(Presenter& presenter, uint32_t display_id, const PendingFrame& fram
     if (!emu || !fb) {
         return;
     }
+    /* A lost device is made again before the copy, and none is made while the copy uses it. */
+    if (!emu->recoverIfLost()) {
+        return;
+    }
+    auto device_use = emu->useDevice();
+    follow_device(*emu, presenter);
     /* Held for the copy, so the guest destroying the buffer meanwhile cannot free its image. */
     auto keep_alive = fb->findColorBuffer(color_buffer);
     if (!keep_alive) {
@@ -427,14 +452,27 @@ void present(Presenter& presenter, uint32_t display_id, const PendingFrame& fram
         submitted = vk->vkQueueSubmit(emu->getQueue(), 1, &submit, presenter.fence);
     }
     if (submitted != VK_SUCCESS) {
+        if (submitted == VK_ERROR_DEVICE_LOST) {
+            /* The next frame finds a new device. */
+            emu->noteDeviceLost();
+        }
         log_once("submitting the copy of a frame into a task window failed");
         return;
     }
     VkResult waited = vk->vkWaitForFences(device, 1, &presenter.fence, VK_TRUE, kCopyTimeoutNs);
+    if (waited == VK_ERROR_DEVICE_LOST) {
+        emu->noteDeviceLost();
+        log_once("the GPU was reset while a frame was copied into a task window");
+        return;
+    }
     if (waited != VK_SUCCESS) {
         /* The fence stays pending; wait for it before the next submit reuses the buffer. */
         log_once("copying a frame into a task window took longer than a second");
-        vk->vkWaitForFences(device, 1, &presenter.fence, VK_TRUE, UINT64_MAX);
+        if (vk->vkWaitForFences(device, 1, &presenter.fence, VK_TRUE, UINT64_MAX) ==
+            VK_ERROR_DEVICE_LOST) {
+            emu->noteDeviceLost();
+            return;
+        }
         vk->vkResetFences(device, 1, &presenter.fence);
         return;
     }
@@ -445,15 +483,31 @@ void present(Presenter& presenter, uint32_t display_id, const PendingFrame& fram
 void run(Presenter* presenter) {
     for (;;) {
         std::map<uint32_t, PendingFrame> frames;
+        std::vector<uint32_t> forget;
         {
             std::unique_lock<std::mutex> lock(presenter->mutex);
             presenter->wake.wait(lock, [presenter] {
-                return presenter->stopping || !presenter->pending.empty();
+                return presenter->stopping || !presenter->pending.empty() ||
+                       !presenter->forget.empty();
             });
             if (presenter->stopping) {
                 break;
             }
             frames.swap(presenter->pending);
+            forget.swap(presenter->forget);
+        }
+        if (!forget.empty()) {
+            if (VkEmulation* emu = emulation()) {
+                auto device_use = emu->useDevice();
+                follow_device(*emu, *presenter);
+                for (uint32_t display_id : forget) {
+                    auto it = presenter->targets.find(display_id);
+                    if (it != presenter->targets.end()) {
+                        destroy_target(*emu, it->second);
+                        presenter->targets.erase(it);
+                    }
+                }
+            }
         }
         for (const auto& [display_id, frame] : frames) {
             present(*presenter, display_id, frame);
@@ -463,6 +517,8 @@ void run(Presenter* presenter) {
     if (!emu) {
         return;
     }
+    auto device_use = emu->useDevice();
+    follow_device(*emu, *presenter);
     for (auto& [display_id, target] : presenter->targets) {
         destroy_target(*emu, target);
     }
@@ -522,6 +578,18 @@ extern "C" DSA_GFX_EXPORT int dsa_gfx_set_display_callbacks2(dsa_display_target_
     return 0;
 }
 
+extern "C" DSA_GFX_EXPORT void dsa_gfx_forget_display(uint32_t display_id) {
+    std::lock_guard<std::mutex> lock(s_presenter_mutex);
+    Presenter* presenter = s_presenter;
+    if (!presenter) {
+        return;
+    }
+    std::lock_guard<std::mutex> frames(presenter->mutex);
+    presenter->pending.erase(display_id);
+    presenter->forget.push_back(display_id);
+    presenter->wake.notify_one();
+}
+
 extern "C" DSA_GFX_EXPORT int dsa_gfx_get_adapter_luid(uint8_t luid[8]) {
     VkEmulation* emu = emulation();
     if (!emu || !luid) {
@@ -562,8 +630,6 @@ extern "C" DSA_GFX_EXPORT int dsa_gfx_set_display_iosurface_callbacks(
     dsa_display_iosurface_fn, dsa_display_iosurface_frame_fn, dsa_display_pixels_fn, void*) {
     return -1;
 }
-
-extern "C" DSA_GFX_EXPORT void dsa_gfx_forget_display(uint32_t) {}
 
 void dsa_gfx_display_shutdown(void) { stop_presenter(); }
 
@@ -675,6 +741,8 @@ struct PixelPresenter {
     VkCommandPool pool = VK_NULL_HANDLE;
     VkCommandBuffer commands = VK_NULL_HANDLE;
     VkFence fence = VK_NULL_HANDLE;
+    /* The renderer's device these objects were made on (VkEmulation::deviceGeneration). */
+    uint64_t generation = 0;
 };
 
 std::mutex s_presenter_mutex;
@@ -1009,10 +1077,21 @@ bool present_dmabuf(PixelPresenter& presenter, uint32_t display_id, const Pendin
         submitted = vk->vkQueueSubmit(emu->getQueue(), 1, &submit, presenter.fence);
     }
     if (submitted != VK_SUCCESS) {
+        if (submitted == VK_ERROR_DEVICE_LOST) {
+            /* The next frame finds a new device. */
+            emu->noteDeviceLost();
+        }
         log_once("submitting the copy of a frame into a task window failed");
         return true;
     }
-    if (vk->vkWaitForFences(device, 1, &presenter.fence, VK_TRUE, kCopyTimeoutNs) != VK_SUCCESS) {
+    const VkResult waited =
+        vk->vkWaitForFences(device, 1, &presenter.fence, VK_TRUE, kCopyTimeoutNs);
+    if (waited == VK_ERROR_DEVICE_LOST) {
+        emu->noteDeviceLost();
+        log_once("the GPU was reset while a frame was copied into a task window");
+        return true;
+    }
+    if (waited != VK_SUCCESS) {
         log_once("copying a frame into a task window took longer than a second");
         vk->vkWaitForFences(device, 1, &presenter.fence, VK_TRUE, UINT64_MAX);
     }
@@ -1283,10 +1362,21 @@ bool present_iosurface(PixelPresenter& presenter, uint32_t display_id, const Pen
         submitted = vk->vkQueueSubmit(emu->getQueue(), 1, &submit, presenter.fence);
     }
     if (submitted != VK_SUCCESS) {
+        if (submitted == VK_ERROR_DEVICE_LOST) {
+            /* The next frame finds a new device. */
+            emu->noteDeviceLost();
+        }
         log_once("submitting the copy of a frame into a task window failed");
         return true;
     }
-    if (vk->vkWaitForFences(device, 1, &presenter.fence, VK_TRUE, kCopyTimeoutNs) != VK_SUCCESS) {
+    const VkResult waited =
+        vk->vkWaitForFences(device, 1, &presenter.fence, VK_TRUE, kCopyTimeoutNs);
+    if (waited == VK_ERROR_DEVICE_LOST) {
+        emu->noteDeviceLost();
+        log_once("the GPU was reset while a frame was copied into a task window");
+        return true;
+    }
+    if (waited != VK_SUCCESS) {
         log_once("copying a frame into a task window took longer than a second");
         vk->vkWaitForFences(device, 1, &presenter.fence, VK_TRUE, UINT64_MAX);
     }
@@ -1311,21 +1401,58 @@ void present_pixels(PixelPresenter& presenter, uint32_t display_id, const Pendin
                         presenter.buffer.data());
 }
 
-void present(PixelPresenter& presenter, uint32_t display_id, const PendingFrame& frame) {
+/* The renderer made a new device after a GPU reset: what was made on the old one went with
+ * it, so it is forgotten, not destroyed, and made again as frames come. */
+void follow_device(VkEmulation& emu, PixelPresenter& presenter) {
+    const uint64_t generation = emu.deviceGeneration();
+    if (presenter.generation == generation) {
+        return;
+    }
+    presenter.generation = generation;
+    presenter.displays.clear();
 #ifdef __APPLE__
-    if (presenter.iosurface_cb && presenter.iosurface_frame_cb && !presenter.iosurface_failed) {
-        if (present_iosurface(presenter, display_id, frame)) {
-            return;
+    /* The surfaces stay the embedder's; only this side's hold on them goes. */
+    for (auto& [display_id, imports] : presenter.imports) {
+        for (SurfaceImport& import : imports) {
+            if (import.surface) {
+                CFRelease(import.surface);
+            }
         }
-        presenter.iosurface_failed = true;
     }
+    presenter.imports.clear();
 #endif
-    if (presenter.dmabuf_cb && presenter.dmabuf_frame_cb && !presenter.dmabuf_failed) {
-        if (present_dmabuf(presenter, display_id, frame)) {
+    presenter.dmabuf_failed = false;
+    presenter.iosurface_failed = false;
+    presenter.pool = VK_NULL_HANDLE;
+    presenter.commands = VK_NULL_HANDLE;
+    presenter.fence = VK_NULL_HANDLE;
+    log_once("the renderer made a new Vulkan device after a GPU reset; task windows follow it");
+}
+
+void present(PixelPresenter& presenter, uint32_t display_id, const PendingFrame& frame) {
+    if (VkEmulation* emu = emulation()) {
+        /* A lost device is made again before the copy, and none is made while it is used. */
+        if (!emu->recoverIfLost()) {
             return;
         }
-        presenter.dmabuf_failed = true;
+        auto device_use = emu->useDevice();
+        follow_device(*emu, presenter);
+#ifdef __APPLE__
+        if (presenter.iosurface_cb && presenter.iosurface_frame_cb && !presenter.iosurface_failed) {
+            if (present_iosurface(presenter, display_id, frame)) {
+                return;
+            }
+            presenter.iosurface_failed = true;
+        }
+#endif
+        if (presenter.dmabuf_cb && presenter.dmabuf_frame_cb && !presenter.dmabuf_failed) {
+            if (present_dmabuf(presenter, display_id, frame)) {
+                return;
+            }
+            presenter.dmabuf_failed = true;
+        }
     }
+    /* Read back without the device lock: the read makes a lost device again itself. */
     present_pixels(presenter, display_id, frame);
 }
 
@@ -1346,8 +1473,12 @@ void run(PixelPresenter* presenter) {
             forget.swap(presenter->forget);
         }
 #ifdef __APPLE__
-        for (uint32_t display_id : forget) {
-            forget_display(*presenter, display_id);
+        if (VkEmulation* emu = emulation()) {
+            auto device_use = emu->useDevice();
+            follow_device(*emu, *presenter);
+            for (uint32_t display_id : forget) {
+                forget_display(*presenter, display_id);
+            }
         }
 #endif
         for (const auto& [display_id, frame] : frames) {
@@ -1358,6 +1489,8 @@ void run(PixelPresenter* presenter) {
     if (!emu) {
         return;
     }
+    auto device_use = emu->useDevice();
+    follow_device(*emu, *presenter);
 #ifdef __APPLE__
     for (auto& [display_id, imports] : presenter->imports) {
         for (SurfaceImport& import : imports) {

@@ -10,7 +10,8 @@
 //!
 //! The VM and the service:
 //! - [`crosvm`]: the VM as a crosvm command line (KVM, virtio disks, vhost-vsock, a balloon
-//!   with free page reporting, the network adapter, the device sandbox);
+//!   with free page reporting, virtio-mem for growth, the network adapter, the device
+//!   sandbox);
 //! - [`launcher`]: starts and stops each user's VM as that user, and resizes, freezes and stops
 //!   it through crosvm's control socket ([`crosvm_control`]);
 //! - [`vsock`]: the host's end of the guest's control, log and file ports, each connection
@@ -24,7 +25,10 @@
 //! the window system, the buses, the devices and the VM build on Linux only, so the workspace
 //! builds everywhere.
 
+#[cfg(target_os = "linux")]
+pub mod adb_discovery;
 pub mod compositor;
+pub mod computer_identity;
 pub mod config;
 pub mod console;
 pub mod crosvm;

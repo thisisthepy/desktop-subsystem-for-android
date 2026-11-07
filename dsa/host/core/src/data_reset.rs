@@ -95,6 +95,34 @@ impl TemplateDataDisk {
     }
 }
 
+/// Removes a user's data disk (and `version_file`, the image version recorded beside it)
+/// when it holds data of a newer Android major than `image_major`. That happens once a user
+/// moved to an older major and agreed to erase the data: Android cannot read data a newer
+/// major wrote. The platform then makes a fresh disk from the image, as for a new user.
+/// Returns whether the disk was removed. Call it only while the user's Android is stopped.
+pub fn erase_if_newer(disk: &Path, version_file: &Path, image_major: u32) -> Result<bool, String> {
+    let held = std::fs::read_to_string(version_file)
+        .ok()
+        .and_then(|version| crate::update::versions::major_of_version(&version));
+    match held {
+        Some(major) if major > image_major && disk.exists() => {
+            std::fs::remove_file(disk).map_err(|e| {
+                format!(
+                    "erasing {}, which holds Android {major} data: {e}",
+                    disk.display()
+                )
+            })?;
+            let _ = std::fs::remove_file(version_file);
+            eprintln!(
+                "{} held Android {major} data, which Android {image_major} cannot read; it was                  erased as the user agreed when they chose Android {image_major}",
+                disk.display()
+            );
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
 /// Where a file waits while its replacement is made.
 fn aside(path: &Path) -> PathBuf {
     let mut name = path.file_name().unwrap_or_default().to_os_string();

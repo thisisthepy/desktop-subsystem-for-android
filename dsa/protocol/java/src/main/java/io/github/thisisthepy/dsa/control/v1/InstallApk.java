@@ -20,6 +20,8 @@ public  final class InstallApk extends
     InstallApkOrBuilder {
   private InstallApk() {
     name_ = "";
+    abi_ = "";
+    parts_ = emptyProtobufList();
   }
   public static final int TRANSFER_ID_FIELD_NUMBER = 1;
   private int transferId_;
@@ -162,6 +164,253 @@ public  final class InstallApk extends
   private void clearSize() {
     
     size_ = 0L;
+  }
+
+  public static final int ABI_FIELD_NUMBER = 4;
+  private java.lang.String abi_;
+  /**
+   * <pre>
+   * The ABI to install the app's native code for, which the agent gives the package
+   * installer as its ABI override: "x86_64" or "arm64-v8a". Empty lets the package manager
+   * take the first ABI of the guest's list the APK has code for. The host chooses arm64-v8a
+   * only while translation is on and the APK's x86_64 libraries leave out some of its arm64
+   * ones.
+   * </pre>
+   *
+   * <code>string abi = 4;</code>
+   * @return The abi.
+   */
+  @java.lang.Override
+  public java.lang.String getAbi() {
+    return abi_;
+  }
+  /**
+   * <pre>
+   * The ABI to install the app's native code for, which the agent gives the package
+   * installer as its ABI override: "x86_64" or "arm64-v8a". Empty lets the package manager
+   * take the first ABI of the guest's list the APK has code for. The host chooses arm64-v8a
+   * only while translation is on and the APK's x86_64 libraries leave out some of its arm64
+   * ones.
+   * </pre>
+   *
+   * <code>string abi = 4;</code>
+   * @return The bytes for abi.
+   */
+  @java.lang.Override
+  public com.google.protobuf.ByteString
+      getAbiBytes() {
+    return com.google.protobuf.ByteString.copyFromUtf8(abi_);
+  }
+  /**
+   * <pre>
+   * The ABI to install the app's native code for, which the agent gives the package
+   * installer as its ABI override: "x86_64" or "arm64-v8a". Empty lets the package manager
+   * take the first ABI of the guest's list the APK has code for. The host chooses arm64-v8a
+   * only while translation is on and the APK's x86_64 libraries leave out some of its arm64
+   * ones.
+   * </pre>
+   *
+   * <code>string abi = 4;</code>
+   * @param value The abi to set.
+   */
+  private void setAbi(
+      java.lang.String value) {
+    java.lang.Class<?> valueClass = value.getClass();
+  
+    abi_ = value;
+  }
+  /**
+   * <pre>
+   * The ABI to install the app's native code for, which the agent gives the package
+   * installer as its ABI override: "x86_64" or "arm64-v8a". Empty lets the package manager
+   * take the first ABI of the guest's list the APK has code for. The host chooses arm64-v8a
+   * only while translation is on and the APK's x86_64 libraries leave out some of its arm64
+   * ones.
+   * </pre>
+   *
+   * <code>string abi = 4;</code>
+   */
+  private void clearAbi() {
+    
+    abi_ = getDefaultInstance().getAbi();
+  }
+  /**
+   * <pre>
+   * The ABI to install the app's native code for, which the agent gives the package
+   * installer as its ABI override: "x86_64" or "arm64-v8a". Empty lets the package manager
+   * take the first ABI of the guest's list the APK has code for. The host chooses arm64-v8a
+   * only while translation is on and the APK's x86_64 libraries leave out some of its arm64
+   * ones.
+   * </pre>
+   *
+   * <code>string abi = 4;</code>
+   * @param value The bytes for abi to set.
+   */
+  private void setAbiBytes(
+      com.google.protobuf.ByteString value) {
+    checkByteStringIsUtf8(value);
+    abi_ = value.toStringUtf8();
+    
+  }
+
+  public static final int PARTS_FIELD_NUMBER = 5;
+  private com.google.protobuf.Internal.ProtobufList<io.github.thisisthepy.dsa.control.v1.InstallPart> parts_;
+  /**
+   * <pre>
+   * Empty for one APK. Otherwise the files of the install, in the order their bytes follow one
+   * another in the chunks: the APKs first, which the agent writes into one install session,
+   * then any expansion files. `size` is then the sum of their sizes.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.InstallPart parts = 5;</code>
+   */
+  @java.lang.Override
+  public java.util.List<io.github.thisisthepy.dsa.control.v1.InstallPart> getPartsList() {
+    return parts_;
+  }
+  /**
+   * <pre>
+   * Empty for one APK. Otherwise the files of the install, in the order their bytes follow one
+   * another in the chunks: the APKs first, which the agent writes into one install session,
+   * then any expansion files. `size` is then the sum of their sizes.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.InstallPart parts = 5;</code>
+   */
+  public java.util.List<? extends io.github.thisisthepy.dsa.control.v1.InstallPartOrBuilder> 
+      getPartsOrBuilderList() {
+    return parts_;
+  }
+  /**
+   * <pre>
+   * Empty for one APK. Otherwise the files of the install, in the order their bytes follow one
+   * another in the chunks: the APKs first, which the agent writes into one install session,
+   * then any expansion files. `size` is then the sum of their sizes.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.InstallPart parts = 5;</code>
+   */
+  @java.lang.Override
+  public int getPartsCount() {
+    return parts_.size();
+  }
+  /**
+   * <pre>
+   * Empty for one APK. Otherwise the files of the install, in the order their bytes follow one
+   * another in the chunks: the APKs first, which the agent writes into one install session,
+   * then any expansion files. `size` is then the sum of their sizes.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.InstallPart parts = 5;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.InstallPart getParts(int index) {
+    return parts_.get(index);
+  }
+  /**
+   * <pre>
+   * Empty for one APK. Otherwise the files of the install, in the order their bytes follow one
+   * another in the chunks: the APKs first, which the agent writes into one install session,
+   * then any expansion files. `size` is then the sum of their sizes.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.InstallPart parts = 5;</code>
+   */
+  public io.github.thisisthepy.dsa.control.v1.InstallPartOrBuilder getPartsOrBuilder(
+      int index) {
+    return parts_.get(index);
+  }
+  private void ensurePartsIsMutable() {
+    com.google.protobuf.Internal.ProtobufList<io.github.thisisthepy.dsa.control.v1.InstallPart> tmp = parts_;
+    if (!tmp.isModifiable()) {
+      parts_ =
+          com.google.protobuf.GeneratedMessageLite.mutableCopy(tmp);
+     }
+  }
+
+  /**
+   * <pre>
+   * Empty for one APK. Otherwise the files of the install, in the order their bytes follow one
+   * another in the chunks: the APKs first, which the agent writes into one install session,
+   * then any expansion files. `size` is then the sum of their sizes.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.InstallPart parts = 5;</code>
+   */
+  private void setParts(
+      int index, io.github.thisisthepy.dsa.control.v1.InstallPart value) {
+    value.getClass();
+  ensurePartsIsMutable();
+    parts_.set(index, value);
+  }
+  /**
+   * <pre>
+   * Empty for one APK. Otherwise the files of the install, in the order their bytes follow one
+   * another in the chunks: the APKs first, which the agent writes into one install session,
+   * then any expansion files. `size` is then the sum of their sizes.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.InstallPart parts = 5;</code>
+   */
+  private void addParts(io.github.thisisthepy.dsa.control.v1.InstallPart value) {
+    value.getClass();
+  ensurePartsIsMutable();
+    parts_.add(value);
+  }
+  /**
+   * <pre>
+   * Empty for one APK. Otherwise the files of the install, in the order their bytes follow one
+   * another in the chunks: the APKs first, which the agent writes into one install session,
+   * then any expansion files. `size` is then the sum of their sizes.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.InstallPart parts = 5;</code>
+   */
+  private void addParts(
+      int index, io.github.thisisthepy.dsa.control.v1.InstallPart value) {
+    value.getClass();
+  ensurePartsIsMutable();
+    parts_.add(index, value);
+  }
+  /**
+   * <pre>
+   * Empty for one APK. Otherwise the files of the install, in the order their bytes follow one
+   * another in the chunks: the APKs first, which the agent writes into one install session,
+   * then any expansion files. `size` is then the sum of their sizes.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.InstallPart parts = 5;</code>
+   */
+  private void addAllParts(
+      java.lang.Iterable<? extends io.github.thisisthepy.dsa.control.v1.InstallPart> values) {
+    ensurePartsIsMutable();
+    com.google.protobuf.AbstractMessageLite.addAll(
+        values, parts_);
+  }
+  /**
+   * <pre>
+   * Empty for one APK. Otherwise the files of the install, in the order their bytes follow one
+   * another in the chunks: the APKs first, which the agent writes into one install session,
+   * then any expansion files. `size` is then the sum of their sizes.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.InstallPart parts = 5;</code>
+   */
+  private void clearParts() {
+    parts_ = emptyProtobufList();
+  }
+  /**
+   * <pre>
+   * Empty for one APK. Otherwise the files of the install, in the order their bytes follow one
+   * another in the chunks: the APKs first, which the agent writes into one install session,
+   * then any expansion files. `size` is then the sum of their sizes.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.InstallPart parts = 5;</code>
+   */
+  private void removeParts(int index) {
+    ensurePartsIsMutable();
+    parts_.remove(index);
   }
 
   public static io.github.thisisthepy.dsa.control.v1.InstallApk parseFrom(
@@ -415,6 +664,269 @@ public  final class InstallApk extends
       return this;
     }
 
+    /**
+     * <pre>
+     * The ABI to install the app's native code for, which the agent gives the package
+     * installer as its ABI override: "x86_64" or "arm64-v8a". Empty lets the package manager
+     * take the first ABI of the guest's list the APK has code for. The host chooses arm64-v8a
+     * only while translation is on and the APK's x86_64 libraries leave out some of its arm64
+     * ones.
+     * </pre>
+     *
+     * <code>string abi = 4;</code>
+     * @return The abi.
+     */
+    @java.lang.Override
+    public java.lang.String getAbi() {
+      return instance.getAbi();
+    }
+    /**
+     * <pre>
+     * The ABI to install the app's native code for, which the agent gives the package
+     * installer as its ABI override: "x86_64" or "arm64-v8a". Empty lets the package manager
+     * take the first ABI of the guest's list the APK has code for. The host chooses arm64-v8a
+     * only while translation is on and the APK's x86_64 libraries leave out some of its arm64
+     * ones.
+     * </pre>
+     *
+     * <code>string abi = 4;</code>
+     * @return The bytes for abi.
+     */
+    @java.lang.Override
+    public com.google.protobuf.ByteString
+        getAbiBytes() {
+      return instance.getAbiBytes();
+    }
+    /**
+     * <pre>
+     * The ABI to install the app's native code for, which the agent gives the package
+     * installer as its ABI override: "x86_64" or "arm64-v8a". Empty lets the package manager
+     * take the first ABI of the guest's list the APK has code for. The host chooses arm64-v8a
+     * only while translation is on and the APK's x86_64 libraries leave out some of its arm64
+     * ones.
+     * </pre>
+     *
+     * <code>string abi = 4;</code>
+     * @param value The abi to set.
+     * @return This builder for chaining.
+     */
+    public Builder setAbi(
+        java.lang.String value) {
+      copyOnWrite();
+      instance.setAbi(value);
+      return this;
+    }
+    /**
+     * <pre>
+     * The ABI to install the app's native code for, which the agent gives the package
+     * installer as its ABI override: "x86_64" or "arm64-v8a". Empty lets the package manager
+     * take the first ABI of the guest's list the APK has code for. The host chooses arm64-v8a
+     * only while translation is on and the APK's x86_64 libraries leave out some of its arm64
+     * ones.
+     * </pre>
+     *
+     * <code>string abi = 4;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearAbi() {
+      copyOnWrite();
+      instance.clearAbi();
+      return this;
+    }
+    /**
+     * <pre>
+     * The ABI to install the app's native code for, which the agent gives the package
+     * installer as its ABI override: "x86_64" or "arm64-v8a". Empty lets the package manager
+     * take the first ABI of the guest's list the APK has code for. The host chooses arm64-v8a
+     * only while translation is on and the APK's x86_64 libraries leave out some of its arm64
+     * ones.
+     * </pre>
+     *
+     * <code>string abi = 4;</code>
+     * @param value The bytes for abi to set.
+     * @return This builder for chaining.
+     */
+    public Builder setAbiBytes(
+        com.google.protobuf.ByteString value) {
+      copyOnWrite();
+      instance.setAbiBytes(value);
+      return this;
+    }
+
+    /**
+     * <pre>
+     * Empty for one APK. Otherwise the files of the install, in the order their bytes follow one
+     * another in the chunks: the APKs first, which the agent writes into one install session,
+     * then any expansion files. `size` is then the sum of their sizes.
+     * </pre>
+     *
+     * <code>repeated .dsa.control.v1.InstallPart parts = 5;</code>
+     */
+    @java.lang.Override
+    public java.util.List<io.github.thisisthepy.dsa.control.v1.InstallPart> getPartsList() {
+      return java.util.Collections.unmodifiableList(
+          instance.getPartsList());
+    }
+    /**
+     * <pre>
+     * Empty for one APK. Otherwise the files of the install, in the order their bytes follow one
+     * another in the chunks: the APKs first, which the agent writes into one install session,
+     * then any expansion files. `size` is then the sum of their sizes.
+     * </pre>
+     *
+     * <code>repeated .dsa.control.v1.InstallPart parts = 5;</code>
+     */
+    @java.lang.Override
+    public int getPartsCount() {
+      return instance.getPartsCount();
+    }/**
+     * <pre>
+     * Empty for one APK. Otherwise the files of the install, in the order their bytes follow one
+     * another in the chunks: the APKs first, which the agent writes into one install session,
+     * then any expansion files. `size` is then the sum of their sizes.
+     * </pre>
+     *
+     * <code>repeated .dsa.control.v1.InstallPart parts = 5;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.InstallPart getParts(int index) {
+      return instance.getParts(index);
+    }
+    /**
+     * <pre>
+     * Empty for one APK. Otherwise the files of the install, in the order their bytes follow one
+     * another in the chunks: the APKs first, which the agent writes into one install session,
+     * then any expansion files. `size` is then the sum of their sizes.
+     * </pre>
+     *
+     * <code>repeated .dsa.control.v1.InstallPart parts = 5;</code>
+     */
+    public Builder setParts(
+        int index, io.github.thisisthepy.dsa.control.v1.InstallPart value) {
+      copyOnWrite();
+      instance.setParts(index, value);
+      return this;
+    }
+    /**
+     * <pre>
+     * Empty for one APK. Otherwise the files of the install, in the order their bytes follow one
+     * another in the chunks: the APKs first, which the agent writes into one install session,
+     * then any expansion files. `size` is then the sum of their sizes.
+     * </pre>
+     *
+     * <code>repeated .dsa.control.v1.InstallPart parts = 5;</code>
+     */
+    public Builder setParts(
+        int index, io.github.thisisthepy.dsa.control.v1.InstallPart.Builder builderForValue) {
+      copyOnWrite();
+      instance.setParts(index,
+          builderForValue.build());
+      return this;
+    }
+    /**
+     * <pre>
+     * Empty for one APK. Otherwise the files of the install, in the order their bytes follow one
+     * another in the chunks: the APKs first, which the agent writes into one install session,
+     * then any expansion files. `size` is then the sum of their sizes.
+     * </pre>
+     *
+     * <code>repeated .dsa.control.v1.InstallPart parts = 5;</code>
+     */
+    public Builder addParts(io.github.thisisthepy.dsa.control.v1.InstallPart value) {
+      copyOnWrite();
+      instance.addParts(value);
+      return this;
+    }
+    /**
+     * <pre>
+     * Empty for one APK. Otherwise the files of the install, in the order their bytes follow one
+     * another in the chunks: the APKs first, which the agent writes into one install session,
+     * then any expansion files. `size` is then the sum of their sizes.
+     * </pre>
+     *
+     * <code>repeated .dsa.control.v1.InstallPart parts = 5;</code>
+     */
+    public Builder addParts(
+        int index, io.github.thisisthepy.dsa.control.v1.InstallPart value) {
+      copyOnWrite();
+      instance.addParts(index, value);
+      return this;
+    }
+    /**
+     * <pre>
+     * Empty for one APK. Otherwise the files of the install, in the order their bytes follow one
+     * another in the chunks: the APKs first, which the agent writes into one install session,
+     * then any expansion files. `size` is then the sum of their sizes.
+     * </pre>
+     *
+     * <code>repeated .dsa.control.v1.InstallPart parts = 5;</code>
+     */
+    public Builder addParts(
+        io.github.thisisthepy.dsa.control.v1.InstallPart.Builder builderForValue) {
+      copyOnWrite();
+      instance.addParts(builderForValue.build());
+      return this;
+    }
+    /**
+     * <pre>
+     * Empty for one APK. Otherwise the files of the install, in the order their bytes follow one
+     * another in the chunks: the APKs first, which the agent writes into one install session,
+     * then any expansion files. `size` is then the sum of their sizes.
+     * </pre>
+     *
+     * <code>repeated .dsa.control.v1.InstallPart parts = 5;</code>
+     */
+    public Builder addParts(
+        int index, io.github.thisisthepy.dsa.control.v1.InstallPart.Builder builderForValue) {
+      copyOnWrite();
+      instance.addParts(index,
+          builderForValue.build());
+      return this;
+    }
+    /**
+     * <pre>
+     * Empty for one APK. Otherwise the files of the install, in the order their bytes follow one
+     * another in the chunks: the APKs first, which the agent writes into one install session,
+     * then any expansion files. `size` is then the sum of their sizes.
+     * </pre>
+     *
+     * <code>repeated .dsa.control.v1.InstallPart parts = 5;</code>
+     */
+    public Builder addAllParts(
+        java.lang.Iterable<? extends io.github.thisisthepy.dsa.control.v1.InstallPart> values) {
+      copyOnWrite();
+      instance.addAllParts(values);
+      return this;
+    }
+    /**
+     * <pre>
+     * Empty for one APK. Otherwise the files of the install, in the order their bytes follow one
+     * another in the chunks: the APKs first, which the agent writes into one install session,
+     * then any expansion files. `size` is then the sum of their sizes.
+     * </pre>
+     *
+     * <code>repeated .dsa.control.v1.InstallPart parts = 5;</code>
+     */
+    public Builder clearParts() {
+      copyOnWrite();
+      instance.clearParts();
+      return this;
+    }
+    /**
+     * <pre>
+     * Empty for one APK. Otherwise the files of the install, in the order their bytes follow one
+     * another in the chunks: the APKs first, which the agent writes into one install session,
+     * then any expansion files. `size` is then the sum of their sizes.
+     * </pre>
+     *
+     * <code>repeated .dsa.control.v1.InstallPart parts = 5;</code>
+     */
+    public Builder removeParts(int index) {
+      copyOnWrite();
+      instance.removeParts(index);
+      return this;
+    }
+
     // @@protoc_insertion_point(builder_scope:dsa.control.v1.InstallApk)
   }
   @java.lang.Override
@@ -434,10 +946,13 @@ public  final class InstallApk extends
             "transferId_",
             "name_",
             "size_",
+            "abi_",
+            "parts_",
+            io.github.thisisthepy.dsa.control.v1.InstallPart.class,
           };
           java.lang.String info =
-              "\u0000\u0003\u0000\u0000\u0001\u0003\u0003\u0000\u0000\u0000\u0001\u000b\u0002\u0208" +
-              "\u0003\u0003";
+              "\u0000\u0005\u0000\u0000\u0001\u0005\u0005\u0000\u0001\u0000\u0001\u000b\u0002\u0208" +
+              "\u0003\u0003\u0004\u0208\u0005\u001b";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through

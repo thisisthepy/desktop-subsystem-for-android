@@ -30,6 +30,20 @@ pub fn parse(value: &str) -> Option<(u32, String)> {
         .then(|| (port, token.to_string()))
 }
 
+/// What the server says when it cannot reach the shared storage. A permission denial on a
+/// folder the service's user owns is the guest's SELinux policy, so it names that.
+pub fn unreachable_storage(error: &std::io::Error) -> String {
+    let storage = crate::share_mount::STORAGE;
+    if error.kind() == std::io::ErrorKind::PermissionDenied {
+        format!(
+            "cannot reach {storage}: {error}; the guest's SELinux policy refuses the way down \
+             (look for an avc denial for dsa_files), so every request will fail"
+        )
+    } else {
+        format!("cannot reach {storage}: {error}; every request will fail")
+    }
+}
+
 /// Runs the server until the process is stopped. Returns the exit status.
 #[cfg(any(target_os = "linux", target_os = "android"))]
 pub fn run(read_property: &dyn Fn(&str) -> String, say: &(dyn Fn(&str) + Sync)) -> i32 {
@@ -43,6 +57,11 @@ pub fn run(read_property: &dyn Fn(&str) -> String, say: &(dyn Fn(&str) + Sync)) 
     let hidden = crate::share_mount::parse(&read_property(crate::share_mount::PROPERTY))
         .map(|wanted| vec![wanted.location])
         .unwrap_or_else(|| vec![crate::share_mount::LOCATION.to_string()]);
+    // Said once when the server starts: every request would fail the same way, and the
+    // host's tries would otherwise go unexplained.
+    if let Err(error) = std::fs::symlink_metadata(crate::share_mount::STORAGE) {
+        say(&unreachable_storage(&error));
+    }
     let config = crate::webdav::Config {
         root: std::path::PathBuf::from(crate::share_mount::STORAGE),
         token,
@@ -150,6 +169,30 @@ mod tests {
             "off"
         );
         assert_eq!(parse("off"), None);
+    }
+
+    #[test]
+    fn fr29_a_refused_storage_is_reported_as_the_policy() {
+        let denied = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        let said = unreachable_storage(&denied);
+        assert!(said.contains("/data/media/0"), "{said}");
+        assert!(said.contains("SELinux"), "{said}");
+        let missing = std::io::Error::from(std::io::ErrorKind::NotFound);
+        assert!(!unreachable_storage(&missing).contains("SELinux"));
+    }
+
+    /// The server reaches /data/media/0 through /data and /data/media, which have labels of
+    /// their own; without the rules its sandbox refuses the way down, and every request was
+    /// answered 403.
+    #[test]
+    fn fr29_the_file_server_may_pass_through_data_media_to_the_shared_storage() {
+        let policy = include_str!("../../image/sepolicy/files.cil");
+        assert!(
+            policy
+                .lines()
+                .any(|line| line.trim() == "(allow dsa_files media_userdir_file (dir (search)))"),
+            "files.cil does not let dsa_files pass through /data/media"
+        );
     }
 
     /// The server reaches /data/media/0 through /data, which has a label of its own; without

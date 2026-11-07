@@ -25,6 +25,8 @@ public  final class InstalledApp extends
     label_ = "";
     iconPng_ = com.google.protobuf.ByteString.EMPTY;
     versionName_ = "";
+    primaryAbi_ = "";
+    nativeLibraries_ = emptyProtobufList();
   }
   public static final int PACKAGE_NAME_FIELD_NUMBER = 1;
   private java.lang.String packageName_;
@@ -468,6 +470,227 @@ public  final class InstalledApp extends
   private void clearCacheBytes() {
     
     cacheBytes_ = 0L;
+  }
+
+  public static final int PRIMARY_ABI_FIELD_NUMBER = 12;
+  private java.lang.String primaryAbi_;
+  /**
+   * <pre>
+   * The ABI the app's native code runs as (the package manager's primary CPU ABI), such as
+   * "x86_64" or "arm64-v8a". Empty for an app without native code.
+   * </pre>
+   *
+   * <code>string primary_abi = 12;</code>
+   * @return The primaryAbi.
+   */
+  @java.lang.Override
+  public java.lang.String getPrimaryAbi() {
+    return primaryAbi_;
+  }
+  /**
+   * <pre>
+   * The ABI the app's native code runs as (the package manager's primary CPU ABI), such as
+   * "x86_64" or "arm64-v8a". Empty for an app without native code.
+   * </pre>
+   *
+   * <code>string primary_abi = 12;</code>
+   * @return The bytes for primaryAbi.
+   */
+  @java.lang.Override
+  public com.google.protobuf.ByteString
+      getPrimaryAbiBytes() {
+    return com.google.protobuf.ByteString.copyFromUtf8(primaryAbi_);
+  }
+  /**
+   * <pre>
+   * The ABI the app's native code runs as (the package manager's primary CPU ABI), such as
+   * "x86_64" or "arm64-v8a". Empty for an app without native code.
+   * </pre>
+   *
+   * <code>string primary_abi = 12;</code>
+   * @param value The primaryAbi to set.
+   */
+  private void setPrimaryAbi(
+      java.lang.String value) {
+    java.lang.Class<?> valueClass = value.getClass();
+  
+    primaryAbi_ = value;
+  }
+  /**
+   * <pre>
+   * The ABI the app's native code runs as (the package manager's primary CPU ABI), such as
+   * "x86_64" or "arm64-v8a". Empty for an app without native code.
+   * </pre>
+   *
+   * <code>string primary_abi = 12;</code>
+   */
+  private void clearPrimaryAbi() {
+    
+    primaryAbi_ = getDefaultInstance().getPrimaryAbi();
+  }
+  /**
+   * <pre>
+   * The ABI the app's native code runs as (the package manager's primary CPU ABI), such as
+   * "x86_64" or "arm64-v8a". Empty for an app without native code.
+   * </pre>
+   *
+   * <code>string primary_abi = 12;</code>
+   * @param value The bytes for primaryAbi to set.
+   */
+  private void setPrimaryAbiBytes(
+      com.google.protobuf.ByteString value) {
+    checkByteStringIsUtf8(value);
+    primaryAbi_ = value.toStringUtf8();
+    
+  }
+
+  public static final int NATIVE_LIBRARIES_FIELD_NUMBER = 13;
+  private com.google.protobuf.Internal.ProtobufList<io.github.thisisthepy.dsa.control.v1.NativeLibraries> nativeLibraries_;
+  /**
+   * <pre>
+   * The native libraries the app's APKs on the device hold, base and splits together, by
+   * ABI, in ABI order. Empty for an app without native code.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.NativeLibraries native_libraries = 13;</code>
+   */
+  @java.lang.Override
+  public java.util.List<io.github.thisisthepy.dsa.control.v1.NativeLibraries> getNativeLibrariesList() {
+    return nativeLibraries_;
+  }
+  /**
+   * <pre>
+   * The native libraries the app's APKs on the device hold, base and splits together, by
+   * ABI, in ABI order. Empty for an app without native code.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.NativeLibraries native_libraries = 13;</code>
+   */
+  public java.util.List<? extends io.github.thisisthepy.dsa.control.v1.NativeLibrariesOrBuilder> 
+      getNativeLibrariesOrBuilderList() {
+    return nativeLibraries_;
+  }
+  /**
+   * <pre>
+   * The native libraries the app's APKs on the device hold, base and splits together, by
+   * ABI, in ABI order. Empty for an app without native code.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.NativeLibraries native_libraries = 13;</code>
+   */
+  @java.lang.Override
+  public int getNativeLibrariesCount() {
+    return nativeLibraries_.size();
+  }
+  /**
+   * <pre>
+   * The native libraries the app's APKs on the device hold, base and splits together, by
+   * ABI, in ABI order. Empty for an app without native code.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.NativeLibraries native_libraries = 13;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.NativeLibraries getNativeLibraries(int index) {
+    return nativeLibraries_.get(index);
+  }
+  /**
+   * <pre>
+   * The native libraries the app's APKs on the device hold, base and splits together, by
+   * ABI, in ABI order. Empty for an app without native code.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.NativeLibraries native_libraries = 13;</code>
+   */
+  public io.github.thisisthepy.dsa.control.v1.NativeLibrariesOrBuilder getNativeLibrariesOrBuilder(
+      int index) {
+    return nativeLibraries_.get(index);
+  }
+  private void ensureNativeLibrariesIsMutable() {
+    com.google.protobuf.Internal.ProtobufList<io.github.thisisthepy.dsa.control.v1.NativeLibraries> tmp = nativeLibraries_;
+    if (!tmp.isModifiable()) {
+      nativeLibraries_ =
+          com.google.protobuf.GeneratedMessageLite.mutableCopy(tmp);
+     }
+  }
+
+  /**
+   * <pre>
+   * The native libraries the app's APKs on the device hold, base and splits together, by
+   * ABI, in ABI order. Empty for an app without native code.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.NativeLibraries native_libraries = 13;</code>
+   */
+  private void setNativeLibraries(
+      int index, io.github.thisisthepy.dsa.control.v1.NativeLibraries value) {
+    value.getClass();
+  ensureNativeLibrariesIsMutable();
+    nativeLibraries_.set(index, value);
+  }
+  /**
+   * <pre>
+   * The native libraries the app's APKs on the device hold, base and splits together, by
+   * ABI, in ABI order. Empty for an app without native code.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.NativeLibraries native_libraries = 13;</code>
+   */
+  private void addNativeLibraries(io.github.thisisthepy.dsa.control.v1.NativeLibraries value) {
+    value.getClass();
+  ensureNativeLibrariesIsMutable();
+    nativeLibraries_.add(value);
+  }
+  /**
+   * <pre>
+   * The native libraries the app's APKs on the device hold, base and splits together, by
+   * ABI, in ABI order. Empty for an app without native code.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.NativeLibraries native_libraries = 13;</code>
+   */
+  private void addNativeLibraries(
+      int index, io.github.thisisthepy.dsa.control.v1.NativeLibraries value) {
+    value.getClass();
+  ensureNativeLibrariesIsMutable();
+    nativeLibraries_.add(index, value);
+  }
+  /**
+   * <pre>
+   * The native libraries the app's APKs on the device hold, base and splits together, by
+   * ABI, in ABI order. Empty for an app without native code.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.NativeLibraries native_libraries = 13;</code>
+   */
+  private void addAllNativeLibraries(
+      java.lang.Iterable<? extends io.github.thisisthepy.dsa.control.v1.NativeLibraries> values) {
+    ensureNativeLibrariesIsMutable();
+    com.google.protobuf.AbstractMessageLite.addAll(
+        values, nativeLibraries_);
+  }
+  /**
+   * <pre>
+   * The native libraries the app's APKs on the device hold, base and splits together, by
+   * ABI, in ABI order. Empty for an app without native code.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.NativeLibraries native_libraries = 13;</code>
+   */
+  private void clearNativeLibraries() {
+    nativeLibraries_ = emptyProtobufList();
+  }
+  /**
+   * <pre>
+   * The native libraries the app's APKs on the device hold, base and splits together, by
+   * ABI, in ABI order. Empty for an app without native code.
+   * </pre>
+   *
+   * <code>repeated .dsa.control.v1.NativeLibraries native_libraries = 13;</code>
+   */
+  private void removeNativeLibraries(int index) {
+    ensureNativeLibrariesIsMutable();
+    nativeLibraries_.remove(index);
   }
 
   public static io.github.thisisthepy.dsa.control.v1.InstalledApp parseFrom(
@@ -1039,6 +1262,242 @@ public  final class InstalledApp extends
       return this;
     }
 
+    /**
+     * <pre>
+     * The ABI the app's native code runs as (the package manager's primary CPU ABI), such as
+     * "x86_64" or "arm64-v8a". Empty for an app without native code.
+     * </pre>
+     *
+     * <code>string primary_abi = 12;</code>
+     * @return The primaryAbi.
+     */
+    @java.lang.Override
+    public java.lang.String getPrimaryAbi() {
+      return instance.getPrimaryAbi();
+    }
+    /**
+     * <pre>
+     * The ABI the app's native code runs as (the package manager's primary CPU ABI), such as
+     * "x86_64" or "arm64-v8a". Empty for an app without native code.
+     * </pre>
+     *
+     * <code>string primary_abi = 12;</code>
+     * @return The bytes for primaryAbi.
+     */
+    @java.lang.Override
+    public com.google.protobuf.ByteString
+        getPrimaryAbiBytes() {
+      return instance.getPrimaryAbiBytes();
+    }
+    /**
+     * <pre>
+     * The ABI the app's native code runs as (the package manager's primary CPU ABI), such as
+     * "x86_64" or "arm64-v8a". Empty for an app without native code.
+     * </pre>
+     *
+     * <code>string primary_abi = 12;</code>
+     * @param value The primaryAbi to set.
+     * @return This builder for chaining.
+     */
+    public Builder setPrimaryAbi(
+        java.lang.String value) {
+      copyOnWrite();
+      instance.setPrimaryAbi(value);
+      return this;
+    }
+    /**
+     * <pre>
+     * The ABI the app's native code runs as (the package manager's primary CPU ABI), such as
+     * "x86_64" or "arm64-v8a". Empty for an app without native code.
+     * </pre>
+     *
+     * <code>string primary_abi = 12;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearPrimaryAbi() {
+      copyOnWrite();
+      instance.clearPrimaryAbi();
+      return this;
+    }
+    /**
+     * <pre>
+     * The ABI the app's native code runs as (the package manager's primary CPU ABI), such as
+     * "x86_64" or "arm64-v8a". Empty for an app without native code.
+     * </pre>
+     *
+     * <code>string primary_abi = 12;</code>
+     * @param value The bytes for primaryAbi to set.
+     * @return This builder for chaining.
+     */
+    public Builder setPrimaryAbiBytes(
+        com.google.protobuf.ByteString value) {
+      copyOnWrite();
+      instance.setPrimaryAbiBytes(value);
+      return this;
+    }
+
+    /**
+     * <pre>
+     * The native libraries the app's APKs on the device hold, base and splits together, by
+     * ABI, in ABI order. Empty for an app without native code.
+     * </pre>
+     *
+     * <code>repeated .dsa.control.v1.NativeLibraries native_libraries = 13;</code>
+     */
+    @java.lang.Override
+    public java.util.List<io.github.thisisthepy.dsa.control.v1.NativeLibraries> getNativeLibrariesList() {
+      return java.util.Collections.unmodifiableList(
+          instance.getNativeLibrariesList());
+    }
+    /**
+     * <pre>
+     * The native libraries the app's APKs on the device hold, base and splits together, by
+     * ABI, in ABI order. Empty for an app without native code.
+     * </pre>
+     *
+     * <code>repeated .dsa.control.v1.NativeLibraries native_libraries = 13;</code>
+     */
+    @java.lang.Override
+    public int getNativeLibrariesCount() {
+      return instance.getNativeLibrariesCount();
+    }/**
+     * <pre>
+     * The native libraries the app's APKs on the device hold, base and splits together, by
+     * ABI, in ABI order. Empty for an app without native code.
+     * </pre>
+     *
+     * <code>repeated .dsa.control.v1.NativeLibraries native_libraries = 13;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.NativeLibraries getNativeLibraries(int index) {
+      return instance.getNativeLibraries(index);
+    }
+    /**
+     * <pre>
+     * The native libraries the app's APKs on the device hold, base and splits together, by
+     * ABI, in ABI order. Empty for an app without native code.
+     * </pre>
+     *
+     * <code>repeated .dsa.control.v1.NativeLibraries native_libraries = 13;</code>
+     */
+    public Builder setNativeLibraries(
+        int index, io.github.thisisthepy.dsa.control.v1.NativeLibraries value) {
+      copyOnWrite();
+      instance.setNativeLibraries(index, value);
+      return this;
+    }
+    /**
+     * <pre>
+     * The native libraries the app's APKs on the device hold, base and splits together, by
+     * ABI, in ABI order. Empty for an app without native code.
+     * </pre>
+     *
+     * <code>repeated .dsa.control.v1.NativeLibraries native_libraries = 13;</code>
+     */
+    public Builder setNativeLibraries(
+        int index, io.github.thisisthepy.dsa.control.v1.NativeLibraries.Builder builderForValue) {
+      copyOnWrite();
+      instance.setNativeLibraries(index,
+          builderForValue.build());
+      return this;
+    }
+    /**
+     * <pre>
+     * The native libraries the app's APKs on the device hold, base and splits together, by
+     * ABI, in ABI order. Empty for an app without native code.
+     * </pre>
+     *
+     * <code>repeated .dsa.control.v1.NativeLibraries native_libraries = 13;</code>
+     */
+    public Builder addNativeLibraries(io.github.thisisthepy.dsa.control.v1.NativeLibraries value) {
+      copyOnWrite();
+      instance.addNativeLibraries(value);
+      return this;
+    }
+    /**
+     * <pre>
+     * The native libraries the app's APKs on the device hold, base and splits together, by
+     * ABI, in ABI order. Empty for an app without native code.
+     * </pre>
+     *
+     * <code>repeated .dsa.control.v1.NativeLibraries native_libraries = 13;</code>
+     */
+    public Builder addNativeLibraries(
+        int index, io.github.thisisthepy.dsa.control.v1.NativeLibraries value) {
+      copyOnWrite();
+      instance.addNativeLibraries(index, value);
+      return this;
+    }
+    /**
+     * <pre>
+     * The native libraries the app's APKs on the device hold, base and splits together, by
+     * ABI, in ABI order. Empty for an app without native code.
+     * </pre>
+     *
+     * <code>repeated .dsa.control.v1.NativeLibraries native_libraries = 13;</code>
+     */
+    public Builder addNativeLibraries(
+        io.github.thisisthepy.dsa.control.v1.NativeLibraries.Builder builderForValue) {
+      copyOnWrite();
+      instance.addNativeLibraries(builderForValue.build());
+      return this;
+    }
+    /**
+     * <pre>
+     * The native libraries the app's APKs on the device hold, base and splits together, by
+     * ABI, in ABI order. Empty for an app without native code.
+     * </pre>
+     *
+     * <code>repeated .dsa.control.v1.NativeLibraries native_libraries = 13;</code>
+     */
+    public Builder addNativeLibraries(
+        int index, io.github.thisisthepy.dsa.control.v1.NativeLibraries.Builder builderForValue) {
+      copyOnWrite();
+      instance.addNativeLibraries(index,
+          builderForValue.build());
+      return this;
+    }
+    /**
+     * <pre>
+     * The native libraries the app's APKs on the device hold, base and splits together, by
+     * ABI, in ABI order. Empty for an app without native code.
+     * </pre>
+     *
+     * <code>repeated .dsa.control.v1.NativeLibraries native_libraries = 13;</code>
+     */
+    public Builder addAllNativeLibraries(
+        java.lang.Iterable<? extends io.github.thisisthepy.dsa.control.v1.NativeLibraries> values) {
+      copyOnWrite();
+      instance.addAllNativeLibraries(values);
+      return this;
+    }
+    /**
+     * <pre>
+     * The native libraries the app's APKs on the device hold, base and splits together, by
+     * ABI, in ABI order. Empty for an app without native code.
+     * </pre>
+     *
+     * <code>repeated .dsa.control.v1.NativeLibraries native_libraries = 13;</code>
+     */
+    public Builder clearNativeLibraries() {
+      copyOnWrite();
+      instance.clearNativeLibraries();
+      return this;
+    }
+    /**
+     * <pre>
+     * The native libraries the app's APKs on the device hold, base and splits together, by
+     * ABI, in ABI order. Empty for an app without native code.
+     * </pre>
+     *
+     * <code>repeated .dsa.control.v1.NativeLibraries native_libraries = 13;</code>
+     */
+    public Builder removeNativeLibraries(int index) {
+      copyOnWrite();
+      instance.removeNativeLibraries(index);
+      return this;
+    }
+
     // @@protoc_insertion_point(builder_scope:dsa.control.v1.InstalledApp)
   }
   @java.lang.Override
@@ -1066,11 +1525,14 @@ public  final class InstalledApp extends
             "appBytes_",
             "dataBytes_",
             "cacheBytes_",
+            "primaryAbi_",
+            "nativeLibraries_",
+            io.github.thisisthepy.dsa.control.v1.NativeLibraries.class,
           };
           java.lang.String info =
-              "\u0000\u000b\u0000\u0000\u0001\u000b\u000b\u0000\u0000\u0000\u0001\u0208\u0002\u0208" +
-              "\u0003\n\u0004\u0208\u0005\u0002\u0006\u0003\u0007\u0003\b\u0007\t\u0003\n\u0003" +
-              "\u000b\u0003";
+              "\u0000\r\u0000\u0000\u0001\r\r\u0000\u0001\u0000\u0001\u0208\u0002\u0208\u0003\n" +
+              "\u0004\u0208\u0005\u0002\u0006\u0003\u0007\u0003\b\u0007\t\u0003\n\u0003\u000b\u0003" +
+              "\f\u0208\r\u001b";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through

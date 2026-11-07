@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <!-- The DSA app icon for macOS, one for every version: a deep green squircle (a
+       superellipse of exponent 5) with a white window on it that shows its thickness. -->
+  <defs>
+    <linearGradient id="mac-tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#14674b"/><stop offset="1" stop-color="#0a3e2e"/>
+    </linearGradient>
+    <linearGradient id="mac-rim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".22"/><stop offset=".18" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="mac-window" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#dcebe4"/>
+    </linearGradient>
+    <linearGradient id="mac-bar" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8cf5bb"/><stop offset="1" stop-color="#2cc674"/>
+    </linearGradient>
+    <filter id="mac-tile-shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="1.4" stdDeviation="1.3" flood-color="#000" flood-opacity=".28"/>
+    </filter>
+    <filter id="mac-window-shadow" x="-30%" y="-30%" width="160%" height="180%">
+      <feDropShadow dx="0" dy="2" stdDeviation="1.8" flood-color="#021c14" flood-opacity=".5"/>
+    </filter>
+  </defs>
+  <g id="tile">
+    <g filter="url(#mac-tile-shadow)"><path d="M59.50 31.50L59.48 40.74L59.41 43.68L59.29 45.80L59.12 47.52L58.91 48.97L58.64 50.23L58.33 51.34L57.96 52.34L57.54 53.24L57.07 54.05L56.53 54.78L55.94 55.44L55.28 56.03L54.55 56.57L53.74 57.04L52.84 57.46L51.84 57.83L50.73 58.14L49.47 58.41L48.02 58.62L46.30 58.79L44.18 58.91L41.24 58.98L32.00 59.00L22.76 58.98L19.82 58.91L17.70 58.79L15.98 58.62L14.53 58.41L13.27 58.14L12.16 57.83L11.16 57.46L10.26 57.04L9.45 56.57L8.72 56.03L8.06 55.44L7.47 54.78L6.93 54.05L6.46 53.24L6.04 52.34L5.67 51.34L5.36 50.23L5.09 48.97L4.88 47.52L4.71 45.80L4.59 43.68L4.52 40.74L4.50 31.50L4.52 22.26L4.59 19.32L4.71 17.20L4.88 15.48L5.09 14.03L5.36 12.77L5.67 11.66L6.04 10.66L6.46 9.76L6.93 8.95L7.47 8.22L8.06 7.56L8.72 6.97L9.45 6.43L10.26 5.96L11.16 5.54L12.16 5.17L13.27 4.86L14.53 4.59L15.98 4.38L17.70 4.21L19.82 4.09L22.76 4.02L32.00 4.00L41.24 4.02L44.18 4.09L46.30 4.21L48.02 4.38L49.47 4.59L50.73 4.86L51.84 5.17L52.84 5.54L53.74 5.96L54.55 6.43L55.28 6.97L55.94 7.56L56.53 8.22L57.07 8.95L57.54 9.76L57.96 10.66L58.33 11.66L58.64 12.77L58.91 14.03L59.12 15.48L59.29 17.20L59.41 19.32L59.48 22.26L59.50 31.50Z" fill="url(#mac-tile)"/></g>
+    <path d="M59.50 31.50L59.48 40.74L59.41 43.68L59.29 45.80L59.12 47.52L58.91 48.97L58.64 50.23L58.33 51.34L57.96 52.34L57.54 53.24L57.07 54.05L56.53 54.78L55.94 55.44L55.28 56.03L54.55 56.57L53.74 57.04L52.84 57.46L51.84 57.83L50.73 58.14L49.47 58.41L48.02 58.62L46.30 58.79L44.18 58.91L41.24 58.98L32.00 59.00L22.76 58.98L19.82 58.91L17.70 58.79L15.98 58.62L14.53 58.41L13.27 58.14L12.16 57.83L11.16 57.46L10.26 57.04L9.45 56.57L8.72 56.03L8.06 55.44L7.47 54.78L6.93 54.05L6.46 53.24L6.04 52.34L5.67 51.34L5.36 50.23L5.09 48.97L4.88 47.52L4.71 45.80L4.59 43.68L4.52 40.74L4.50 31.50L4.52 22.26L4.59 19.32L4.71 17.20L4.88 15.48L5.09 14.03L5.36 12.77L5.67 11.66L6.04 10.66L6.46 9.76L6.93 8.95L7.47 8.22L8.06 7.56L8.72 6.97L9.45 6.43L10.26 5.96L11.16 5.54L12.16 5.17L13.27 4.86L14.53 4.59L15.98 4.38L17.70 4.21L19.82 4.09L22.76 4.02L32.00 4.00L41.24 4.02L44.18 4.09L46.30 4.21L48.02 4.38L49.47 4.59L50.73 4.86L51.84 5.17L52.84 5.54L53.74 5.96L54.55 6.43L55.28 6.97L55.94 7.56L56.53 8.22L57.07 8.95L57.54 9.76L57.96 10.66L58.33 11.66L58.64 12.77L58.91 14.03L59.12 15.48L59.29 17.20L59.41 19.32L59.48 22.26L59.50 31.50Z" fill="url(#mac-rim)"/>
+  </g>
+  <g transform="translate(32 33) scale(.6) translate(-32 -32)" filter="url(#mac-window-shadow)">
+    <g id="window">
+      <path d="M22 14 L16.5 5 M42 14 L47.5 5" stroke="url(#mac-bar)" stroke-width="4.4" stroke-linecap="round" fill="none"/>
+      <path d="M13 15h38a9 9 0 0 1 9 9v28a9 9 0 0 1-9 9H13a9 9 0 0 1-9-9V24a9 9 0 0 1 9-9z" fill="#b9d3c7"/>
+      <path d="M13 12h38a9 9 0 0 1 9 9v28a9 9 0 0 1-9 9H13a9 9 0 0 1-9-9V21a9 9 0 0 1 9-9z" fill="url(#mac-window)"/>
+      <path d="M16 32h32a4 4 0 0 1 4 4v10a4 4 0 0 1-4 4H16a4 4 0 0 1-4-4V36a4 4 0 0 1 4-4z" fill="#0c5a43" opacity=".14"/>
+    </g>
+    <g id="title-bar">
+      <path d="M13 12h38a9 9 0 0 1 9 9v4H4v-4a9 9 0 0 1 9-9z" fill="url(#mac-bar)"/>
+      <circle cx="40" cy="18.5" r="2.3" fill="#0b5a42"/>
+      <circle cx="48" cy="18.5" r="2.3" fill="#0b5a42"/>
+    </g>
+  </g>
+</svg>

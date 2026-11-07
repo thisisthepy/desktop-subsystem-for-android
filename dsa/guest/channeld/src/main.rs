@@ -40,6 +40,7 @@ mod daemon {
 
     use dsa_guest_channeld::arm_translation::{self, ArmTranslation, BootFacts};
     use dsa_guest_channeld::gamepad::{uinput::Uinput, GamepadDevices};
+    use dsa_guest_channeld::gapps::{self, Gapps, GuestFacts};
     use dsa_guest_channeld::logbridge::{
         files_in, DiagnosticFiles, LogBridge, LogPackets, LogSource, PortConnector,
     };
@@ -327,27 +328,66 @@ mod daemon {
     #[cfg(target_os = "android")]
     fn reclaim_idle_memory(router: Arc<Router>) {
         use dsa_guest_channeld::reclaim::{
-            file_refaults_kb, memory_pressure, MemInfo, Reason, ReclaimPolicy, Reclaimer,
-            CHECK_INTERVAL, RECLAIM_PROPERTY, TRIM_PROPERTY, TRIM_SIZE_PROPERTY,
+            file_refaults_kb, memory_pressure, package_running, reclaim_step_mib, MemInfo,
+            ReadFailures, Reason, ReclaimPolicy, Reclaimer, CHECK_INTERVAL, EXIT_POLL,
+            EXIT_WAIT_LIMIT, RECLAIM_PROPERTY, RECLAIM_STEP_PROPERTY, TRIM_PROPERTY,
+            TRIM_SIZE_PROPERTY,
         };
+        // The command lines of the guest's processes, for whether a closed app's are gone.
+        fn command_lines(failures: &mut ReadFailures) -> Vec<String> {
+            let listing = std::fs::read_dir("/proc");
+            if let Some(line) = failures.note(
+                "/proc",
+                &listing,
+                "a closed app's memory is reclaimed without waiting for its processes to exit",
+            ) {
+                say!("{line}");
+            }
+            let Ok(entries) = listing else {
+                return Vec::new();
+            };
+            entries
+                .flatten()
+                .filter(|e| {
+                    e.file_name()
+                        .to_string_lossy()
+                        .bytes()
+                        .all(|b| b.is_ascii_digit())
+                })
+                .filter_map(|e| std::fs::read(e.path().join("cmdline")).ok())
+                .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+                .collect()
+        }
         // SAFETY: sysconf has no preconditions.
         let page_kb = (unsafe { libc::sysconf(libc::_SC_PAGESIZE) }.max(4096) as u64) / 1024;
         let start = std::time::Instant::now();
         let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
+        let mut failures = ReadFailures::default();
         let mut closed = router.apps_closed();
         loop {
             let now_closed = router.wait_for_closed_app(closed, CHECK_INTERVAL);
-            if now_closed != closed {
+            let app_closed = now_closed != closed;
+            if app_closed {
                 closed = now_closed;
                 // An app's last window closed: the agent ends its processes, and what they
                 // held and the cache they read go back to the host now, not at the next look.
-                // The pause lets the processes die first.
-                thread::sleep(std::time::Duration::from_secs(2));
-                say!("an app closed: dropping its caches so its memory goes back to the host");
-                if let Err(why) = set_property(RECLAIM_PROPERTY, "1") {
-                    say!("could not ask init to reclaim: {why}");
+                // The reclaim starts the moment the processes have exited, so it frees what
+                // they held; one that the agent keeps (a widget, a foreground service) holds
+                // it back by EXIT_WAIT_LIMIT at most.
+                let packages = router.take_closed_packages();
+                let waited = std::time::Instant::now();
+                while waited.elapsed() < EXIT_WAIT_LIMIT {
+                    let lines = command_lines(&mut failures);
+                    if !packages.iter().any(|p| package_running(&lines, p)) {
+                        break;
+                    }
+                    thread::sleep(EXIT_POLL);
                 }
-                continue;
+                say!(
+                    "{} closed: returning its memory to the host ({} ms after its window)",
+                    packages.join(", "),
+                    waited.elapsed().as_millis()
+                );
             }
             let memory = match std::fs::read_to_string("/proc/meminfo") {
                 Ok(text) => MemInfo::parse(&text),
@@ -359,18 +399,36 @@ mod daemon {
             let tasks = router.tasks_in_use();
             reclaimer.host_short(router.host_memory_low());
             // Pressure stall information is optional in the kernel: unreadable counts as busy.
-            let pressure = std::fs::read_to_string("/proc/pressure/memory")
-                .map(|text| memory_pressure(&text, 5.0))
-                .unwrap_or(true);
+            let psi = std::fs::read_to_string("/proc/pressure/memory");
+            if let Some(line) = failures.note(
+                "/proc/pressure/memory",
+                &psi,
+                "the guest counts as under memory pressure and the gradual trim never runs",
+            ) {
+                say!("{line}");
+            }
+            let pressure = psi.map(|text| memory_pressure(&text, 5.0)).unwrap_or(true);
             // Evicted cache read back says the working set is larger than the trim assumed.
-            if let Some(refaults) = std::fs::read_to_string("/proc/vmstat")
+            let vmstat = std::fs::read_to_string("/proc/vmstat");
+            if let Some(line) = failures.note(
+                "/proc/vmstat",
+                &vmstat,
+                "the trim cannot tell when it evicted cache the guest still uses",
+            ) {
+                say!("{line}");
+            }
+            if let Some(refaults) = vmstat
                 .ok()
                 .and_then(|text| file_refaults_kb(&text, page_kb))
             {
                 reclaimer.refaults(refaults);
             }
-            if let Some(reason) = reclaimer.decide_under(start.elapsed(), tasks, &memory, pressure)
-            {
+            let reason = if app_closed {
+                reclaimer.app_closed(start.elapsed(), tasks, &memory)
+            } else {
+                reclaimer.decide_under(start.elapsed(), tasks, &memory, pressure)
+            };
+            if let Some(reason) = reason {
                 let property = if reason == Reason::Gradual {
                     let size = reclaimer.trim_mib().to_string();
                     say!(
@@ -383,6 +441,11 @@ mod daemon {
                     }
                     TRIM_PROPERTY
                 } else {
+                    let step = reclaim_step_mib(&memory).to_string();
+                    if let Err(why) = set_property(RECLAIM_STEP_PROPERTY, &step) {
+                        say!("could not size the reclaim: {why}");
+                        continue;
+                    }
                     RECLAIM_PROPERTY
                 };
                 say!(
@@ -480,6 +543,10 @@ mod daemon {
                 .on_arm_translation(Arc::new(ArmTranslation::new(
                     arm_translation::DIR,
                     BootFacts::of_system(|| read_property("ro.product.cpu.abilist")),
+                )))
+                .on_gapps(Arc::new(Gapps::new(
+                    gapps::DIR,
+                    GuestFacts::of_system(read_property),
                 )))
                 .on_gamepads(gamepads),
         );

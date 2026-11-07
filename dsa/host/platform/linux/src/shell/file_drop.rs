@@ -33,9 +33,15 @@ fn local_path(uri: &str) -> Option<PathBuf> {
         use std::os::unix::ffi::OsStringExt;
         Some(PathBuf::from(std::ffi::OsString::from_vec(bytes)))
     }
+    // "file:///C:/dir/name" is the path "C:\dir\name": the slash before the drive goes.
     #[cfg(not(unix))]
     {
-        String::from_utf8(bytes).ok().map(PathBuf::from)
+        let path = String::from_utf8(bytes).ok()?;
+        let path = match path.as_bytes() {
+            [b'/', drive, b':', ..] if drive.is_ascii_alphabetic() => &path[1..],
+            _ => &path[..],
+        };
+        Some(PathBuf::from(path.replace('/', "\\")))
     }
 }
 

@@ -8,14 +8,21 @@
 //! ([`window_styles`]).
 //!
 //! The window shows the widget's latest frame, a PNG image with an alpha channel, so a widget
-//! with rounded corners or a see-through background looks as it does on a phone. The window
-//! is moved by dragging the band along its top edge, which shows while the pointer is over
-//! it, and resized by its edges ([`hit_test`]). When the user lets go, the service is told
-//! where the window is and how large, in its monitor's pixels and density; the service
-//! remembers it and tells Android, which draws the widget at that size and tells the widget's
-//! app its size in dp, so the app can pick the layout that fits. A press, a move and a
-//! release inside the widget go to the widget's view in Android, so its buttons and lists
-//! work and an app it opens shows as a window.
+//! with rounded corners or a see-through background looks as it does on a phone. While the
+//! pointer is over the widget, or the window has the keyboard, a small round "More" button
+//! fades in at its top right corner, inside its rounded corners ([`more_button`]), as on the
+//! cards of the Windows 11 Widgets board; clicking it opens the widget's menu under it, as a
+//! right click opens it at the pointer ([`super::widget_menu`]).
+//!
+//! A press, a move and a release inside the widget go to the widget's view in Android, so its
+//! buttons and lists work and an app it opens shows as a window. The window is moved by
+//! dragging its More button, or by pressing anywhere on the widget and holding still for
+//! [`HOLD_TO_MOVE`] before dragging, as a widget is moved on a phone's home screen; a press
+//! that moves sooner is the widget's own (a list scrolls), and a tap stays a tap
+//! ([`Gesture`]). The window is resized by its edges ([`hit_test`]). When the user lets go,
+//! the service is told where the window is and how large, in its monitor's pixels and
+//! density; the service remembers it and tells Android, which draws the widget at that size
+//! and tells the widget's app its size in dp, so the app can pick the layout that fits.
 //!
 //! The window manager starts at sign-in, and it starts Android then when it is not running
 //! ([`starts_android_at_sign_in`]): the first app opened after the computer starts does not
@@ -50,8 +57,23 @@ const POLL: Duration = Duration::from_millis(15);
 /// The width of the edges a widget window is resized by, in device-independent pixels.
 pub const BORDER_DIP: i32 = 6;
 
-/// The height of the band along a widget window's top edge it is moved by.
-pub const CAPTION_DIP: i32 = 18;
+/// The diameter of a widget window's More button, in device-independent pixels.
+pub const MORE_BUTTON_DIP: u32 = 28;
+
+/// How far the More button sits from the window's top and right edges, which keeps it
+/// inside every corner radius an Android widget is drawn with (up to 41 dp) and off the edges
+/// that resize the window.
+pub const MORE_BUTTON_MARGIN_DIP: u32 = 8;
+
+/// The size of the More button's glyph.
+pub const MORE_GLYPH_DIP: u32 = 16;
+
+/// How long the More button takes to fade in or out: WinUI's `ControlFastAnimationDuration`.
+pub const FADE: Duration = Duration::from_millis(167);
+
+/// How long a press on the widget is held still before dragging it moves the window, as a
+/// long press does on a phone's home screen.
+pub const HOLD_TO_MOVE: Duration = Duration::from_millis(500);
 
 /// The host's density at a scale of 100%.
 const HOST_BASE_DPI: u32 = 96;
@@ -118,7 +140,7 @@ pub fn window_styles() -> (u32, u32) {
 
 /// How long a widget window waits for its first image from Android, after it opened, before
 /// the window manager logs that it has none. Android draws a widget within a second of being
-/// told its size, so a window still without an image after this shows only its see-through
+/// told its size, so a window still without an image after this shows only its
 /// placeholder, and the log says so.
 pub const NO_FRAME: Duration = Duration::from_secs(10);
 
@@ -132,6 +154,65 @@ pub fn frame_overdue(waiting_since: Option<Instant>, noted: bool, now: Instant) 
         Some(since) => !noted && now.saturating_duration_since(since) >= NO_FRAME,
         None => false,
     }
+}
+
+/// The corner radius of a widget window's placeholder, in device-independent pixels.
+const PLACEHOLDER_RADIUS_DIP: u32 = 12;
+
+/// What a widget window shows until its first image from Android comes, or while the image
+/// it has is all clear: a dark grey card with a lighter edge and rounded corners, as
+/// premultiplied BGRA rows of `width` by `height` pixels on a monitor of `dpi`. It is mostly
+/// opaque, so the user sees where the widget is and can grab it even when Android has not
+/// drawn it yet; a window that showed nothing would look like no widget at all.
+pub fn placeholder(width: usize, height: usize, dpi: u32) -> Vec<u8> {
+    let mut pixels = vec![0u8; width * height * 4];
+    let radius = (px_of_dip(PLACEHOLDER_RADIUS_DIP, dpi).max(1) as usize)
+        .min(width / 2)
+        .min(height / 2) as i64;
+    let edge = px_of_dip(1, dpi).max(1) as i64;
+    let (w, h) = (width as i64, height as i64);
+    // Premultiplied BGRA: #383838 at 0xd8 inside, #909090 at 0xe8 on the edge.
+    let fill = [0x2f, 0x2f, 0x2f, 0xd8];
+    let border = [0x83, 0x83, 0x83, 0xe8];
+    for y in 0..h {
+        for x in 0..w {
+            // How far into a rounded corner's square the pixel is, 0 outside the squares.
+            let cx = if x < radius {
+                radius - x
+            } else if x >= w - radius {
+                x - (w - radius - 1)
+            } else {
+                0
+            };
+            let cy = if y < radius {
+                radius - y
+            } else if y >= h - radius {
+                y - (h - radius - 1)
+            } else {
+                0
+            };
+            let in_corner = cx > 0 && cy > 0;
+            if in_corner && cx * cx + cy * cy > radius * radius {
+                continue;
+            }
+            let inner = (radius - edge).max(0);
+            let on_edge = x < edge
+                || y < edge
+                || x >= w - edge
+                || y >= h - edge
+                || (in_corner && cx * cx + cy * cy > inner * inner);
+            let at = ((y * w + x) * 4) as usize;
+            pixels[at..at + 4].copy_from_slice(if on_edge { &border } else { &fill });
+        }
+    }
+    pixels
+}
+
+/// Whether premultiplied BGRA `pixels` show nothing: every alpha is zero. A widget always
+/// draws something, so such an image is a drawing that went wrong, and the window shows its
+/// placeholder instead of a see-through hole.
+pub fn all_clear(pixels: &[u8]) -> bool {
+    pixels.chunks_exact(4).all(|pixel| pixel[3] == 0)
 }
 
 /// Where a widget window goes in the z-order.
@@ -161,13 +242,46 @@ pub fn z_place(desktop: Option<isize>, above_desktop: Option<isize>, own: isize)
     }
 }
 
+/// How often the widget windows are checked to be right above the desktop. The shell
+/// restacks its own windows without telling anyone: "show desktop", a wallpaper slideshow
+/// and an Explorer restart raise the window that holds the desktop icons and paints the
+/// wallpaper, and a widget window that only fixed its place when it moved itself stayed under
+/// it, drawn but hidden behind the desktop.
+pub const RESTACK_CHECK: Duration = Duration::from_millis(500);
+
+/// One window below a widget window, as [`right_above_desktop`] reads it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Below {
+    pub hwnd: isize,
+    /// Whether it shows over part of the widget window: visible, not minimized and
+    /// overlapping it.
+    pub covers: bool,
+}
+
+/// Whether a widget window sits where it belongs, given the windows below it in z-order from
+/// the nearest down (`below`): the desktop's own window (`desktop`) comes before any other
+/// window that overlaps it. Other widget windows (`ours`) and windows that do not overlap it
+/// may be in between. False when the desktop is not below it at all, which means the desktop
+/// is drawn over it, and when an app's window is below it, which it would hide.
+pub fn right_above_desktop(below: &[Below], desktop: isize, ours: &[isize]) -> bool {
+    for window in below {
+        if window.hwnd == desktop {
+            return true;
+        }
+        if window.covers && !ours.contains(&window.hwnd) {
+            return false;
+        }
+    }
+    false
+}
+
 /// Where in a widget window a point is, which says what dragging it does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Hit {
     /// Inside the widget: input goes to Android.
     Client,
-    /// The band along the top: dragging moves the window.
-    Caption,
+    /// The More button: a click opens the menu and a drag moves the window.
+    More,
     Left,
     Right,
     Top,
@@ -179,10 +293,10 @@ pub enum Hit {
 }
 
 /// What `x`, `y` (from the window's top left corner) hits in a window of `width` by `height`
-/// pixels on a monitor of `dpi`. Only the edges the widget may be resized along resize it.
+/// pixels on a monitor of `dpi`. Only the edges the widget may be resized along resize it;
+/// there is no band along the top, so all of the widget but its More button is the widget's.
 pub fn hit_test(x: i32, y: i32, width: i32, height: i32, dpi: u32, resize_mode: u32) -> Hit {
     let border = px_of_dip(BORDER_DIP as u32, dpi).max(1);
-    let caption = px_of_dip(CAPTION_DIP as u32, dpi).max(1);
     let horizontal = resize_mode & widgets::RESIZE_HORIZONTAL != 0;
     let vertical = resize_mode & widgets::RESIZE_VERTICAL != 0;
     let left = horizontal && x < border;
@@ -198,9 +312,328 @@ pub fn hit_test(x: i32, y: i32, width: i32, height: i32, dpi: u32, resize_mode: 
         (_, true, ..) => Hit::Right,
         (_, _, true, _) => Hit::Top,
         (.., true) => Hit::Bottom,
-        _ if y < caption => Hit::Caption,
+        _ if on_more_button(x, y, width, height, dpi) => Hit::More,
         _ => Hit::Client,
     }
+}
+
+/// A circle in a window's pixels.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Circle {
+    pub cx: f32,
+    pub cy: f32,
+    pub radius: f32,
+}
+
+impl Circle {
+    pub fn contains(&self, x: f32, y: f32) -> bool {
+        let (dx, dy) = (x - self.cx, y - self.cy);
+        dx * dx + dy * dy <= self.radius * self.radius
+    }
+
+    /// The square of whole pixels around it: left, top, right and bottom.
+    pub fn bounds(&self) -> (i32, i32, i32, i32) {
+        (
+            (self.cx - self.radius).floor() as i32,
+            (self.cy - self.radius).floor() as i32,
+            (self.cx + self.radius).ceil() as i32,
+            (self.cy + self.radius).ceil() as i32,
+        )
+    }
+}
+
+/// The More button of a window of `width` by `height` pixels on a monitor of `dpi`: a circle
+/// of [`MORE_BUTTON_DIP`] in its top right corner, [`MORE_BUTTON_MARGIN_DIP`] from the edges.
+/// A widget too small for it gets a smaller one that still fits.
+pub fn more_button(width: i32, height: i32, dpi: u32) -> Circle {
+    let side = width.min(height).max(1) as f32;
+    let diameter = (px_of_dip(MORE_BUTTON_DIP, dpi) as f32).min((side - 2.0).max(1.0));
+    let room = ((side - diameter) / 2.0).max(0.0);
+    let margin = (px_of_dip(MORE_BUTTON_MARGIN_DIP, dpi) as f32).min(room);
+    let radius = diameter / 2.0;
+    Circle {
+        cx: width as f32 - margin - radius,
+        cy: margin + radius,
+        radius,
+    }
+}
+
+/// Whether the pixel at `x`, `y` is on the More button of a window of `width` by `height`:
+/// inside its circle, not merely its square.
+pub fn on_more_button(x: i32, y: i32, width: i32, height: i32, dpi: u32) -> bool {
+    more_button(width, height, dpi).contains(x as f32 + 0.5, y as f32 + 0.5)
+}
+
+/// Whether `circle` lies wholly inside a window of `width` by `height` whose corners are
+/// rounded to `radius`, as the widget's own image is.
+pub fn inside_rounded_window(circle: &Circle, width: i32, height: i32, radius: f32) -> bool {
+    let (w, h, rho) = (width as f32, height as f32, circle.radius);
+    let edges = circle.cx - rho >= 0.0
+        && circle.cy - rho >= 0.0
+        && circle.cx + rho <= w
+        && circle.cy + rho <= h;
+    if rho >= radius {
+        return edges;
+    }
+    // A rounded rectangle is the rectangle `radius` inside it, grown by `radius`.
+    let dx = (radius - circle.cx).max(circle.cx - (w - radius)).max(0.0);
+    let dy = (radius - circle.cy).max(circle.cy - (h - radius)).max(0.0);
+    edges && (dx * dx + dy * dy).sqrt() + rho <= radius + 0.01
+}
+
+/// How much of the More button shows, from 0 (none) to 1, while it fades from `from` to `to`
+/// since `since`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Fade {
+    pub from: f32,
+    pub to: f32,
+    pub since: Instant,
+}
+
+impl Fade {
+    /// A button that is not shown.
+    pub fn hidden(now: Instant) -> Fade {
+        Fade {
+            from: 0.0,
+            to: 0.0,
+            since: now,
+        }
+    }
+
+    pub fn level(&self, now: Instant) -> f32 {
+        let done = now.saturating_duration_since(self.since).as_secs_f32() / FADE.as_secs_f32();
+        self.from + (self.to - self.from) * done.clamp(0.0, 1.0)
+    }
+
+    pub fn done(&self, now: Instant) -> bool {
+        now.saturating_duration_since(self.since) >= FADE
+    }
+
+    /// The fade towards `shown` from where this one is at `now`; this one when it goes
+    /// there already.
+    pub fn toward(self, shown: bool, now: Instant) -> Fade {
+        if (self.to > 0.5) == shown {
+            return self;
+        }
+        let to = if shown { 1.0 } else { 0.0 };
+        Fade {
+            from: self.level(now),
+            to,
+            since: now,
+        }
+    }
+}
+
+/// Whether the More button shows: while the pointer is over the widget, while the window has
+/// the keyboard, while its menu is open, and while it is pressed or moving the window.
+pub fn more_button_shown(hover: bool, focused: bool, menu_open: bool, gesture: &Gesture) -> bool {
+    hover
+        || focused
+        || menu_open
+        || matches!(gesture, Gesture::Button { .. } | Gesture::Moving { .. })
+}
+
+/// What a press on a widget window is doing.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Gesture {
+    Idle,
+    /// Pressed inside the widget, at `down` on the screen, `since` then; Android has the
+    /// press. Once it `slid` past the drag threshold it is the widget's own drag.
+    Widget {
+        down: (i32, i32),
+        since: Instant,
+        slid: bool,
+    },
+    /// Pressed on the More button, at `down` on the screen.
+    Button {
+        down: (i32, i32),
+    },
+    /// Moving the window, the pointer `grab` pixels from its top left corner.
+    Moving {
+        grab: (i32, i32),
+    },
+}
+
+/// What a step of a gesture asks of the window.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Step {
+    Nothing,
+    /// The pointer goes to Android as this action.
+    Android(PointerAction),
+    /// The More button is pressed, or no longer pressed.
+    Button,
+    /// The More button was clicked: its menu opens.
+    OpenMenu,
+    /// The window starts moving, to this top left corner; Android's press is cancelled
+    /// first when `cancel`.
+    StartMove {
+        cancel: bool,
+        to: (i32, i32),
+    },
+    /// The window moves to this top left corner.
+    MoveTo((i32, i32)),
+    /// The move ended: the service is told where the window is.
+    EndMove,
+}
+
+/// Whether `at` is past the drag threshold (`threshold` pixels each way) from `down`.
+fn beyond(down: (i32, i32), at: (i32, i32), threshold: (i32, i32)) -> bool {
+    (at.0 - down.0).abs() > threshold.0 || (at.1 - down.1).abs() > threshold.1
+}
+
+impl Gesture {
+    /// The button went down at `at` on the screen, on the More button or not.
+    pub fn down(&mut self, on_button: bool, at: (i32, i32), now: Instant) -> Step {
+        if on_button {
+            *self = Gesture::Button { down: at };
+            Step::Button
+        } else {
+            *self = Gesture::Widget {
+                down: at,
+                since: now,
+                slid: false,
+            };
+            Step::Android(PointerAction::Down)
+        }
+    }
+
+    /// The pointer moved to `at` on the screen, the window's top left corner at `origin`.
+    pub fn moved(&mut self, at: (i32, i32), origin: (i32, i32), threshold: (i32, i32)) -> Step {
+        match *self {
+            Gesture::Idle => Step::Nothing,
+            Gesture::Widget { down, since, slid } => {
+                if !slid && beyond(down, at, threshold) {
+                    *self = Gesture::Widget {
+                        down,
+                        since,
+                        slid: true,
+                    };
+                }
+                Step::Android(PointerAction::Move)
+            }
+            Gesture::Button { down } if beyond(down, at, threshold) => {
+                let grab = (down.0 - origin.0, down.1 - origin.1);
+                *self = Gesture::Moving { grab };
+                Step::StartMove {
+                    cancel: false,
+                    to: (at.0 - grab.0, at.1 - grab.1),
+                }
+            }
+            Gesture::Button { .. } => Step::Nothing,
+            Gesture::Moving { grab } => Step::MoveTo((at.0 - grab.0, at.1 - grab.1)),
+        }
+    }
+
+    /// The press has been held until `now`, the pointer at `at`: one held still for
+    /// [`HOLD_TO_MOVE`] starts moving the window, and Android's press is cancelled.
+    pub fn held(&mut self, at: (i32, i32), origin: (i32, i32), now: Instant) -> Step {
+        let Gesture::Widget { since, slid, .. } = *self else {
+            return Step::Nothing;
+        };
+        if slid || now.saturating_duration_since(since) < HOLD_TO_MOVE {
+            return Step::Nothing;
+        }
+        let grab = (at.0 - origin.0, at.1 - origin.1);
+        *self = Gesture::Moving { grab };
+        Step::StartMove {
+            cancel: true,
+            to: origin,
+        }
+    }
+
+    /// The button went up, on the More button or not.
+    pub fn up(&mut self, on_button: bool) -> Step {
+        match std::mem::replace(self, Gesture::Idle) {
+            Gesture::Idle => Step::Nothing,
+            Gesture::Widget { .. } => Step::Android(PointerAction::Up),
+            Gesture::Button { .. } if on_button => Step::OpenMenu,
+            Gesture::Button { .. } => Step::Button,
+            Gesture::Moving { .. } => Step::EndMove,
+        }
+    }
+
+    /// The window lost the mouse before the button went up.
+    pub fn cancel(&mut self) -> Step {
+        match std::mem::replace(self, Gesture::Idle) {
+            Gesture::Idle => Step::Nothing,
+            Gesture::Widget { .. } => Step::Android(PointerAction::Cancel),
+            Gesture::Button { .. } => Step::Button,
+            Gesture::Moving { .. } => Step::EndMove,
+        }
+    }
+}
+
+/// The More button drawn over a widget's pixels.
+#[derive(Debug, Clone, Copy)]
+pub struct ButtonLook<'a> {
+    /// How much of it shows, from 0 to 1, as it fades.
+    pub level: f32,
+    pub hover: bool,
+    pub pressed: bool,
+    pub palette: super::fluent::ButtonPalette,
+    /// Its glyph, centred in it.
+    pub glyph: Option<&'a super::fluent_menu::Mask>,
+}
+
+/// `color` at `level` (0 to 1) of its alpha.
+fn faded(color: super::fluent::Argb, level: f32) -> super::fluent::Argb {
+    let alpha = (((color >> 24) as f32) * level.clamp(0.0, 1.0)).round() as u32;
+    (alpha.min(255) << 24) | (color & 0x00FF_FFFF)
+}
+
+/// Draws the More button of a window of `width` by `height` pixels on a monitor of `dpi`
+/// over its premultiplied BGRA `pixels`: a subtle fill with a hairline edge, lighter or
+/// darker while the pointer is on it or presses it, and the "More" glyph.
+pub fn draw_more_button(
+    pixels: &mut [u8],
+    width: usize,
+    height: usize,
+    dpi: u32,
+    look: &ButtonLook<'_>,
+) {
+    if look.level <= 0.0 {
+        return;
+    }
+    let circle = more_button(width as i32, height as i32, dpi);
+    let mut canvas = super::fluent::Canvas {
+        width,
+        height,
+        pixels,
+    };
+    let (r, d) = (circle.radius, circle.radius * 2.0);
+    let (x, y) = (circle.cx - r, circle.cy - r);
+    let palette = &look.palette;
+    canvas.fill_rounded(x, y, d, d, r, faded(palette.fill, look.level));
+    let state = if look.pressed {
+        Some(palette.pressed)
+    } else if look.hover {
+        Some(palette.hover)
+    } else {
+        None
+    };
+    if let Some(overlay) = state {
+        canvas.fill_rounded(x, y, d, d, r, faded(overlay, look.level));
+    }
+    let hairline = px_of_dip(1, dpi).max(1) as f32;
+    canvas.stroke_rounded(x, y, d, d, r, hairline, faded(palette.border, look.level));
+    if let Some(glyph) = look.glyph {
+        let color = if look.pressed {
+            palette.glyph_pressed
+        } else {
+            palette.glyph
+        };
+        let left = (circle.cx - glyph.width as f32 / 2.0).round() as i32;
+        let top = (circle.cy - glyph.height as f32 / 2.0).round() as i32;
+        let (w, h) = (glyph.width, glyph.height);
+        canvas.draw_mask(left, top, w, h, &glyph.cover, color, look.level);
+    }
+}
+
+/// The size of the More button's glyph box for a window of `width` by `height` on `dpi`.
+pub fn more_glyph_size(width: i32, height: i32, dpi: u32) -> usize {
+    let circle = more_button(width, height, dpi);
+    let wanted = px_of_dip(MORE_GLYPH_DIP, dpi) as f32;
+    (wanted.min(circle.radius * 2.0 * 0.6).round() as usize).max(1)
 }
 
 /// A rectangle in screen pixels: left, top, right and bottom.
@@ -543,7 +976,7 @@ mod win {
     use std::ptr::{null, null_mut};
     use std::sync::atomic::{AtomicIsize, Ordering};
     use std::sync::mpsc::{Receiver, Sender};
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     use dsa_host_core::widgets::{Placement, Widget, WidgetFrame};
     use dsa_protocol::host_api::types::PointerAction;
@@ -556,34 +989,46 @@ mod win {
     };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::HiDpi::{
-        GetDpiForWindow, SetThreadDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+        GetDpiForWindow, GetSystemMetricsForDpi, SetThreadDpiAwarenessContext,
+        DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
     };
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-        ReleaseCapture, SetCapture, TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT,
+        ReleaseCapture, SetCapture, SetFocus, TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT,
+        VK_RETURN, VK_SPACE,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, FindWindowExW,
-        FindWindowW, GetMessageW, GetWindow, GetWindowRect, KillTimer, LoadCursorW, PostMessageW,
-        PostQuitMessage, RegisterClassExW, RegisterWindowMessageW, SetTimer, SetWindowLongPtrW,
-        SetWindowPos, ShowWindow, TranslateMessage, UpdateLayeredWindow, GWLP_HWNDPARENT,
-        GW_HWNDPREV, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCAPTION, HTCLIENT, HTLEFT, HTRIGHT,
-        HTTOP, HTTOPLEFT, HTTOPRIGHT, HWND_BOTTOM, HWND_MESSAGE, IDC_ARROW, MA_NOACTIVATE,
-        MINMAXINFO, MSG, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_SHOWNOACTIVATE,
-        ULW_ALPHA, WINDOWPOS, WM_APP, WM_CAPTURECHANGED, WM_CLOSE, WM_CONTEXTMENU, WM_DESTROY,
-        WM_DPICHANGED, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_LBUTTONDOWN,
-        WM_LBUTTONUP, WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_NCHITTEST, WM_SIZE, WM_TIMER,
-        WM_WINDOWPOSCHANGING, WNDCLASSEXW,
+        FindWindowW, GetCursorPos, GetMessageW, GetWindow, GetWindowRect, KillTimer, LoadCursorW,
+        PostMessageW, PostQuitMessage, RegisterClassExW, RegisterWindowMessageW, SetCursor,
+        SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos, ShowWindow,
+        TranslateMessage, UpdateLayeredWindow, GWLP_HWNDPARENT, GW_HWNDPREV, HTBOTTOM,
+        HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCLIENT, HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT,
+        HWND_BOTTOM, HWND_MESSAGE, IDC_ARROW, IDC_SIZEALL, MA_NOACTIVATE, MINMAXINFO, MSG,
+        SM_CXDRAG, SM_CYDRAG, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+        SW_SHOWNOACTIVATE, ULW_ALPHA, WINDOWPOS, WM_APP, WM_CAPTURECHANGED, WM_CLOSE,
+        WM_CONTEXTMENU, WM_DESTROY, WM_DPICHANGED, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE,
+        WM_GETMINMAXINFO, WM_GETOBJECT, WM_KEYDOWN, WM_KILLFOCUS, WM_LBUTTONDOWN, WM_LBUTTONUP,
+        WM_MOUSEACTIVATE, WM_MOUSEMOVE, WM_NCDESTROY, WM_NCHITTEST, WM_SETFOCUS, WM_SETTINGCHANGE,
+        WM_SIZE, WM_SYSCOLORCHANGE, WM_THEMECHANGED, WM_TIMER, WM_WINDOWPOSCHANGING, WNDCLASSEXW,
     };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{IsIconic, IsWindowVisible, GW_HWNDNEXT};
 
     use std::time::Instant;
 
     use super::{
-        android_density, frame_overdue, hit_test, min_window_size, placement_of, reachable_origin,
-        to_frame, window_size, window_styles, z_place, Hit, WindowCommand, WindowReport, ZPlace,
-        NO_FRAME, NO_FRAME_CHECK,
+        android_density, draw_more_button, frame_overdue, hit_test, min_window_size, more_button,
+        more_button_shown, more_glyph_size, on_more_button, placement_of, px_of_dip,
+        reachable_origin, right_above_desktop, to_frame, window_size, window_styles, z_place,
+        Below, ButtonLook, Fade, Gesture, Hit, Step, WindowCommand, WindowReport, ZPlace,
+        HOLD_TO_MOVE, MORE_GLYPH_DIP, NO_FRAME, NO_FRAME_CHECK, RESTACK_CHECK,
     };
+    use crate::compositor::fluent::text::{self, Align, ICON_FACES};
+    use crate::compositor::fluent::{button_palette, glyph, read_theme, Theme};
+    use crate::compositor::fluent_menu::{Anchor, Mask};
     use crate::compositor::log::{note, CompositorLogger};
+    use crate::compositor::widget_automation::{self, WidgetView, WM_WIDGET_FOCUS, WM_WIDGET_MORE};
     use crate::compositor::widget_menu::{self, MenuChoice};
+    use windows::Win32::UI::Accessibility::IRawElementProviderSimple;
 
     /// The message that tells the controller window commands are waiting.
     const WM_COMMANDS: u32 = WM_APP + 1;
@@ -595,16 +1040,68 @@ mod win {
     struct Window {
         widget: Widget,
         frame: Option<WidgetFrame>,
+        /// The last image that had something in it, which the window keeps showing when
+        /// Android sends one with nothing in it.
+        shown: Option<WidgetFrame>,
+        /// The widget's image at the window's size before the More button is drawn over it,
+        /// so the button is drawn again (as it fades) without decoding the image again.
+        base: Option<(i32, i32, Vec<u8>)>,
         hover: bool,
+        /// Whether Android has a press of the widget.
         pressed: bool,
+        gesture: Gesture,
+        /// Whether the pointer is over the More button.
+        over_button: bool,
+        /// Whether the window has the keyboard.
+        focused: bool,
+        menu_open: bool,
+        fade: Fade,
         /// Since when the window waits for its first image; None once one came.
         waiting_since: Option<Instant>,
         /// Whether the wait was logged already.
         noted: bool,
+        /// What UI Automation reads of the window, and the provider it was answered with.
+        view: Arc<Mutex<WidgetView>>,
+        provider: Option<IRawElementProviderSimple>,
     }
+
+    /// The window's timer that turns a held press into a move.
+    const HOLD_TIMER: usize = 3;
+
+    /// The window's timer that draws the More button as it fades.
+    const FADE_TIMER: usize = 4;
+
+    /// How often the fade is drawn, in milliseconds.
+    const FADE_STEP_MS: u32 = 16;
 
     /// The controller's timer that checks for windows still without an image.
     const NO_FRAME_TIMER: usize = 1;
+
+    /// The controller's timer that keeps the windows right above the desktop.
+    const RESTACK_TIMER: usize = 2;
+
+    /// What the last drawing of a window handed the system, so a test can tell a window that
+    /// shows something from one that shows nothing.
+    #[cfg(test)]
+    #[derive(Debug, Clone, Copy)]
+    pub(super) struct Presented {
+        pub hwnd: isize,
+        /// Whether UpdateLayeredWindow took the picture.
+        pub committed: bool,
+        pub width: i32,
+        pub height: i32,
+        /// How many of its pixels are at least half opaque.
+        pub opaque: usize,
+        /// How many of its pixels are see-through: an alpha of at most 1, which keeps them
+        /// clickable.
+        pub clear: usize,
+        /// Whether the window was shown already when it got the picture.
+        pub visible: bool,
+    }
+
+    #[cfg(test)]
+    pub(super) static PRESENTED: std::sync::Mutex<Vec<Presented>> =
+        std::sync::Mutex::new(Vec::new());
 
     struct State {
         commands: Receiver<WindowCommand>,
@@ -615,6 +1112,10 @@ mod win {
         taskbar_created: u32,
         logger: Option<Arc<CompositorLogger>>,
         decoder: Option<super::png::Decoder>,
+        /// The theme the More button is drawn in.
+        theme: Theme,
+        /// The More button's glyph at a DPI and a size.
+        more_glyph: Option<(u32, usize, Mask)>,
     }
 
     thread_local! {
@@ -755,6 +1256,8 @@ mod win {
                 taskbar_created,
                 logger,
                 decoder,
+                theme: read_theme(),
+                more_glyph: None,
             })
         });
         // SAFETY: a message-only window, never shown.
@@ -788,8 +1291,14 @@ mod win {
                 NO_FRAME_TIMER,
                 NO_FRAME_CHECK.as_millis() as u32,
                 None,
-            )
-        };
+            );
+            SetTimer(
+                controller,
+                RESTACK_TIMER,
+                RESTACK_CHECK.as_millis() as u32,
+                None,
+            );
+        }
         slot.store(controller as isize, Ordering::SeqCst);
         let _ = ready.send(Ok(()));
         // SAFETY: the usual message loop of this thread's windows.
@@ -821,16 +1330,21 @@ mod win {
                 note_missing_frames();
                 0
             }
+            WM_TIMER if wparam == RESTACK_TIMER => {
+                keep_above_desktop();
+                0
+            }
             WM_CLOSE => {
-                let windows: Vec<isize> =
-                    with_state(|s| s.windows.keys().copied().collect()).unwrap_or_default();
-                for window in windows {
+                let windows = with_state(|s| s.windows.drain().collect::<Vec<_>>());
+                for (hwnd, window) in windows.unwrap_or_default() {
+                    widget_automation::release(hwnd, &window.view, window.provider);
                     // SAFETY: windows of this thread.
-                    unsafe { DestroyWindow(window as HWND) };
+                    unsafe { DestroyWindow(hwnd as HWND) };
                 }
-                // SAFETY: the controller is this thread's, and so is its timer.
+                // SAFETY: the controller is this thread's, and so are its timers.
                 unsafe {
                     KillTimer(hwnd, NO_FRAME_TIMER);
+                    KillTimer(hwnd, RESTACK_TIMER);
                     DestroyWindow(hwnd);
                 }
                 0
@@ -868,6 +1382,7 @@ mod win {
                         window.waiting_since = None;
                         window.noted = false;
                         window.frame = Some(frame);
+                        window.base = None;
                         Some(hwnd)
                     })
                     .flatten();
@@ -876,13 +1391,15 @@ mod win {
                     }
                 }
                 WindowCommand::Remove(widget_id) => {
-                    let hwnd = with_state(|s| {
+                    let gone = with_state(|s| {
                         let hwnd = s.by_id.remove(&widget_id)?;
-                        s.windows.remove(&hwnd);
-                        Some(hwnd)
+                        Some((hwnd, s.windows.remove(&hwnd)))
                     })
                     .flatten();
-                    if let Some(hwnd) = hwnd {
+                    if let Some((hwnd, window)) = gone {
+                        if let Some(window) = window {
+                            widget_automation::release(hwnd, &window.view, window.provider);
+                        }
                         // SAFETY: a window of this thread.
                         unsafe { DestroyWindow(hwnd as HWND) };
                     }
@@ -909,7 +1426,7 @@ mod win {
                 note(
                     s.logger.as_deref(),
                     &format!(
-                        "widget {} ({}) has had no image from Android for {waited} s; its window of {}x{} pixels shows only a see-through placeholder. The service's and the agent's logs say why",
+                        "widget {} ({}) has had no image from Android for {waited} s; its window of {}x{} pixels shows only its placeholder. The service's and the agent's logs say why",
                         window.widget.widget_id,
                         window.widget.provider.provider,
                         rect.right - rect.left,
@@ -922,7 +1439,7 @@ mod win {
 
     /// The desktop's own window: the shell's window that holds the desktop icons, which a
     /// wallpaper slideshow or "show desktop" moves out of `Progman` into a `WorkerW`.
-    fn desktop_window() -> Option<HWND> {
+    pub(super) fn desktop_window() -> Option<HWND> {
         let progman = desktop_owner();
         let defview = wide("SHELLDLL_DefView");
         let worker = wide("WorkerW");
@@ -945,6 +1462,53 @@ mod win {
             }
         }
         (!progman.is_null()).then_some(progman)
+    }
+
+    /// Puts every widget window that the shell left under the desktop, or above an app's
+    /// window, right above the desktop again ([`right_above_desktop`]). The shell restacks
+    /// its desktop window without moving the widget windows, so they hear nothing of it.
+    fn keep_above_desktop() {
+        let Some(desktop) = desktop_window() else {
+            return;
+        };
+        let ours: Vec<isize> =
+            with_state(|s| s.windows.keys().copied().collect()).unwrap_or_default();
+        for &own in &ours {
+            let rect = rect_of(own as HWND);
+            let mut below = Vec::new();
+            // SAFETY: walks the z-order down from a window of this thread; a window that goes
+            // meanwhile ends the walk.
+            unsafe {
+                let mut next = GetWindow(own as HWND, GW_HWNDNEXT);
+                while !next.is_null() && below.len() < 4096 {
+                    let other = rect_of(next);
+                    let overlaps = other.left < rect.right
+                        && rect.left < other.right
+                        && other.top < rect.bottom
+                        && rect.top < other.bottom;
+                    below.push(Below {
+                        hwnd: next as isize,
+                        covers: overlaps && IsWindowVisible(next) != 0 && IsIconic(next) == 0,
+                    });
+                    next = GetWindow(next, GW_HWNDNEXT);
+                }
+            }
+            if !right_above_desktop(&below, desktop as isize, &ours) {
+                // SAFETY: a window of this thread; WM_WINDOWPOSCHANGING puts it right above
+                // the desktop.
+                unsafe {
+                    SetWindowPos(
+                        own as HWND,
+                        HWND_BOTTOM,
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
+                    );
+                }
+            }
+        }
     }
 
     /// Where `hwnd` goes in the z-order: right above the desktop ([`z_place`]).
@@ -1008,6 +1572,10 @@ mod win {
                     });
                     return;
                 }
+                // A finger's press reaches the widget at once, and a finger held on it moves
+                // it as a held mouse button does, rather than becoming a right click.
+                // SAFETY: the window was just made on this thread.
+                unsafe { crate::app_window::pointer::deliver_contacts_at_once(hwnd) };
                 with_state(|s| {
                     s.by_id.insert(widget.widget_id, hwnd as isize);
                     s.windows.insert(
@@ -1015,10 +1583,19 @@ mod win {
                         Window {
                             widget: widget.clone(),
                             frame: None,
+                            shown: None,
+                            base: None,
                             hover: false,
                             pressed: false,
+                            gesture: Gesture::Idle,
+                            over_button: false,
+                            focused: false,
+                            menu_open: false,
+                            fade: Fade::hidden(Instant::now()),
                             waiting_since: Some(Instant::now()),
                             noted: false,
+                            view: Arc::new(Mutex::new(WidgetView::default())),
+                            provider: None,
                         },
                     );
                 });
@@ -1039,11 +1616,13 @@ mod win {
         };
         // SAFETY: a window of this thread; it goes right above the desktop, where
         // WM_WINDOWPOSCHANGING puts it.
-        unsafe {
-            SetWindowPos(hwnd, HWND_BOTTOM, x, y, width, height, SWP_NOACTIVATE);
-            ShowWindow(hwnd, SW_SHOWNOACTIVATE);
-        }
+        unsafe { SetWindowPos(hwnd, HWND_BOTTOM, x, y, width, height, SWP_NOACTIVATE) };
+        // A layered window shows nothing at all until it is given a picture, so it gets its
+        // placeholder before it is shown, never after.
         present(hwnd);
+        // SAFETY: as above.
+        unsafe { ShowWindow(hwnd, SW_SHOWNOACTIVATE) };
+        keep_above_desktop();
         report_placement(hwnd);
     }
 
@@ -1066,9 +1645,77 @@ mod win {
         });
     }
 
-    /// Draws the widget's latest frame, scaled to its window, with the move band while the
-    /// pointer is over it. Pixels the widget leaves clear stay just visible enough to be
-    /// clicked, so the whole window can be grabbed.
+    /// The widget's image at `width` by `height` pixels: its latest frame, scaled to its
+    /// window, or the last one that had something in it when Android sent one with nothing,
+    /// or the placeholder until the first one comes.
+    fn base_pixels(
+        window: &mut Window,
+        decoder: Option<&super::png::Decoder>,
+        logger: Option<&CompositorLogger>,
+        width: i32,
+        height: i32,
+        dpi: u32,
+    ) -> Vec<u8> {
+        let decode = |frame: &WidgetFrame| match decoder {
+            Some(decoder) => decoder
+                .decode(&frame.png, width as u32, height as u32)
+                .map_err(|why| note(logger, &format!("a widget's image: {why}")))
+                .ok(),
+            None => None,
+        };
+        let mut decoded = window.frame.as_ref().and_then(decode);
+        if decoded.as_deref().is_some_and(super::all_clear) {
+            // A widget whose app stopped drawing keeps its last image; the placeholder is
+            // only for a widget that has never shown one.
+            note(
+                logger,
+                &format!(
+                    "widget {}: Android sent an image with nothing in it; {}",
+                    window.widget.widget_id,
+                    if window.shown.is_some() {
+                        "keeping the last one"
+                    } else {
+                        "showing the placeholder"
+                    }
+                ),
+            );
+            window.frame = window.shown.clone();
+            decoded = window.frame.as_ref().and_then(decode);
+        } else if decoded.is_some() {
+            window.shown = window.frame.clone();
+        }
+        decoded.unwrap_or_else(|| super::placeholder(width as usize, height as usize, dpi))
+    }
+
+    /// The More button's glyph for a window of `width` by `height` on `dpi`, rasterized once
+    /// for each DPI and size.
+    fn more_glyph_of(
+        cache: &mut Option<(u32, usize, Mask)>,
+        width: i32,
+        height: i32,
+        dpi: u32,
+    ) -> Option<&Mask> {
+        let size = more_glyph_size(width, height, dpi);
+        let fresh = !matches!(cache, Some((at, side, _)) if (*at, *side) == (dpi, size));
+        if fresh {
+            let em = px_of_dip(MORE_GLYPH_DIP, dpi).min(size as i32);
+            let symbol = glyph::MORE.to_string();
+            let cover = text::mask(&symbol, &ICON_FACES, em, (size, size), Align::Center);
+            *cache = cover.map(|cover| {
+                let mask = Mask {
+                    width: size,
+                    height: size,
+                    cover,
+                };
+                (dpi, size, mask)
+            });
+        }
+        cache.as_ref().map(|(_, _, mask)| mask)
+    }
+
+    /// Draws the widget's image with the More button over it while the button shows. Pixels
+    /// the widget leaves clear stay just visible enough to be clicked, so the whole window
+    /// takes the pointer.
     fn present(hwnd: HWND) {
         let rect = rect_of(hwnd);
         let (width, height) = (
@@ -1076,30 +1723,52 @@ mod win {
             (rect.bottom - rect.top).max(1),
         );
         let dpi = dpi_of(hwnd);
+        let now = Instant::now();
         let pixels = with_state(|s| {
-            let window = s.windows.get(&(hwnd as isize))?;
-            let decoded = match (&window.frame, &s.decoder) {
-                (Some(frame), Some(decoder)) => decoder
-                    .decode(&frame.png, width as u32, height as u32)
-                    .map_err(|why| note(s.logger.as_deref(), &format!("a widget's image: {why}")))
-                    .ok(),
+            let State {
+                windows,
+                decoder,
+                logger,
+                theme,
+                more_glyph,
+                ..
+            } = s;
+            let window = windows.get_mut(&(hwnd as isize))?;
+            let cached = match &window.base {
+                Some((w, h, pixels)) if (*w, *h) == (width, height) => Some(pixels.clone()),
                 _ => None,
             };
-            let mut pixels =
-                decoded.unwrap_or_else(|| placeholder(width as usize, height as usize));
-            finish(
-                &mut pixels,
-                width as usize,
-                height as usize,
-                dpi,
-                window.hover,
-            );
+            let mut pixels = match cached {
+                Some(pixels) => pixels,
+                None => {
+                    let (decoder, logger) = (decoder.as_ref(), logger.as_deref());
+                    let pixels = base_pixels(window, decoder, logger, width, height, dpi);
+                    window.base = Some((width, height, pixels.clone()));
+                    pixels
+                }
+            };
+            let level = window.fade.level(now);
+            let glyph = if level > 0.0 {
+                more_glyph_of(more_glyph, width, height, dpi)
+            } else {
+                None
+            };
+            let look = ButtonLook {
+                level,
+                hover: window.over_button,
+                pressed: matches!(window.gesture, Gesture::Button { .. }),
+                palette: button_palette(theme),
+                glyph,
+            };
+            finish(&mut pixels, width as usize, height as usize, dpi, &look);
             Some(pixels)
         })
         .flatten();
         let Some(pixels) = pixels else {
             return;
         };
+        let mut committed = false;
+        let mut failure = None;
         // SAFETY: a DIB section of the window's size, filled from `pixels`, selected into a
         // memory DC for UpdateLayeredWindow and freed after.
         unsafe {
@@ -1135,7 +1804,7 @@ mod win {
                     SourceConstantAlpha: 255,
                     AlphaFormat: AC_SRC_ALPHA as u8,
                 };
-                UpdateLayeredWindow(
+                committed = UpdateLayeredWindow(
                     hwnd,
                     screen,
                     null(),
@@ -1145,44 +1814,189 @@ mod win {
                     0,
                     &blend,
                     ULW_ALPHA,
-                );
+                ) != 0;
+                if !committed {
+                    failure = Some(std::io::Error::last_os_error());
+                }
                 SelectObject(memory, old);
                 DeleteObject(bitmap);
+            } else {
+                failure = Some(std::io::Error::last_os_error());
             }
             DeleteDC(memory);
             ReleaseDC(null_mut(), screen);
         }
-    }
-
-    /// A see-through grey square for a widget that has drawn nothing yet.
-    fn placeholder(width: usize, height: usize) -> Vec<u8> {
-        let mut pixels = vec![0u8; width * height * 4];
-        for pixel in pixels.chunks_exact_mut(4) {
-            // Premultiplied BGRA: grey at a quarter.
-            pixel.copy_from_slice(&[0x20, 0x20, 0x20, 0x40]);
+        if let Some(why) = failure {
+            // Without a picture a layered window is not drawn at all, so this is logged.
+            with_state(|s| {
+                let id = s.windows.get(&(hwnd as isize)).map(|w| w.widget.widget_id);
+                note(
+                    s.logger.as_deref(),
+                    &format!(
+                        "widget {}: its window of {width}x{height} pixels could not be drawn: {why}",
+                        id.unwrap_or_default()
+                    ),
+                );
+            });
         }
-        pixels
+        record(hwnd, committed, width, height, &pixels);
+        sync_view(hwnd);
     }
 
-    /// Keeps every pixel clickable and draws the move band while the pointer is over the
-    /// window.
-    fn finish(pixels: &mut [u8], width: usize, height: usize, dpi: u32, hover: bool) {
+    /// The More button's square on the screen: left, top, right and bottom.
+    fn button_on_screen(hwnd: HWND) -> (i32, i32, i32, i32) {
+        let rect = rect_of(hwnd);
+        let (width, height) = (rect.right - rect.left, rect.bottom - rect.top);
+        let (left, top, right, bottom) = more_button(width, height, dpi_of(hwnd)).bounds();
+        (
+            rect.left + left,
+            rect.top + top,
+            rect.left + right,
+            rect.top + bottom,
+        )
+    }
+
+    /// Writes what UI Automation reads of the window now.
+    fn sync_view(hwnd: HWND) {
+        let (left, top, right, bottom) = button_on_screen(hwnd);
+        let text = widget_menu::display_text();
+        with_state(|s| {
+            let Some(window) = s.windows.get(&(hwnd as isize)) else {
+                return;
+            };
+            let mut view = window.view.lock().unwrap_or_else(|e| e.into_inner());
+            view.alive = true;
+            view.hwnd = hwnd as isize;
+            view.name = widget_menu::menu_name(&text, &window.widget.provider);
+            view.button_name = text.more.to_string();
+            view.button = (left, top, right - left, bottom - top);
+            view.focused = window.focused;
+        });
+    }
+
+    /// Fades the More button in or out as the window's state asks now, and draws it.
+    fn update_button(hwnd: HWND) {
+        let key = hwnd as isize;
+        let now = Instant::now();
+        let fading = with_state(|s| {
+            let w = s.windows.get_mut(&key)?;
+            let shown = more_button_shown(w.hover, w.focused, w.menu_open, &w.gesture);
+            let before = w.fade;
+            w.fade = w.fade.toward(shown, now);
+            Some(w.fade != before)
+        })
+        .flatten()
+        .unwrap_or(false);
+        if fading {
+            // SAFETY: a timer of this window, killed once the fade is done.
+            unsafe { SetTimer(hwnd, FADE_TIMER, FADE_STEP_MS, None) };
+        }
+        present(hwnd);
+    }
+
+    /// How far the pointer moves before a press is a drag, at `dpi`.
+    fn drag_threshold(dpi: u32) -> (i32, i32) {
+        // SAFETY: plain reads of the system's metrics.
+        let x = unsafe { GetSystemMetricsForDpi(SM_CXDRAG, dpi) };
+        // SAFETY: as above.
+        let y = unsafe { GetSystemMetricsForDpi(SM_CYDRAG, dpi) };
+        (x.max(1), y.max(1))
+    }
+
+    /// Runs a step of the window's gesture.
+    fn gesture(hwnd: HWND, step: impl FnOnce(&mut Gesture) -> Step) -> Step {
+        let key = hwnd as isize;
+        let done = with_state(|s| s.windows.get_mut(&key).map(|w| step(&mut w.gesture)));
+        done.flatten().unwrap_or(Step::Nothing)
+    }
+
+    fn set_pressed(hwnd: HWND, pressed: bool) {
+        with_state(|s| {
+            if let Some(w) = s.windows.get_mut(&(hwnd as isize)) {
+                w.pressed = pressed;
+            }
+        });
+    }
+
+    /// Moves the window's top left corner to `x`, `y` on the screen.
+    fn move_to(hwnd: HWND, (x, y): (i32, i32)) {
+        // SAFETY: a window of this thread; it keeps its size and its place in the z-order.
+        unsafe {
+            SetWindowPos(
+                hwnd,
+                null_mut(),
+                x,
+                y,
+                0,
+                0,
+                SWP_NOACTIVATE | SWP_NOSIZE | SWP_NOZORDER,
+            );
+        }
+    }
+
+    /// Does what a step of the window's gesture asks.
+    fn do_step(hwnd: HWND, step: Step, lparam: LPARAM) {
+        match step {
+            Step::Nothing => {}
+            Step::Android(action) => {
+                if action == PointerAction::Down {
+                    set_pressed(hwnd, true);
+                }
+                pointer(hwnd, action, lparam);
+                if matches!(action, PointerAction::Up | PointerAction::Cancel) {
+                    set_pressed(hwnd, false);
+                }
+            }
+            Step::Button => update_button(hwnd),
+            Step::OpenMenu => {
+                update_button(hwnd);
+                open_menu(hwnd, None, false);
+            }
+            Step::StartMove { cancel, to } => {
+                if cancel {
+                    pointer(hwnd, PointerAction::Cancel, 0);
+                    set_pressed(hwnd, false);
+                }
+                // SAFETY: a system cursor, shown while the window moves.
+                unsafe { SetCursor(LoadCursorW(null_mut(), IDC_SIZEALL)) };
+                move_to(hwnd, to);
+                update_button(hwnd);
+            }
+            Step::MoveTo(to) => move_to(hwnd, to),
+            Step::EndMove => {
+                report_placement(hwnd);
+                update_button(hwnd);
+            }
+        }
+    }
+
+    #[cfg(test)]
+    fn record(hwnd: HWND, committed: bool, width: i32, height: i32, pixels: &[u8]) {
+        if let Ok(mut presented) = PRESENTED.lock() {
+            presented.push(Presented {
+                hwnd: hwnd as isize,
+                committed,
+                width,
+                height,
+                opaque: pixels.chunks_exact(4).filter(|p| p[3] >= 0x80).count(),
+                clear: pixels.chunks_exact(4).filter(|p| p[3] <= 1).count(),
+                // SAFETY: a window of this thread.
+                visible: unsafe { IsWindowVisible(hwnd) } != 0,
+            });
+        }
+    }
+
+    #[cfg(not(test))]
+    fn record(_: HWND, _: bool, _: i32, _: i32, _: &[u8]) {}
+
+    /// Keeps every pixel clickable and draws the More button over the widget while it shows.
+    fn finish(pixels: &mut [u8], width: usize, height: usize, dpi: u32, button: &ButtonLook<'_>) {
         for pixel in pixels.chunks_exact_mut(4) {
             if pixel[3] == 0 {
                 pixel[3] = 1;
             }
         }
-        if hover {
-            let band =
-                (super::px_of_dip(super::CAPTION_DIP as u32, dpi).max(1) as usize).min(height);
-            for pixel in pixels[..band * width * 4].chunks_exact_mut(4) {
-                // Over the image, a dark band at half: premultiplied blend.
-                for channel in &mut pixel[..3] {
-                    *channel /= 2;
-                }
-                pixel[3] = pixel[3] / 2 + 0x60;
-            }
-        }
+        draw_more_button(pixels, width, height, dpi, button);
     }
 
     unsafe extern "system" fn widget_proc(
@@ -1209,8 +2023,7 @@ mod win {
                     resize_mode,
                 );
                 (match hit {
-                    Hit::Client => HTCLIENT,
-                    Hit::Caption => HTCAPTION,
+                    Hit::Client | Hit::More => HTCLIENT,
                     Hit::Left => HTLEFT,
                     Hit::Right => HTRIGHT,
                     Hit::Top => HTTOP,
@@ -1288,13 +2101,21 @@ mod win {
                 0
             }
             WM_MOUSEMOVE => {
-                let first = with_state(|s| {
-                    s.windows
-                        .get_mut(&key)
-                        .map(|w| !std::mem::replace(&mut w.hover, true))
+                let rect = rect_of(hwnd);
+                let (x, y) = (lo(lparam), hi(lparam));
+                let (width, height) = (rect.right - rect.left, rect.bottom - rect.top);
+                let dpi = dpi_of(hwnd);
+                let over = on_more_button(x, y, width, height, dpi);
+                let (at, origin) = ((rect.left + x, rect.top + y), (rect.left, rect.top));
+                let threshold = drag_threshold(dpi);
+                let seen = with_state(|s| {
+                    let w = s.windows.get_mut(&key)?;
+                    let first = !std::mem::replace(&mut w.hover, true);
+                    let changed = std::mem::replace(&mut w.over_button, over) != over;
+                    Some((first, changed, w.gesture.moved(at, origin, threshold)))
                 })
-                .flatten()
-                .unwrap_or(false);
+                .flatten();
+                let (first, changed, step) = seen.unwrap_or((false, false, Step::Nothing));
                 if first {
                     let mut track = TRACKMOUSEEVENT {
                         cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
@@ -1304,60 +2125,150 @@ mod win {
                     };
                     // SAFETY: asks for WM_MOUSELEAVE for this window.
                     unsafe { TrackMouseEvent(&mut track) };
-                    present(hwnd);
                 }
-                pointer(hwnd, PointerAction::Move, lparam);
+                if first || changed {
+                    update_button(hwnd);
+                }
+                do_step(hwnd, step, lparam);
                 0
             }
             WM_MOUSELEAVE => {
                 with_state(|s| {
                     if let Some(w) = s.windows.get_mut(&key) {
                         w.hover = false;
+                        w.over_button = false;
                     }
                 });
-                present(hwnd);
+                update_button(hwnd);
                 0
             }
             WM_LBUTTONDOWN => {
                 // SAFETY: the window takes the mouse until the button is released.
                 unsafe { SetCapture(hwnd) };
-                with_state(|s| {
-                    if let Some(w) = s.windows.get_mut(&key) {
-                        w.pressed = true;
-                    }
-                });
-                pointer(hwnd, PointerAction::Down, lparam);
+                let rect = rect_of(hwnd);
+                let (x, y) = (lo(lparam), hi(lparam));
+                let (width, height) = (rect.right - rect.left, rect.bottom - rect.top);
+                let over = on_more_button(x, y, width, height, dpi_of(hwnd));
+                let at = (rect.left + x, rect.top + y);
+                let now = Instant::now();
+                let step = gesture(hwnd, |g| g.down(over, at, now));
+                if matches!(step, Step::Android(_)) {
+                    let hold = HOLD_TO_MOVE.as_millis() as u32;
+                    // SAFETY: a timer of this window, killed when the press ends.
+                    unsafe { SetTimer(hwnd, HOLD_TIMER, hold, None) };
+                }
+                do_step(hwnd, step, lparam);
                 0
             }
             WM_LBUTTONUP => {
-                pointer(hwnd, PointerAction::Up, lparam);
-                with_state(|s| {
-                    if let Some(w) = s.windows.get_mut(&key) {
-                        w.pressed = false;
-                    }
-                });
-                // SAFETY: gives the mouse back.
+                // SAFETY: the hold timer of this window.
+                unsafe { KillTimer(hwnd, HOLD_TIMER) };
+                let rect = rect_of(hwnd);
+                let (width, height) = (rect.right - rect.left, rect.bottom - rect.top);
+                let over = on_more_button(lo(lparam), hi(lparam), width, height, dpi_of(hwnd));
+                let step = gesture(hwnd, |g| g.up(over));
+                // SAFETY: gives the mouse back; the gesture has ended, so losing it ends
+                // nothing.
                 unsafe { ReleaseCapture() };
+                do_step(hwnd, step, lparam);
                 0
             }
             WM_CAPTURECHANGED => {
-                let was_pressed = with_state(|s| {
-                    s.windows
-                        .get_mut(&key)
-                        .map(|w| std::mem::replace(&mut w.pressed, false))
-                })
-                .flatten()
-                .unwrap_or(false);
-                if was_pressed {
-                    pointer(hwnd, PointerAction::Cancel, 0);
+                // SAFETY: the hold timer of this window.
+                unsafe { KillTimer(hwnd, HOLD_TIMER) };
+                let step = gesture(hwnd, Gesture::cancel);
+                do_step(hwnd, step, 0);
+                0
+            }
+            WM_TIMER if wparam == HOLD_TIMER => {
+                let mut cursor = POINT { x: 0, y: 0 };
+                // SAFETY: the hold timer of this window, and a plain read of the cursor.
+                unsafe {
+                    KillTimer(hwnd, HOLD_TIMER);
+                    GetCursorPos(&mut cursor);
+                }
+                let rect = rect_of(hwnd);
+                let (at, origin) = ((cursor.x, cursor.y), (rect.left, rect.top));
+                let now = Instant::now();
+                let step = gesture(hwnd, |g| g.held(at, origin, now));
+                do_step(hwnd, step, 0);
+                0
+            }
+            WM_TIMER if wparam == FADE_TIMER => {
+                present(hwnd);
+                let now = Instant::now();
+                let done = with_state(|s| s.windows.get(&key).map(|w| w.fade.done(now)));
+                if done.flatten().unwrap_or(true) {
+                    // SAFETY: the fade timer of this window.
+                    unsafe { KillTimer(hwnd, FADE_TIMER) };
                 }
                 0
             }
+            WM_SETFOCUS | WM_KILLFOCUS => {
+                let focused = msg == WM_SETFOCUS;
+                let view = with_state(|s| {
+                    let w = s.windows.get_mut(&key)?;
+                    w.focused = focused;
+                    Some(Arc::clone(&w.view))
+                })
+                .flatten();
+                update_button(hwnd);
+                if let (true, Some(view)) = (focused, view) {
+                    widget_automation::raise_focus(&view);
+                }
+                0
+            }
+            WM_KEYDOWN if matches!(wparam as u16, VK_RETURN | VK_SPACE) => {
+                open_menu(hwnd, None, true);
+                0
+            }
+            WM_WIDGET_MORE => {
+                open_menu(hwnd, None, true);
+                0
+            }
+            WM_WIDGET_FOCUS => {
+                // SAFETY: a window of this thread takes the keyboard, as UI Automation asked.
+                unsafe {
+                    SetForegroundWindow(hwnd);
+                    SetFocus(hwnd);
+                }
+                0
+            }
+            WM_GETOBJECT => {
+                let provider = with_state(|s| {
+                    let w = s.windows.get_mut(&key)?;
+                    let view = Arc::clone(&w.view);
+                    let slot = &mut w.provider;
+                    let provider = slot.get_or_insert_with(|| widget_automation::provider(&view));
+                    Some(provider.clone())
+                })
+                .flatten();
+                match provider.and_then(|p| widget_automation::answer(key, wparam, lparam, &p)) {
+                    Some(result) => result,
+                    // SAFETY: the default handling of every other object.
+                    None => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
+                }
+            }
+            WM_SETTINGCHANGE | WM_THEMECHANGED | WM_SYSCOLORCHANGE => {
+                // The button follows the theme and high contrast as they change.
+                with_state(|s| s.theme = read_theme());
+                // SAFETY: the default handling of the message.
+                unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+            }
             WM_CONTEXTMENU => {
-                context_menu(hwnd, lparam);
+                // From the keyboard (the menu key or Shift+F10) the position is -1, -1.
+                let at = (lparam as u32 != u32::MAX).then(|| (lo(lparam), hi(lparam)));
+                open_menu(hwnd, at, at.is_none());
                 0
             }
             WM_CLOSE => 0,
+            WM_NCDESTROY => {
+                // SAFETY: the window is still alive until this message returns.
+                unsafe {
+                    crate::app_window::pointer::forget_contacts(hwnd);
+                    DefWindowProcW(hwnd, msg, wparam, lparam)
+                }
+            }
             m if m != 0 && with_state(|s| s.taskbar_created).unwrap_or(0) == m => {
                 // The shell restarted: the window belongs to its new desktop.
                 // SAFETY: a window of this thread.
@@ -1380,9 +2291,44 @@ mod win {
         }
     }
 
-    /// Shows the window's menu (Resize, Remove) where the user right-clicked, or at the
-    /// window's corner for the menu key, and does what the user chose.
-    fn context_menu(hwnd: HWND, lparam: LPARAM) {
+    /// The menu of the window is open (or closed again): the More button shows while it is.
+    /// Once it closes the pointer may be elsewhere, so the window looks again.
+    fn set_menu_open(hwnd: HWND, open: bool) {
+        let key = hwnd as isize;
+        let rect = rect_of(hwnd);
+        let mut cursor = POINT { x: 0, y: 0 };
+        // SAFETY: a plain read of the cursor's position.
+        unsafe { GetCursorPos(&mut cursor) };
+        let inside = cursor.x >= rect.left
+            && cursor.y >= rect.top
+            && cursor.x < rect.right
+            && cursor.y < rect.bottom;
+        with_state(|s| {
+            if let Some(w) = s.windows.get_mut(&key) {
+                w.menu_open = open;
+                if !open {
+                    w.hover = inside;
+                    w.over_button = false;
+                }
+            }
+        });
+        if !open && inside {
+            let mut track = TRACKMOUSEEVENT {
+                cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
+                dwFlags: TME_LEAVE,
+                hwndTrack: hwnd,
+                dwHoverTime: 0,
+            };
+            // SAFETY: asks for WM_MOUSELEAVE for this window again.
+            unsafe { TrackMouseEvent(&mut track) };
+        }
+        update_button(hwnd);
+    }
+
+    /// Shows the window's menu (Resize, Remove) at `at` on the screen, where the user
+    /// right-clicked, or under the More button (None), and does what the user chose.
+    /// `keyboard` says the keyboard opened it.
+    fn open_menu(hwnd: HWND, at: Option<(i32, i32)>, keyboard: bool) {
         let key = hwnd as isize;
         let Some((provider, placement, widget_id)) = with_state(|s| {
             s.windows.get(&key).map(|w| {
@@ -1397,10 +2343,9 @@ mod win {
             return;
         };
         let rect = rect_of(hwnd);
-        let (x, y) = if lparam as u32 == u32::MAX {
-            (rect.left, rect.top)
-        } else {
-            (lo(lparam), hi(lparam))
+        let anchor = match at {
+            Some((x, y)) => Anchor::Point { x, y },
+            None => Anchor::Below(button_on_screen(hwnd)),
         };
         let dpi = dpi_of(hwnd);
         // The size shown as current is the window's own, which a drag may have changed.
@@ -1416,7 +2361,10 @@ mod win {
             height_dp: shown.height_dp,
             ..placement
         };
-        match widget_menu::show(hwnd as isize, x, y, &provider, &placement) {
+        set_menu_open(hwnd, true);
+        let choice = widget_menu::show(key, anchor, keyboard, &provider, &placement);
+        set_menu_open(hwnd, false);
+        match choice {
             Some(MenuChoice::Resize {
                 width_dp,
                 height_dp,
@@ -1495,6 +2443,31 @@ pub(crate) mod png {
 
     pub(crate) struct Decoder {
         factory: IWICImagingFactory,
+    }
+
+    /// Runs `f` with COM entered on this thread, as the imaging component needs, and leaves
+    /// it as it was. A thread already in COM, in either apartment, stays in it.
+    pub(crate) fn with_com<T>(f: impl FnOnce() -> T) -> T {
+        use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
+        // SAFETY: enters COM for this thread; undone below only when this call entered it.
+        let entered = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }.is_ok();
+        let result = f();
+        if entered {
+            // SAFETY: balances the successful CoInitializeEx above.
+            unsafe { CoUninitialize() };
+        }
+        result
+    }
+
+    /// The width and height a PNG says it has, from its header chunk.
+    pub(crate) fn size(png: &[u8]) -> Option<(u32, u32)> {
+        const SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
+        if png.len() < 24 || &png[..8] != SIGNATURE || &png[12..16] != b"IHDR" {
+            return None;
+        }
+        let width = u32::from_be_bytes(png[16..20].try_into().ok()?);
+        let height = u32::from_be_bytes(png[20..24].try_into().ok()?);
+        (width > 0 && height > 0).then_some((width, height))
     }
 
     impl Decoder {
@@ -1630,6 +2603,41 @@ mod tests {
     }
 
     #[test]
+    fn fr12_a_widget_window_without_an_image_shows_a_visible_placeholder() {
+        let (width, height) = (600usize, 340usize);
+        let pixels = placeholder(width, height, 192);
+        assert_eq!(pixels.len(), width * height * 4);
+        assert!(!all_clear(&pixels));
+        let alpha = |x: usize, y: usize| pixels[(y * width + x) * 4 + 3];
+        // The middle and every edge's midpoint are mostly opaque, so the window is never a
+        // see-through hole on the desktop.
+        for (x, y) in [
+            (width / 2, height / 2),
+            (0, height / 2),
+            (width - 1, height / 2),
+            (width / 2, 0),
+            (width / 2, height - 1),
+        ] {
+            assert!(alpha(x, y) >= 0xc0, "alpha at {x},{y} is {}", alpha(x, y));
+        }
+        // The corners are rounded off.
+        assert_eq!(alpha(0, 0), 0);
+        assert_eq!(alpha(width - 1, height - 1), 0);
+        // Premultiplied: no colour exceeds its alpha.
+        assert!(pixels
+            .chunks_exact(4)
+            .all(|p| p[..3].iter().all(|&c| c <= p[3])));
+        // A tiny window still gets one.
+        assert!(!all_clear(&placeholder(3, 2, 96)));
+    }
+
+    #[test]
+    fn fr12_an_image_with_nothing_in_it_is_told_from_one_with_something_drawn() {
+        assert!(all_clear(&[0, 0, 0, 0, 9, 9, 9, 0]));
+        assert!(!all_clear(&[0, 0, 0, 0, 0, 0, 0, 1]));
+    }
+
+    #[test]
     fn fr12_a_widget_windows_size_follows_its_monitors_scale() {
         let placement = Placement {
             x: 10,
@@ -1662,22 +2670,441 @@ mod tests {
     }
 
     #[test]
-    fn fr12_a_widget_window_is_moved_by_its_top_band_and_resized_by_its_edges() {
+    fn fr12_a_widget_window_is_resized_by_its_edges_and_has_no_band_along_its_top() {
         let (w, h) = (200, 120);
         assert_eq!(hit_test(100, 60, w, h, 96, 3), Hit::Client);
-        assert_eq!(hit_test(100, 10, w, h, 96, 3), Hit::Caption);
+        assert_eq!(hit_test(100, 10, w, h, 96, 3), Hit::Client, "no band");
         assert_eq!(hit_test(2, 60, w, h, 96, 3), Hit::Left);
         assert_eq!(hit_test(198, 60, w, h, 96, 3), Hit::Right);
         assert_eq!(hit_test(100, 118, w, h, 96, 3), Hit::Bottom);
         assert_eq!(hit_test(100, 2, w, h, 96, 3), Hit::Top);
         assert_eq!(hit_test(198, 118, w, h, 96, 3), Hit::BottomRight);
         assert_eq!(hit_test(1, 1, w, h, 96, 3), Hit::TopLeft);
+        assert_eq!(hit_test(198, 2, w, h, 96, 3), Hit::TopRight);
         // Only the edges the widget may be resized along resize it.
         assert_eq!(hit_test(2, 60, w, h, 96, 2), Hit::Client);
         assert_eq!(hit_test(100, 118, w, h, 96, 1), Hit::Client);
-        assert_eq!(hit_test(100, 2, w, h, 96, 0), Hit::Caption);
-        // The band and the edges grow with the scale.
-        assert_eq!(hit_test(100, 30, w, h, 192, 3), Hit::Caption);
+        assert_eq!(hit_test(100, 2, w, h, 96, 0), Hit::Client);
+        // The edges grow with the scale.
+        assert_eq!(hit_test(100, 30, w, h, 192, 3), Hit::Client);
+        assert_eq!(hit_test(10, 60, w, h, 192, 3), Hit::Left);
+    }
+
+    #[test]
+    fn fr12_the_more_button_is_a_28_px_circle_in_the_top_right_corner() {
+        // At 100%: 28 px across, 8 px from the top and right edges.
+        let at_100 = more_button(200, 120, 96);
+        assert_eq!((at_100.cx, at_100.cy, at_100.radius), (178.0, 22.0, 14.0));
+        assert_eq!(at_100.bounds(), (164, 8, 192, 36));
+        // It grows with the scale.
+        let at_150 = more_button(300, 180, 144);
+        assert_eq!((at_150.cx, at_150.cy, at_150.radius), (267.0, 33.0, 21.0));
+        let at_200 = more_button(400, 240, 192);
+        assert_eq!(at_200.radius, 28.0);
+        // A widget too small for it gets one that still fits.
+        let tiny = more_button(30, 24, 96);
+        assert!(tiny.radius * 2.0 <= 22.0);
+        assert!(tiny.cx + tiny.radius <= 30.0 && tiny.cy - tiny.radius >= 0.0);
+        // It stays off the edges that resize the window.
+        let border = BORDER_DIP as f32;
+        assert!(at_100.cx + at_100.radius <= 200.0 - border);
+        assert!(at_100.cy - at_100.radius >= border);
+    }
+
+    #[test]
+    fn fr12_the_more_button_is_hit_inside_its_circle_only() {
+        let (w, h) = (200, 120);
+        assert_eq!(hit_test(178, 22, w, h, 96, 3), Hit::More);
+        assert!(on_more_button(178, 22, w, h, 96));
+        assert!(on_more_button(166, 22, w, h, 96), "the left of the circle");
+        assert!(on_more_button(178, 34, w, h, 96), "its bottom");
+        // The corners of its square are the widget's.
+        assert!(!on_more_button(165, 9, w, h, 96));
+        assert_eq!(hit_test(165, 9, w, h, 96, 3), Hit::Client);
+        assert!(!on_more_button(191, 35, w, h, 96));
+        // Outside it, everywhere is the widget's.
+        assert!(!on_more_button(150, 22, w, h, 96));
+        assert!(!on_more_button(178, 40, w, h, 96));
+        // At 200% it is twice as large.
+        assert!(on_more_button(2 * 166, 2 * 22, 2 * w, 2 * h, 192));
+    }
+
+    #[test]
+    fn fr12_the_more_button_stays_inside_the_widgets_rounded_corners() {
+        // Android draws widgets with corners of 16 to 28 dp; the placeholder's are 12. Every
+        // radius up to 40 dp keeps the circle inside, at every scale.
+        for dpi in [96, 120, 144, 192] {
+            let (width, height) = window_size(
+                &Placement {
+                    x: 0,
+                    y: 0,
+                    width_dp: 180,
+                    height_dp: 110,
+                },
+                dpi,
+            );
+            let circle = more_button(width, height, dpi);
+            for radius_dp in 0..=40 {
+                let radius = px_of_dip(radius_dp, dpi) as f32;
+                assert!(
+                    inside_rounded_window(&circle, width, height, radius),
+                    "at {dpi} dpi the button leaves corners of {radius_dp} dp"
+                );
+            }
+        }
+        // The check itself tells a circle that leaves a corner.
+        let corner = Circle {
+            cx: 190.0,
+            cy: 10.0,
+            radius: 9.0,
+        };
+        assert!(!inside_rounded_window(&corner, 200, 120, 30.0));
+        assert!(inside_rounded_window(&corner, 200, 120, 0.0));
+    }
+
+    #[test]
+    fn fr12_the_more_button_fades_in_on_hover_and_keyboard_focus_and_out_after() {
+        let start = Instant::now();
+        let idle = Gesture::Idle;
+        assert!(!more_button_shown(false, false, false, &idle));
+        // The pointer is over the widget, the keyboard is on it, its menu is open.
+        assert!(more_button_shown(true, false, false, &idle));
+        assert!(more_button_shown(false, true, false, &idle));
+        assert!(more_button_shown(false, false, true, &idle));
+        let moving = Gesture::Moving { grab: (4, 4) };
+        assert!(more_button_shown(false, false, false, &moving));
+        // Fading in takes WinUI's fast animation, and turning back starts from where it is.
+        let hidden = Fade::hidden(start);
+        assert_eq!(hidden.level(start + FADE), 0.0);
+        let fading_in = hidden.toward(true, start);
+        assert_eq!(fading_in.level(start), 0.0);
+        let half = fading_in.level(start + FADE / 2);
+        assert!(half > 0.4 && half < 0.6, "halfway: {half}");
+        assert_eq!(fading_in.level(start + FADE), 1.0);
+        assert!(fading_in.done(start + FADE));
+        assert!(!fading_in.done(start + FADE / 2));
+        assert_eq!(fading_in.toward(true, start + FADE / 2), fading_in);
+        let back = fading_in.toward(false, start + FADE / 2);
+        assert!((back.level(start + FADE / 2) - half).abs() < 0.01);
+        assert_eq!(back.level(start + FADE / 2 + FADE), 0.0);
+    }
+
+    #[test]
+    fn fr12_the_more_button_is_drawn_with_a_subtle_fill_a_hairline_and_its_states() {
+        use crate::compositor::fluent::{button_palette, Theme};
+        let (width, height) = (200usize, 120usize);
+        let base = placeholder(width, height, 96);
+        let palette = button_palette(&Theme::light());
+        let draw = |level: f32, hover: bool, pressed: bool| {
+            let mut pixels = base.clone();
+            let look = ButtonLook {
+                level,
+                hover,
+                pressed,
+                palette,
+                glyph: None,
+            };
+            draw_more_button(&mut pixels, width, height, 96, &look);
+            pixels
+        };
+        let at = |pixels: &[u8], x: usize, y: usize| {
+            let index = (y * width + x) * 4;
+            [
+                pixels[index],
+                pixels[index + 1],
+                pixels[index + 2],
+                pixels[index + 3],
+            ]
+        };
+        // Not shown: the widget is untouched.
+        assert_eq!(draw(0.0, false, false), base);
+        let rest = draw(1.0, false, false);
+        let hover = draw(1.0, true, false);
+        let pressed = draw(1.0, false, true);
+        // The circle's middle takes the light fill over the dark placeholder.
+        assert!(at(&rest, 178, 22)[0] > at(&base, 178, 22)[0] + 0x60);
+        assert_ne!(at(&hover, 178, 22), at(&rest, 178, 22));
+        assert_ne!(at(&pressed, 178, 22), at(&hover, 178, 22));
+        // The hairline sits on the circle's edge, and the square's corner stays the widget's.
+        assert_ne!(at(&rest, 178, 8), at(&rest, 178, 12));
+        assert_eq!(at(&rest, 165, 9), at(&base, 165, 9));
+        // Elsewhere the widget is untouched.
+        assert_eq!(at(&rest, 100, 60), at(&base, 100, 60));
+        assert_eq!(at(&rest, 150, 22), at(&base, 150, 22));
+        // Half faded in, it is between the widget and the button.
+        let half = draw(0.5, false, false);
+        let blue = |pixels: &[u8]| at(pixels, 178, 22)[0];
+        let (b, h, r) = (blue(&base), blue(&half), blue(&rest));
+        assert!(h > b && h < r, "{b} < {h} < {r}");
+        // Premultiplied: no color exceeds its alpha.
+        assert!(rest
+            .chunks_exact(4)
+            .all(|p| p[..3].iter().all(|&c| c <= p[3])));
+    }
+
+    fn pressed_on_button(down: (i32, i32)) -> Gesture {
+        let mut gesture = Gesture::Idle;
+        gesture.down(true, down, Instant::now());
+        gesture
+    }
+
+    #[test]
+    fn fr12_a_tap_and_a_drag_on_the_widget_stay_the_widgets() {
+        let start = Instant::now();
+        let (origin, threshold) = ((100, 100), (4, 4));
+        let mut gesture = Gesture::Idle;
+        assert_eq!(
+            gesture.down(false, (150, 150), start),
+            Step::Android(PointerAction::Down)
+        );
+        // A tap: the press and the release go to Android.
+        assert_eq!(gesture.up(false), Step::Android(PointerAction::Up));
+        assert_eq!(gesture, Gesture::Idle);
+        // A drag that starts at once (a list scrolling) is the widget's, however long it lasts.
+        gesture.down(false, (150, 150), start);
+        let moved = gesture.moved((150, 170), origin, threshold);
+        assert_eq!(moved, Step::Android(PointerAction::Move));
+        let later = start + HOLD_TO_MOVE * 2;
+        assert_eq!(gesture.held((150, 170), origin, later), Step::Nothing);
+        assert_eq!(gesture.up(false), Step::Android(PointerAction::Up));
+        // The window losing the mouse cancels Android's press.
+        gesture.down(false, (150, 150), start);
+        assert_eq!(gesture.cancel(), Step::Android(PointerAction::Cancel));
+    }
+
+    #[test]
+    fn fr12_holding_a_press_still_then_dragging_moves_the_widget() {
+        let start = Instant::now();
+        let (origin, threshold) = ((100, 100), (4, 4));
+        let mut gesture = Gesture::Idle;
+        gesture.down(false, (150, 150), start);
+        // A small wobble within the threshold is still a press.
+        gesture.moved((152, 151), origin, threshold);
+        let early = start + HOLD_TO_MOVE / 2;
+        assert_eq!(gesture.held((152, 151), origin, early), Step::Nothing);
+        // Held still long enough: Android's press is cancelled and the window starts moving.
+        let held = gesture.held((152, 151), origin, start + HOLD_TO_MOVE);
+        let start_move = Step::StartMove {
+            cancel: true,
+            to: origin,
+        };
+        assert_eq!(held, start_move);
+        // The window follows the pointer, keeping where it was grabbed.
+        let moved = gesture.moved((252, 201), origin, threshold);
+        assert_eq!(moved, Step::MoveTo((200, 150)));
+        assert_eq!(gesture.up(false), Step::EndMove);
+        assert_eq!(gesture, Gesture::Idle);
+    }
+
+    #[test]
+    fn fr12_the_more_button_opens_the_menu_on_a_click_and_moves_the_widget_on_a_drag() {
+        let (origin, threshold) = ((100, 100), (4, 4));
+        // A click on the button opens the menu; nothing reaches Android.
+        let mut gesture = pressed_on_button((278, 122));
+        assert_eq!(gesture.moved((279, 123), origin, threshold), Step::Nothing);
+        assert_eq!(gesture.up(true), Step::OpenMenu);
+        // A press that leaves the button before it is let go does nothing.
+        let mut gesture = pressed_on_button((278, 122));
+        assert_eq!(gesture.up(false), Step::Button);
+        // Dragging the button moves the window at once, by as far as the pointer went.
+        let mut gesture = pressed_on_button((278, 122));
+        let start = gesture.moved((288, 122), origin, threshold);
+        let start_move = Step::StartMove {
+            cancel: false,
+            to: (110, 100),
+        };
+        assert_eq!(start, start_move);
+        assert_eq!(
+            gesture.moved((300, 140), origin, threshold),
+            Step::MoveTo((122, 118))
+        );
+        // A drag never opens the menu.
+        assert_eq!(gesture.up(true), Step::EndMove);
+        let mut gesture = pressed_on_button((278, 122));
+        gesture.moved((300, 122), origin, threshold);
+        assert_eq!(gesture.cancel(), Step::EndMove);
+    }
+
+    /// Pictures of the widget menu (its first level and its Resize submenu) and of the More
+    /// button at rest, under the pointer and pressed, in the light and the dark theme at 100%
+    /// and 150%, kept with the Test run when `DSA_WIDGET_MENU_PICTURES` names a folder.
+    #[cfg(windows)]
+    #[test]
+    fn fr12_pictures_of_the_widget_menu_and_its_more_button() {
+        use crate::compositor::fluent::text::{self, Align, ICON_FACES, TEXT_FACES};
+        use crate::compositor::fluent::{
+            button_palette, glyph, menu_palette, premultiplied, Theme,
+        };
+        use crate::compositor::fluent_menu::{self, metrics, Look, Mask, MenuEntry};
+        use crate::compositor::widget_menu;
+
+        let folder = std::env::var_os("DSA_WIDGET_MENU_PICTURES").map(std::path::PathBuf::from);
+        let desktop = [0xA5, 0x6E, 0x3A];
+        let sizes = widget_menu::size_choices(&clock());
+        let placement = Placement {
+            x: 0,
+            y: 0,
+            width_dp: 180,
+            height_dp: 110,
+        };
+        for dark in [false, true] {
+            // Transparency off: the solid fill DWM's acrylic falls back to, as a picture can
+            // show it.
+            let theme = Theme {
+                dark,
+                transparency: false,
+                ..Theme::light()
+            };
+            let palette = menu_palette(&theme);
+            for dpi in [96, 144] {
+                let words = widget_menu::menu_text(false);
+                let entries = widget_menu::entries(&words, &sizes, &placement);
+                let submenu = match entries[0].item() {
+                    Some(item) => item.submenu.clone(),
+                    None => Vec::new(),
+                };
+                let draw = |entries: &[MenuEntry], focus: Option<usize>| {
+                    let em = px_of_dip(metrics::TEXT_SIZE, dpi);
+                    let widths: Vec<i32> = entries
+                        .iter()
+                        .map(|entry| match entry.item() {
+                            Some(item) => text::measure(&item.label, &TEXT_FACES, em),
+                            None => 0,
+                        })
+                        .collect();
+                    let laid = fluent_menu::layout(entries, &widths, dpi);
+                    let art = fluent_menu::row_art(entries, &laid);
+                    let look = Look {
+                        layout: &laid,
+                        art: &art,
+                        entries,
+                        focus,
+                        pressed: None,
+                        cues: true,
+                        palette: &palette,
+                    };
+                    let pixels = fluent_menu::render(&look);
+                    (laid, pixels)
+                };
+                let (root, root_pixels) = draw(&entries, Some(0));
+                let (sub, sub_pixels) = draw(&submenu, Some(2));
+                // The labels are drawn: the first row's label box is not all background.
+                let label = root.rows[0].text;
+                let background = premultiplied(palette.background, 1.0);
+                let inked = (label.y..label.y + label.h)
+                    .flat_map(|y| (label.x..label.x + label.w).map(move |x| (x, y)))
+                    .filter(|&(x, y)| {
+                        let index = ((y * root.width + x) * 4) as usize;
+                        root_pixels[index..index + 4] != background
+                    })
+                    .count();
+                assert!(
+                    inked > 20,
+                    "the label {:?} has {inked} inked pixels",
+                    words.resize
+                );
+                let mut picture = Picture::new(
+                    (root.width + sub.width) as usize + 48,
+                    root.height.max(sub.height) as usize + 32,
+                    desktop,
+                );
+                let (root_w, root_h) = (root.width as usize, root.height as usize);
+                picture.place(16, 16, root_w, root_h, &root_pixels);
+                let (sub_w, sub_h) = (sub.width as usize, sub.height as usize);
+                picture.place(root_w + 32, 16, sub_w, sub_h, &sub_pixels);
+                let percent = dpi * 100 / 96;
+                let name = if dark { "dark" } else { "light" };
+                picture.save(folder.as_deref(), &format!("menu-{name}-{percent}.bmp"));
+
+                // The More button over the placeholder, at rest, hovered and pressed.
+                let (width, height) = window_size(&placement, dpi);
+                let size = more_glyph_size(width, height, dpi);
+                let em = px_of_dip(MORE_GLYPH_DIP, dpi).min(size as i32);
+                let symbol = glyph::MORE.to_string();
+                let cover = text::mask(&symbol, &ICON_FACES, em, (size, size), Align::Center);
+                let mask = cover.map(|cover| Mask {
+                    width: size,
+                    height: size,
+                    cover,
+                });
+                let (w, h) = (width as usize, height as usize);
+                let mut picture = Picture::new(3 * w + 64, h + 32, desktop);
+                let states = [(false, false), (true, false), (false, true)];
+                for (index, (hover, pressed)) in states.into_iter().enumerate() {
+                    let mut pixels = placeholder(w, h, dpi);
+                    let look = ButtonLook {
+                        level: 1.0,
+                        hover,
+                        pressed,
+                        palette: button_palette(&theme),
+                        glyph: mask.as_ref(),
+                    };
+                    draw_more_button(&mut pixels, w, h, dpi, &look);
+                    picture.place(16 + index * (w + 16), 16, w, h, &pixels);
+                }
+                picture.save(folder.as_deref(), &format!("button-{name}-{percent}.bmp"));
+            }
+        }
+    }
+
+    /// An opaque picture of `width` by `height` pixels on a desktop color, saved as a BMP.
+    #[cfg(windows)]
+    struct Picture {
+        width: usize,
+        height: usize,
+        /// Opaque BGRA rows, top first.
+        pixels: Vec<u8>,
+    }
+
+    #[cfg(windows)]
+    impl Picture {
+        fn new(width: usize, height: usize, color: [u8; 3]) -> Picture {
+            let pixels = [color[0], color[1], color[2], 0xff].repeat(width * height);
+            Picture {
+                width,
+                height,
+                pixels,
+            }
+        }
+
+        /// Lays premultiplied BGRA `source` of `w` by `h` over the picture at `x`, `y`.
+        fn place(&mut self, x: usize, y: usize, w: usize, h: usize, source: &[u8]) {
+            for row in 0..h.min(self.height.saturating_sub(y)) {
+                for column in 0..w.min(self.width.saturating_sub(x)) {
+                    let from = (row * w + column) * 4;
+                    let to = ((y + row) * self.width + x + column) * 4;
+                    let keep = 255 - u32::from(source[from + 3]);
+                    for channel in 0..3 {
+                        let under = u32::from(self.pixels[to + channel]) * keep / 255;
+                        let over = u32::from(source[from + channel]);
+                        self.pixels[to + channel] = (over + under).min(255) as u8;
+                    }
+                }
+            }
+        }
+
+        /// Writes the picture as a 32-bit BMP named `name` into `folder`, when there is one.
+        fn save(&self, folder: Option<&std::path::Path>, name: &str) {
+            let Some(folder) = folder else {
+                return;
+            };
+            std::fs::create_dir_all(folder).unwrap();
+            let mut out = Vec::with_capacity(54 + self.pixels.len());
+            let size = (54 + self.pixels.len()) as u32;
+            out.extend_from_slice(b"BM");
+            out.extend_from_slice(&size.to_le_bytes());
+            out.extend_from_slice(&[0, 0, 0, 0]);
+            out.extend_from_slice(&54u32.to_le_bytes());
+            out.extend_from_slice(&40u32.to_le_bytes());
+            out.extend_from_slice(&(self.width as i32).to_le_bytes());
+            // Negative: the rows come top first.
+            out.extend_from_slice(&(-(self.height as i32)).to_le_bytes());
+            out.extend_from_slice(&1u16.to_le_bytes());
+            out.extend_from_slice(&32u16.to_le_bytes());
+            out.extend_from_slice(&[0; 24]);
+            out.extend_from_slice(&self.pixels);
+            std::fs::write(folder.join(name), out).unwrap();
+        }
     }
 
     #[test]
@@ -1764,5 +3191,232 @@ mod tests {
             Some(WindowCommand::Remove(3))
         );
         assert_eq!(command_of(WidgetEvent::Listed(vec![3])), None);
+    }
+
+    #[test]
+    fn fr12_a_widget_window_the_shell_put_under_the_desktop_is_put_back_above_it() {
+        let (desktop, own, widget) = (10, 1, 2);
+        let fits = |list: &[(isize, bool)], ours: &[isize]| {
+            let below: Vec<Below> = list
+                .iter()
+                .map(|&(hwnd, covers)| Below { hwnd, covers })
+                .collect();
+            right_above_desktop(&below, desktop, ours)
+        };
+        // Right above the desktop, with a hidden window and another widget between.
+        assert!(fits(
+            &[(30, false), (widget, true), (desktop, true)],
+            &[own, widget]
+        ));
+        // The shell raised its desktop window over it: the desktop is not below it.
+        assert!(!fits(&[(40, false), (41, false)], &[own]));
+        // An app's window is under it, which it would hide.
+        assert!(!fits(&[(50, true), (desktop, true)], &[own]));
+    }
+
+    /// A placed widget window shows its placeholder from the moment it opens, through the real
+    /// windows: it is given its picture before it is shown, the system takes the picture, the
+    /// picture is mostly opaque, and the window is visible, on a monitor and right above the
+    /// desktop.
+    #[cfg(windows)]
+    #[test]
+    fn fr12_a_widget_window_shows_a_placeholder_then_a_see_through_image_it_keeps() {
+        use windows_sys::Win32::Foundation::{HWND, RECT};
+        use windows_sys::Win32::Graphics::Gdi::{MonitorFromRect, MONITOR_DEFAULTTONULL};
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            GetWindow, GetWindowLongPtrW, GetWindowRect, IsWindowVisible, GWL_EXSTYLE, GW_HWNDNEXT,
+            WS_EX_LAYERED,
+        };
+
+        let mut windows = WindowsWidgetWindows::open(None).expect("opening the widget windows");
+        let placement = Placement {
+            x: 40,
+            y: 40,
+            width_dp: 180,
+            height_dp: 110,
+        };
+        windows.command(WindowCommand::Place(Widget {
+            widget_id: 4242,
+            provider: clock(),
+            placement,
+        }));
+        let deadline = Instant::now() + Duration::from_secs(10);
+        // Only this test opens widget windows, so the first drawing is its window's.
+        let (first, hwnd) = loop {
+            let found = win::PRESENTED.lock().unwrap().first().copied();
+            if let Some(found) = found {
+                break (found, found.hwnd as HWND);
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the widget's window was never drawn"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        // Shown right after its first drawing.
+        std::thread::sleep(Duration::from_millis(500));
+        assert!(
+            first.committed,
+            "the system did not take the window's picture"
+        );
+        assert!(
+            !first.visible,
+            "the window was shown before it had a picture"
+        );
+        let pixels = (first.width * first.height) as usize;
+        assert!(pixels > 0, "the window is {}x{}", first.width, first.height);
+        assert!(
+            first.opaque * 10 >= pixels * 9,
+            "only {} of {pixels} pixels of the placeholder are opaque",
+            first.opaque
+        );
+        // SAFETY: reads a window of the windows' thread.
+        unsafe {
+            assert!(IsWindowVisible(hwnd) != 0, "the window is hidden");
+            let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+            assert!(ex_style & WS_EX_LAYERED != 0);
+            let mut rect = RECT {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            };
+            GetWindowRect(hwnd, &mut rect);
+            assert_eq!(
+                (rect.right - rect.left, rect.bottom - rect.top),
+                (first.width, first.height)
+            );
+            assert!(
+                !MonitorFromRect(&rect, MONITOR_DEFAULTTONULL).is_null(),
+                "the window at {},{} is on no monitor",
+                rect.left,
+                rect.top
+            );
+            // With a shell, the desktop is below the window, so the desktop is not drawn over it.
+            if let Some(desktop) = win::desktop_window() {
+                let mut next = GetWindow(hwnd, GW_HWNDNEXT);
+                let mut steps = 0;
+                while !next.is_null() && next != desktop && steps < 4096 {
+                    next = GetWindow(next, GW_HWNDNEXT);
+                    steps += 1;
+                }
+                assert_eq!(next, desktop, "the desktop is drawn over the window");
+            }
+        }
+
+        // A widget's own image: its left half drawn, its right half see-through, as a clock's
+        // text over the wallpaper. The system is handed exactly that, alpha and all.
+        let frame = |png: Vec<u8>| {
+            WindowCommand::Frame(WidgetFrame {
+                widget_id: 4242,
+                width: 8,
+                height: 2,
+                png,
+            })
+        };
+        let drawn = [[255u8, 255, 255, 255]; 4]
+            .into_iter()
+            .chain([[0u8, 0, 0, 0]; 4])
+            .collect::<Vec<_>>();
+        windows.command(frame(rgba_png(8, 2, &[drawn.clone(), drawn].concat())));
+        let image = next_presented(1, deadline);
+        assert!(
+            image.committed,
+            "the system did not take the widget's image"
+        );
+        assert!(
+            image.opaque * 10 >= pixels * 4 && image.opaque * 10 <= pixels * 6,
+            "{} of {pixels} pixels are opaque; half the widget's image is see-through",
+            image.opaque
+        );
+        assert!(
+            image.clear * 10 >= pixels * 4,
+            "only {} of {pixels} pixels are see-through; the widget's transparent half is drawn opaque",
+            image.clear
+        );
+
+        // Its app stops drawing and the image comes back empty: the last one stays, not the
+        // placeholder.
+        windows.command(frame(rgba_png(8, 2, &[[0u8; 4]; 16])));
+        let kept = next_presented(2, deadline);
+        assert!(
+            kept.opaque == image.opaque && kept.clear == image.clear,
+            "after an empty image the window shows {} opaque and {} clear pixels, not its last image ({} and {})",
+            kept.opaque,
+            kept.clear,
+            image.opaque,
+            image.clear
+        );
+        windows.command(WindowCommand::Remove(4242));
+    }
+
+    /// The window's next drawing after the first `seen` ones.
+    #[cfg(windows)]
+    fn next_presented(seen: usize, deadline: Instant) -> win::Presented {
+        let deadline = deadline.max(Instant::now() + Duration::from_secs(10));
+        loop {
+            if let Some(found) = win::PRESENTED.lock().unwrap().get(seen).copied() {
+                return found;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the widget's window was not drawn again"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// An RGBA PNG of `width` by `height` straight-alpha `pixels`, stored without compression.
+    #[cfg(windows)]
+    fn rgba_png(width: u32, height: u32, pixels: &[[u8; 4]]) -> Vec<u8> {
+        fn crc(bytes: &[u8]) -> u32 {
+            let mut crc = 0xffff_ffffu32;
+            for &b in bytes {
+                crc ^= b as u32;
+                for _ in 0..8 {
+                    crc = if crc & 1 != 0 {
+                        (crc >> 1) ^ 0xedb8_8320
+                    } else {
+                        crc >> 1
+                    };
+                }
+            }
+            !crc
+        }
+        fn chunk(out: &mut Vec<u8>, kind: &[u8], body: &[u8]) {
+            out.extend_from_slice(&(body.len() as u32).to_be_bytes());
+            let start = out.len();
+            out.extend_from_slice(kind);
+            out.extend_from_slice(body);
+            let sum = crc(&out[start..]);
+            out.extend_from_slice(&sum.to_be_bytes());
+        }
+        let mut raw = Vec::new();
+        for row in pixels.chunks(width as usize) {
+            raw.push(0);
+            for p in row {
+                raw.extend_from_slice(p);
+            }
+        }
+        let (mut a, mut b) = (1u32, 0u32);
+        for &byte in &raw {
+            a = (a + byte as u32) % 65521;
+            b = (b + a) % 65521;
+        }
+        let len = raw.len() as u16;
+        let mut z = vec![0x78, 0x01, 0x01];
+        z.extend_from_slice(&len.to_le_bytes());
+        z.extend_from_slice(&(!len).to_le_bytes());
+        z.extend_from_slice(&raw);
+        z.extend_from_slice(&((b << 16) | a).to_be_bytes());
+        let mut header = Vec::new();
+        header.extend_from_slice(&width.to_be_bytes());
+        header.extend_from_slice(&height.to_be_bytes());
+        header.extend_from_slice(&[8, 6, 0, 0, 0]);
+        let mut out = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+        chunk(&mut out, b"IHDR", &header);
+        chunk(&mut out, b"IDAT", &z);
+        chunk(&mut out, b"IEND", &[]);
+        out
     }
 }

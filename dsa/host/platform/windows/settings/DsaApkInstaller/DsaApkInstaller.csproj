@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    APK Installer: the app an .apk file opens in. It shows what the APK is and installs it in
+    the user's Android, laid out as App Installer lays out an app package.
+
+    It is its own program, apart from the settings app, so Windows shows it under its own name
+    and icon in the taskbar and in Open with. It is the same kind of app as the settings app (a
+    WPF app with WPF UI, MIT) and shares its core (DsaSettings.Core: the dsa command, the view
+    models) and its strings, so one UI stack and one set of translations serve both. It is
+    published self-contained into the settings app's folder, where both share one copy of the
+    .NET runtime.
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>Dsa.ApkInstaller</RootNamespace>
+    <AssemblyName>DsaApkInstaller</AssemblyName>
+    <AssemblyTitle>APK Installer</AssemblyTitle>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\apk-installer.ico</ApplicationIcon>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <NeutralLanguage>en</NeutralLanguage>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <DebugType>embedded</DebugType>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WPF-UI" Version="3.0.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DsaSettings.Core\DsaSettings.Core.csproj" />
+  </ItemGroup>
+
+  <!-- The settings app's English string table: the window's texts live beside the rest of
+       DSA's. The window is English in every language, as App Installer's labels are, so the
+       translations are left out and no language mixes into it. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\DsaSettings\Strings.resx" Link="Strings.resx" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\apk-installer.png" />
+    <Resource Include="Assets\apk-installer.ico" />
+  </ItemGroup>
+</Project>

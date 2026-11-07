@@ -29,6 +29,22 @@ fn fr2_the_console_is_the_virtio_console() {
 }
 
 #[test]
+fn nfr2_freed_memory_is_reported_a_page_at_a_time() {
+    // Once, from the host, whatever the image or the user's settings say.
+    let cmdline = for_virtualization_framework(
+        HYPER_V_CMDLINE,
+        "page_reporting.page_reporting_order=9",
+        false,
+    );
+    let words: Vec<&str> = cmdline.split_whitespace().collect();
+    let orders: Vec<&&str> = words
+        .iter()
+        .filter(|w| w.starts_with("page_reporting.page_reporting_order="))
+        .collect();
+    assert_eq!(orders, [&"page_reporting.page_reporting_order=0"]);
+}
+
+#[test]
 fn fr2_android_finds_its_partitions_on_every_pci_slot() {
     let cmdline = for_virtualization_framework(HYPER_V_CMDLINE, "", false);
     assert!(!cmdline.contains("boot_devices=vmbus"));
@@ -58,6 +74,16 @@ fn fr2_the_rest_of_the_image_command_line_is_kept_in_order() {
     assert_eq!(cmdline.matches("pstore_blk.blkdev=").count(), 1);
     let without = for_virtualization_framework("pstore_blk.blkdev=x init=/init", "", false);
     assert!(!without.contains("pstore_blk."));
+}
+
+#[test]
+fn pr1_the_kernel_reads_the_bootconfig_that_carries_the_boot_secret() {
+    // Once, whether the image's command line already says it or not.
+    for image in [HYPER_V_CMDLINE, "init=/init bootconfig"] {
+        let cmdline = for_virtualization_framework(image, "", false);
+        let flags = cmdline.split_whitespace().filter(|w| *w == "bootconfig");
+        assert_eq!(flags.count(), 1, "{cmdline}");
+    }
 }
 
 #[test]

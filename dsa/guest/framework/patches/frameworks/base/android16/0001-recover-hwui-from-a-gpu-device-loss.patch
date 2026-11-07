@@ -1,0 +1,1005 @@
+Subject: HWUI: recover from a GPU device loss and draw every window again
+
+HWUI aborted when the GPU device was lost: "Lost GPU device unexpectedly" at the start of a
+frame, "Encountered EGL error 12302 EGL_CONTEXT_LOST during rendering" in eglSwapBuffers, and
+Skia's Vulkan device lost callback.
+
+RenderThread now finds the loss (the EGL display answers EGL_CONTEXT_LOST, or Skia abandoned
+its context), abandons the GrDirectContext, destroys the EGL or Vulkan context and every
+window's surface, and builds them again once the host GPU answers, trying with backoff without
+blocking the thread. Each window then draws again in full from its display lists, and the
+next sync asks the UI thread to draw it again (SyncResult::UIRedrawRequired). A process also
+rebuilds when SurfaceFlinger reports a reset through debug.dsa.gpu.resets, so idle windows are
+drawn again too. Paths that need a context (layers, TextureView frames, readback, hardware
+bitmap uploads) wait or fail softly while there is none.
+
+Applies to frameworks/base at 45034f0663f960d9ee5fb0a101a4732b71f6e2f4 (Android 16).
+---
+diff --git a/libs/hwui/DeferredLayerUpdater.cpp b/libs/hwui/DeferredLayerUpdater.cpp
+index c0160705f..2abe5d321 100644
+--- a/libs/hwui/DeferredLayerUpdater.cpp
++++ b/libs/hwui/DeferredLayerUpdater.cpp
+@@ -154,6 +154,11 @@ void DeferredLayerUpdater::apply() {
+             mUpdateTexImage = true;
+             ASurfaceTexture_takeConsumerOwnership(mSurfaceTexture.get());
+         }
++        if (mUpdateTexImage && !mRenderState.getRenderThread().getGrContext()) {
++            // No context to take the frame into, as while the GPU is given back after a device
++            // loss. The frame stays queued for the first frame that draws.
++            return;
++        }
+         if (mUpdateTexImage) {
+             mUpdateTexImage = false;
+             float transformMatrix[16];
+diff --git a/libs/hwui/HardwareBitmapUploader.cpp b/libs/hwui/HardwareBitmapUploader.cpp
+index 236c37368..d0287c7bc 100644
+--- a/libs/hwui/HardwareBitmapUploader.cpp
++++ b/libs/hwui/HardwareBitmapUploader.cpp
+@@ -149,8 +149,18 @@ private:
+     }
+ 
+     void onBeginUpload() override {
++        if (mEglManager.hasEglContext() && mEglManager.isContextLost()) {
++            // The GPU device was lost: the upload context goes, and a new one is made.
++            mUploadThread->queue().runSync([this]() { this->mEglManager.destroy(); });
++        }
+         if (!mEglManager.hasEglContext()) {
+             mUploadThread->queue().runSync([this]() {
++                // While the host's GPU is given back after a device loss no context can be
++                // made; the upload fails then, and no hardware bitmap is made.
++                if (uirenderer::renderthread::EglManager::sDeviceLossSeen &&
++                    !uirenderer::renderthread::EglManager::deviceAnswers()) {
++                    return;
++                }
+                 this->mEglManager.initialize();
+                 glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+             });
+@@ -170,6 +180,13 @@ private:
+                                 AHardwareBuffer* ahb) override {
+         ATRACE_CALL();
+ 
++        {
++            std::lock_guard _lock{mLock};
++            if (!mEglManager.hasEglContext()) {
++                // The GPU device was lost and does not answer yet.
++                return false;
++            }
++        }
+         EGLDisplay display = getUploadEglDisplay();
+ 
+         LOG_ALWAYS_FATAL_IF(display == EGL_NO_DISPLAY, "Failed to get EGL_DEFAULT_DISPLAY! err=%s",
+diff --git a/libs/hwui/Readback.cpp b/libs/hwui/Readback.cpp
+index 2f15722a2..95900c897 100644
+--- a/libs/hwui/Readback.cpp
++++ b/libs/hwui/Readback.cpp
+@@ -119,6 +119,10 @@ void Readback::copySurfaceInto(ANativeWindow* window, const std::shared_ptr<Copy
+     }
+ 
+     sk_sp<GrDirectContext> grContext = mRenderThread.requireGrContext();
++    if (!grContext) {
++        // The GPU device was lost and the GPU does not answer yet.
++        return request->onCopyFinished(CopyResult::UnknownError);
++    }
+ 
+     SkRect srcRect = request->srcRect.toSkRect();
+ 
+@@ -317,6 +321,10 @@ CopyResult Readback::copyImageInto(const sk_sp<SkImage>& image, const Rect& srcR
+     int imgWidth = image->width();
+     int imgHeight = image->height();
+     sk_sp<GrDirectContext> grContext = sk_ref_sp(mRenderThread.getGrContext());
++    if (!grContext) {
++        // The GPU device was lost and the GPU does not answer yet.
++        return CopyResult::UnknownError;
++    }
+ 
+     CopyResult copyResult = CopyResult::UnknownError;
+ 
+diff --git a/libs/hwui/pipeline/skia/SkiaGpuPipeline.cpp b/libs/hwui/pipeline/skia/SkiaGpuPipeline.cpp
+index 7bfbfdc4b..07da31716 100644
+--- a/libs/hwui/pipeline/skia/SkiaGpuPipeline.cpp
++++ b/libs/hwui/pipeline/skia/SkiaGpuPipeline.cpp
+@@ -82,7 +82,11 @@ bool SkiaGpuPipeline::createOrUpdateLayer(RenderNode* node,
+         info = SkImageInfo::Make(surfaceWidth, surfaceHeight, getSurfaceColorType(),
+                                  kPremul_SkAlphaType, getSurfaceColorSpace());
+         SkSurfaceProps props(0, kUnknown_SkPixelGeometry);
+-        SkASSERT(mRenderThread.getGrContext() != nullptr);
++        if (!mRenderThread.getGrContext()) {
++            // No context to make the layer on, as while the GPU is given back after a device
++            // loss. The frame is not drawn, and the first frame that is makes the layer.
++            return false;
++        }
+         node->setLayerSurface(SkSurfaces::RenderTarget(mRenderThread.getGrContext(),
+                                                        skgpu::Budgeted::kYes, info, 0,
+                                                        this->getSurfaceOrigin(), &props));
+diff --git a/libs/hwui/pipeline/skia/SkiaOpenGLPipeline.cpp b/libs/hwui/pipeline/skia/SkiaOpenGLPipeline.cpp
+index 0768f4579..857f124ff 100644
+--- a/libs/hwui/pipeline/skia/SkiaOpenGLPipeline.cpp
++++ b/libs/hwui/pipeline/skia/SkiaOpenGLPipeline.cpp
+@@ -159,6 +159,10 @@ IRenderPipeline::DrawResult SkiaOpenGLPipeline::draw(
+                                                       mSurfaceColorSpace, &props);
+         preTransform = SkMatrix::I();
+     }
++    if (!surface) {
++        // There is nothing to draw into, as when the GPU device was lost after the frame began.
++        return {false, IRenderPipeline::DrawResult::kUnknownTime, android::base::unique_fd{}};
++    }
+ 
+     SkPoint lightCenter = preTransform.mapXY(lightGeometry.center.x, lightGeometry.center.y);
+     LightGeometry localGeometry = lightGeometry;
+@@ -242,6 +246,11 @@ bool SkiaOpenGLPipeline::setSurface(ANativeWindow* surface, SwapBehavior swapBeh
+ 
+     if (surface) {
+         mRenderThread.requireGlContext();
++        if (!mEglManager.hasEglContext()) {
++            // The GPU device was lost and the GPU does not answer yet; the surface is made on
++            // the context built once it does.
++            return false;
++        }
+         auto newSurface = mEglManager.createSurface(surface, mColorMode, mSurfaceColorSpace);
+         if (!newSurface) {
+             return false;
+diff --git a/libs/hwui/pipeline/skia/SkiaVulkanPipeline.cpp b/libs/hwui/pipeline/skia/SkiaVulkanPipeline.cpp
+index 05020abb2..dd06ad72b 100644
+--- a/libs/hwui/pipeline/skia/SkiaVulkanPipeline.cpp
++++ b/libs/hwui/pipeline/skia/SkiaVulkanPipeline.cpp
+@@ -173,6 +173,11 @@ bool SkiaVulkanPipeline::setSurface(ANativeWindow* surface, SwapBehavior /*swapB
+ 
+     if (surface) {
+         mRenderThread.requireVkContext();
++        if (!mRenderThread.getGrContext()) {
++            // The GPU device was lost and the GPU does not answer yet; the surface is made on
++            // the device created once it does.
++            return false;
++        }
+         mVkSurface =
+                 vulkanManager().createSurface(surface, mColorMode, mSurfaceColorSpace,
+                                               mSurfaceColorType, mRenderThread.getGrContext(), 0);
+diff --git a/libs/hwui/platform/host/renderthread/RenderThread.cpp b/libs/hwui/platform/host/renderthread/RenderThread.cpp
+index ece45304e..ca029e350 100644
+--- a/libs/hwui/platform/host/renderthread/RenderThread.cpp
++++ b/libs/hwui/platform/host/renderthread/RenderThread.cpp
+@@ -77,6 +77,16 @@ void RenderThread::initGrContextOptions(GrContextOptions& options) {}
+ 
+ void RenderThread::destroyRenderingContext() {}
+ 
++bool RenderThread::isDeviceLost() {
++    return false;
++}
++
++void RenderThread::handleDeviceLoss() {}
++
++bool RenderThread::checkDevice() {
++    return true;
++}
++
+ VulkanManager& RenderThread::vulkanManager() {
+     return *mVkManager;
+ }
+diff --git a/libs/hwui/renderthread/CanvasContext.cpp b/libs/hwui/renderthread/CanvasContext.cpp
+index b24c2cc65..222bb50bf 100644
+--- a/libs/hwui/renderthread/CanvasContext.cpp
++++ b/libs/hwui/renderthread/CanvasContext.cpp
+@@ -371,12 +371,24 @@ void CanvasContext::setTargetSdrHdrRatio(float ratio) {
+ bool CanvasContext::makeCurrent() {
+     if (mStopped) return false;
+ 
++    if (!mRenderThread.checkDevice()) {
++        // The GPU device was lost and there is no new context yet; this window draws again once
++        // there is one.
++        return false;
++    }
++
+     auto result = mRenderPipeline->makeCurrent();
+     switch (result) {
+         case MakeCurrentResult::AlreadyCurrent:
+             return true;
+         case MakeCurrentResult::Failed:
+             mHaveNewSurface = true;
++            if (mRenderThread.isDeviceLost()) {
++                // Lost since checkDevice(): the surface is kept, the context goes, and the
++                // window draws again on the next one.
++                mRenderThread.handleDeviceLoss();
++                return false;
++            }
+             setSurface(nullptr);
+             return false;
+         case MakeCurrentResult::Succeeded:
+@@ -602,18 +614,12 @@ Frame CanvasContext::getFrame() {
+ }
+ 
+ void CanvasContext::draw(bool solelyTextureViewUpdates) {
+-#ifdef __ANDROID__
+-    if (auto grContext = getGrContext()) {
+-        if (grContext->abandoned()) {
+-            if (grContext->isDeviceLost()) {
+-                LOG_ALWAYS_FATAL("Lost GPU device unexpectedly");
+-                return;
+-            }
+-            LOG_ALWAYS_FATAL("GrContext is abandoned at start of CanvasContext::draw");
+-            return;
+-        }
++    // The GPU device may have been lost since makeCurrent(). The frame is dropped, the context
++    // goes, and every window draws again on the context built next.
++    const bool deviceLost = mRenderThread.isDeviceLost();
++    if (deviceLost) {
++        mRenderThread.handleDeviceLoss();
+     }
+-#endif
+     SkRect dirty;
+     mDamageAccumulator.finish(&dirty);
+ 
+@@ -624,6 +630,10 @@ void CanvasContext::draw(bool solelyTextureViewUpdates) {
+     mIdleDuration = 0;
+ 
+     const auto skippedFrameReason = [&]() -> std::optional<SkippedFrameReason> {
++        if (deviceLost) {
++            return SkippedFrameReason::ContextIsStopped;
++        }
++
+         if (!Properties::isDrawingEnabled()) {
+             return SkippedFrameReason::DrawingOff;
+         }
+@@ -727,6 +737,11 @@ void CanvasContext::draw(bool solelyTextureViewUpdates) {
+             // history
+             didDraw = false;
+ 
++        } else if ((error != OK || !didSwap) && mRenderThread.isDeviceLost()) {
++            // The GPU device was lost during the frame. The surface is kept: the context goes,
++            // and the window draws again in full on the next one.
++            mRenderThread.handleDeviceLoss();
++            didDraw = false;
+         } else if (error != OK || !didSwap) {
+             // Unknown error, abandon the surface
+             setSurface(nullptr);
+@@ -953,6 +968,11 @@ void CanvasContext::onSurfaceStatsAvailable(void* context, int32_t surfaceContro
+ 
+ // Called by choreographer to do an RT-driven animation
+ void CanvasContext::doFrame() {
++    if (mRedrawAfterDeviceReset) {
++        mRedrawAfterDeviceReset = false;
++        // The surface went with the lost context: make it again on the new one, then draw.
++        if (!makeCurrent()) return;
++    }
+     if (!mRenderPipeline->isSurfaceReady()) return;
+     mIdleDuration =
+             systemTime(SYSTEM_TIME_MONOTONIC) - mRenderThread.timeLord().computeFrameTimeNanos();
+@@ -1054,6 +1074,19 @@ void CanvasContext::destroyHardwareResources() {
+     }
+ }
+ 
++void CanvasContext::onDeviceReset() {
++    // What the window last showed may have gone with the lost device, so all of it is drawn
++    // again: the next frame has full damage (makeCurrent() marks the new surface), and the UI
++    // thread is asked to draw again at its next sync. A window that is not drawing now draws
++    // from its display lists at the next vsync, without waiting for the UI thread.
++    mUiRedrawAfterDeviceReset = true;
++    mHaveNewSurface = true;
++    if (mNativeSurface && !mStopped) {
++        mRedrawAfterDeviceReset = true;
++        mRenderThread.postFrameCallback(this);
++    }
++}
++
+ void CanvasContext::onContextDestroyed() {
+     // We don't want to destroyHardwareResources as that will invalidate display lists which
+     // the client may not be expecting. Instead just purge all scratch resources
+diff --git a/libs/hwui/renderthread/CanvasContext.h b/libs/hwui/renderthread/CanvasContext.h
+index 5fe9fe4ce..d4fe8b307 100644
+--- a/libs/hwui/renderthread/CanvasContext.h
++++ b/libs/hwui/renderthread/CanvasContext.h
+@@ -164,6 +164,12 @@ public:
+     void destroyHardwareResources();
+     void onContextDestroyed() override;
+ 
++    // After RenderThread built its GPU context again following a device loss: draws this window
++    // again, in full, from what it last drew, and asks the UI thread to draw it again too.
++    void onDeviceReset();
++    // Whether the UI thread is to draw the window again in full; true once after each reset.
++    bool takeUiRedrawAfterDeviceReset() { return std::exchange(mUiRedrawAfterDeviceReset, false); }
++
+     DeferredLayerUpdater* createTextureLayer();
+ 
+     void stopDrawing();
+@@ -338,6 +344,10 @@ private:
+     LightGeometry mLightGeometry = {{0, 0, 0}, 0};
+ 
+     bool mHaveNewSurface = false;
++    // Set by onDeviceReset(): the next frame callback makes the surface again before it draws,
++    // and the next sync asks the UI thread to draw again.
++    bool mRedrawAfterDeviceReset = false;
++    bool mUiRedrawAfterDeviceReset = false;
+     DamageAccumulator mDamageAccumulator;
+     ColorArea mColorArea;
+     LayerUpdateQueue mLayerUpdateQueue;
+diff --git a/libs/hwui/renderthread/DeviceLossRecovery.h b/libs/hwui/renderthread/DeviceLossRecovery.h
+new file mode 100644
+index 000000000..60c5d08ed
+--- /dev/null
++++ b/libs/hwui/renderthread/DeviceLossRecovery.h
+@@ -0,0 +1,107 @@
++/*
++ * Copyright 2026 The DSA Authors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#pragma once
++
++#include <algorithm>
++#include <chrono>
++#include <cstdint>
++
++namespace android {
++namespace gpurecovery {
++
++// When a renderer builds its GPU context again after the device was lost (VK_ERROR_DEVICE_LOST,
++// EGL_CONTEXT_LOST). The renderer says what it sees and how each attempt went; this says when to
++// try. While the host is still resetting its GPU an attempt fails, so the attempts back off from
++// kFirstRetry to kLongestRetry and then go on at that pace. The renderer never gives up: the GPU
++// comes back, and a renderer that stopped trying would stay blank until its process restarted.
++class DeviceLossRecovery {
++public:
++    using Clock = std::chrono::steady_clock;
++
++    static constexpr std::chrono::milliseconds kFirstRetry{50};
++    static constexpr std::chrono::milliseconds kLongestRetry{1600};
++
++    enum class State {
++        // The context works, or there is none yet and nothing was lost.
++        Healthy,
++        // The device was lost and nothing has been tried yet: build the context again now.
++        Lost,
++        // An attempt failed; the next one waits until the retry delay has passed.
++        Waiting,
++    };
++
++    State state() const { return mState; }
++    bool isHealthy() const { return mState == State::Healthy; }
++
++    // How many times the context was built again after a loss. A cache of what an earlier
++    // context drew keeps the count it saw, and starts over when the count moves on.
++    uint32_t resetCount() const { return mResets; }
++
++    // Failed attempts since the device was lost.
++    uint32_t failedAttempts() const { return mFailedAttempts; }
++
++    // The device was found lost. True the first time, when the renderer must drop everything
++    // the lost context made; false when the loss is already being handled.
++    bool onLost(Clock::time_point now) {
++        if (mState != State::Healthy) {
++            return false;
++        }
++        mState = State::Lost;
++        mFailedAttempts = 0;
++        mNextAttempt = now;
++        return true;
++    }
++
++    // Whether an attempt to build the context again may be made now.
++    bool shouldRebuild(Clock::time_point now) const {
++        return mState == State::Lost || (mState == State::Waiting && now >= mNextAttempt);
++    }
++
++    // How long until the next attempt may be made: zero when it may be made now, or when
++    // nothing needs building.
++    Clock::duration untilNextAttempt(Clock::time_point now) const {
++        if (mState != State::Waiting || now >= mNextAttempt) {
++            return Clock::duration::zero();
++        }
++        return mNextAttempt - now;
++    }
++
++    // How an attempt went. A success makes the renderer healthy and counts a reset; a failure
++    // schedules the next attempt.
++    void onRebuilt(bool succeeded, Clock::time_point now) {
++        if (mState == State::Healthy) {
++            return;
++        }
++        if (succeeded) {
++            mState = State::Healthy;
++            mFailedAttempts = 0;
++            mResets++;
++            return;
++        }
++        mFailedAttempts++;
++        mState = State::Waiting;
++        mNextAttempt = now + retryDelay(mFailedAttempts);
++    }
++
++    // The wait after the given number of failed attempts: kFirstRetry after the first, doubling
++    // after each further one, and never more than kLongestRetry.
++    static Clock::duration retryDelay(uint32_t failedAttempts) {
++        Clock::duration delay = kFirstRetry;
++        for (uint32_t i = 1; i < failedAttempts && delay < kLongestRetry; i++) {
++            delay *= 2;
++        }
++        return std::min<Clock::duration>(delay, kLongestRetry);
++    }
++
++private:
++    State mState = State::Healthy;
++    uint32_t mResets = 0;
++    uint32_t mFailedAttempts = 0;
++    Clock::time_point mNextAttempt{};
++};
++
++}  // namespace gpurecovery
++}  // namespace android
+diff --git a/libs/hwui/renderthread/DrawFrameTask.cpp b/libs/hwui/renderthread/DrawFrameTask.cpp
+index 826d00e1f..14f63605f 100644
+--- a/libs/hwui/renderthread/DrawFrameTask.cpp
++++ b/libs/hwui/renderthread/DrawFrameTask.cpp
+@@ -209,6 +209,11 @@ bool DrawFrameTask::syncFrameState(TreeInfo& info) {
+             mSyncResult |= SyncResult::UIRedrawRequired;
+         }
+     }
++    if (mContext->takeUiRedrawAfterDeviceReset()) {
++        // The GPU device was lost and the window drew again from its display lists; the UI
++        // thread draws it again in full too (ViewRootImpl.invalidate()).
++        mSyncResult |= SyncResult::UIRedrawRequired;
++    }
+     if (info.out.skippedFrameReason) {
+         mSyncResult |= SyncResult::FrameDropped;
+     }
+diff --git a/libs/hwui/renderthread/EglManager.cpp b/libs/hwui/renderthread/EglManager.cpp
+index 60104452f..b95388318 100644
+--- a/libs/hwui/renderthread/EglManager.cpp
++++ b/libs/hwui/renderthread/EglManager.cpp
+@@ -138,6 +138,7 @@ void EglManager::initialize() {
+     loadConfigs();
+     createContext();
+     createPBufferSurface();
++    sDeviceLossSeen = false;
+     makeCurrent(mPBufferSurface, nullptr, /* force */ true);
+ 
+     skcms_Matrix3x3 wideColorGamut;
+@@ -508,10 +509,17 @@ Result<EGLSurface, EGLint> EglManager::createSurface(EGLNativeWindowType window,
+     }
+ 
+     if (mSwapBehavior != SwapBehavior::Preserved) {
+-        LOG_ALWAYS_FATAL_IF(eglSurfaceAttrib(mEglDisplay, surface, EGL_SWAP_BEHAVIOR,
+-                                             EGL_BUFFER_DESTROYED) == EGL_FALSE,
+-                            "Failed to set swap behavior to destroyed for window %p, eglErr = %s",
+-                            (void*)window, eglErrorString());
++        if (eglSurfaceAttrib(mEglDisplay, surface, EGL_SWAP_BEHAVIOR, EGL_BUFFER_DESTROYED) ==
++            EGL_FALSE) {
++            const EGLint error = eglGetError();
++            if (error == EGL_CONTEXT_LOST || isContextLost()) {
++                // The surface was made just before the GPU device was lost.
++                eglDestroySurface(mEglDisplay, surface);
++                return Error<EGLint>{EGL_CONTEXT_LOST};
++            }
++            LOG_ALWAYS_FATAL("Failed to set swap behavior to destroyed for window %p, eglErr = %s",
++                             (void*)window, egl_error_str(error));
++        }
+     }
+ 
+     if (overrideWindowDataSpaceForHdr) {
+@@ -551,6 +559,43 @@ void EglManager::destroy() {
+     mCurrentSurface = EGL_NO_SURFACE;
+ }
+ 
++bool EglManager::isContextLost() {
++    if (!hasEglContext()) {
++        return false;
++    }
++    EGLint version = 0;
++    if (eglQueryContext(mEglDisplay, mEglContext, EGL_CONTEXT_CLIENT_VERSION, &version)) {
++        return false;
++    }
++    if (eglGetError() != EGL_CONTEXT_LOST) {
++        return false;
++    }
++    sDeviceLossSeen = true;
++    return true;
++}
++
++bool EglManager::deviceAnswers() {
++    EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
++    if (display == EGL_NO_DISPLAY || !eglInitialize(display, nullptr, nullptr)) {
++        return false;
++    }
++    bool answers = false;
++    const EGLint configAttribs[] = {EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT, EGL_NONE};
++    EGLConfig config = nullptr;
++    EGLint count = 0;
++    if (eglQueryString(display, EGL_VENDOR) != nullptr &&
++        eglChooseConfig(display, configAttribs, &config, 1, &count) && count > 0) {
++        const EGLint contextAttribs[] = {EGL_CONTEXT_CLIENT_VERSION, GLES_VERSION, EGL_NONE};
++        EGLContext context = eglCreateContext(display, config, EGL_NO_CONTEXT, contextAttribs);
++        if (context != EGL_NO_CONTEXT) {
++            answers = true;
++            eglDestroyContext(display, context);
++        }
++    }
++    eglTerminate(display);
++    return answers;
++}
++
+ bool EglManager::makeCurrent(EGLSurface surface, EGLint* errOut, bool force) {
+     if (!force && isCurrent(surface)) return false;
+ 
+@@ -559,13 +604,19 @@ bool EglManager::makeCurrent(EGLSurface surface, EGLint* errOut, bool force) {
+         surface = mPBufferSurface;
+     }
+     if (!eglMakeCurrent(mEglDisplay, surface, surface, mEglContext)) {
++        const EGLint error = eglGetError();
+         if (errOut) {
+-            *errOut = eglGetError();
++            *errOut = error;
+             ALOGW("Failed to make current on surface %p, error=%s", (void*)surface,
+                   egl_error_str(*errOut));
++        } else if (error == EGL_CONTEXT_LOST) {
++            // The GPU device is lost. Nothing is current; RenderThread finds the loss before
++            // the next frame and builds a new context.
++            ALOGW("Failed to make current on surface %p: the GPU device is lost", (void*)surface);
++            return false;
+         } else {
+             LOG_ALWAYS_FATAL("Failed to make current on surface %p, error=%s", (void*)surface,
+-                             eglErrorString());
++                             egl_error_str(error));
+         }
+     }
+     mCurrentSurface = surface;
+@@ -607,8 +658,14 @@ void EglManager::damageFrame(const Frame& frame, const SkRect& dirty) {
+         EGLint rects[4];
+         frame.map(dirty, rects);
+         if (!eglSetDamageRegionKHR(mEglDisplay, frame.mSurface, rects, 1)) {
++            const EGLint error = eglGetError();
++            if (error == EGL_CONTEXT_LOST || isContextLost()) {
++                ALOGW("Failed to set damage region on surface %p: the GPU device is lost",
++                      (void*)frame.mSurface);
++                return;
++            }
+             LOG_ALWAYS_FATAL("Failed to set damage region on surface %p, error=%s",
+-                             (void*)frame.mSurface, eglErrorString());
++                             (void*)frame.mSurface, egl_error_str(error));
+         }
+     }
+ #endif
+@@ -640,6 +697,13 @@ bool EglManager::swapBuffers(const Frame& frame, const SkRect& screenDirty) {
+               frame.mSurface);
+         return false;
+     }
++    if (err == EGL_CONTEXT_LOST || isContextLost()) {
++        // The GPU device is lost. RenderThread drops this context and draws the frame again on
++        // a new one.
++        ALOGW("swapBuffers on %p failed with %s: the GPU device is lost", frame.mSurface,
++              egl_error_str(err));
++        return false;
++    }
+     LOG_ALWAYS_FATAL("Encountered EGL error %d %s during rendering", err, egl_error_str(err));
+     // Impossible to hit this, but the compiler doesn't know that
+     return false;
+diff --git a/libs/hwui/renderthread/EglManager.h b/libs/hwui/renderthread/EglManager.h
+index b8f8c9267..1b6be6560 100644
+--- a/libs/hwui/renderthread/EglManager.h
++++ b/libs/hwui/renderthread/EglManager.h
+@@ -24,6 +24,8 @@
+ #include <cutils/compiler.h>
+ #include <utils/StrongPointer.h>
+ 
++#include <atomic>
++
+ #include "IRenderPipeline.h"
+ #include "utils/Result.h"
+ 
+@@ -48,6 +50,18 @@ public:
+ 
+     bool hasEglContext();
+ 
++    // Whether the display lost its device (it answers EGL_CONTEXT_LOST): nothing made on it can
++    // be used any more, and it serves nothing until it is terminated and initialized again.
++    bool isContextLost();
++
++    // Whether the default display can be initialized and make a context, tried on throwaway
++    // objects. After a device loss this tells whether the host's GPU answers again.
++    static bool deviceAnswers();
++
++    // Set when any EglManager in the process found its display lost, and cleared when one made a
++    // context again: until then a new context is made only once deviceAnswers().
++    static inline std::atomic<bool> sDeviceLossSeen = false;
++
+     Result<EGLSurface, EGLint> createSurface(EGLNativeWindowType window, ColorMode colorMode,
+                                              sk_sp<SkColorSpace> colorSpace);
+     void destroySurface(EGLSurface surface);
+diff --git a/libs/hwui/renderthread/RenderThread.cpp b/libs/hwui/renderthread/RenderThread.cpp
+index 0dc7ea3a6..1eca23a63 100644
+--- a/libs/hwui/renderthread/RenderThread.cpp
++++ b/libs/hwui/renderthread/RenderThread.cpp
+@@ -24,6 +24,7 @@
+ #include <include/gpu/ganesh/gl/GrGLInterface.h>
+ #include <private/android/choreographer.h>
+ #include <sys/resource.h>
++#include <sys/system_properties.h>
+ #include <ui/FatVector.h>
+ #include <ui/GraphicBufferAllocator.h>
+ #include <utils/Condition.h>
+@@ -53,6 +54,9 @@ namespace renderthread {
+ 
+ static bool gHasRenderThreadInstance = false;
+ 
++// Where SurfaceFlinger counts the GPU device resets it recovered from.
++static constexpr const char* kGpuResetsProperty = "debug.dsa.gpu.resets";
++
+ static JVMAttachHook gOnStartHook = nullptr;
+ 
+ void RenderThread::extendedFrameCallback(const AChoreographerFrameCallbackData* cbData,
+@@ -208,6 +212,7 @@ void RenderThread::initThreadLocals() {
+     mRenderState = new RenderState(*this);
+     mVkManager = VulkanManager::getInstance();
+     mCacheManager = new CacheManager(*this);
++    watchGpuResets();
+ }
+ 
+ void RenderThread::setupFrameInterval() {
+@@ -219,6 +224,18 @@ void RenderThread::requireGlContext() {
+     if (mEglManager->hasEglContext()) {
+         return;
+     }
++    // After a device loss the context is built again only once the GPU answers, at the pace the
++    // recovery sets. Until then there is no context, and callers draw nothing.
++    if (!mDeviceRecovery.isHealthy()) {
++        if (!mDeviceRecovery.shouldRebuild(gpurecovery::DeviceLossRecovery::Clock::now())) {
++            scheduleRebuildRetry();
++            return;
++        }
++        if (!deviceAnswers()) {
++            onContextRebuilt(false);
++            return;
++        }
++    }
+     mEglManager->initialize();
+ 
+     sk_sp<const GrGLInterface> glInterface = GrGLMakeNativeInterface();
+@@ -232,6 +249,9 @@ void RenderThread::requireGlContext() {
+     sk_sp<GrDirectContext> grContext(GrDirectContexts::MakeGL(std::move(glInterface), options));
+     LOG_ALWAYS_FATAL_IF(!grContext.get());
+     setGrContext(grContext);
++    if (!mDeviceRecovery.isHealthy()) {
++        onContextRebuilt(true);
++    }
+ }
+ 
+ void RenderThread::requireVkContext() {
+@@ -242,6 +262,16 @@ void RenderThread::requireVkContext() {
+     if (vulkanManager().hasVkContext() && mGrContext) {
+         return;
+     }
++    if (!mDeviceRecovery.isHealthy()) {
++        if (!mDeviceRecovery.shouldRebuild(gpurecovery::DeviceLossRecovery::Clock::now())) {
++            scheduleRebuildRetry();
++            return;
++        }
++        if (!deviceAnswers()) {
++            onContextRebuilt(false);
++            return;
++        }
++    }
+     mVkManager->initialize();
+     GrContextOptions options;
+     initGrContextOptions(options);
+@@ -250,6 +280,9 @@ void RenderThread::requireVkContext() {
+     sk_sp<GrDirectContext> grContext = mVkManager->createContext(options);
+     LOG_ALWAYS_FATAL_IF(!grContext.get());
+     setGrContext(grContext);
++    if (!mDeviceRecovery.isHealthy()) {
++        onContextRebuilt(true);
++    }
+ }
+ 
+ void RenderThread::initGrContextOptions(GrContextOptions& options) {
+@@ -276,6 +309,130 @@ void RenderThread::destroyRenderingContext() {
+     }
+ }
+ 
++bool RenderThread::isDeviceLost() {
++    // Skia abandons its context once it sees VK_ERROR_DEVICE_LOST; nothing else in HWUI keeps an
++    // abandoned context.
++    if (mGrContext && mGrContext->abandoned()) {
++        return true;
++    }
++    if (Properties::getRenderPipelineType() == RenderPipelineType::SkiaGL) {
++        return mEglManager->isContextLost();
++    }
++    return mVkManager.get() && mVkManager->isDeviceLost();
++}
++
++void RenderThread::handleDeviceLoss() {
++    if (!mDeviceRecovery.onLost(gpurecovery::DeviceLossRecovery::Clock::now())) {
++        return;
++    }
++    ALOGW("The GPU device was lost. HWUI drops its GPU context, builds a new one once the GPU "
++          "answers, and draws every window again.");
++    if (mGrContext) {
++        // Nothing the lost context made can be drawn or freed through it any more. Abandoning
++        // it first lets Skia let go of the textures it wraps while the old display still exists,
++        // so that none of them is freed later through a display or device made after it.
++        mGrContext->abandonContext();
++    }
++    if (mVkManager.get()) {
++        // The next VulkanManager this process asks for is a new one, on a new device.
++        mVkManager->markDeviceLost();
++    }
++    destroyRenderingContext();
++    // Build the context again as soon as the GPU answers, whether or not a window draws first.
++    scheduleRebuildRetry();
++}
++
++bool RenderThread::checkDevice() {
++    if (mDeviceRecovery.isHealthy()) {
++        if (!isDeviceLost()) {
++            return true;
++        }
++        handleDeviceLoss();
++    }
++    (void)requireGrContext();
++    return mDeviceRecovery.isHealthy();
++}
++
++bool RenderThread::deviceAnswers() {
++    if (Properties::getRenderPipelineType() == RenderPipelineType::SkiaGL) {
++        return EglManager::deviceAnswers();
++    }
++    return VulkanManager::deviceAnswers();
++}
++
++void RenderThread::onContextRebuilt(bool succeeded) {
++    const auto now = gpurecovery::DeviceLossRecovery::Clock::now();
++    mDeviceRecovery.onRebuilt(succeeded, now);
++    if (!succeeded) {
++        ALOGW("The GPU does not answer yet after the device loss (%u attempts); trying again in "
++              "%lld ms",
++              mDeviceRecovery.failedAttempts(),
++              static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
++                                             mDeviceRecovery.untilNextAttempt(now))
++                                             .count()));
++        scheduleRebuildRetry();
++        return;
++    }
++    mLastDeviceReset = now;
++    ALOGI("HWUI has a GPU context again after the device loss (reset %u); drawing every window "
++          "again",
++          mDeviceRecovery.resetCount());
++    for (auto&& context : mCacheManager->mCanvasContexts) {
++        context->onDeviceReset();
++    }
++}
++
++void RenderThread::watchGpuResets() {
++    // SurfaceFlinger creates the property before any app starts; without it (an image without
++    // the recovery) nothing is watched.
++    const prop_info* info = __system_property_find(kGpuResetsProperty);
++    if (info == nullptr) {
++        return;
++    }
++    std::thread([this, info]() {
++        uint32_t serial = __system_property_serial(info);
++        while (true) {
++            uint32_t newSerial = 0;
++            if (!__system_property_wait(info, serial, &newSerial, nullptr)) {
++                continue;
++            }
++            serial = newSerial;
++            queue().post([this]() { onGpuResetElsewhere(); });
++        }
++    }).detach();
++}
++
++void RenderThread::onGpuResetElsewhere() {
++    // SurfaceFlinger found the GPU device lost. Every process's device went with the same GPU,
++    // though this one may not have run into it yet, and what its windows showed may be gone.
++    if (!mDeviceRecovery.isHealthy() || !mGrContext) {
++        // Already building a new context, or none to drop: the windows draw when they next do.
++        return;
++    }
++    if (mDeviceRecovery.resetCount() > 0 &&
++        gpurecovery::DeviceLossRecovery::Clock::now() - mLastDeviceReset < kRecentReset) {
++        // This process already built its context again for the same loss.
++        return;
++    }
++    ALOGW("SurfaceFlinger recovered from a GPU device loss; HWUI builds its context again too");
++    handleDeviceLoss();
++}
++
++void RenderThread::scheduleRebuildRetry() {
++    if (mRebuildRetryScheduled) {
++        return;
++    }
++    mRebuildRetryScheduled = true;
++    const auto delay = std::chrono::duration_cast<std::chrono::nanoseconds>(
++            mDeviceRecovery.untilNextAttempt(gpurecovery::DeviceLossRecovery::Clock::now()));
++    queue().postDelayed(static_cast<nsecs_t>(delay.count()), [this]() {
++        mRebuildRetryScheduled = false;
++        if (!mDeviceRecovery.isHealthy()) {
++            (void)requireGrContext();
++        }
++    });
++}
++
+ VulkanManager& RenderThread::vulkanManager() {
+     if (!mVkManager.get()) {
+         mVkManager = VulkanManager::getInstance();
+diff --git a/libs/hwui/renderthread/RenderThread.h b/libs/hwui/renderthread/RenderThread.h
+index f733c7c58..8bf4ea07c 100644
+--- a/libs/hwui/renderthread/RenderThread.h
++++ b/libs/hwui/renderthread/RenderThread.h
+@@ -28,6 +28,7 @@
+ #include <set>
+ 
+ #include "CacheManager.h"
++#include "DeviceLossRecovery.h"
+ #include "MemoryPolicy.h"
+ #include "ProfileDataContainer.h"
+ #include "RenderTask.h"
+@@ -121,6 +122,17 @@ public:
+     void requireVkContext();
+     void destroyRenderingContext();
+ 
++    // Whether the GPU device under the rendering context is lost: the EGL display answers
++    // EGL_CONTEXT_LOST, or Skia saw VK_ERROR_DEVICE_LOST.
++    bool isDeviceLost();
++    // Drops everything the lost context made, once per loss, so that the next frame builds a
++    // new context. Every window then draws again in full.
++    void handleDeviceLoss();
++    // Called before a window draws. Handles a loss it finds, and tries to build the context
++    // again when one was lost. False while there is no context to draw with; the windows are
++    // drawn again once there is.
++    bool checkDevice();
++
+     void preload();
+ 
+     void trimMemory(TrimLevel level);
+@@ -173,6 +185,16 @@ private:
+     void drainDisplayEventQueue();
+     void dispatchFrameCallbacks();
+     void requestVsync();
++    // After a loss: whether the host's GPU answers again, tried on a throwaway context so that
++    // the context HWUI keeps is only built once it can be.
++    bool deviceAnswers();
++    // After a loss: the result of an attempt to build the context again, and what follows it.
++    void onContextRebuilt(bool succeeded);
++    void scheduleRebuildRetry();
++    // Waits on the property SurfaceFlinger sets when it recovered from a GPU device loss, which
++    // took this process's device too. Runs on a thread of its own, which sleeps until then.
++    void watchGpuResets();
++    void onGpuResetElsewhere();
+ 
+     AChoreographer* mChoreographer;
+     VsyncSource* mVsyncSource;
+@@ -197,6 +219,12 @@ private:
+     CacheManager* mCacheManager;
+     sp<VulkanManager> mVkManager;
+ 
++    gpurecovery::DeviceLossRecovery mDeviceRecovery;
++    bool mRebuildRetryScheduled = false;
++    gpurecovery::DeviceLossRecovery::Clock::time_point mLastDeviceReset{};
++    // A reset SurfaceFlinger reports this soon after this process's own is the same loss.
++    static constexpr std::chrono::seconds kRecentReset{3};
++
+     std::mutex mJankDataMutex;
+ };
+ 
+diff --git a/libs/hwui/renderthread/VulkanManager.cpp b/libs/hwui/renderthread/VulkanManager.cpp
+index 2b421432b..236d6b6ff 100644
+--- a/libs/hwui/renderthread/VulkanManager.cpp
++++ b/libs/hwui/renderthread/VulkanManager.cpp
+@@ -85,7 +85,7 @@ static std::mutex sLock;
+ sp<VulkanManager> VulkanManager::getInstance() {
+     std::lock_guard _lock{sLock};
+     sp<VulkanManager> vulkanManager = sWeakInstance.promote();
+-    if (!vulkanManager.get()) {
++    if (!vulkanManager.get() || vulkanManager->isDeviceLost()) {
+         vulkanManager = new VulkanManager();
+         sWeakInstance = vulkanManager;
+     }
+@@ -95,7 +95,47 @@ sp<VulkanManager> VulkanManager::getInstance() {
+ 
+ sp<VulkanManager> VulkanManager::peekInstance() {
+     std::lock_guard _lock{sLock};
+-    return sWeakInstance.promote();
++    sp<VulkanManager> vulkanManager = sWeakInstance.promote();
++    if (vulkanManager.get() && vulkanManager->isDeviceLost()) {
++        return nullptr;
++    }
++    return vulkanManager;
++}
++
++bool VulkanManager::deviceAnswers() {
++    VkApplicationInfo appInfo = {};
++    appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
++    appInfo.apiVersion = VK_MAKE_VERSION(1, 1, 0);
++    VkInstanceCreateInfo instanceInfo = {};
++    instanceInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
++    instanceInfo.pApplicationInfo = &appInfo;
++    VkInstance instance = VK_NULL_HANDLE;
++    if (vkCreateInstance(&instanceInfo, nullptr, &instance) != VK_SUCCESS) {
++        return false;
++    }
++    bool answers = false;
++    uint32_t count = 1;
++    VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
++    const VkResult result = vkEnumeratePhysicalDevices(instance, &count, &physicalDevice);
++    if ((result == VK_SUCCESS || result == VK_INCOMPLETE) && count > 0) {
++        const float priority = 1.0f;
++        VkDeviceQueueCreateInfo queueInfo = {};
++        queueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
++        queueInfo.queueFamilyIndex = 0;
++        queueInfo.queueCount = 1;
++        queueInfo.pQueuePriorities = &priority;
++        VkDeviceCreateInfo deviceInfo = {};
++        deviceInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
++        deviceInfo.queueCreateInfoCount = 1;
++        deviceInfo.pQueueCreateInfos = &queueInfo;
++        VkDevice device = VK_NULL_HANDLE;
++        if (vkCreateDevice(physicalDevice, &deviceInfo, nullptr, &device) == VK_SUCCESS) {
++            answers = true;
++            vkDestroyDevice(device, nullptr);
++        }
++    }
++    vkDestroyInstance(instance, nullptr);
++    return answers;
+ }
+ 
+ VulkanManager::~VulkanManager() {
+@@ -503,19 +543,23 @@ void onVkDeviceFault(const std::string& contextLabel, const std::string& descrip
+     }
+ 
+     crashMsg << "): " << description;
+-    LOG_ALWAYS_FATAL("%s", crashMsg.str().c_str());
++    // A lost device is recovered from, not fatal: RenderThread sees the abandoned context before
++    // the next frame, drops it and draws every window again on a new device.
++    ALOGE("%s", crashMsg.str().c_str());
+ }
+ 
+ void deviceLostProcRenderThread(void* callbackContext, const std::string& description,
+                                 const std::vector<VkDeviceFaultAddressInfoEXT>& addressInfos,
+                                 const std::vector<VkDeviceFaultVendorInfoEXT>& vendorInfos,
+                                 const std::vector<std::byte>& vendorBinaryData) {
++    static_cast<VulkanManager*>(callbackContext)->markDeviceLost();
+     onVkDeviceFault("RenderThread", description, addressInfos, vendorInfos, vendorBinaryData);
+ }
+ void deviceLostProcUploadThread(void* callbackContext, const std::string& description,
+                                 const std::vector<VkDeviceFaultAddressInfoEXT>& addressInfos,
+                                 const std::vector<VkDeviceFaultVendorInfoEXT>& vendorInfos,
+                                 const std::vector<std::byte>& vendorBinaryData) {
++    static_cast<VulkanManager*>(callbackContext)->markDeviceLost();
+     onVkDeviceFault("UploadThread", description, addressInfos, vendorInfos, vendorBinaryData);
+ }
+ }  // anonymous namespace
+@@ -545,7 +589,7 @@ sk_sp<GrDirectContext> VulkanManager::createContext(GrContextOptions& options,
+     backendContext.fVkExtensions = &mExtensions;
+     backendContext.fDeviceFeatures2 = &mPhysicalDeviceFeatures2;
+     backendContext.fGetProc = std::move(getProc);
+-    backendContext.fDeviceLostContext = nullptr;
++    backendContext.fDeviceLostContext = this;
+     backendContext.fDeviceLostProc = (contextType == ContextType::kRenderThread)
+                                              ? deviceLostProcRenderThread
+                                              : deviceLostProcUploadThread;
+diff --git a/libs/hwui/renderthread/VulkanManager.h b/libs/hwui/renderthread/VulkanManager.h
+index ae3776ec6..d83d21697 100644
+--- a/libs/hwui/renderthread/VulkanManager.h
++++ b/libs/hwui/renderthread/VulkanManager.h
+@@ -69,6 +69,15 @@ public:
+     // Quick check to see if the VulkanManager has been initialized.
+     bool hasVkContext() { return mInitialized; }
+ 
++    // Whether Skia saw this manager's device lost. A lost manager is never handed out again: the
++    // next getInstance() makes a new one, on a new device.
++    bool isDeviceLost() const { return mDeviceLost; }
++    void markDeviceLost() { mDeviceLost = true; }
++
++    // Whether a Vulkan device can be created, tried on a throwaway instance and device. After a
++    // device loss this tells whether the host's GPU answers again.
++    static bool deviceAnswers();
++
+     // Create and destroy functions for wrapping an ANativeWindow in a VulkanSurface
+     VulkanSurface* createSurface(ANativeWindow* window,
+                                  ColorMode colorMode,
+@@ -210,6 +219,7 @@ private:
+ 
+     std::once_flag mInitFlag;
+     std::atomic_bool mInitialized = false;
++    std::atomic_bool mDeviceLost = false;
+ };
+ 
+ } /* namespace renderthread */

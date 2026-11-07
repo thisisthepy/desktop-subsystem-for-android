@@ -59,6 +59,8 @@ pub const VERSION: &str = match option_env!("DSA_VERSION") {
 
 #[cfg(windows)]
 pub mod account;
+#[cfg(windows)]
+pub mod adb_discovery;
 pub mod android_files;
 #[cfg(windows)]
 pub mod android_vm;
@@ -70,6 +72,7 @@ pub mod camera_capture;
 pub mod child_probe;
 #[cfg(windows)]
 pub mod compositor;
+pub mod computer_identity;
 pub mod console_log;
 #[cfg(windows)]
 pub mod console_pipe;

@@ -28,9 +28,7 @@ use std::sync::{Arc, Mutex, Weak};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use dsa_host_core::device_identity::{
-    DeviceIdentity, DeviceIdentityStore, FileDeviceIdentities, ImageBuild,
-};
+use dsa_host_core::device_identity::{BootIdentity, FileDeviceIdentities, ImageBuild};
 use dsa_host_core::diagnostics::HostFile;
 use dsa_host_core::guest_display::{display_or_smallest, with_display_size};
 use dsa_host_core::guest_log::{LogFilter, LogWatch, DEFAULT_BUFFERS, WARN};
@@ -44,7 +42,8 @@ use dsa_host_core::update::program_service::{
     ProgramStatus, ProgramUpdates, Timing, WithProgramStatus,
 };
 use dsa_host_core::update::service::{
-    check_reporting, next_image_check, Download, UpdateNotices, UpdatingAndroid,
+    check_reporting, next_image_check, CheckNow, Download, StoreVersions, UpdateNotices,
+    UpdatingAndroid,
 };
 use dsa_host_core::update::store::{ImageStore, Recovery};
 use dsa_host_core::window_manager::WindowManagerKeeper;
@@ -76,6 +75,8 @@ pub struct Updates {
     pub notices: Arc<UpdateNotices>,
     pub boot_timeout: Duration,
     pub trial_running: Arc<AtomicBool>,
+    /// Set when a user chose another Android version, so the image is checked for at once.
+    pub check_now: Arc<CheckNow>,
 }
 
 /// Sizes the guest's display for the monitors the user's session recorded. This process runs
@@ -267,6 +268,12 @@ pub fn create_user_android(
     let disk_size_gb = user.data_disk_size_gb;
     let console_log = user.console_log.clone();
     let owner = sid.to_string();
+    // What this PC says it is, with what the user chose, read at each start.
+    let boot_identity = BootIdentity::new(
+        Arc::new(FileDeviceIdentities::new(config.settings_dir())),
+        sid,
+        Arc::new(crate::computer_identity::read),
+    );
     // Set each time the guest's configuration is built, from the command line it boots with.
     let trace_on = Arc::new(AtomicBool::new(false));
     let traced = Arc::clone(&trace_on);
@@ -306,6 +313,13 @@ pub fn create_user_android(
                     let current = store.state().map_err(|e| e.to_string())?.current;
                     let files = config.image_files(Some(&store.image_dir(&current.version)));
                     let mut vm = base.clone();
+                    // A disk holding a newer Android's data than this image, after the user
+                    // chose an older version and agreed to erase it, starts afresh.
+                    dsa_host_core::data_reset::erase_if_newer(
+                        &vm.data_disk,
+                        &vm.data_disk.with_extension("image-version"),
+                        current.android_major,
+                    )?;
                     match &files.disk_template {
                         // A new user's disk is the template; an existing one gets this
                         // image's Android and keeps the user's data.
@@ -346,27 +360,28 @@ pub fn create_user_android(
     .with_memory_max(memory_max)
     .with_boot_dir(config.machine_root().tmp())
     .with_bootconfig({
-        // An installed ARM translation package is used only while the user's setting is on,
-        // and only from a boot that is told so.
+        // An ARM translator (the package the user installed, else the image's default one) is
+        // used only while the user's setting is on, and only from a boot that is told so; so
+        // are the Google apps the user installed.
         let store = settings_store(config);
         let user = sid.to_string();
-        Box::new(move || arm_translation_bootconfig(&*store, &user))
+        Box::new(move |vm: &AndroidVmConfig| {
+            let image = vm.initrd.as_deref().and_then(std::path::Path::parent);
+            dsa_host_core::arm_translation::bootconfig_for(&*store, &user, image)
+                + &dsa_host_core::gapps::bootconfig_for(&*store, &user)
+        })
     })
     .with_boot_properties({
-        // The user's device identity, which Android reads once while it boots.
-        let identities = FileDeviceIdentities::new(config.settings_dir());
-        let (owner, build) = (sid.to_string(), build.to_string());
+        // The user's device identity on this PC, which Android reads once while it boots. The
+        // PC is read again at each start, so a renamed PC is followed.
+        let identity = Arc::clone(&boot_identity);
         Box::new(move |vm: &AndroidVmConfig| {
-            let identity = identities.get(&owner).unwrap_or_else(|why| {
-                eprintln!("{build}: {why}; Android starts with the image's device identity");
-                DeviceIdentity::default()
-            });
             let image = vm
                 .initrd
                 .as_deref()
                 .and_then(std::path::Path::parent)
                 .and_then(ImageBuild::from_image_dir);
-            identity.boot_properties(image.as_ref())
+            Some(identity.boot_properties(image.as_ref()))
         })
     });
     let launcher = if config.keep_window_manager {
@@ -406,6 +421,8 @@ pub fn create_user_android(
     let session_config = config.session_config();
     let handshake = ControlHandshake::new(build, session_config.connect_timeout);
     let session = Session::new(launcher, Box::new(listener), handshake, session_config);
+    // The PC's name becomes the guest's device name.
+    session.set_device_name_source(Arc::new(move || boot_identity.device_name()));
     // Developer mode's bridge reaches the guest's adbd over a Hyper-V socket to its vsock port.
     session.set_adb_connect(Arc::new(|vm_id: &str| {
         let vm: Guid = vm_id.parse().map_err(|_| {
@@ -420,6 +437,10 @@ pub fn create_user_android(
             Duration::from_secs(5),
         )
     }));
+    // Developer mode's port is attached to the user's own adb server, and advertised over
+    // mDNS on the loopback address, so adb finds it without `adb connect`.
+    session.set_adb_server(crate::adb_discovery::adb_server_of(sid));
+    session.set_adb_advertise(crate::adb_discovery::advertiser());
     session.serve_log_port(Box::new(log_listener), build);
     // The user's folders, served with the user's own rights.
     session.serve_file_shares(
@@ -479,6 +500,7 @@ pub fn create_user_android(
             notices: Arc::clone(&updates.notices),
             boot_timeout: updates.boot_timeout,
             trial_running: Arc::clone(&updates.trial_running),
+            rollback: Default::default(),
         }),
     })
 }
@@ -539,6 +561,7 @@ pub fn open_updates(config: &HostConfig, build: &str) -> Result<Option<Updates>,
         notices: Arc::new(UpdateNotices::default()),
         boot_timeout: Duration::from_secs(boot_timeout),
         trial_running: Arc::new(AtomicBool::new(false)),
+        check_now: Arc::new(CheckNow::default()),
     }))
 }
 
@@ -575,6 +598,10 @@ fn check_for_updates(
     };
     while !stop.load(Ordering::Relaxed) {
         next = next_image_check(next, Instant::now(), !no_image(), FIRST_IMAGE_RETRY);
+        // A user who chose another Android version waits for it now, not at the next turn.
+        if updates.check_now.take() {
+            next = Instant::now();
+        }
         if Instant::now() < next {
             thread::sleep(Duration::from_secs(1));
             continue;
@@ -583,7 +610,7 @@ fn check_for_updates(
         // Turned off in the settings, the list is not read, except for the first image,
         // without which no Android can start. A minute later it looks again, so turning
         // updates back on takes effect soon.
-        if !waiting_for_first && !store.machine().image_updates {
+        if !waiting_for_first && !updates.store.switch_pending() && !store.machine().image_updates {
             next = Instant::now() + SETTINGS_RECHECK;
             continue;
         }
@@ -692,8 +719,11 @@ fn take_old_trace_markers(config: &HostConfig, store: &dyn SettingsStore, build:
     }
 }
 
-/// The build of the image a user's Android starts from next, from its `image.json`.
-fn current_image_build(config: &HostConfig, images: Option<&ImageStore>) -> Option<ImageBuild> {
+/// The folder of the image a user's Android starts from next, which holds its `image.json`.
+fn current_image_dir(
+    config: &HostConfig,
+    images: Option<&ImageStore>,
+) -> Option<std::path::PathBuf> {
     let files = match images {
         Some(images) => {
             let current = images.state().ok()?.current;
@@ -701,35 +731,16 @@ fn current_image_build(config: &HostConfig, images: Option<&ImageStore>) -> Opti
         }
         None => config.image_files(None),
     };
-    ImageBuild::from_image_dir(files.initrd?.parent()?)
+    Some(files.initrd?.parent()?.to_path_buf())
+}
+
+/// The build of the image a user's Android starts from next, from its `image.json`.
+fn current_image_build(config: &HostConfig, images: Option<&ImageStore>) -> Option<ImageBuild> {
+    ImageBuild::from_image_dir(&current_image_dir(config, images)?)
 }
 
 /// The settings in the service's own folder. A user who has never saved settings starts
 /// from the render GPU in their own `compositor.json`, if they chose one there.
-/// The bootconfig that tells `user`'s next boot to use their ARM translation package, or
-/// nothing.
-fn arm_translation_bootconfig(store: &dyn SettingsStore, user: &str) -> String {
-    let package = store.arm_translation(user).unwrap_or_else(|why| {
-        eprintln!("arm translation: {user}'s package is not known ({why}); booting without it");
-        None
-    });
-    let enabled = store.get(user).map(|s| s.arm_translation).unwrap_or(true);
-    let text = dsa_host_core::arm_translation::bootconfig(package.as_ref(), enabled);
-    if let Some(package) = &package {
-        eprintln!(
-            "arm translation: {user} has {} {}; this boot {}",
-            package.name,
-            package.version,
-            if text.is_empty() {
-                "goes without it (turned off)"
-            } else {
-                "uses it"
-            }
-        );
-    }
-    text.to_string()
-}
-
 fn settings_store(config: &HostConfig) -> Arc<dyn SettingsStore> {
     let dir = config.settings_dir();
     Arc::new(
@@ -871,12 +882,19 @@ where
         }
     };
     let identity_images = updates.as_ref().map(|updates| Arc::clone(&updates.store));
+    let translator_images = updates.as_ref().map(|updates| Arc::clone(&updates.store));
     // A data reset makes the fresh disk from the image the next start boots.
     let reset_images = updates.as_ref().map(|updates| Arc::clone(&updates.store));
     let factory_config = config.clone();
     let factory_build = build.to_string();
     let factory_status = program.as_ref().map(|_| Arc::clone(&program_status));
     let factory_store = Arc::clone(&store);
+    let version_store = updates.as_ref().map(|updates| StoreVersions {
+        store: Arc::clone(&updates.store),
+        notices: Arc::clone(&updates.notices),
+        check_now: Arc::clone(&updates.check_now),
+        shared_by_users: true,
+    });
     let androids = Arc::new(PerUser::new(move |sid: &str| {
         let android = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             create_user_android(
@@ -918,6 +936,9 @@ where
                             s.shared_folders.clone()
                         }),
                 );
+                // So is attaching developer mode's port to their adb server, on unless they
+                // turned it off.
+                android.adb_auto_connect(settings.as_ref().is_none_or(|s| s.adb_auto_connect));
                 // So is developer mode, off unless they turned it on, and its adb port.
                 if let Some(settings) = settings.as_ref().filter(|s| s.developer_mode) {
                     if let Err(why) = android.developer_mode(true, settings.adb_port) {
@@ -984,7 +1005,18 @@ where
                 let config = config.clone();
                 Arc::new(move |_: &str| current_image_build(&config, identity_images.as_deref()))
             },
-        );
+        )
+        // The defaults the settings show are what this PC says it is now.
+        .with_computer_identity(Arc::new(crate::computer_identity::read))
+        // The default ARM translator of the image the next start boots: only an x86_64 image
+        // has one.
+        .with_default_arm_translation({
+            let config = config.clone();
+            Arc::new(move |_: &str| {
+                current_image_dir(&config, translator_images.as_deref())
+                    .and_then(|dir| dsa_host_core::arm_translation::default_package(&dir))
+            })
+        });
     {
         let androids = androids.clone();
         let (worker_build, stop) = (build.to_string(), Arc::clone(&stop));
@@ -997,6 +1029,15 @@ where
     }
     if let Some(source) = android_version {
         service = service.with_android_version(source);
+    }
+    // Google Play, for a user who asks: downloaded from LiteGapps and made ready in the
+    // service's own temporary folder.
+    service = service.with_gapps(dsa_host_core::gapps::Source::new(
+        Arc::new(UrlFetch::default()),
+        config.machine_root().tmp().join("gapps"),
+    ));
+    if let Some(versions) = version_store {
+        service = service.with_android_versions(Arc::new(versions));
     }
     if let Some(settings) = program {
         let check_interval = config

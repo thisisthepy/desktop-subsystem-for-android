@@ -13,7 +13,8 @@
   widget host (platform/AndroidWidgets.kt), which draws the widgets the user placed on the
   host's desktop. Its print service (platform/HostPrintService.kt) sends what apps print to the
   host's printers.
-  Every permission here is also in privapp-permissions-dsa-agent.xml.
+  Every permission here is also in privapp-permissions-dsa-agent.xml, but for the runtime
+  permissions, which default-permissions-dsa-agent.xml grants instead.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     coreApp="true">
@@ -36,6 +37,12 @@
     <uses-permission android:name="android.permission.INJECT_EVENTS" />
     <!-- Reading the label and launcher activity of any app. -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+    <!--
+      Reading the Google Services Framework Android ID, which Google's page for uncertified
+      devices asks for, once the user has installed Google Play. Google's services framework
+      declares the permission; without it installed, the permission does not exist.
+    -->
+    <uses-permission android:name="com.google.android.providers.gsf.permission.READ_GSERVICES" />
     <!--
       Turning the screen off and on, forcing Doze while no task window is shown on the host,
       and setting the battery and battery saver to the host's.
@@ -61,6 +68,13 @@
     <uses-permission android:name="android.permission.READ_LOGS" />
     <!-- Installing the APKs the host sends, without asking the user to confirm each one. -->
     <uses-permission android:name="android.permission.INSTALL_PACKAGES" />
+    <!--
+      Putting an installed app's expansion (OBB) files in its folder under Android/obb/: Android
+      opens those folders to an installer only while it holds the storage permissions too.
+      They are runtime permissions, which the image grants by default.
+    -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <!-- Uninstalling an app the user removes on the host, without asking again in the guest. -->
     <uses-permission android:name="android.permission.DELETE_PACKAGES" />
 

@@ -6,9 +6,15 @@ It fails when the shell apps are still there, when the build is still debuggable
 could start without developer mode, listen on TCP or ask for an authorisation, when an
 app is not signed with one of the keys in the key folder, when the framework overlay or the
 trace script is missing, when the agent is missing or not signed with the platform key, when
-Settings still has the preferences or code that crash it without Bluetooth, when a system
-app users open is not compiled for the guest's boot image and its own dex, when the files
-do not match image.json, when the kernel or a DSA guest binary is built for another
+Settings still has the preferences or code that crash it without Bluetooth, when a list in
+Settings or Files that sets its own padding keeps no room below its last row, when a system
+app users open is not compiled for the guest's boot image and its own dex, when an app the
+published build shipped compiled lost its odex, vdex or app image, or has one made for
+other dex, another boot image or another compiler filter, when the files
+do not match image.json, when an arm64 image carries an ARM translation package or an x86_64
+image's default one does not match image.json or would be refused by the host, when the patched
+framework image.json names (SurfaceFlinger, libhwui and libEGL from the Framework build) is not
+in the image as built, when the kernel or a DSA guest binary is built for another
 architecture than the image's, when the ramdisk lacks the directories and links Android's
 first stage init needs, when the network adapter is not shown to Android as Wi-Fi with its
 address and DNS servers from DHCP, or when the kernel command line, a mount table or an init script
@@ -68,6 +74,9 @@ if kernel in manifest["files"]:
         found = make_image.kernel_format(f.read(0x1000))
     if found != arch:
         problems.append(f"{kernel} is not a kernel for {arch} (its header says {found or 'neither'})")
+
+# An x86_64 image's release may carry the default ARM translation package; an arm64 one never.
+problems += make_image.check_default_arm_translation(manifest, image)
 
 for name, expected in manifest["files"].items():
     h = hashlib.sha256()
@@ -186,10 +195,27 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
                 if left:
                     problems.append(f"{name}:{dex} still has the code in {', '.join(sorted(set(left)))} "
                                     "that crashes Settings without the Bluetooth adapter")
+    # The lists that set their own bottom padding, in Settings and Files, keep room below
+    # their last row. (PermissionController's, inside the permission APEX, make-image.py
+    # checks after signing: reading an APEX payload takes otatools' deapexer.)
+    for suffix, edits in [
+        (make_image.SETTINGS_APK, {"code": make_image.SETTINGS_CODE_LIST_MARGIN,
+                                   "dimensions": make_image.SETTINGS_LIST_DIMENSIONS}),
+        (make_image.DOCUMENTSUI_APK, {"code": make_image.DOCUMENTSUI_CODE}),
+    ]:
+        for name in names:
+            if name.endswith(suffix):
+                left = make_image.apk_edits_left(z.read(name), **edits)
+                if left:
+                    problems.append(f"{name} still has {'; '.join(left)}, so the last row of its list "
+                                    "sits on the window's bottom edge")
     # The system apps users open, compiled when the image was made: each odex must be there,
     # made for the APK's own (edited, signed) dex and the guest's boot image, or ART drops it
     # and the app runs interpreted again.
     problems += make_image.compiled_app_problems(z)
+    # The apps the published build shipped compiled keep their odex, vdex and app image,
+    # valid for their dex and the guest's boot image, with the filter they were compiled with.
+    problems += make_image.prebuilt_oat_problems(z)
     if "VENDOR/etc/fstab.dsa" not in names:
         problems.append("the Hyper-V mount table is missing")
     if "SYSTEM/etc/selinux/plat_sepolicy.cil" not in names:
@@ -304,7 +330,8 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
                         "shows only after the 100 ms tap timeout")
     if "VENDOR/overlay/DsaSettingsOverlay.apk" not in names:
         problems.append("VENDOR/overlay/DsaSettingsOverlay.apk is missing, so Settings' back button shows "
-                        "its hover and ripple 8 dp left of its circle")
+                        "its hover and ripple 8 dp left of its circle, and the last row of a Settings "
+                        "list sits on the window's bottom edge")
     if "SYSTEM/etc/init/dsa-trace.rc" not in names:
         problems.append("SYSTEM/etc/init/dsa-trace.rc is missing, so the input trace has no main thread timing")
 
@@ -327,6 +354,53 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
         if "on post-fs-data && property:ro.boot.dsa.arm_translation=on" not in rc:
             problems.append("dsa-arm-translation.rc mounts the ARM translation package without waiting "
                             "for the host to say one is installed")
+        if "on post-fs-data && property:ro.boot.dsa.arm_translation=default" not in rc:
+            problems.append("dsa-arm-translation.rc never lays the image's default ARM translation package "
+                            "over the system")
+    # The default translator: in an x86_64 image's system partition when image.json describes
+    # one, and nowhere in an arm64 image.
+    problems += make_image.check_builtin_arm_translation(manifest, names, z.read)
+    # The patched framework: the Framework build's files, for this build and architecture.
+    problems += make_image.check_framework(manifest, names, z.read)
+    # The ABIs translation adds come after the guest's own, so the Play Store hands out the
+    # x86_64 builds of Google Play services and the other system apps, not their ARM builds.
+    if "SYSTEM/etc/dsa/arm-translation-on.prop" in names:
+        for line in z.read("SYSTEM/etc/dsa/arm-translation-on.prop").decode(errors="replace").splitlines():
+            key, _, value = line.partition("=")
+            if ".cpu.abilist" in key and "x86_64" in value.split(",") and not value.startswith("x86_64"):
+                problems.append(f"arm-translation-on.prop sets {line}, so x86_64 is not the ABI apps "
+                                "are installed for first and the Play Store hands out ARM builds")
+
+    # Google Play: the image the user installed is laid over the system, and the boot made an
+    # upgrade, only when the host says one is installed.
+    for needed in ["SYSTEM/etc/init/dsa-gapps.rc", "SYSTEM/etc/dsa/gapps-on.prop",
+                   "SYSTEM/etc/dsa/gapps-off.prop"]:
+        if needed not in names:
+            problems.append(f"{needed} is missing, so the Google apps a user installs are never used")
+    if "PRODUCT/etc/build.prop" in names:
+        product_lines = [line.strip() for line in
+                         z.read("PRODUCT/etc/build.prop").decode(errors="replace").splitlines()]
+        if "import /system/etc/dsa/gapps-${ro.boot.dsa.gapps:-off}.prop" not in product_lines:
+            problems.append("PRODUCT/etc/build.prop does not import the Google Play properties, so "
+                            "the Google apps a user installs never get their default permissions")
+    if "SYSTEM/etc/init/dsa-gapps.rc" in names:
+        rc = z.read("SYSTEM/etc/init/dsa-gapps.rc").decode(errors="replace")
+        sections = rc.split("\non ")
+        for section in sections:
+            first = section.split("\n", 1)[0]
+            trigger = first[3:] if first.startswith("on ") else first
+            if "mount " in section and trigger != "post-fs-data && property:ro.boot.dsa.gapps=on":
+                problems.append("dsa-gapps.rc lays the Google apps over the system without waiting "
+                                "for the host to say they are installed")
+        if "on post-fs-data && property:ro.boot.dsa.gapps=on" not in rc:
+            problems.append("dsa-gapps.rc never lays the Google apps over the system")
+    if "SYSTEM/etc/dsa/gapps-off.prop" in names:
+        off = [line for line in z.read("SYSTEM/etc/dsa/gapps-off.prop").decode(errors="replace").splitlines()
+               if line.strip() and not line.startswith("#")]
+        if off:
+            problems.append("gapps-off.prop sets properties, so a boot without Google Play is not the "
+                            "image as made")
+
     for name in sorted(n for n in names if n.endswith("build.prop") or n.endswith("prop.default")):
         for line in z.read(name).decode(errors="replace").splitlines():
             if line.startswith("ro.dalvik.vm.native.bridge=") and line not in (
@@ -484,7 +558,8 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
             if m and value != make_image.IDENTITY[m.group(2)]:
                 problems.append(f"{name} sets {line}, not DSA's {m.group(2)}")
             if make_image.FINGERPRINT_KEY.match(key):
-                if not value.startswith("DSA/dsa_x86_64/dsa_x86_64:") or ":user/" not in value:
+                device = make_image.IDENTITY["device"]
+                if not value.startswith(f"DSA/{make_image.IDENTITY['name']}/{device}:") or ":user/" not in value:
                     problems.append(f"{name} sets {line}, not DSA's user build fingerprint")
             if key == "ro.build.characteristics" and value != make_image.CHARACTERISTICS:
                 problems.append(f"{name} sets {line}, not {make_image.CHARACTERISTICS}")

@@ -1,11 +1,18 @@
-# ARM app translation. The host adds androidboot.dsa.arm_translation=on to the boot's
-# bootconfig only when the user has installed a translation package and left it on. The
-# package's system image (erofs) is on the user's disk, where dsa-channeld wrote it. Here init
-# mounts it through a loop device and lays it over /system's lib64, bin and etc, before the
-# zygote starts, so the bridge library the properties name (libdsa_native_bridge.so) and its
-# ARM64 libraries are where the runtime and the bridge look for them. The properties come from
-# /system/etc/dsa/arm-translation-on.prop, which the product build.prop imports on the same
-# condition. A system script, because only init itself may lay anything over /system.
+# ARM app translation. The host adds androidboot.dsa.arm_translation to the boot's bootconfig
+# only while translation is on: "on" when the user installed a translation package, whose
+# system image (erofs) is on the user's disk, where dsa-channeld wrote it; "default" when they
+# did not and this x86_64 image carries its own default package, at
+# /system/etc/dsa/arm-translation/default.img. Here init mounts that image through a loop
+# device and lays it over /system's lib64, bin and etc, before the zygote starts, so the bridge
+# library the properties name (libdsa_native_bridge.so) and its ARM64 libraries are where the
+# runtime and the bridge look for them. The properties come from
+# /system/etc/dsa/arm-translation-<value>.prop, which the product build.prop imports on the
+# same condition. A system script, because only init itself may lay anything over /system.
+#
+# ARM64 programs an app starts run through the package's translator: init mounts binfmt_misc,
+# which nothing else in Android mounts, and registers the package's handlers. Init has no
+# "or" for property triggers, and an action it triggers from here would run only after the
+# zygote starts, so each value has its own copy of the same steps.
 on post-fs-data && property:ro.boot.dsa.arm_translation=on
     mkdir /data/vendor/dsa 0771 system system
     mkdir /data/vendor/dsa/arm-translation 0770 system system
@@ -14,11 +21,21 @@ on post-fs-data && property:ro.boot.dsa.arm_translation=on
     mount overlay overlay /system/lib64 ro nodev nosuid lowerdir=/mnt/dsa-arm-translation/system/lib64:/system/lib64
     mount overlay overlay /system/bin ro nodev nosuid lowerdir=/mnt/dsa-arm-translation/system/bin:/system/bin
     mount overlay overlay /system/etc ro nodev nosuid lowerdir=/mnt/dsa-arm-translation/system/etc:/system/etc
-    # ARM64 executables an app starts run through the package's translator.
+    mount binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc nodev noexec nosuid
     copy /mnt/dsa-arm-translation/system/etc/binfmt_misc/arm64_exe /proc/sys/fs/binfmt_misc/register
     copy /mnt/dsa-arm-translation/system/etc/binfmt_misc/arm64_dyn /proc/sys/fs/binfmt_misc/register
 
-# Without the package the directory still exists, so dsa-channeld can write one the user
+on post-fs-data && property:ro.boot.dsa.arm_translation=default
+    mkdir /mnt/dsa-arm-translation 0755 root root
+    mount erofs loop@/system/etc/dsa/arm-translation/default.img /mnt/dsa-arm-translation ro nodev nosuid context=u:object_r:system_lib_file:s0
+    mount overlay overlay /system/lib64 ro nodev nosuid lowerdir=/mnt/dsa-arm-translation/system/lib64:/system/lib64
+    mount overlay overlay /system/bin ro nodev nosuid lowerdir=/mnt/dsa-arm-translation/system/bin:/system/bin
+    mount overlay overlay /system/etc ro nodev nosuid lowerdir=/mnt/dsa-arm-translation/system/etc:/system/etc
+    mount binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc nodev noexec nosuid
+    copy /mnt/dsa-arm-translation/system/etc/binfmt_misc/arm64_exe /proc/sys/fs/binfmt_misc/register
+    copy /mnt/dsa-arm-translation/system/etc/binfmt_misc/arm64_dyn /proc/sys/fs/binfmt_misc/register
+
+# Without a package the directory still exists, so dsa-channeld can write one the user
 # installs while Android runs; it takes effect at the next start.
 on post-fs-data
     mkdir /data/vendor/dsa 0771 system system

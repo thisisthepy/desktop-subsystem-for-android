@@ -1,34 +1,42 @@
 //! The device identity a user's Android reports to its apps: the manufacturer, brand, model,
 //! device and product name, the form factor, and the build fingerprint.
 //!
-//! The image carries DSA's own values. A user may change any of them; the service keeps the
-//! changes per user and hands them to the guest at boot, because Android reads these
-//! properties once, before its property service makes them read only.
+//! By default the manufacturer, brand and model are the computer's, as its firmware says them
+//! ([`crate::computer_identity`]), and the chip is its CPU; the device and product name, the
+//! form factor and the fingerprint's build are DSA's own, which the image carries. A user may
+//! change any of the values below; the service keeps the changes per user and hands the
+//! identity to the guest at every boot, because Android reads these properties once, before
+//! its property service makes them read only.
 //!
 //! The values travel as a property file in a small cpio archive appended to the boot's initrd,
 //! at `/system/etc/ramdisk/build.prop`. Android's first stage init copies that file for the
 //! second stage, and the image's product `build.prop` ends with `import` lines that take the
 //! identity properties from it, so they win over every partition's own. Init itself reads the
-//! file, so no SELinux rule is needed. A user who changed nothing gets no file, and the image's
-//! own values stand.
+//! file, so no SELinux rule is needed. The file goes with every boot, since the computer's
+//! values are not in the image.
 //!
 //! ```text
 //! <dir>/users/<user>.device.json   {"model": "My tablet"}    (a missing field: the default)
 //! ```
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use dsa_protocol::host_api::types;
 use serde::{Deserialize, Serialize};
 
+use crate::computer_identity::{ComputerIdentity, ComputerInfo, Derived, Origin};
 use crate::settings::{read_json, user_file_stem, write_json};
 
+/// DSA's own manufacturer, brand and model, for a computer whose firmware does not say.
 pub const DEFAULT_MANUFACTURER: &str = "thisisthepy";
 pub const DEFAULT_BRAND: &str = "DSA";
 pub const DEFAULT_MODEL: &str = "Desktop Subsystem for Android";
+/// The device and product name of an x86_64 image.
 pub const DEFAULT_DEVICE: &str = "dsa_x86_64";
 pub const DEFAULT_NAME: &str = "dsa_x86_64";
+/// The device and product name of an arm64 image.
+pub const DEFAULT_DEVICE_ARM64: &str = "dsa_arm64";
 /// Large-screen layouts without keeping phone apps out: apps pick their layout from the
 /// window's size, not from this value.
 pub const DEFAULT_CHARACTERISTICS: &str = "tablet";
@@ -121,14 +129,11 @@ impl Field {
             })
     }
 
-    /// The value the image has, for the fields whose value does not depend on the image.
+    /// The default, for the fields whose default is the same on every computer and image.
+    /// The manufacturer, brand and model follow the computer, and the device and product
+    /// name the image's architecture, so a value a user typed for them is kept as typed.
     pub fn fixed_default(self) -> Option<&'static str> {
         match self {
-            Field::Manufacturer => Some(DEFAULT_MANUFACTURER),
-            Field::Brand => Some(DEFAULT_BRAND),
-            Field::Model => Some(DEFAULT_MODEL),
-            Field::Device => Some(DEFAULT_DEVICE),
-            Field::Name => Some(DEFAULT_NAME),
             Field::Characteristics => Some(DEFAULT_CHARACTERISTICS),
             Field::FingerprintType => Some(DEFAULT_BUILD_TYPE),
             _ => None,
@@ -295,9 +300,28 @@ pub struct ImageBuild {
     pub id: String,
     pub incremental: String,
     pub tags: String,
+    /// The guest architecture, `x86_64` or `arm64`; empty when the image does not say, and
+    /// it is then the host's own.
+    pub arch: String,
 }
 
 impl ImageBuild {
+    /// Whether the image is an arm64 one.
+    pub fn is_arm64(&self) -> bool {
+        match self.arch.as_str() {
+            "" => cfg!(target_arch = "aarch64"),
+            arch => arch == "arm64",
+        }
+    }
+
+    /// The device and product name the image has.
+    pub fn default_device(&self) -> &'static str {
+        if self.is_arm64() {
+            DEFAULT_DEVICE_ARM64
+        } else {
+            DEFAULT_DEVICE
+        }
+    }
     /// The image's build from its `image.json`; `None` for an image made before it said.
     pub fn from_manifest(manifest: &serde_json::Value) -> Option<ImageBuild> {
         let identity = manifest.get("identity")?;
@@ -313,6 +337,11 @@ impl ImageBuild {
             id: text("id")?,
             incremental: text("incremental")?,
             tags: text("tags").unwrap_or_else(|| DEFAULT_BUILD_TAGS.into()),
+            arch: manifest
+                .get("arch")
+                .and_then(|a| a.as_str())
+                .unwrap_or_default()
+                .to_string(),
         })
     }
 
@@ -323,7 +352,7 @@ impl ImageBuild {
     }
 }
 
-/// A user's device identity. An empty value is the default: the image's own.
+/// A user's device identity. An empty value is the default: the computer's or DSA's own.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DeviceIdentity {
@@ -434,11 +463,19 @@ impl DeviceIdentity {
             .all(|field| self.get(field).is_empty())
     }
 
-    /// Every value as Android will report it: the user's where they chose one, the image's
-    /// elsewhere. The fingerprint's release, build ID and incremental version stay empty
-    /// when neither the user nor `build` gives them, and so does the composed fingerprint.
-    pub fn effective(&self, build: Option<&ImageBuild>) -> DeviceIdentity {
+    /// Every value as Android will report it: the user's where they chose one, else the
+    /// default. The manufacturer, brand and model default to the computer's (`computer`, which
+    /// holds DSA's own where the computer said nothing usable), the device and product name to
+    /// the image's architecture, and the rest to DSA's values and the image's build. The
+    /// fingerprint's release, build ID and incremental version stay empty when neither the
+    /// user nor `build` gives them, and so does the composed fingerprint.
+    pub fn effective(
+        &self,
+        build: Option<&ImageBuild>,
+        computer: &ComputerIdentity,
+    ) -> DeviceIdentity {
         let build = build.cloned().unwrap_or_default();
+        let device = build.default_device();
         fn or(value: &str, default: &str) -> String {
             if value.is_empty() {
                 default.to_string()
@@ -452,11 +489,11 @@ impl DeviceIdentity {
             build.tags.as_str()
         };
         let mut out = DeviceIdentity {
-            manufacturer: or(&self.manufacturer, DEFAULT_MANUFACTURER),
-            brand: or(&self.brand, DEFAULT_BRAND),
-            model: or(&self.model, DEFAULT_MODEL),
-            device: or(&self.device, DEFAULT_DEVICE),
-            name: or(&self.name, DEFAULT_NAME),
+            manufacturer: or(&self.manufacturer, &computer.manufacturer.value),
+            brand: or(&self.brand, &computer.brand.value),
+            model: or(&self.model, &computer.model.value),
+            device: or(&self.device, device),
+            name: or(&self.name, device),
             characteristics: or(&self.characteristics, DEFAULT_CHARACTERISTICS),
             fingerprint: String::new(),
             fingerprint_release: or(&self.fingerprint_release, &build.release),
@@ -496,14 +533,20 @@ impl DeviceIdentity {
         ))
     }
 
-    /// The property file that gives Android this identity, or `None` when the user changed
-    /// nothing and the image's own values stand.
-    pub fn boot_properties(&self, build: Option<&ImageBuild>) -> Option<String> {
-        if self.is_default() {
-            return None;
-        }
-        let e = self.effective(build);
-        let mut lines = vec!["# The device identity chosen in DSA's settings".to_string()];
+    /// The property file that gives Android this identity on `computer`. Every boot gets one,
+    /// as the computer's values are not in the image. Besides the values a user may change,
+    /// it names the model name (`ro.product.marketname`) and the chip (`ro.soc.manufacturer`,
+    /// `ro.soc.model`) when the computer says them.
+    pub fn boot_properties(
+        &self,
+        build: Option<&ImageBuild>,
+        computer: &ComputerIdentity,
+    ) -> String {
+        let e = self.effective(build, computer);
+        let mut lines = vec![
+            "# The device identity: the computer's, with what was chosen in DSA's settings"
+                .to_string(),
+        ];
         for (field, value) in [
             ("brand", &e.brand),
             ("manufacturer", &e.manufacturer),
@@ -538,7 +581,210 @@ impl DeviceIdentity {
         if !e.fingerprint.is_empty() {
             lines.push(format!("ro.build.fingerprint={}", e.fingerprint));
         }
-        Some(lines.join("\n") + "\n")
+        lines.push(format!(
+            "ro.product.marketname={}",
+            computer.model_name.value
+        ));
+        for (key, value) in [
+            ("ro.soc.manufacturer", &computer.soc_manufacturer.value),
+            ("ro.soc.model", &computer.soc_model.value),
+        ] {
+            if !value.is_empty() {
+                lines.push(format!("{key}={value}"));
+            }
+        }
+        lines.join("\n") + "\n"
+    }
+}
+
+/// Values Android reports that follow the computer and that a user does not choose.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ComputerValues {
+    /// The name the product is sold under, such as `Galaxy Book4 Ultra`.
+    pub model_name: String,
+    /// Android's device name: the computer's name, else the model.
+    pub device_name: String,
+    /// The chip's maker and model; empty when the computer does not say, and Android keeps
+    /// its own.
+    pub soc_manufacturer: String,
+    pub soc_model: String,
+}
+
+/// The keys of [`ComputerValues`], as the local API and `dsa settings device --json` name
+/// them.
+pub const COMPUTER_KEYS: [&str; 4] = ["model_name", "device_name", "soc_manufacturer", "soc_model"];
+
+/// A user's identity as the settings show it: what they chose, what Android reports from its
+/// next start, the defaults, and which defaults are the computer's.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct IdentityReport {
+    pub chosen: DeviceIdentity,
+    pub effective: DeviceIdentity,
+    /// Every value as Android reports it when the user chooses nothing.
+    pub defaults: DeviceIdentity,
+    /// What follows the computer, as Android reports it.
+    pub computer: ComputerValues,
+    /// The keys (a [`Field::key`] or one of [`COMPUTER_KEYS`]) whose default is the
+    /// computer's; every other default is DSA's.
+    pub from_computer: Vec<String>,
+}
+
+impl IdentityReport {
+    /// The report for `chosen` on `computer`, for an image of `build`.
+    pub fn new(
+        chosen: &DeviceIdentity,
+        build: Option<&ImageBuild>,
+        computer: &ComputerIdentity,
+    ) -> IdentityReport {
+        let effective = chosen.effective(build, computer);
+        let device_name = if computer.device_name.value.is_empty() {
+            effective.model.clone()
+        } else {
+            computer.device_name.value.clone()
+        };
+        let from = |key: &str, derived: &Derived| {
+            (derived.origin == Origin::Computer).then(|| key.to_string())
+        };
+        let from_computer = [
+            from("manufacturer", &computer.manufacturer),
+            from("brand", &computer.brand),
+            from("model", &computer.model),
+            from("model_name", &computer.model_name),
+            from("device_name", &computer.device_name),
+            from("soc_manufacturer", &computer.soc_manufacturer),
+            from("soc_model", &computer.soc_model),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        IdentityReport {
+            chosen: chosen.clone(),
+            effective,
+            defaults: DeviceIdentity::default().effective(build, computer),
+            computer: ComputerValues {
+                model_name: computer.model_name.value.clone(),
+                device_name,
+                soc_manufacturer: computer.soc_manufacturer.value.clone(),
+                soc_model: computer.soc_model.value.clone(),
+            },
+            from_computer,
+        }
+    }
+
+    /// Where the default of `key` came from: `computer` or `dsa`.
+    pub fn origin(&self, key: &str) -> &'static str {
+        if self.from_computer.iter().any(|k| k == key) {
+            Origin::Computer.key()
+        } else {
+            Origin::Dsa.key()
+        }
+    }
+
+    /// The value of one of [`COMPUTER_KEYS`].
+    pub fn computer_value(&self, key: &str) -> &str {
+        match key {
+            "model_name" => &self.computer.model_name,
+            "device_name" => &self.computer.device_name,
+            "soc_manufacturer" => &self.computer.soc_manufacturer,
+            "soc_model" => &self.computer.soc_model,
+            _ => "",
+        }
+    }
+}
+
+/// Reads what the computer says it is; each host has its own.
+pub type ComputerSource = Arc<dyn Fn() -> ComputerInfo + Send + Sync>;
+
+/// A user's identity at each boot of their Android: the host builds the boot's property file
+/// from it, and tells the agent the device name it found.
+pub struct BootIdentity {
+    store: Arc<dyn DeviceIdentityStore>,
+    user: String,
+    computer: ComputerSource,
+    /// The device name the last boot was given.
+    device_name: Mutex<Option<String>>,
+}
+
+impl BootIdentity {
+    pub fn new(
+        store: Arc<dyn DeviceIdentityStore>,
+        user: impl Into<String>,
+        computer: ComputerSource,
+    ) -> Arc<BootIdentity> {
+        Arc::new(BootIdentity {
+            store,
+            user: user.into(),
+            computer,
+            device_name: Mutex::new(None),
+        })
+    }
+
+    /// Reads the computer and the user's choices now, and gives the property file for this
+    /// boot. A store that cannot be read leaves the computer's values standing.
+    pub fn boot_properties(&self, build: Option<&ImageBuild>) -> String {
+        let chosen = self.store.get(&self.user).unwrap_or_else(|why| {
+            eprintln!("device identity: {why}; Android starts with the computer's identity");
+            DeviceIdentity::default()
+        });
+        let computer = (self.computer)().identity();
+        let report = IdentityReport::new(&chosen, build, &computer);
+        eprintln!(
+            "device identity: {} {} ({}), named {:?}",
+            report.effective.manufacturer,
+            report.effective.model,
+            report.computer.model_name,
+            report.computer.device_name
+        );
+        *self.device_name.lock().unwrap_or_else(|e| e.into_inner()) =
+            Some(report.computer.device_name.clone());
+        chosen.boot_properties(build, &computer)
+    }
+
+    /// The device name the last boot was given, which the agent makes the guest's.
+    pub fn device_name(&self) -> Option<String> {
+        self.device_name
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+            .filter(|name| !name.is_empty())
+    }
+}
+
+/// `report` as the local API carries it.
+pub fn report_to_wire(report: &IdentityReport) -> types::DeviceIdentityReport {
+    let mut effective = to_wire(&report.effective);
+    effective.model_name = report.computer.model_name.clone();
+    effective.device_name = report.computer.device_name.clone();
+    effective.soc_manufacturer = report.computer.soc_manufacturer.clone();
+    effective.soc_model = report.computer.soc_model.clone();
+    types::DeviceIdentityReport {
+        chosen: Some(to_wire(&report.chosen)),
+        effective: Some(effective.clone()),
+        defaults: Some(types::DeviceIdentity {
+            model_name: effective.model_name.clone(),
+            device_name: effective.device_name.clone(),
+            soc_manufacturer: effective.soc_manufacturer.clone(),
+            soc_model: effective.soc_model.clone(),
+            ..to_wire(&report.defaults)
+        }),
+        from_computer: report.from_computer.clone(),
+    }
+}
+
+/// A report the local API carried.
+pub fn report_from_wire(report: types::DeviceIdentityReport) -> IdentityReport {
+    let effective = report.effective.unwrap_or_default();
+    IdentityReport {
+        chosen: from_wire(report.chosen.unwrap_or_default()),
+        computer: ComputerValues {
+            model_name: effective.model_name.clone(),
+            device_name: effective.device_name.clone(),
+            soc_manufacturer: effective.soc_manufacturer.clone(),
+            soc_model: effective.soc_model.clone(),
+        },
+        effective: from_wire(effective),
+        defaults: from_wire(report.defaults.unwrap_or_default()),
+        from_computer: report.from_computer,
     }
 }
 
@@ -557,6 +803,7 @@ pub fn to_wire(identity: &DeviceIdentity) -> types::DeviceIdentity {
         fingerprint_incremental: identity.fingerprint_incremental.clone(),
         fingerprint_type: identity.fingerprint_type.clone(),
         fingerprint_tags: identity.fingerprint_tags.clone(),
+        ..Default::default()
     }
 }
 

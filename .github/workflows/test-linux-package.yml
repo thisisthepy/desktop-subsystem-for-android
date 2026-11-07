@@ -22,10 +22,12 @@ on:
   workflow_dispatch:
 
 concurrency:
-  # A newer push to develop holds every older one, so only the newest is checked. Runs
-  # that never finish are avoided by checking compile and lint before each push.
+  # On develop a run in progress finishes and only the newest waiting run stays: GitHub
+  # keeps one pending run per group, so a newer merge replaces the one still waiting.
+  # The newest run tests everything the dropped ones held. Anywhere else, such as a pull
+  # request, a newer run still replaces the older one.
   group: test-linux-package-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/develop' }}
 
 permissions:
   contents: read
@@ -60,7 +62,8 @@ jobs:
       - name: Install the packaging tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y rpm desktop-file-utils gnupg dpkg-dev apt-utils createrepo-c appstream
+          sudo apt-get install -y rpm desktop-file-utils gnupg dpkg-dev apt-utils createrepo-c appstream \
+            libgtk-4-dev libadwaita-1-dev gettext
 
       # A key made for this run only. The real one is a repository secret that only the
       # release workflow reads.
@@ -77,7 +80,7 @@ jobs:
 
       - name: Build the host programs
         working-directory: dsa
-        run: cargo build --release -p dsa-cli -p dsa-host-linux
+        run: cargo build --release -p dsa-cli -p dsa-host-linux -p dsa-settings-linux
 
       # The lock file the build resolved, so a dependency added without one can be checked
       # in from here.
@@ -128,13 +131,26 @@ jobs:
               /usr/lib/systemd/user/dsa-devices.service /usr/lib/udev/rules.d/70-dsa.rules \
               /usr/lib/modules-load.d/dsa.conf /usr/share/applications/dsa-open.desktop \
               /usr/share/applications/dsa-apk.desktop /etc/geoclue/conf.d/90-dsa.conf \
+              /usr/share/mime/packages/io.github.thisisthepy.DSA.apk-bundles.xml \
               /etc/dsa/dsa-hostd.json /usr/lib/dsa/vm/image/image.json \
               /usr/lib/dsa/bin/crosvm /usr/lib/dsa/bin/passt /usr/lib/dsa/bin/libgfxstream_backend.so \
               /etc/apparmor.d/dsa-vm \
               /usr/share/doc/desktop-subsystem-for-android/crosvm-crates.txt \
               /usr/share/doc/desktop-subsystem-for-android/passt-source.tar.gz \
               /usr/share/doc/desktop-subsystem-for-android/licenses/crosvm-crates.txt \
-              /usr/share/metainfo/io.github.thisisthepy.DSA.metainfo.xml; do
+              /usr/share/metainfo/io.github.thisisthepy.DSA.metainfo.xml \
+              /usr/lib/dsa/bin/dsa-settings \
+              /usr/share/applications/io.github.thisisthepy.DSA.Settings.desktop \
+              /usr/share/metainfo/io.github.thisisthepy.DSA.Settings.metainfo.xml \
+              /usr/share/icons/hicolor/scalable/apps/io.github.thisisthepy.DSA.svg \
+              /usr/share/icons/hicolor/symbolic/apps/io.github.thisisthepy.DSA-symbolic.svg \
+              /usr/share/icons/hicolor/scalable/apps/io.github.thisisthepy.DSA.Settings.svg \
+              /usr/share/icons/hicolor/symbolic/apps/io.github.thisisthepy.DSA.Settings-symbolic.svg \
+              /usr/share/icons/hicolor/scalable/apps/io.github.thisisthepy.DSA.ApkInstaller.svg \
+              /usr/share/icons/hicolor/symbolic/apps/io.github.thisisthepy.DSA.ApkInstaller-symbolic.svg \
+              /usr/share/icons/hicolor/scalable/apps/io.github.thisisthepy.DSA.Files.svg \
+              /usr/share/icons/hicolor/symbolic/apps/io.github.thisisthepy.DSA.Files-symbolic.svg \
+              /usr/share/locale/ko/LC_MESSAGES/dsa-settings.mo; do
             grep -q "\.$path\$\|\.$path -> " .scratch/deb-contents || { echo "the .deb has no $path"; exit 1; }
             grep -qx "$path" .scratch/rpm-contents || { echo "the .rpm has no $path"; exit 1; }
           done

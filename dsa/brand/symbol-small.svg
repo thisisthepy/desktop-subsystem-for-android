@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <!-- The DSA symbol at 24 px and below: no dots, no inner panel, thicker antennae, so it
+       stays readable on a few pixels. -->
+  <defs>
+    <linearGradient id="sym-body" gradientUnits="userSpaceOnUse" x1="8" y1="12" x2="56" y2="60">
+      <stop offset="0" stop-color="#1c8a63"/><stop offset="1" stop-color="#05392a"/>
+    </linearGradient>
+    <linearGradient id="sym-bar" gradientUnits="userSpaceOnUse" x1="10" y1="2" x2="54" y2="28">
+      <stop offset="0" stop-color="#9af8c4"/><stop offset=".5" stop-color="#47e08c"/><stop offset="1" stop-color="#1fb066"/>
+    </linearGradient>
+    <filter id="sym-shadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feDropShadow dx="0" dy="1" stdDeviation=".8" flood-color="#022218" flood-opacity=".35"/>
+    </filter>
+  </defs>
+  <g filter="url(#sym-shadow)">
+    <path d="M21 14 L15.5 5 M43 14 L48.5 5" stroke="url(#sym-bar)" stroke-width="6.5" stroke-linecap="round" fill="none"/>
+    <path d="M13 12h38a9 9 0 0 1 9 9v28a9 9 0 0 1-9 9H13a9 9 0 0 1-9-9V21a9 9 0 0 1 9-9z" fill="url(#sym-body)"/>
+    <path d="M13 12h38a9 9 0 0 1 9 9v7H4v-7a9 9 0 0 1 9-9z" fill="url(#sym-bar)"/>
+  </g>
+</svg>

@@ -144,7 +144,7 @@ version = "b1aa4d87ea41273aad8be3ac8e37ba7d86b9b1c4"
 license = "BSD-3-Clause"
 part = "linux"
 distribution = "separate-program"
-notice = "Every crate and shared library crosvm links, with its licence, is listed in crosvm-crates.txt."
+notice = "Built with DSA's patches applied (a virtio-mem device), contributed under crosvm's BSD-3-Clause. Every crate and shared library crosvm links, with its licence, is listed in crosvm-crates.txt."
 source = "https://chromium.googlesource.com/crosvm/crosvm"
 
 [[component]]

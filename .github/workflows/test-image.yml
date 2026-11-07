@@ -27,6 +27,7 @@ on:
       - "dsa/guest/agent/**"
       - "dsa/guest/aidl/**"
       - "dsa/protocol/**"
+      - "dsa/host/platform/linux/tests/widgets.rs"
       - ".github/workflows/test-image.yml"
       - "scripts/tests/image-graphics-workflow.test.sh"
       - "scripts/tests/image-audio-workflow.test.sh"
@@ -53,10 +54,12 @@ on:
         default: ""
 
 concurrency:
-  # A newer push to develop holds every older one, so only the newest is checked. Runs
-  # that never finish are avoided by checking compile and lint before each push.
+  # On develop a run in progress finishes and only the newest waiting run stays: GitHub
+  # keeps one pending run per group, so a newer merge replaces the one still waiting.
+  # The newest run tests everything the dropped ones held. Anywhere else, such as a pull
+  # request, a newer run still replaces the older one.
   group: test-image-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/develop' }}
 
 permissions:
   contents: read
@@ -478,7 +481,8 @@ jobs:
     name: Make and check the guest image (ubuntu-latest, Android ${{ matrix.android }}, ${{ matrix.arch }})
     needs: [guest-graphics, channeld, hwcomposer, power-hal, gnss-hal, codec2, audio, sensors, camera, agent]
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # Android 17 on x86_64 also boots the image and checks a widget, below.
+    timeout-minutes: ${{ matrix.android == '17' && matrix.arch == 'x86_64' && 120 || 60 }}
     strategy:
       fail-fast: false
       matrix:
@@ -679,3 +683,113 @@ jobs:
             dsa/target/image/*/image.json
             dsa/target/image/*/initrd.img
           if-no-files-found: error
+
+      # The image just made, booted under crosvm by the service, with the digital clock widget
+      # placed through the local API: its pictures must reach the client, show something and
+      # change as the clock ticks, and the guest log must not say a widget failed to draw. One
+      # combination is enough, and the runner's KVM is x86_64. The kernel is the newest
+      # published one, because this workflow does not build the kernel.
+      - name: Free the image inputs for the boot check
+        if: matrix.android == '17' && matrix.arch == 'x86_64'
+        run: |
+          rm -rf .scratch/aosp-inputs
+          df -h /
+
+      - name: Keep the VM programs between runs
+        if: matrix.android == '17' && matrix.arch == 'x86_64'
+        uses: actions/cache@v4
+        with:
+          path: .scratch/vm-programs
+          key: linux-vm-programs-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('dsa/host/platform/linux/crosvm/**', 'dsa/graphics/host/**', 'dsa/graphics/patches/**', '.github/scripts/linux-vm/**') }}
+
+      - name: Build crosvm, passt and gfxstream's renderer
+        if: matrix.android == '17' && matrix.arch == 'x86_64'
+        run: bash .github/scripts/linux-vm/build-vm-programs.sh .scratch/vm-programs
+
+      # Where the package puts them, so the package's AppArmor profile lets crosvm and passt
+      # make their sandboxes' user namespaces, as on an installed system.
+      - name: Install the VM programs as the package does
+        if: matrix.android == '17' && matrix.arch == 'x86_64'
+        run: |
+          sudo install -d /usr/lib/dsa/bin
+          sudo install -m 0755 .scratch/vm-programs/crosvm .scratch/vm-programs/passt .scratch/vm-programs/libgfxstream_backend.so /usr/lib/dsa/bin/
+          sudo install -m 0644 dsa/host/platform/linux/packaging/apparmor/dsa-vm /etc/apparmor.d/dsa-vm
+          sudo apparmor_parser -r -W /etc/apparmor.d/dsa-vm
+          echo "DSA_CROSVM=/usr/lib/dsa/bin/crosvm" >> "$GITHUB_ENV"
+
+      - name: Load KVM and vhost-vsock
+        if: matrix.android == '17' && matrix.arch == 'x86_64'
+        run: |
+          sudo modprobe vhost_vsock
+          sudo chmod 666 /dev/kvm /dev/vhost-vsock
+          ls -l /dev/kvm /dev/vhost-vsock
+
+      - name: Download the newest published kernel
+        if: matrix.android == '17' && matrix.arch == 'x86_64'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$(gh release list -R "${{ github.repository }}" -L 50 --json tagName -q '[.[] | select(.tagName | startswith("android-17") and (endswith("-arm64") | not))][0].tagName')"
+          test -n "$tag" || { echo "no published x86_64 Android 17 image release"; exit 1; }
+          echo "kernel release: $tag"
+          gh release download "$tag" -R "${{ github.repository }}" -p bzImage -D "$RUNNER_TEMP"
+          echo "DSA_WIDGET_TEST_KERNEL=$RUNNER_TEMP/bzImage" >> "$GITHUB_ENV"
+          image="$(ls -d "$PWD"/dsa/target/image/*/ | head -1)"
+          ls -l "$image"
+          echo "DSA_WIDGET_TEST_IMAGE=$image" >> "$GITHUB_ENV"
+
+      - name: Build the widget boot check
+        if: matrix.android == '17' && matrix.arch == 'x86_64'
+        working-directory: dsa
+        run: cargo test -p dsa-host-linux --test widgets --no-run && cargo build -p dsa-host-linux --bin dsa-compositor
+
+      # Android's renderer runs in the window manager (dsa-compositor), which needs a desktop
+      # session: a headless Wayland compositor stands in for it, with Mesa's software Vulkan
+      # driver in place of a GPU.
+      - name: Install a headless Wayland compositor and a software Vulkan driver
+        if: matrix.android == '17' && matrix.arch == 'x86_64'
+        timeout-minutes: 20
+        run: |
+          echo 'man-db man-db/auto-update boolean false' | sudo debconf-set-selections
+          sudo apt-get update
+          for try in 1 2 3; do
+            timeout 300 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+              weston libxkbcommon0 mesa-vulkan-drivers libvulkan1 dbus-daemon && break
+            test "$try" -lt 3 || exit 1
+          done
+
+      - name: Place a widget on the booted image
+        if: matrix.android == '17' && matrix.arch == 'x86_64'
+        timeout-minutes: 12
+        working-directory: dsa
+        run: |
+          # The service finds the user's session in /run/user/<uid>, as on a desktop.
+          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+          sudo mkdir -p "$XDG_RUNTIME_DIR"
+          sudo chown "$(id -u):$(id -g)" "$XDG_RUNTIME_DIR"
+          chmod 0700 "$XDG_RUNTIME_DIR"
+          export GFXSTREAM_BACKEND_PATH=/usr/lib/dsa/bin/libgfxstream_backend.so
+          # A session bus at the place a desktop has it.
+          dbus-daemon --session --address="unix:path=$XDG_RUNTIME_DIR/bus" --fork
+          export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+          weston --backend=headless --socket=wayland-dsa --idle-time=0 --width=1920 --height=1080 &
+          for _ in $(seq 50); do
+            [[ -S "$XDG_RUNTIME_DIR/wayland-dsa" ]] && break
+            sleep 0.2
+          done
+          export WAYLAND_DISPLAY=wayland-dsa
+          cargo test -p dsa-host-linux --test widgets -- --nocapture --test-threads 1
+
+      - name: Keep the widget boot check's logs
+        if: always() && matrix.android == '17' && matrix.arch == 'x86_64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: widget-boot-logs
+          path: |
+            /tmp/widget-test-*/hostd.log
+            /tmp/widget-test-*/compositor.log
+            /tmp/widget-test-*/devices.log
+            /tmp/widget-test-*/guest.log
+            /tmp/widget-test-*/first.png
+            ~/.local/share/dsa/**/*.log
+          if-no-files-found: ignore

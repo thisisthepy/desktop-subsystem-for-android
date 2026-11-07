@@ -47,9 +47,11 @@ use std::ffi::c_void;
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use dsa_host_core::compositor::caption::band_fill;
 use dsa_host_core::compositor::frame_buffers::{
-    content_region, frame_scale, sample_points, swapchain_buffers, swapchain_change,
-    uniform_colour, HiddenBuffers, HiddenFrame, SwapchainChange, SAMPLE_GRID,
+    buffers_after_frame, content_region, frame_scale, sample_points, swapchain_buffers,
+    swapchain_change, uniform_colour, wanted_swapchain_buffers, HiddenBuffers, HiddenFrame,
+    SwapchainChange, SAMPLE_GRID,
 };
 use dsa_host_core::compositor::frame_follow::{Arrival, FrameFollow};
 use dsa_host_core::compositor::present_watch::{FrameStatistics, PresentWatch};
@@ -65,9 +67,9 @@ use windows::Win32::Graphics::Direct3D11::{
     D3D11CreateDevice, ID3D11Device, ID3D11Device1, ID3D11DeviceContext, ID3D11Query,
     ID3D11Texture2D, D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_BOX,
     D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAPPED_SUBRESOURCE,
-    D3D11_MAP_READ, D3D11_QUERY_DESC, D3D11_QUERY_EVENT, D3D11_RESOURCE_MISC_SHARED,
-    D3D11_RESOURCE_MISC_SHARED_NTHANDLE, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC,
-    D3D11_USAGE_DEFAULT, D3D11_USAGE_STAGING,
+    D3D11_MAP_FLAG_DO_NOT_WAIT, D3D11_MAP_READ, D3D11_QUERY_DESC, D3D11_QUERY_EVENT,
+    D3D11_RESOURCE_MISC_SHARED, D3D11_RESOURCE_MISC_SHARED_NTHANDLE, D3D11_SDK_VERSION,
+    D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT, D3D11_USAGE_STAGING,
 };
 use windows::Win32::Graphics::DirectComposition::{
     DCompositionCreateDevice, IDCompositionDevice, IDCompositionSurface, IDCompositionTarget,
@@ -80,11 +82,11 @@ use windows::Win32::Graphics::Dxgi::Common::{
 use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory2, IDXGIAdapter, IDXGIAdapter3, IDXGIDevice, IDXGIDevice3, IDXGIFactory2,
     IDXGIFactory4, IDXGIResource1, IDXGISwapChain2, DXGI_CREATE_FACTORY_FLAGS,
-    DXGI_ERROR_FRAME_STATISTICS_DISJOINT, DXGI_FRAME_STATISTICS, DXGI_MEMORY_SEGMENT_GROUP_LOCAL,
-    DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL, DXGI_PRESENT, DXGI_QUERY_VIDEO_MEMORY_INFO,
-    DXGI_SCALING_STRETCH, DXGI_SHARED_RESOURCE_READ, DXGI_SHARED_RESOURCE_WRITE,
-    DXGI_SWAP_CHAIN_DESC1, DXGI_SWAP_CHAIN_FLAG, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
-    DXGI_USAGE_RENDER_TARGET_OUTPUT,
+    DXGI_ERROR_FRAME_STATISTICS_DISJOINT, DXGI_ERROR_WAS_STILL_DRAWING, DXGI_FRAME_STATISTICS,
+    DXGI_MEMORY_SEGMENT_GROUP_LOCAL, DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL, DXGI_PRESENT,
+    DXGI_QUERY_VIDEO_MEMORY_INFO, DXGI_SCALING_STRETCH, DXGI_SHARED_RESOURCE_READ,
+    DXGI_SHARED_RESOURCE_WRITE, DXGI_SWAP_CHAIN_DESC1, DXGI_SWAP_CHAIN_FLAG,
+    DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_USAGE_RENDER_TARGET_OUTPUT,
 };
 use windows_numerics::Matrix3x2;
 
@@ -378,6 +380,12 @@ struct State {
     swapchain: Option<IDXGISwapChain2>,
     /// The size of the swapchain's buffers: the texture's, not a frame's.
     buffers: Option<(u32, u32)>,
+    /// How many buffers the swapchain has, and how many it is to have: three while frames
+    /// come, two once the window is still (`wanted_swapchain_buffers`).
+    buffer_count: u32,
+    wanted_buffers: u32,
+    /// When the last frame came.
+    last_frame_at: Option<Instant>,
     /// The size of the last frame shown: the swapchain's source size.
     frame: (u32, u32),
     /// The client size last proposed for the window, which the guest is asked for.
@@ -413,6 +421,17 @@ struct State {
     /// The texture the newest frame came in, its size and the region the frame fills: what is
     /// shown again when a minimized window is restored.
     newest: Option<Newest>,
+    /// The height of the title bar's band over the frame while it is shown; 0 otherwise.
+    band: u32,
+    /// Where pixels of the band and of the row under it are copied to be read: a row of
+    /// each, `BAND_SAMPLES` wide.
+    band_probe: Option<ID3D11Texture2D>,
+    /// Whether a copy waits in `band_probe` to be read.
+    band_pending: bool,
+    /// When the band was last copied.
+    band_probed: Option<Instant>,
+    /// What the window was last told to fill the band with.
+    band_fill: Option<u32>,
 }
 
 /// What a window's splash is drawn from: its background as `0xAARRGGBB`, the app's icon as
@@ -465,6 +484,16 @@ const CLAIM_WAIT: Duration = Duration::from_millis(100);
 /// Tells a window that a frame of another size is kept for it to take.
 pub type FrameReady = Box<dyn Fn() + Send + Sync>;
 
+/// Tells a window the color its title bar's band should be filled with (0xAARRGGBB), or
+/// `None` when the app draws the band itself.
+pub type BandColour = Box<dyn Fn(Option<u32>) + Send + Sync>;
+
+/// How many pixels are sampled across the band, and across the row under it.
+const BAND_SAMPLES: u32 = 8;
+
+/// How often the band is sampled at most, while frames come.
+const BAND_PROBE_EVERY: Duration = Duration::from_millis(200);
+
 /// Shows one task's frames in its window.
 pub struct WindowPresenter {
     task_id: i32,
@@ -476,6 +505,8 @@ pub struct WindowPresenter {
     claim_released: Condvar,
     /// Tells the window a frame of another size is kept for it.
     frame_ready: Mutex<Option<FrameReady>>,
+    /// Tells the window what to fill its title bar's band with.
+    band_colour: Mutex<Option<BandColour>>,
     logger: Option<Arc<CompositorLogger>>,
 }
 
@@ -543,6 +574,9 @@ impl WindowPresenter {
                 splash_image: None,
                 swapchain: None,
                 buffers: None,
+                buffer_count: 0,
+                wanted_buffers: swapchain_buffers(),
+                last_frame_at: None,
                 frame: (0, 0),
                 asked: view,
                 committed: None,
@@ -560,9 +594,15 @@ impl WindowPresenter {
                 watch: None,
                 hidden: HiddenBuffers::new(),
                 newest: None,
+                band: 0,
+                band_probe: None,
+                band_pending: false,
+                band_probed: None,
+                band_fill: None,
             }),
             claim_released: Condvar::new(),
             frame_ready: Mutex::new(None),
+            band_colour: Mutex::new(None),
             logger,
         }))
     }
@@ -571,6 +611,128 @@ impl WindowPresenter {
     /// than the window's is kept for the window to take.
     pub fn on_frame_ready(&self, ready: FrameReady) {
         *self.frame_ready.lock().unwrap_or_else(|e| e.into_inner()) = Some(ready);
+    }
+
+    /// Has `told` called, from the thread that shows frames, whenever the color the title
+    /// bar's band should be filled with changes: the app's top color while the app's frames
+    /// leave the band empty or black, `None` once the app draws the band itself.
+    pub fn on_band_colour(&self, told: BandColour) {
+        *self.band_colour.lock().unwrap_or_else(|e| e.into_inner()) = Some(told);
+    }
+
+    /// Samples the band and the row under it from the frame in `texture` (of `region`
+    /// pixels), at most every [`BAND_PROBE_EVERY`]. The copy is read on a later frame, once
+    /// the GPU has made it, so showing a frame never waits for it. Returns the band's new
+    /// fill when it changed.
+    unsafe fn probe_band(
+        &self,
+        state: &mut State,
+        texture: &ID3D11Texture2D,
+        region: (u32, u32),
+    ) -> Option<Option<u32>> {
+        let band = state.band;
+        if band == 0 || region.1 <= band + 2 || region.0 < BAND_SAMPLES {
+            return None;
+        }
+        let context = self.gpu.context.lock().unwrap_or_else(|e| e.into_inner());
+        let mut changed = None;
+        if state.band_pending {
+            let probe = state.band_probe.clone()?;
+            let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+            let flags = D3D11_MAP_FLAG_DO_NOT_WAIT.0 as u32;
+            match context.Map(&probe, 0, D3D11_MAP_READ, flags, Some(&mut mapped)) {
+                Ok(()) => {
+                    let base = mapped.pData as *const u8;
+                    let pitch = mapped.RowPitch as usize;
+                    let row = |index: usize| -> Vec<u32> {
+                        (0..BAND_SAMPLES as usize)
+                            .map(|column| {
+                                let at = base.add(index * pitch + column * 4);
+                                let pixel = std::slice::from_raw_parts(at, 4);
+                                // RGBA bytes, as 0xAARRGGBB.
+                                u32::from_be_bytes([pixel[3], pixel[0], pixel[1], pixel[2]])
+                            })
+                            .collect()
+                    };
+                    let (inside, below) = (row(0), row(1));
+                    context.Unmap(&probe, 0);
+                    state.band_pending = false;
+                    let fill = band_fill(&inside, &below);
+                    if fill != state.band_fill {
+                        state.band_fill = fill;
+                        changed = Some(fill);
+                    }
+                }
+                // The GPU has not made the copy yet: it is read on a later frame.
+                Err(error) if error.code() == DXGI_ERROR_WAS_STILL_DRAWING => return None,
+                Err(_) => state.band_pending = false,
+            }
+        }
+        if state
+            .band_probed
+            .is_some_and(|at| at.elapsed() < BAND_PROBE_EVERY)
+        {
+            return changed;
+        }
+        if state.band_probe.is_none() {
+            let desc = D3D11_TEXTURE2D_DESC {
+                Width: BAND_SAMPLES,
+                Height: 2,
+                MipLevels: 1,
+                ArraySize: 1,
+                Format: DXGI_FORMAT_R8G8B8A8_UNORM,
+                SampleDesc: DXGI_SAMPLE_DESC {
+                    Count: 1,
+                    Quality: 0,
+                },
+                Usage: D3D11_USAGE_STAGING,
+                BindFlags: 0,
+                CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
+                MiscFlags: 0,
+            };
+            let made = self
+                .gpu
+                .device
+                .CreateTexture2D(&desc, None, Some(&mut state.band_probe));
+            if let Err(error) = made {
+                let what = "creating the texture a title bar's band is sampled into";
+                note(self.logger.as_deref(), &failed(what, error));
+                // Not tried again on every frame.
+                state.band_probed = Some(Instant::now());
+                return changed;
+            }
+        }
+        let Some(probe) = state.band_probe.clone() else {
+            return changed;
+        };
+        // Across the band's middle row, and the row just under it, where the app's top begins.
+        let rows = [band / 2, band + 2];
+        for (index, y) in rows.into_iter().enumerate() {
+            for column in 0..BAND_SAMPLES {
+                let x = (2 * column + 1) * region.0 / (2 * BAND_SAMPLES);
+                let pixel = D3D11_BOX {
+                    left: x,
+                    top: y,
+                    front: 0,
+                    right: x + 1,
+                    bottom: y + 1,
+                    back: 1,
+                };
+                context.CopySubresourceRegion(
+                    &probe,
+                    0,
+                    column,
+                    index as u32,
+                    0,
+                    texture,
+                    0,
+                    Some(&pixel as *const _),
+                );
+            }
+        }
+        state.band_pending = true;
+        state.band_probed = Some(Instant::now());
+        changed
     }
 
     /// The size of the frame kept for the window to take, if one is.
@@ -595,6 +757,26 @@ impl WindowPresenter {
             self.size_asked(&mut state, proposed);
         }
         taken
+    }
+
+    /// The window's monitor changed scale and the window takes a client area of `proposed`
+    /// pixels there at once, the size the desktop suggests, and whoever calls this has asked
+    /// the guest for it. Until a frame of it comes, the window shows its last frame 1:1, and
+    /// the frames the app still draws at the old size are not shown and do not move the
+    /// window back: that would put it on the other monitor again.
+    pub fn scale_changed(&self, proposed: (u32, u32)) {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.closed {
+            return;
+        }
+        state.follow.scale_changed(proposed);
+        if proposed != state.asked {
+            state.asked = proposed;
+            self.size_asked(&mut state, proposed);
+        }
+        drop(state);
+        // A frame that waited for a claim the change of scale let go goes on.
+        self.claim_released.notify_all();
     }
 
     /// The client area is now `view` pixels. The frame kept for that size is presented now,
@@ -681,6 +863,7 @@ impl WindowPresenter {
             return;
         }
         self.trace_shown(&mut state);
+        self.release_idle_buffer(&mut state);
         if let Some(((width, height), waited)) = state.latency.stuck(Instant::now()) {
             note(
                 self.logger.as_deref(),
@@ -693,13 +876,40 @@ impl WindowPresenter {
         }
     }
 
+    /// A shown window that has had no frame for a while gives its swapchain's third buffer
+    /// back: the swapchain is resized to two buffers and the newest frame shown again from the
+    /// shared texture, since resizing drops what the buffers held. The next frame makes the
+    /// third buffer again. A window that keeps a frame for a size it is about to take is left
+    /// alone, so the kept frame is not lost.
+    fn release_idle_buffer(&self, state: &mut State) {
+        if state.hidden.hidden() || state.swapchain.is_none() || state.follow.kept().is_some() {
+            return;
+        }
+        let Some(quiet) = state.last_frame_at.map(|at| at.elapsed()) else {
+            return;
+        };
+        let wanted = wanted_swapchain_buffers(quiet);
+        if wanted >= state.buffer_count {
+            return;
+        }
+        let Some((texture, size, region)) = state.newest.clone() else {
+            return;
+        };
+        state.wanted_buffers = wanted;
+        if let Err(why) = self.present_locked(state, &texture, size, region, false) {
+            note(self.logger.as_deref(), &why);
+        }
+    }
+
     /// Takes the caption buttons out of sight until the next [`show_caption`](Self::show_caption),
     /// as in a window that fills its monitor and has no title bar.
     pub fn hide_caption(&self) {
-        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if state.closed {
             return;
         }
+        // No band, nothing to sample under it.
+        state.band = 0;
         let Ok(dcomp) = self.gpu.dcomp() else {
             return;
         };
@@ -722,6 +932,7 @@ impl WindowPresenter {
         if pixels.len() < (size.0 * size.1 * 4) as usize {
             return Err("the caption image is smaller than its size".into());
         }
+        state.band = size.1;
         let dcomp = self.gpu.dcomp()?.lock().unwrap_or_else(|e| e.into_inner());
         // SAFETY: plain COM calls on objects this presenter owns; the update reads only
         // `pixels`, which holds the whole image.
@@ -797,6 +1008,7 @@ impl WindowPresenter {
         }
         state.swapchain = None;
         state.buffers = None;
+        state.buffer_count = 0;
         state.committed = None;
         state.frame = (0, 0);
         state.presents.forget();
@@ -862,6 +1074,14 @@ impl WindowPresenter {
         }
         let region = content_region(content, texture.size);
         state.newest = Some((texture.texture.clone(), texture.size, region));
+        // Frames in quick succession say the window is drawing: its swapchain takes all its
+        // buffers again. A lone frame of a still window keeps the two it has.
+        let now = Instant::now();
+        let since_last = state
+            .last_frame_at
+            .map(|at| now.saturating_duration_since(at));
+        state.wanted_buffers = buffers_after_frame(state.wanted_buffers, since_last);
+        state.last_frame_at = Some(now);
         if state.hidden.frame() == HiddenFrame::Hold {
             // Nothing is shown in a minimized window; the frame waits in the texture.
             return Ok(());
@@ -890,10 +1110,26 @@ impl WindowPresenter {
                 arrival => break arrival,
             }
         };
+        if arrival == Arrival::Stale {
+            // Drawn at the size the window had before its monitor changed scale: it is not
+            // shown, the window keeps the size it took for the new scale, and the back buffer
+            // keeps any frame kept for the window to take.
+            trace_stage(
+                self.logger.as_deref(),
+                self.task_id,
+                "app.frame_stale",
+                region,
+                &format!("view={}x{}", state.follow.view().0, state.follow.view().1),
+            );
+            return Ok(());
+        }
         let keep = arrival == Arrival::Keep;
         let shown =
             self.present_locked(&mut state, &texture.texture, texture.size, region, keep)?;
         self.trace_frame_colour(&mut state, &texture.texture, region);
+        // SAFETY: plain COM calls on objects this presenter owns, and the immediate context
+        // under its lock.
+        let band_changed = unsafe { self.probe_band(&mut state, &texture.texture, region) };
         if keep {
             trace_stage(
                 self.logger.as_deref(),
@@ -913,6 +1149,16 @@ impl WindowPresenter {
             );
         }
         drop(state);
+        if let Some(fill) = band_changed {
+            if let Some(told) = self
+                .band_colour
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .as_ref()
+            {
+                told(fill);
+            }
+        }
         if keep {
             // The window takes the frame's size, and shows it then.
             if let Some(ready) = self
@@ -1348,6 +1594,27 @@ impl WindowPresenter {
         }
     }
 
+    /// The window is now on a monitor of `dpi`. A splash still shown keeps its icon 160 dp
+    /// large there: it is drawn again from the icon's full image at the new size, with the
+    /// client area the window takes for the new scale, when that comes.
+    pub fn splash_dpi_changed(&self, dpi: u32) {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.closed || state.first_frame.is_some() {
+            return;
+        }
+        let Some(image) = state.splash_image.as_mut() else {
+            return;
+        };
+        if image.dpi == dpi {
+            return;
+        }
+        image.dpi = dpi;
+        let view = state.asked;
+        if let Err(why) = self.draw_splash(&mut state, view) {
+            note(self.logger.as_deref(), &why);
+        }
+    }
+
     /// Draws the splash at the size of a `view` pixel client area, and commits it.
     fn draw_splash(&self, state: &mut State, view: (u32, u32)) -> Result<(), String> {
         let Some(image) = state.splash_image.as_ref() else {
@@ -1360,11 +1627,12 @@ impl WindowPresenter {
             size: *size,
             pixels,
         });
+        let source = icon.map_or(0, |icon| icon.size.0.min(icon.size.1));
         let pixels = splash::compose(
             view,
             image.background,
             icon,
-            splash::icon_edge(view, image.dpi),
+            splash::icon_edge(view, image.dpi, source),
         );
         let dcomp = self.gpu.dcomp()?.lock().unwrap_or_else(|e| e.into_inner());
         // SAFETY: plain COM calls on objects this presenter owns; the update reads only
@@ -1595,7 +1863,15 @@ impl WindowPresenter {
             let started = Instant::now();
             // The buffers follow the texture, which keeps its size while the window is
             // resized; only the source size follows the frame.
-            let change = swapchain_change(state.buffers, texture_size);
+            let mut change = swapchain_change(state.buffers, texture_size);
+            if change == SwapchainChange::Keep
+                && state.swapchain.is_some()
+                && state.buffer_count != state.wanted_buffers
+            {
+                // The size fits, but a still window lets a buffer go or a drawing one takes
+                // it back.
+                change = SwapchainChange::Resize(texture_size);
+            }
             match change {
                 SwapchainChange::Create((buffer_width, buffer_height)) => {
                     let desc = DXGI_SWAP_CHAIN_DESC1 {
@@ -1608,7 +1884,7 @@ impl WindowPresenter {
                             Quality: 0,
                         },
                         BufferUsage: DXGI_USAGE_RENDER_TARGET_OUTPUT,
-                        BufferCount: swapchain_buffers(),
+                        BufferCount: state.wanted_buffers,
                         // The only scaling a composition swapchain takes; the visual's
                         // transform does the scaling.
                         Scaling: DXGI_SCALING_STRETCH,
@@ -1632,6 +1908,7 @@ impl WindowPresenter {
                             .map_err(|e| failed("showing a task window's swapchain", e))?;
                     }
                     state.swapchain = Some(swapchain);
+                    state.buffer_count = state.wanted_buffers;
                     // The content is new: the first present commits it.
                     state.committed = None;
                 }
@@ -1639,13 +1916,14 @@ impl WindowPresenter {
                     if let Some(swapchain) = &state.swapchain {
                         swapchain
                             .ResizeBuffers(
-                                0,
+                                state.wanted_buffers,
                                 buffer_width,
                                 buffer_height,
                                 DXGI_FORMAT_UNKNOWN,
                                 DXGI_SWAP_CHAIN_FLAG(0),
                             )
                             .map_err(|e| failed("resizing a task window's swapchain", e))?;
+                        state.buffer_count = state.wanted_buffers;
                     }
                 }
                 SwapchainChange::Keep => {}

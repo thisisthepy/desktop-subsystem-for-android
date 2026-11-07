@@ -71,6 +71,8 @@ object Messages {
             .setAppBytes(maxOf(0L, app.appBytes))
             .setDataBytes(maxOf(0L, app.dataBytes))
             .setCacheBytes(maxOf(0L, app.cacheBytes))
+            .setPrimaryAbi(app.primaryAbi)
+            .addAllNativeLibraries(io.github.thisisthepy.dsa.agent.install.NativeLibraries.messages(app.nativeLibraries))
         return Envelope.newBuilder().setInstalledApp(info).build().toByteArray()
     }
 

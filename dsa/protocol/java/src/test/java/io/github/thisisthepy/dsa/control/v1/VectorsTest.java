@@ -226,6 +226,18 @@ public final class VectorsTest {
                         .setY(599.0f)
                         .setButtons(32))
                 .build());
+        cases.put("pointer_event_pen_tilt", Envelope.newBuilder()
+                .setPointerEvent(PointerEvent.newBuilder()
+                        .setTaskId(42)
+                        .setAction(PointerAction.POINTER_ACTION_DOWN)
+                        .setTool(PointerTool.POINTER_TOOL_PEN)
+                        .setPointerId(1)
+                        .setX(100.0f)
+                        .setY(200.0f)
+                        .setPressure(0.5f)
+                        .setTiltX(30.0f)
+                        .setTiltY(-45.0f))
+                .build());
         cases.put("key_event_ctrl_a_down", Envelope.newBuilder()
                 .setKeyEvent(KeyEvent.newBuilder()
                         .setTaskId(42)
@@ -362,6 +374,11 @@ public final class VectorsTest {
                 .build());
         cases.put("install_apk", Envelope.newBuilder()
                 .setInstallApk(InstallApk.newBuilder().setTransferId(3).setName("notes.apk").setSize(1000))
+                .build());
+        cases.put("install_apk_split", Envelope.newBuilder()
+                .setInstallApk(InstallApk.newBuilder().setTransferId(4).setName("notes.xapk").setSize(13)
+                        .addParts(InstallPart.newBuilder().setName("base.apk").setSize(10))
+                        .addParts(InstallPart.newBuilder().setName("main.1.com.example.notes.obb").setSize(3).setObb(true)))
                 .build());
         cases.put("apk_chunk", Envelope.newBuilder()
                 .setApkChunk(ApkChunk.newBuilder().setTransferId(3).setOffset(131072)

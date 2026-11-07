@@ -29,7 +29,7 @@ fn fr2_a_minimal_configuration_gets_working_defaults() {
     // Without memory_mb and without a user limit, the VM keeps its 3 GiB default.
     assert_eq!(vm.memory_mb, host_sized_memory_mb(0));
     assert_eq!(vm.memory_mb, 3072);
-    assert!([5, 9].contains(&vm.page_reporting_order));
+    assert!([0, 9].contains(&vm.page_reporting_order));
     assert_eq!(vm.socket_sids, ["S-1-5-21-1-2-3-1001"]);
     vm.to_hcs_document_for(GuestArch::X86_64)
         .expect("the defaults make a valid VM");
@@ -57,10 +57,12 @@ fn fr10_freezing_after_a_time_in_doze_is_a_setting() {
 fn nfr2_free_pages_are_reported_in_the_smallest_pieces_the_host_takes() {
     assert_eq!(page_reporting_order_for_build(None), 9);
     assert_eq!(page_reporting_order_for_build(Some((19045, 3392))), 9);
-    assert_eq!(page_reporting_order_for_build(Some((19045, 3393))), 5);
+    assert_eq!(page_reporting_order_for_build(Some((19045, 3393))), 0);
     assert_eq!(page_reporting_order_for_build(Some((22000, 1969))), 9);
-    assert_eq!(page_reporting_order_for_build(Some((22000, 1970))), 5);
-    assert_eq!(page_reporting_order_for_build(Some((26300, 0))), 5);
+    assert_eq!(page_reporting_order_for_build(Some((22000, 1970))), 0);
+    // Every free 4 KiB page is reported, not only whole 128 KiB blocks: memory an app frees
+    // goes back without waiting for compaction to gather it.
+    assert_eq!(page_reporting_order_for_build(Some((26300, 0))), 0);
     let pinned = MINIMAL.replace("\n}", ",\n  \"page_reporting_order\": 9\n}");
     let config = HostConfig::parse(&pinned).unwrap();
     let vm = config.vm_config(Some("S-1-5-21-1-2-3-1001")).unwrap();

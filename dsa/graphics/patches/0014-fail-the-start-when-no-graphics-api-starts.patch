@@ -1,0 +1,18 @@
+diff --git a/host/FrameBuffer.cpp b/host/FrameBuffer.cpp
+--- a/host/FrameBuffer.cpp
++++ b/host/FrameBuffer.cpp
+@@ -386,6 +386,14 @@ bool FrameBuffer::initialize(int width, int height, gfxstream::host::FeatureSet
+     }
+ #endif
+ 
++    // With neither Vulkan nor GL there is nothing to compose or post with: the composition
++    // below would call through the GL emulation that was never made. Fail the start, so
++    // the embedder hears that the host has no usable graphics instead of crashing.
++    if (!fb->m_emulationVk && !fb->m_emulationGl) {
++        ERR("Neither Vulkan nor GL emulation could start; the renderer cannot run.");
++        return false;
++    }
++
+     fb->m_useVulkanComposition = fb->m_features.GuestVulkanOnly.enabled ||
+                                  fb->m_features.VulkanNativeSwapchain.enabled;
+ 

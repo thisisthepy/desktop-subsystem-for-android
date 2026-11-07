@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The split-APK bundles DSA installs beside APKs: an app packed as a base APK and split APKs
+  in one archive, as APKPure (.xapk), bundletool and SAI (.apks) and APKMirror (.apkm) make
+  them. "Install in Android" (dsa-apk.desktop) opens them. App Bundles (.aab) get no type of
+  their own here, so the tools that build them keep opening them.
+-->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-split-apk-bundle">
+    <comment>Split APK bundle</comment>
+    <comment xml:lang="ko">분할 APK 묶음</comment>
+    <sub-class-of type="application/zip"/>
+    <generic-icon name="package-x-generic"/>
+    <glob pattern="*.xapk"/>
+    <glob pattern="*.apks"/>
+    <glob pattern="*.apkm"/>
+  </mime-type>
+</mime-info>

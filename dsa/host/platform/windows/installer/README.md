@@ -60,6 +60,9 @@ copies only `setup.exe` itself, because the package is embedded in it.)
   (built from `dsa/host/platform/windows/settings/`), so it carries the .NET runtime and
   needs nothing installed first. It changes settings only through the service,
   which keeps them in `C:\ProgramData\DSA\settings` (`settings_dir` in the configuration).
+- Installs the APK Installer (`DsaApkInstaller.exe`) beside it, in the same folder and on the
+  same runtime, without a Start menu shortcut. `.apk` files open in it, and Open with lists it
+  as "APK Installer".
 - Puts the licence bundle and master notice in `C:\Program Files\DSA\licenses\` and
   `C:\Program Files\DSA\NOTICE.txt`.
 - Keeps the image in `image.cab` beside the MSI, because an MSI holds at most 2 GB.
@@ -72,6 +75,14 @@ copies only `setup.exe` itself, because the package is embedded in it.)
   DSA program still running from them in every session (the window manager, the app
   windows and the settings app), and afterwards starts the window manager again for each
   signed-in user.
+- Installs a rebuild of the version already installed (development and CI builds share a
+  version) as an upgrade: double-click the newer MSI or `setup.exe`. Each build is its own
+  product to Windows Installer, so it replaces the one before it rather than repairing it.
+  `msiexec /i dsa-<version>.msi REINSTALL=ALL REINSTALLMODE=vamus` does the same for a newer
+  build, and repairs the build that is installed when it is the same package.
+- Removes the images, the settings and each user's files only on a real uninstall. A repair
+  (`msiexec /fa`, or Repair in Installed apps), a reinstall, a change and an upgrade keep
+  them.
 - When the image the service last used has missing or broken files, the service moves to
   a usable installed image, or downloads one when there is none, rather than waiting on
   files that cannot boot.
@@ -114,7 +125,8 @@ only progress; `/install`, `/repair`, `/uninstall` and `/layout [folder]` choose
 do; `/norestart` never restarts; `/log file` writes a log; and `InstallFolder=<folder>
 DataFolder=<folder>` choose the folders.
 
-The logo (`setup-ui/assets/make-logo.py`) is drawn here. The window's text, colours and
+The logo (`setup-ui/assets/logo.ico` and `logo.png`) is rendered from the DSA symbol by
+`dsa/brand/generate.py`. The window's text, colours and
 layout are this project's own.
 
 ## Third-party parts and their licences

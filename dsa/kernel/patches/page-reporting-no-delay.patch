@@ -1,0 +1,19 @@
+diff --git a/mm/page_reporting.c b/mm/page_reporting.c
+--- a/mm/page_reporting.c
++++ b/mm/page_reporting.c
+@@ -47,7 +47,14 @@
+  */
+ EXPORT_SYMBOL_GPL(page_reporting_order);
+
+-#define PAGE_REPORTING_DELAY	(2 * HZ)
++/*
++ * Report freed pages to the host at once. Upstream waits two seconds before each pass
++ * so a queue builds up, and a pass that runs out of its budget waits two seconds again
++ * before the next, so a large free (an app closing, a cache drop) reached the host only
++ * slice by slice, over many seconds. Memory a desktop guest frees belongs back on the
++ * host now; each pass still reports in batches.
++ */
++#define PAGE_REPORTING_DELAY	0
+ static struct page_reporting_dev_info __rcu *pr_dev_info __read_mostly;
+
+ enum {

@@ -7,7 +7,14 @@
 	<key>CFBundleDisplayName</key>
 	<string>Desktop Subsystem for Android</string>
 	<key>CFBundleExecutable</key>
-	<string>dsa-app-window</string>
+	<string>dsa-settings</string>
+	<key>CFBundleIconFile</key>
+	<string>DSA</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>ko</string>
+	</array>
 	<key>CFBundleIdentifier</key>
 	<string>org.thisisthepy.dsa</string>
 	<key>CFBundleInfoDictionaryVersion</key>

@@ -1,0 +1,18 @@
+diff --git a/host/vulkan/VkCommonOperations.cpp b/host/vulkan/VkCommonOperations.cpp
+--- a/host/vulkan/VkCommonOperations.cpp
++++ b/host/vulkan/VkCommonOperations.cpp
+@@ -955,8 +955,13 @@ std::unique_ptr<VkEmulation> VkEmulation::create(VulkanDispatch* gvk,
+     bool surfaceSupported = extensionsSupported(instanceExts, surfaceInstanceExtNames);
+ #if defined(__APPLE__)
+     const std::string vulkanIcd = android::base::getEnvironmentVariable("ANDROID_EMU_VK_ICD");
+-    const bool moltenVKEnabled = (vulkanIcd == "moltenvk");
+     const bool moltenVKSupported = extensionsSupported(instanceExts, moltenVkInstanceExtNames);
++    // stream_renderer_init asks for the host's Vulkan, which clears ANDROID_EMU_VK_ICD, so
++    // an embedder never gets to name MoltenVK. The loader lists MoltenVK only to an instance
++    // that enables portability enumeration, so with no driver named, use MoltenVK whenever
++    // the loader offers its extensions.
++    const bool moltenVKEnabled =
++        (vulkanIcd == "moltenvk") || (vulkanIcd.empty() && moltenVKSupported);
+     if (moltenVKEnabled && !moltenVKSupported) {
+         // This might happen if the user manually changes moltenvk ICD library
+         ERR("MoltenVK requested, but the required extensions are not supported.");

@@ -32,6 +32,73 @@ pub mod names {
     pub const APP_WINDOW: &str = "DSA app window";
 }
 
+pub mod shell {
+    //! The words Explorer, the Start menu and the Services console show for DSA, in every
+    //! language they are translated into. They are a string table in the installed
+    //! `dsa-app-window.exe`, and the installer points at them as indirect strings
+    //! (`@<file>,-<id>`), so Windows shows each user the words in that user's display
+    //! language. Product names (DSA Files, DSA Settings) are not translated; the verbs are.
+
+    /// "Open in an Android app", the context menu entry of every file.
+    pub const OPEN_IN_ANDROID_APP: u16 = 101;
+    /// "Share with an Android app", the context menu entry of every file.
+    pub const SHARE_WITH_ANDROID_APP: u16 = 102;
+    /// The description of the "DSA Settings" Start menu shortcut.
+    pub const SETTINGS_SHORTCUT_DESCRIPTION: u16 = 104;
+    /// "Install in Android", the open verb of an `.apk` file.
+    pub const INSTALL_IN_ANDROID: u16 = 105;
+    /// The kind of file an `.apk` file is, as Explorer's Type column shows it.
+    pub const APK_FILE_TYPE: u16 = 106;
+    /// The name of the entry in Explorer's navigation pane. Android is a trademark and is
+    /// never transliterated, so it reads the same in every language.
+    pub const NAVIGATION_NAME: u16 = 107;
+    /// The tooltip of the entry in Explorer's navigation pane.
+    pub const NAVIGATION_TIP: u16 = 108;
+    /// The description of the DSA service, as the Services console shows it.
+    pub const SERVICE_DESCRIPTION: u16 = 109;
+    /// The APK Installer's name, as Open with and the taskbar show it.
+    pub const APK_INSTALLER_NAME: u16 = 110;
+    /// The kind of file a split-APK bundle (`.xapk`, `.apks`, `.apkm`) is, as Explorer's Type
+    /// column shows it.
+    pub const APK_BUNDLE_FILE_TYPE: u16 = 111;
+
+    /// Every string, as (ID, English, Korean).
+    pub const STRINGS: &[(u16, &str, &str)] = &[
+        (OPEN_IN_ANDROID_APP, "Open in an Android app", "Android 앱에서 열기"),
+        (SHARE_WITH_ANDROID_APP, "Share with an Android app", "Android 앱으로 공유"),
+        (
+            SETTINGS_SHORTCUT_DESCRIPTION,
+            "Settings and state of Desktop Subsystem for Android",
+            "Desktop Subsystem for Android의 설정과 상태",
+        ),
+        (INSTALL_IN_ANDROID, "Install in Android", "Android에 설치"),
+        (APK_FILE_TYPE, "APK app package", "APK 앱 패키지"),
+        (NAVIGATION_NAME, "Android", "Android"),
+        (
+            NAVIGATION_TIP,
+            "The shared storage of your Android",
+            "내 Android의 공유 저장소",
+        ),
+        (
+            SERVICE_DESCRIPTION,
+            "Runs each user's Android in its own virtual machine and answers the dsa command and the desktop apps.",
+            "사용자마다 Android를 자체 가상 머신에서 실행하고, dsa 명령과 데스크톱 앱의 요청에 응답합니다.",
+        ),
+        (APK_INSTALLER_NAME, "APK Installer", "APK 설치 관리자"),
+        (APK_BUNDLE_FILE_TYPE, "Split APK bundle", "분할 APK 묶음"),
+    ];
+
+    /// The English string `id`, which the installer also writes as the plain fallback.
+    pub fn english(id: u16) -> Option<&'static str> {
+        STRINGS.iter().find(|s| s.0 == id).map(|s| s.1)
+    }
+
+    /// The Korean string `id`.
+    pub fn korean(id: u16) -> Option<&'static str> {
+        STRINGS.iter().find(|s| s.0 == id).map(|s| s.2)
+    }
+}
+
 /// English (United States), the language of every program's main version information.
 pub const LANG_EN_US: u16 = 0x0409;
 /// Korean, for the names that have a Korean translation.
@@ -43,13 +110,32 @@ pub const CODE_PAGE_UNICODE: u16 = 1200;
 pub const RT_ICON: u16 = 3;
 /// `RT_GROUP_ICON`: the list of an icon's images.
 pub const RT_GROUP_ICON: u16 = 14;
+/// `RT_STRING`: a block of sixteen strings of a string table.
+pub const RT_STRING: u16 = 6;
 /// `RT_VERSION`: the version information.
 pub const RT_VERSION: u16 = 16;
+/// `RT_RCDATA`: raw data the program reads itself.
+pub const RT_RCDATA: u16 = 10;
+
+/// The `RT_RCDATA` ID of the app's icon as the guest drew it, a PNG larger than the 256 pixel
+/// icon image, in an app's window program. The window's splash is drawn from it, so the icon
+/// is scaled down to its size on a monitor of any scale up to 320% rather than up from 256.
+pub const SPLASH_ICON_ID: u16 = 1;
+
+/// The largest image an icon resource holds, in pixels on a side.
+pub const MAX_ICON_IMAGE_SIDE: u32 = 256;
 
 /// The ID of the icon group every DSA program shows, the first and only one.
 pub const ICON_GROUP_ID: u16 = 1;
 /// The ID of the version information.
 pub const VERSION_ID: u16 = 1;
+/// The ID of the second icon group the installed window host carries: the icon of Android's
+/// entry in Explorer's navigation pane (DSA Files), which the entry names as
+/// `dsa-app-window.exe,-3`. It was 2 while the icon carried a Files badge; Explorer caches
+/// an icon by file and index, so a new index makes an upgrade show the new drawing.
+pub const FILES_ICON_GROUP_ID: u16 = 3;
+/// The `RT_ICON` ID of the Files icon's first image, clear of the program icon's images.
+pub const FILES_ICON_FIRST_IMAGE_ID: u16 = 101;
 
 /// The strings of one language's version information.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -239,6 +325,47 @@ pub fn png_icon(png: &[u8]) -> Option<IconImage> {
     })
 }
 
+/// The side an icon image made from an app's `side` pixel PNG takes: the PNG's own when it
+/// fits an icon image, else the largest an icon image holds, to which it is scaled down.
+pub fn icon_image_side(side: u32) -> u32 {
+    side.min(MAX_ICON_IMAGE_SIDE)
+}
+
+/// An icon image of `side` pixels square from `pixels`, rows of straight-alpha BGRA pixels
+/// with the top row first: a bitmap without its file header, as `RT_ICON` holds one. The
+/// header gives twice the height, for the colour rows and the mask under them; the colour
+/// rows go bottom first, and the mask is all clear because the alpha channel says what shows.
+/// `None` when `pixels` does not hold `side` rows of `side` pixels.
+pub fn dib_icon(pixels: &[u8], side: u32) -> Option<IconImage> {
+    let side_usize = side as usize;
+    if side == 0 || side > MAX_ICON_IMAGE_SIDE || pixels.len() != side_usize * side_usize * 4 {
+        return None;
+    }
+    let row = side_usize * 4;
+    // Mask rows are padded to four bytes.
+    let mask_row = side_usize.div_ceil(32) * 4;
+    let mut data = Vec::with_capacity(40 + row * side_usize + mask_row * side_usize);
+    data.extend_from_slice(&40u32.to_le_bytes());
+    data.extend_from_slice(&(side as i32).to_le_bytes());
+    data.extend_from_slice(&(2 * side as i32).to_le_bytes());
+    data.extend_from_slice(&1u16.to_le_bytes()); // planes
+    data.extend_from_slice(&32u16.to_le_bytes()); // bits per pixel
+    data.extend_from_slice(&0u32.to_le_bytes()); // no compression
+    data.extend_from_slice(&((row + mask_row) as u32 * side).to_le_bytes());
+    data.extend_from_slice(&[0u8; 16]); // resolution and colours: unused
+    for y in (0..side_usize).rev() {
+        data.extend_from_slice(&pixels[y * row..(y + 1) * row]);
+    }
+    data.resize(data.len() + mask_row * side_usize, 0);
+    let byte = |side: u32| if side >= 256 { 0 } else { side as u8 };
+    Some(IconImage {
+        width: byte(side),
+        height: byte(side),
+        bit_count: 32,
+        data,
+    })
+}
+
 /// The `RT_GROUP_ICON` resource listing `images`, whose `RT_ICON` resources have the IDs
 /// `first_id`, `first_id + 1` and so on.
 pub fn icon_group(images: &[IconImage], first_id: u16) -> Vec<u8> {
@@ -257,6 +384,68 @@ pub fn icon_group(images: &[IconImage], first_id: u16) -> Vec<u8> {
         out.extend_from_slice(&(first_id + index as u16).to_le_bytes());
     }
     out
+}
+
+/// The `RT_STRING` resources of a string table in `language`, from (ID, text) pairs. Windows
+/// keeps strings in blocks of sixteen: block `n` (from 1) holds IDs `16 * (n - 1)` to
+/// `16 * n - 1`, each as its length in UTF-16 units and then the units, with no terminator.
+pub fn string_table(strings: &[(u16, &str)], language: u16) -> Vec<Resource> {
+    let mut blocks: std::collections::BTreeMap<u16, [Option<&str>; 16]> = Default::default();
+    for (id, text) in strings {
+        blocks.entry(id / 16 + 1).or_insert([None; 16])[usize::from(id % 16)] = Some(text);
+    }
+    blocks
+        .into_iter()
+        .map(|(block, entries)| {
+            let mut data = Vec::new();
+            for entry in entries {
+                let units: Vec<u16> = entry.unwrap_or("").encode_utf16().collect();
+                data.extend_from_slice(&(units.len() as u16).to_le_bytes());
+                data.extend(units.iter().flat_map(|unit| unit.to_le_bytes()));
+            }
+            Resource {
+                kind: RT_STRING,
+                id: block,
+                language,
+                data,
+            }
+        })
+        .collect()
+}
+
+/// The resources of a further icon from the `.ico` file `file`: its images, numbered from
+/// `first_id`, and the icon group `group_id` that lists them.
+pub fn icon_resources(file: &[u8], group_id: u16, first_id: u16) -> Result<Vec<Resource>, String> {
+    let images = parse_ico(file)?;
+    if images.is_empty() {
+        return Err("the icon file holds no image".into());
+    }
+    let mut resources: Vec<Resource> = images
+        .iter()
+        .enumerate()
+        .map(|(index, image)| Resource {
+            kind: RT_ICON,
+            id: first_id + index as u16,
+            language: 0,
+            data: image.data.clone(),
+        })
+        .collect();
+    resources.push(Resource {
+        kind: RT_GROUP_ICON,
+        id: group_id,
+        language: 0,
+        data: icon_group(&images, first_id),
+    });
+    Ok(resources)
+}
+
+/// The English and Korean string tables of the words in [`shell`].
+pub fn shell_string_tables() -> Vec<Resource> {
+    let english: Vec<(u16, &str)> = shell::STRINGS.iter().map(|s| (s.0, s.1)).collect();
+    let korean: Vec<(u16, &str)> = shell::STRINGS.iter().map(|s| (s.0, s.2)).collect();
+    let mut tables = string_table(&english, LANG_EN_US);
+    tables.extend(string_table(&korean, LANG_KO_KR));
+    tables
 }
 
 /// One resource for a `.res` file.
@@ -349,6 +538,17 @@ pub fn program_resources(
 ///
 /// The version is `DSA_VERSION` when the installer build sets it, else the crate's.
 pub fn embed(bin: &str, description: &str, description_ko: Option<&str>, icon_file: &str) {
+    embed_with(bin, description, description_ko, icon_file, Vec::new());
+}
+
+/// [`embed`], with `extra` resources (such as [`shell_string_tables`]) beside them.
+pub fn embed_with(
+    bin: &str,
+    description: &str,
+    description_ko: Option<&str>,
+    icon_file: &str,
+    extra: Vec<Resource>,
+) {
     println!("cargo:rerun-if-env-changed=DSA_VERSION");
     println!("cargo:rerun-if-changed={icon_file}");
     let windows = std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows");
@@ -372,11 +572,10 @@ pub fn embed(bin: &str, description: &str, description_ko: Option<&str>, icon_fi
     };
     let out_dir = std::env::var("OUT_DIR").expect("a build script has OUT_DIR");
     let path = std::path::Path::new(&out_dir).join(format!("{bin}.res"));
-    std::fs::write(
-        &path,
-        res_file(&program_resources(&strings, description_ko, &icon)),
-    )
-    .unwrap_or_else(|why| panic!("writing {}: {why}", path.display()));
+    let mut resources = program_resources(&strings, description_ko, &icon);
+    resources.extend(extra);
+    std::fs::write(&path, res_file(&resources))
+        .unwrap_or_else(|why| panic!("writing {}: {why}", path.display()));
     println!("cargo:rustc-link-arg-bin={bin}={}", path.display());
 }
 
@@ -400,6 +599,39 @@ mod tests {
 
     fn contains(haystack: &[u8], needle: &[u8]) -> bool {
         haystack.windows(needle.len()).any(|w| w == needle)
+    }
+
+    #[test]
+    fn fr9_shell_words_have_a_korean_string_table() {
+        let tables = shell_string_tables();
+        let korean: Vec<&Resource> = tables
+            .iter()
+            .filter(|r| r.kind == RT_STRING && r.language == LANG_KO_KR)
+            .collect();
+        assert!(!korean.is_empty());
+        for (id, english, ko) in shell::STRINGS {
+            assert!(!ko.contains("안드로이드"), "{id} transliterates Android");
+            let block = korean.iter().find(|r| r.id == id / 16 + 1).unwrap();
+            // Walk to the entry the way LoadString does.
+            let mut at = 0;
+            for _ in 0..id % 16 {
+                let len = u16::from_le_bytes([block.data[at], block.data[at + 1]]) as usize;
+                at += 2 + 2 * len;
+            }
+            let len = u16::from_le_bytes([block.data[at], block.data[at + 1]]) as usize;
+            assert_eq!(&block.data[at + 2..at + 2 + 2 * len], utf16(ko).as_slice());
+            if *id != shell::NAVIGATION_NAME {
+                assert_ne!(english, ko, "{id} has no Korean");
+            }
+        }
+        assert_eq!(
+            shell::korean(shell::OPEN_IN_ANDROID_APP),
+            Some("Android 앱에서 열기")
+        );
+        assert_eq!(
+            shell::english(shell::SHARE_WITH_ANDROID_APP),
+            Some("Share with an Android app")
+        );
     }
 
     #[test]
@@ -451,12 +683,81 @@ mod tests {
     }
 
     #[test]
+    fn fr3_an_icon_larger_than_an_icon_image_is_scaled_down_to_256() {
+        assert_eq!(icon_image_side(512), 256);
+        assert_eq!(icon_image_side(256), 256);
+        assert_eq!(icon_image_side(192), 192);
+    }
+
+    #[test]
+    fn fr3_a_bitmap_icon_image_holds_its_rows_bottom_first_over_a_clear_mask() {
+        // Two by two: the top row red and green, the bottom blue and white.
+        let pixels = [
+            [0, 0, 0xFF, 0xFF],
+            [0, 0xFF, 0, 0xFF],
+            [0xFF, 0, 0, 0x80],
+            [0xFF, 0xFF, 0xFF, 0xFF],
+        ]
+        .concat();
+        let image = dib_icon(&pixels, 2).unwrap();
+        assert_eq!((image.width, image.height, image.bit_count), (2, 2, 32));
+        let data = &image.data;
+        assert_eq!(u32::from_le_bytes(data[0..4].try_into().unwrap()), 40);
+        assert_eq!(i32::from_le_bytes(data[4..8].try_into().unwrap()), 2);
+        // Twice the height: the colour rows, then the mask.
+        assert_eq!(i32::from_le_bytes(data[8..12].try_into().unwrap()), 4);
+        assert_eq!(u16::from_le_bytes(data[14..16].try_into().unwrap()), 32);
+        assert_eq!(&data[40..48], &pixels[8..16]);
+        assert_eq!(&data[48..56], &pixels[0..8]);
+        // One four-byte mask row per row, all clear.
+        assert_eq!(data.len(), 40 + 16 + 8);
+        assert!(data[56..].iter().all(|b| *b == 0));
+        // A 256 pixel image is the largest, and its size is written as 0.
+        let big = dib_icon(&vec![0; 256 * 256 * 4], 256).unwrap();
+        assert_eq!((big.width, big.height), (0, 0));
+        assert_eq!(big.data.len(), 40 + 256 * 256 * 4 + 32 * 256);
+        assert!(dib_icon(&vec![0; 512 * 512 * 4], 512).is_none());
+        assert!(dib_icon(&pixels[..12], 2).is_none());
+    }
+
+    #[test]
     fn fr3_the_programs_icon_file_reads_back() {
         let file = include_bytes!("../../installer/setup-ui/assets/logo.ico");
         let images = parse_ico(file).unwrap();
         assert!(images.len() >= 4);
         assert!(images.iter().any(|image| image.width == 32));
         assert!(parse_ico(b"nonsense").is_err());
+    }
+
+    #[test]
+    fn fr29_the_files_icon_is_a_second_icon_group_with_every_size() {
+        let file = include_bytes!("../icons/files.ico");
+        let resources =
+            icon_resources(file, FILES_ICON_GROUP_ID, FILES_ICON_FIRST_IMAGE_ID).unwrap();
+        let images: Vec<_> = resources.iter().filter(|r| r.kind == RT_ICON).collect();
+        assert_eq!(images.len(), 8);
+        assert_eq!(images[0].id, FILES_ICON_FIRST_IMAGE_ID);
+        let group = resources.iter().find(|r| r.kind == RT_GROUP_ICON).unwrap();
+        assert_eq!(group.id, FILES_ICON_GROUP_ID);
+        assert_eq!(&group.data[4..6], &8u16.to_le_bytes());
+        assert!(icon_resources(b"nonsense", 2, 101).is_err());
+    }
+
+    #[test]
+    fn fr29_the_files_icon_is_the_plain_symbol_without_a_badge() {
+        // The navigation pane entry shows the DSA symbol alone, the same drawing as the
+        // program icon, with no folder badge in its corner.
+        let files = include_bytes!("../icons/files.ico");
+        let program = include_bytes!("../../installer/setup-ui/assets/logo.ico");
+        assert!(
+            files[..] == program[..],
+            "files.ico is not the plain DSA symbol"
+        );
+        assert_ne!(
+            FILES_ICON_GROUP_ID, 2,
+            "index 2 is the badged icon Explorer may have cached"
+        );
+        assert_ne!(FILES_ICON_GROUP_ID, ICON_GROUP_ID);
     }
 
     #[test]

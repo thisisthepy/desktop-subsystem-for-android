@@ -376,6 +376,76 @@ public  final class PointerEvent extends
     scrollY_ = 0F;
   }
 
+  public static final int TILT_X_FIELD_NUMBER = 11;
+  private float tiltX_;
+  /**
+   * <pre>
+   * A pen's tilt, in degrees from upright, from -90 to 90: positive `tilt_x` leans its top
+   * toward the right of the screen, positive `tilt_y` toward the bottom (toward the user).
+   * 0 for a pointer that does not measure it.
+   * </pre>
+   *
+   * <code>float tilt_x = 11;</code>
+   * @return The tiltX.
+   */
+  @java.lang.Override
+  public float getTiltX() {
+    return tiltX_;
+  }
+  /**
+   * <pre>
+   * A pen's tilt, in degrees from upright, from -90 to 90: positive `tilt_x` leans its top
+   * toward the right of the screen, positive `tilt_y` toward the bottom (toward the user).
+   * 0 for a pointer that does not measure it.
+   * </pre>
+   *
+   * <code>float tilt_x = 11;</code>
+   * @param value The tiltX to set.
+   */
+  private void setTiltX(float value) {
+    
+    tiltX_ = value;
+  }
+  /**
+   * <pre>
+   * A pen's tilt, in degrees from upright, from -90 to 90: positive `tilt_x` leans its top
+   * toward the right of the screen, positive `tilt_y` toward the bottom (toward the user).
+   * 0 for a pointer that does not measure it.
+   * </pre>
+   *
+   * <code>float tilt_x = 11;</code>
+   */
+  private void clearTiltX() {
+    
+    tiltX_ = 0F;
+  }
+
+  public static final int TILT_Y_FIELD_NUMBER = 12;
+  private float tiltY_;
+  /**
+   * <code>float tilt_y = 12;</code>
+   * @return The tiltY.
+   */
+  @java.lang.Override
+  public float getTiltY() {
+    return tiltY_;
+  }
+  /**
+   * <code>float tilt_y = 12;</code>
+   * @param value The tiltY to set.
+   */
+  private void setTiltY(float value) {
+    
+    tiltY_ = value;
+  }
+  /**
+   * <code>float tilt_y = 12;</code>
+   */
+  private void clearTiltY() {
+    
+    tiltY_ = 0F;
+  }
+
   public static io.github.thisisthepy.dsa.control.v1.PointerEvent parseFrom(
       java.nio.ByteBuffer data)
       throws com.google.protobuf.InvalidProtocolBufferException {
@@ -858,6 +928,80 @@ public  final class PointerEvent extends
       return this;
     }
 
+    /**
+     * <pre>
+     * A pen's tilt, in degrees from upright, from -90 to 90: positive `tilt_x` leans its top
+     * toward the right of the screen, positive `tilt_y` toward the bottom (toward the user).
+     * 0 for a pointer that does not measure it.
+     * </pre>
+     *
+     * <code>float tilt_x = 11;</code>
+     * @return The tiltX.
+     */
+    @java.lang.Override
+    public float getTiltX() {
+      return instance.getTiltX();
+    }
+    /**
+     * <pre>
+     * A pen's tilt, in degrees from upright, from -90 to 90: positive `tilt_x` leans its top
+     * toward the right of the screen, positive `tilt_y` toward the bottom (toward the user).
+     * 0 for a pointer that does not measure it.
+     * </pre>
+     *
+     * <code>float tilt_x = 11;</code>
+     * @param value The tiltX to set.
+     * @return This builder for chaining.
+     */
+    public Builder setTiltX(float value) {
+      copyOnWrite();
+      instance.setTiltX(value);
+      return this;
+    }
+    /**
+     * <pre>
+     * A pen's tilt, in degrees from upright, from -90 to 90: positive `tilt_x` leans its top
+     * toward the right of the screen, positive `tilt_y` toward the bottom (toward the user).
+     * 0 for a pointer that does not measure it.
+     * </pre>
+     *
+     * <code>float tilt_x = 11;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearTiltX() {
+      copyOnWrite();
+      instance.clearTiltX();
+      return this;
+    }
+
+    /**
+     * <code>float tilt_y = 12;</code>
+     * @return The tiltY.
+     */
+    @java.lang.Override
+    public float getTiltY() {
+      return instance.getTiltY();
+    }
+    /**
+     * <code>float tilt_y = 12;</code>
+     * @param value The tiltY to set.
+     * @return This builder for chaining.
+     */
+    public Builder setTiltY(float value) {
+      copyOnWrite();
+      instance.setTiltY(value);
+      return this;
+    }
+    /**
+     * <code>float tilt_y = 12;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearTiltY() {
+      copyOnWrite();
+      instance.clearTiltY();
+      return this;
+    }
+
     // @@protoc_insertion_point(builder_scope:dsa.control.v1.PointerEvent)
   }
   @java.lang.Override
@@ -884,10 +1028,13 @@ public  final class PointerEvent extends
             "pressure_",
             "scrollX_",
             "scrollY_",
+            "tiltX_",
+            "tiltY_",
           };
           java.lang.String info =
-              "\u0000\n\u0000\u0000\u0001\n\n\u0000\u0000\u0000\u0001\u0004\u0002\f\u0003\f\u0004" +
-              "\u000b\u0005\u0001\u0006\u0001\u0007\u000b\b\u0001\t\u0001\n\u0001";
+              "\u0000\f\u0000\u0000\u0001\f\f\u0000\u0000\u0000\u0001\u0004\u0002\f\u0003\f\u0004" +
+              "\u000b\u0005\u0001\u0006\u0001\u0007\u000b\b\u0001\t\u0001\n\u0001\u000b\u0001\f" +
+              "\u0001";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through

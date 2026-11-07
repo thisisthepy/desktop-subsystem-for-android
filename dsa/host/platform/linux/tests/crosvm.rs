@@ -1,10 +1,11 @@
 //! The launcher against the real crosvm under KVM.
 //!
 //! Two runs, each when CI gives it what it needs:
-//! - `DSA_CROSVM` names the crosvm to run and `DSA_CROSVM_TEST_KERNEL` a kernel to boot: the
-//!   command line it builds is one crosvm takes, and the VM can be resized through the
-//!   balloon, suspended, resumed and stopped through the control socket. The kernel need not
-//!   reach Android.
+//! - `DSA_CROSVM` names the crosvm to run, `DSA_CROSVM_TEST_KERNEL` a kernel to boot and
+//!   `DSA_CROSVM_TEST_INITRD` an initrd whose init brings up the virtio balloon and virtio-mem
+//!   drivers and idles: the command line it builds is one crosvm takes, and the VM can be
+//!   resized through its virtio-mem device, suspended, resumed and stopped through the control
+//!   socket. The kernel need not reach Android.
 //! - `DSA_CROSVM_TEST_IMAGE` names a published Android image folder as well: the real image
 //!   boots under crosvm until the guest's control daemon connects on its vsock port.
 //!
@@ -78,16 +79,20 @@ fn test_cid(offset: u32) -> u32 {
 
 #[test]
 fn fr2_crosvm_starts_resizes_freezes_and_stops_the_vm() {
-    let (Some(crosvm), Some(kernel)) = (
+    let (Some(crosvm), Some(kernel), Some(test_initrd)) = (
         crosvm(),
         std::env::var_os("DSA_CROSVM_TEST_KERNEL").map(PathBuf::from),
+        std::env::var_os("DSA_CROSVM_TEST_INITRD").map(PathBuf::from),
     ) else {
-        eprintln!("skipped: DSA_CROSVM and DSA_CROSVM_TEST_KERNEL name no crosvm and kernel");
+        eprintln!(
+            "skipped: DSA_CROSVM, DSA_CROSVM_TEST_KERNEL and DSA_CROSVM_TEST_INITRD name no \
+             crosvm, kernel and initrd"
+        );
         return;
     };
     let dir = scratch("kernel");
     let initrd = dir.join("initrd.img");
-    std::fs::write(&initrd, b"070701").unwrap();
+    std::fs::copy(&test_initrd, &initrd).unwrap();
     let account = Account::current().unwrap();
     make_disk(&account, &dir.join("data.img"), None, 1).unwrap();
     let files = ImageFiles {
@@ -105,9 +110,17 @@ fn fr2_crosvm_starts_resizes_freezes_and_stops_the_vm() {
         .unwrap_or_else(|why| panic!("{why}\n{:?}", launcher.diagnostics()));
     assert!(launcher.vm_id().is_some());
     assert_eq!(launcher.memory_range_mb(), Some((512, 1024)));
-    launcher
-        .set_memory_mb(768)
-        .unwrap_or_else(|why| panic!("{why}\n{:?}", launcher.diagnostics()));
+    // Retried while the guest's drivers come up; crosvm takes a virtio-mem request at once.
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while let Err(why) = launcher.set_memory_mb(768) {
+        if Instant::now() >= deadline {
+            panic!(
+                "the VM could not be resized within 60 s: {why}\n{:?}",
+                launcher.diagnostics()
+            );
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
     launcher.set_memory_mb(512).unwrap();
     launcher.freeze().unwrap();
     launcher.thaw().unwrap();
@@ -160,14 +173,28 @@ fn fr2_the_published_image_boots_under_crosvm_until_its_daemon_connects() {
     launcher
         .start(&secret)
         .unwrap_or_else(|why| panic!("{why}\n{:?}", launcher.diagnostics()));
-    let connected = daemon.accept_stream(Duration::from_secs(600));
+    // Waited for in short steps, so a VM that exits during boot fails the test at once
+    // instead of after the whole 600 s.
+    let deadline = Instant::now() + Duration::from_secs(600);
+    let connected = loop {
+        match daemon.accept_stream(Duration::from_secs(2)) {
+            Ok(stream) => break Ok(stream),
+            Err(why) => {
+                if let Some(exit) = launcher.exited() {
+                    break Err(format!("{exit} after {} s", started.elapsed().as_secs()));
+                }
+                if Instant::now() >= deadline {
+                    break Err(format!(
+                        "the guest's daemon did not connect within 600 s: {why:?}"
+                    ));
+                }
+            }
+        }
+    };
     let report = launcher.diagnostics();
     let stopped = launcher.stop(Duration::from_secs(30));
     if let Err(why) = &connected {
-        panic!(
-            "the guest's daemon did not connect within 600 s: {why:?}\n{}",
-            report.unwrap_or_default()
-        );
+        panic!("{why}\n{}", report.unwrap_or_default());
     }
     eprintln!(
         "the guest's daemon connected {} s after the start",

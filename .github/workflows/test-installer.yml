@@ -22,10 +22,12 @@ on:
   workflow_dispatch:
 
 concurrency:
-  # A newer push to develop holds every older one, so only the newest is checked. Runs
-  # that never finish are avoided by checking compile and lint before each push.
+  # On develop a run in progress finishes and only the newest waiting run stays: GitHub
+  # keeps one pending run per group, so a newer merge replaces the one still waiting.
+  # The newest run tests everything the dropped ones held. Anywhere else, such as a pull
+  # request, a newer run still replaces the older one.
   group: test-installer-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/develop' }}
 
 permissions:
   contents: read
@@ -125,6 +127,18 @@ jobs:
           -ListUrl "$env:MIRROR\images.json" -TrustedKey $env:TEST_PUBLIC_KEY
           -ProgramListUrl "$env:MIRROR\program.json"
 
+      # Fingers and a pen put into this machine's input with Windows' synthetic pointer
+      # devices, on a task window opened over a fake Android: ten fingers and a pinch reach
+      # the task as ten touch pointers, a pen with its pressure, barrel button and eraser, and
+      # a finger on the title bar's minimize button minimizes the window. They move the real
+      # input, so they are ignored on a developer's machine and run here, where nobody uses
+      # the desktop. The release build above already holds most of what they need.
+      - name: fr5_real_fingers_and_a_pen_reach_a_task_window_as_touch_and_a_pen
+        working-directory: dsa
+        run: |
+          cargo test --release --target $env:RUST_TARGET -p dsa-host-windows --test task_windows -- --ignored --test-threads 1 --nocapture real_input
+          if ($LASTEXITCODE -ne 0) { throw "touch or pen input on a task window did not reach its task" }
+
       # Nothing is installed yet, so setup.exe opens on its first screen. Pictures of it in
       # the light and the dark theme, of Change, and of the command line help.
       - name: Take pictures of setup.exe's first screens
@@ -139,7 +153,9 @@ jobs:
             Set-AppTheme -Dark:($theme -eq 'dark')
             $setup = Start-Process 'dsa\target\installer\setup-test-0.0.9.exe' -ArgumentList '/log', "$PWD\first-$theme.log" -PassThru
             $null = $setup.Handle
-            Wait-SetupControl InstallButton -Enabled | Out-Null
+            # The first start on a fresh runner can take minutes (the 2025 image took 130 seconds
+            # to show its window), so the first screen gets longer than later ones.
+            Wait-SetupControl InstallButton -Enabled -Seconds 300 | Out-Null
             Save-SetupScreen "$PWD\screens\$theme-install.png"
             $publisher = Get-SetupText HeroPublisher
             if ($publisher -cne 'ThisIsThePy') { throw "the first screen names the publisher '$publisher', not ThisIsThePy" }
@@ -176,8 +192,12 @@ jobs:
 
       - name: Install the package
         run: |
+          # fr29: the "DSA Files" shortcut an earlier version left must go.
+          $filesShortcut = "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\DSA Files.lnk"
+          Set-Content $filesShortcut 'left by an earlier version'
           $p = Start-Process msiexec -Wait -PassThru -ArgumentList '/i', 'dsa\target\installer\dsa-test-0.0.9.msi', '/qn', '/l*v', 'install.log', "INSTALLFOLDER=`"$env:PROGRAM_DIR`"", "DATAFOLDER=`"$env:DATA_DIR`""
           if ($p.ExitCode -ne 0) { Get-Content install.log -Tail 80; throw "install failed ($($p.ExitCode))" }
+          if (Test-Path $filesShortcut) { throw "installing left the DSA Files Start menu shortcut, which Windows search finds" }
 
       - name: Check the service, the command and the access lists
         run: |
@@ -188,7 +208,9 @@ jobs:
           if ($entry.Publisher -cne 'ThisIsThePy') { throw "the package names its publisher '$($entry.Publisher)', not ThisIsThePy" }
           $out = & "$env:PROGRAM_DIR\dsa.exe" status 2>&1
           Write-Host $out
-          if ($LASTEXITCODE -ne 0 -or -not ($out -match '^Android: Stopped')) { throw "dsa status: $out" }
+          # The window manager starts a stopped Android at sign-in, so Android may already be
+          # starting by the time status is asked for.
+          if ($LASTEXITCODE -ne 0 -or -not ($out -match '^Android: (Stopped|Starting|Active|Dozing)')) { throw "dsa status: $out" }
           $acl = (Get-Acl $env:DATA_DIR).Sddl
           Write-Host $acl
           if ($acl -notmatch 'S-1-5-83-0') { throw "the VMs cannot read the data folder" }
@@ -220,6 +242,14 @@ jobs:
           if (-not (Test-Path $shortcut)) { throw "there is no Start menu shortcut $shortcut" }
           $target = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut).TargetPath
           if ($target -ne $exe) { throw "the Start menu shortcut points at '$target', not $exe" }
+          # The APK Installer is its own program beside it, with its own name and no shortcut.
+          $installer = "$env:PROGRAM_DIR\settings\DsaApkInstaller.exe"
+          if (-not (Test-Path $installer)) { throw "DsaApkInstaller.exe is not installed in $env:PROGRAM_DIR\settings" }
+          $info = (Get-Item $installer).VersionInfo
+          Write-Host "DsaApkInstaller.exe: $($info.FileDescription) | $($info.ProductName) | $($info.ProductVersion)"
+          if ($info.FileDescription -cne 'APK Installer') { throw "DsaApkInstaller.exe calls itself '$($info.FileDescription)'" }
+          if ($info.ProductVersion -notlike '0.0.9*') { throw "DsaApkInstaller.exe says it is version '$($info.ProductVersion)', not 0.0.9" }
+          if (Test-Path "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\APK Installer.lnk") { throw "the APK Installer has a Start menu shortcut" }
 
           $dsa = "$env:PROGRAM_DIR\dsa.exe"
           $settings = & $dsa settings --json
@@ -255,23 +285,53 @@ jobs:
           . .github/scripts/installer/setup-ui.ps1
           New-Item -ItemType Directory -Force screens | Out-Null
           $exe = "$env:PROGRAM_DIR\settings\DsaSettings.exe"
-          # The app opens on the page --page names, so each picture is of one fresh start.
+          # Each picture is of one fresh start, on the page its pane item opens through UI Automation.
           foreach ($theme in 'light', 'dark') {
             Set-AppTheme -Dark:($theme -eq 'dark')
-            foreach ($page in 'general', 'memory', 'display', 'updates', 'advanced', 'device', 'about') {
-              $app = Start-Process $exe -ArgumentList '--page', $page -PassThru
+            foreach ($page in 'general', 'memory', 'display', 'updates', 'advanced', 'device', 'about', 'logs') {
+              $app = Start-Process $exe -PassThru
               $window = Wait-ProcessWindow $app.Id 90
               if (-not $window) {
                 Show-Desktop "settings-$theme-$page-timeout"
                 $exited = if ($app.HasExited) { "it exited with code $($app.ExitCode)" } else { "it is still running" }
                 throw "DSA Settings showed no window within 90 seconds; $exited"
               }
+              Open-SettingsPage $window $page
               Start-Sleep -Seconds 5
               Save-WindowScreen $window "$PWD\screens\settings-$theme-$page.png"
               if ($app.HasExited) { throw "DSA Settings exited while showing $page (code $($app.ExitCode))" }
               Stop-Process -Id $app.Id -Force
               $app.WaitForExit(10000) | Out-Null
             }
+          }
+          Set-AppTheme
+
+      # The pane in Task Manager's layout, open and closed, with an item under the pointer.
+      - name: Take pictures of the settings app's navigation pane
+        run: |
+          . .github/scripts/installer/setup-ui.ps1
+          Add-Type -Namespace Dsa -Name Pointer -MemberDefinition '[DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);'
+          New-Item -ItemType Directory -Force screens | Out-Null
+          $exe = "$env:PROGRAM_DIR\settings\DsaSettings.exe"
+          foreach ($theme in 'light', 'dark') {
+            Set-AppTheme -Dark:($theme -eq 'dark')
+            $app = Start-Process $exe -PassThru
+            $window = Wait-ProcessWindow $app.Id 90
+            if (-not $window) { throw "DSA Settings showed no window within 90 seconds" }
+            Start-Sleep -Seconds 5
+            $r = $window.Current.BoundingRectangle
+            # The third item below the hamburger: rows are 40 px apart, under a 48 px title bar.
+            [Dsa.Pointer]::SetCursorPos([int]$r.X + 24, [int]$r.Y + 48 + 40 * 3 + 20) | Out-Null
+            Save-WindowScreen $window "$PWD\screens\settings-$theme-pane-open.png"
+            $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::AutomationIdProperty, 'PART_ToggleButton')
+            $toggle = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
+            if (-not $toggle) { throw "the navigation pane has no toggle button" }
+            $toggle.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+            Start-Sleep -Seconds 2
+            Save-WindowScreen $window "$PWD\screens\settings-$theme-pane-closed.png"
+            if ($app.HasExited) { throw "DSA Settings exited after closing its pane (code $($app.ExitCode))" }
+            Stop-Process -Id $app.Id -Force
+            $app.WaitForExit(10000) | Out-Null
           }
           Set-AppTheme
 
@@ -288,13 +348,15 @@ jobs:
             foreach ($lang in 'en-US', 'ko-KR') {
               foreach ($theme in 'light', 'dark') {
                 Set-AppTheme -Dark:($theme -eq 'dark')
-                $app = Start-Process $exe -ArgumentList '--page', 'widgets', '--lang', $lang -PassThru
+                $app = Start-Process $exe -ArgumentList '--lang', $lang -PassThru
                 $window = Wait-ProcessWindow $app.Id 90
                 if (-not $window) {
                   Show-Desktop "settings-$theme-widgets-$lang-timeout"
                   throw "DSA Settings showed no window for the Widgets page within 90 seconds"
                 }
+                Open-SettingsPage $window 'widgets' $lang
                 Start-Sleep -Seconds 5
+                Assert-RowsShown $window 'Clock', 'Sticky note', 'Forecast'
                 Save-WindowScreen $window "$PWD\screens\settings-$theme-widgets-$lang.png"
                 if ($app.HasExited) { throw "DSA Settings exited while showing the Widgets page (code $($app.ExitCode))" }
                 Stop-Process -Id $app.Id -Force
@@ -323,12 +385,13 @@ jobs:
               foreach ($theme in 'light', 'dark') {
                 Set-AppTheme -Dark:($theme -eq 'dark')
                 foreach ($page in 'memory', 'general', 'advanced') {
-                  $app = Start-Process $exe -ArgumentList '--page', $page, '--lang', $lang -PassThru
+                  $app = Start-Process $exe -ArgumentList '--lang', $lang -PassThru
                   $window = Wait-ProcessWindow $app.Id 90
                   if (-not $window) {
                     Show-Desktop "settings-$theme-$page-$lang-timeout"
                     throw "DSA Settings showed no window for the $page page within 90 seconds"
                   }
+                  Open-SettingsPage $window $page $lang
                   Start-Sleep -Seconds 5
                   Save-WindowScreen $window "$PWD\screens\settings-$theme-$page-$lang.png"
                   if ($app.HasExited) { throw "DSA Settings exited while showing the $page page (code $($app.ExitCode))" }
@@ -340,6 +403,121 @@ jobs:
           } finally {
             Set-AppTheme
             Remove-Item Env:DSA_CLI
+          }
+
+      # The adb card sits below the fold of the Advanced page, so the page is scrolled to it.
+      # Each theme and language gets a picture at rest and one with the port box focused, and
+      # the box's height is measured. The Network page's read-only values get a picture too.
+      - name: fr17_text_boxes_and_selectable_values_match_winui
+        run: |
+          . .github/scripts/installer/setup-ui.ps1
+          New-Item -ItemType Directory -Force screens | Out-Null
+          $exe = "$env:PROGRAM_DIR\settings\DsaSettings.exe"
+          try {
+            foreach ($lang in 'en-US', 'ko-KR') {
+              foreach ($theme in 'light', 'dark') {
+                Set-AppTheme -Dark:($theme -eq 'dark')
+                $app = Start-Process $exe -ArgumentList '--lang', $lang -PassThru
+                $window = Wait-ProcessWindow $app.Id 90
+                if (-not $window) { throw "DSA Settings showed no window for the Advanced page within 90 seconds" }
+                Open-SettingsPage $window 'advanced' $lang
+                Start-Sleep -Seconds 5
+                $box = $window.FindFirst($Scope::Descendants, (New-Object System.Windows.Automation.PropertyCondition($Auto::AutomationIdProperty, 'AdbPortBox')))
+                if (-not $box) { throw "the Advanced page has no adb port box" }
+                $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+                $viewer = $walker.GetParent($box)
+                while ($viewer -and -not $viewer.GetCurrentPropertyValue($Auto::IsScrollPatternAvailableProperty)) {
+                  $viewer = $walker.GetParent($viewer)
+                }
+                if (-not $viewer) { throw "the adb port box is not inside anything that scrolls" }
+                $scroll = $viewer.GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
+                $w = $window.Current.BoundingRectangle
+                foreach ($percent in 30..100) {
+                  $scroll.SetScrollPercent(-1, $percent)
+                  Start-Sleep -Milliseconds 50
+                  $r = $box.Current.BoundingRectangle
+                  if ($r.Top -gt 0 -and $r.Top -lt ($w.Top + $w.Height / 2)) { break }
+                }
+                Start-Sleep -Seconds 1
+                Save-WindowScreen $window "$PWD\screens\settings-$theme-adb-$lang.png"
+                $r = $box.Current.BoundingRectangle
+                Write-Host "the adb port box measures $($r.Width) by $($r.Height)"
+                if ([Math]::Abs($r.Height - 32) -gt 0.5) { throw "the adb port box is $($r.Height) px high, not 32" }
+                $box.SetFocus()
+                Start-Sleep -Seconds 1
+                Save-WindowScreen $window "$PWD\screens\settings-$theme-adb-focused-$lang.png"
+                if ($app.HasExited) { throw "DSA Settings exited while showing the adb card (code $($app.ExitCode))" }
+                Stop-Process -Id $app.Id -Force
+                $app.WaitForExit(10000) | Out-Null
+              }
+            }
+            foreach ($theme in 'light', 'dark') {
+              Set-AppTheme -Dark:($theme -eq 'dark')
+              $app = Start-Process $exe -ArgumentList '--lang', 'en-US' -PassThru
+              $window = Wait-ProcessWindow $app.Id 90
+              if (-not $window) { throw "DSA Settings showed no window for the Network page within 90 seconds" }
+              Open-SettingsPage $window 'network' 'en-US'
+              Start-Sleep -Seconds 5
+              # An unknown page name opens General, so this card's title proves the page opened.
+              Assert-RowsShown $window "Android's network"
+              Save-WindowScreen $window "$PWD\screens\settings-$theme-network.png"
+              Stop-Process -Id $app.Id -Force
+              $app.WaitForExit(10000) | Out-Null
+            }
+          } finally {
+            Set-AppTheme
+          }
+
+      # Every item of the navigation pane, the footer's About too, is a list item named by its
+      # label that UI Automation can select, as Narrator does, and selecting it opens its page:
+      # the item reports itself selected and the page's title shows beside the pane. Invoking
+      # an item opens its page as well.
+      - name: fr17_every_settings_page_opens_from_its_pane_item_through_ui_automation
+        run: |
+          . .github/scripts/installer/setup-ui.ps1
+          New-Item -ItemType Directory -Force screens | Out-Null
+          $exe = "$env:PROGRAM_DIR\settings\DsaSettings.exe"
+          $pages = 'memory', 'apps', 'background', 'widgets', 'display', 'android', 'updates', 'device', 'network', 'advanced', 'logs', 'about', 'general'
+          foreach ($lang in 'en-US', 'ko-KR') {
+            $app = Start-Process $exe -ArgumentList '--lang', $lang -PassThru
+            $window = Wait-ProcessWindow $app.Id 90
+            if (-not $window) { throw "DSA Settings showed no window within 90 seconds" }
+            try {
+              foreach ($page in $pages) {
+                $label = Get-SettingsPageLabel $page $lang
+                Open-SettingsPage $window $page $lang
+                $others = @($pages | Where-Object { $_ -ne $page } | ForEach-Object {
+                  $other = Find-SettingsPaneItem $window (Get-SettingsPageLabel $_ $lang)
+                  if (-not $other) { throw "the navigation pane has no selectable item named '$(Get-SettingsPageLabel $_ $lang)'" }
+                  if ($other.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Current.IsSelected) { $_ }
+                })
+                if ($others) { throw "with '$label' open, these items also say they are selected: $($others -join ', ')" }
+                $paneEdge = $window.Current.BoundingRectangle.X + 244
+                $deadline = (Get-Date).AddSeconds(15)
+                $title = $null
+                while (-not $title -and (Get-Date) -lt $deadline) {
+                  $title = $window.FindAll($Scope::Descendants, (New-Object System.Windows.Automation.PropertyCondition($Auto::NameProperty, $label))) |
+                    Where-Object { $_.Current.BoundingRectangle.X -gt $paneEdge -and $_.Current.BoundingRectangle.Width -gt 0 } | Select-Object -First 1
+                  if (-not $title) { Start-Sleep -Milliseconds 500 }
+                }
+                if (-not $title) {
+                  Save-WindowScreen $window "$PWD\screens\settings-uia-$page-$lang.png"
+                  throw "selecting '$label' did not show a page titled '$label'"
+                }
+                Write-Host "'$label' opened its page ($lang)"
+              }
+              # Invoke opens a page too.
+              $item = Find-SettingsPaneItem $window (Get-SettingsPageLabel 'about' $lang)
+              $item.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+              Start-Sleep -Seconds 2
+              if (-not $item.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Current.IsSelected) {
+                throw "invoking the About item through UI Automation did not open its page"
+              }
+              if ($app.HasExited) { throw "DSA Settings exited (code $($app.ExitCode))" }
+            } finally {
+              Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue
+              $app.WaitForExit(10000) | Out-Null
+            }
           }
 
       # The "Running in the background" page with apps on it: this runner's Android does not
@@ -355,13 +533,15 @@ jobs:
           if ($listed.apps.Count -ne 2) { throw "the stand-in dsa lists $($listed.apps.Count) apps, not 2" }
           foreach ($theme in 'light', 'dark') {
             Set-AppTheme -Dark:($theme -eq 'dark')
-            $app = Start-Process $exe -ArgumentList '--page', 'background' -PassThru
+            $app = Start-Process $exe -PassThru
             $window = Wait-ProcessWindow $app.Id 90
             if (-not $window) {
               Show-Desktop "settings-$theme-background-timeout"
               throw "DSA Settings showed no window within 90 seconds"
             }
+            Open-SettingsPage $window 'background'
             Start-Sleep -Seconds 8
+            Assert-RowsShown $window 'Music', 'Files' -MinVisible 2
             Save-WindowScreen $window "$PWD\screens\settings-$theme-background.png"
             if ($app.HasExited) { throw "DSA Settings exited while showing the background apps (code $($app.ExitCode))" }
             Stop-Process -Id $app.Id -Force
@@ -378,11 +558,12 @@ jobs:
           [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
           [DllImport("user32.dll")] public static extern void mouse_event(uint flags, int dx, int dy, int data, System.UIntPtr extra);
           [DllImport("user32.dll")] public static extern bool SetForegroundWindow(System.IntPtr window);
+          [DllImport("user32.dll")] public static extern void keybd_event(byte key, byte scan, uint flags, System.UIntPtr extra);
           '@
           New-Item -ItemType Directory -Force screens | Out-Null
           $exe = "$env:PROGRAM_DIR\settings\DsaSettings.exe"
           $name = [System.Windows.Automation.AutomationElement]::NameProperty
-          $items = 'General', 'Memory', 'Apps', 'Running in the background', 'Widgets', 'Display & GPU', 'Updates', 'Device identity', 'Advanced', 'Android log', 'About'
+          $items = 'General', 'Memory', 'Apps', 'Running in the background', 'Widgets', 'Display & GPU', 'Android', 'Updates', 'Device identity', 'Network', 'Advanced', 'Android log', 'About'
 
           # The navigation item named $Text: the pane is on the left, so a page title of the
           # same name is not it.
@@ -400,20 +581,104 @@ jobs:
           function Get-ShownItems($Window) {
             @($items | Where-Object { Test-InView $Window (Find-Item $Window $_) })
           }
+          # The runner sometimes opens the Start menu over the window (the ARM64 image does), and
+          # then the wheel scrolls the Start menu. The wheel goes only to a point where DSA
+          # Settings is under the cursor: a point across the element that nothing covers, or,
+          # when every point is covered, one cleared by closing what covers it.
+          Add-Type -Namespace Dsa -Name Cover -MemberDefinition @'
+          [DllImport("user32.dll")] public static extern System.IntPtr WindowFromPoint(POINT point);
+          [DllImport("user32.dll")] public static extern System.IntPtr GetAncestor(System.IntPtr window, uint flags);
+          [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(System.IntPtr window, System.Text.StringBuilder name, int size);
+          [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(System.IntPtr window, out uint process);
+          [DllImport("user32.dll")] public static extern bool PostMessage(System.IntPtr window, uint message, System.IntPtr w, System.IntPtr l);
+          [DllImport("user32.dll")] public static extern System.IntPtr GetForegroundWindow();
+          [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X; public int Y; }
+          '@
+          function Get-Cover([int]$X, [int]$Y) {
+            $point = New-Object Dsa.Cover+POINT
+            $point.X = $X; $point.Y = $Y
+            $root = [Dsa.Cover]::GetAncestor([Dsa.Cover]::WindowFromPoint($point), 2)   # GA_ROOT
+            $class = New-Object System.Text.StringBuilder 256
+            [Dsa.Cover]::GetClassName($root, $class, 256) | Out-Null
+            $id = [uint32]0
+            [Dsa.Cover]::GetWindowThreadProcessId($root, [ref]$id) | Out-Null
+            $process = Get-Process -Id $id -ErrorAction SilentlyContinue
+            @{ Window = $root; Class = $class.ToString(); ProcessId = [int]$id; Process = $process.ProcessName }
+          }
           function Wheel-Over($Element, [int]$Notches) {
             $r = $Element.Current.BoundingRectangle
-            [Dsa.Input]::SetCursorPos([int]($r.X + $r.Width / 2), [int]($r.Y + $r.Height / 2)) | Out-Null
+            $owner = $Element.Current.ProcessId
+            $y = [int]($r.Y + $r.Height / 2)
+            $xs = 0.5, 0.15, 0.3, 0.7, 0.85 | ForEach-Object { [int]($r.X + $r.Width * $_) }
+            $found = $null
+            for ($try = 0; $try -lt 6 -and -not $found; $try++) {
+              foreach ($x in $xs) {
+                $cover = Get-Cover $x $y
+                if ($cover.ProcessId -eq $owner) { $found = $x; break }
+              }
+              if ($found) { break }
+              $cover = Get-Cover $xs[0] $y
+              Write-Host "the point to wheel over is covered by window class '$($cover.Class)' of process $($cover.Process) ($($cover.ProcessId)); closing it"
+              [Dsa.Input]::keybd_event(0x1B, 0, 0, [UIntPtr]::Zero)   # Escape down
+              [Dsa.Input]::keybd_event(0x1B, 0, 2, [UIntPtr]::Zero)   # Escape up
+              Get-Process StartMenuExperienceHost, SearchHost, ShellExperienceHost -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+              if ($try -ge 2) {
+                # Escape and closing the Start menu's hosts did not clear it: whatever window
+                # covers the point is closed, and a shell window is cleared by restarting the shell.
+                if ($cover.Process -eq 'explorer') {
+                  Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
+                } elseif ($cover.Process -notin 'csrss', 'dwm', 'winlogon', 'System', 'Idle', '') {
+                  [Dsa.Cover]::PostMessage($cover.Window, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null   # WM_CLOSE
+                  Stop-Process -Id $cover.ProcessId -Force -ErrorAction SilentlyContinue
+                }
+                Start-Sleep -Seconds 3
+              }
+              [Dsa.Input]::SetForegroundWindow([IntPtr]$window.Current.NativeWindowHandle) | Out-Null
+              Start-Sleep -Seconds 1
+            }
+            if (-not $found) {
+              Save-WindowScreen $window "$PWD\screens\settings-covered.png"
+              throw "another window covers DSA Settings where the wheel goes"
+            }
+            [Dsa.Input]::SetCursorPos($found, $y) | Out-Null
+            Start-Sleep -Milliseconds 200
             for ($i = 0; $i -lt $Notches; $i++) {
               [Dsa.Input]::mouse_event(0x0800, 0, 0, -120, [UIntPtr]::Zero)   # wheel down
               Start-Sleep -Milliseconds 100
             }
             Start-Sleep -Milliseconds 500
           }
+          # Keys go to the foreground window, and on the ARM64 runner the Start menu opens over
+          # DSA Settings and takes the keyboard (Tab then walks the Start menu's tiles). DSA
+          # Settings is made the foreground window before any key: the Start menu is closed
+          # with Escape, and an Alt tap lets this process move the foreground.
+          function Set-Foreground($Window) {
+            $handle = [IntPtr]$Window.Current.NativeWindowHandle
+            for ($try = 0; $try -lt 6; $try++) {
+              if ([Dsa.Cover]::GetForegroundWindow() -eq $handle) { return }
+              $front = [Dsa.Cover]::GetForegroundWindow()
+              $id = [uint32]0
+              [Dsa.Cover]::GetWindowThreadProcessId($front, [ref]$id) | Out-Null
+              Write-Host "the keyboard is with process $((Get-Process -Id $id -ErrorAction SilentlyContinue).ProcessName) ($id); bringing DSA Settings to the front"
+              [Dsa.Input]::keybd_event(0x1B, 0, 0, [UIntPtr]::Zero)   # Escape down
+              [Dsa.Input]::keybd_event(0x1B, 0, 2, [UIntPtr]::Zero)   # Escape up
+              if ($try -ge 2) {
+                Get-Process StartMenuExperienceHost, SearchHost -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+              }
+              [Dsa.Input]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero)   # Alt down
+              [Dsa.Input]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)   # Alt up
+              [Dsa.Input]::SetForegroundWindow($handle) | Out-Null
+              Start-Sleep -Seconds 1
+            }
+            Save-WindowScreen $Window "$PWD\screens\settings-not-foreground.png"
+            throw "DSA Settings could not be brought to the front for the keyboard"
+          }
           function Start-Short([string]$Page) {
             Close-PrivacyExperience
-            $app = Start-Process $exe -ArgumentList '--page', $Page -PassThru
+            $app = Start-Process $exe -PassThru
             $window = Wait-ProcessWindow $app.Id 90
             if (-not $window) { throw "DSA Settings showed no window within 90 seconds" }
+            Open-SettingsPage $window $Page
             Start-Sleep -Seconds 4
             $transform = $window.GetCurrentPattern([System.Windows.Automation.TransformPattern]::Pattern)
             $transform.Move(40, 40)
@@ -460,17 +725,22 @@ jobs:
             $window = $run.Window
             $seen = @{}
             Get-ShownItems $window | ForEach-Object { $seen[$_] = $true }
+            Set-Foreground $window
             $r = (Find-Item $window 'General').Current.BoundingRectangle
             [Dsa.Input]::SetCursorPos([int]($r.X + $r.Width / 2), [int]($r.Y + $r.Height / 2)) | Out-Null
             [Dsa.Input]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)   # left down
             [Dsa.Input]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)   # left up
             Start-Sleep -Seconds 1
-            for ($i = 0; $i -lt 16; $i++) {
+            Set-Foreground $window
+            # About sits in the pane's footer, and Tab may visit the pane toggle and the page
+            # before it, so the presses go on until every item was in view (at most 40).
+            for ($i = 0; $i -lt 40; $i++) {
               [System.Windows.Forms.SendKeys]::SendWait('{TAB}')
               Start-Sleep -Milliseconds 500
               $shown = Get-ShownItems $window
               Write-Host "Tab $($i + 1): $($shown -join ', ')"
               $shown | ForEach-Object { $seen[$_] = $true }
+              if (-not ($items | Where-Object { -not $seen[$_] })) { break }
             }
             Save-WindowScreen $window "$PWD\screens\settings-$theme-short-pane-keyboard.png"
             $missing = $items | Where-Object { -not $seen[$_] }
@@ -480,10 +750,11 @@ jobs:
             # The wheel over the page reaches its last card.
             $run = Start-Short 'general'
             $window = $run.Window
-            $text = $window.FindAll($Scope::Descendants, (New-Object System.Windows.Automation.PropertyCondition(
-              [System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Text))) |
-              Where-Object { $_.Current.BoundingRectangle.X -gt ($window.Current.BoundingRectangle.X + 320) } | Select-Object -First 1
-            if (-not $text) { throw "no text on the General page" }
+            # The page title stays put above the scrolling cards, as in Windows Settings, so the
+            # wheel goes over the first card's title.
+            $text = $window.FindAll($Scope::Descendants, (New-Object System.Windows.Automation.PropertyCondition($name, 'State'))) |
+              Where-Object { $_.Current.BoundingRectangle.X -gt ($window.Current.BoundingRectangle.X + 244) } | Select-Object -First 1
+            if (-not $text) { throw "no State card on the General page" }
             Wheel-Over $text 25
             $last = $window.FindFirst($Scope::Descendants, (New-Object System.Windows.Automation.PropertyCondition($name, 'Refresh')))
             Save-WindowScreen $window "$PWD\screens\settings-$theme-short-page-wheel.png"
@@ -518,13 +789,18 @@ jobs:
       - name: fr11_double_clicking_an_apk_opens_the_install_window
         run: |
           . .github/scripts/installer/setup-ui.ps1
+          # The APK Installer's window keeps this id.
           $script:WindowId = 'ApkInstallWindow'
           New-Item -ItemType Directory -Force screens | Out-Null
           $apks = (Resolve-Path .scratch/test-apks).Path
           Set-Content -Path "$apks\broken.apk" -Value 'not an apk' -NoNewline
+          # As a browser marks a download.
+          Set-Content -Path "$apks\many.apk" -Stream Zone.Identifier -Value "[ZoneTransfer]`r`nZoneId=3`r`nReferrerUrl=https://apps.example.com/many`r`nHostUrl=https://downloads.example.com/many.apk"
           $command =(Get-ItemProperty 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Classes\Dsa.ApkFile\shell\open\command').'(default)'
           Write-Host "the .apk association runs: $command"
-          if ($command -notlike "*\settings\DsaSettings.exe`" --install-apk `"%1`"") { throw "the .apk association runs $command" }
+          if ($command -notlike "*\settings\DsaApkInstaller.exe`" --install-apk `"%1`"") { throw "the .apk association runs $command" }
+          $friendly = (Get-ItemProperty 'Registry::HKEY_LOCAL_MACHINE\SOFTWARE\Classes\Applications\DsaApkInstaller.exe').FriendlyAppName
+          if ($friendly -notlike '@*\dsa-app-window.exe,-110') { throw "Open with names the APK Installer '$friendly'" }
           function Open-Apk([string]$Name) {
             # What Explorer runs for a double-clicked APK.
             $line = $command.Replace('%1', "$apks\$Name")
@@ -536,6 +812,13 @@ jobs:
           function Close-Apk($Process) {
             if (-not $Process.HasExited) { Stop-Process -Id $Process.Id -Force }
             $Process.WaitForExit(10000) | Out-Null
+          }
+          # Turns "Launch when ready" on or off; off keeps the window on its done screen.
+          function Set-LaunchWhenReady([bool]$On) {
+            $box = Wait-SetupControl LaunchWhenReady -Seconds 90
+            $toggle = $box.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+            $want = if ($On) { [System.Windows.Automation.ToggleState]::On } else { [System.Windows.Automation.ToggleState]::Off }
+            if ($toggle.Current.ToggleState -ne $want) { $toggle.Toggle() }
           }
           function Expect-Text([string]$Id, [string]$Like) {
             $text = Get-SetupText $Id
@@ -554,31 +837,104 @@ jobs:
             try {
               Wait-SetupControl InstallButton -Enabled -Seconds 90 | Out-Null
             } catch {
-              if ($app.HasExited) { Write-Host "DsaSettings.exe exited with code $($app.ExitCode)" }
+              if ($app.HasExited) { Write-Host "DsaApkInstaller.exe exited with code $($app.ExitCode)" }
               Get-WinEvent -FilterHashtable @{ LogName = 'Application'; ProviderName = '.NET Runtime', 'Application Error' } -MaxEvents 4 -ErrorAction SilentlyContinue |
                 ForEach-Object { Write-Host $_.Message }
               throw
             }
-            Expect-Text HeroTitle 'Notes'
-            Expect-Text HeroPackage 'com.example.notes'
-            Expect-Text VersionChip '*4.2*'
-            Expect-Text PermissionsHeader '*2*'
+            Expect-Text HeroTitle 'Install Notes[?]'
+            Expect-Text HeroPackage 'Package Name: com.example.notes'
+            Expect-Text PublisherText 'Publisher: *'
+            Expect-Text VersionChip 'Version: 4.2'
+            # No Zone.Identifier here: the folder it is in.
+            Expect-Text SourceText "Source: $apks"
+            Expect-Text PermissionsHeader 'Capabilities (2):'
             Save-SetupScreen "$PWD\screens\apk-$theme-details.png"
             Close-Apk $app
+
+            # Many permissions, code for another processor and transparent icon corners: the
+            # labels, the warning and More, and the labels stay English in Korean.
+            foreach ($lang in 'en-US', 'ko-KR') {
+              $line = $command.Replace('%1', "$apks\many.apk")
+              $exe = $line.Substring(1, $line.IndexOf('"', 1) - 1)
+              $app = Start-Process $exe -ArgumentList ($line.Substring($exe.Length + 3) + " --lang $lang") -PassThru
+              $null = $app.Handle
+              Wait-SetupControl InstallButton -Enabled -Seconds 90 | Out-Null
+              Expect-Text HeroTitle 'Install Many[?]'
+              Expect-Text HeroPackage 'Package Name: com.example.many'
+              Expect-Text VersionChip 'Version: 3.20.8107'
+              Expect-Text SourceText 'Source: downloads.example.com'
+              Expect-Text PermissionsHeader 'Capabilities (40):'
+              Expect-Text MoreLink 'More'
+              $title = (Find-SetupWindow).Current.Name
+              $want = if ($lang -eq 'ko-KR') { 'APK 설치 관리자' } else { 'APK Installer' }
+              if ($title -cne $want) { throw "the window's title is '$title', not '$want'" }
+              Wait-SetupControl CompatibilityTitle | Out-Null
+              Save-SetupScreen "$PWD\screens\apk-$theme-many-$lang.png"
+              # More is a toggle, as App Installer's is: it opens the list and becomes Less,
+              # and Less folds it again. UI Automation sees its state.
+              function Expect-Expanded([string]$State) {
+                $link = Wait-SetupControl MoreLink
+                $state = $link.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Current.ExpandCollapseState
+                if ("$state" -ne $State) { Show-Desktop "apk-more-$State"; throw "More is $state, not $State" }
+              }
+              Expect-Expanded 'Collapsed'
+              Invoke-SetupButton MoreLink
+              Wait-SetupControl PermissionList | Out-Null
+              Start-Sleep -Seconds 1
+              Expect-Text MoreLink 'Less'
+              Expect-Expanded 'Expanded'
+              Save-SetupScreen "$PWD\screens\apk-$theme-many-expanded-$lang.png"
+              Invoke-SetupButton MoreLink
+              Start-Sleep -Seconds 1
+              Expect-Text MoreLink 'More'
+              Expect-Expanded 'Collapsed'
+              Save-SetupScreen "$PWD\screens\apk-$theme-many-collapsed-again-$lang.png"
+              Close-Apk $app
+            }
+
             $app = Open-Apk adaptive.apk
             Wait-SetupControl InstallButton -Enabled -Seconds 90 | Out-Null
-            Expect-Text HeroTitle 'Adaptive'
+            Expect-Text HeroTitle 'Install Adaptive[?]'
             Save-SetupScreen "$PWD\screens\apk-$theme-adaptive-icon.png"
+            Close-Apk $app
+            # An adaptive icon whose foreground is a vector drawable, as Chrome's is: the tile
+            # shows the drawing on its background, not a plain square.
+            $app = Open-Apk vector.apk
+            Wait-SetupControl InstallButton -Enabled -Seconds 90 | Out-Null
+            Expect-Text HeroTitle 'Install Vector[?]'
+            Save-SetupScreen "$PWD\screens\apk-$theme-vector-icon.png"
             Close-Apk $app
             $app = Open-Apk broken.apk
             Wait-SetupControl ResultTitle -Seconds 90 | Out-Null
+            Expect-Text ResultText 'broken.apk is not a valid APK file.'
             Save-SetupScreen "$PWD\screens\apk-$theme-not-an-apk.png"
             Close-Apk $app
+            # Bundles are named for what they are, from what is in them.
+            $bundle = "$apks\work-bundle"
+            New-Item -ItemType Directory -Force $bundle | Out-Null
+            Copy-Item "$apks\notes.apk" "$bundle\base.apk"
+            Set-Content -Path "$bundle\manifest.json" -Value '{"package_name":"com.example.notes"}'
+            Compress-Archive -Force -Path "$bundle\base.apk", "$bundle\manifest.json" -DestinationPath "$apks\split.zip"
+            Copy-Item -Force "$apks\split.zip" "$apks\split.xapk"
+            Set-Content -Path "$bundle\BundleConfig.pb" -Value 'config' -NoNewline
+            Compress-Archive -Force -Path "$bundle\BundleConfig.pb" -DestinationPath "$apks\store.zip"
+            Copy-Item -Force "$apks\store.zip" "$apks\store.aab"
+            foreach ($case in @(
+                @{ File = 'split.xapk'; Like = 'split.xapk is a split APK bundle*not supported yet*' },
+                @{ File = 'store.aab'; Like = "store.aab is an Android App Bundle*cannot be installed directly*publisher*" })) {
+              $app = Open-Apk $case.File
+              Wait-SetupControl ResultTitle -Seconds 90 | Out-Null
+              Expect-Text ResultText $case.Like
+              Save-SetupScreen "$PWD\screens\apk-$theme-$($case.File -replace '\.', '-').png"
+              Close-Apk $app
+            }
 
             $env:DSA_CLI = $fake
             # Installing starts Android, finds the app installed already, and shows both versions.
             $env:FAKE_DSA_SCENARIO = 'update'
             $app = Open-Apk notes.apk
+            Set-LaunchWhenReady $false
             Invoke-SetupButton InstallButton -Seconds 90
             Wait-SetupControl ProgressTitle | Out-Null
             Save-SetupScreen "$PWD\screens\apk-$theme-starting-android.png"
@@ -633,14 +989,19 @@ jobs:
             foreach ($lang in 'en-US', 'ko-KR') {
               foreach ($theme in 'light', 'dark') {
                 Set-AppTheme -Dark:($theme -eq 'dark')
-                $app = Start-Process $exe -ArgumentList '--page', 'apps', '--lang', $lang -PassThru
+                $app = Start-Process $exe -ArgumentList '--lang', $lang -PassThru
                 $window = Wait-ProcessWindow $app.Id 90
                 if (-not $window) {
                   Show-Desktop "settings-$theme-apps-$lang-timeout"
                   throw "DSA Settings showed no window for the Apps page within 90 seconds"
                 }
+                Open-SettingsPage $window 'apps' $lang
                 Start-Sleep -Seconds 5
+                Assert-RowsShown $window $AppsFixtureLabels
                 Save-WindowScreen $window "$PWD\screens\settings-$theme-apps-$lang.png"
+                Set-PageScrolledToEnd $window
+                Assert-RowsShown $window $AppsFixtureLabels[-1]
+                Save-WindowScreen $window "$PWD\screens\settings-$theme-apps-$lang-end.png"
                 if ($app.HasExited) { throw "DSA Settings exited while showing the Apps page (code $($app.ExitCode))" }
                 Stop-Process -Id $app.Id -Force
                 $app.WaitForExit(10000) | Out-Null
@@ -665,6 +1026,137 @@ jobs:
             Set-AppTheme
             Remove-Item Env:DSA_CLI -ErrorAction SilentlyContinue
             Get-Process cmd, PING -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          }
+
+      # Every row of the Apps page and of the Android log is laid out with room for its text, and
+      # a row's search and actions reach dsa. Pictures alone let a blank list pass: this counts
+      # rows through UI Automation and fails on none.
+      - name: fr22_settings_apps_page_shows_every_app_and_its_actions_work
+        run: |
+          . .github/scripts/installer/setup-ui.ps1
+          . .github/scripts/installer/apps-fixture.ps1
+          Add-Type -Namespace Dsa -Name RowInput -MemberDefinition @'
+          [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+          [DllImport("user32.dll")] public static extern void mouse_event(uint flags, int dx, int dy, int data, System.UIntPtr extra);
+          [DllImport("user32.dll")] public static extern bool SetForegroundWindow(System.IntPtr window);
+          '@
+          New-Item -ItemType Directory -Force screens | Out-Null
+          $exe = "$env:PROGRAM_DIR\settings\DsaSettings.exe"
+          $types = [System.Windows.Automation.ControlType]
+          $env:DSA_CLI = New-AppsFixture "$env:RUNNER_TEMP\apps-rows" "$env:PROGRAM_DIR\dsa.exe"
+          $calls = "$env:RUNNER_TEMP\apps-rows\calls.txt"
+          function Find-Typed($Window, $Type) {
+            $Window.FindAll($Scope::Descendants, (New-Object System.Windows.Automation.PropertyCondition($Auto::ControlTypeProperty, $Type)))
+          }
+          function Wait-Call([string]$Pattern) {
+            $deadline = (Get-Date).AddSeconds(20)
+            while ((Get-Date) -lt $deadline) {
+              if ((Test-Path $calls) -and (Get-Content $calls | Where-Object { $_ -like $Pattern })) { return }
+              Start-Sleep -Milliseconds 250
+            }
+            Get-Content $calls -ErrorAction SilentlyContinue
+            throw "the page did not run dsa $Pattern"
+          }
+          function Press($Control) {
+            $Control.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+          }
+          function Set-Search($Window, [string]$Text) {
+            (Find-Typed $Window $types::Edit)[0].GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($Text)
+          }
+          try {
+            Set-AppTheme
+            $app = Start-Process $exe -ArgumentList '--lang', 'en-US' -PassThru
+            $window = Wait-ProcessWindow $app.Id 90
+            if (-not $window) { throw "DSA Settings showed no window for the Apps page within 90 seconds" }
+            Open-SettingsPage $window 'apps' 'en-US'
+            Assert-RowsShown $window $AppsFixtureLabels
+            $texts = Find-Typed $window $types::Text
+            $sizes = @($texts | Where-Object { $_.Current.Name -match '^[\d.,]+ (KB|MB|GB)$' -and $_.Current.BoundingRectangle.Width -gt 0 })
+            if ($sizes.Count -lt 9) { throw "only $($sizes.Count) of the 9 rows show their size" }
+            if (-not ($texts | Where-Object { $_.Current.Name -like '*com.example.notes*4.1.2*' -and $_.Current.BoundingRectangle.Width -gt 0 })) { throw "the Notes row does not show its version" }
+            $icons = @(Find-Typed $window $types::Image | Where-Object { $_.Current.BoundingRectangle.Height -gt 0 })
+            if ($icons.Count -lt 8) { throw "only $($icons.Count) of the 8 apps with an icon show one" }
+
+            # The search narrows the list, and clearing it brings every app back.
+            Set-Search $window 'notes'
+            Start-Sleep -Seconds 2
+            Save-WindowScreen $window "$PWD\screens\settings-apps-search.png"
+            Write-Host "the search box holds '$((Find-Typed $window $types::Edit)[0].GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value)'"
+            Assert-RowsShown $window 'Notes'
+            if (Find-RowTexts $window 'Weather') { throw "the search for notes still lists Weather" }
+
+            # A row's actions, on the one row the search left.
+            Press (Find-RowControl $window 'Notes' $types::Button 'Open')
+            Wait-Call 'launch com.example.notes*'
+            Start-Sleep -Seconds 1
+            Press (Find-RowControl $window 'Notes' $types::Button 'App info')
+            Wait-Call 'apps settings com.example.notes*'
+            Start-Sleep -Seconds 1
+            $box = Find-RowControl $window 'Notes' $types::ComboBox
+            $box.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
+            Start-Sleep -Seconds 1
+            $items = $box.FindAll($Scope::Descendants, (New-Object System.Windows.Automation.PropertyCondition($Auto::ControlTypeProperty, $types::ListItem)))
+            if ($items.Count -lt 2) { throw "the start size list offers $($items.Count) sizes" }
+            $items[1].GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+            Wait-Call 'app-window com.example.notes*--start-size 412x915*'
+            Start-Sleep -Seconds 1
+            # Automation's toggle raises no Click, which is what the row listens to: the mouse.
+            $condition = New-Object System.Windows.Automation.AndCondition(
+              (New-Object System.Windows.Automation.PropertyCondition($Auto::HelpTextProperty, 'Notes')),
+              (New-Object System.Windows.Automation.PropertyCondition($Auto::IsTogglePatternAvailableProperty, $true)))
+            $switch = $window.FindFirst($Scope::Descendants, $condition)
+            if (-not $switch) { throw "the Notes row has no switch" }
+            [Dsa.RowInput]::SetForegroundWindow([System.IntPtr]$window.Current.NativeWindowHandle) | Out-Null
+            $r = $switch.Current.BoundingRectangle
+            [Dsa.RowInput]::SetCursorPos([int]($r.Right - 20), [int]($r.Y + $r.Height / 2)) | Out-Null
+            Start-Sleep -Milliseconds 300
+            [Dsa.RowInput]::mouse_event(2, 0, 0, 0, [System.UIntPtr]::Zero)
+            [Dsa.RowInput]::mouse_event(4, 0, 0, 0, [System.UIntPtr]::Zero)
+            Wait-Call 'app-window com.example.notes*--fixed-size on*'
+            Start-Sleep -Seconds 1
+
+            # Uninstall asks first, then runs; an app that is part of Android cannot be removed.
+            Set-Search $window ''
+            Assert-RowsShown $window $AppsFixtureLabels
+            if ((Find-RowControl $window 'Settings' $types::Button 'Uninstall').Current.IsEnabled) { throw "an app that is part of Android offers to uninstall" }
+            Press (Find-RowControl $window 'Reader' $types::Button 'Uninstall')
+            $deadline = (Get-Date).AddSeconds(20)
+            $confirm = $null
+            $sameProcess = New-Object System.Windows.Automation.PropertyCondition($Auto::ProcessIdProperty, $app.Id)
+            while (-not $confirm -and (Get-Date) -lt $deadline) {
+              foreach ($top in $Auto::RootElement.FindAll($Scope::Children, $sameProcess)) {
+                $confirm = Find-Typed $top $types::Button |
+                  Where-Object { $_.Current.Name -eq 'Uninstall' -and $_.Current.HelpText -eq '' } | Select-Object -First 1
+                if ($confirm) { break }
+              }
+              if (-not $confirm) { Start-Sleep -Milliseconds 250 }
+            }
+            if (-not $confirm) { throw "uninstalling asked nothing" }
+            Press $confirm
+            Wait-Call 'apps uninstall com.example.reader*'
+            Assert-RowsShown $window $AppsFixtureLabels
+            Stop-Process -Id $app.Id -Force
+            $app.WaitForExit(10000) | Out-Null
+
+            # The Android log's list shows its lines.
+            $app = Start-Process $exe -ArgumentList '--lang', 'en-US' -PassThru
+            $window = Wait-ProcessWindow $app.Id 90
+            if (-not $window) { throw "DSA Settings showed no window for the log page within 90 seconds" }
+            Open-SettingsPage $window 'logs' 'en-US'
+            $deadline = (Get-Date).AddSeconds(30)
+            $lines = @()
+            while ($lines.Count -eq 0 -and (Get-Date) -lt $deadline) {
+              Start-Sleep -Seconds 1
+              $lines = @(Find-Typed $window $types::Text |
+                Where-Object { $_.Current.Name -like '*fixture line*' -and (Test-InWindow $window $_) -and $_.Current.BoundingRectangle.Height -gt 0 })
+            }
+            Save-WindowScreen $window "$PWD\screens\settings-logs.png"
+            if ($lines.Count -eq 0) { throw "the Android log page shows no line of the log it read" }
+            Write-Host "log lines in view: $($lines.Count)"
+            Stop-Process -Id $app.Id -Force
+            $app.WaitForExit(10000) | Out-Null
+          } finally {
+            Remove-Item Env:DSA_CLI -ErrorAction SilentlyContinue
           }
 
       # Task Manager and the taskbar name a program by its version information.
@@ -877,6 +1369,75 @@ jobs:
       # service's own first check (a minute after it started) cannot find it first.
       # 0.0.10 bundles a newer stand-in image, 17.0.0-2, whose disk has a disk's signature, so
       # the service takes its files as complete and must boot it in place of 17.0.0-1.
+      # A repair, a reinstall from the command line, and a rebuild of the same version put
+      # over the one installed, each as people run them: msiexec /fa, msiexec /i with
+      # REINSTALL=ALL REINSTALLMODE=vamus, and a plain msiexec /i (a double-click) or the
+      # REINSTALL command on a newer build. None of them may remove what only uninstalling
+      # removes, and the service runs after each. Uninstalling, and what it removes, is the
+      # Uninstall step below.
+      - name: fr1_repair_reinstall_and_same_version_rebuild_keep_the_service_and_user_data
+        run: |
+          $userRoot = "$env:LOCALAPPDATA\DSA"
+          $userMark = "$userRoot\repair-test.txt"
+          $machineMark = "$env:DATA_DIR\settings\repair-test.txt"
+          New-Item -ItemType Directory -Force $userRoot, "$env:DATA_DIR\settings" | Out-Null
+          Set-Content $userMark 'kept'
+          Set-Content $machineMark 'kept'
+          $displayName = 'Desktop Subsystem for Android (test package)'
+          function Get-Entries {
+            @(Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*' |
+              Where-Object { $_.DisplayName -eq $displayName })
+          }
+          function Invoke-Step([string] $what, [string] $log, [string[]] $arguments) {
+            Write-Host "== $what"
+            $p = Start-Process msiexec -Wait -PassThru -ArgumentList ($arguments + @('/qn', '/l*v', $log))
+            if ($p.ExitCode -notin 0, 3010) {
+              Select-String -Path $log -Pattern 'Error 27|Return value 3' | Select-Object -First 20 | ForEach-Object { $_.Line }
+              Get-Content $log -Tail 80
+              throw "$what failed ($($p.ExitCode))"
+            }
+            if (Select-String -Path $log -Pattern 'Action start [0-9:]+: Remove(UserData|MachineData|Images|Updates)\.' -Quiet) {
+              throw "$what ran an action that only uninstalling may run"
+            }
+            $deadline = (Get-Date).AddSeconds(60)
+            while ((Get-Service DsaHost -ErrorAction SilentlyContinue).Status -ne 'Running') {
+              if ((Get-Date) -gt $deadline) { throw "after $what the service is $((Get-Service DsaHost -ErrorAction SilentlyContinue).Status)" }
+              Start-Sleep -Seconds 2
+            }
+            foreach ($name in 'dsa.exe', 'dsa-hostd.exe', 'dsa-wm.exe') {
+              if (-not (Test-Path "$env:PROGRAM_DIR\$name")) { throw "after $what $name is missing" }
+            }
+            if (-not (Test-Path $userMark)) { throw "$what removed the user's files" }
+            if (-not (Test-Path $machineMark)) { throw "$what removed the service's settings" }
+            $entries = Get-Entries
+            if ($entries.Count -ne 1) { throw "after $what $($entries.Count) entries are in the list of installed programs" }
+            & "$env:PROGRAM_DIR\dsa.exe" status
+            if ($LASTEXITCODE -ne 0) { throw "after $what dsa status failed" }
+            Write-Host "$what kept the service and the data"
+          }
+          function Build-Again {
+            dsa/host/platform/windows/installer/build.ps1 -Version 0.0.9 -PlaceholderKernel -Arch $env:DSA_ARCH `
+              -ImageDir .scratch\stand-in-image -AndroidMajor 17 `
+              -PipeSddl "D:P(A;;GA;;;SY)(A;;GRGW;;;IU)(A;;GRGW;;;AU)" `
+              -ListUrl "$env:MIRROR\images.json" -TrustedKey $env:TEST_PUBLIC_KEY `
+              -ProgramListUrl "$env:MIRROR\program.json"
+            if (-not $?) { throw "building 0.0.9 again failed" }
+          }
+          $msi = (Resolve-Path 'dsa\target\installer\dsa-test-0.0.9.msi').Path
+          Invoke-Step 'a repair (msiexec /fa)' 'repair-fa.log' @('/fa', "`"$msi`"")
+          Invoke-Step 'a reinstall (REINSTALL=ALL REINSTALLMODE=vamus)' 'repair-vamus.log' @('/i', "`"$msi`"", 'REINSTALL=ALL', 'REINSTALLMODE=vamus')
+          # A rebuild of the same version is a new product to Windows Installer, which takes
+          # the place of the build before it.
+          $before = (Get-Entries)[0].PSChildName
+          Build-Again
+          Invoke-Step 'a same-version rebuild installed as a double-click does' 'same-version.log' @('/i', "`"$msi`"")
+          $after = (Get-Entries)[0].PSChildName
+          if ($after -eq $before) { throw "the rebuild did not replace the build before it ($before)" }
+          Build-Again
+          Invoke-Step 'a same-version rebuild installed with REINSTALL=ALL REINSTALLMODE=vamus' 'same-version-vamus.log' @('/i', "`"$msi`"", 'REINSTALL=ALL', 'REINSTALLMODE=vamus')
+          if ((Get-Entries)[0].PSChildName -eq $after) { throw "the second rebuild did not replace the first" }
+          Remove-Item -Force $userMark, $machineMark
+
       - name: Build version 0.0.10 and offer it in the program list
         run: |
           $newer = (New-Item -ItemType Directory -Force .scratch\stand-in-image-2).FullName
@@ -1005,8 +1566,13 @@ jobs:
           New-Item -Force $ours | Out-Null
           New-ItemProperty -Path $ours -Name DisplayName -Value 'Example' -Force | Out-Null
           New-Item -Force $theirs | Out-Null
+          # fr29: the upgrade to this version left no "DSA Files" shortcut, and nor does uninstalling.
+          $filesShortcut = "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\DSA Files.lnk"
+          if (Test-Path $filesShortcut) { throw "the upgrade left the DSA Files Start menu shortcut" }
+          Set-Content $filesShortcut 'left by an earlier version'
           $p = Start-Process 'dsa\target\installer\setup-test-0.0.10.exe' -Wait -PassThru -ArgumentList '/uninstall', '/quiet', '/log', 'uninstall.log'
           if ($p.ExitCode -ne 0) { Get-ChildItem uninstall*.log | ForEach-Object { Get-Content $_ -Tail 80 }; throw "uninstall failed ($($p.ExitCode))" }
+          if (Test-Path $filesShortcut) { throw "uninstalling left the DSA Files Start menu shortcut" }
           if (Get-Service DsaHost -ErrorAction SilentlyContinue) { throw "the service is still there" }
           if (Test-Path "$env:PROGRAM_DIR\dsa.exe") { throw "the program is still there" }
           if (Test-Path "$env:PROGRAM_DIR\dsa-wm.exe") { throw "dsa-wm.exe is still there" }
@@ -1072,6 +1638,7 @@ jobs:
             Copy-Item "dsa\target\$env:RUST_TARGET\release\$name" "$program\$name"
           }
           Copy-Item dsa\target\installer\settings-app\DsaSettings.exe "$program\settings\DsaSettings.exe"
+          Copy-Item dsa\target\installer\settings-app\DsaApkInstaller.exe "$program\settings\DsaApkInstaller.exe"
           foreach ($name in 'gfxstream_backend.dll', 'NOTICE.txt', 'licenses\NOTICE.txt', 'licenses\gfxstream.txt', "vm\$env:KERNEL_NAME") {
             Set-Content "$program\$name" 'a stale copy' -NoNewline
           }
@@ -1247,7 +1814,7 @@ jobs:
           Write-Host "the package's platform: $template"
           if ($template -notlike 'Arm64;*') { throw "the arm64 package's platform is '$template'" }
           # IMAGE_FILE_MACHINE_ARM64 is 0xAA64, at the PE header's machine field.
-          foreach ($program in Get-ChildItem dsa\target\installer\stage\*.exe, dsa\target\installer\settings-app\DsaSettings.exe) {
+          foreach ($program in Get-ChildItem dsa\target\installer\stage\*.exe, dsa\target\installer\settings-app\DsaSettings.exe, dsa\target\installer\settings-app\DsaApkInstaller.exe) {
             $bytes = [System.IO.File]::ReadAllBytes($program.FullName)
             $pe = [BitConverter]::ToInt32($bytes, 0x3c)
             $machine = [BitConverter]::ToUInt16($bytes, $pe + 4)

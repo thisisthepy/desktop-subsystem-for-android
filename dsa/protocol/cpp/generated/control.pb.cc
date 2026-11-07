@@ -260,10 +260,12 @@ struct AppInfoDefaultTypeInternal {
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 AppInfoDefaultTypeInternal _AppInfo_default_instance_;
 PROTOBUF_CONSTEXPR InstalledApp::InstalledApp(
     ::_pbi::ConstantInitialized): _impl_{
-    /*decltype(_impl_.package_name_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+    /*decltype(_impl_.native_libraries_)*/{}
+  , /*decltype(_impl_.package_name_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
   , /*decltype(_impl_.label_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
   , /*decltype(_impl_.icon_png_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
   , /*decltype(_impl_.version_name_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.primary_abi_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
   , /*decltype(_impl_.version_code_)*/int64_t{0}
   , /*decltype(_impl_.first_install_time_ms_)*/uint64_t{0u}
   , /*decltype(_impl_.last_update_time_ms_)*/uint64_t{0u}
@@ -281,6 +283,68 @@ struct InstalledAppDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 InstalledAppDefaultTypeInternal _InstalledApp_default_instance_;
+PROTOBUF_CONSTEXPR NativeLibraries::NativeLibraries(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.names_)*/{}
+  , /*decltype(_impl_.abi_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct NativeLibrariesDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR NativeLibrariesDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~NativeLibrariesDefaultTypeInternal() {}
+  union {
+    NativeLibraries _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 NativeLibrariesDefaultTypeInternal _NativeLibraries_default_instance_;
+PROTOBUF_CONSTEXPR ReinstallApp::ReinstallApp(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.package_name_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.abi_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.request_id_)*/0u
+  , /*decltype(_impl_.erase_data_)*/false
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct ReinstallAppDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR ReinstallAppDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~ReinstallAppDefaultTypeInternal() {}
+  union {
+    ReinstallApp _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 ReinstallAppDefaultTypeInternal _ReinstallApp_default_instance_;
+PROTOBUF_CONSTEXPR ReinstallResult::ReinstallResult(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.package_name_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.message_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.primary_abi_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.request_id_)*/0u
+  , /*decltype(_impl_.status_)*/0
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct ReinstallResultDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR ReinstallResultDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~ReinstallResultDefaultTypeInternal() {}
+  union {
+    ReinstallResult _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 ReinstallResultDefaultTypeInternal _ReinstallResult_default_instance_;
+PROTOBUF_CONSTEXPR NativeLibraryCrash::NativeLibraryCrash(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.package_name_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.detail_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.arm64_supported_)*/false
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct NativeLibraryCrashDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR NativeLibraryCrashDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~NativeLibraryCrashDefaultTypeInternal() {}
+  union {
+    NativeLibraryCrash _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 NativeLibraryCrashDefaultTypeInternal _NativeLibraryCrash_default_instance_;
 PROTOBUF_CONSTEXPR RefreshApps::RefreshApps(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_._cached_size_)*/{}} {}
@@ -361,6 +425,8 @@ PROTOBUF_CONSTEXPR PointerEvent::PointerEvent(
   , /*decltype(_impl_.pressure_)*/0
   , /*decltype(_impl_.scroll_x_)*/0
   , /*decltype(_impl_.scroll_y_)*/0
+  , /*decltype(_impl_.tilt_x_)*/0
+  , /*decltype(_impl_.tilt_y_)*/0
   , /*decltype(_impl_._cached_size_)*/{}} {}
 struct PointerEventDefaultTypeInternal {
   PROTOBUF_CONSTEXPR PointerEventDefaultTypeInternal()
@@ -724,6 +790,106 @@ struct ArmTranslationStateDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 ArmTranslationStateDefaultTypeInternal _ArmTranslationState_default_instance_;
+PROTOBUF_CONSTEXPR GappsInstall::GappsInstall(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.sha256_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.size_)*/uint64_t{0u}
+  , /*decltype(_impl_.transfer_id_)*/0u
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct GappsInstallDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR GappsInstallDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~GappsInstallDefaultTypeInternal() {}
+  union {
+    GappsInstall _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 GappsInstallDefaultTypeInternal _GappsInstall_default_instance_;
+PROTOBUF_CONSTEXPR GappsChunk::GappsChunk(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.data_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.offset_)*/uint64_t{0u}
+  , /*decltype(_impl_.transfer_id_)*/0u
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct GappsChunkDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR GappsChunkDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~GappsChunkDefaultTypeInternal() {}
+  union {
+    GappsChunk _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 GappsChunkDefaultTypeInternal _GappsChunk_default_instance_;
+PROTOBUF_CONSTEXPR GappsRemove::GappsRemove(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_._cached_size_)*/{}} {}
+struct GappsRemoveDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR GappsRemoveDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~GappsRemoveDefaultTypeInternal() {}
+  union {
+    GappsRemove _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 GappsRemoveDefaultTypeInternal _GappsRemove_default_instance_;
+PROTOBUF_CONSTEXPR GappsQuery::GappsQuery(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_._cached_size_)*/{}} {}
+struct GappsQueryDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR GappsQueryDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~GappsQueryDefaultTypeInternal() {}
+  union {
+    GappsQuery _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 GappsQueryDefaultTypeInternal _GappsQuery_default_instance_;
+PROTOBUF_CONSTEXPR GappsState::GappsState(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.error_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.abi_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.abilist_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.received_)*/uint64_t{0u}
+  , /*decltype(_impl_.transfer_id_)*/0u
+  , /*decltype(_impl_.done_)*/false
+  , /*decltype(_impl_.installed_)*/false
+  , /*decltype(_impl_.active_)*/false
+  , /*decltype(_impl_.sdk_)*/0u
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct GappsStateDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR GappsStateDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~GappsStateDefaultTypeInternal() {}
+  union {
+    GappsState _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 GappsStateDefaultTypeInternal _GappsState_default_instance_;
+PROTOBUF_CONSTEXPR GoogleDeviceIdQuery::GoogleDeviceIdQuery(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_._cached_size_)*/{}} {}
+struct GoogleDeviceIdQueryDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR GoogleDeviceIdQueryDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~GoogleDeviceIdQueryDefaultTypeInternal() {}
+  union {
+    GoogleDeviceIdQuery _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 GoogleDeviceIdQueryDefaultTypeInternal _GoogleDeviceIdQuery_default_instance_;
+PROTOBUF_CONSTEXPR GoogleDeviceId::GoogleDeviceId(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.id_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct GoogleDeviceIdDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR GoogleDeviceIdDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~GoogleDeviceIdDefaultTypeInternal() {}
+  union {
+    GoogleDeviceId _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 GoogleDeviceIdDefaultTypeInternal _GoogleDeviceId_default_instance_;
 PROTOBUF_CONSTEXPR GuestNotification::GuestNotification(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_.key_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
@@ -969,9 +1135,26 @@ struct GuestBootDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 GuestBootDefaultTypeInternal _GuestBoot_default_instance_;
-PROTOBUF_CONSTEXPR InstallApk::InstallApk(
+PROTOBUF_CONSTEXPR InstallPart::InstallPart(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_.name_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.size_)*/uint64_t{0u}
+  , /*decltype(_impl_.obb_)*/false
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct InstallPartDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR InstallPartDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~InstallPartDefaultTypeInternal() {}
+  union {
+    InstallPart _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 InstallPartDefaultTypeInternal _InstallPart_default_instance_;
+PROTOBUF_CONSTEXPR InstallApk::InstallApk(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.parts_)*/{}
+  , /*decltype(_impl_.name_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.abi_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
   , /*decltype(_impl_.size_)*/uint64_t{0u}
   , /*decltype(_impl_.transfer_id_)*/0u
   , /*decltype(_impl_._cached_size_)*/{}} {}
@@ -2240,6 +2423,19 @@ struct SystemSettingsDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 SystemSettingsDefaultTypeInternal _SystemSettings_default_instance_;
+PROTOBUF_CONSTEXPR DeviceName::DeviceName(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.name_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct DeviceNameDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR DeviceNameDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~DeviceNameDefaultTypeInternal() {}
+  union {
+    DeviceName _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 DeviceNameDefaultTypeInternal _DeviceName_default_instance_;
 PROTOBUF_CONSTEXPR GamepadConnected::GamepadConnected(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_.name_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
@@ -2622,6 +2818,77 @@ bool StatusBarAppearance_Parse(
       StatusBarAppearance_entries, 3, name, &int_value);
   if (success) {
     *value = static_cast<StatusBarAppearance>(int_value);
+  }
+  return success;
+}
+bool ReinstallStatus_IsValid(int value) {
+  switch (value) {
+    case 0:
+    case 1:
+    case 2:
+    case 3:
+    case 4:
+    case 5:
+    case 6:
+      return true;
+    default:
+      return false;
+  }
+}
+
+static ::PROTOBUF_NAMESPACE_ID::internal::ExplicitlyConstructed<std::string> ReinstallStatus_strings[7] = {};
+
+static const char ReinstallStatus_names[] =
+  "REINSTALL_STATUS_DATA_WOULD_BE_ERASED"
+  "REINSTALL_STATUS_NOT_INSTALLED"
+  "REINSTALL_STATUS_NO_LIBRARIES"
+  "REINSTALL_STATUS_OTHER"
+  "REINSTALL_STATUS_SUCCESS"
+  "REINSTALL_STATUS_SYSTEM_APP"
+  "REINSTALL_STATUS_UNSPECIFIED";
+
+static const ::PROTOBUF_NAMESPACE_ID::internal::EnumEntry ReinstallStatus_entries[] = {
+  { {ReinstallStatus_names + 0, 37}, 2 },
+  { {ReinstallStatus_names + 37, 30}, 3 },
+  { {ReinstallStatus_names + 67, 29}, 5 },
+  { {ReinstallStatus_names + 96, 22}, 6 },
+  { {ReinstallStatus_names + 118, 24}, 1 },
+  { {ReinstallStatus_names + 142, 27}, 4 },
+  { {ReinstallStatus_names + 169, 28}, 0 },
+};
+
+static const int ReinstallStatus_entries_by_number[] = {
+  6, // 0 -> REINSTALL_STATUS_UNSPECIFIED
+  4, // 1 -> REINSTALL_STATUS_SUCCESS
+  0, // 2 -> REINSTALL_STATUS_DATA_WOULD_BE_ERASED
+  1, // 3 -> REINSTALL_STATUS_NOT_INSTALLED
+  5, // 4 -> REINSTALL_STATUS_SYSTEM_APP
+  2, // 5 -> REINSTALL_STATUS_NO_LIBRARIES
+  3, // 6 -> REINSTALL_STATUS_OTHER
+};
+
+const std::string& ReinstallStatus_Name(
+    ReinstallStatus value) {
+  static const bool dummy =
+      ::PROTOBUF_NAMESPACE_ID::internal::InitializeEnumStrings(
+          ReinstallStatus_entries,
+          ReinstallStatus_entries_by_number,
+          7, ReinstallStatus_strings);
+  (void) dummy;
+  int idx = ::PROTOBUF_NAMESPACE_ID::internal::LookUpEnumName(
+      ReinstallStatus_entries,
+      ReinstallStatus_entries_by_number,
+      7, value);
+  return idx == -1 ? ::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString() :
+                     ReinstallStatus_strings[idx].get();
+}
+bool ReinstallStatus_Parse(
+    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, ReinstallStatus* value) {
+  int int_value;
+  bool success = ::PROTOBUF_NAMESPACE_ID::internal::LookUpEnumValue(
+      ReinstallStatus_entries, 7, name, &int_value);
+  if (success) {
+    *value = static_cast<ReinstallStatus>(int_value);
   }
   return success;
 }
@@ -7980,10 +8247,12 @@ InstalledApp::InstalledApp(const InstalledApp& from)
   : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
   InstalledApp* const _this = this; (void)_this;
   new (&_impl_) Impl_{
-      decltype(_impl_.package_name_){}
+      decltype(_impl_.native_libraries_){from._impl_.native_libraries_}
+    , decltype(_impl_.package_name_){}
     , decltype(_impl_.label_){}
     , decltype(_impl_.icon_png_){}
     , decltype(_impl_.version_name_){}
+    , decltype(_impl_.primary_abi_){}
     , decltype(_impl_.version_code_){}
     , decltype(_impl_.first_install_time_ms_){}
     , decltype(_impl_.last_update_time_ms_){}
@@ -8026,6 +8295,14 @@ InstalledApp::InstalledApp(const InstalledApp& from)
     _this->_impl_.version_name_.Set(from._internal_version_name(), 
       _this->GetArenaForAllocation());
   }
+  _impl_.primary_abi_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.primary_abi_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_primary_abi().empty()) {
+    _this->_impl_.primary_abi_.Set(from._internal_primary_abi(), 
+      _this->GetArenaForAllocation());
+  }
   ::memcpy(&_impl_.version_code_, &from._impl_.version_code_,
     static_cast<size_t>(reinterpret_cast<char*>(&_impl_.system_app_) -
     reinterpret_cast<char*>(&_impl_.version_code_)) + sizeof(_impl_.system_app_));
@@ -8037,10 +8314,12 @@ inline void InstalledApp::SharedCtor(
   (void)arena;
   (void)is_message_owned;
   new (&_impl_) Impl_{
-      decltype(_impl_.package_name_){}
+      decltype(_impl_.native_libraries_){arena}
+    , decltype(_impl_.package_name_){}
     , decltype(_impl_.label_){}
     , decltype(_impl_.icon_png_){}
     , decltype(_impl_.version_name_){}
+    , decltype(_impl_.primary_abi_){}
     , decltype(_impl_.version_code_){int64_t{0}}
     , decltype(_impl_.first_install_time_ms_){uint64_t{0u}}
     , decltype(_impl_.last_update_time_ms_){uint64_t{0u}}
@@ -8066,6 +8345,10 @@ inline void InstalledApp::SharedCtor(
   #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
     _impl_.version_name_.Set("", GetArenaForAllocation());
   #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  _impl_.primary_abi_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.primary_abi_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
 }
 
 InstalledApp::~InstalledApp() {
@@ -8079,10 +8362,12 @@ InstalledApp::~InstalledApp() {
 
 inline void InstalledApp::SharedDtor() {
   GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.native_libraries_.~RepeatedPtrField();
   _impl_.package_name_.Destroy();
   _impl_.label_.Destroy();
   _impl_.icon_png_.Destroy();
   _impl_.version_name_.Destroy();
+  _impl_.primary_abi_.Destroy();
 }
 
 void InstalledApp::SetCachedSize(int size) const {
@@ -8095,10 +8380,12 @@ void InstalledApp::Clear() {
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
+  _impl_.native_libraries_.Clear();
   _impl_.package_name_.ClearToEmpty();
   _impl_.label_.ClearToEmpty();
   _impl_.icon_png_.ClearToEmpty();
   _impl_.version_name_.ClearToEmpty();
+  _impl_.primary_abi_.ClearToEmpty();
   ::memset(&_impl_.version_code_, 0, static_cast<size_t>(
       reinterpret_cast<char*>(&_impl_.system_app_) -
       reinterpret_cast<char*>(&_impl_.version_code_)) + sizeof(_impl_.system_app_));
@@ -8203,6 +8490,29 @@ const char* InstalledApp::_InternalParse(const char* ptr, ::_pbi::ParseContext* 
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 88)) {
           _impl_.cache_bytes_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
           CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // string primary_abi = 12;
+      case 12:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 98)) {
+          auto str = _internal_mutable_primary_abi();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+          CHK_(::_pbi::VerifyUTF8(str, nullptr));
+        } else
+          goto handle_unusual;
+        continue;
+      // repeated .dsa.control.v1.NativeLibraries native_libraries = 13;
+      case 13:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 106)) {
+          ptr -= 1;
+          do {
+            ptr += 1;
+            ptr = ctx->ParseMessage(_internal_add_native_libraries(), ptr);
+            CHK_(ptr);
+            if (!ctx->DataAvailable(ptr)) break;
+          } while (::PROTOBUF_NAMESPACE_ID::internal::ExpectTag<106>(ptr));
         } else
           goto handle_unusual;
         continue;
@@ -8313,6 +8623,24 @@ uint8_t* InstalledApp::_InternalSerialize(
     target = ::_pbi::WireFormatLite::WriteUInt64ToArray(11, this->_internal_cache_bytes(), target);
   }
 
+  // string primary_abi = 12;
+  if (!this->_internal_primary_abi().empty()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->_internal_primary_abi().data(), static_cast<int>(this->_internal_primary_abi().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "dsa.control.v1.InstalledApp.primary_abi");
+    target = stream->WriteStringMaybeAliased(
+        12, this->_internal_primary_abi(), target);
+  }
+
+  // repeated .dsa.control.v1.NativeLibraries native_libraries = 13;
+  for (unsigned i = 0,
+      n = static_cast<unsigned>(this->_internal_native_libraries_size()); i < n; i++) {
+    const auto& repfield = this->_internal_native_libraries(i);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+        InternalWriteMessage(13, repfield, repfield.GetCachedSize(), target, stream);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -8328,6 +8656,13 @@ size_t InstalledApp::ByteSizeLong() const {
   uint32_t cached_has_bits = 0;
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
+
+  // repeated .dsa.control.v1.NativeLibraries native_libraries = 13;
+  total_size += 1UL * this->_internal_native_libraries_size();
+  for (const auto& msg : this->_impl_.native_libraries_) {
+    total_size +=
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(msg);
+  }
 
   // string package_name = 1;
   if (!this->_internal_package_name().empty()) {
@@ -8355,6 +8690,13 @@ size_t InstalledApp::ByteSizeLong() const {
     total_size += 1 +
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
         this->_internal_version_name());
+  }
+
+  // string primary_abi = 12;
+  if (!this->_internal_primary_abi().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_primary_abi());
   }
 
   // int64 version_code = 5;
@@ -8413,6 +8755,7 @@ void InstalledApp::MergeFrom(const InstalledApp& from) {
   uint32_t cached_has_bits = 0;
   (void) cached_has_bits;
 
+  _this->_impl_.native_libraries_.MergeFrom(from._impl_.native_libraries_);
   if (!from._internal_package_name().empty()) {
     _this->_internal_set_package_name(from._internal_package_name());
   }
@@ -8424,6 +8767,9 @@ void InstalledApp::MergeFrom(const InstalledApp& from) {
   }
   if (!from._internal_version_name().empty()) {
     _this->_internal_set_version_name(from._internal_version_name());
+  }
+  if (!from._internal_primary_abi().empty()) {
+    _this->_internal_set_primary_abi(from._internal_primary_abi());
   }
   if (from._internal_version_code() != 0) {
     _this->_internal_set_version_code(from._internal_version_code());
@@ -8465,6 +8811,7 @@ void InstalledApp::InternalSwap(InstalledApp* other) {
   auto* lhs_arena = GetArenaForAllocation();
   auto* rhs_arena = other->GetArenaForAllocation();
   _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  _impl_.native_libraries_.InternalSwap(&other->_impl_.native_libraries_);
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
       &_impl_.package_name_, lhs_arena,
       &other->_impl_.package_name_, rhs_arena
@@ -8481,6 +8828,10 @@ void InstalledApp::InternalSwap(InstalledApp* other) {
       &_impl_.version_name_, lhs_arena,
       &other->_impl_.version_name_, rhs_arena
   );
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.primary_abi_, lhs_arena,
+      &other->_impl_.primary_abi_, rhs_arena
+  );
   ::PROTOBUF_NAMESPACE_ID::internal::memswap<
       PROTOBUF_FIELD_OFFSET(InstalledApp, _impl_.system_app_)
       + sizeof(InstalledApp::_impl_.system_app_)
@@ -8491,6 +8842,1215 @@ void InstalledApp::InternalSwap(InstalledApp* other) {
 
 std::string InstalledApp::GetTypeName() const {
   return "dsa.control.v1.InstalledApp";
+}
+
+
+// ===================================================================
+
+class NativeLibraries::_Internal {
+ public:
+};
+
+NativeLibraries::NativeLibraries(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.NativeLibraries)
+}
+NativeLibraries::NativeLibraries(const NativeLibraries& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  NativeLibraries* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.names_){from._impl_.names_}
+    , decltype(_impl_.abi_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _impl_.abi_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.abi_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_abi().empty()) {
+    _this->_impl_.abi_.Set(from._internal_abi(), 
+      _this->GetArenaForAllocation());
+  }
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.NativeLibraries)
+}
+
+inline void NativeLibraries::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.names_){arena}
+    , decltype(_impl_.abi_){}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+  _impl_.abi_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.abi_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+}
+
+NativeLibraries::~NativeLibraries() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.NativeLibraries)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void NativeLibraries::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.names_.~RepeatedPtrField();
+  _impl_.abi_.Destroy();
+}
+
+void NativeLibraries::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void NativeLibraries::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.NativeLibraries)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.names_.Clear();
+  _impl_.abi_.ClearToEmpty();
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* NativeLibraries::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // string abi = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 10)) {
+          auto str = _internal_mutable_abi();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+          CHK_(::_pbi::VerifyUTF8(str, nullptr));
+        } else
+          goto handle_unusual;
+        continue;
+      // repeated string names = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
+          ptr -= 1;
+          do {
+            ptr += 1;
+            auto str = _internal_add_names();
+            ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+            CHK_(ptr);
+            CHK_(::_pbi::VerifyUTF8(str, nullptr));
+            if (!ctx->DataAvailable(ptr)) break;
+          } while (::PROTOBUF_NAMESPACE_ID::internal::ExpectTag<18>(ptr));
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* NativeLibraries::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.NativeLibraries)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // string abi = 1;
+  if (!this->_internal_abi().empty()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->_internal_abi().data(), static_cast<int>(this->_internal_abi().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "dsa.control.v1.NativeLibraries.abi");
+    target = stream->WriteStringMaybeAliased(
+        1, this->_internal_abi(), target);
+  }
+
+  // repeated string names = 2;
+  for (int i = 0, n = this->_internal_names_size(); i < n; i++) {
+    const auto& s = this->_internal_names(i);
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      s.data(), static_cast<int>(s.length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "dsa.control.v1.NativeLibraries.names");
+    target = stream->WriteString(2, s, target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.NativeLibraries)
+  return target;
+}
+
+size_t NativeLibraries::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.NativeLibraries)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // repeated string names = 2;
+  total_size += 1 *
+      ::PROTOBUF_NAMESPACE_ID::internal::FromIntSize(_impl_.names_.size());
+  for (int i = 0, n = _impl_.names_.size(); i < n; i++) {
+    total_size += ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+      _impl_.names_.Get(i));
+  }
+
+  // string abi = 1;
+  if (!this->_internal_abi().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_abi());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void NativeLibraries::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const NativeLibraries*>(
+      &from));
+}
+
+void NativeLibraries::MergeFrom(const NativeLibraries& from) {
+  NativeLibraries* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.NativeLibraries)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  _this->_impl_.names_.MergeFrom(from._impl_.names_);
+  if (!from._internal_abi().empty()) {
+    _this->_internal_set_abi(from._internal_abi());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void NativeLibraries::CopyFrom(const NativeLibraries& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.NativeLibraries)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool NativeLibraries::IsInitialized() const {
+  return true;
+}
+
+void NativeLibraries::InternalSwap(NativeLibraries* other) {
+  using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  _impl_.names_.InternalSwap(&other->_impl_.names_);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.abi_, lhs_arena,
+      &other->_impl_.abi_, rhs_arena
+  );
+}
+
+std::string NativeLibraries::GetTypeName() const {
+  return "dsa.control.v1.NativeLibraries";
+}
+
+
+// ===================================================================
+
+class ReinstallApp::_Internal {
+ public:
+};
+
+ReinstallApp::ReinstallApp(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.ReinstallApp)
+}
+ReinstallApp::ReinstallApp(const ReinstallApp& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  ReinstallApp* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.package_name_){}
+    , decltype(_impl_.abi_){}
+    , decltype(_impl_.request_id_){}
+    , decltype(_impl_.erase_data_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _impl_.package_name_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.package_name_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_package_name().empty()) {
+    _this->_impl_.package_name_.Set(from._internal_package_name(), 
+      _this->GetArenaForAllocation());
+  }
+  _impl_.abi_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.abi_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_abi().empty()) {
+    _this->_impl_.abi_.Set(from._internal_abi(), 
+      _this->GetArenaForAllocation());
+  }
+  ::memcpy(&_impl_.request_id_, &from._impl_.request_id_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.erase_data_) -
+    reinterpret_cast<char*>(&_impl_.request_id_)) + sizeof(_impl_.erase_data_));
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.ReinstallApp)
+}
+
+inline void ReinstallApp::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.package_name_){}
+    , decltype(_impl_.abi_){}
+    , decltype(_impl_.request_id_){0u}
+    , decltype(_impl_.erase_data_){false}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+  _impl_.package_name_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.package_name_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  _impl_.abi_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.abi_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+}
+
+ReinstallApp::~ReinstallApp() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.ReinstallApp)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void ReinstallApp::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.package_name_.Destroy();
+  _impl_.abi_.Destroy();
+}
+
+void ReinstallApp::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void ReinstallApp::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.ReinstallApp)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.package_name_.ClearToEmpty();
+  _impl_.abi_.ClearToEmpty();
+  ::memset(&_impl_.request_id_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&_impl_.erase_data_) -
+      reinterpret_cast<char*>(&_impl_.request_id_)) + sizeof(_impl_.erase_data_));
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* ReinstallApp::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // uint32 request_id = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.request_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // string package_name = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
+          auto str = _internal_mutable_package_name();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+          CHK_(::_pbi::VerifyUTF8(str, nullptr));
+        } else
+          goto handle_unusual;
+        continue;
+      // string abi = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 26)) {
+          auto str = _internal_mutable_abi();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+          CHK_(::_pbi::VerifyUTF8(str, nullptr));
+        } else
+          goto handle_unusual;
+        continue;
+      // bool erase_data = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 32)) {
+          _impl_.erase_data_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* ReinstallApp::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.ReinstallApp)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // uint32 request_id = 1;
+  if (this->_internal_request_id() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(1, this->_internal_request_id(), target);
+  }
+
+  // string package_name = 2;
+  if (!this->_internal_package_name().empty()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->_internal_package_name().data(), static_cast<int>(this->_internal_package_name().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "dsa.control.v1.ReinstallApp.package_name");
+    target = stream->WriteStringMaybeAliased(
+        2, this->_internal_package_name(), target);
+  }
+
+  // string abi = 3;
+  if (!this->_internal_abi().empty()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->_internal_abi().data(), static_cast<int>(this->_internal_abi().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "dsa.control.v1.ReinstallApp.abi");
+    target = stream->WriteStringMaybeAliased(
+        3, this->_internal_abi(), target);
+  }
+
+  // bool erase_data = 4;
+  if (this->_internal_erase_data() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(4, this->_internal_erase_data(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.ReinstallApp)
+  return target;
+}
+
+size_t ReinstallApp::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.ReinstallApp)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // string package_name = 2;
+  if (!this->_internal_package_name().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_package_name());
+  }
+
+  // string abi = 3;
+  if (!this->_internal_abi().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_abi());
+  }
+
+  // uint32 request_id = 1;
+  if (this->_internal_request_id() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_request_id());
+  }
+
+  // bool erase_data = 4;
+  if (this->_internal_erase_data() != 0) {
+    total_size += 1 + 1;
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void ReinstallApp::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const ReinstallApp*>(
+      &from));
+}
+
+void ReinstallApp::MergeFrom(const ReinstallApp& from) {
+  ReinstallApp* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.ReinstallApp)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (!from._internal_package_name().empty()) {
+    _this->_internal_set_package_name(from._internal_package_name());
+  }
+  if (!from._internal_abi().empty()) {
+    _this->_internal_set_abi(from._internal_abi());
+  }
+  if (from._internal_request_id() != 0) {
+    _this->_internal_set_request_id(from._internal_request_id());
+  }
+  if (from._internal_erase_data() != 0) {
+    _this->_internal_set_erase_data(from._internal_erase_data());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void ReinstallApp::CopyFrom(const ReinstallApp& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.ReinstallApp)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool ReinstallApp::IsInitialized() const {
+  return true;
+}
+
+void ReinstallApp::InternalSwap(ReinstallApp* other) {
+  using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.package_name_, lhs_arena,
+      &other->_impl_.package_name_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.abi_, lhs_arena,
+      &other->_impl_.abi_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(ReinstallApp, _impl_.erase_data_)
+      + sizeof(ReinstallApp::_impl_.erase_data_)
+      - PROTOBUF_FIELD_OFFSET(ReinstallApp, _impl_.request_id_)>(
+          reinterpret_cast<char*>(&_impl_.request_id_),
+          reinterpret_cast<char*>(&other->_impl_.request_id_));
+}
+
+std::string ReinstallApp::GetTypeName() const {
+  return "dsa.control.v1.ReinstallApp";
+}
+
+
+// ===================================================================
+
+class ReinstallResult::_Internal {
+ public:
+};
+
+ReinstallResult::ReinstallResult(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.ReinstallResult)
+}
+ReinstallResult::ReinstallResult(const ReinstallResult& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  ReinstallResult* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.package_name_){}
+    , decltype(_impl_.message_){}
+    , decltype(_impl_.primary_abi_){}
+    , decltype(_impl_.request_id_){}
+    , decltype(_impl_.status_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _impl_.package_name_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.package_name_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_package_name().empty()) {
+    _this->_impl_.package_name_.Set(from._internal_package_name(), 
+      _this->GetArenaForAllocation());
+  }
+  _impl_.message_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.message_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_message().empty()) {
+    _this->_impl_.message_.Set(from._internal_message(), 
+      _this->GetArenaForAllocation());
+  }
+  _impl_.primary_abi_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.primary_abi_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_primary_abi().empty()) {
+    _this->_impl_.primary_abi_.Set(from._internal_primary_abi(), 
+      _this->GetArenaForAllocation());
+  }
+  ::memcpy(&_impl_.request_id_, &from._impl_.request_id_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.status_) -
+    reinterpret_cast<char*>(&_impl_.request_id_)) + sizeof(_impl_.status_));
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.ReinstallResult)
+}
+
+inline void ReinstallResult::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.package_name_){}
+    , decltype(_impl_.message_){}
+    , decltype(_impl_.primary_abi_){}
+    , decltype(_impl_.request_id_){0u}
+    , decltype(_impl_.status_){0}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+  _impl_.package_name_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.package_name_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  _impl_.message_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.message_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  _impl_.primary_abi_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.primary_abi_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+}
+
+ReinstallResult::~ReinstallResult() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.ReinstallResult)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void ReinstallResult::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.package_name_.Destroy();
+  _impl_.message_.Destroy();
+  _impl_.primary_abi_.Destroy();
+}
+
+void ReinstallResult::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void ReinstallResult::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.ReinstallResult)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.package_name_.ClearToEmpty();
+  _impl_.message_.ClearToEmpty();
+  _impl_.primary_abi_.ClearToEmpty();
+  ::memset(&_impl_.request_id_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&_impl_.status_) -
+      reinterpret_cast<char*>(&_impl_.request_id_)) + sizeof(_impl_.status_));
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* ReinstallResult::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // uint32 request_id = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.request_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // string package_name = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
+          auto str = _internal_mutable_package_name();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+          CHK_(::_pbi::VerifyUTF8(str, nullptr));
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.ReinstallStatus status = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 24)) {
+          uint64_t val = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+          _internal_set_status(static_cast<::dsa::control::v1::ReinstallStatus>(val));
+        } else
+          goto handle_unusual;
+        continue;
+      // string message = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 34)) {
+          auto str = _internal_mutable_message();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+          CHK_(::_pbi::VerifyUTF8(str, nullptr));
+        } else
+          goto handle_unusual;
+        continue;
+      // string primary_abi = 5;
+      case 5:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 42)) {
+          auto str = _internal_mutable_primary_abi();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+          CHK_(::_pbi::VerifyUTF8(str, nullptr));
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* ReinstallResult::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.ReinstallResult)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // uint32 request_id = 1;
+  if (this->_internal_request_id() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(1, this->_internal_request_id(), target);
+  }
+
+  // string package_name = 2;
+  if (!this->_internal_package_name().empty()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->_internal_package_name().data(), static_cast<int>(this->_internal_package_name().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "dsa.control.v1.ReinstallResult.package_name");
+    target = stream->WriteStringMaybeAliased(
+        2, this->_internal_package_name(), target);
+  }
+
+  // .dsa.control.v1.ReinstallStatus status = 3;
+  if (this->_internal_status() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteEnumToArray(
+      3, this->_internal_status(), target);
+  }
+
+  // string message = 4;
+  if (!this->_internal_message().empty()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->_internal_message().data(), static_cast<int>(this->_internal_message().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "dsa.control.v1.ReinstallResult.message");
+    target = stream->WriteStringMaybeAliased(
+        4, this->_internal_message(), target);
+  }
+
+  // string primary_abi = 5;
+  if (!this->_internal_primary_abi().empty()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->_internal_primary_abi().data(), static_cast<int>(this->_internal_primary_abi().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "dsa.control.v1.ReinstallResult.primary_abi");
+    target = stream->WriteStringMaybeAliased(
+        5, this->_internal_primary_abi(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.ReinstallResult)
+  return target;
+}
+
+size_t ReinstallResult::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.ReinstallResult)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // string package_name = 2;
+  if (!this->_internal_package_name().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_package_name());
+  }
+
+  // string message = 4;
+  if (!this->_internal_message().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_message());
+  }
+
+  // string primary_abi = 5;
+  if (!this->_internal_primary_abi().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_primary_abi());
+  }
+
+  // uint32 request_id = 1;
+  if (this->_internal_request_id() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_request_id());
+  }
+
+  // .dsa.control.v1.ReinstallStatus status = 3;
+  if (this->_internal_status() != 0) {
+    total_size += 1 +
+      ::_pbi::WireFormatLite::EnumSize(this->_internal_status());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void ReinstallResult::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const ReinstallResult*>(
+      &from));
+}
+
+void ReinstallResult::MergeFrom(const ReinstallResult& from) {
+  ReinstallResult* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.ReinstallResult)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (!from._internal_package_name().empty()) {
+    _this->_internal_set_package_name(from._internal_package_name());
+  }
+  if (!from._internal_message().empty()) {
+    _this->_internal_set_message(from._internal_message());
+  }
+  if (!from._internal_primary_abi().empty()) {
+    _this->_internal_set_primary_abi(from._internal_primary_abi());
+  }
+  if (from._internal_request_id() != 0) {
+    _this->_internal_set_request_id(from._internal_request_id());
+  }
+  if (from._internal_status() != 0) {
+    _this->_internal_set_status(from._internal_status());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void ReinstallResult::CopyFrom(const ReinstallResult& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.ReinstallResult)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool ReinstallResult::IsInitialized() const {
+  return true;
+}
+
+void ReinstallResult::InternalSwap(ReinstallResult* other) {
+  using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.package_name_, lhs_arena,
+      &other->_impl_.package_name_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.message_, lhs_arena,
+      &other->_impl_.message_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.primary_abi_, lhs_arena,
+      &other->_impl_.primary_abi_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(ReinstallResult, _impl_.status_)
+      + sizeof(ReinstallResult::_impl_.status_)
+      - PROTOBUF_FIELD_OFFSET(ReinstallResult, _impl_.request_id_)>(
+          reinterpret_cast<char*>(&_impl_.request_id_),
+          reinterpret_cast<char*>(&other->_impl_.request_id_));
+}
+
+std::string ReinstallResult::GetTypeName() const {
+  return "dsa.control.v1.ReinstallResult";
+}
+
+
+// ===================================================================
+
+class NativeLibraryCrash::_Internal {
+ public:
+};
+
+NativeLibraryCrash::NativeLibraryCrash(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.NativeLibraryCrash)
+}
+NativeLibraryCrash::NativeLibraryCrash(const NativeLibraryCrash& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  NativeLibraryCrash* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.package_name_){}
+    , decltype(_impl_.detail_){}
+    , decltype(_impl_.arm64_supported_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _impl_.package_name_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.package_name_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_package_name().empty()) {
+    _this->_impl_.package_name_.Set(from._internal_package_name(), 
+      _this->GetArenaForAllocation());
+  }
+  _impl_.detail_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.detail_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_detail().empty()) {
+    _this->_impl_.detail_.Set(from._internal_detail(), 
+      _this->GetArenaForAllocation());
+  }
+  _this->_impl_.arm64_supported_ = from._impl_.arm64_supported_;
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.NativeLibraryCrash)
+}
+
+inline void NativeLibraryCrash::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.package_name_){}
+    , decltype(_impl_.detail_){}
+    , decltype(_impl_.arm64_supported_){false}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+  _impl_.package_name_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.package_name_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  _impl_.detail_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.detail_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+}
+
+NativeLibraryCrash::~NativeLibraryCrash() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.NativeLibraryCrash)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void NativeLibraryCrash::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.package_name_.Destroy();
+  _impl_.detail_.Destroy();
+}
+
+void NativeLibraryCrash::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void NativeLibraryCrash::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.NativeLibraryCrash)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.package_name_.ClearToEmpty();
+  _impl_.detail_.ClearToEmpty();
+  _impl_.arm64_supported_ = false;
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* NativeLibraryCrash::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // string package_name = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 10)) {
+          auto str = _internal_mutable_package_name();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+          CHK_(::_pbi::VerifyUTF8(str, nullptr));
+        } else
+          goto handle_unusual;
+        continue;
+      // string detail = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
+          auto str = _internal_mutable_detail();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+          CHK_(::_pbi::VerifyUTF8(str, nullptr));
+        } else
+          goto handle_unusual;
+        continue;
+      // bool arm64_supported = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 24)) {
+          _impl_.arm64_supported_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* NativeLibraryCrash::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.NativeLibraryCrash)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // string package_name = 1;
+  if (!this->_internal_package_name().empty()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->_internal_package_name().data(), static_cast<int>(this->_internal_package_name().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "dsa.control.v1.NativeLibraryCrash.package_name");
+    target = stream->WriteStringMaybeAliased(
+        1, this->_internal_package_name(), target);
+  }
+
+  // string detail = 2;
+  if (!this->_internal_detail().empty()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->_internal_detail().data(), static_cast<int>(this->_internal_detail().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "dsa.control.v1.NativeLibraryCrash.detail");
+    target = stream->WriteStringMaybeAliased(
+        2, this->_internal_detail(), target);
+  }
+
+  // bool arm64_supported = 3;
+  if (this->_internal_arm64_supported() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(3, this->_internal_arm64_supported(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.NativeLibraryCrash)
+  return target;
+}
+
+size_t NativeLibraryCrash::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.NativeLibraryCrash)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // string package_name = 1;
+  if (!this->_internal_package_name().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_package_name());
+  }
+
+  // string detail = 2;
+  if (!this->_internal_detail().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_detail());
+  }
+
+  // bool arm64_supported = 3;
+  if (this->_internal_arm64_supported() != 0) {
+    total_size += 1 + 1;
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void NativeLibraryCrash::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const NativeLibraryCrash*>(
+      &from));
+}
+
+void NativeLibraryCrash::MergeFrom(const NativeLibraryCrash& from) {
+  NativeLibraryCrash* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.NativeLibraryCrash)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (!from._internal_package_name().empty()) {
+    _this->_internal_set_package_name(from._internal_package_name());
+  }
+  if (!from._internal_detail().empty()) {
+    _this->_internal_set_detail(from._internal_detail());
+  }
+  if (from._internal_arm64_supported() != 0) {
+    _this->_internal_set_arm64_supported(from._internal_arm64_supported());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void NativeLibraryCrash::CopyFrom(const NativeLibraryCrash& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.NativeLibraryCrash)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool NativeLibraryCrash::IsInitialized() const {
+  return true;
+}
+
+void NativeLibraryCrash::InternalSwap(NativeLibraryCrash* other) {
+  using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.package_name_, lhs_arena,
+      &other->_impl_.package_name_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.detail_, lhs_arena,
+      &other->_impl_.detail_, rhs_arena
+  );
+  swap(_impl_.arm64_supported_, other->_impl_.arm64_supported_);
+}
+
+std::string NativeLibraryCrash::GetTypeName() const {
+  return "dsa.control.v1.NativeLibraryCrash";
 }
 
 
@@ -9615,12 +11175,14 @@ PointerEvent::PointerEvent(const PointerEvent& from)
     , decltype(_impl_.pressure_){}
     , decltype(_impl_.scroll_x_){}
     , decltype(_impl_.scroll_y_){}
+    , decltype(_impl_.tilt_x_){}
+    , decltype(_impl_.tilt_y_){}
     , /*decltype(_impl_._cached_size_)*/{}};
 
   _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
   ::memcpy(&_impl_.task_id_, &from._impl_.task_id_,
-    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.scroll_y_) -
-    reinterpret_cast<char*>(&_impl_.task_id_)) + sizeof(_impl_.scroll_y_));
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.tilt_y_) -
+    reinterpret_cast<char*>(&_impl_.task_id_)) + sizeof(_impl_.tilt_y_));
   // @@protoc_insertion_point(copy_constructor:dsa.control.v1.PointerEvent)
 }
 
@@ -9639,6 +11201,8 @@ inline void PointerEvent::SharedCtor(
     , decltype(_impl_.pressure_){0}
     , decltype(_impl_.scroll_x_){0}
     , decltype(_impl_.scroll_y_){0}
+    , decltype(_impl_.tilt_x_){0}
+    , decltype(_impl_.tilt_y_){0}
     , /*decltype(_impl_._cached_size_)*/{}
   };
 }
@@ -9667,8 +11231,8 @@ void PointerEvent::Clear() {
   (void) cached_has_bits;
 
   ::memset(&_impl_.task_id_, 0, static_cast<size_t>(
-      reinterpret_cast<char*>(&_impl_.scroll_y_) -
-      reinterpret_cast<char*>(&_impl_.task_id_)) + sizeof(_impl_.scroll_y_));
+      reinterpret_cast<char*>(&_impl_.tilt_y_) -
+      reinterpret_cast<char*>(&_impl_.task_id_)) + sizeof(_impl_.tilt_y_));
   _internal_metadata_.Clear<std::string>();
 }
 
@@ -9756,6 +11320,22 @@ const char* PointerEvent::_InternalParse(const char* ptr, ::_pbi::ParseContext* 
       case 10:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 85)) {
           _impl_.scroll_y_ = ::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<float>(ptr);
+          ptr += sizeof(float);
+        } else
+          goto handle_unusual;
+        continue;
+      // float tilt_x = 11;
+      case 11:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 93)) {
+          _impl_.tilt_x_ = ::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<float>(ptr);
+          ptr += sizeof(float);
+        } else
+          goto handle_unusual;
+        continue;
+      // float tilt_y = 12;
+      case 12:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 101)) {
+          _impl_.tilt_y_ = ::PROTOBUF_NAMESPACE_ID::internal::UnalignedLoad<float>(ptr);
           ptr += sizeof(float);
         } else
           goto handle_unusual;
@@ -9871,6 +11451,26 @@ uint8_t* PointerEvent::_InternalSerialize(
     target = ::_pbi::WireFormatLite::WriteFloatToArray(10, this->_internal_scroll_y(), target);
   }
 
+  // float tilt_x = 11;
+  static_assert(sizeof(uint32_t) == sizeof(float), "Code assumes uint32_t and float are the same size.");
+  float tmp_tilt_x = this->_internal_tilt_x();
+  uint32_t raw_tilt_x;
+  memcpy(&raw_tilt_x, &tmp_tilt_x, sizeof(tmp_tilt_x));
+  if (raw_tilt_x != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteFloatToArray(11, this->_internal_tilt_x(), target);
+  }
+
+  // float tilt_y = 12;
+  static_assert(sizeof(uint32_t) == sizeof(float), "Code assumes uint32_t and float are the same size.");
+  float tmp_tilt_y = this->_internal_tilt_y();
+  uint32_t raw_tilt_y;
+  memcpy(&raw_tilt_y, &tmp_tilt_y, sizeof(tmp_tilt_y));
+  if (raw_tilt_y != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteFloatToArray(12, this->_internal_tilt_y(), target);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -9959,6 +11559,24 @@ size_t PointerEvent::ByteSizeLong() const {
     total_size += 1 + 4;
   }
 
+  // float tilt_x = 11;
+  static_assert(sizeof(uint32_t) == sizeof(float), "Code assumes uint32_t and float are the same size.");
+  float tmp_tilt_x = this->_internal_tilt_x();
+  uint32_t raw_tilt_x;
+  memcpy(&raw_tilt_x, &tmp_tilt_x, sizeof(tmp_tilt_x));
+  if (raw_tilt_x != 0) {
+    total_size += 1 + 4;
+  }
+
+  // float tilt_y = 12;
+  static_assert(sizeof(uint32_t) == sizeof(float), "Code assumes uint32_t and float are the same size.");
+  float tmp_tilt_y = this->_internal_tilt_y();
+  uint32_t raw_tilt_y;
+  memcpy(&raw_tilt_y, &tmp_tilt_y, sizeof(tmp_tilt_y));
+  if (raw_tilt_y != 0) {
+    total_size += 1 + 4;
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
   }
@@ -10030,6 +11648,20 @@ void PointerEvent::MergeFrom(const PointerEvent& from) {
   if (raw_scroll_y != 0) {
     _this->_internal_set_scroll_y(from._internal_scroll_y());
   }
+  static_assert(sizeof(uint32_t) == sizeof(float), "Code assumes uint32_t and float are the same size.");
+  float tmp_tilt_x = from._internal_tilt_x();
+  uint32_t raw_tilt_x;
+  memcpy(&raw_tilt_x, &tmp_tilt_x, sizeof(tmp_tilt_x));
+  if (raw_tilt_x != 0) {
+    _this->_internal_set_tilt_x(from._internal_tilt_x());
+  }
+  static_assert(sizeof(uint32_t) == sizeof(float), "Code assumes uint32_t and float are the same size.");
+  float tmp_tilt_y = from._internal_tilt_y();
+  uint32_t raw_tilt_y;
+  memcpy(&raw_tilt_y, &tmp_tilt_y, sizeof(tmp_tilt_y));
+  if (raw_tilt_y != 0) {
+    _this->_internal_set_tilt_y(from._internal_tilt_y());
+  }
   _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
 }
 
@@ -10048,8 +11680,8 @@ void PointerEvent::InternalSwap(PointerEvent* other) {
   using std::swap;
   _internal_metadata_.InternalSwap(&other->_internal_metadata_);
   ::PROTOBUF_NAMESPACE_ID::internal::memswap<
-      PROTOBUF_FIELD_OFFSET(PointerEvent, _impl_.scroll_y_)
-      + sizeof(PointerEvent::_impl_.scroll_y_)
+      PROTOBUF_FIELD_OFFSET(PointerEvent, _impl_.tilt_y_)
+      + sizeof(PointerEvent::_impl_.tilt_y_)
       - PROTOBUF_FIELD_OFFSET(PointerEvent, _impl_.task_id_)>(
           reinterpret_cast<char*>(&_impl_.task_id_),
           reinterpret_cast<char*>(&other->_impl_.task_id_));
@@ -15774,6 +17406,1636 @@ std::string ArmTranslationState::GetTypeName() const {
 
 // ===================================================================
 
+class GappsInstall::_Internal {
+ public:
+};
+
+GappsInstall::GappsInstall(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.GappsInstall)
+}
+GappsInstall::GappsInstall(const GappsInstall& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  GappsInstall* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.sha256_){}
+    , decltype(_impl_.size_){}
+    , decltype(_impl_.transfer_id_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _impl_.sha256_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.sha256_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_sha256().empty()) {
+    _this->_impl_.sha256_.Set(from._internal_sha256(), 
+      _this->GetArenaForAllocation());
+  }
+  ::memcpy(&_impl_.size_, &from._impl_.size_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.transfer_id_) -
+    reinterpret_cast<char*>(&_impl_.size_)) + sizeof(_impl_.transfer_id_));
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.GappsInstall)
+}
+
+inline void GappsInstall::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.sha256_){}
+    , decltype(_impl_.size_){uint64_t{0u}}
+    , decltype(_impl_.transfer_id_){0u}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+  _impl_.sha256_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.sha256_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+}
+
+GappsInstall::~GappsInstall() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.GappsInstall)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void GappsInstall::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.sha256_.Destroy();
+}
+
+void GappsInstall::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void GappsInstall::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.GappsInstall)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.sha256_.ClearToEmpty();
+  ::memset(&_impl_.size_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&_impl_.transfer_id_) -
+      reinterpret_cast<char*>(&_impl_.size_)) + sizeof(_impl_.transfer_id_));
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* GappsInstall::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // uint32 transfer_id = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.transfer_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint64 size = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 16)) {
+          _impl_.size_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // bytes sha256 = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 26)) {
+          auto str = _internal_mutable_sha256();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* GappsInstall::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.GappsInstall)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // uint32 transfer_id = 1;
+  if (this->_internal_transfer_id() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(1, this->_internal_transfer_id(), target);
+  }
+
+  // uint64 size = 2;
+  if (this->_internal_size() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(2, this->_internal_size(), target);
+  }
+
+  // bytes sha256 = 3;
+  if (!this->_internal_sha256().empty()) {
+    target = stream->WriteBytesMaybeAliased(
+        3, this->_internal_sha256(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.GappsInstall)
+  return target;
+}
+
+size_t GappsInstall::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.GappsInstall)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // bytes sha256 = 3;
+  if (!this->_internal_sha256().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_sha256());
+  }
+
+  // uint64 size = 2;
+  if (this->_internal_size() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_size());
+  }
+
+  // uint32 transfer_id = 1;
+  if (this->_internal_transfer_id() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_transfer_id());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void GappsInstall::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const GappsInstall*>(
+      &from));
+}
+
+void GappsInstall::MergeFrom(const GappsInstall& from) {
+  GappsInstall* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.GappsInstall)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (!from._internal_sha256().empty()) {
+    _this->_internal_set_sha256(from._internal_sha256());
+  }
+  if (from._internal_size() != 0) {
+    _this->_internal_set_size(from._internal_size());
+  }
+  if (from._internal_transfer_id() != 0) {
+    _this->_internal_set_transfer_id(from._internal_transfer_id());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void GappsInstall::CopyFrom(const GappsInstall& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.GappsInstall)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool GappsInstall::IsInitialized() const {
+  return true;
+}
+
+void GappsInstall::InternalSwap(GappsInstall* other) {
+  using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.sha256_, lhs_arena,
+      &other->_impl_.sha256_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(GappsInstall, _impl_.transfer_id_)
+      + sizeof(GappsInstall::_impl_.transfer_id_)
+      - PROTOBUF_FIELD_OFFSET(GappsInstall, _impl_.size_)>(
+          reinterpret_cast<char*>(&_impl_.size_),
+          reinterpret_cast<char*>(&other->_impl_.size_));
+}
+
+std::string GappsInstall::GetTypeName() const {
+  return "dsa.control.v1.GappsInstall";
+}
+
+
+// ===================================================================
+
+class GappsChunk::_Internal {
+ public:
+};
+
+GappsChunk::GappsChunk(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.GappsChunk)
+}
+GappsChunk::GappsChunk(const GappsChunk& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  GappsChunk* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.data_){}
+    , decltype(_impl_.offset_){}
+    , decltype(_impl_.transfer_id_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _impl_.data_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.data_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_data().empty()) {
+    _this->_impl_.data_.Set(from._internal_data(), 
+      _this->GetArenaForAllocation());
+  }
+  ::memcpy(&_impl_.offset_, &from._impl_.offset_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.transfer_id_) -
+    reinterpret_cast<char*>(&_impl_.offset_)) + sizeof(_impl_.transfer_id_));
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.GappsChunk)
+}
+
+inline void GappsChunk::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.data_){}
+    , decltype(_impl_.offset_){uint64_t{0u}}
+    , decltype(_impl_.transfer_id_){0u}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+  _impl_.data_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.data_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+}
+
+GappsChunk::~GappsChunk() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.GappsChunk)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void GappsChunk::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.data_.Destroy();
+}
+
+void GappsChunk::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void GappsChunk::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.GappsChunk)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.data_.ClearToEmpty();
+  ::memset(&_impl_.offset_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&_impl_.transfer_id_) -
+      reinterpret_cast<char*>(&_impl_.offset_)) + sizeof(_impl_.transfer_id_));
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* GappsChunk::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // uint32 transfer_id = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.transfer_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint64 offset = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 16)) {
+          _impl_.offset_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // bytes data = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 26)) {
+          auto str = _internal_mutable_data();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* GappsChunk::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.GappsChunk)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // uint32 transfer_id = 1;
+  if (this->_internal_transfer_id() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(1, this->_internal_transfer_id(), target);
+  }
+
+  // uint64 offset = 2;
+  if (this->_internal_offset() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(2, this->_internal_offset(), target);
+  }
+
+  // bytes data = 3;
+  if (!this->_internal_data().empty()) {
+    target = stream->WriteBytesMaybeAliased(
+        3, this->_internal_data(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.GappsChunk)
+  return target;
+}
+
+size_t GappsChunk::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.GappsChunk)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // bytes data = 3;
+  if (!this->_internal_data().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_data());
+  }
+
+  // uint64 offset = 2;
+  if (this->_internal_offset() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_offset());
+  }
+
+  // uint32 transfer_id = 1;
+  if (this->_internal_transfer_id() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_transfer_id());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void GappsChunk::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const GappsChunk*>(
+      &from));
+}
+
+void GappsChunk::MergeFrom(const GappsChunk& from) {
+  GappsChunk* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.GappsChunk)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (!from._internal_data().empty()) {
+    _this->_internal_set_data(from._internal_data());
+  }
+  if (from._internal_offset() != 0) {
+    _this->_internal_set_offset(from._internal_offset());
+  }
+  if (from._internal_transfer_id() != 0) {
+    _this->_internal_set_transfer_id(from._internal_transfer_id());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void GappsChunk::CopyFrom(const GappsChunk& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.GappsChunk)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool GappsChunk::IsInitialized() const {
+  return true;
+}
+
+void GappsChunk::InternalSwap(GappsChunk* other) {
+  using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.data_, lhs_arena,
+      &other->_impl_.data_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(GappsChunk, _impl_.transfer_id_)
+      + sizeof(GappsChunk::_impl_.transfer_id_)
+      - PROTOBUF_FIELD_OFFSET(GappsChunk, _impl_.offset_)>(
+          reinterpret_cast<char*>(&_impl_.offset_),
+          reinterpret_cast<char*>(&other->_impl_.offset_));
+}
+
+std::string GappsChunk::GetTypeName() const {
+  return "dsa.control.v1.GappsChunk";
+}
+
+
+// ===================================================================
+
+class GappsRemove::_Internal {
+ public:
+};
+
+GappsRemove::GappsRemove(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.GappsRemove)
+}
+GappsRemove::GappsRemove(const GappsRemove& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  GappsRemove* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.GappsRemove)
+}
+
+inline void GappsRemove::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      /*decltype(_impl_._cached_size_)*/{}
+  };
+}
+
+GappsRemove::~GappsRemove() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.GappsRemove)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void GappsRemove::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+}
+
+void GappsRemove::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void GappsRemove::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.GappsRemove)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* GappsRemove::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* GappsRemove::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.GappsRemove)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.GappsRemove)
+  return target;
+}
+
+size_t GappsRemove::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.GappsRemove)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void GappsRemove::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const GappsRemove*>(
+      &from));
+}
+
+void GappsRemove::MergeFrom(const GappsRemove& from) {
+  GappsRemove* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.GappsRemove)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void GappsRemove::CopyFrom(const GappsRemove& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.GappsRemove)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool GappsRemove::IsInitialized() const {
+  return true;
+}
+
+void GappsRemove::InternalSwap(GappsRemove* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+}
+
+std::string GappsRemove::GetTypeName() const {
+  return "dsa.control.v1.GappsRemove";
+}
+
+
+// ===================================================================
+
+class GappsQuery::_Internal {
+ public:
+};
+
+GappsQuery::GappsQuery(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.GappsQuery)
+}
+GappsQuery::GappsQuery(const GappsQuery& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  GappsQuery* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.GappsQuery)
+}
+
+inline void GappsQuery::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      /*decltype(_impl_._cached_size_)*/{}
+  };
+}
+
+GappsQuery::~GappsQuery() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.GappsQuery)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void GappsQuery::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+}
+
+void GappsQuery::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void GappsQuery::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.GappsQuery)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* GappsQuery::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* GappsQuery::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.GappsQuery)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.GappsQuery)
+  return target;
+}
+
+size_t GappsQuery::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.GappsQuery)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void GappsQuery::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const GappsQuery*>(
+      &from));
+}
+
+void GappsQuery::MergeFrom(const GappsQuery& from) {
+  GappsQuery* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.GappsQuery)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void GappsQuery::CopyFrom(const GappsQuery& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.GappsQuery)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool GappsQuery::IsInitialized() const {
+  return true;
+}
+
+void GappsQuery::InternalSwap(GappsQuery* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+}
+
+std::string GappsQuery::GetTypeName() const {
+  return "dsa.control.v1.GappsQuery";
+}
+
+
+// ===================================================================
+
+class GappsState::_Internal {
+ public:
+};
+
+GappsState::GappsState(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.GappsState)
+}
+GappsState::GappsState(const GappsState& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  GappsState* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.error_){}
+    , decltype(_impl_.abi_){}
+    , decltype(_impl_.abilist_){}
+    , decltype(_impl_.received_){}
+    , decltype(_impl_.transfer_id_){}
+    , decltype(_impl_.done_){}
+    , decltype(_impl_.installed_){}
+    , decltype(_impl_.active_){}
+    , decltype(_impl_.sdk_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _impl_.error_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.error_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_error().empty()) {
+    _this->_impl_.error_.Set(from._internal_error(), 
+      _this->GetArenaForAllocation());
+  }
+  _impl_.abi_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.abi_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_abi().empty()) {
+    _this->_impl_.abi_.Set(from._internal_abi(), 
+      _this->GetArenaForAllocation());
+  }
+  _impl_.abilist_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.abilist_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_abilist().empty()) {
+    _this->_impl_.abilist_.Set(from._internal_abilist(), 
+      _this->GetArenaForAllocation());
+  }
+  ::memcpy(&_impl_.received_, &from._impl_.received_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.sdk_) -
+    reinterpret_cast<char*>(&_impl_.received_)) + sizeof(_impl_.sdk_));
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.GappsState)
+}
+
+inline void GappsState::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.error_){}
+    , decltype(_impl_.abi_){}
+    , decltype(_impl_.abilist_){}
+    , decltype(_impl_.received_){uint64_t{0u}}
+    , decltype(_impl_.transfer_id_){0u}
+    , decltype(_impl_.done_){false}
+    , decltype(_impl_.installed_){false}
+    , decltype(_impl_.active_){false}
+    , decltype(_impl_.sdk_){0u}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+  _impl_.error_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.error_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  _impl_.abi_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.abi_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  _impl_.abilist_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.abilist_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+}
+
+GappsState::~GappsState() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.GappsState)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void GappsState::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.error_.Destroy();
+  _impl_.abi_.Destroy();
+  _impl_.abilist_.Destroy();
+}
+
+void GappsState::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void GappsState::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.GappsState)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.error_.ClearToEmpty();
+  _impl_.abi_.ClearToEmpty();
+  _impl_.abilist_.ClearToEmpty();
+  ::memset(&_impl_.received_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&_impl_.sdk_) -
+      reinterpret_cast<char*>(&_impl_.received_)) + sizeof(_impl_.sdk_));
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* GappsState::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // uint32 transfer_id = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.transfer_id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint64 received = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 16)) {
+          _impl_.received_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // bool done = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 24)) {
+          _impl_.done_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // string error = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 34)) {
+          auto str = _internal_mutable_error();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+          CHK_(::_pbi::VerifyUTF8(str, nullptr));
+        } else
+          goto handle_unusual;
+        continue;
+      // bool installed = 5;
+      case 5:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 40)) {
+          _impl_.installed_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // bool active = 6;
+      case 6:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 48)) {
+          _impl_.active_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint32 sdk = 7;
+      case 7:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 56)) {
+          _impl_.sdk_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // string abi = 8;
+      case 8:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 66)) {
+          auto str = _internal_mutable_abi();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+          CHK_(::_pbi::VerifyUTF8(str, nullptr));
+        } else
+          goto handle_unusual;
+        continue;
+      // string abilist = 9;
+      case 9:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 74)) {
+          auto str = _internal_mutable_abilist();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+          CHK_(::_pbi::VerifyUTF8(str, nullptr));
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* GappsState::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.GappsState)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // uint32 transfer_id = 1;
+  if (this->_internal_transfer_id() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(1, this->_internal_transfer_id(), target);
+  }
+
+  // uint64 received = 2;
+  if (this->_internal_received() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(2, this->_internal_received(), target);
+  }
+
+  // bool done = 3;
+  if (this->_internal_done() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(3, this->_internal_done(), target);
+  }
+
+  // string error = 4;
+  if (!this->_internal_error().empty()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->_internal_error().data(), static_cast<int>(this->_internal_error().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "dsa.control.v1.GappsState.error");
+    target = stream->WriteStringMaybeAliased(
+        4, this->_internal_error(), target);
+  }
+
+  // bool installed = 5;
+  if (this->_internal_installed() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(5, this->_internal_installed(), target);
+  }
+
+  // bool active = 6;
+  if (this->_internal_active() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(6, this->_internal_active(), target);
+  }
+
+  // uint32 sdk = 7;
+  if (this->_internal_sdk() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(7, this->_internal_sdk(), target);
+  }
+
+  // string abi = 8;
+  if (!this->_internal_abi().empty()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->_internal_abi().data(), static_cast<int>(this->_internal_abi().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "dsa.control.v1.GappsState.abi");
+    target = stream->WriteStringMaybeAliased(
+        8, this->_internal_abi(), target);
+  }
+
+  // string abilist = 9;
+  if (!this->_internal_abilist().empty()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->_internal_abilist().data(), static_cast<int>(this->_internal_abilist().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "dsa.control.v1.GappsState.abilist");
+    target = stream->WriteStringMaybeAliased(
+        9, this->_internal_abilist(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.GappsState)
+  return target;
+}
+
+size_t GappsState::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.GappsState)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // string error = 4;
+  if (!this->_internal_error().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_error());
+  }
+
+  // string abi = 8;
+  if (!this->_internal_abi().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_abi());
+  }
+
+  // string abilist = 9;
+  if (!this->_internal_abilist().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_abilist());
+  }
+
+  // uint64 received = 2;
+  if (this->_internal_received() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_received());
+  }
+
+  // uint32 transfer_id = 1;
+  if (this->_internal_transfer_id() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_transfer_id());
+  }
+
+  // bool done = 3;
+  if (this->_internal_done() != 0) {
+    total_size += 1 + 1;
+  }
+
+  // bool installed = 5;
+  if (this->_internal_installed() != 0) {
+    total_size += 1 + 1;
+  }
+
+  // bool active = 6;
+  if (this->_internal_active() != 0) {
+    total_size += 1 + 1;
+  }
+
+  // uint32 sdk = 7;
+  if (this->_internal_sdk() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_sdk());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void GappsState::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const GappsState*>(
+      &from));
+}
+
+void GappsState::MergeFrom(const GappsState& from) {
+  GappsState* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.GappsState)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (!from._internal_error().empty()) {
+    _this->_internal_set_error(from._internal_error());
+  }
+  if (!from._internal_abi().empty()) {
+    _this->_internal_set_abi(from._internal_abi());
+  }
+  if (!from._internal_abilist().empty()) {
+    _this->_internal_set_abilist(from._internal_abilist());
+  }
+  if (from._internal_received() != 0) {
+    _this->_internal_set_received(from._internal_received());
+  }
+  if (from._internal_transfer_id() != 0) {
+    _this->_internal_set_transfer_id(from._internal_transfer_id());
+  }
+  if (from._internal_done() != 0) {
+    _this->_internal_set_done(from._internal_done());
+  }
+  if (from._internal_installed() != 0) {
+    _this->_internal_set_installed(from._internal_installed());
+  }
+  if (from._internal_active() != 0) {
+    _this->_internal_set_active(from._internal_active());
+  }
+  if (from._internal_sdk() != 0) {
+    _this->_internal_set_sdk(from._internal_sdk());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void GappsState::CopyFrom(const GappsState& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.GappsState)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool GappsState::IsInitialized() const {
+  return true;
+}
+
+void GappsState::InternalSwap(GappsState* other) {
+  using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.error_, lhs_arena,
+      &other->_impl_.error_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.abi_, lhs_arena,
+      &other->_impl_.abi_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.abilist_, lhs_arena,
+      &other->_impl_.abilist_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(GappsState, _impl_.sdk_)
+      + sizeof(GappsState::_impl_.sdk_)
+      - PROTOBUF_FIELD_OFFSET(GappsState, _impl_.received_)>(
+          reinterpret_cast<char*>(&_impl_.received_),
+          reinterpret_cast<char*>(&other->_impl_.received_));
+}
+
+std::string GappsState::GetTypeName() const {
+  return "dsa.control.v1.GappsState";
+}
+
+
+// ===================================================================
+
+class GoogleDeviceIdQuery::_Internal {
+ public:
+};
+
+GoogleDeviceIdQuery::GoogleDeviceIdQuery(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.GoogleDeviceIdQuery)
+}
+GoogleDeviceIdQuery::GoogleDeviceIdQuery(const GoogleDeviceIdQuery& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  GoogleDeviceIdQuery* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.GoogleDeviceIdQuery)
+}
+
+inline void GoogleDeviceIdQuery::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      /*decltype(_impl_._cached_size_)*/{}
+  };
+}
+
+GoogleDeviceIdQuery::~GoogleDeviceIdQuery() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.GoogleDeviceIdQuery)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void GoogleDeviceIdQuery::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+}
+
+void GoogleDeviceIdQuery::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void GoogleDeviceIdQuery::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.GoogleDeviceIdQuery)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* GoogleDeviceIdQuery::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* GoogleDeviceIdQuery::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.GoogleDeviceIdQuery)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.GoogleDeviceIdQuery)
+  return target;
+}
+
+size_t GoogleDeviceIdQuery::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.GoogleDeviceIdQuery)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void GoogleDeviceIdQuery::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const GoogleDeviceIdQuery*>(
+      &from));
+}
+
+void GoogleDeviceIdQuery::MergeFrom(const GoogleDeviceIdQuery& from) {
+  GoogleDeviceIdQuery* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.GoogleDeviceIdQuery)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void GoogleDeviceIdQuery::CopyFrom(const GoogleDeviceIdQuery& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.GoogleDeviceIdQuery)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool GoogleDeviceIdQuery::IsInitialized() const {
+  return true;
+}
+
+void GoogleDeviceIdQuery::InternalSwap(GoogleDeviceIdQuery* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+}
+
+std::string GoogleDeviceIdQuery::GetTypeName() const {
+  return "dsa.control.v1.GoogleDeviceIdQuery";
+}
+
+
+// ===================================================================
+
+class GoogleDeviceId::_Internal {
+ public:
+};
+
+GoogleDeviceId::GoogleDeviceId(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.GoogleDeviceId)
+}
+GoogleDeviceId::GoogleDeviceId(const GoogleDeviceId& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  GoogleDeviceId* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.id_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _impl_.id_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.id_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_id().empty()) {
+    _this->_impl_.id_.Set(from._internal_id(), 
+      _this->GetArenaForAllocation());
+  }
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.GoogleDeviceId)
+}
+
+inline void GoogleDeviceId::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.id_){}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+  _impl_.id_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.id_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+}
+
+GoogleDeviceId::~GoogleDeviceId() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.GoogleDeviceId)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void GoogleDeviceId::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.id_.Destroy();
+}
+
+void GoogleDeviceId::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void GoogleDeviceId::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.GoogleDeviceId)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.id_.ClearToEmpty();
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* GoogleDeviceId::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // string id = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 10)) {
+          auto str = _internal_mutable_id();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+          CHK_(::_pbi::VerifyUTF8(str, nullptr));
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* GoogleDeviceId::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.GoogleDeviceId)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // string id = 1;
+  if (!this->_internal_id().empty()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->_internal_id().data(), static_cast<int>(this->_internal_id().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "dsa.control.v1.GoogleDeviceId.id");
+    target = stream->WriteStringMaybeAliased(
+        1, this->_internal_id(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.GoogleDeviceId)
+  return target;
+}
+
+size_t GoogleDeviceId::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.GoogleDeviceId)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // string id = 1;
+  if (!this->_internal_id().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_id());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void GoogleDeviceId::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const GoogleDeviceId*>(
+      &from));
+}
+
+void GoogleDeviceId::MergeFrom(const GoogleDeviceId& from) {
+  GoogleDeviceId* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.GoogleDeviceId)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (!from._internal_id().empty()) {
+    _this->_internal_set_id(from._internal_id());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void GoogleDeviceId::CopyFrom(const GoogleDeviceId& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.GoogleDeviceId)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool GoogleDeviceId::IsInitialized() const {
+  return true;
+}
+
+void GoogleDeviceId::InternalSwap(GoogleDeviceId* other) {
+  using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.id_, lhs_arena,
+      &other->_impl_.id_, rhs_arena
+  );
+}
+
+std::string GoogleDeviceId::GetTypeName() const {
+  return "dsa.control.v1.GoogleDeviceId";
+}
+
+
+// ===================================================================
+
 class GuestNotification::_Internal {
  public:
 };
@@ -20399,6 +23661,271 @@ std::string GuestBoot::GetTypeName() const {
 
 // ===================================================================
 
+class InstallPart::_Internal {
+ public:
+};
+
+InstallPart::InstallPart(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.InstallPart)
+}
+InstallPart::InstallPart(const InstallPart& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  InstallPart* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.name_){}
+    , decltype(_impl_.size_){}
+    , decltype(_impl_.obb_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _impl_.name_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.name_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_name().empty()) {
+    _this->_impl_.name_.Set(from._internal_name(), 
+      _this->GetArenaForAllocation());
+  }
+  ::memcpy(&_impl_.size_, &from._impl_.size_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.obb_) -
+    reinterpret_cast<char*>(&_impl_.size_)) + sizeof(_impl_.obb_));
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.InstallPart)
+}
+
+inline void InstallPart::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.name_){}
+    , decltype(_impl_.size_){uint64_t{0u}}
+    , decltype(_impl_.obb_){false}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+  _impl_.name_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.name_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+}
+
+InstallPart::~InstallPart() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.InstallPart)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void InstallPart::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.name_.Destroy();
+}
+
+void InstallPart::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void InstallPart::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.InstallPart)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.name_.ClearToEmpty();
+  ::memset(&_impl_.size_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&_impl_.obb_) -
+      reinterpret_cast<char*>(&_impl_.size_)) + sizeof(_impl_.obb_));
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* InstallPart::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // string name = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 10)) {
+          auto str = _internal_mutable_name();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+          CHK_(::_pbi::VerifyUTF8(str, nullptr));
+        } else
+          goto handle_unusual;
+        continue;
+      // uint64 size = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 16)) {
+          _impl_.size_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // bool obb = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 24)) {
+          _impl_.obb_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* InstallPart::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.InstallPart)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // string name = 1;
+  if (!this->_internal_name().empty()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->_internal_name().data(), static_cast<int>(this->_internal_name().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "dsa.control.v1.InstallPart.name");
+    target = stream->WriteStringMaybeAliased(
+        1, this->_internal_name(), target);
+  }
+
+  // uint64 size = 2;
+  if (this->_internal_size() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(2, this->_internal_size(), target);
+  }
+
+  // bool obb = 3;
+  if (this->_internal_obb() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(3, this->_internal_obb(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.InstallPart)
+  return target;
+}
+
+size_t InstallPart::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.InstallPart)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // string name = 1;
+  if (!this->_internal_name().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_name());
+  }
+
+  // uint64 size = 2;
+  if (this->_internal_size() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_size());
+  }
+
+  // bool obb = 3;
+  if (this->_internal_obb() != 0) {
+    total_size += 1 + 1;
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void InstallPart::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const InstallPart*>(
+      &from));
+}
+
+void InstallPart::MergeFrom(const InstallPart& from) {
+  InstallPart* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.InstallPart)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (!from._internal_name().empty()) {
+    _this->_internal_set_name(from._internal_name());
+  }
+  if (from._internal_size() != 0) {
+    _this->_internal_set_size(from._internal_size());
+  }
+  if (from._internal_obb() != 0) {
+    _this->_internal_set_obb(from._internal_obb());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void InstallPart::CopyFrom(const InstallPart& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.InstallPart)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool InstallPart::IsInitialized() const {
+  return true;
+}
+
+void InstallPart::InternalSwap(InstallPart* other) {
+  using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.name_, lhs_arena,
+      &other->_impl_.name_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(InstallPart, _impl_.obb_)
+      + sizeof(InstallPart::_impl_.obb_)
+      - PROTOBUF_FIELD_OFFSET(InstallPart, _impl_.size_)>(
+          reinterpret_cast<char*>(&_impl_.size_),
+          reinterpret_cast<char*>(&other->_impl_.size_));
+}
+
+std::string InstallPart::GetTypeName() const {
+  return "dsa.control.v1.InstallPart";
+}
+
+
+// ===================================================================
+
 class InstallApk::_Internal {
  public:
 };
@@ -20413,7 +23940,9 @@ InstallApk::InstallApk(const InstallApk& from)
   : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
   InstallApk* const _this = this; (void)_this;
   new (&_impl_) Impl_{
-      decltype(_impl_.name_){}
+      decltype(_impl_.parts_){from._impl_.parts_}
+    , decltype(_impl_.name_){}
+    , decltype(_impl_.abi_){}
     , decltype(_impl_.size_){}
     , decltype(_impl_.transfer_id_){}
     , /*decltype(_impl_._cached_size_)*/{}};
@@ -20427,6 +23956,14 @@ InstallApk::InstallApk(const InstallApk& from)
     _this->_impl_.name_.Set(from._internal_name(), 
       _this->GetArenaForAllocation());
   }
+  _impl_.abi_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.abi_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_abi().empty()) {
+    _this->_impl_.abi_.Set(from._internal_abi(), 
+      _this->GetArenaForAllocation());
+  }
   ::memcpy(&_impl_.size_, &from._impl_.size_,
     static_cast<size_t>(reinterpret_cast<char*>(&_impl_.transfer_id_) -
     reinterpret_cast<char*>(&_impl_.size_)) + sizeof(_impl_.transfer_id_));
@@ -20438,7 +23975,9 @@ inline void InstallApk::SharedCtor(
   (void)arena;
   (void)is_message_owned;
   new (&_impl_) Impl_{
-      decltype(_impl_.name_){}
+      decltype(_impl_.parts_){arena}
+    , decltype(_impl_.name_){}
+    , decltype(_impl_.abi_){}
     , decltype(_impl_.size_){uint64_t{0u}}
     , decltype(_impl_.transfer_id_){0u}
     , /*decltype(_impl_._cached_size_)*/{}
@@ -20446,6 +23985,10 @@ inline void InstallApk::SharedCtor(
   _impl_.name_.InitDefault();
   #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
     _impl_.name_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  _impl_.abi_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.abi_.Set("", GetArenaForAllocation());
   #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
 }
 
@@ -20460,7 +24003,9 @@ InstallApk::~InstallApk() {
 
 inline void InstallApk::SharedDtor() {
   GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.parts_.~RepeatedPtrField();
   _impl_.name_.Destroy();
+  _impl_.abi_.Destroy();
 }
 
 void InstallApk::SetCachedSize(int size) const {
@@ -20473,7 +24018,9 @@ void InstallApk::Clear() {
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
+  _impl_.parts_.Clear();
   _impl_.name_.ClearToEmpty();
+  _impl_.abi_.ClearToEmpty();
   ::memset(&_impl_.size_, 0, static_cast<size_t>(
       reinterpret_cast<char*>(&_impl_.transfer_id_) -
       reinterpret_cast<char*>(&_impl_.size_)) + sizeof(_impl_.transfer_id_));
@@ -20509,6 +24056,29 @@ const char* InstallApk::_InternalParse(const char* ptr, ::_pbi::ParseContext* ct
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 24)) {
           _impl_.size_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
           CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // string abi = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 34)) {
+          auto str = _internal_mutable_abi();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+          CHK_(::_pbi::VerifyUTF8(str, nullptr));
+        } else
+          goto handle_unusual;
+        continue;
+      // repeated .dsa.control.v1.InstallPart parts = 5;
+      case 5:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 42)) {
+          ptr -= 1;
+          do {
+            ptr += 1;
+            ptr = ctx->ParseMessage(_internal_add_parts(), ptr);
+            CHK_(ptr);
+            if (!ctx->DataAvailable(ptr)) break;
+          } while (::PROTOBUF_NAMESPACE_ID::internal::ExpectTag<42>(ptr));
         } else
           goto handle_unusual;
         continue;
@@ -20563,6 +24133,24 @@ uint8_t* InstallApk::_InternalSerialize(
     target = ::_pbi::WireFormatLite::WriteUInt64ToArray(3, this->_internal_size(), target);
   }
 
+  // string abi = 4;
+  if (!this->_internal_abi().empty()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->_internal_abi().data(), static_cast<int>(this->_internal_abi().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "dsa.control.v1.InstallApk.abi");
+    target = stream->WriteStringMaybeAliased(
+        4, this->_internal_abi(), target);
+  }
+
+  // repeated .dsa.control.v1.InstallPart parts = 5;
+  for (unsigned i = 0,
+      n = static_cast<unsigned>(this->_internal_parts_size()); i < n; i++) {
+    const auto& repfield = this->_internal_parts(i);
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+        InternalWriteMessage(5, repfield, repfield.GetCachedSize(), target, stream);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -20579,11 +24167,25 @@ size_t InstallApk::ByteSizeLong() const {
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
+  // repeated .dsa.control.v1.InstallPart parts = 5;
+  total_size += 1UL * this->_internal_parts_size();
+  for (const auto& msg : this->_impl_.parts_) {
+    total_size +=
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(msg);
+  }
+
   // string name = 2;
   if (!this->_internal_name().empty()) {
     total_size += 1 +
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
         this->_internal_name());
+  }
+
+  // string abi = 4;
+  if (!this->_internal_abi().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_abi());
   }
 
   // uint64 size = 3;
@@ -20617,8 +24219,12 @@ void InstallApk::MergeFrom(const InstallApk& from) {
   uint32_t cached_has_bits = 0;
   (void) cached_has_bits;
 
+  _this->_impl_.parts_.MergeFrom(from._impl_.parts_);
   if (!from._internal_name().empty()) {
     _this->_internal_set_name(from._internal_name());
+  }
+  if (!from._internal_abi().empty()) {
+    _this->_internal_set_abi(from._internal_abi());
   }
   if (from._internal_size() != 0) {
     _this->_internal_set_size(from._internal_size());
@@ -20645,9 +24251,14 @@ void InstallApk::InternalSwap(InstallApk* other) {
   auto* lhs_arena = GetArenaForAllocation();
   auto* rhs_arena = other->GetArenaForAllocation();
   _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  _impl_.parts_.InternalSwap(&other->_impl_.parts_);
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
       &_impl_.name_, lhs_arena,
       &other->_impl_.name_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.abi_, lhs_arena,
+      &other->_impl_.abi_, rhs_arena
   );
   ::PROTOBUF_NAMESPACE_ID::internal::memswap<
       PROTOBUF_FIELD_OFFSET(InstallApk, _impl_.transfer_id_)
@@ -42709,6 +46320,211 @@ std::string SystemSettings::GetTypeName() const {
 
 // ===================================================================
 
+class DeviceName::_Internal {
+ public:
+};
+
+DeviceName::DeviceName(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.DeviceName)
+}
+DeviceName::DeviceName(const DeviceName& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  DeviceName* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.name_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _impl_.name_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.name_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_name().empty()) {
+    _this->_impl_.name_.Set(from._internal_name(), 
+      _this->GetArenaForAllocation());
+  }
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.DeviceName)
+}
+
+inline void DeviceName::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.name_){}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+  _impl_.name_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.name_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+}
+
+DeviceName::~DeviceName() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.DeviceName)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void DeviceName::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.name_.Destroy();
+}
+
+void DeviceName::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void DeviceName::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.DeviceName)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.name_.ClearToEmpty();
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* DeviceName::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // string name = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 10)) {
+          auto str = _internal_mutable_name();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+          CHK_(::_pbi::VerifyUTF8(str, nullptr));
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* DeviceName::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.DeviceName)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // string name = 1;
+  if (!this->_internal_name().empty()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->_internal_name().data(), static_cast<int>(this->_internal_name().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "dsa.control.v1.DeviceName.name");
+    target = stream->WriteStringMaybeAliased(
+        1, this->_internal_name(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.DeviceName)
+  return target;
+}
+
+size_t DeviceName::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.DeviceName)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // string name = 1;
+  if (!this->_internal_name().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_name());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void DeviceName::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const DeviceName*>(
+      &from));
+}
+
+void DeviceName::MergeFrom(const DeviceName& from) {
+  DeviceName* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.DeviceName)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (!from._internal_name().empty()) {
+    _this->_internal_set_name(from._internal_name());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void DeviceName::CopyFrom(const DeviceName& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.DeviceName)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool DeviceName::IsInitialized() const {
+  return true;
+}
+
+void DeviceName::InternalSwap(DeviceName* other) {
+  using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.name_, lhs_arena,
+      &other->_impl_.name_, rhs_arena
+  );
+}
+
+std::string DeviceName::GetTypeName() const {
+  return "dsa.control.v1.DeviceName";
+}
+
+
+// ===================================================================
+
 class GamepadConnected::_Internal {
  public:
 };
@@ -43860,6 +47676,13 @@ class Envelope::_Internal {
   static const ::dsa::control::v1::ArmTranslationRemove& arm_translation_remove(const Envelope* msg);
   static const ::dsa::control::v1::ArmTranslationQuery& arm_translation_query(const Envelope* msg);
   static const ::dsa::control::v1::ArmTranslationState& arm_translation_state(const Envelope* msg);
+  static const ::dsa::control::v1::GappsInstall& gapps_install(const Envelope* msg);
+  static const ::dsa::control::v1::GappsChunk& gapps_chunk(const Envelope* msg);
+  static const ::dsa::control::v1::GappsRemove& gapps_remove(const Envelope* msg);
+  static const ::dsa::control::v1::GappsQuery& gapps_query(const Envelope* msg);
+  static const ::dsa::control::v1::GappsState& gapps_state(const Envelope* msg);
+  static const ::dsa::control::v1::GoogleDeviceIdQuery& google_device_id_query(const Envelope* msg);
+  static const ::dsa::control::v1::GoogleDeviceId& google_device_id(const Envelope* msg);
   static const ::dsa::control::v1::DeviceIdle& device_idle(const Envelope* msg);
   static const ::dsa::control::v1::HostMemory& host_memory(const Envelope* msg);
   static const ::dsa::control::v1::HostSleep& host_sleep(const Envelope* msg);
@@ -43946,6 +47769,7 @@ class Envelope::_Internal {
   static const ::dsa::control::v1::CameraError& camera_error(const Envelope* msg);
   static const ::dsa::control::v1::SetTaskCaption& set_task_caption(const Envelope* msg);
   static const ::dsa::control::v1::SystemSettings& system_settings(const Envelope* msg);
+  static const ::dsa::control::v1::DeviceName& device_name(const Envelope* msg);
   static const ::dsa::control::v1::GamepadConnected& gamepad_connected(const Envelope* msg);
   static const ::dsa::control::v1::GamepadDisconnected& gamepad_disconnected(const Envelope* msg);
   static const ::dsa::control::v1::GamepadState& gamepad_state(const Envelope* msg);
@@ -43957,6 +47781,9 @@ class Envelope::_Internal {
   static const ::dsa::control::v1::DragRead& drag_read(const Envelope* msg);
   static const ::dsa::control::v1::DragData& drag_data(const Envelope* msg);
   static const ::dsa::control::v1::DragEnd& drag_end(const Envelope* msg);
+  static const ::dsa::control::v1::ReinstallApp& reinstall_app(const Envelope* msg);
+  static const ::dsa::control::v1::ReinstallResult& reinstall_result(const Envelope* msg);
+  static const ::dsa::control::v1::NativeLibraryCrash& native_library_crash(const Envelope* msg);
 };
 
 const ::dsa::control::v1::Hello&
@@ -44110,6 +47937,34 @@ Envelope::_Internal::arm_translation_query(const Envelope* msg) {
 const ::dsa::control::v1::ArmTranslationState&
 Envelope::_Internal::arm_translation_state(const Envelope* msg) {
   return *msg->_impl_.body_.arm_translation_state_;
+}
+const ::dsa::control::v1::GappsInstall&
+Envelope::_Internal::gapps_install(const Envelope* msg) {
+  return *msg->_impl_.body_.gapps_install_;
+}
+const ::dsa::control::v1::GappsChunk&
+Envelope::_Internal::gapps_chunk(const Envelope* msg) {
+  return *msg->_impl_.body_.gapps_chunk_;
+}
+const ::dsa::control::v1::GappsRemove&
+Envelope::_Internal::gapps_remove(const Envelope* msg) {
+  return *msg->_impl_.body_.gapps_remove_;
+}
+const ::dsa::control::v1::GappsQuery&
+Envelope::_Internal::gapps_query(const Envelope* msg) {
+  return *msg->_impl_.body_.gapps_query_;
+}
+const ::dsa::control::v1::GappsState&
+Envelope::_Internal::gapps_state(const Envelope* msg) {
+  return *msg->_impl_.body_.gapps_state_;
+}
+const ::dsa::control::v1::GoogleDeviceIdQuery&
+Envelope::_Internal::google_device_id_query(const Envelope* msg) {
+  return *msg->_impl_.body_.google_device_id_query_;
+}
+const ::dsa::control::v1::GoogleDeviceId&
+Envelope::_Internal::google_device_id(const Envelope* msg) {
+  return *msg->_impl_.body_.google_device_id_;
 }
 const ::dsa::control::v1::DeviceIdle&
 Envelope::_Internal::device_idle(const Envelope* msg) {
@@ -44455,6 +48310,10 @@ const ::dsa::control::v1::SystemSettings&
 Envelope::_Internal::system_settings(const Envelope* msg) {
   return *msg->_impl_.body_.system_settings_;
 }
+const ::dsa::control::v1::DeviceName&
+Envelope::_Internal::device_name(const Envelope* msg) {
+  return *msg->_impl_.body_.device_name_;
+}
 const ::dsa::control::v1::GamepadConnected&
 Envelope::_Internal::gamepad_connected(const Envelope* msg) {
   return *msg->_impl_.body_.gamepad_connected_;
@@ -44498,6 +48357,18 @@ Envelope::_Internal::drag_data(const Envelope* msg) {
 const ::dsa::control::v1::DragEnd&
 Envelope::_Internal::drag_end(const Envelope* msg) {
   return *msg->_impl_.body_.drag_end_;
+}
+const ::dsa::control::v1::ReinstallApp&
+Envelope::_Internal::reinstall_app(const Envelope* msg) {
+  return *msg->_impl_.body_.reinstall_app_;
+}
+const ::dsa::control::v1::ReinstallResult&
+Envelope::_Internal::reinstall_result(const Envelope* msg) {
+  return *msg->_impl_.body_.reinstall_result_;
+}
+const ::dsa::control::v1::NativeLibraryCrash&
+Envelope::_Internal::native_library_crash(const Envelope* msg) {
+  return *msg->_impl_.body_.native_library_crash_;
 }
 void Envelope::set_allocated_hello(::dsa::control::v1::Hello* hello) {
   ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
@@ -45068,6 +48939,111 @@ void Envelope::set_allocated_arm_translation_state(::dsa::control::v1::ArmTransl
     _impl_.body_.arm_translation_state_ = arm_translation_state;
   }
   // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.arm_translation_state)
+}
+void Envelope::set_allocated_gapps_install(::dsa::control::v1::GappsInstall* gapps_install) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (gapps_install) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(gapps_install);
+    if (message_arena != submessage_arena) {
+      gapps_install = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, gapps_install, submessage_arena);
+    }
+    set_has_gapps_install();
+    _impl_.body_.gapps_install_ = gapps_install;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.gapps_install)
+}
+void Envelope::set_allocated_gapps_chunk(::dsa::control::v1::GappsChunk* gapps_chunk) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (gapps_chunk) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(gapps_chunk);
+    if (message_arena != submessage_arena) {
+      gapps_chunk = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, gapps_chunk, submessage_arena);
+    }
+    set_has_gapps_chunk();
+    _impl_.body_.gapps_chunk_ = gapps_chunk;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.gapps_chunk)
+}
+void Envelope::set_allocated_gapps_remove(::dsa::control::v1::GappsRemove* gapps_remove) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (gapps_remove) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(gapps_remove);
+    if (message_arena != submessage_arena) {
+      gapps_remove = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, gapps_remove, submessage_arena);
+    }
+    set_has_gapps_remove();
+    _impl_.body_.gapps_remove_ = gapps_remove;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.gapps_remove)
+}
+void Envelope::set_allocated_gapps_query(::dsa::control::v1::GappsQuery* gapps_query) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (gapps_query) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(gapps_query);
+    if (message_arena != submessage_arena) {
+      gapps_query = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, gapps_query, submessage_arena);
+    }
+    set_has_gapps_query();
+    _impl_.body_.gapps_query_ = gapps_query;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.gapps_query)
+}
+void Envelope::set_allocated_gapps_state(::dsa::control::v1::GappsState* gapps_state) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (gapps_state) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(gapps_state);
+    if (message_arena != submessage_arena) {
+      gapps_state = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, gapps_state, submessage_arena);
+    }
+    set_has_gapps_state();
+    _impl_.body_.gapps_state_ = gapps_state;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.gapps_state)
+}
+void Envelope::set_allocated_google_device_id_query(::dsa::control::v1::GoogleDeviceIdQuery* google_device_id_query) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (google_device_id_query) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(google_device_id_query);
+    if (message_arena != submessage_arena) {
+      google_device_id_query = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, google_device_id_query, submessage_arena);
+    }
+    set_has_google_device_id_query();
+    _impl_.body_.google_device_id_query_ = google_device_id_query;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.google_device_id_query)
+}
+void Envelope::set_allocated_google_device_id(::dsa::control::v1::GoogleDeviceId* google_device_id) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (google_device_id) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(google_device_id);
+    if (message_arena != submessage_arena) {
+      google_device_id = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, google_device_id, submessage_arena);
+    }
+    set_has_google_device_id();
+    _impl_.body_.google_device_id_ = google_device_id;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.google_device_id)
 }
 void Envelope::set_allocated_device_idle(::dsa::control::v1::DeviceIdle* device_idle) {
   ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
@@ -46359,6 +50335,21 @@ void Envelope::set_allocated_system_settings(::dsa::control::v1::SystemSettings*
   }
   // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.system_settings)
 }
+void Envelope::set_allocated_device_name(::dsa::control::v1::DeviceName* device_name) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (device_name) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(device_name);
+    if (message_arena != submessage_arena) {
+      device_name = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, device_name, submessage_arena);
+    }
+    set_has_device_name();
+    _impl_.body_.device_name_ = device_name;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.device_name)
+}
 void Envelope::set_allocated_gamepad_connected(::dsa::control::v1::GamepadConnected* gamepad_connected) {
   ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
   clear_body();
@@ -46523,6 +50514,51 @@ void Envelope::set_allocated_drag_end(::dsa::control::v1::DragEnd* drag_end) {
     _impl_.body_.drag_end_ = drag_end;
   }
   // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.drag_end)
+}
+void Envelope::set_allocated_reinstall_app(::dsa::control::v1::ReinstallApp* reinstall_app) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (reinstall_app) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(reinstall_app);
+    if (message_arena != submessage_arena) {
+      reinstall_app = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, reinstall_app, submessage_arena);
+    }
+    set_has_reinstall_app();
+    _impl_.body_.reinstall_app_ = reinstall_app;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.reinstall_app)
+}
+void Envelope::set_allocated_reinstall_result(::dsa::control::v1::ReinstallResult* reinstall_result) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (reinstall_result) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(reinstall_result);
+    if (message_arena != submessage_arena) {
+      reinstall_result = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, reinstall_result, submessage_arena);
+    }
+    set_has_reinstall_result();
+    _impl_.body_.reinstall_result_ = reinstall_result;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.reinstall_result)
+}
+void Envelope::set_allocated_native_library_crash(::dsa::control::v1::NativeLibraryCrash* native_library_crash) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (native_library_crash) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(native_library_crash);
+    if (message_arena != submessage_arena) {
+      native_library_crash = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, native_library_crash, submessage_arena);
+    }
+    set_has_native_library_crash();
+    _impl_.body_.native_library_crash_ = native_library_crash;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.native_library_crash)
 }
 Envelope::Envelope(::PROTOBUF_NAMESPACE_ID::Arena* arena,
                          bool is_message_owned)
@@ -46729,6 +50765,41 @@ Envelope::Envelope(const Envelope& from)
     case kArmTranslationState: {
       _this->_internal_mutable_arm_translation_state()->::dsa::control::v1::ArmTranslationState::MergeFrom(
           from._internal_arm_translation_state());
+      break;
+    }
+    case kGappsInstall: {
+      _this->_internal_mutable_gapps_install()->::dsa::control::v1::GappsInstall::MergeFrom(
+          from._internal_gapps_install());
+      break;
+    }
+    case kGappsChunk: {
+      _this->_internal_mutable_gapps_chunk()->::dsa::control::v1::GappsChunk::MergeFrom(
+          from._internal_gapps_chunk());
+      break;
+    }
+    case kGappsRemove: {
+      _this->_internal_mutable_gapps_remove()->::dsa::control::v1::GappsRemove::MergeFrom(
+          from._internal_gapps_remove());
+      break;
+    }
+    case kGappsQuery: {
+      _this->_internal_mutable_gapps_query()->::dsa::control::v1::GappsQuery::MergeFrom(
+          from._internal_gapps_query());
+      break;
+    }
+    case kGappsState: {
+      _this->_internal_mutable_gapps_state()->::dsa::control::v1::GappsState::MergeFrom(
+          from._internal_gapps_state());
+      break;
+    }
+    case kGoogleDeviceIdQuery: {
+      _this->_internal_mutable_google_device_id_query()->::dsa::control::v1::GoogleDeviceIdQuery::MergeFrom(
+          from._internal_google_device_id_query());
+      break;
+    }
+    case kGoogleDeviceId: {
+      _this->_internal_mutable_google_device_id()->::dsa::control::v1::GoogleDeviceId::MergeFrom(
+          from._internal_google_device_id());
       break;
     }
     case kDeviceIdle: {
@@ -47161,6 +51232,11 @@ Envelope::Envelope(const Envelope& from)
           from._internal_system_settings());
       break;
     }
+    case kDeviceName: {
+      _this->_internal_mutable_device_name()->::dsa::control::v1::DeviceName::MergeFrom(
+          from._internal_device_name());
+      break;
+    }
     case kGamepadConnected: {
       _this->_internal_mutable_gamepad_connected()->::dsa::control::v1::GamepadConnected::MergeFrom(
           from._internal_gamepad_connected());
@@ -47214,6 +51290,21 @@ Envelope::Envelope(const Envelope& from)
     case kDragEnd: {
       _this->_internal_mutable_drag_end()->::dsa::control::v1::DragEnd::MergeFrom(
           from._internal_drag_end());
+      break;
+    }
+    case kReinstallApp: {
+      _this->_internal_mutable_reinstall_app()->::dsa::control::v1::ReinstallApp::MergeFrom(
+          from._internal_reinstall_app());
+      break;
+    }
+    case kReinstallResult: {
+      _this->_internal_mutable_reinstall_result()->::dsa::control::v1::ReinstallResult::MergeFrom(
+          from._internal_reinstall_result());
+      break;
+    }
+    case kNativeLibraryCrash: {
+      _this->_internal_mutable_native_library_crash()->::dsa::control::v1::NativeLibraryCrash::MergeFrom(
+          from._internal_native_library_crash());
       break;
     }
     case BODY_NOT_SET: {
@@ -47483,6 +51574,48 @@ void Envelope::clear_body() {
     case kArmTranslationState: {
       if (GetArenaForAllocation() == nullptr) {
         delete _impl_.body_.arm_translation_state_;
+      }
+      break;
+    }
+    case kGappsInstall: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.gapps_install_;
+      }
+      break;
+    }
+    case kGappsChunk: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.gapps_chunk_;
+      }
+      break;
+    }
+    case kGappsRemove: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.gapps_remove_;
+      }
+      break;
+    }
+    case kGappsQuery: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.gapps_query_;
+      }
+      break;
+    }
+    case kGappsState: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.gapps_state_;
+      }
+      break;
+    }
+    case kGoogleDeviceIdQuery: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.google_device_id_query_;
+      }
+      break;
+    }
+    case kGoogleDeviceId: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.google_device_id_;
       }
       break;
     }
@@ -48002,6 +52135,12 @@ void Envelope::clear_body() {
       }
       break;
     }
+    case kDeviceName: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.device_name_;
+      }
+      break;
+    }
     case kGamepadConnected: {
       if (GetArenaForAllocation() == nullptr) {
         delete _impl_.body_.gamepad_connected_;
@@ -48065,6 +52204,24 @@ void Envelope::clear_body() {
     case kDragEnd: {
       if (GetArenaForAllocation() == nullptr) {
         delete _impl_.body_.drag_end_;
+      }
+      break;
+    }
+    case kReinstallApp: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.reinstall_app_;
+      }
+      break;
+    }
+    case kReinstallResult: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.reinstall_result_;
+      }
+      break;
+    }
+    case kNativeLibraryCrash: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.native_library_crash_;
       }
       break;
     }
@@ -49172,6 +53329,94 @@ const char* Envelope::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx)
         } else
           goto handle_unusual;
         continue;
+      // .dsa.control.v1.ReinstallApp reinstall_app = 380;
+      case 380:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 226)) {
+          ptr = ctx->ParseMessage(_internal_mutable_reinstall_app(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.ReinstallResult reinstall_result = 381;
+      case 381:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 234)) {
+          ptr = ctx->ParseMessage(_internal_mutable_reinstall_result(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.NativeLibraryCrash native_library_crash = 382;
+      case 382:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 242)) {
+          ptr = ctx->ParseMessage(_internal_mutable_native_library_crash(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.DeviceName device_name = 383;
+      case 383:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 250)) {
+          ptr = ctx->ParseMessage(_internal_mutable_device_name(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.GappsInstall gapps_install = 400;
+      case 400:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 130)) {
+          ptr = ctx->ParseMessage(_internal_mutable_gapps_install(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.GappsChunk gapps_chunk = 401;
+      case 401:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 138)) {
+          ptr = ctx->ParseMessage(_internal_mutable_gapps_chunk(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.GappsRemove gapps_remove = 402;
+      case 402:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 146)) {
+          ptr = ctx->ParseMessage(_internal_mutable_gapps_remove(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.GappsQuery gapps_query = 403;
+      case 403:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 154)) {
+          ptr = ctx->ParseMessage(_internal_mutable_gapps_query(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.GappsState gapps_state = 404;
+      case 404:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 162)) {
+          ptr = ctx->ParseMessage(_internal_mutable_gapps_state(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.GoogleDeviceIdQuery google_device_id_query = 405;
+      case 405:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 170)) {
+          ptr = ctx->ParseMessage(_internal_mutable_google_device_id_query(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.GoogleDeviceId google_device_id = 406;
+      case 406:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 178)) {
+          ptr = ctx->ParseMessage(_internal_mutable_google_device_id(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
       default:
         goto handle_unusual;
     }  // switch
@@ -50146,6 +54391,83 @@ uint8_t* Envelope::_InternalSerialize(
         _Internal::ime_delete_surrounding(this).GetCachedSize(), target, stream);
   }
 
+  // .dsa.control.v1.ReinstallApp reinstall_app = 380;
+  if (_internal_has_reinstall_app()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(380, _Internal::reinstall_app(this),
+        _Internal::reinstall_app(this).GetCachedSize(), target, stream);
+  }
+
+  // .dsa.control.v1.ReinstallResult reinstall_result = 381;
+  if (_internal_has_reinstall_result()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(381, _Internal::reinstall_result(this),
+        _Internal::reinstall_result(this).GetCachedSize(), target, stream);
+  }
+
+  // .dsa.control.v1.NativeLibraryCrash native_library_crash = 382;
+  if (_internal_has_native_library_crash()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(382, _Internal::native_library_crash(this),
+        _Internal::native_library_crash(this).GetCachedSize(), target, stream);
+  }
+
+  // .dsa.control.v1.DeviceName device_name = 383;
+  if (_internal_has_device_name()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(383, _Internal::device_name(this),
+        _Internal::device_name(this).GetCachedSize(), target, stream);
+  }
+
+  // .dsa.control.v1.GappsInstall gapps_install = 400;
+  if (_internal_has_gapps_install()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(400, _Internal::gapps_install(this),
+        _Internal::gapps_install(this).GetCachedSize(), target, stream);
+  }
+
+  // .dsa.control.v1.GappsChunk gapps_chunk = 401;
+  if (_internal_has_gapps_chunk()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(401, _Internal::gapps_chunk(this),
+        _Internal::gapps_chunk(this).GetCachedSize(), target, stream);
+  }
+
+  // .dsa.control.v1.GappsRemove gapps_remove = 402;
+  if (_internal_has_gapps_remove()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(402, _Internal::gapps_remove(this),
+        _Internal::gapps_remove(this).GetCachedSize(), target, stream);
+  }
+
+  // .dsa.control.v1.GappsQuery gapps_query = 403;
+  if (_internal_has_gapps_query()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(403, _Internal::gapps_query(this),
+        _Internal::gapps_query(this).GetCachedSize(), target, stream);
+  }
+
+  // .dsa.control.v1.GappsState gapps_state = 404;
+  if (_internal_has_gapps_state()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(404, _Internal::gapps_state(this),
+        _Internal::gapps_state(this).GetCachedSize(), target, stream);
+  }
+
+  // .dsa.control.v1.GoogleDeviceIdQuery google_device_id_query = 405;
+  if (_internal_has_google_device_id_query()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(405, _Internal::google_device_id_query(this),
+        _Internal::google_device_id_query(this).GetCachedSize(), target, stream);
+  }
+
+  // .dsa.control.v1.GoogleDeviceId google_device_id = 406;
+  if (_internal_has_google_device_id()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(406, _Internal::google_device_id(this),
+        _Internal::google_device_id(this).GetCachedSize(), target, stream);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -50427,6 +54749,55 @@ size_t Envelope::ByteSizeLong() const {
       total_size += 2 +
         ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
           *_impl_.body_.arm_translation_state_);
+      break;
+    }
+    // .dsa.control.v1.GappsInstall gapps_install = 400;
+    case kGappsInstall: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.gapps_install_);
+      break;
+    }
+    // .dsa.control.v1.GappsChunk gapps_chunk = 401;
+    case kGappsChunk: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.gapps_chunk_);
+      break;
+    }
+    // .dsa.control.v1.GappsRemove gapps_remove = 402;
+    case kGappsRemove: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.gapps_remove_);
+      break;
+    }
+    // .dsa.control.v1.GappsQuery gapps_query = 403;
+    case kGappsQuery: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.gapps_query_);
+      break;
+    }
+    // .dsa.control.v1.GappsState gapps_state = 404;
+    case kGappsState: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.gapps_state_);
+      break;
+    }
+    // .dsa.control.v1.GoogleDeviceIdQuery google_device_id_query = 405;
+    case kGoogleDeviceIdQuery: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.google_device_id_query_);
+      break;
+    }
+    // .dsa.control.v1.GoogleDeviceId google_device_id = 406;
+    case kGoogleDeviceId: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.google_device_id_);
       break;
     }
     // .dsa.control.v1.DeviceIdle device_idle = 42;
@@ -51031,6 +55402,13 @@ size_t Envelope::ByteSizeLong() const {
           *_impl_.body_.system_settings_);
       break;
     }
+    // .dsa.control.v1.DeviceName device_name = 383;
+    case kDeviceName: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.device_name_);
+      break;
+    }
     // .dsa.control.v1.GamepadConnected gamepad_connected = 341;
     case kGamepadConnected: {
       total_size += 2 +
@@ -51106,6 +55484,27 @@ size_t Envelope::ByteSizeLong() const {
       total_size += 2 +
         ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
           *_impl_.body_.drag_end_);
+      break;
+    }
+    // .dsa.control.v1.ReinstallApp reinstall_app = 380;
+    case kReinstallApp: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.reinstall_app_);
+      break;
+    }
+    // .dsa.control.v1.ReinstallResult reinstall_result = 381;
+    case kReinstallResult: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.reinstall_result_);
+      break;
+    }
+    // .dsa.control.v1.NativeLibraryCrash native_library_crash = 382;
+    case kNativeLibraryCrash: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.native_library_crash_);
       break;
     }
     case BODY_NOT_SET: {
@@ -51322,6 +55721,41 @@ void Envelope::MergeFrom(const Envelope& from) {
     case kArmTranslationState: {
       _this->_internal_mutable_arm_translation_state()->::dsa::control::v1::ArmTranslationState::MergeFrom(
           from._internal_arm_translation_state());
+      break;
+    }
+    case kGappsInstall: {
+      _this->_internal_mutable_gapps_install()->::dsa::control::v1::GappsInstall::MergeFrom(
+          from._internal_gapps_install());
+      break;
+    }
+    case kGappsChunk: {
+      _this->_internal_mutable_gapps_chunk()->::dsa::control::v1::GappsChunk::MergeFrom(
+          from._internal_gapps_chunk());
+      break;
+    }
+    case kGappsRemove: {
+      _this->_internal_mutable_gapps_remove()->::dsa::control::v1::GappsRemove::MergeFrom(
+          from._internal_gapps_remove());
+      break;
+    }
+    case kGappsQuery: {
+      _this->_internal_mutable_gapps_query()->::dsa::control::v1::GappsQuery::MergeFrom(
+          from._internal_gapps_query());
+      break;
+    }
+    case kGappsState: {
+      _this->_internal_mutable_gapps_state()->::dsa::control::v1::GappsState::MergeFrom(
+          from._internal_gapps_state());
+      break;
+    }
+    case kGoogleDeviceIdQuery: {
+      _this->_internal_mutable_google_device_id_query()->::dsa::control::v1::GoogleDeviceIdQuery::MergeFrom(
+          from._internal_google_device_id_query());
+      break;
+    }
+    case kGoogleDeviceId: {
+      _this->_internal_mutable_google_device_id()->::dsa::control::v1::GoogleDeviceId::MergeFrom(
+          from._internal_google_device_id());
       break;
     }
     case kDeviceIdle: {
@@ -51754,6 +56188,11 @@ void Envelope::MergeFrom(const Envelope& from) {
           from._internal_system_settings());
       break;
     }
+    case kDeviceName: {
+      _this->_internal_mutable_device_name()->::dsa::control::v1::DeviceName::MergeFrom(
+          from._internal_device_name());
+      break;
+    }
     case kGamepadConnected: {
       _this->_internal_mutable_gamepad_connected()->::dsa::control::v1::GamepadConnected::MergeFrom(
           from._internal_gamepad_connected());
@@ -51807,6 +56246,21 @@ void Envelope::MergeFrom(const Envelope& from) {
     case kDragEnd: {
       _this->_internal_mutable_drag_end()->::dsa::control::v1::DragEnd::MergeFrom(
           from._internal_drag_end());
+      break;
+    }
+    case kReinstallApp: {
+      _this->_internal_mutable_reinstall_app()->::dsa::control::v1::ReinstallApp::MergeFrom(
+          from._internal_reinstall_app());
+      break;
+    }
+    case kReinstallResult: {
+      _this->_internal_mutable_reinstall_result()->::dsa::control::v1::ReinstallResult::MergeFrom(
+          from._internal_reinstall_result());
+      break;
+    }
+    case kNativeLibraryCrash: {
+      _this->_internal_mutable_native_library_crash()->::dsa::control::v1::NativeLibraryCrash::MergeFrom(
+          from._internal_native_library_crash());
       break;
     }
     case BODY_NOT_SET: {
@@ -51911,6 +56365,22 @@ Arena::CreateMaybeMessage< ::dsa::control::v1::AppInfo >(Arena* arena) {
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::InstalledApp*
 Arena::CreateMaybeMessage< ::dsa::control::v1::InstalledApp >(Arena* arena) {
   return Arena::CreateMessageInternal< ::dsa::control::v1::InstalledApp >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::NativeLibraries*
+Arena::CreateMaybeMessage< ::dsa::control::v1::NativeLibraries >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::NativeLibraries >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::ReinstallApp*
+Arena::CreateMaybeMessage< ::dsa::control::v1::ReinstallApp >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::ReinstallApp >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::ReinstallResult*
+Arena::CreateMaybeMessage< ::dsa::control::v1::ReinstallResult >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::ReinstallResult >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::NativeLibraryCrash*
+Arena::CreateMaybeMessage< ::dsa::control::v1::NativeLibraryCrash >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::NativeLibraryCrash >(arena);
 }
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::RefreshApps*
 Arena::CreateMaybeMessage< ::dsa::control::v1::RefreshApps >(Arena* arena) {
@@ -52032,6 +56502,34 @@ template<> PROTOBUF_NOINLINE ::dsa::control::v1::ArmTranslationState*
 Arena::CreateMaybeMessage< ::dsa::control::v1::ArmTranslationState >(Arena* arena) {
   return Arena::CreateMessageInternal< ::dsa::control::v1::ArmTranslationState >(arena);
 }
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::GappsInstall*
+Arena::CreateMaybeMessage< ::dsa::control::v1::GappsInstall >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::GappsInstall >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::GappsChunk*
+Arena::CreateMaybeMessage< ::dsa::control::v1::GappsChunk >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::GappsChunk >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::GappsRemove*
+Arena::CreateMaybeMessage< ::dsa::control::v1::GappsRemove >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::GappsRemove >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::GappsQuery*
+Arena::CreateMaybeMessage< ::dsa::control::v1::GappsQuery >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::GappsQuery >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::GappsState*
+Arena::CreateMaybeMessage< ::dsa::control::v1::GappsState >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::GappsState >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::GoogleDeviceIdQuery*
+Arena::CreateMaybeMessage< ::dsa::control::v1::GoogleDeviceIdQuery >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::GoogleDeviceIdQuery >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::GoogleDeviceId*
+Arena::CreateMaybeMessage< ::dsa::control::v1::GoogleDeviceId >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::GoogleDeviceId >(arena);
+}
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::GuestNotification*
 Arena::CreateMaybeMessage< ::dsa::control::v1::GuestNotification >(Arena* arena) {
   return Arena::CreateMessageInternal< ::dsa::control::v1::GuestNotification >(arena);
@@ -52091,6 +56589,10 @@ Arena::CreateMaybeMessage< ::dsa::control::v1::AgentConnected >(Arena* arena) {
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::GuestBoot*
 Arena::CreateMaybeMessage< ::dsa::control::v1::GuestBoot >(Arena* arena) {
   return Arena::CreateMessageInternal< ::dsa::control::v1::GuestBoot >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::InstallPart*
+Arena::CreateMaybeMessage< ::dsa::control::v1::InstallPart >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::InstallPart >(arena);
 }
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::InstallApk*
 Arena::CreateMaybeMessage< ::dsa::control::v1::InstallApk >(Arena* arena) {
@@ -52415,6 +56917,10 @@ Arena::CreateMaybeMessage< ::dsa::control::v1::CameraError >(Arena* arena) {
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::SystemSettings*
 Arena::CreateMaybeMessage< ::dsa::control::v1::SystemSettings >(Arena* arena) {
   return Arena::CreateMessageInternal< ::dsa::control::v1::SystemSettings >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::DeviceName*
+Arena::CreateMaybeMessage< ::dsa::control::v1::DeviceName >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::DeviceName >(arena);
 }
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::GamepadConnected*
 Arena::CreateMaybeMessage< ::dsa::control::v1::GamepadConnected >(Arena* arena) {

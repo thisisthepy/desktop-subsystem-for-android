@@ -3,7 +3,8 @@
 //! Six of them are the user's own: the GPU their window manager renders on, whether their
 //! Android may be frozen when idle, whether their clipboard is shared with it, whether web
 //! links open in apps in their Android instead of the host's browser, and developer mode
-//! (whether adb reaches their Android) with the loopback port adb connects to, and file sharing
+//! (whether adb reaches their Android) with the loopback port adb connects to and whether that
+//! port is attached to their adb server by itself, and file sharing
 //! (which of their host folders their Android shows in its shared storage). The others are the
 //! machine's, shared by every user: whether the service updates DSA itself, whether it
 //! downloads new Android images, and whether DSA's processes write the input trace and the
@@ -18,7 +19,8 @@
 //!                              "input_trace": false, "resize_trace": false}
 //! <dir>/users/<user>.json     {"render_gpu": "display", "freeze": false, "clipboard": true,
 //!                              "links_in_android": false, "developer_mode": false,
-//!                              "adb_port": 58526, "arm_translation": true,
+//!                              "adb_port": 58526, "adb_auto_connect": true,
+//!                              "arm_translation": true,
 //!                              "file_sharing": true,
 //!                              "shared_folders": ["Documents", "Pictures"],
 //!                              "advanced_networking": false}
@@ -26,6 +28,10 @@
 //!                             the user's window settings for each app
 //! <dir>/users/<user>.arm-translation.json
 //!                             the ARM translation package the user installed, if any
+//! <dir>/users/<user>.arm-translation-boot.json
+//!                             the translator the user's latest boot of Android was told to use
+//! <dir>/users/<user>.gapps.json
+//!                             the build of Google's apps the user installed, if any
 //! ```
 //!
 //! A missing file means the defaults. A user who has never saved settings starts from what
@@ -38,8 +44,9 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 
 use crate::app_windows::AppWindowSettings;
-use crate::arm_translation::Package;
+use crate::arm_translation::{Package, Translator};
 use crate::file_share;
+use crate::gapps::GappsPackage;
 
 /// The longest render GPU value accepted, in characters.
 const MAX_RENDER_GPU: usize = 128;
@@ -87,6 +94,9 @@ pub struct Settings {
     /// The port on `127.0.0.1` adb connects to in developer mode. [`DEFAULT_ADB_PORT`] by
     /// default.
     pub adb_port: u16,
+    /// Whether, while developer mode is on, the service attaches the port to the user's adb
+    /// server by itself, so adb lists it without `adb connect`. On by default.
+    pub adb_auto_connect: bool,
     /// Whether the user's Android uses an installed ARM translation package, from its next
     /// start. On by default; it does nothing while no package is installed.
     pub arm_translation: bool,
@@ -113,6 +123,7 @@ impl Default for Settings {
             resize_trace: false,
             developer_mode: false,
             adb_port: DEFAULT_ADB_PORT,
+            adb_auto_connect: true,
             arm_translation: true,
             file_sharing: true,
             shared_folders: file_share::all_folders(),
@@ -184,6 +195,8 @@ pub struct UserSettings {
     #[serde(default = "default_adb_port")]
     pub adb_port: u16,
     #[serde(default = "yes")]
+    pub adb_auto_connect: bool,
+    #[serde(default = "yes")]
     pub arm_translation: bool,
     #[serde(default)]
     pub stop_without_asking: bool,
@@ -205,6 +218,7 @@ impl Default for UserSettings {
             clipboard: true,
             developer_mode: false,
             adb_port: DEFAULT_ADB_PORT,
+            adb_auto_connect: true,
             arm_translation: true,
             stop_without_asking: false,
             file_sharing: true,
@@ -230,6 +244,7 @@ impl UserSettings {
             clipboard: settings.clipboard,
             developer_mode: settings.developer_mode,
             adb_port: normalise_adb_port(settings.adb_port),
+            adb_auto_connect: settings.adb_auto_connect,
             arm_translation: settings.arm_translation,
             stop_without_asking: settings.stop_without_asking,
             file_sharing: settings.file_sharing,
@@ -296,6 +311,21 @@ pub trait SettingsStore: Send + Sync {
     fn arm_translation(&self, user: &str) -> Result<Option<Package>, String>;
     /// Records the ARM translation package `user` has installed, or that there is none.
     fn set_arm_translation(&self, user: &str, package: Option<&Package>) -> Result<(), String>;
+    /// The ARM translator `user`'s latest boot of Android was told to use, if any.
+    fn arm_translation_boot(&self, user: &str) -> Result<Option<Translator>, String> {
+        let _ = user;
+        Ok(None)
+    }
+    /// Records the ARM translator a boot of `user`'s Android is told to use, or that it is told
+    /// to use none.
+    fn set_arm_translation_boot(
+        &self,
+        user: &str,
+        translator: Option<&Translator>,
+    ) -> Result<(), String> {
+        let _ = (user, translator);
+        Ok(())
+    }
     /// The window settings of `user` for every app that has any, by package name.
     fn app_windows(&self, user: &str) -> Result<Vec<AppWindowSettings>, String> {
         let _ = user;
@@ -305,6 +335,16 @@ pub trait SettingsStore: Send + Sync {
     fn set_app_windows(&self, user: &str, apps: &[AppWindowSettings]) -> Result<(), String> {
         let _ = (user, apps);
         Err("this service keeps no window settings for apps".into())
+    }
+    /// The build of Google's apps `user` has installed, if any.
+    fn gapps(&self, user: &str) -> Result<Option<GappsPackage>, String> {
+        let _ = user;
+        Ok(None)
+    }
+    /// Records the build of Google's apps `user` has installed, or that there is none.
+    fn set_gapps(&self, user: &str, package: Option<&GappsPackage>) -> Result<(), String> {
+        let _ = (user, package);
+        Err("this service keeps no Google apps".into())
     }
 }
 
@@ -356,6 +396,20 @@ impl FileSettings {
             .dir
             .join("users")
             .join(format!("{}.arm-translation.json", user_file_stem(user)?)))
+    }
+
+    fn gapps_file(&self, user: &str) -> Result<PathBuf, String> {
+        Ok(self
+            .dir
+            .join("users")
+            .join(format!("{}.gapps.json", user_file_stem(user)?)))
+    }
+
+    fn arm_translation_boot_file(&self, user: &str) -> Result<PathBuf, String> {
+        Ok(self.dir.join("users").join(format!(
+            "{}.arm-translation-boot.json",
+            user_file_stem(user)?
+        )))
     }
 
     fn read_machine(&self) -> Result<MachineSettings, String> {
@@ -415,6 +469,7 @@ fn combine(mine: UserSettings, machine: MachineSettings) -> Settings {
         resize_trace: machine.resize_trace,
         developer_mode: mine.developer_mode,
         adb_port: normalise_adb_port(mine.adb_port),
+        adb_auto_connect: mine.adb_auto_connect,
         arm_translation: mine.arm_translation,
         file_sharing: mine.file_sharing,
         // A folder name a later release no longer knows is dropped rather than refused, so
@@ -492,6 +547,29 @@ impl SettingsStore for FileSettings {
         }
     }
 
+    fn arm_translation_boot(&self, user: &str) -> Result<Option<Translator>, String> {
+        let file = self.arm_translation_boot_file(user)?;
+        let _held = self.lock.lock().unwrap_or_else(|e| e.into_inner());
+        read_json(&file)
+    }
+
+    fn set_arm_translation_boot(
+        &self,
+        user: &str,
+        translator: Option<&Translator>,
+    ) -> Result<(), String> {
+        let file = self.arm_translation_boot_file(user)?;
+        let _held = self.lock.lock().unwrap_or_else(|e| e.into_inner());
+        match translator {
+            Some(translator) => write_json(&file, translator),
+            None => match std::fs::remove_file(&file) {
+                Ok(()) => Ok(()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(e) => Err(format!("removing {}: {e}", file.display())),
+            },
+        }
+    }
+
     fn app_windows(&self, user: &str) -> Result<Vec<AppWindowSettings>, String> {
         let file = self.app_windows_file(user)?;
         let _held = self.lock.lock().unwrap_or_else(|e| e.into_inner());
@@ -503,6 +581,25 @@ impl SettingsStore for FileSettings {
         let _held = self.lock.lock().unwrap_or_else(|e| e.into_inner());
         write_json(&file, &apps)
     }
+
+    fn gapps(&self, user: &str) -> Result<Option<GappsPackage>, String> {
+        let file = self.gapps_file(user)?;
+        let _held = self.lock.lock().unwrap_or_else(|e| e.into_inner());
+        read_json(&file)
+    }
+
+    fn set_gapps(&self, user: &str, package: Option<&GappsPackage>) -> Result<(), String> {
+        let file = self.gapps_file(user)?;
+        let _held = self.lock.lock().unwrap_or_else(|e| e.into_inner());
+        match package {
+            Some(package) => write_json(&file, package),
+            None => match std::fs::remove_file(&file) {
+                Ok(()) => Ok(()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(e) => Err(format!("removing {}: {e}", file.display())),
+            },
+        }
+    }
 }
 
 /// Settings kept in memory, for tests and for a service that keeps no folder.
@@ -511,7 +608,9 @@ pub struct MemorySettings {
     users: Mutex<std::collections::HashMap<String, UserSettings>>,
     machine: Mutex<MachineSettings>,
     arm_translation: Mutex<std::collections::HashMap<String, Package>>,
+    arm_translation_boot: Mutex<std::collections::HashMap<String, Translator>>,
     app_windows: Mutex<std::collections::HashMap<String, Vec<AppWindowSettings>>>,
+    gapps: Mutex<std::collections::HashMap<String, GappsPackage>>,
 }
 
 impl SettingsStore for MemorySettings {
@@ -572,6 +671,31 @@ impl SettingsStore for MemorySettings {
         Ok(())
     }
 
+    fn arm_translation_boot(&self, user: &str) -> Result<Option<Translator>, String> {
+        Ok(self
+            .arm_translation_boot
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(user)
+            .cloned())
+    }
+
+    fn set_arm_translation_boot(
+        &self,
+        user: &str,
+        translator: Option<&Translator>,
+    ) -> Result<(), String> {
+        let mut boots = self
+            .arm_translation_boot
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        match translator {
+            Some(translator) => boots.insert(user.to_string(), translator.clone()),
+            None => boots.remove(user),
+        };
+        Ok(())
+    }
+
     fn app_windows(&self, user: &str) -> Result<Vec<AppWindowSettings>, String> {
         Ok(self
             .app_windows
@@ -587,6 +711,24 @@ impl SettingsStore for MemorySettings {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .insert(user.to_string(), apps.to_vec());
+        Ok(())
+    }
+
+    fn gapps(&self, user: &str) -> Result<Option<GappsPackage>, String> {
+        Ok(self
+            .gapps
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(user)
+            .cloned())
+    }
+
+    fn set_gapps(&self, user: &str, package: Option<&GappsPackage>) -> Result<(), String> {
+        let mut packages = self.gapps.lock().unwrap_or_else(|e| e.into_inner());
+        match package {
+            Some(package) => packages.insert(user.to_string(), package.clone()),
+            None => packages.remove(user),
+        };
         Ok(())
     }
 }
@@ -673,6 +815,7 @@ mod tests {
                     resize_trace: false,
                     developer_mode: true,
                     adb_port: 5037,
+                    adb_auto_connect: false,
                     arm_translation: false,
                     file_sharing: false,
                     shared_folders: vec!["Pictures".into()],
@@ -930,6 +1073,38 @@ mod tests {
     }
 
     #[test]
+    fn fr20_adb_auto_connect_is_on_by_default_and_kept_per_user() {
+        let dir = scratch("adb-auto-connect");
+        let store = FileSettings::new(&dir);
+        assert!(store.get("uid:1000").unwrap().adb_auto_connect);
+        let saved = store
+            .set(
+                "uid:1000",
+                &Settings {
+                    adb_auto_connect: false,
+                    ..Settings::default()
+                },
+            )
+            .unwrap();
+        assert!(!saved.adb_auto_connect);
+        let again = FileSettings::new(&dir);
+        assert!(!again.get("uid:1000").unwrap().adb_auto_connect);
+        assert!(
+            again.get("uid:1001").unwrap().adb_auto_connect,
+            "the user's own"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fr20_a_settings_file_from_before_auto_connect_reads_it_as_on() {
+        let kept: UserSettings =
+            serde_json::from_str(r#"{"developer_mode": true, "adb_port": 58526}"#).unwrap();
+        assert!(kept.developer_mode);
+        assert!(kept.adb_auto_connect);
+    }
+
+    #[test]
     fn fr25_arm_translation_is_on_by_default_and_its_package_is_kept_per_user() {
         let dir = scratch("arm-translation");
         let store = FileSettings::new(&dir);
@@ -972,6 +1147,71 @@ mod tests {
     }
 
     #[test]
+    fn fr25_the_translator_a_boot_was_told_to_use_is_kept_per_user() {
+        use crate::arm_translation::Source;
+        let dir = scratch("arm-translation-boot");
+        let store = FileSettings::new(&dir);
+        assert_eq!(store.arm_translation_boot("uid:1000").unwrap(), None);
+        let booted = Translator {
+            source: Source::Default,
+            package: Package {
+                name: "Digitalis".into(),
+                version: "17-abefbe2b1600".into(),
+                library: "libberberis_arm64.so".into(),
+                abis: vec!["arm64-v8a".into()],
+                license: "Apache-2.0".into(),
+            },
+        };
+        store
+            .set_arm_translation_boot("uid:1000", Some(&booted))
+            .unwrap();
+        let again = FileSettings::new(&dir);
+        assert_eq!(
+            again.arm_translation_boot("uid:1000").unwrap(),
+            Some(booted.clone())
+        );
+        assert_eq!(again.arm_translation_boot("uid:1001").unwrap(), None);
+        again.set_arm_translation_boot("uid:1000", None).unwrap();
+        assert_eq!(again.arm_translation_boot("uid:1000").unwrap(), None);
+        again.set_arm_translation_boot("uid:1000", None).unwrap();
+        let memory = MemorySettings::default();
+        memory
+            .set_arm_translation_boot("uid:1000", Some(&booted))
+            .unwrap();
+        assert_eq!(
+            memory.arm_translation_boot("uid:1000").unwrap(),
+            Some(booted)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fr32_the_google_apps_a_user_installed_are_kept_per_user() {
+        let dir = scratch("gapps");
+        let store = FileSettings::new(&dir);
+        assert_eq!(store.gapps("uid:1000").unwrap(), None);
+        let package = GappsPackage {
+            variant: "core".into(),
+            version: "20261001".into(),
+            android_version: "16.0".into(),
+            sdk: 36,
+            arch: "x86_64".into(),
+            file: "LiteGapps-core-x86_64-16.0-20261001-official.zip".into(),
+            source: "https://example.com/build.zip".into(),
+            md5: "ea9945a6d63849fa9e51782edfe613a4".into(),
+        };
+        store.set_gapps("uid:1000", Some(&package)).unwrap();
+        let again = FileSettings::new(&dir);
+        assert_eq!(again.gapps("uid:1000").unwrap(), Some(package));
+        assert_eq!(again.gapps("uid:1001").unwrap(), None);
+        again.set_gapps("uid:1000", None).unwrap();
+        assert_eq!(again.gapps("uid:1000").unwrap(), None);
+        // Removing what is not there is not an error.
+        again.set_gapps("uid:1000", None).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn fr17_a_user_identity_never_leaves_the_settings_folder() {
         let dir = scratch("identity");
         let store = FileSettings::new(&dir);
@@ -1005,7 +1245,10 @@ mod tests {
         .unwrap();
         let store = FileSettings::new(&dir);
         let mine = store.get("uid:1000").unwrap();
-        assert_eq!(mine.render_gpu, "discrete", "the rest of the file still reads");
+        assert_eq!(
+            mine.render_gpu, "discrete",
+            "the rest of the file still reads"
+        );
         store.set("uid:1000", &mine).unwrap();
         let kept = std::fs::read_to_string(&file).unwrap();
         for gone in ["run_mode", "stop_after_secs", "keep_for_notifications"] {

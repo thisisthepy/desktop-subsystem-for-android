@@ -21,6 +21,9 @@ bzImage
 
 # macOS
 .DS_Store
+# Swift packages built without a --scratch-path
+.build/
+.swiftpm/
 
 # Agent worktrees (AGENTS.md, "Where files go")
 .claude/

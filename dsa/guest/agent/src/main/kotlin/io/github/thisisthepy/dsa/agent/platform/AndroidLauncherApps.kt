@@ -35,7 +35,8 @@ class AndroidLauncherApps(
             if (packageName in apps) continue
             val label = activity.loadLabel(pm).toString().ifEmpty { packageName }
             val icon = try {
-                iconPng(activity.loadIcon(pm))
+                val iconRes = if (activity.resolvePackageName == null) activity.iconResource else 0
+                sharpIconPng(pm, activity.activityInfo.applicationInfo, iconRes) { activity.loadIcon(pm) }
             } catch (e: Exception) {
                 log.warn("could not draw the icon of $packageName", e)
                 ByteArray(0)
@@ -73,6 +74,7 @@ class AndroidLauncherApps(
                 log.warn("could not read the apps' storage sizes; they are reported as zero", e)
             }
         }
+        val application = info.applicationInfo
         return LauncherApp(
             packageName = packageName,
             label = label,
@@ -85,8 +87,12 @@ class AndroidLauncherApps(
             appBytes = appBytes,
             dataBytes = dataBytes,
             cacheBytes = cacheBytes,
+            primaryAbi = application?.let { AndroidApks.primaryAbi(it) }.orEmpty(),
+            nativeLibraries = application?.let { apks.libraries(it) }.orEmpty(),
         )
     }
+
+    private val apks = AndroidApks()
 
     private var warnedSizes = false
 

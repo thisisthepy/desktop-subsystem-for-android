@@ -32,6 +32,17 @@ public partial class AppsPage : Page
         }
     }
 
+    private async void OnRunAsArm(object sender, RoutedEventArgs e)
+    {
+        if (sender is ToggleButton { Tag: string package } toggle)
+        {
+            await ViewModel.SetRunAsArmAsync(package, toggle.IsChecked == true, label => Shell.Confirm(
+                string.Format(CultureInfo.CurrentCulture, App.Text.Get("AppsRunAsArmEraseTitle"), label),
+                string.Format(CultureInfo.CurrentCulture, App.Text.Get("AppsRunAsArmEraseBody"), label),
+                App.Text.Get("AppsRunAsArmEraseButton")));
+        }
+    }
+
     private async void OnStartSize(object sender, SelectionChangedEventArgs e)
     {
         // The list takes the app's size when it fills in; only a choice the user makes counts.

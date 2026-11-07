@@ -4,6 +4,21 @@ using System.Text.RegularExpressions;
 
 namespace Dsa.Settings.Core;
 
+/// <summary>The "Run as ARM" switch of an app, as dsa apps list reports it: whether the app
+/// runs its ARM code now, whether the switch can be changed, and if not, why
+/// (<c>system-app</c>, <c>no-arm-libraries</c>, <c>translation-off</c> or <c>arm-only</c>).</summary>
+public sealed record RunAsArmSwitch(bool On, bool Available, string Reason)
+{
+    /// <summary>The switch dsa says nothing of, as an older dsa: off, and not to be changed.</summary>
+    public static RunAsArmSwitch Unknown { get; } = new(false, false, "unknown");
+}
+
+/// <summary>How a change of the "Run as ARM" switch went: <paramref name="Status"/> is dsa's
+/// stable reason (<c>done</c>, <c>data-would-be-erased</c>, <c>not-installed</c>,
+/// <c>system-app</c>, <c>no-libraries</c>, <c>translation-off</c> or <c>other</c>),
+/// <paramref name="Message"/> Android's own words.</summary>
+public sealed record RunAsArmReport(bool Done, string Status, string Message, bool On);
+
 /// <summary>One app installed in Android, as dsa apps list reports it.</summary>
 public sealed record InstalledAppInfo(
     string Package,
@@ -16,7 +31,8 @@ public sealed record InstalledAppInfo(
     ulong AppBytes,
     ulong DataBytes,
     ulong CacheBytes,
-    byte[] IconPng)
+    byte[] IconPng,
+    RunAsArmSwitch? RunAsArm = null)
 {
     public ulong TotalBytes => AppBytes + DataBytes + CacheBytes;
 }
@@ -57,6 +73,10 @@ public sealed class AppsService
     /// <summary>The start of dsa's line for an app Android did not uninstall: the reason's
     /// code, then the detail.</summary>
     private static readonly Regex Refusal = new(@"^not uninstalled \(([a-z-]+)\): (.*)$", RegexOptions.Singleline);
+
+    /// <summary>The start of dsa's line for an app whose ABI did not change: the reason's
+    /// code, then the detail.</summary>
+    private static readonly Regex NotChanged = new(@"^not changed \(([a-z-]+)\): (.*)$", RegexOptions.Singleline);
 
     private static string Detail(CliResult result) =>
         result.Error.StartsWith("dsa: ", StringComparison.Ordinal) ? result.Error["dsa: ".Length..] : result.Error;
@@ -118,6 +138,11 @@ public sealed class AppsService
         }
     }
 
+    private static RunAsArmSwitch ReadRunAsArm(JsonElement app) =>
+        app.TryGetProperty("run_as_arm", out var value) && value.ValueKind == JsonValueKind.Object
+            ? new RunAsArmSwitch(Bool(value, "on"), Bool(value, "available"), String(value, "reason"))
+            : RunAsArmSwitch.Unknown;
+
     public static InstalledAppInfo ReadApp(JsonElement app) => new(
         String(app, "package"),
         String(app, "label"),
@@ -129,7 +154,8 @@ public sealed class AppsService
         Number(app, "app_bytes"),
         Number(app, "data_bytes"),
         Number(app, "cache_bytes"),
-        Png(app, "icon_png"));
+        Png(app, "icon_png"),
+        ReadRunAsArm(app));
 
     /// <summary>Every app installed in Android, with its size read again; Android is started
     /// first when it is not running.</summary>
@@ -219,6 +245,32 @@ public sealed class AppsService
             : AppWindowSetting.Default(setting.Package);
     }
 
+    /// <summary>Installs <paramref name="package"/> again with its ARM code (<paramref name="on"/>)
+    /// or its x86_64 code, keeping its data unless <paramref name="eraseData"/>. A refusal is a
+    /// report with its reason; anything else that kept the request from Android is a
+    /// <see cref="DsaException"/>.</summary>
+    public async Task<RunAsArmReport> RunAsArmAsync(string package, bool on, bool eraseData)
+    {
+        var args = new List<string> { "apps", "run-as-arm", package, on ? "on" : "off" };
+        if (eraseData)
+        {
+            args.Add("--erase-data");
+        }
+        args.Add("--json");
+        var result = await _cli.RunAsync(args).ConfigureAwait(true);
+        if (result.ExitCode != 0)
+        {
+            var refused = NotChanged.Match(Detail(result));
+            if (refused.Success)
+            {
+                return new RunAsArmReport(false, refused.Groups[1].Value, refused.Groups[2].Value, !on);
+            }
+            throw Failure(result);
+        }
+        var json = Parse(result.Output);
+        return new RunAsArmReport(String(json, "status") == "done", String(json, "status"), String(json, "message"), Bool(json, "on"));
+    }
+
     /// <summary>Uninstalls <paramref name="package"/>. A refusal by Android is a report with its
     /// reason; anything else that kept the request from Android is a
     /// <see cref="DsaException"/>.</summary>
@@ -250,9 +302,15 @@ public sealed record AppRow(
     bool IsSystem,
     string? UninstallTip,
     bool Resizable = true,
-    int StartSizeIndex = 0)
+    int StartSizeIndex = 0,
+    bool RunAsArm = false,
+    bool CanRunAsArm = false,
+    string? RunAsArmTip = null)
 {
     public bool NoIcon => Icon is null;
+
+    /// <summary>Whether the page says why the app cannot run as ARM.</summary>
+    public bool HasRunAsArmTip => RunAsArmTip is not null;
 }
 
 /// <summary>The Apps page: every app installed in Android, searchable, each to open, to see
@@ -384,6 +442,7 @@ public sealed class AppsViewModel : ObservableObject
         {
             parts.Add(_text.Get("Apps_System"));
         }
+        var arm = app.RunAsArm ?? RunAsArmSwitch.Unknown;
         return new AppRow(
             app.Package,
             app.Label.Length > 0 ? app.Label : app.Package,
@@ -394,8 +453,41 @@ public sealed class AppsViewModel : ObservableObject
             app.SystemApp,
             app.SystemApp ? _text.Get("Apps_SystemTip") : null,
             !WindowOf(app.Package).FixedSize,
-            StartSizeIndexOf(WindowOf(app.Package)));
+            StartSizeIndexOf(WindowOf(app.Package)),
+            arm.On,
+            arm.Available,
+            RunAsArmTipOf(arm));
     }
+
+    /// <summary>Why the "Run as ARM" switch cannot be changed, in the user's language; null
+    /// when it can.</summary>
+    public string? RunAsArmTipOf(RunAsArmSwitch arm) =>
+        arm.Available ? null : _text.Get($"Apps_RunAsArm_{(arm.Reason.Length > 0 ? arm.Reason : "unknown")}");
+
+    /// <summary>Installs the app again with its ARM code (<paramref name="on"/>) or its x86_64
+    /// code. The app keeps its data; when Android cannot keep it, <paramref name="confirmErase"/>
+    /// asks the user (with the app's name) whether to go on and erase it. A refusal is the
+    /// page's error, in the user's language.</summary>
+    public Task SetRunAsArmAsync(string package, bool on, Func<string, Task<bool>> confirmErase) => Run(async () =>
+    {
+        var label = LabelOf(package);
+        var report = await _service.RunAsArmAsync(package, on, eraseData: false).ConfigureAwait(true);
+        if (!report.Done && report.Status == "data-would-be-erased")
+        {
+            if (!await confirmErase(label).ConfigureAwait(true))
+            {
+                return string.Format(CultureInfo.CurrentCulture, _text.Get("Apps_RunAsArmKept"), label);
+            }
+            report = await _service.RunAsArmAsync(package, on, eraseData: true).ConfigureAwait(true);
+        }
+        if (!report.Done)
+        {
+            var reason = _text.Get($"Apps_RunAsArmRefused_{report.Status}");
+            throw new RefusedByAndroid(
+                string.Format(CultureInfo.CurrentCulture, _text.Get("Apps_RunAsArmNotChanged"), label, reason, report.Message));
+        }
+        return string.Format(CultureInfo.CurrentCulture, _text.Get(report.On ? "Apps_RunAsArmOn" : "Apps_RunAsArmOff"), label);
+    }, reload: true);
 
     /// <summary>Reads the user's window settings for the apps. A service that keeps none
     /// leaves every app at the defaults.</summary>

@@ -30,9 +30,9 @@
 
         <StackPanel Grid.Row="2">
             <ui:InfoBar Title="{l:Text LogsErrorBar.Title}" Severity="Error" IsClosable="False"
-                        IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" />
+                        IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" Margin="0,0,0,4" />
             <ui:InfoBar Title="{l:Text LogsStatusBar.Title}" Severity="Informational" IsClosable="False"
-                        IsOpen="{Binding HasStatus, Mode=OneWay}" Message="{Binding Status, Mode=OneWay}" />
+                        IsOpen="{Binding HasStatus, Mode=OneWay}" Message="{Binding Status, Mode=OneWay}" Margin="0,0,0,4" />
         </StackPanel>
 
         <Grid Grid.Row="3" Margin="0,8,0,8">
@@ -53,11 +53,30 @@
         <Grid Grid.Row="4">
             <ListBox x:Name="LinesList" ItemsSource="{Binding Lines, Mode=OneWay}"
                      VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
-                     VirtualizingPanel.ScrollUnit="Pixel"
+                     VirtualizingPanel.ScrollUnit="Pixel" SelectionMode="Extended"
                      ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.CanContentScroll="True">
-                <!-- A log line is one short row: the theme's list rows are tall, padded and in
-                     the body font. Cascadia Mono and Consolas have no Hangul, so Korean text
-                     falls to the system's Korean font rather than a random one. -->
+                <!-- A log line is one short row in the app's body font: the theme's list rows
+                     are tall and padded. The 20 px line fits Korean text and keeps every row
+                     one height. -->
+                <!-- Selected lines copy with Ctrl+C or the menu, as the whole lines of the log.
+                     Ctrl+A and Shift or Ctrl clicks select as in any extended list. -->
+                <ListBox.CommandBindings>
+                    <CommandBinding Command="ApplicationCommands.Copy" Executed="OnCopy" CanExecute="OnCanCopy" />
+                </ListBox.CommandBindings>
+                <ListBox.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Header="{l:Text CopyButton.ToolTip}" Command="ApplicationCommands.Copy" />
+                    </ContextMenu>
+                </ListBox.ContextMenu>
+                <ListBox.Resources>
+                    <Style x:Key="LogCell" TargetType="TextBlock">
+                        <Setter Property="FontFamily" Value="{StaticResource TextFont}" />
+                        <Setter Property="FontSize" Value="14" />
+                        <Setter Property="LineHeight" Value="20" />
+                        <Setter Property="LineStackingStrategy" Value="BlockLineHeight" />
+                        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                    </Style>
+                </ListBox.Resources>
                 <ListBox.ItemContainerStyle>
                     <Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
                         <Setter Property="Padding" Value="6,0" />
@@ -67,8 +86,16 @@
                 </ListBox.ItemContainerStyle>
                 <ListBox.ItemTemplate>
                     <DataTemplate>
-                        <TextBlock Text="{Binding Text, Mode=OneTime}" Foreground="{DynamicResource TextFillColorPrimaryBrush}"
-                                   FontFamily="Cascadia Mono, Consolas, Malgun Gothic" FontSize="12" />
+                        <!-- A proportional font does not line columns up by itself, so the fields
+                             have fixed widths. The body has none: a long line overflows into
+                             the list's horizontal scroll bar. -->
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource LogCell}" Width="164" Text="{Binding TimeColumn, Mode=OneTime}" />
+                            <TextBlock Style="{StaticResource LogCell}" Width="56" TextAlignment="Right" Text="{Binding PidColumn, Mode=OneTime}" />
+                            <TextBlock Style="{StaticResource LogCell}" Width="56" TextAlignment="Right" Text="{Binding TidColumn, Mode=OneTime}" />
+                            <TextBlock Style="{StaticResource LogCell}" Width="32" TextAlignment="Center" Text="{Binding PriorityColumn, Mode=OneTime}" />
+                            <TextBlock Style="{StaticResource LogCell}" Text="{Binding BodyColumn, Mode=OneTime}" />
+                        </StackPanel>
                     </DataTemplate>
                 </ListBox.ItemTemplate>
             </ListBox>

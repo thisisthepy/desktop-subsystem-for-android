@@ -46,8 +46,11 @@
 (allow kernel dsa_sharemount (vsock_socket (read write getattr)))
 ; The mount points under the shared storage, owned by media_rw, and the mounts.
 (allow dsa_sharemount self (capability (sys_admin chown fowner dac_override dac_read_search)))
-(allow dsa_sharemount system_data_file (dir (search getattr)))
-(allow dsa_sharemount media_rw_data_file (dir (search getattr read open create write add_name remove_name rmdir setattr mounton)))
+; The way down to /data/media/0: /data and /data/media each carry a label of their own
+; (system_data_root_file, media_userdir_file); only the user's folder is the storage.
+(allow dsa_sharemount system_data_root_file (dir (search)))
+(allow dsa_sharemount media_userdir_file (dir (search)))
+(allow dsa_sharemount media_rw_data_file (dir (search getattr create write add_name remove_name rmdir setattr mounton)))
 ; The host's folders carry the shared storage's own label, so the media provider and the apps
 ; it serves reach them under the same rules as the rest of the storage.
 (genfscon 9p "/" (u object_r media_rw_data_file ((s0) (s0))))
@@ -67,8 +70,12 @@
 (allow dsa_files dsa_files_prop (file (read open getattr map)))
 (allow dsa_files dsa_shares_prop (file (read open getattr map)))
 (allow dsa_files self (vsock_socket (create bind listen accept read write getattr setattr getopt setopt shutdown)))
-(allow dsa_files system_data_file (dir (search getattr)))
-; The way down to the shared storage: /data itself carries a label of its own.
+; The way down to the shared storage: /data and /data/media each carry a label of their own.
+; Refused /data/media, every request failed and the host asked again and again.
 (allow dsa_files system_data_root_file (dir (search getattr)))
-(allow dsa_files media_rw_data_file (dir (search getattr read open create write add_name remove_name rmdir rename reparent setattr)))
-(allow dsa_files media_rw_data_file (file (create read write open getattr setattr unlink rename append map)))
+(allow dsa_files media_userdir_file (dir (search)))
+; Listing, reading, writing, copying, moving and deleting in the storage. A copy sets the new
+; file's mode (setattr); links are read by hand to keep every path inside the storage.
+(allow dsa_files media_rw_data_file (dir (search getattr read open create write add_name remove_name rmdir rename reparent)))
+(allow dsa_files media_rw_data_file (file (create read write open getattr setattr unlink rename)))
+(allow dsa_files media_rw_data_file (lnk_file (read getattr unlink rename)))

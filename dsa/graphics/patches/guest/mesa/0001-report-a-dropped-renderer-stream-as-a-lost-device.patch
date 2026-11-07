@@ -1,0 +1,3087 @@
+diff --git a/src/gfxstream/guest/connection-manager/GfxStreamConnectionManager.cpp b/src/gfxstream/guest/connection-manager/GfxStreamConnectionManager.cpp
+index 7927f80..2d4713a 100644
+--- a/src/gfxstream/guest/connection-manager/GfxStreamConnectionManager.cpp
++++ b/src/gfxstream/guest/connection-manager/GfxStreamConnectionManager.cpp
+@@ -118,6 +118,22 @@ GfxStreamConnectionManager* GfxStreamConnectionManager::getThreadLocalInstance(
+     return sThreadInfo.mgr.get();
+ }
+ 
++GfxStreamConnectionManager* GfxStreamConnectionManager::replaceThreadLocalInstance(
++    GfxStreamTransportType type, VirtGpuCapset capset) {
++    auto fresh = std::make_unique<GfxStreamConnectionManager>(type, capset);
++    if (!fresh->initialize()) {
++        return nullptr;
++    }
++    gfxstream::guest::IOStream* oldStream = sThreadInfo.mgr ? sThreadInfo.mgr->mStream : nullptr;
++    // The old connections go first: their encoders hold references to the old stream.
++    sThreadInfo.mgr = std::move(fresh);
++    if (oldStream) {
++        // The manager's own reference, which closes the dead socket once nothing else holds it.
++        oldStream->decRef();
++    }
++    return sThreadInfo.mgr.get();
++}
++
+ void GfxStreamConnectionManager::threadLocalExit() {
+     if (sThreadInfo.mgr == nullptr) {
+         return;
+diff --git a/src/gfxstream/guest/connection-manager/GfxStreamConnectionManager.h b/src/gfxstream/guest/connection-manager/GfxStreamConnectionManager.h
+index 8607999..429e659 100644
+--- a/src/gfxstream/guest/connection-manager/GfxStreamConnectionManager.h
++++ b/src/gfxstream/guest/connection-manager/GfxStreamConnectionManager.h
+@@ -36,6 +36,10 @@ class GfxStreamConnectionManager {
+     static GfxStreamConnectionManager* getThreadLocalInstance(GfxStreamTransportType type,
+                                                               VirtGpuCapset capset);
+     void threadLocalExit();
++    // Connects this thread to the host renderer again, in place of a connection whose stream
++    // ended. The old connection stays if the renderer does not answer yet; nullptr then.
++    static GfxStreamConnectionManager* replaceThreadLocalInstance(GfxStreamTransportType type,
++                                                                  VirtGpuCapset capset);
+ 
+     bool initialize();
+     int32_t addConnection(GfxStreamConnectionType type,
+diff --git a/src/gfxstream/guest/vulkan/gfxstream_vk_device.cpp b/src/gfxstream/guest/vulkan/gfxstream_vk_device.cpp
+index 48c33a6..85be211 100644
+--- a/src/gfxstream/guest/vulkan/gfxstream_vk_device.cpp
++++ b/src/gfxstream/guest/vulkan/gfxstream_vk_device.cpp
+@@ -6,11 +6,15 @@
+ #include <errno.h>
+ #include <string.h>
+ 
++#include <chrono>
++#include <mutex>
++
+ #include "GfxStreamConnectionManager.h"
+ #include "GfxStreamRenderControl.h"
+ #include "GfxStreamVulkanConnection.h"
+ #include "ResourceTracker.h"
+ #include "VkEncoder.h"
++#include "dsa_lost_stream.h"
+ #include "gfxstream_vk_entrypoints.h"
+ #include "gfxstream_vk_private.h"
+ #include "util/detect_os.h"
+@@ -47,9 +51,52 @@ static gfxstream::vk::VkEncoder* getVulkanEncoder(GfxStreamConnectionManager* mg
+     return vkEncoder;
+ }
+ 
++// Whether this thread's Vulkan stream to the host renderer ended, and its generation.
++static bool threadStreamLost(GfxStreamConnectionManager* mgr, uint32_t* generation) {
++    auto* vkEncoder = (gfxstream::vk::VkEncoder*)mgr->getEncoder(GFXSTREAM_CONNECTION_VULKAN);
++    if (!vkEncoder) {
++        return false;
++    }
++    if (generation) *generation = vkEncoder->streamGeneration();
++    return vkEncoder->streamLost();
++}
++
++// A thread whose stream ended before the process started Vulkan over connects again
++// (dsa_lost_stream.h). While the renderer does not answer (it is restarting), the thread keeps
++// its lost stream, whose calls report VK_ERROR_DEVICE_LOST, and tries again later.
++static thread_local std::chrono::steady_clock::time_point sLastReconnectAttempt;
++
+ static GfxStreamConnectionManager* getConnectionManager(void) {
+     auto transport = renderControlGetTransport();
+-    return GfxStreamConnectionManager::getThreadLocalInstance(transport, kCapsetGfxStreamVulkan);
++    auto* mgr = GfxStreamConnectionManager::getThreadLocalInstance(transport, kCapsetGfxStreamVulkan);
++    uint32_t generation = 0;
++    const bool lost = mgr && threadStreamLost(mgr, &generation);
++    const auto now = std::chrono::steady_clock::now();
++    if (lost && dsa::shouldReconnect(lost, generation, now, sLastReconnectAttempt)) {
++        sLastReconnectAttempt = now;
++        if (auto* fresh = GfxStreamConnectionManager::replaceThreadLocalInstance(
++                transport, kCapsetGfxStreamVulkan)) {
++            mesa_logi("Connected to the host renderer again");
++            mgr = fresh;
++        }
++    }
++    return mgr;
++}
++
++// After a stream to the host renderer ended, an instance-level call (eglInitialize makes one)
++// starts Vulkan over: a renderer that restarted knows nothing of this process, so the process
++// registers again (a new process pipe), its sequence numbers start from zero as the
++// renderer's do, and every thread whose stream ended connects again.
++static std::mutex sStartOverMutex;
++
++static void startOverAfterStreamLoss(void) {
++    if (!dsa::StreamGenerations::anyLost()) return;
++    std::lock_guard<std::mutex> lock(sStartOverMutex);
++    if (!dsa::StreamGenerations::anyLost()) return;
++    mesa_logw("A stream to the host renderer ended; starting Vulkan over with a new connection");
++    renderControlResetProcess();
++    __atomic_store_n(&gSeqno, 0, __ATOMIC_SEQ_CST);
++    dsa::StreamGenerations::beginNew();
+ }
+ 
+ namespace {
+@@ -76,11 +123,17 @@ static const char* const kMesaOnlyDeviceExtensions[] = {
+ };
+ 
+ static VkResult SetupInstanceForProcess(void) {
++    startOverAfterStreamLoss();
+     auto mgr = getConnectionManager();
+     if (!mgr) {
+         mesa_loge("vulkan: Failed to get host connection\n");
+         return VK_ERROR_DEVICE_LOST;
+     }
++    if (threadStreamLost(mgr, nullptr)) {
++        // The renderer does not answer yet; the caller tries again later.
++        mesa_logw("vulkan: the host renderer does not answer yet");
++        return VK_ERROR_INITIALIZATION_FAILED;
++    }
+ 
+     gfxstream::vk::ResourceTracker::get()->setupCaps(gNoRenderControlEnc);
+     gfxstream::vk::ResourceTracker::get()->setupPlatformHelpers();
+diff --git a/src/gfxstream/guest/vulkan_enc/VkEncoder.cpp b/src/gfxstream/guest/vulkan_enc/VkEncoder.cpp
+index 808614c..d848016 100644
+--- a/src/gfxstream/guest/vulkan_enc/VkEncoder.cpp
++++ b/src/gfxstream/guest/vulkan_enc/VkEncoder.cpp
+@@ -122,7 +122,7 @@ VkResult VkEncoder::vkCreateInstance(const VkInstanceCreateInfo* pCreateInfo,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkCreateInstance = OP_vkCreateInstance;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkCreateInstance, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkCreateInstance, sizeof(uint32_t));
+@@ -156,6 +156,7 @@ VkResult VkEncoder::vkCreateInstance(const VkInstanceCreateInfo* pCreateInfo,
+     stream->unsetHandleMapping();
+     VkResult vkCreateInstance_VkResult_return = (VkResult)0;
+     stream->read(&vkCreateInstance_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkCreateInstance_VkResult_return = VK_ERROR_DEVICE_LOST;
+     sResourceTracker->on_vkCreateInstance(this, vkCreateInstance_VkResult_return, pCreateInfo,
+                                           pAllocator, pInstance);
+     ++encodeCount;
+@@ -208,7 +209,7 @@ void VkEncoder::vkDestroyInstance(VkInstance instance, const VkAllocationCallbac
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkDestroyInstance = OP_vkDestroyInstance;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkDestroyInstance, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkDestroyInstance, sizeof(uint32_t));
+@@ -277,7 +278,7 @@ VkResult VkEncoder::vkEnumeratePhysicalDevices(VkInstance instance, uint32_t* pP
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkEnumeratePhysicalDevices = OP_vkEnumeratePhysicalDevices;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkEnumeratePhysicalDevices, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkEnumeratePhysicalDevices, sizeof(uint32_t));
+@@ -346,6 +347,7 @@ VkResult VkEncoder::vkEnumeratePhysicalDevices(VkInstance instance, uint32_t* pP
+     stream->unsetHandleMapping();
+     VkResult vkEnumeratePhysicalDevices_VkResult_return = (VkResult)0;
+     stream->read(&vkEnumeratePhysicalDevices_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkEnumeratePhysicalDevices_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -380,7 +382,7 @@ void VkEncoder::vkGetPhysicalDeviceFeatures(VkPhysicalDevice physicalDevice,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetPhysicalDeviceFeatures = OP_vkGetPhysicalDeviceFeatures;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetPhysicalDeviceFeatures, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetPhysicalDeviceFeatures, sizeof(uint32_t));
+@@ -439,7 +441,7 @@ void VkEncoder::vkGetPhysicalDeviceFormatProperties(VkPhysicalDevice physicalDev
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetPhysicalDeviceFormatProperties = OP_vkGetPhysicalDeviceFormatProperties;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetPhysicalDeviceFormatProperties, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetPhysicalDeviceFormatProperties, sizeof(uint32_t));
+@@ -513,7 +515,7 @@ VkResult VkEncoder::vkGetPhysicalDeviceImageFormatProperties(
+     uint32_t opcode_vkGetPhysicalDeviceImageFormatProperties =
+         OP_vkGetPhysicalDeviceImageFormatProperties;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetPhysicalDeviceImageFormatProperties, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetPhysicalDeviceImageFormatProperties, sizeof(uint32_t));
+@@ -547,6 +549,7 @@ VkResult VkEncoder::vkGetPhysicalDeviceImageFormatProperties(
+     }
+     VkResult vkGetPhysicalDeviceImageFormatProperties_VkResult_return = (VkResult)0;
+     stream->read(&vkGetPhysicalDeviceImageFormatProperties_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkGetPhysicalDeviceImageFormatProperties_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -582,7 +585,7 @@ void VkEncoder::vkGetPhysicalDeviceProperties(VkPhysicalDevice physicalDevice,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetPhysicalDeviceProperties = OP_vkGetPhysicalDeviceProperties;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetPhysicalDeviceProperties, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetPhysicalDeviceProperties, sizeof(uint32_t));
+@@ -654,7 +657,7 @@ void VkEncoder::vkGetPhysicalDeviceQueueFamilyProperties(
+     uint32_t opcode_vkGetPhysicalDeviceQueueFamilyProperties =
+         OP_vkGetPhysicalDeviceQueueFamilyProperties;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetPhysicalDeviceQueueFamilyProperties, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetPhysicalDeviceQueueFamilyProperties, sizeof(uint32_t));
+@@ -756,7 +759,7 @@ void VkEncoder::vkGetPhysicalDeviceMemoryProperties(
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetPhysicalDeviceMemoryProperties = OP_vkGetPhysicalDeviceMemoryProperties;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetPhysicalDeviceMemoryProperties, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetPhysicalDeviceMemoryProperties, sizeof(uint32_t));
+@@ -813,7 +816,7 @@ PFN_vkVoidFunction VkEncoder::vkGetInstanceProcAddr(VkInstance instance, const c
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetInstanceProcAddr = OP_vkGetInstanceProcAddr;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetInstanceProcAddr, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetInstanceProcAddr, sizeof(uint32_t));
+@@ -872,7 +875,7 @@ PFN_vkVoidFunction VkEncoder::vkGetDeviceProcAddr(VkDevice device, const char* p
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetDeviceProcAddr = OP_vkGetDeviceProcAddr;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetDeviceProcAddr, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetDeviceProcAddr, sizeof(uint32_t));
+@@ -961,7 +964,7 @@ VkResult VkEncoder::vkCreateDevice(VkPhysicalDevice physicalDevice,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkCreateDevice = OP_vkCreateDevice;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkCreateDevice, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkCreateDevice, sizeof(uint32_t));
+@@ -999,6 +1002,7 @@ VkResult VkEncoder::vkCreateDevice(VkPhysicalDevice physicalDevice,
+     stream->unsetHandleMapping();
+     VkResult vkCreateDevice_VkResult_return = (VkResult)0;
+     stream->read(&vkCreateDevice_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkCreateDevice_VkResult_return = VK_ERROR_DEVICE_LOST;
+     sResourceTracker->on_vkCreateDevice(this, vkCreateDevice_VkResult_return, physicalDevice,
+                                         pCreateInfo, pAllocator, pDevice);
+     ++encodeCount;
+@@ -1051,7 +1055,7 @@ void VkEncoder::vkDestroyDevice(VkDevice device, const VkAllocationCallbacks* pA
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkDestroyDevice = OP_vkDestroyDevice;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkDestroyDevice, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkDestroyDevice, sizeof(uint32_t));
+@@ -1134,7 +1138,7 @@ VkResult VkEncoder::vkEnumerateInstanceExtensionProperties(const char* pLayerNam
+     uint32_t opcode_vkEnumerateInstanceExtensionProperties =
+         OP_vkEnumerateInstanceExtensionProperties;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkEnumerateInstanceExtensionProperties, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkEnumerateInstanceExtensionProperties, sizeof(uint32_t));
+@@ -1223,6 +1227,7 @@ VkResult VkEncoder::vkEnumerateInstanceExtensionProperties(const char* pLayerNam
+     }
+     VkResult vkEnumerateInstanceExtensionProperties_VkResult_return = (VkResult)0;
+     stream->read(&vkEnumerateInstanceExtensionProperties_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkEnumerateInstanceExtensionProperties_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -1286,7 +1291,7 @@ VkResult VkEncoder::vkEnumerateDeviceExtensionProperties(VkPhysicalDevice physic
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkEnumerateDeviceExtensionProperties = OP_vkEnumerateDeviceExtensionProperties;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkEnumerateDeviceExtensionProperties, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkEnumerateDeviceExtensionProperties, sizeof(uint32_t));
+@@ -1379,6 +1384,7 @@ VkResult VkEncoder::vkEnumerateDeviceExtensionProperties(VkPhysicalDevice physic
+     }
+     VkResult vkEnumerateDeviceExtensionProperties_VkResult_return = (VkResult)0;
+     stream->read(&vkEnumerateDeviceExtensionProperties_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkEnumerateDeviceExtensionProperties_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -1423,7 +1429,7 @@ VkResult VkEncoder::vkEnumerateInstanceLayerProperties(uint32_t* pPropertyCount,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkEnumerateInstanceLayerProperties = OP_vkEnumerateInstanceLayerProperties;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkEnumerateInstanceLayerProperties, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkEnumerateInstanceLayerProperties, sizeof(uint32_t));
+@@ -1485,6 +1491,7 @@ VkResult VkEncoder::vkEnumerateInstanceLayerProperties(uint32_t* pPropertyCount,
+     }
+     VkResult vkEnumerateInstanceLayerProperties_VkResult_return = (VkResult)0;
+     stream->read(&vkEnumerateInstanceLayerProperties_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkEnumerateInstanceLayerProperties_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -1534,7 +1541,7 @@ VkResult VkEncoder::vkEnumerateDeviceLayerProperties(VkPhysicalDevice physicalDe
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkEnumerateDeviceLayerProperties = OP_vkEnumerateDeviceLayerProperties;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkEnumerateDeviceLayerProperties, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkEnumerateDeviceLayerProperties, sizeof(uint32_t));
+@@ -1600,6 +1607,7 @@ VkResult VkEncoder::vkEnumerateDeviceLayerProperties(VkPhysicalDevice physicalDe
+     }
+     VkResult vkEnumerateDeviceLayerProperties_VkResult_return = (VkResult)0;
+     stream->read(&vkEnumerateDeviceLayerProperties_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkEnumerateDeviceLayerProperties_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -1639,7 +1647,7 @@ void VkEncoder::vkGetDeviceQueue(VkDevice device, uint32_t queueFamilyIndex, uin
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetDeviceQueue = OP_vkGetDeviceQueue;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetDeviceQueue, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetDeviceQueue, sizeof(uint32_t));
+@@ -1723,7 +1731,7 @@ VkResult VkEncoder::vkQueueSubmit(VkQueue queue, uint32_t submitCount, const VkS
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkQueueSubmit = OP_vkQueueSubmit;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkQueueSubmit, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkQueueSubmit, sizeof(uint32_t));
+@@ -1748,6 +1756,7 @@ VkResult VkEncoder::vkQueueSubmit(VkQueue queue, uint32_t submitCount, const VkS
+     *streamPtrPtr += 1 * 8;
+     VkResult vkQueueSubmit_VkResult_return = (VkResult)0;
+     stream->read(&vkQueueSubmit_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkQueueSubmit_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -1778,7 +1787,7 @@ VkResult VkEncoder::vkQueueWaitIdle(VkQueue queue, uint32_t doLock) {
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkQueueWaitIdle = OP_vkQueueWaitIdle;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkQueueWaitIdle, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkQueueWaitIdle, sizeof(uint32_t));
+@@ -1793,6 +1802,7 @@ VkResult VkEncoder::vkQueueWaitIdle(VkQueue queue, uint32_t doLock) {
+     *streamPtrPtr += 1 * 8;
+     VkResult vkQueueWaitIdle_VkResult_return = (VkResult)0;
+     stream->read(&vkQueueWaitIdle_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkQueueWaitIdle_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -1823,7 +1833,7 @@ VkResult VkEncoder::vkDeviceWaitIdle(VkDevice device, uint32_t doLock) {
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkDeviceWaitIdle = OP_vkDeviceWaitIdle;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkDeviceWaitIdle, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkDeviceWaitIdle, sizeof(uint32_t));
+@@ -1838,6 +1848,7 @@ VkResult VkEncoder::vkDeviceWaitIdle(VkDevice device, uint32_t doLock) {
+     *streamPtrPtr += 1 * 8;
+     VkResult vkDeviceWaitIdle_VkResult_return = (VkResult)0;
+     stream->read(&vkDeviceWaitIdle_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkDeviceWaitIdle_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -1904,7 +1915,7 @@ VkResult VkEncoder::vkAllocateMemory(VkDevice device, const VkMemoryAllocateInfo
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkAllocateMemory = OP_vkAllocateMemory;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkAllocateMemory, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkAllocateMemory, sizeof(uint32_t));
+@@ -1944,6 +1955,7 @@ VkResult VkEncoder::vkAllocateMemory(VkDevice device, const VkMemoryAllocateInfo
+     stream->unsetHandleMapping();
+     VkResult vkAllocateMemory_VkResult_return = (VkResult)0;
+     stream->read(&vkAllocateMemory_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkAllocateMemory_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -1996,7 +2008,7 @@ void VkEncoder::vkFreeMemory(VkDevice device, VkDeviceMemory memory,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkFreeMemory = OP_vkFreeMemory;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkFreeMemory, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkFreeMemory, sizeof(uint32_t));
+@@ -2098,7 +2110,7 @@ VkResult VkEncoder::vkFlushMappedMemoryRanges(VkDevice device, uint32_t memoryRa
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkFlushMappedMemoryRanges = OP_vkFlushMappedMemoryRanges;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkFlushMappedMemoryRanges, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkFlushMappedMemoryRanges, sizeof(uint32_t));
+@@ -2144,6 +2156,7 @@ VkResult VkEncoder::vkFlushMappedMemoryRanges(VkDevice device, uint32_t memoryRa
+     }
+     VkResult vkFlushMappedMemoryRanges_VkResult_return = (VkResult)0;
+     stream->read(&vkFlushMappedMemoryRanges_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkFlushMappedMemoryRanges_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -2203,7 +2216,7 @@ VkResult VkEncoder::vkInvalidateMappedMemoryRanges(VkDevice device, uint32_t mem
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkInvalidateMappedMemoryRanges = OP_vkInvalidateMappedMemoryRanges;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkInvalidateMappedMemoryRanges, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkInvalidateMappedMemoryRanges, sizeof(uint32_t));
+@@ -2225,6 +2238,7 @@ VkResult VkEncoder::vkInvalidateMappedMemoryRanges(VkDevice device, uint32_t mem
+     }
+     VkResult vkInvalidateMappedMemoryRanges_VkResult_return = (VkResult)0;
+     stream->read(&vkInvalidateMappedMemoryRanges_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkInvalidateMappedMemoryRanges_VkResult_return = VK_ERROR_DEVICE_LOST;
+     if (!sResourceTracker->usingDirectMapping()) {
+         // The host sends each range's size, then that many bytes. The guest must read
+         // exactly what the host sent, whatever it expected: the host's allocation can be
+@@ -2291,7 +2305,7 @@ void VkEncoder::vkGetDeviceMemoryCommitment(VkDevice device, VkDeviceMemory memo
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetDeviceMemoryCommitment = OP_vkGetDeviceMemoryCommitment;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetDeviceMemoryCommitment, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetDeviceMemoryCommitment, sizeof(uint32_t));
+@@ -2356,7 +2370,7 @@ VkResult VkEncoder::vkBindBufferMemory(VkDevice device, VkBuffer buffer, VkDevic
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkBindBufferMemory = OP_vkBindBufferMemory;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkBindBufferMemory, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkBindBufferMemory, sizeof(uint32_t));
+@@ -2381,6 +2395,7 @@ VkResult VkEncoder::vkBindBufferMemory(VkDevice device, VkBuffer buffer, VkDevic
+     *streamPtrPtr += sizeof(VkDeviceSize);
+     VkResult vkBindBufferMemory_VkResult_return = (VkResult)0;
+     stream->read(&vkBindBufferMemory_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkBindBufferMemory_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -2427,7 +2442,7 @@ VkResult VkEncoder::vkBindImageMemory(VkDevice device, VkImage image, VkDeviceMe
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkBindImageMemory = OP_vkBindImageMemory;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkBindImageMemory, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkBindImageMemory, sizeof(uint32_t));
+@@ -2452,6 +2467,7 @@ VkResult VkEncoder::vkBindImageMemory(VkDevice device, VkImage image, VkDeviceMe
+     *streamPtrPtr += sizeof(VkDeviceSize);
+     VkResult vkBindImageMemory_VkResult_return = (VkResult)0;
+     stream->read(&vkBindImageMemory_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkBindImageMemory_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -2491,7 +2507,7 @@ void VkEncoder::vkGetBufferMemoryRequirements(VkDevice device, VkBuffer buffer,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetBufferMemoryRequirements = OP_vkGetBufferMemoryRequirements;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetBufferMemoryRequirements, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetBufferMemoryRequirements, sizeof(uint32_t));
+@@ -2555,7 +2571,7 @@ void VkEncoder::vkGetImageMemoryRequirements(VkDevice device, VkImage image,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetImageMemoryRequirements = OP_vkGetImageMemoryRequirements;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetImageMemoryRequirements, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetImageMemoryRequirements, sizeof(uint32_t));
+@@ -2634,7 +2650,7 @@ void VkEncoder::vkGetImageSparseMemoryRequirements(
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetImageSparseMemoryRequirements = OP_vkGetImageSparseMemoryRequirements;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetImageSparseMemoryRequirements, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetImageSparseMemoryRequirements, sizeof(uint32_t));
+@@ -2773,7 +2789,7 @@ void VkEncoder::vkGetPhysicalDeviceSparseImageFormatProperties(
+     uint32_t opcode_vkGetPhysicalDeviceSparseImageFormatProperties =
+         OP_vkGetPhysicalDeviceSparseImageFormatProperties;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetPhysicalDeviceSparseImageFormatProperties, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetPhysicalDeviceSparseImageFormatProperties, sizeof(uint32_t));
+@@ -2908,7 +2924,7 @@ VkResult VkEncoder::vkQueueBindSparse(VkQueue queue, uint32_t bindInfoCount,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkQueueBindSparse = OP_vkQueueBindSparse;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkQueueBindSparse, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkQueueBindSparse, sizeof(uint32_t));
+@@ -2933,6 +2949,7 @@ VkResult VkEncoder::vkQueueBindSparse(VkQueue queue, uint32_t bindInfoCount,
+     *streamPtrPtr += 1 * 8;
+     VkResult vkQueueBindSparse_VkResult_return = (VkResult)0;
+     stream->read(&vkQueueBindSparse_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkQueueBindSparse_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -2998,7 +3015,7 @@ VkResult VkEncoder::vkCreateFence(VkDevice device, const VkFenceCreateInfo* pCre
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkCreateFence = OP_vkCreateFence;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkCreateFence, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkCreateFence, sizeof(uint32_t));
+@@ -3036,6 +3053,7 @@ VkResult VkEncoder::vkCreateFence(VkDevice device, const VkFenceCreateInfo* pCre
+     stream->unsetHandleMapping();
+     VkResult vkCreateFence_VkResult_return = (VkResult)0;
+     stream->read(&vkCreateFence_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkCreateFence_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -3089,7 +3107,7 @@ void VkEncoder::vkDestroyFence(VkDevice device, VkFence fence,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkDestroyFence = OP_vkDestroyFence;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkDestroyFence, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkDestroyFence, sizeof(uint32_t));
+@@ -3157,7 +3175,7 @@ VkResult VkEncoder::vkResetFences(VkDevice device, uint32_t fenceCount, const Vk
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkResetFences = OP_vkResetFences;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkResetFences, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkResetFences, sizeof(uint32_t));
+@@ -3182,6 +3200,7 @@ VkResult VkEncoder::vkResetFences(VkDevice device, uint32_t fenceCount, const Vk
+     }
+     VkResult vkResetFences_VkResult_return = (VkResult)0;
+     stream->read(&vkResetFences_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkResetFences_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -3216,7 +3235,7 @@ VkResult VkEncoder::vkGetFenceStatus(VkDevice device, VkFence fence, uint32_t do
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetFenceStatus = OP_vkGetFenceStatus;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetFenceStatus, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetFenceStatus, sizeof(uint32_t));
+@@ -3235,6 +3254,7 @@ VkResult VkEncoder::vkGetFenceStatus(VkDevice device, VkFence fence, uint32_t do
+     *streamPtrPtr += 1 * 8;
+     VkResult vkGetFenceStatus_VkResult_return = (VkResult)0;
+     stream->read(&vkGetFenceStatus_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkGetFenceStatus_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -3281,7 +3301,7 @@ VkResult VkEncoder::vkWaitForFences(VkDevice device, uint32_t fenceCount, const
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkWaitForFences = OP_vkWaitForFences;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkWaitForFences, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkWaitForFences, sizeof(uint32_t));
+@@ -3310,6 +3330,7 @@ VkResult VkEncoder::vkWaitForFences(VkDevice device, uint32_t fenceCount, const
+     *streamPtrPtr += sizeof(uint64_t);
+     VkResult vkWaitForFences_VkResult_return = (VkResult)0;
+     stream->read(&vkWaitForFences_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkWaitForFences_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -3377,7 +3398,7 @@ VkResult VkEncoder::vkCreateSemaphore(VkDevice device, const VkSemaphoreCreateIn
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkCreateSemaphore = OP_vkCreateSemaphore;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkCreateSemaphore, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkCreateSemaphore, sizeof(uint32_t));
+@@ -3416,6 +3437,7 @@ VkResult VkEncoder::vkCreateSemaphore(VkDevice device, const VkSemaphoreCreateIn
+     stream->unsetHandleMapping();
+     VkResult vkCreateSemaphore_VkResult_return = (VkResult)0;
+     stream->read(&vkCreateSemaphore_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkCreateSemaphore_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -3470,7 +3492,7 @@ void VkEncoder::vkDestroySemaphore(VkDevice device, VkSemaphore semaphore,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkDestroySemaphore = OP_vkDestroySemaphore;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkDestroySemaphore, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkDestroySemaphore, sizeof(uint32_t));
+@@ -3563,7 +3585,7 @@ VkResult VkEncoder::vkCreateEvent(VkDevice device, const VkEventCreateInfo* pCre
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkCreateEvent = OP_vkCreateEvent;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkCreateEvent, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkCreateEvent, sizeof(uint32_t));
+@@ -3601,6 +3623,7 @@ VkResult VkEncoder::vkCreateEvent(VkDevice device, const VkEventCreateInfo* pCre
+     stream->unsetHandleMapping();
+     VkResult vkCreateEvent_VkResult_return = (VkResult)0;
+     stream->read(&vkCreateEvent_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkCreateEvent_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -3654,7 +3677,7 @@ void VkEncoder::vkDestroyEvent(VkDevice device, VkEvent event,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkDestroyEvent = OP_vkDestroyEvent;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkDestroyEvent, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkDestroyEvent, sizeof(uint32_t));
+@@ -3716,7 +3739,7 @@ VkResult VkEncoder::vkGetEventStatus(VkDevice device, VkEvent event, uint32_t do
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetEventStatus = OP_vkGetEventStatus;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetEventStatus, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetEventStatus, sizeof(uint32_t));
+@@ -3735,6 +3758,7 @@ VkResult VkEncoder::vkGetEventStatus(VkDevice device, VkEvent event, uint32_t do
+     *streamPtrPtr += 1 * 8;
+     VkResult vkGetEventStatus_VkResult_return = (VkResult)0;
+     stream->read(&vkGetEventStatus_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkGetEventStatus_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -3769,7 +3793,7 @@ VkResult VkEncoder::vkSetEvent(VkDevice device, VkEvent event, uint32_t doLock)
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkSetEvent = OP_vkSetEvent;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkSetEvent, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkSetEvent, sizeof(uint32_t));
+@@ -3788,6 +3812,7 @@ VkResult VkEncoder::vkSetEvent(VkDevice device, VkEvent event, uint32_t doLock)
+     *streamPtrPtr += 1 * 8;
+     VkResult vkSetEvent_VkResult_return = (VkResult)0;
+     stream->read(&vkSetEvent_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkSetEvent_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -3822,7 +3847,7 @@ VkResult VkEncoder::vkResetEvent(VkDevice device, VkEvent event, uint32_t doLock
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkResetEvent = OP_vkResetEvent;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkResetEvent, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkResetEvent, sizeof(uint32_t));
+@@ -3841,6 +3866,7 @@ VkResult VkEncoder::vkResetEvent(VkDevice device, VkEvent event, uint32_t doLock
+     *streamPtrPtr += 1 * 8;
+     VkResult vkResetEvent_VkResult_return = (VkResult)0;
+     stream->read(&vkResetEvent_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkResetEvent_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -3908,7 +3934,7 @@ VkResult VkEncoder::vkCreateQueryPool(VkDevice device, const VkQueryPoolCreateIn
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkCreateQueryPool = OP_vkCreateQueryPool;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkCreateQueryPool, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkCreateQueryPool, sizeof(uint32_t));
+@@ -3947,6 +3973,7 @@ VkResult VkEncoder::vkCreateQueryPool(VkDevice device, const VkQueryPoolCreateIn
+     stream->unsetHandleMapping();
+     VkResult vkCreateQueryPool_VkResult_return = (VkResult)0;
+     stream->read(&vkCreateQueryPool_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkCreateQueryPool_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -4001,7 +4028,7 @@ void VkEncoder::vkDestroyQueryPool(VkDevice device, VkQueryPool queryPool,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkDestroyQueryPool = OP_vkDestroyQueryPool;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkDestroyQueryPool, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkDestroyQueryPool, sizeof(uint32_t));
+@@ -4083,7 +4110,7 @@ VkResult VkEncoder::vkGetQueryPoolResults(VkDevice device, VkQueryPool queryPool
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetQueryPoolResults = OP_vkGetQueryPoolResults;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetQueryPoolResults, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetQueryPoolResults, sizeof(uint32_t));
+@@ -4117,6 +4144,7 @@ VkResult VkEncoder::vkGetQueryPoolResults(VkDevice device, VkQueryPool queryPool
+     stream->read((void*)pData, ((dataSize)) * sizeof(uint8_t));
+     VkResult vkGetQueryPoolResults_VkResult_return = (VkResult)0;
+     stream->read(&vkGetQueryPoolResults_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkGetQueryPoolResults_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -4182,7 +4210,7 @@ VkResult VkEncoder::vkCreateBuffer(VkDevice device, const VkBufferCreateInfo* pC
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkCreateBuffer = OP_vkCreateBuffer;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkCreateBuffer, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkCreateBuffer, sizeof(uint32_t));
+@@ -4220,6 +4248,7 @@ VkResult VkEncoder::vkCreateBuffer(VkDevice device, const VkBufferCreateInfo* pC
+     stream->unsetHandleMapping();
+     VkResult vkCreateBuffer_VkResult_return = (VkResult)0;
+     stream->read(&vkCreateBuffer_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkCreateBuffer_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -4273,7 +4302,7 @@ void VkEncoder::vkDestroyBuffer(VkDevice device, VkBuffer buffer,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkDestroyBuffer = OP_vkDestroyBuffer;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkDestroyBuffer, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkDestroyBuffer, sizeof(uint32_t));
+@@ -4368,7 +4397,7 @@ VkResult VkEncoder::vkCreateBufferView(VkDevice device, const VkBufferViewCreate
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkCreateBufferView = OP_vkCreateBufferView;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkCreateBufferView, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkCreateBufferView, sizeof(uint32_t));
+@@ -4407,6 +4436,7 @@ VkResult VkEncoder::vkCreateBufferView(VkDevice device, const VkBufferViewCreate
+     stream->unsetHandleMapping();
+     VkResult vkCreateBufferView_VkResult_return = (VkResult)0;
+     stream->read(&vkCreateBufferView_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkCreateBufferView_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -4461,7 +4491,7 @@ void VkEncoder::vkDestroyBufferView(VkDevice device, VkBufferView bufferView,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkDestroyBufferView = OP_vkDestroyBufferView;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkDestroyBufferView, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkDestroyBufferView, sizeof(uint32_t));
+@@ -4556,7 +4586,7 @@ VkResult VkEncoder::vkCreateImage(VkDevice device, const VkImageCreateInfo* pCre
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkCreateImage = OP_vkCreateImage;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkCreateImage, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkCreateImage, sizeof(uint32_t));
+@@ -4594,6 +4624,7 @@ VkResult VkEncoder::vkCreateImage(VkDevice device, const VkImageCreateInfo* pCre
+     stream->unsetHandleMapping();
+     VkResult vkCreateImage_VkResult_return = (VkResult)0;
+     stream->read(&vkCreateImage_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkCreateImage_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -4647,7 +4678,7 @@ void VkEncoder::vkDestroyImage(VkDevice device, VkImage image,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkDestroyImage = OP_vkDestroyImage;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkDestroyImage, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkDestroyImage, sizeof(uint32_t));
+@@ -4727,7 +4758,7 @@ void VkEncoder::vkGetImageSubresourceLayout(VkDevice device, VkImage image,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetImageSubresourceLayout = OP_vkGetImageSubresourceLayout;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetImageSubresourceLayout, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetImageSubresourceLayout, sizeof(uint32_t));
+@@ -4819,7 +4850,7 @@ VkResult VkEncoder::vkCreateImageView(VkDevice device, const VkImageViewCreateIn
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkCreateImageView = OP_vkCreateImageView;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkCreateImageView, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkCreateImageView, sizeof(uint32_t));
+@@ -4858,6 +4889,7 @@ VkResult VkEncoder::vkCreateImageView(VkDevice device, const VkImageViewCreateIn
+     stream->unsetHandleMapping();
+     VkResult vkCreateImageView_VkResult_return = (VkResult)0;
+     stream->read(&vkCreateImageView_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkCreateImageView_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -4912,7 +4944,7 @@ void VkEncoder::vkDestroyImageView(VkDevice device, VkImageView imageView,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkDestroyImageView = OP_vkDestroyImageView;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkDestroyImageView, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkDestroyImageView, sizeof(uint32_t));
+@@ -5008,7 +5040,7 @@ VkResult VkEncoder::vkCreateShaderModule(VkDevice device,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkCreateShaderModule = OP_vkCreateShaderModule;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkCreateShaderModule, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkCreateShaderModule, sizeof(uint32_t));
+@@ -5048,6 +5080,7 @@ VkResult VkEncoder::vkCreateShaderModule(VkDevice device,
+     stream->unsetHandleMapping();
+     VkResult vkCreateShaderModule_VkResult_return = (VkResult)0;
+     stream->read(&vkCreateShaderModule_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkCreateShaderModule_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -5102,7 +5135,7 @@ void VkEncoder::vkDestroyShaderModule(VkDevice device, VkShaderModule shaderModu
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkDestroyShaderModule = OP_vkDestroyShaderModule;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkDestroyShaderModule, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkDestroyShaderModule, sizeof(uint32_t));
+@@ -5198,7 +5231,7 @@ VkResult VkEncoder::vkCreatePipelineCache(VkDevice device,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkCreatePipelineCache = OP_vkCreatePipelineCache;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkCreatePipelineCache, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkCreatePipelineCache, sizeof(uint32_t));
+@@ -5238,6 +5271,7 @@ VkResult VkEncoder::vkCreatePipelineCache(VkDevice device,
+     stream->unsetHandleMapping();
+     VkResult vkCreatePipelineCache_VkResult_return = (VkResult)0;
+     stream->read(&vkCreatePipelineCache_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkCreatePipelineCache_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -5292,7 +5326,7 @@ void VkEncoder::vkDestroyPipelineCache(VkDevice device, VkPipelineCache pipeline
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkDestroyPipelineCache = OP_vkDestroyPipelineCache;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkDestroyPipelineCache, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkDestroyPipelineCache, sizeof(uint32_t));
+@@ -5369,7 +5403,7 @@ VkResult VkEncoder::vkGetPipelineCacheData(VkDevice device, VkPipelineCache pipe
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetPipelineCacheData = OP_vkGetPipelineCacheData;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetPipelineCacheData, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetPipelineCacheData, sizeof(uint32_t));
+@@ -5426,6 +5460,7 @@ VkResult VkEncoder::vkGetPipelineCacheData(VkDevice device, VkPipelineCache pipe
+     }
+     VkResult vkGetPipelineCacheData_VkResult_return = (VkResult)0;
+     stream->read(&vkGetPipelineCacheData_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkGetPipelineCacheData_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -5472,7 +5507,7 @@ VkResult VkEncoder::vkMergePipelineCaches(VkDevice device, VkPipelineCache dstCa
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkMergePipelineCaches = OP_vkMergePipelineCaches;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkMergePipelineCaches, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkMergePipelineCaches, sizeof(uint32_t));
+@@ -5501,6 +5536,7 @@ VkResult VkEncoder::vkMergePipelineCaches(VkDevice device, VkPipelineCache dstCa
+     }
+     VkResult vkMergePipelineCaches_VkResult_return = (VkResult)0;
+     stream->read(&vkMergePipelineCaches_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkMergePipelineCaches_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -5586,7 +5622,7 @@ VkResult VkEncoder::vkCreateGraphicsPipelines(VkDevice device, VkPipelineCache p
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkCreateGraphicsPipelines = OP_vkCreateGraphicsPipelines;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkCreateGraphicsPipelines, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkCreateGraphicsPipelines, sizeof(uint32_t));
+@@ -5641,6 +5677,7 @@ VkResult VkEncoder::vkCreateGraphicsPipelines(VkDevice device, VkPipelineCache p
+     stream->unsetHandleMapping();
+     VkResult vkCreateGraphicsPipelines_VkResult_return = (VkResult)0;
+     stream->read(&vkCreateGraphicsPipelines_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkCreateGraphicsPipelines_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -5726,7 +5763,7 @@ VkResult VkEncoder::vkCreateComputePipelines(VkDevice device, VkPipelineCache pi
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkCreateComputePipelines = OP_vkCreateComputePipelines;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkCreateComputePipelines, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkCreateComputePipelines, sizeof(uint32_t));
+@@ -5781,6 +5818,7 @@ VkResult VkEncoder::vkCreateComputePipelines(VkDevice device, VkPipelineCache pi
+     stream->unsetHandleMapping();
+     VkResult vkCreateComputePipelines_VkResult_return = (VkResult)0;
+     stream->read(&vkCreateComputePipelines_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkCreateComputePipelines_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -5835,7 +5873,7 @@ void VkEncoder::vkDestroyPipeline(VkDevice device, VkPipeline pipeline,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkDestroyPipeline = OP_vkDestroyPipeline;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkDestroyPipeline, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkDestroyPipeline, sizeof(uint32_t));
+@@ -5932,7 +5970,7 @@ VkResult VkEncoder::vkCreatePipelineLayout(VkDevice device,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkCreatePipelineLayout = OP_vkCreatePipelineLayout;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkCreatePipelineLayout, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkCreatePipelineLayout, sizeof(uint32_t));
+@@ -5972,6 +6010,7 @@ VkResult VkEncoder::vkCreatePipelineLayout(VkDevice device,
+     stream->unsetHandleMapping();
+     VkResult vkCreatePipelineLayout_VkResult_return = (VkResult)0;
+     stream->read(&vkCreatePipelineLayout_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkCreatePipelineLayout_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -6026,7 +6065,7 @@ void VkEncoder::vkDestroyPipelineLayout(VkDevice device, VkPipelineLayout pipeli
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkDestroyPipelineLayout = OP_vkDestroyPipelineLayout;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkDestroyPipelineLayout, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkDestroyPipelineLayout, sizeof(uint32_t));
+@@ -6120,7 +6159,7 @@ VkResult VkEncoder::vkCreateSampler(VkDevice device, const VkSamplerCreateInfo*
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkCreateSampler = OP_vkCreateSampler;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkCreateSampler, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkCreateSampler, sizeof(uint32_t));
+@@ -6158,6 +6197,7 @@ VkResult VkEncoder::vkCreateSampler(VkDevice device, const VkSamplerCreateInfo*
+     stream->unsetHandleMapping();
+     VkResult vkCreateSampler_VkResult_return = (VkResult)0;
+     stream->read(&vkCreateSampler_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkCreateSampler_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -6211,7 +6251,7 @@ void VkEncoder::vkDestroySampler(VkDevice device, VkSampler sampler,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkDestroySampler = OP_vkDestroySampler;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkDestroySampler, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkDestroySampler, sizeof(uint32_t));
+@@ -6310,7 +6350,7 @@ VkResult VkEncoder::vkCreateDescriptorSetLayout(VkDevice device,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkCreateDescriptorSetLayout = OP_vkCreateDescriptorSetLayout;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkCreateDescriptorSetLayout, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkCreateDescriptorSetLayout, sizeof(uint32_t));
+@@ -6350,6 +6390,7 @@ VkResult VkEncoder::vkCreateDescriptorSetLayout(VkDevice device,
+     stream->unsetHandleMapping();
+     VkResult vkCreateDescriptorSetLayout_VkResult_return = (VkResult)0;
+     stream->read(&vkCreateDescriptorSetLayout_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkCreateDescriptorSetLayout_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -6406,7 +6447,7 @@ void VkEncoder::vkDestroyDescriptorSetLayout(VkDevice device,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkDestroyDescriptorSetLayout = OP_vkDestroyDescriptorSetLayout;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkDestroyDescriptorSetLayout, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkDestroyDescriptorSetLayout, sizeof(uint32_t));
+@@ -6504,7 +6545,7 @@ VkResult VkEncoder::vkCreateDescriptorPool(VkDevice device,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkCreateDescriptorPool = OP_vkCreateDescriptorPool;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkCreateDescriptorPool, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkCreateDescriptorPool, sizeof(uint32_t));
+@@ -6544,6 +6585,7 @@ VkResult VkEncoder::vkCreateDescriptorPool(VkDevice device,
+     stream->unsetHandleMapping();
+     VkResult vkCreateDescriptorPool_VkResult_return = (VkResult)0;
+     stream->read(&vkCreateDescriptorPool_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkCreateDescriptorPool_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -6598,7 +6640,7 @@ void VkEncoder::vkDestroyDescriptorPool(VkDevice device, VkDescriptorPool descri
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkDestroyDescriptorPool = OP_vkDestroyDescriptorPool;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkDestroyDescriptorPool, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkDestroyDescriptorPool, sizeof(uint32_t));
+@@ -6666,7 +6708,7 @@ VkResult VkEncoder::vkResetDescriptorPool(VkDevice device, VkDescriptorPool desc
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkResetDescriptorPool = OP_vkResetDescriptorPool;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkResetDescriptorPool, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkResetDescriptorPool, sizeof(uint32_t));
+@@ -6688,6 +6730,7 @@ VkResult VkEncoder::vkResetDescriptorPool(VkDevice device, VkDescriptorPool desc
+     *streamPtrPtr += sizeof(VkDescriptorPoolResetFlags);
+     VkResult vkResetDescriptorPool_VkResult_return = (VkResult)0;
+     stream->read(&vkResetDescriptorPool_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkResetDescriptorPool_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -6739,7 +6782,7 @@ VkResult VkEncoder::vkAllocateDescriptorSets(VkDevice device,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkAllocateDescriptorSets = OP_vkAllocateDescriptorSets;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkAllocateDescriptorSets, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkAllocateDescriptorSets, sizeof(uint32_t));
+@@ -6776,6 +6819,7 @@ VkResult VkEncoder::vkAllocateDescriptorSets(VkDevice device,
+     stream->unsetHandleMapping();
+     VkResult vkAllocateDescriptorSets_VkResult_return = (VkResult)0;
+     stream->read(&vkAllocateDescriptorSets_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkAllocateDescriptorSets_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -6826,7 +6870,7 @@ VkResult VkEncoder::vkFreeDescriptorSets(VkDevice device, VkDescriptorPool descr
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkFreeDescriptorSets = OP_vkFreeDescriptorSets;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkFreeDescriptorSets, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkFreeDescriptorSets, sizeof(uint32_t));
+@@ -6862,6 +6906,7 @@ VkResult VkEncoder::vkFreeDescriptorSets(VkDevice device, VkDescriptorPool descr
+     }
+     VkResult vkFreeDescriptorSets_VkResult_return = (VkResult)0;
+     stream->read(&vkFreeDescriptorSets_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkFreeDescriptorSets_VkResult_return = VK_ERROR_DEVICE_LOST;
+     if (pDescriptorSets) {
+         sResourceTracker->destroyMapping()->mapHandles_VkDescriptorSet(
+             (VkDescriptorSet*)pDescriptorSets, ((descriptorSetCount)));
+@@ -6949,7 +6994,7 @@ void VkEncoder::vkUpdateDescriptorSets(VkDevice device, uint32_t descriptorWrite
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkUpdateDescriptorSets = OP_vkUpdateDescriptorSets;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkUpdateDescriptorSets, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkUpdateDescriptorSets, sizeof(uint32_t));
+@@ -7043,7 +7088,7 @@ VkResult VkEncoder::vkCreateFramebuffer(VkDevice device, const VkFramebufferCrea
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkCreateFramebuffer = OP_vkCreateFramebuffer;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkCreateFramebuffer, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkCreateFramebuffer, sizeof(uint32_t));
+@@ -7083,6 +7128,7 @@ VkResult VkEncoder::vkCreateFramebuffer(VkDevice device, const VkFramebufferCrea
+     stream->unsetHandleMapping();
+     VkResult vkCreateFramebuffer_VkResult_return = (VkResult)0;
+     stream->read(&vkCreateFramebuffer_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkCreateFramebuffer_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -7137,7 +7183,7 @@ void VkEncoder::vkDestroyFramebuffer(VkDevice device, VkFramebuffer framebuffer,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkDestroyFramebuffer = OP_vkDestroyFramebuffer;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkDestroyFramebuffer, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkDestroyFramebuffer, sizeof(uint32_t));
+@@ -7232,7 +7278,7 @@ VkResult VkEncoder::vkCreateRenderPass(VkDevice device, const VkRenderPassCreate
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkCreateRenderPass = OP_vkCreateRenderPass;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkCreateRenderPass, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkCreateRenderPass, sizeof(uint32_t));
+@@ -7272,6 +7318,7 @@ VkResult VkEncoder::vkCreateRenderPass(VkDevice device, const VkRenderPassCreate
+     stream->unsetHandleMapping();
+     VkResult vkCreateRenderPass_VkResult_return = (VkResult)0;
+     stream->read(&vkCreateRenderPass_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkCreateRenderPass_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -7326,7 +7373,7 @@ void VkEncoder::vkDestroyRenderPass(VkDevice device, VkRenderPass renderPass,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkDestroyRenderPass = OP_vkDestroyRenderPass;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkDestroyRenderPass, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkDestroyRenderPass, sizeof(uint32_t));
+@@ -7392,7 +7439,7 @@ void VkEncoder::vkGetRenderAreaGranularity(VkDevice device, VkRenderPass renderP
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetRenderAreaGranularity = OP_vkGetRenderAreaGranularity;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetRenderAreaGranularity, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetRenderAreaGranularity, sizeof(uint32_t));
+@@ -7481,7 +7528,7 @@ VkResult VkEncoder::vkCreateCommandPool(VkDevice device, const VkCommandPoolCrea
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkCreateCommandPool = OP_vkCreateCommandPool;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkCreateCommandPool, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkCreateCommandPool, sizeof(uint32_t));
+@@ -7521,6 +7568,7 @@ VkResult VkEncoder::vkCreateCommandPool(VkDevice device, const VkCommandPoolCrea
+     stream->unsetHandleMapping();
+     VkResult vkCreateCommandPool_VkResult_return = (VkResult)0;
+     stream->read(&vkCreateCommandPool_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkCreateCommandPool_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -7575,7 +7623,7 @@ void VkEncoder::vkDestroyCommandPool(VkDevice device, VkCommandPool commandPool,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkDestroyCommandPool = OP_vkDestroyCommandPool;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkDestroyCommandPool, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkDestroyCommandPool, sizeof(uint32_t));
+@@ -7642,7 +7690,7 @@ VkResult VkEncoder::vkResetCommandPool(VkDevice device, VkCommandPool commandPoo
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkResetCommandPool = OP_vkResetCommandPool;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkResetCommandPool, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkResetCommandPool, sizeof(uint32_t));
+@@ -7663,6 +7711,7 @@ VkResult VkEncoder::vkResetCommandPool(VkDevice device, VkCommandPool commandPoo
+     *streamPtrPtr += sizeof(VkCommandPoolResetFlags);
+     VkResult vkResetCommandPool_VkResult_return = (VkResult)0;
+     stream->read(&vkResetCommandPool_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkResetCommandPool_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -7714,7 +7763,7 @@ VkResult VkEncoder::vkAllocateCommandBuffers(VkDevice device,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkAllocateCommandBuffers = OP_vkAllocateCommandBuffers;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkAllocateCommandBuffers, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkAllocateCommandBuffers, sizeof(uint32_t));
+@@ -7751,6 +7800,7 @@ VkResult VkEncoder::vkAllocateCommandBuffers(VkDevice device,
+     stream->unsetHandleMapping();
+     VkResult vkAllocateCommandBuffers_VkResult_return = (VkResult)0;
+     stream->read(&vkAllocateCommandBuffers_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkAllocateCommandBuffers_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -7801,7 +7851,7 @@ void VkEncoder::vkFreeCommandBuffers(VkDevice device, VkCommandPool commandPool,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkFreeCommandBuffers = OP_vkFreeCommandBuffers;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkFreeCommandBuffers, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkFreeCommandBuffers, sizeof(uint32_t));
+@@ -7900,6 +7950,7 @@ VkResult VkEncoder::vkBeginCommandBuffer(VkCommandBuffer commandBuffer,
+                                              streamPtrPtr);
+     VkResult vkBeginCommandBuffer_VkResult_return = (VkResult)0;
+     stream->read(&vkBeginCommandBuffer_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkBeginCommandBuffer_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -7942,6 +7993,7 @@ VkResult VkEncoder::vkEndCommandBuffer(VkCommandBuffer commandBuffer, uint32_t d
+     }
+     VkResult vkEndCommandBuffer_VkResult_return = (VkResult)0;
+     stream->read(&vkEndCommandBuffer_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkEndCommandBuffer_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -7991,6 +8043,7 @@ VkResult VkEncoder::vkResetCommandBuffer(VkCommandBuffer commandBuffer,
+     *streamPtrPtr += sizeof(VkCommandBufferResetFlags);
+     VkResult vkResetCommandBuffer_VkResult_return = (VkResult)0;
+     stream->read(&vkResetCommandBuffer_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkResetCommandBuffer_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -11159,7 +11212,7 @@ VkResult VkEncoder::vkEnumerateInstanceVersion(uint32_t* pApiVersion, uint32_t d
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkEnumerateInstanceVersion = OP_vkEnumerateInstanceVersion;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkEnumerateInstanceVersion, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkEnumerateInstanceVersion, sizeof(uint32_t));
+@@ -11173,6 +11226,7 @@ VkResult VkEncoder::vkEnumerateInstanceVersion(uint32_t* pApiVersion, uint32_t d
+     stream->read((uint32_t*)pApiVersion, sizeof(uint32_t));
+     VkResult vkEnumerateInstanceVersion_VkResult_return = (VkResult)0;
+     stream->read(&vkEnumerateInstanceVersion_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkEnumerateInstanceVersion_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -11228,7 +11282,7 @@ VkResult VkEncoder::vkBindBufferMemory2(VkDevice device, uint32_t bindInfoCount,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkBindBufferMemory2 = OP_vkBindBufferMemory2;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkBindBufferMemory2, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkBindBufferMemory2, sizeof(uint32_t));
+@@ -11250,6 +11304,7 @@ VkResult VkEncoder::vkBindBufferMemory2(VkDevice device, uint32_t bindInfoCount,
+     }
+     VkResult vkBindBufferMemory2_VkResult_return = (VkResult)0;
+     stream->read(&vkBindBufferMemory2_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkBindBufferMemory2_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -11307,7 +11362,7 @@ VkResult VkEncoder::vkBindImageMemory2(VkDevice device, uint32_t bindInfoCount,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkBindImageMemory2 = OP_vkBindImageMemory2;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkBindImageMemory2, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkBindImageMemory2, sizeof(uint32_t));
+@@ -11329,6 +11384,7 @@ VkResult VkEncoder::vkBindImageMemory2(VkDevice device, uint32_t bindInfoCount,
+     }
+     VkResult vkBindImageMemory2_VkResult_return = (VkResult)0;
+     stream->read(&vkBindImageMemory2_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkBindImageMemory2_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -11374,7 +11430,7 @@ void VkEncoder::vkGetDeviceGroupPeerMemoryFeatures(VkDevice device, uint32_t hea
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetDeviceGroupPeerMemoryFeatures = OP_vkGetDeviceGroupPeerMemoryFeatures;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetDeviceGroupPeerMemoryFeatures, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetDeviceGroupPeerMemoryFeatures, sizeof(uint32_t));
+@@ -11562,7 +11618,7 @@ VkResult VkEncoder::vkEnumeratePhysicalDeviceGroups(
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkEnumeratePhysicalDeviceGroups = OP_vkEnumeratePhysicalDeviceGroups;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkEnumeratePhysicalDeviceGroups, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkEnumeratePhysicalDeviceGroups, sizeof(uint32_t));
+@@ -11635,6 +11691,7 @@ VkResult VkEncoder::vkEnumeratePhysicalDeviceGroups(
+     }
+     VkResult vkEnumeratePhysicalDeviceGroups_VkResult_return = (VkResult)0;
+     stream->read(&vkEnumeratePhysicalDeviceGroups_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkEnumeratePhysicalDeviceGroups_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -11686,7 +11743,7 @@ void VkEncoder::vkGetImageMemoryRequirements2(VkDevice device,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetImageMemoryRequirements2 = OP_vkGetImageMemoryRequirements2;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetImageMemoryRequirements2, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetImageMemoryRequirements2, sizeof(uint32_t));
+@@ -11761,7 +11818,7 @@ void VkEncoder::vkGetBufferMemoryRequirements2(VkDevice device,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetBufferMemoryRequirements2 = OP_vkGetBufferMemoryRequirements2;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetBufferMemoryRequirements2, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetBufferMemoryRequirements2, sizeof(uint32_t));
+@@ -11852,7 +11909,7 @@ void VkEncoder::vkGetImageSparseMemoryRequirements2(
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetImageSparseMemoryRequirements2 = OP_vkGetImageSparseMemoryRequirements2;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetImageSparseMemoryRequirements2, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetImageSparseMemoryRequirements2, sizeof(uint32_t));
+@@ -11959,7 +12016,7 @@ void VkEncoder::vkGetPhysicalDeviceFeatures2(VkPhysicalDevice physicalDevice,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetPhysicalDeviceFeatures2 = OP_vkGetPhysicalDeviceFeatures2;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetPhysicalDeviceFeatures2, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetPhysicalDeviceFeatures2, sizeof(uint32_t));
+@@ -12015,7 +12072,7 @@ void VkEncoder::vkGetPhysicalDeviceProperties2(VkPhysicalDevice physicalDevice,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetPhysicalDeviceProperties2 = OP_vkGetPhysicalDeviceProperties2;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetPhysicalDeviceProperties2, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetPhysicalDeviceProperties2, sizeof(uint32_t));
+@@ -12076,7 +12133,7 @@ void VkEncoder::vkGetPhysicalDeviceFormatProperties2(VkPhysicalDevice physicalDe
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetPhysicalDeviceFormatProperties2 = OP_vkGetPhysicalDeviceFormatProperties2;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetPhysicalDeviceFormatProperties2, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetPhysicalDeviceFormatProperties2, sizeof(uint32_t));
+@@ -12151,7 +12208,7 @@ VkResult VkEncoder::vkGetPhysicalDeviceImageFormatProperties2(
+     uint32_t opcode_vkGetPhysicalDeviceImageFormatProperties2 =
+         OP_vkGetPhysicalDeviceImageFormatProperties2;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetPhysicalDeviceImageFormatProperties2, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetPhysicalDeviceImageFormatProperties2, sizeof(uint32_t));
+@@ -12178,6 +12235,7 @@ VkResult VkEncoder::vkGetPhysicalDeviceImageFormatProperties2(
+     }
+     VkResult vkGetPhysicalDeviceImageFormatProperties2_VkResult_return = (VkResult)0;
+     stream->read(&vkGetPhysicalDeviceImageFormatProperties2_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkGetPhysicalDeviceImageFormatProperties2_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -12228,7 +12286,7 @@ void VkEncoder::vkGetPhysicalDeviceQueueFamilyProperties2(
+     uint32_t opcode_vkGetPhysicalDeviceQueueFamilyProperties2 =
+         OP_vkGetPhysicalDeviceQueueFamilyProperties2;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetPhysicalDeviceQueueFamilyProperties2, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetPhysicalDeviceQueueFamilyProperties2, sizeof(uint32_t));
+@@ -12330,7 +12388,7 @@ void VkEncoder::vkGetPhysicalDeviceMemoryProperties2(
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetPhysicalDeviceMemoryProperties2 = OP_vkGetPhysicalDeviceMemoryProperties2;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetPhysicalDeviceMemoryProperties2, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetPhysicalDeviceMemoryProperties2, sizeof(uint32_t));
+@@ -12419,7 +12477,7 @@ void VkEncoder::vkGetPhysicalDeviceSparseImageFormatProperties2(
+     uint32_t opcode_vkGetPhysicalDeviceSparseImageFormatProperties2 =
+         OP_vkGetPhysicalDeviceSparseImageFormatProperties2;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetPhysicalDeviceSparseImageFormatProperties2, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetPhysicalDeviceSparseImageFormatProperties2,
+@@ -12527,7 +12585,7 @@ void VkEncoder::vkTrimCommandPool(VkDevice device, VkCommandPool commandPool,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkTrimCommandPool = OP_vkTrimCommandPool;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkTrimCommandPool, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkTrimCommandPool, sizeof(uint32_t));
+@@ -12593,7 +12651,7 @@ void VkEncoder::vkGetDeviceQueue2(VkDevice device, const VkDeviceQueueInfo2* pQu
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetDeviceQueue2 = OP_vkGetDeviceQueue2;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetDeviceQueue2, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetDeviceQueue2, sizeof(uint32_t));
+@@ -12689,7 +12747,7 @@ VkResult VkEncoder::vkCreateSamplerYcbcrConversion(
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkCreateSamplerYcbcrConversion = OP_vkCreateSamplerYcbcrConversion;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkCreateSamplerYcbcrConversion, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkCreateSamplerYcbcrConversion, sizeof(uint32_t));
+@@ -12729,6 +12787,7 @@ VkResult VkEncoder::vkCreateSamplerYcbcrConversion(
+     stream->unsetHandleMapping();
+     VkResult vkCreateSamplerYcbcrConversion_VkResult_return = (VkResult)0;
+     stream->read(&vkCreateSamplerYcbcrConversion_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkCreateSamplerYcbcrConversion_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -12785,7 +12844,7 @@ void VkEncoder::vkDestroySamplerYcbcrConversion(VkDevice device,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkDestroySamplerYcbcrConversion = OP_vkDestroySamplerYcbcrConversion;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkDestroySamplerYcbcrConversion, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkDestroySamplerYcbcrConversion, sizeof(uint32_t));
+@@ -12884,7 +12943,7 @@ VkResult VkEncoder::vkCreateDescriptorUpdateTemplate(
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkCreateDescriptorUpdateTemplate = OP_vkCreateDescriptorUpdateTemplate;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkCreateDescriptorUpdateTemplate, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkCreateDescriptorUpdateTemplate, sizeof(uint32_t));
+@@ -12924,6 +12983,7 @@ VkResult VkEncoder::vkCreateDescriptorUpdateTemplate(
+     stream->unsetHandleMapping();
+     VkResult vkCreateDescriptorUpdateTemplate_VkResult_return = (VkResult)0;
+     stream->read(&vkCreateDescriptorUpdateTemplate_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkCreateDescriptorUpdateTemplate_VkResult_return = VK_ERROR_DEVICE_LOST;
+     sResourceTracker->on_vkCreateDescriptorUpdateTemplate(
+         this, vkCreateDescriptorUpdateTemplate_VkResult_return, device, pCreateInfo, pAllocator,
+         pDescriptorUpdateTemplate);
+@@ -12982,7 +13042,7 @@ void VkEncoder::vkDestroyDescriptorUpdateTemplate(
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkDestroyDescriptorUpdateTemplate = OP_vkDestroyDescriptorUpdateTemplate;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkDestroyDescriptorUpdateTemplate, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkDestroyDescriptorUpdateTemplate, sizeof(uint32_t));
+@@ -13060,7 +13120,7 @@ void VkEncoder::vkUpdateDescriptorSetWithTemplate(
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkUpdateDescriptorSetWithTemplate = OP_vkUpdateDescriptorSetWithTemplate;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkUpdateDescriptorSetWithTemplate, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkUpdateDescriptorSetWithTemplate, sizeof(uint32_t));
+@@ -13145,7 +13205,7 @@ void VkEncoder::vkGetPhysicalDeviceExternalBufferProperties(
+     uint32_t opcode_vkGetPhysicalDeviceExternalBufferProperties =
+         OP_vkGetPhysicalDeviceExternalBufferProperties;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetPhysicalDeviceExternalBufferProperties, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetPhysicalDeviceExternalBufferProperties, sizeof(uint32_t));
+@@ -13224,7 +13284,7 @@ void VkEncoder::vkGetPhysicalDeviceExternalFenceProperties(
+     uint32_t opcode_vkGetPhysicalDeviceExternalFenceProperties =
+         OP_vkGetPhysicalDeviceExternalFenceProperties;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetPhysicalDeviceExternalFenceProperties, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetPhysicalDeviceExternalFenceProperties, sizeof(uint32_t));
+@@ -13303,7 +13363,7 @@ void VkEncoder::vkGetPhysicalDeviceExternalSemaphoreProperties(
+     uint32_t opcode_vkGetPhysicalDeviceExternalSemaphoreProperties =
+         OP_vkGetPhysicalDeviceExternalSemaphoreProperties;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetPhysicalDeviceExternalSemaphoreProperties, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetPhysicalDeviceExternalSemaphoreProperties, sizeof(uint32_t));
+@@ -13382,7 +13442,7 @@ void VkEncoder::vkGetDescriptorSetLayoutSupport(VkDevice device,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetDescriptorSetLayoutSupport = OP_vkGetDescriptorSetLayoutSupport;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetDescriptorSetLayoutSupport, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetDescriptorSetLayoutSupport, sizeof(uint32_t));
+@@ -13631,7 +13691,7 @@ VkResult VkEncoder::vkCreateRenderPass2(VkDevice device, const VkRenderPassCreat
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkCreateRenderPass2 = OP_vkCreateRenderPass2;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkCreateRenderPass2, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkCreateRenderPass2, sizeof(uint32_t));
+@@ -13671,6 +13731,7 @@ VkResult VkEncoder::vkCreateRenderPass2(VkDevice device, const VkRenderPassCreat
+     stream->unsetHandleMapping();
+     VkResult vkCreateRenderPass2_VkResult_return = (VkResult)0;
+     stream->read(&vkCreateRenderPass2_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkCreateRenderPass2_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -13916,7 +13977,7 @@ void VkEncoder::vkResetQueryPool(VkDevice device, VkQueryPool queryPool, uint32_
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkResetQueryPool = OP_vkResetQueryPool;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkResetQueryPool, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkResetQueryPool, sizeof(uint32_t));
+@@ -13974,7 +14035,7 @@ VkResult VkEncoder::vkGetSemaphoreCounterValue(VkDevice device, VkSemaphore sema
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetSemaphoreCounterValue = OP_vkGetSemaphoreCounterValue;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetSemaphoreCounterValue, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetSemaphoreCounterValue, sizeof(uint32_t));
+@@ -13996,6 +14057,7 @@ VkResult VkEncoder::vkGetSemaphoreCounterValue(VkDevice device, VkSemaphore sema
+     stream->read((uint64_t*)pValue, sizeof(uint64_t));
+     VkResult vkGetSemaphoreCounterValue_VkResult_return = (VkResult)0;
+     stream->read(&vkGetSemaphoreCounterValue_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkGetSemaphoreCounterValue_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -14043,7 +14105,7 @@ VkResult VkEncoder::vkWaitSemaphores(VkDevice device, const VkSemaphoreWaitInfo*
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkWaitSemaphores = OP_vkWaitSemaphores;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkWaitSemaphores, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkWaitSemaphores, sizeof(uint32_t));
+@@ -14062,6 +14124,7 @@ VkResult VkEncoder::vkWaitSemaphores(VkDevice device, const VkSemaphoreWaitInfo*
+     *streamPtrPtr += sizeof(uint64_t);
+     VkResult vkWaitSemaphores_VkResult_return = (VkResult)0;
+     stream->read(&vkWaitSemaphores_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkWaitSemaphores_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -14108,7 +14171,7 @@ VkResult VkEncoder::vkSignalSemaphore(VkDevice device, const VkSemaphoreSignalIn
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkSignalSemaphore = OP_vkSignalSemaphore;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkSignalSemaphore, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkSignalSemaphore, sizeof(uint32_t));
+@@ -14126,6 +14189,7 @@ VkResult VkEncoder::vkSignalSemaphore(VkDevice device, const VkSemaphoreSignalIn
+                                           streamPtrPtr);
+     VkResult vkSignalSemaphore_VkResult_return = (VkResult)0;
+     stream->read(&vkSignalSemaphore_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkSignalSemaphore_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -14173,7 +14237,7 @@ VkDeviceAddress VkEncoder::vkGetBufferDeviceAddress(VkDevice device,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetBufferDeviceAddress = OP_vkGetBufferDeviceAddress;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetBufferDeviceAddress, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetBufferDeviceAddress, sizeof(uint32_t));
+@@ -14238,7 +14302,7 @@ uint64_t VkEncoder::vkGetBufferOpaqueCaptureAddress(VkDevice device,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetBufferOpaqueCaptureAddress = OP_vkGetBufferOpaqueCaptureAddress;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetBufferOpaqueCaptureAddress, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetBufferOpaqueCaptureAddress, sizeof(uint32_t));
+@@ -14305,7 +14369,7 @@ uint64_t VkEncoder::vkGetDeviceMemoryOpaqueCaptureAddress(
+     uint32_t opcode_vkGetDeviceMemoryOpaqueCaptureAddress =
+         OP_vkGetDeviceMemoryOpaqueCaptureAddress;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetDeviceMemoryOpaqueCaptureAddress, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetDeviceMemoryOpaqueCaptureAddress, sizeof(uint32_t));
+@@ -14374,7 +14438,7 @@ VkResult VkEncoder::vkGetPhysicalDeviceToolProperties(
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetPhysicalDeviceToolProperties = OP_vkGetPhysicalDeviceToolProperties;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetPhysicalDeviceToolProperties, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetPhysicalDeviceToolProperties, sizeof(uint32_t));
+@@ -14442,6 +14506,7 @@ VkResult VkEncoder::vkGetPhysicalDeviceToolProperties(
+     }
+     VkResult vkGetPhysicalDeviceToolProperties_VkResult_return = (VkResult)0;
+     stream->read(&vkGetPhysicalDeviceToolProperties_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkGetPhysicalDeviceToolProperties_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -14511,7 +14576,7 @@ VkResult VkEncoder::vkCreatePrivateDataSlot(VkDevice device,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkCreatePrivateDataSlot = OP_vkCreatePrivateDataSlot;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkCreatePrivateDataSlot, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkCreatePrivateDataSlot, sizeof(uint32_t));
+@@ -14551,6 +14616,7 @@ VkResult VkEncoder::vkCreatePrivateDataSlot(VkDevice device,
+     stream->unsetHandleMapping();
+     VkResult vkCreatePrivateDataSlot_VkResult_return = (VkResult)0;
+     stream->read(&vkCreatePrivateDataSlot_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkCreatePrivateDataSlot_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -14605,7 +14671,7 @@ void VkEncoder::vkDestroyPrivateDataSlot(VkDevice device, VkPrivateDataSlot priv
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkDestroyPrivateDataSlot = OP_vkDestroyPrivateDataSlot;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkDestroyPrivateDataSlot, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkDestroyPrivateDataSlot, sizeof(uint32_t));
+@@ -14679,7 +14745,7 @@ VkResult VkEncoder::vkSetPrivateData(VkDevice device, VkObjectType objectType,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkSetPrivateData = OP_vkSetPrivateData;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkSetPrivateData, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkSetPrivateData, sizeof(uint32_t));
+@@ -14704,6 +14770,7 @@ VkResult VkEncoder::vkSetPrivateData(VkDevice device, VkObjectType objectType,
+     *streamPtrPtr += sizeof(uint64_t);
+     VkResult vkSetPrivateData_VkResult_return = (VkResult)0;
+     stream->read(&vkSetPrivateData_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkSetPrivateData_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -14747,7 +14814,7 @@ void VkEncoder::vkGetPrivateData(VkDevice device, VkObjectType objectType, uint6
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetPrivateData = OP_vkGetPrivateData;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetPrivateData, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetPrivateData, sizeof(uint32_t));
+@@ -15140,7 +15207,7 @@ VkResult VkEncoder::vkQueueSubmit2(VkQueue queue, uint32_t submitCount,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkQueueSubmit2 = OP_vkQueueSubmit2;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkQueueSubmit2, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkQueueSubmit2, sizeof(uint32_t));
+@@ -15165,6 +15232,7 @@ VkResult VkEncoder::vkQueueSubmit2(VkQueue queue, uint32_t submitCount,
+     *streamPtrPtr += 1 * 8;
+     VkResult vkQueueSubmit2_VkResult_return = (VkResult)0;
+     stream->read(&vkQueueSubmit2_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkQueueSubmit2_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -16466,7 +16534,7 @@ void VkEncoder::vkGetDeviceBufferMemoryRequirements(VkDevice device,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetDeviceBufferMemoryRequirements = OP_vkGetDeviceBufferMemoryRequirements;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetDeviceBufferMemoryRequirements, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetDeviceBufferMemoryRequirements, sizeof(uint32_t));
+@@ -16541,7 +16609,7 @@ void VkEncoder::vkGetDeviceImageMemoryRequirements(VkDevice device,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetDeviceImageMemoryRequirements = OP_vkGetDeviceImageMemoryRequirements;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetDeviceImageMemoryRequirements, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetDeviceImageMemoryRequirements, sizeof(uint32_t));
+@@ -16632,7 +16700,7 @@ void VkEncoder::vkGetDeviceImageSparseMemoryRequirements(
+     uint32_t opcode_vkGetDeviceImageSparseMemoryRequirements =
+         OP_vkGetDeviceImageSparseMemoryRequirements;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetDeviceImageSparseMemoryRequirements, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetDeviceImageSparseMemoryRequirements, sizeof(uint32_t));
+@@ -16805,7 +16873,7 @@ VkResult VkEncoder::vkMapMemory2(VkDevice device, const VkMemoryMapInfo* pMemory
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkMapMemory2 = OP_vkMapMemory2;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkMapMemory2, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkMapMemory2, sizeof(uint32_t));
+@@ -16840,6 +16908,7 @@ VkResult VkEncoder::vkMapMemory2(VkDevice device, const VkMemoryMapInfo* pMemory
+     }
+     VkResult vkMapMemory2_VkResult_return = (VkResult)0;
+     stream->read(&vkMapMemory2_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkMapMemory2_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -16884,7 +16953,7 @@ VkResult VkEncoder::vkUnmapMemory2(VkDevice device, const VkMemoryUnmapInfo* pMe
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkUnmapMemory2 = OP_vkUnmapMemory2;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkUnmapMemory2, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkUnmapMemory2, sizeof(uint32_t));
+@@ -16901,6 +16970,7 @@ VkResult VkEncoder::vkUnmapMemory2(VkDevice device, const VkMemoryUnmapInfo* pMe
+                                       (VkMemoryUnmapInfo*)(local_pMemoryUnmapInfo), streamPtrPtr);
+     VkResult vkUnmapMemory2_VkResult_return = (VkResult)0;
+     stream->read(&vkUnmapMemory2_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkUnmapMemory2_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -17014,7 +17084,7 @@ void VkEncoder::vkGetRenderingAreaGranularity(VkDevice device,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetRenderingAreaGranularity = OP_vkGetRenderingAreaGranularity;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetRenderingAreaGranularity, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetRenderingAreaGranularity, sizeof(uint32_t));
+@@ -17084,7 +17154,7 @@ void VkEncoder::vkGetDeviceImageSubresourceLayout(VkDevice device,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetDeviceImageSubresourceLayout = OP_vkGetDeviceImageSubresourceLayout;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetDeviceImageSubresourceLayout, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetDeviceImageSubresourceLayout, sizeof(uint32_t));
+@@ -17158,7 +17228,7 @@ void VkEncoder::vkGetImageSubresourceLayout2(VkDevice device, VkImage image,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetImageSubresourceLayout2 = OP_vkGetImageSubresourceLayout2;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetImageSubresourceLayout2, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetImageSubresourceLayout2, sizeof(uint32_t));
+@@ -17768,7 +17838,7 @@ VkResult VkEncoder::vkCopyMemoryToImage(VkDevice device,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkCopyMemoryToImage = OP_vkCopyMemoryToImage;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkCopyMemoryToImage, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkCopyMemoryToImage, sizeof(uint32_t));
+@@ -17786,6 +17856,7 @@ VkResult VkEncoder::vkCopyMemoryToImage(VkDevice device,
+         (VkCopyMemoryToImageInfo*)(local_pCopyMemoryToImageInfo), streamPtrPtr);
+     VkResult vkCopyMemoryToImage_VkResult_return = (VkResult)0;
+     stream->read(&vkCopyMemoryToImage_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkCopyMemoryToImage_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -17834,7 +17905,7 @@ VkResult VkEncoder::vkCopyImageToMemory(VkDevice device,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkCopyImageToMemory = OP_vkCopyImageToMemory;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkCopyImageToMemory, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkCopyImageToMemory, sizeof(uint32_t));
+@@ -17852,6 +17923,7 @@ VkResult VkEncoder::vkCopyImageToMemory(VkDevice device,
+         (VkCopyImageToMemoryInfo*)(local_pCopyImageToMemoryInfo), streamPtrPtr);
+     VkResult vkCopyImageToMemory_VkResult_return = (VkResult)0;
+     stream->read(&vkCopyImageToMemory_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkCopyImageToMemory_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -17900,7 +17972,7 @@ VkResult VkEncoder::vkCopyImageToImage(VkDevice device,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkCopyImageToImage = OP_vkCopyImageToImage;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkCopyImageToImage, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkCopyImageToImage, sizeof(uint32_t));
+@@ -17918,6 +17990,7 @@ VkResult VkEncoder::vkCopyImageToImage(VkDevice device,
+                                            streamPtrPtr);
+     VkResult vkCopyImageToImage_VkResult_return = (VkResult)0;
+     stream->read(&vkCopyImageToImage_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkCopyImageToImage_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -17976,7 +18049,7 @@ VkResult VkEncoder::vkTransitionImageLayout(VkDevice device, uint32_t transition
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkTransitionImageLayout = OP_vkTransitionImageLayout;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkTransitionImageLayout, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkTransitionImageLayout, sizeof(uint32_t));
+@@ -17998,6 +18071,7 @@ VkResult VkEncoder::vkTransitionImageLayout(VkDevice device, uint32_t transition
+     }
+     VkResult vkTransitionImageLayout_VkResult_return = (VkResult)0;
+     stream->read(&vkTransitionImageLayout_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkTransitionImageLayout_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -18131,7 +18205,7 @@ void VkEncoder::vkGetPhysicalDeviceFeatures2KHR(VkPhysicalDevice physicalDevice,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetPhysicalDeviceFeatures2KHR = OP_vkGetPhysicalDeviceFeatures2KHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetPhysicalDeviceFeatures2KHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetPhysicalDeviceFeatures2KHR, sizeof(uint32_t));
+@@ -18187,7 +18261,7 @@ void VkEncoder::vkGetPhysicalDeviceProperties2KHR(VkPhysicalDevice physicalDevic
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetPhysicalDeviceProperties2KHR = OP_vkGetPhysicalDeviceProperties2KHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetPhysicalDeviceProperties2KHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetPhysicalDeviceProperties2KHR, sizeof(uint32_t));
+@@ -18249,7 +18323,7 @@ void VkEncoder::vkGetPhysicalDeviceFormatProperties2KHR(VkPhysicalDevice physica
+     uint32_t opcode_vkGetPhysicalDeviceFormatProperties2KHR =
+         OP_vkGetPhysicalDeviceFormatProperties2KHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetPhysicalDeviceFormatProperties2KHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetPhysicalDeviceFormatProperties2KHR, sizeof(uint32_t));
+@@ -18324,7 +18398,7 @@ VkResult VkEncoder::vkGetPhysicalDeviceImageFormatProperties2KHR(
+     uint32_t opcode_vkGetPhysicalDeviceImageFormatProperties2KHR =
+         OP_vkGetPhysicalDeviceImageFormatProperties2KHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetPhysicalDeviceImageFormatProperties2KHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetPhysicalDeviceImageFormatProperties2KHR, sizeof(uint32_t));
+@@ -18351,6 +18425,7 @@ VkResult VkEncoder::vkGetPhysicalDeviceImageFormatProperties2KHR(
+     }
+     VkResult vkGetPhysicalDeviceImageFormatProperties2KHR_VkResult_return = (VkResult)0;
+     stream->read(&vkGetPhysicalDeviceImageFormatProperties2KHR_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkGetPhysicalDeviceImageFormatProperties2KHR_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -18401,7 +18476,7 @@ void VkEncoder::vkGetPhysicalDeviceQueueFamilyProperties2KHR(
+     uint32_t opcode_vkGetPhysicalDeviceQueueFamilyProperties2KHR =
+         OP_vkGetPhysicalDeviceQueueFamilyProperties2KHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetPhysicalDeviceQueueFamilyProperties2KHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetPhysicalDeviceQueueFamilyProperties2KHR, sizeof(uint32_t));
+@@ -18504,7 +18579,7 @@ void VkEncoder::vkGetPhysicalDeviceMemoryProperties2KHR(
+     uint32_t opcode_vkGetPhysicalDeviceMemoryProperties2KHR =
+         OP_vkGetPhysicalDeviceMemoryProperties2KHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetPhysicalDeviceMemoryProperties2KHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetPhysicalDeviceMemoryProperties2KHR, sizeof(uint32_t));
+@@ -18593,7 +18668,7 @@ void VkEncoder::vkGetPhysicalDeviceSparseImageFormatProperties2KHR(
+     uint32_t opcode_vkGetPhysicalDeviceSparseImageFormatProperties2KHR =
+         OP_vkGetPhysicalDeviceSparseImageFormatProperties2KHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetPhysicalDeviceSparseImageFormatProperties2KHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetPhysicalDeviceSparseImageFormatProperties2KHR,
+@@ -18703,7 +18778,7 @@ void VkEncoder::vkTrimCommandPoolKHR(VkDevice device, VkCommandPool commandPool,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkTrimCommandPoolKHR = OP_vkTrimCommandPoolKHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkTrimCommandPoolKHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkTrimCommandPoolKHR, sizeof(uint32_t));
+@@ -18779,7 +18854,7 @@ void VkEncoder::vkGetPhysicalDeviceExternalBufferPropertiesKHR(
+     uint32_t opcode_vkGetPhysicalDeviceExternalBufferPropertiesKHR =
+         OP_vkGetPhysicalDeviceExternalBufferPropertiesKHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetPhysicalDeviceExternalBufferPropertiesKHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetPhysicalDeviceExternalBufferPropertiesKHR, sizeof(uint32_t));
+@@ -18863,7 +18938,7 @@ void VkEncoder::vkGetPhysicalDeviceExternalSemaphorePropertiesKHR(
+     uint32_t opcode_vkGetPhysicalDeviceExternalSemaphorePropertiesKHR =
+         OP_vkGetPhysicalDeviceExternalSemaphorePropertiesKHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetPhysicalDeviceExternalSemaphorePropertiesKHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetPhysicalDeviceExternalSemaphorePropertiesKHR,
+@@ -18942,7 +19017,7 @@ VkResult VkEncoder::vkImportSemaphoreFdKHR(VkDevice device,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkImportSemaphoreFdKHR = OP_vkImportSemaphoreFdKHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkImportSemaphoreFdKHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkImportSemaphoreFdKHR, sizeof(uint32_t));
+@@ -18960,6 +19035,7 @@ VkResult VkEncoder::vkImportSemaphoreFdKHR(VkDevice device,
+         (VkImportSemaphoreFdInfoKHR*)(local_pImportSemaphoreFdInfo), streamPtrPtr);
+     VkResult vkImportSemaphoreFdKHR_VkResult_return = (VkResult)0;
+     stream->read(&vkImportSemaphoreFdKHR_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkImportSemaphoreFdKHR_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -19007,7 +19083,7 @@ VkResult VkEncoder::vkGetSemaphoreFdKHR(VkDevice device, const VkSemaphoreGetFdI
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetSemaphoreFdKHR = OP_vkGetSemaphoreFdKHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetSemaphoreFdKHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetSemaphoreFdKHR, sizeof(uint32_t));
+@@ -19028,6 +19104,7 @@ VkResult VkEncoder::vkGetSemaphoreFdKHR(VkDevice device, const VkSemaphoreGetFdI
+     stream->read((int*)pFd, sizeof(int));
+     VkResult vkGetSemaphoreFdKHR_VkResult_return = (VkResult)0;
+     stream->read(&vkGetSemaphoreFdKHR_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkGetSemaphoreFdKHR_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -19100,7 +19177,7 @@ VkResult VkEncoder::vkCreateDescriptorUpdateTemplateKHR(
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkCreateDescriptorUpdateTemplateKHR = OP_vkCreateDescriptorUpdateTemplateKHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkCreateDescriptorUpdateTemplateKHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkCreateDescriptorUpdateTemplateKHR, sizeof(uint32_t));
+@@ -19140,6 +19217,7 @@ VkResult VkEncoder::vkCreateDescriptorUpdateTemplateKHR(
+     stream->unsetHandleMapping();
+     VkResult vkCreateDescriptorUpdateTemplateKHR_VkResult_return = (VkResult)0;
+     stream->read(&vkCreateDescriptorUpdateTemplateKHR_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkCreateDescriptorUpdateTemplateKHR_VkResult_return = VK_ERROR_DEVICE_LOST;
+     sResourceTracker->on_vkCreateDescriptorUpdateTemplateKHR(
+         this, vkCreateDescriptorUpdateTemplateKHR_VkResult_return, device, pCreateInfo, pAllocator,
+         pDescriptorUpdateTemplate);
+@@ -19198,7 +19276,7 @@ void VkEncoder::vkDestroyDescriptorUpdateTemplateKHR(
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkDestroyDescriptorUpdateTemplateKHR = OP_vkDestroyDescriptorUpdateTemplateKHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkDestroyDescriptorUpdateTemplateKHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkDestroyDescriptorUpdateTemplateKHR, sizeof(uint32_t));
+@@ -19276,7 +19354,7 @@ void VkEncoder::vkUpdateDescriptorSetWithTemplateKHR(
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkUpdateDescriptorSetWithTemplateKHR = OP_vkUpdateDescriptorSetWithTemplateKHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkUpdateDescriptorSetWithTemplateKHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkUpdateDescriptorSetWithTemplateKHR, sizeof(uint32_t));
+@@ -19376,7 +19454,7 @@ VkResult VkEncoder::vkCreateRenderPass2KHR(VkDevice device,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkCreateRenderPass2KHR = OP_vkCreateRenderPass2KHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkCreateRenderPass2KHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkCreateRenderPass2KHR, sizeof(uint32_t));
+@@ -19416,6 +19494,7 @@ VkResult VkEncoder::vkCreateRenderPass2KHR(VkDevice device,
+     stream->unsetHandleMapping();
+     VkResult vkCreateRenderPass2KHR_VkResult_return = (VkResult)0;
+     stream->read(&vkCreateRenderPass2KHR_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkCreateRenderPass2KHR_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -19675,7 +19754,7 @@ void VkEncoder::vkGetPhysicalDeviceExternalFencePropertiesKHR(
+     uint32_t opcode_vkGetPhysicalDeviceExternalFencePropertiesKHR =
+         OP_vkGetPhysicalDeviceExternalFencePropertiesKHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetPhysicalDeviceExternalFencePropertiesKHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetPhysicalDeviceExternalFencePropertiesKHR, sizeof(uint32_t));
+@@ -19748,7 +19827,7 @@ VkResult VkEncoder::vkImportFenceFdKHR(VkDevice device,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkImportFenceFdKHR = OP_vkImportFenceFdKHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkImportFenceFdKHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkImportFenceFdKHR, sizeof(uint32_t));
+@@ -19766,6 +19845,7 @@ VkResult VkEncoder::vkImportFenceFdKHR(VkDevice device,
+                                            streamPtrPtr);
+     VkResult vkImportFenceFdKHR_VkResult_return = (VkResult)0;
+     stream->read(&vkImportFenceFdKHR_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkImportFenceFdKHR_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -19811,7 +19891,7 @@ VkResult VkEncoder::vkGetFenceFdKHR(VkDevice device, const VkFenceGetFdInfoKHR*
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetFenceFdKHR = OP_vkGetFenceFdKHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetFenceFdKHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetFenceFdKHR, sizeof(uint32_t));
+@@ -19831,6 +19911,7 @@ VkResult VkEncoder::vkGetFenceFdKHR(VkDevice device, const VkFenceGetFdInfoKHR*
+     stream->read((int*)pFd, sizeof(int));
+     VkResult vkGetFenceFdKHR_VkResult_return = (VkResult)0;
+     stream->read(&vkGetFenceFdKHR_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkGetFenceFdKHR_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -19884,7 +19965,7 @@ void VkEncoder::vkGetImageMemoryRequirements2KHR(VkDevice device,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetImageMemoryRequirements2KHR = OP_vkGetImageMemoryRequirements2KHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetImageMemoryRequirements2KHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetImageMemoryRequirements2KHR, sizeof(uint32_t));
+@@ -19959,7 +20040,7 @@ void VkEncoder::vkGetBufferMemoryRequirements2KHR(VkDevice device,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetBufferMemoryRequirements2KHR = OP_vkGetBufferMemoryRequirements2KHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetBufferMemoryRequirements2KHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetBufferMemoryRequirements2KHR, sizeof(uint32_t));
+@@ -20051,7 +20132,7 @@ void VkEncoder::vkGetImageSparseMemoryRequirements2KHR(
+     uint32_t opcode_vkGetImageSparseMemoryRequirements2KHR =
+         OP_vkGetImageSparseMemoryRequirements2KHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetImageSparseMemoryRequirements2KHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetImageSparseMemoryRequirements2KHR, sizeof(uint32_t));
+@@ -20195,7 +20276,7 @@ VkResult VkEncoder::vkCreateSamplerYcbcrConversionKHR(
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkCreateSamplerYcbcrConversionKHR = OP_vkCreateSamplerYcbcrConversionKHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkCreateSamplerYcbcrConversionKHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkCreateSamplerYcbcrConversionKHR, sizeof(uint32_t));
+@@ -20235,6 +20316,7 @@ VkResult VkEncoder::vkCreateSamplerYcbcrConversionKHR(
+     stream->unsetHandleMapping();
+     VkResult vkCreateSamplerYcbcrConversionKHR_VkResult_return = (VkResult)0;
+     stream->read(&vkCreateSamplerYcbcrConversionKHR_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkCreateSamplerYcbcrConversionKHR_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -20291,7 +20373,7 @@ void VkEncoder::vkDestroySamplerYcbcrConversionKHR(VkDevice device,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkDestroySamplerYcbcrConversionKHR = OP_vkDestroySamplerYcbcrConversionKHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkDestroySamplerYcbcrConversionKHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkDestroySamplerYcbcrConversionKHR, sizeof(uint32_t));
+@@ -20378,7 +20460,7 @@ VkResult VkEncoder::vkBindBufferMemory2KHR(VkDevice device, uint32_t bindInfoCou
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkBindBufferMemory2KHR = OP_vkBindBufferMemory2KHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkBindBufferMemory2KHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkBindBufferMemory2KHR, sizeof(uint32_t));
+@@ -20400,6 +20482,7 @@ VkResult VkEncoder::vkBindBufferMemory2KHR(VkDevice device, uint32_t bindInfoCou
+     }
+     VkResult vkBindBufferMemory2KHR_VkResult_return = (VkResult)0;
+     stream->read(&vkBindBufferMemory2KHR_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkBindBufferMemory2KHR_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -20456,7 +20539,7 @@ VkResult VkEncoder::vkBindImageMemory2KHR(VkDevice device, uint32_t bindInfoCoun
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkBindImageMemory2KHR = OP_vkBindImageMemory2KHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkBindImageMemory2KHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkBindImageMemory2KHR, sizeof(uint32_t));
+@@ -20478,6 +20561,7 @@ VkResult VkEncoder::vkBindImageMemory2KHR(VkDevice device, uint32_t bindInfoCoun
+     }
+     VkResult vkBindImageMemory2KHR_VkResult_return = (VkResult)0;
+     stream->read(&vkBindImageMemory2KHR_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkBindImageMemory2KHR_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -20531,7 +20615,7 @@ void VkEncoder::vkGetDescriptorSetLayoutSupportKHR(
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetDescriptorSetLayoutSupportKHR = OP_vkGetDescriptorSetLayoutSupportKHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetDescriptorSetLayoutSupportKHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetDescriptorSetLayoutSupportKHR, sizeof(uint32_t));
+@@ -20604,7 +20688,7 @@ VkDeviceAddress VkEncoder::vkGetBufferDeviceAddressKHR(VkDevice device,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetBufferDeviceAddressKHR = OP_vkGetBufferDeviceAddressKHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetBufferDeviceAddressKHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetBufferDeviceAddressKHR, sizeof(uint32_t));
+@@ -20669,7 +20753,7 @@ uint64_t VkEncoder::vkGetBufferOpaqueCaptureAddressKHR(VkDevice device,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetBufferOpaqueCaptureAddressKHR = OP_vkGetBufferOpaqueCaptureAddressKHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetBufferOpaqueCaptureAddressKHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetBufferOpaqueCaptureAddressKHR, sizeof(uint32_t));
+@@ -20736,7 +20820,7 @@ uint64_t VkEncoder::vkGetDeviceMemoryOpaqueCaptureAddressKHR(
+     uint32_t opcode_vkGetDeviceMemoryOpaqueCaptureAddressKHR =
+         OP_vkGetDeviceMemoryOpaqueCaptureAddressKHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetDeviceMemoryOpaqueCaptureAddressKHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetDeviceMemoryOpaqueCaptureAddressKHR, sizeof(uint32_t));
+@@ -20818,7 +20902,7 @@ VkResult VkEncoder::vkGetPipelineExecutablePropertiesKHR(
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetPipelineExecutablePropertiesKHR = OP_vkGetPipelineExecutablePropertiesKHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetPipelineExecutablePropertiesKHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetPipelineExecutablePropertiesKHR, sizeof(uint32_t));
+@@ -20888,6 +20972,7 @@ VkResult VkEncoder::vkGetPipelineExecutablePropertiesKHR(
+     }
+     VkResult vkGetPipelineExecutablePropertiesKHR_VkResult_return = (VkResult)0;
+     stream->read(&vkGetPipelineExecutablePropertiesKHR_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkGetPipelineExecutablePropertiesKHR_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -20952,7 +21037,7 @@ VkResult VkEncoder::vkGetPipelineExecutableStatisticsKHR(
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetPipelineExecutableStatisticsKHR = OP_vkGetPipelineExecutableStatisticsKHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetPipelineExecutableStatisticsKHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetPipelineExecutableStatisticsKHR, sizeof(uint32_t));
+@@ -21023,6 +21108,7 @@ VkResult VkEncoder::vkGetPipelineExecutableStatisticsKHR(
+     }
+     VkResult vkGetPipelineExecutableStatisticsKHR_VkResult_return = (VkResult)0;
+     stream->read(&vkGetPipelineExecutableStatisticsKHR_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkGetPipelineExecutableStatisticsKHR_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -21092,7 +21178,7 @@ VkResult VkEncoder::vkGetPipelineExecutableInternalRepresentationsKHR(
+     uint32_t opcode_vkGetPipelineExecutableInternalRepresentationsKHR =
+         OP_vkGetPipelineExecutableInternalRepresentationsKHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetPipelineExecutableInternalRepresentationsKHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetPipelineExecutableInternalRepresentationsKHR,
+@@ -21544,7 +21630,7 @@ VkResult VkEncoder::vkQueueSubmit2KHR(VkQueue queue, uint32_t submitCount,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkQueueSubmit2KHR = OP_vkQueueSubmit2KHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkQueueSubmit2KHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkQueueSubmit2KHR, sizeof(uint32_t));
+@@ -21569,6 +21655,7 @@ VkResult VkEncoder::vkQueueSubmit2KHR(VkQueue queue, uint32_t submitCount,
+     *streamPtrPtr += 1 * 8;
+     VkResult vkQueueSubmit2KHR_VkResult_return = (VkResult)0;
+     stream->read(&vkQueueSubmit2KHR_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkQueueSubmit2KHR_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -21967,7 +22054,7 @@ void VkEncoder::vkGetDeviceBufferMemoryRequirementsKHR(
+     uint32_t opcode_vkGetDeviceBufferMemoryRequirementsKHR =
+         OP_vkGetDeviceBufferMemoryRequirementsKHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetDeviceBufferMemoryRequirementsKHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetDeviceBufferMemoryRequirementsKHR, sizeof(uint32_t));
+@@ -22043,7 +22130,7 @@ void VkEncoder::vkGetDeviceImageMemoryRequirementsKHR(VkDevice device,
+     uint32_t opcode_vkGetDeviceImageMemoryRequirementsKHR =
+         OP_vkGetDeviceImageMemoryRequirementsKHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetDeviceImageMemoryRequirementsKHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetDeviceImageMemoryRequirementsKHR, sizeof(uint32_t));
+@@ -22134,7 +22221,7 @@ void VkEncoder::vkGetDeviceImageSparseMemoryRequirementsKHR(
+     uint32_t opcode_vkGetDeviceImageSparseMemoryRequirementsKHR =
+         OP_vkGetDeviceImageSparseMemoryRequirementsKHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetDeviceImageSparseMemoryRequirementsKHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetDeviceImageSparseMemoryRequirementsKHR, sizeof(uint32_t));
+@@ -22321,7 +22408,7 @@ void VkEncoder::vkGetRenderingAreaGranularityKHR(VkDevice device,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetRenderingAreaGranularityKHR = OP_vkGetRenderingAreaGranularityKHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetRenderingAreaGranularityKHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetRenderingAreaGranularityKHR, sizeof(uint32_t));
+@@ -22392,7 +22479,7 @@ void VkEncoder::vkGetDeviceImageSubresourceLayoutKHR(VkDevice device,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetDeviceImageSubresourceLayoutKHR = OP_vkGetDeviceImageSubresourceLayoutKHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetDeviceImageSubresourceLayoutKHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetDeviceImageSubresourceLayoutKHR, sizeof(uint32_t));
+@@ -22466,7 +22553,7 @@ void VkEncoder::vkGetImageSubresourceLayout2KHR(VkDevice device, VkImage image,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetImageSubresourceLayout2KHR = OP_vkGetImageSubresourceLayout2KHR;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetImageSubresourceLayout2KHR, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetImageSubresourceLayout2KHR, sizeof(uint32_t));
+@@ -22585,7 +22672,7 @@ VkResult VkEncoder::vkGetSwapchainGrallocUsageANDROID(VkDevice device, VkFormat
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetSwapchainGrallocUsageANDROID = OP_vkGetSwapchainGrallocUsageANDROID;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetSwapchainGrallocUsageANDROID, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetSwapchainGrallocUsageANDROID, sizeof(uint32_t));
+@@ -22607,6 +22694,7 @@ VkResult VkEncoder::vkGetSwapchainGrallocUsageANDROID(VkDevice device, VkFormat
+     stream->read((int*)grallocUsage, sizeof(int));
+     VkResult vkGetSwapchainGrallocUsageANDROID_VkResult_return = (VkResult)0;
+     stream->read(&vkGetSwapchainGrallocUsageANDROID_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkGetSwapchainGrallocUsageANDROID_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -22656,7 +22744,7 @@ VkResult VkEncoder::vkAcquireImageANDROID(VkDevice device, VkImage image, int na
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkAcquireImageANDROID = OP_vkAcquireImageANDROID;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkAcquireImageANDROID, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkAcquireImageANDROID, sizeof(uint32_t));
+@@ -22685,6 +22773,7 @@ VkResult VkEncoder::vkAcquireImageANDROID(VkDevice device, VkImage image, int na
+     *streamPtrPtr += 1 * 8;
+     VkResult vkAcquireImageANDROID_VkResult_return = (VkResult)0;
+     stream->read(&vkAcquireImageANDROID_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkAcquireImageANDROID_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -22737,7 +22826,7 @@ VkResult VkEncoder::vkQueueSignalReleaseImageANDROID(VkQueue queue, uint32_t wai
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkQueueSignalReleaseImageANDROID = OP_vkQueueSignalReleaseImageANDROID;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkQueueSignalReleaseImageANDROID, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkQueueSignalReleaseImageANDROID, sizeof(uint32_t));
+@@ -22776,6 +22865,7 @@ VkResult VkEncoder::vkQueueSignalReleaseImageANDROID(VkQueue queue, uint32_t wai
+     stream->read((int*)pNativeFenceFd, sizeof(int));
+     VkResult vkQueueSignalReleaseImageANDROID_VkResult_return = (VkResult)0;
+     stream->read(&vkQueueSignalReleaseImageANDROID_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkQueueSignalReleaseImageANDROID_VkResult_return = VK_ERROR_DEVICE_LOST;
+     stream->flush();
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+@@ -22822,7 +22912,7 @@ VkResult VkEncoder::vkGetSwapchainGrallocUsage2ANDROID(
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetSwapchainGrallocUsage2ANDROID = OP_vkGetSwapchainGrallocUsage2ANDROID;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetSwapchainGrallocUsage2ANDROID, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetSwapchainGrallocUsage2ANDROID, sizeof(uint32_t));
+@@ -22850,6 +22940,7 @@ VkResult VkEncoder::vkGetSwapchainGrallocUsage2ANDROID(
+     stream->read((uint64_t*)grallocProducerUsage, sizeof(uint64_t));
+     VkResult vkGetSwapchainGrallocUsage2ANDROID_VkResult_return = (VkResult)0;
+     stream->read(&vkGetSwapchainGrallocUsage2ANDROID_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkGetSwapchainGrallocUsage2ANDROID_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -23371,7 +23462,7 @@ VkResult VkEncoder::vkGetImageDrmFormatModifierPropertiesEXT(
+     uint32_t opcode_vkGetImageDrmFormatModifierPropertiesEXT =
+         OP_vkGetImageDrmFormatModifierPropertiesEXT;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetImageDrmFormatModifierPropertiesEXT, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetImageDrmFormatModifierPropertiesEXT, sizeof(uint32_t));
+@@ -23399,6 +23490,7 @@ VkResult VkEncoder::vkGetImageDrmFormatModifierPropertiesEXT(
+     }
+     VkResult vkGetImageDrmFormatModifierPropertiesEXT_VkResult_return = (VkResult)0;
+     stream->read(&vkGetImageDrmFormatModifierPropertiesEXT_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkGetImageDrmFormatModifierPropertiesEXT_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -23450,7 +23542,7 @@ VkResult VkEncoder::vkGetPhysicalDeviceToolPropertiesEXT(
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetPhysicalDeviceToolPropertiesEXT = OP_vkGetPhysicalDeviceToolPropertiesEXT;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetPhysicalDeviceToolPropertiesEXT, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetPhysicalDeviceToolPropertiesEXT, sizeof(uint32_t));
+@@ -23518,6 +23610,7 @@ VkResult VkEncoder::vkGetPhysicalDeviceToolPropertiesEXT(
+     }
+     VkResult vkGetPhysicalDeviceToolPropertiesEXT_VkResult_return = (VkResult)0;
+     stream->read(&vkGetPhysicalDeviceToolPropertiesEXT_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkGetPhysicalDeviceToolPropertiesEXT_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -24303,7 +24396,7 @@ VkResult VkEncoder::vkCopyMemoryToImageEXT(VkDevice device,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkCopyMemoryToImageEXT = OP_vkCopyMemoryToImageEXT;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkCopyMemoryToImageEXT, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkCopyMemoryToImageEXT, sizeof(uint32_t));
+@@ -24321,6 +24414,7 @@ VkResult VkEncoder::vkCopyMemoryToImageEXT(VkDevice device,
+         (VkCopyMemoryToImageInfo*)(local_pCopyMemoryToImageInfo), streamPtrPtr);
+     VkResult vkCopyMemoryToImageEXT_VkResult_return = (VkResult)0;
+     stream->read(&vkCopyMemoryToImageEXT_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkCopyMemoryToImageEXT_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -24369,7 +24463,7 @@ VkResult VkEncoder::vkCopyImageToMemoryEXT(VkDevice device,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkCopyImageToMemoryEXT = OP_vkCopyImageToMemoryEXT;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkCopyImageToMemoryEXT, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkCopyImageToMemoryEXT, sizeof(uint32_t));
+@@ -24387,6 +24481,7 @@ VkResult VkEncoder::vkCopyImageToMemoryEXT(VkDevice device,
+         (VkCopyImageToMemoryInfo*)(local_pCopyImageToMemoryInfo), streamPtrPtr);
+     VkResult vkCopyImageToMemoryEXT_VkResult_return = (VkResult)0;
+     stream->read(&vkCopyImageToMemoryEXT_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkCopyImageToMemoryEXT_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -24435,7 +24530,7 @@ VkResult VkEncoder::vkCopyImageToImageEXT(VkDevice device,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkCopyImageToImageEXT = OP_vkCopyImageToImageEXT;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkCopyImageToImageEXT, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkCopyImageToImageEXT, sizeof(uint32_t));
+@@ -24453,6 +24548,7 @@ VkResult VkEncoder::vkCopyImageToImageEXT(VkDevice device,
+                                            streamPtrPtr);
+     VkResult vkCopyImageToImageEXT_VkResult_return = (VkResult)0;
+     stream->read(&vkCopyImageToImageEXT_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkCopyImageToImageEXT_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -24511,7 +24607,7 @@ VkResult VkEncoder::vkTransitionImageLayoutEXT(VkDevice device, uint32_t transit
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkTransitionImageLayoutEXT = OP_vkTransitionImageLayoutEXT;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkTransitionImageLayoutEXT, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkTransitionImageLayoutEXT, sizeof(uint32_t));
+@@ -24533,6 +24629,7 @@ VkResult VkEncoder::vkTransitionImageLayoutEXT(VkDevice device, uint32_t transit
+     }
+     VkResult vkTransitionImageLayoutEXT_VkResult_return = (VkResult)0;
+     stream->read(&vkTransitionImageLayoutEXT_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkTransitionImageLayoutEXT_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -24585,7 +24682,7 @@ void VkEncoder::vkGetImageSubresourceLayout2EXT(VkDevice device, VkImage image,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetImageSubresourceLayout2EXT = OP_vkGetImageSubresourceLayout2EXT;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetImageSubresourceLayout2EXT, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetImageSubresourceLayout2EXT, sizeof(uint32_t));
+@@ -24682,7 +24779,7 @@ VkResult VkEncoder::vkCreatePrivateDataSlotEXT(VkDevice device,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkCreatePrivateDataSlotEXT = OP_vkCreatePrivateDataSlotEXT;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkCreatePrivateDataSlotEXT, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkCreatePrivateDataSlotEXT, sizeof(uint32_t));
+@@ -24720,6 +24817,7 @@ VkResult VkEncoder::vkCreatePrivateDataSlotEXT(VkDevice device,
+         &cgen_var_3, (VkPrivateDataSlot*)pPrivateDataSlot, 1);
+     VkResult vkCreatePrivateDataSlotEXT_VkResult_return = (VkResult)0;
+     stream->read(&vkCreatePrivateDataSlotEXT_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkCreatePrivateDataSlotEXT_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -24775,7 +24873,7 @@ void VkEncoder::vkDestroyPrivateDataSlotEXT(VkDevice device, VkPrivateDataSlot p
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkDestroyPrivateDataSlotEXT = OP_vkDestroyPrivateDataSlotEXT;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkDestroyPrivateDataSlotEXT, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkDestroyPrivateDataSlotEXT, sizeof(uint32_t));
+@@ -24848,7 +24946,7 @@ VkResult VkEncoder::vkSetPrivateDataEXT(VkDevice device, VkObjectType objectType
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkSetPrivateDataEXT = OP_vkSetPrivateDataEXT;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkSetPrivateDataEXT, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkSetPrivateDataEXT, sizeof(uint32_t));
+@@ -24873,6 +24971,7 @@ VkResult VkEncoder::vkSetPrivateDataEXT(VkDevice device, VkObjectType objectType
+     *streamPtrPtr += sizeof(uint64_t);
+     VkResult vkSetPrivateDataEXT_VkResult_return = (VkResult)0;
+     stream->read(&vkSetPrivateDataEXT_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkSetPrivateDataEXT_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -24917,7 +25016,7 @@ void VkEncoder::vkGetPrivateDataEXT(VkDevice device, VkObjectType objectType, ui
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetPrivateDataEXT = OP_vkGetPrivateDataEXT;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetPrivateDataEXT, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetPrivateDataEXT, sizeof(uint32_t));
+@@ -25271,7 +25370,7 @@ VkResult VkEncoder::vkMapMemoryIntoAddressSpaceGOOGLE(VkDevice device, VkDeviceM
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkMapMemoryIntoAddressSpaceGOOGLE = OP_vkMapMemoryIntoAddressSpaceGOOGLE;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkMapMemoryIntoAddressSpaceGOOGLE, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkMapMemoryIntoAddressSpaceGOOGLE, sizeof(uint32_t));
+@@ -25308,6 +25407,7 @@ VkResult VkEncoder::vkMapMemoryIntoAddressSpaceGOOGLE(VkDevice device, VkDeviceM
+     }
+     VkResult vkMapMemoryIntoAddressSpaceGOOGLE_VkResult_return = (VkResult)0;
+     stream->read(&vkMapMemoryIntoAddressSpaceGOOGLE_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkMapMemoryIntoAddressSpaceGOOGLE_VkResult_return = VK_ERROR_DEVICE_LOST;
+     sResourceTracker->on_vkMapMemoryIntoAddressSpaceGOOGLE(
+         this, vkMapMemoryIntoAddressSpaceGOOGLE_VkResult_return, device, memory, pAddress);
+     ++encodeCount;
+@@ -25449,7 +25549,7 @@ void VkEncoder::vkUpdateDescriptorSetWithTemplateSizedGOOGLE(
+     uint32_t opcode_vkUpdateDescriptorSetWithTemplateSizedGOOGLE =
+         OP_vkUpdateDescriptorSetWithTemplateSizedGOOGLE;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkUpdateDescriptorSetWithTemplateSizedGOOGLE, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkUpdateDescriptorSetWithTemplateSizedGOOGLE, sizeof(uint32_t));
+@@ -25809,7 +25909,7 @@ VkResult VkEncoder::vkCreateImageWithRequirementsGOOGLE(
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkCreateImageWithRequirementsGOOGLE = OP_vkCreateImageWithRequirementsGOOGLE;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkCreateImageWithRequirementsGOOGLE, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkCreateImageWithRequirementsGOOGLE, sizeof(uint32_t));
+@@ -25856,6 +25956,7 @@ VkResult VkEncoder::vkCreateImageWithRequirementsGOOGLE(
+     }
+     VkResult vkCreateImageWithRequirementsGOOGLE_VkResult_return = (VkResult)0;
+     stream->read(&vkCreateImageWithRequirementsGOOGLE_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkCreateImageWithRequirementsGOOGLE_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -25924,7 +26025,7 @@ VkResult VkEncoder::vkCreateBufferWithRequirementsGOOGLE(
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkCreateBufferWithRequirementsGOOGLE = OP_vkCreateBufferWithRequirementsGOOGLE;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkCreateBufferWithRequirementsGOOGLE, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkCreateBufferWithRequirementsGOOGLE, sizeof(uint32_t));
+@@ -25971,6 +26072,7 @@ VkResult VkEncoder::vkCreateBufferWithRequirementsGOOGLE(
+     }
+     VkResult vkCreateBufferWithRequirementsGOOGLE_VkResult_return = (VkResult)0;
+     stream->read(&vkCreateBufferWithRequirementsGOOGLE_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkCreateBufferWithRequirementsGOOGLE_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -26026,7 +26128,7 @@ VkResult VkEncoder::vkGetMemoryHostAddressInfoGOOGLE(VkDevice device, VkDeviceMe
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetMemoryHostAddressInfoGOOGLE = OP_vkGetMemoryHostAddressInfoGOOGLE;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetMemoryHostAddressInfoGOOGLE, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetMemoryHostAddressInfoGOOGLE, sizeof(uint32_t));
+@@ -26099,6 +26201,7 @@ VkResult VkEncoder::vkGetMemoryHostAddressInfoGOOGLE(VkDevice device, VkDeviceMe
+     }
+     VkResult vkGetMemoryHostAddressInfoGOOGLE_VkResult_return = (VkResult)0;
+     stream->read(&vkGetMemoryHostAddressInfoGOOGLE_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkGetMemoryHostAddressInfoGOOGLE_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -26153,7 +26256,7 @@ VkResult VkEncoder::vkFreeMemorySyncGOOGLE(VkDevice device, VkDeviceMemory memor
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkFreeMemorySyncGOOGLE = OP_vkFreeMemorySyncGOOGLE;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkFreeMemorySyncGOOGLE, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkFreeMemorySyncGOOGLE, sizeof(uint32_t));
+@@ -26182,6 +26285,7 @@ VkResult VkEncoder::vkFreeMemorySyncGOOGLE(VkDevice device, VkDeviceMemory memor
+     }
+     VkResult vkFreeMemorySyncGOOGLE_VkResult_return = (VkResult)0;
+     stream->read(&vkFreeMemorySyncGOOGLE_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkFreeMemorySyncGOOGLE_VkResult_return = VK_ERROR_DEVICE_LOST;
+     sResourceTracker->destroyMapping()->mapHandles_VkDeviceMemory((VkDeviceMemory*)&memory);
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+@@ -26221,7 +26325,7 @@ void VkEncoder::vkQueueHostSyncGOOGLE(VkQueue queue, uint32_t needHostSync, uint
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkQueueHostSyncGOOGLE = OP_vkQueueHostSyncGOOGLE;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkQueueHostSyncGOOGLE, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkQueueHostSyncGOOGLE, sizeof(uint32_t));
+@@ -26296,7 +26400,7 @@ void VkEncoder::vkQueueSubmitAsyncGOOGLE(VkQueue queue, uint32_t submitCount,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkQueueSubmitAsyncGOOGLE = OP_vkQueueSubmitAsyncGOOGLE;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkQueueSubmitAsyncGOOGLE, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkQueueSubmitAsyncGOOGLE, sizeof(uint32_t));
+@@ -26350,7 +26454,7 @@ void VkEncoder::vkQueueWaitIdleAsyncGOOGLE(VkQueue queue, uint32_t doLock) {
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkQueueWaitIdleAsyncGOOGLE = OP_vkQueueWaitIdleAsyncGOOGLE;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkQueueWaitIdleAsyncGOOGLE, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkQueueWaitIdleAsyncGOOGLE, sizeof(uint32_t));
+@@ -26423,7 +26527,7 @@ void VkEncoder::vkQueueBindSparseAsyncGOOGLE(VkQueue queue, uint32_t bindInfoCou
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkQueueBindSparseAsyncGOOGLE = OP_vkQueueBindSparseAsyncGOOGLE;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkQueueBindSparseAsyncGOOGLE, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkQueueBindSparseAsyncGOOGLE, sizeof(uint32_t));
+@@ -26484,7 +26588,7 @@ void VkEncoder::vkGetLinearImageLayoutGOOGLE(VkDevice device, VkFormat format,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetLinearImageLayoutGOOGLE = OP_vkGetLinearImageLayoutGOOGLE;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetLinearImageLayoutGOOGLE, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetLinearImageLayoutGOOGLE, sizeof(uint32_t));
+@@ -26553,7 +26657,7 @@ void VkEncoder::vkGetLinearImageLayout2GOOGLE(VkDevice device, const VkImageCrea
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetLinearImageLayout2GOOGLE = OP_vkGetLinearImageLayout2GOOGLE;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetLinearImageLayout2GOOGLE, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetLinearImageLayout2GOOGLE, sizeof(uint32_t));
+@@ -26676,7 +26780,7 @@ void VkEncoder::vkQueueCommitDescriptorSetUpdatesGOOGLE(
+     uint32_t opcode_vkQueueCommitDescriptorSetUpdatesGOOGLE =
+         OP_vkQueueCommitDescriptorSetUpdatesGOOGLE;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkQueueCommitDescriptorSetUpdatesGOOGLE, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkQueueCommitDescriptorSetUpdatesGOOGLE, sizeof(uint32_t));
+@@ -26773,7 +26877,7 @@ void VkEncoder::vkCollectDescriptorPoolIdsGOOGLE(VkDevice device, VkDescriptorPo
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkCollectDescriptorPoolIdsGOOGLE = OP_vkCollectDescriptorPoolIdsGOOGLE;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkCollectDescriptorPoolIdsGOOGLE, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkCollectDescriptorPoolIdsGOOGLE, sizeof(uint32_t));
+@@ -26862,7 +26966,7 @@ void VkEncoder::vkQueueSignalReleaseImageANDROIDAsyncGOOGLE(VkQueue queue,
+     uint32_t opcode_vkQueueSignalReleaseImageANDROIDAsyncGOOGLE =
+         OP_vkQueueSignalReleaseImageANDROIDAsyncGOOGLE;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkQueueSignalReleaseImageANDROIDAsyncGOOGLE, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkQueueSignalReleaseImageANDROIDAsyncGOOGLE, sizeof(uint32_t));
+@@ -26946,7 +27050,7 @@ void VkEncoder::vkQueueFlushCommandsFromAuxMemoryGOOGLE(VkQueue queue,
+     uint32_t opcode_vkQueueFlushCommandsFromAuxMemoryGOOGLE =
+         OP_vkQueueFlushCommandsFromAuxMemoryGOOGLE;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkQueueFlushCommandsFromAuxMemoryGOOGLE, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkQueueFlushCommandsFromAuxMemoryGOOGLE, sizeof(uint32_t));
+@@ -27008,7 +27112,7 @@ VkResult VkEncoder::vkGetBlobGOOGLE(VkDevice device, VkDeviceMemory memory, uint
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetBlobGOOGLE = OP_vkGetBlobGOOGLE;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetBlobGOOGLE, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetBlobGOOGLE, sizeof(uint32_t));
+@@ -27027,6 +27131,7 @@ VkResult VkEncoder::vkGetBlobGOOGLE(VkDevice device, VkDeviceMemory memory, uint
+     *streamPtrPtr += 1 * 8;
+     VkResult vkGetBlobGOOGLE_VkResult_return = (VkResult)0;
+     stream->read(&vkGetBlobGOOGLE_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkGetBlobGOOGLE_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+@@ -27178,7 +27283,7 @@ void VkEncoder::vkUpdateDescriptorSetWithTemplateSized2GOOGLE(
+     uint32_t opcode_vkUpdateDescriptorSetWithTemplateSized2GOOGLE =
+         OP_vkUpdateDescriptorSetWithTemplateSized2GOOGLE;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkUpdateDescriptorSetWithTemplateSized2GOOGLE, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkUpdateDescriptorSetWithTemplateSized2GOOGLE, sizeof(uint32_t));
+@@ -27344,7 +27449,7 @@ void VkEncoder::vkQueueSubmitAsync2GOOGLE(VkQueue queue, uint32_t submitCount,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkQueueSubmitAsync2GOOGLE = OP_vkQueueSubmitAsync2GOOGLE;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkQueueSubmitAsync2GOOGLE, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkQueueSubmitAsync2GOOGLE, sizeof(uint32_t));
+@@ -27406,7 +27511,7 @@ VkResult VkEncoder::vkGetSemaphoreGOOGLE(VkDevice device, VkSemaphore semaphore,
+     uint8_t** streamPtrPtr = &streamPtr;
+     uint32_t opcode_vkGetSemaphoreGOOGLE = OP_vkGetSemaphoreGOOGLE;
+     uint32_t seqno;
+-    if (queueSubmitWithCommandsEnabled) seqno = ResourceTracker::nextSeqno();
++    if (queueSubmitWithCommandsEnabled) seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+     memcpy(streamPtr, &opcode_vkGetSemaphoreGOOGLE, sizeof(uint32_t));
+     streamPtr += sizeof(uint32_t);
+     memcpy(streamPtr, &packetSize_vkGetSemaphoreGOOGLE, sizeof(uint32_t));
+@@ -27427,6 +27532,7 @@ VkResult VkEncoder::vkGetSemaphoreGOOGLE(VkDevice device, VkSemaphore semaphore,
+     *streamPtrPtr += sizeof(uint64_t);
+     VkResult vkGetSemaphoreGOOGLE_VkResult_return = (VkResult)0;
+     stream->read(&vkGetSemaphoreGOOGLE_VkResult_return, sizeof(VkResult));
++    if (stream->isLost()) vkGetSemaphoreGOOGLE_VkResult_return = VK_ERROR_DEVICE_LOST;
+     ++encodeCount;
+     if (0 == encodeCount % POOL_CLEAR_INTERVAL) {
+         pool->freeAll();
+diff --git a/src/gfxstream/guest/vulkan_enc/VkEncoder.cpp.inl b/src/gfxstream/guest/vulkan_enc/VkEncoder.cpp.inl
+index 3499964..babfb1e 100644
+--- a/src/gfxstream/guest/vulkan_enc/VkEncoder.cpp.inl
++++ b/src/gfxstream/guest/vulkan_enc/VkEncoder.cpp.inl
+@@ -69,6 +69,10 @@ VkEncoder::VkEncoder(gfxstream::guest::IOStream* stream)
+ 
+ void VkEncoder::flush() { mImpl->flush(); }
+ 
++bool VkEncoder::streamLost() { return mImpl->stream()->isLost(); }
++
++uint32_t VkEncoder::streamGeneration() { return mImpl->stream()->generation(); }
++
+ void VkEncoder::lock() { mImpl->lock(); }
+ 
+ void VkEncoder::unlock() { mImpl->unlock(); }
+diff --git a/src/gfxstream/guest/vulkan_enc/VkEncoder.h.inl b/src/gfxstream/guest/vulkan_enc/VkEncoder.h.inl
+index 368533a..560d046 100644
+--- a/src/gfxstream/guest/vulkan_enc/VkEncoder.h.inl
++++ b/src/gfxstream/guest/vulkan_enc/VkEncoder.h.inl
+@@ -8,6 +8,10 @@
+     void incRef();
+     bool decRef();
+     std::string getPacketContents(const uint8_t* ptr, size_t len);
++    // Whether the stream to the host renderer ended, and the generation it was opened in
++    // (VulkanStreamGuest).
++    bool streamLost();
++    uint32_t streamGeneration();
+     uint32_t refCount = 1;
+     #define POOL_CLEAR_INTERVAL 10
+     uint32_t encodeCount = 0;
+diff --git a/src/gfxstream/guest/vulkan_enc/VulkanStreamGuest.cpp b/src/gfxstream/guest/vulkan_enc/VulkanStreamGuest.cpp
+index 9641a73..2bbb5d0 100644
+--- a/src/gfxstream/guest/vulkan_enc/VulkanStreamGuest.cpp
++++ b/src/gfxstream/guest/vulkan_enc/VulkanStreamGuest.cpp
+@@ -19,6 +19,15 @@ VulkanStreamGuest::~VulkanStreamGuest() = default;
+ 
+ bool VulkanStreamGuest::valid() { return true; }
+ 
++void VulkanStreamGuest::lose(const char* what) {
++    if (mLoss.markLost()) {
++        mesa_loge(
++            "The stream to the host renderer ended (a %s failed). Every call on it now reports "
++            "VK_ERROR_DEVICE_LOST, and the next new Vulkan instance connects again.",
++            what);
++    }
++}
++
+ void VulkanStreamGuest::alloc(void** ptrAddr, size_t bytes) {
+     if (!bytes) {
+         *ptrAddr = nullptr;
+@@ -92,21 +101,36 @@ void VulkanStreamGuest::loadStringArrayInPlaceWithStreamPtr(char*** forOutput,
+ }
+ 
+ ssize_t VulkanStreamGuest::read(void* buffer, size_t size) {
+-    if (!mStream->readback(buffer, size)) {
+-        mesa_loge("FATAL: Could not read back %zu bytes", size);
+-        abort();
++    if (!mLoss.lost() && mStream->readback(buffer, size)) {
++        return size;
+     }
++    // The host renderer is gone: the caller reads zeros, and the encoder turns the call's
++    // result into VK_ERROR_DEVICE_LOST.
++    lose("read");
++    dsa::LostStream::zero(buffer, size);
+     return size;
+ }
+ 
+ ssize_t VulkanStreamGuest::write(const void* buffer, size_t size) {
++    if (mLoss.lost()) {
++        return size;
++    }
+     uint8_t* streamBuf = (uint8_t*)mStream->alloc(size);
++    if (!streamBuf) {
++        lose("write");
++        return size;
++    }
+     memcpy(streamBuf, buffer, size);
+     return size;
+ }
+ 
+ void VulkanStreamGuest::writeLarge(const void* buffer, size_t size) {
+-    mStream->writeFullyAsync(buffer, size);
++    if (mLoss.lost()) {
++        return;
++    }
++    if (mStream->writeFullyAsync(buffer, size) != 0) {
++        lose("write");
++    }
+ }
+ 
+ void VulkanStreamGuest::clearPool() { mPool.freeAll(); }
+@@ -121,7 +145,12 @@ VulkanHandleMapping* VulkanStreamGuest::handleMapping() const { return mCurrentH
+ 
+ void VulkanStreamGuest::flush() {
+     MESA_TRACE_SCOPE("VulkanStreamGuest device write");
+-    mStream->flush();
++    if (mLoss.lost()) {
++        return;
++    }
++    if (mStream->flush() < 0) {
++        lose("write");
++    }
+ }
+ 
+ uint32_t VulkanStreamGuest::getFeatureBits() const { return mFeatureBits; }
+@@ -130,7 +159,16 @@ void VulkanStreamGuest::incStreamRef() { mStream->incRef(); }
+ 
+ bool VulkanStreamGuest::decStreamRef() { return mStream->decRef(); }
+ 
+-uint8_t* VulkanStreamGuest::reserve(size_t size) { return (uint8_t*)mStream->alloc(size); }
++uint8_t* VulkanStreamGuest::reserve(size_t size) {
++    if (!mLoss.lost()) {
++        uint8_t* reserved = (uint8_t*)mStream->alloc(size);
++        if (reserved) {
++            return reserved;
++        }
++        lose("write");
++    }
++    return mLoss.scratch(size);
++}
+ 
+ VulkanCountingStream::VulkanCountingStream() : VulkanStreamGuest(nullptr) {}
+ VulkanCountingStream::~VulkanCountingStream() = default;
+diff --git a/src/gfxstream/guest/vulkan_enc/VulkanStreamGuest.h b/src/gfxstream/guest/vulkan_enc/VulkanStreamGuest.h
+index 30aa9ea..ecab36e 100644
+--- a/src/gfxstream/guest/vulkan_enc/VulkanStreamGuest.h
++++ b/src/gfxstream/guest/vulkan_enc/VulkanStreamGuest.h
+@@ -12,6 +12,7 @@
+ #include "ResourceTracker.h"
+ #include "VulkanHandleMapping.h"
+ #include "BumpPool.h"
++#include "dsa_lost_stream.h"
+ #include "Stream.h"
+ #include "gfxstream/guest/IOStream.h"
+ #include "goldfish_vk_private_defs.h"
+@@ -60,7 +61,16 @@ class VulkanStreamGuest : public gfxstream::aemu::Stream {
+ 
+     uint8_t* reserve(size_t size);
+ 
++    // Whether the stream to the host renderer ended (dsa_lost_stream.h): nothing more is sent,
++    // reads give zeros, and the encoder reports VK_ERROR_DEVICE_LOST for each call.
++    bool isLost() const { return mLoss.lost(); }
++    // The generation the stream was opened in; a thread on an older one connects again.
++    uint32_t generation() const { return mLoss.generation(); }
++
+    private:
++    void lose(const char* what);
++
++    dsa::LostStream mLoss;
+     gfxstream::aemu::BumpPool mPool;
+     std::vector<uint8_t> mWriteBuffer;
+     gfxstream::guest::IOStream* mStream = nullptr;
+diff --git a/src/gfxstream/guest/vulkan_enc/vkQueueFlushCommandsGOOGLE_encode_impl.cpp.inl b/src/gfxstream/guest/vulkan_enc/vkQueueFlushCommandsGOOGLE_encode_impl.cpp.inl
+index 2580311..a114b64 100644
+--- a/src/gfxstream/guest/vulkan_enc/vkQueueFlushCommandsGOOGLE_encode_impl.cpp.inl
++++ b/src/gfxstream/guest/vulkan_enc/vkQueueFlushCommandsGOOGLE_encode_impl.cpp.inl
+@@ -31,7 +31,8 @@ uint8_t* streamPtr = stream->reserve(packetSize_vkQueueFlushCommandsGOOGLE - loc
+ uint8_t* packetBeginPtr = streamPtr;
+ uint8_t** streamPtrPtr = &streamPtr;
+ uint32_t opcode_vkQueueFlushCommandsGOOGLE = OP_vkQueueFlushCommandsGOOGLE;
+-uint32_t seqno = ResourceTracker::nextSeqno();
++// A lost stream sends nothing, so it takes no sequence number the renderer would wait for.
++uint32_t seqno = stream->isLost() ? 0 : ResourceTracker::nextSeqno();
+ memcpy(streamPtr, &opcode_vkQueueFlushCommandsGOOGLE, sizeof(uint32_t)); streamPtr += sizeof(uint32_t);
+ memcpy(streamPtr, &packetSize_vkQueueFlushCommandsGOOGLE, sizeof(uint32_t)); streamPtr += sizeof(uint32_t);
+ memcpy(streamPtr, &seqno, sizeof(uint32_t)); streamPtr += sizeof(uint32_t);

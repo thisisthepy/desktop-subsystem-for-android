@@ -19,12 +19,14 @@
 //! dsa memory
 //! dsa gpus
 //! dsa widgets [list | add <provider> | remove <id> | watch]
-//! dsa apps [list | info <package> | uninstall <package> | settings [<package>]]
+//! dsa apps [list | info <package> | uninstall <package> | settings [<package>] |
+//!     run-as-arm <package> on|off [--erase-data]]
 //! dsa background [list | open <package> | stop <package>]
 //! dsa app-window [<package> [--fixed-size on|off] [--start-size <width>x<height>|auto] | <package> reset]
 //! dsa logcat [-d] [-b <buffers>] [<tag>[:<priority>] ...]
 //! dsa logs collect -o <file.zip>
-//! dsa arm-translation [status | install <folder> | remove]
+//! dsa arm-translation [status | install <folder> | fetch google [--yes] | remove | use-default]
+//! dsa gapps [status | install [--progress] | remove]
 //! dsa reset-data --yes
 //! ```
 //!
@@ -60,7 +62,14 @@
 //! is not running, and says how it went: the app's package once it is installed, or the reason
 //! Android gave for refusing it, with exit code 1. The installed app then appears in the Start
 //! menu like any other. APKs up to 2 GiB can be installed, one at a time; a second install waits
-//! for the first. With `--json` it prints `installed`, `status` (`installed`, or the reason:
+//! for the first. It also installs an app that comes as a split-APK bundle (`.xapk`, `.apks`,
+//! `.apkm`, told apart by what is in them): the base APK and the splits this computer's Android
+//! needs (its ABI, x86_64 first; the density nearest the screen's; its languages and English;
+//! every feature) go in one install, and the bundle's expansion files go to
+//! `Android/obb/<package>/`. An Android App Bundle (`.aab`), an encrypted bundle and a bundle
+//! whose splits are signed with other keys are refused before Android is started, with
+//! `not installed (app-bundle):`, `(encrypted-bundle):`, `(split-signature-mismatch):` or
+//! `(invalid-bundle):` and the reason. With `--json` it prints `installed`, `status` (`installed`, or the reason:
 //! `incompatible`, `conflicting-signature`, `invalid-apk`, `insufficient-storage`, `downgrade`,
 //! `blocked` or `other`), `package` and `message`. A refusal's line on standard error starts
 //! with `not installed (<reason>):`. With `--progress` it first prints a line for each step,
@@ -70,7 +79,8 @@
 //!
 //! `dsa apk-info` reads an APK on this computer and says what it is: its package, its name and
 //! icon, its version, the Android versions it is made for, the permissions it asks for and the
-//! certificate it is signed with. When Android is running it also says what Android has of the
+//! certificate it is signed with. Of a split-APK bundle it says the same from the base APK, and
+//! which of its files would be installed. When Android is running it also says what Android has of the
 //! package, and whether installing the APK would be a new install, an update, the same version
 //! again, a downgrade or an APK signed with another key; Android refuses the last two. It never
 //! starts Android. With `--json` it prints `package`, `label`, `version_code`, `version_name`,
@@ -80,7 +90,11 @@
 //! `#AARRGGBB` or `unknown`), `signer` (`scheme` and `sha256`), `abis`, `android` (`running`,
 //! `stopped` or `unreachable`), `installed` (`version_code`, `version_name` and `signers`, or
 //! null) and `install` (`new`, `update`, `reinstall`, `downgrade`, `signature-mismatch`, or
-//! null while Android is not running).
+//! null while Android is not running), and of what installing the file sends: `format` (`apk`,
+//! `xapk`, `apks` or `apkm`), `apks` (the names of the APKs that would be installed, the base
+//! first), `split_count` (how many of them are splits), `obbs` (the expansion files),
+//! `total_size` (all of them, in bytes) and `install_abi` (the ABI chosen from the splits, or
+//! null). A file it cannot read fails as `dsa install` does.
 //!
 //! `dsa open` sends a file from this computer to Android, which asks which app opens it; that
 //! app shows in a window of its own. `dsa share` does the same for sharing the file with an
@@ -118,6 +132,19 @@
 //! `total_bytes` and `icon_png` in base64; `info` prints one such object; `uninstall` prints
 //! `package`, `uninstalled`, `status` and `message`; `settings` prints `opened` with the package,
 //! or null for the list of apps.
+//!
+//! Each app of `list` and `info` also says how its native code runs: `primary_abi` (`x86_64`,
+//! `arm64-v8a`, or empty for none), `native_abis` (the ABIs its APKs on the device hold
+//! libraries for) and `run_as_arm`, the settings apps' "Run as ARM" switch: `on`, `available`,
+//! and `reason`, why it cannot be changed (`system-app`, `no-arm-libraries`,
+//! `translation-off` or `arm-only`; empty when it can). `dsa apps run-as-arm <package> on`
+//! installs the app again from its APKs in Android with its ARM code, run through the
+//! translator; `off` goes back to its x86_64 code. The app keeps its data. When Android cannot
+//! change the ABI and keep the data, nothing changes and the line on standard error starts with
+//! `not changed (data-would-be-erased):`, with exit code 1; `--erase-data` then does it and
+//! erases the app's data. Other refusals have the same form with `not-installed`,
+//! `system-app`, `no-libraries`, `translation-off` or `other`. With `--json` it prints
+//! `package`, `status`, `on` and `message`.
 //!
 //! `dsa background list` (or `dsa background`) lists the apps that keep running in Android
 //! with no window because they run a foreground service (music playback, a download, a VPN),
@@ -159,7 +186,10 @@
 //! resize (`resize-trace`) to its log, off by default. Those last four are the computer's, so
 //! only an administrator changes them. `developer-mode` (off by default) lets adb reach the
 //! user's Android: while it is on, `adb connect 127.0.0.1:58526` connects, with no prompt to
-//! accept in Android. `adb-port` picks another loopback port than 58526. `stop-without-asking` (off by default)
+//! accept in Android. `adb-port` picks another loopback port than 58526. `adb-auto-connect`
+//! (on by default) attaches that port to this computer's adb server by itself while developer
+//! mode is on, so `adb devices` and Android Studio list DSA without `adb connect`; `dsa
+//! settings` says whether the adb server lists it. `stop-without-asking` (off by default)
 //! is whether stopping an app that runs in the background skips the question that confirms it.
 //! `advanced-networking` (off by default) puts the user's Android on this computer's network as
 //! a device of its own, so other devices there reach it, instead of behind a NAT network of its
@@ -173,16 +203,50 @@
 //! choosing the render GPU.
 //!
 //! `dsa arm-translation status` (or `dsa arm-translation`) says whether apps built only for
-//! 64-bit ARM (`arm64-v8a`) can be installed and run: which translation package is installed,
-//! whether the `arm-translation` setting is on, and which ABIs the running Android installs apps
-//! for. `dsa arm-translation install <folder>` installs a translation package: a folder holding
+//! 64-bit ARM (`arm64-v8a`) can be installed and run: which translator Android uses (the
+//! image's default one, a package the user installed, or Google's), whether the
+//! `arm-translation` setting is on, and which ABIs the running Android installs apps for. An
+//! x86_64 image carries a default translator, which Android uses from its first start; an arm64
+//! image runs ARM apps itself and has none. `dsa arm-translation install <folder>` installs a
+//! translation package, which is used in place of the default one: a folder holding
 //! `arm-translation.json` and `system.img`, as `dsa/guest/arm-translation/make-package.py`
 //! makes one. Android is started first when it is not running. `dsa arm-translation remove`
-//! removes it. Both apply from the next start of Android, and say so. With `--json` each prints
-//! `package` (`name`, `version`, `library`, `abis`, `license`, or null), `enabled`,
-//! `supported` (a package is installed and on), `android` (`installed`, `active` and `abilist`,
-//! or null while Android is not running) and `restart_needed`. `dsa settings set
-//! arm-translation off` keeps the package but boots Android without it.
+//! removes it, and the default translator, if the image has one, is used again;
+//! `dsa arm-translation use-default` does the same, and refuses where there is no default
+//! translator. Each applies from the next start of Android, and says so. With `--json` each
+//! prints `package` (the installed one: `name`, `version`, `library`, `abis`, `license`, or
+//! null), `default` (the image's default package, the same fields, or null), `translator`
+//! (what Android uses from its next start: `source`, which is `default`, `user` or `google`,
+//! with `name`, `version` and `license`, or null), `enabled`, `supported` (a translator is
+//! used), `android` (`installed`, `active` and `abilist`, or null while Android is not running)
+//! and `restart_needed`. `dsa settings set arm-translation off` keeps the package but boots
+//! Android without any translator. The JSON also says `google_fetch_available`: whether
+//! `fetch google` is offered here.
+//!
+//! `dsa arm-translation fetch google` gets Google's own ARM translator, which DSA does not ship:
+//! it reads Google's list of emulator system images, downloads the Google APIs x86_64 image of
+//! the Android version this computer's Android runs, checks it against the list's SHA-1 and
+//! size, takes out only the translator's files, and installs them as a translation package. The
+//! downloaded image is deleted afterwards. It first says where the download comes from and that
+//! Google's Android SDK License (https://developer.android.com/studio/terms) covers it, and asks
+//! before downloading; `--yes` agrees without asking, as the settings app does after its own
+//! confirmation. A package from another translator, such as Digitalis, does the same job through
+//! `dsa arm-translation install`. On an ARM64 computer Android runs ARM apps itself, so there is
+//! nothing to fetch. The `DSA_GOOGLE_REPOSITORY` environment variable points at a mirror of
+//! Google's repository (a URL or a folder) instead.
+//!
+//! `dsa gapps status` (or `dsa gapps`) says whether Google Play is installed: which LiteGapps
+//! build, for which Android, where it came from, whether the running Android has it, and the
+//! Android ID Google's page for uncertified devices asks for. DSA ships no Google app.
+//! `dsa gapps install` has the service download the newest LiteGapps Core build for the Android
+//! version and processor the running Android reports, check it, make a system image of its
+//! apps and permission files, and send it to Android; with `--progress` it prints a `stage`
+//! line as each step starts and as bytes arrive. `dsa gapps remove` removes it. Android is
+//! started first when it is not running, and both apply from its next start, and say so.
+//! Google's apps follow Google's terms. With `--json` each prints `package` (`variant`,
+//! `version`, `android_version`, `sdk`, `arch`, `file`, `source`, `md5`, or null),
+//! `installed`, `android` (`installed`, `active`, `sdk`, `abi`, `abilist` and `device_id`, or
+//! null while Android is not running), `restart_needed`, `terms_url` and `registration_url`.
 //!
 //! `dsa settings device` shows the device identity Android reports to its apps: what the user
 //! chose, and each value as Android reports it from its next start.
@@ -223,19 +287,24 @@ use std::fmt::Write as _;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use dsa_host_core::apk::{ApkFile, InstallKind, InstallOutcome, InstalledPackage};
-use dsa_host_core::apk_info::{signing, ApkInfo, Icon, Layer};
+use dsa_host_core::apk::{InstallKind, InstallOutcome, InstalledPackage};
+use dsa_host_core::apk_bundle::{Bundle, Device, InstallFile, Refusal, Selection};
+use dsa_host_core::apk_info::{signing, ApkInfo, Icon, Layer, Vector};
 use dsa_host_core::app_windows::AppWindowSettings;
-use dsa_host_core::arm_translation;
+use dsa_host_core::arm_translation::{self, google};
 use dsa_host_core::background::{BackgroundApp, BackgroundCommand, MediaSession, Playback};
 use dsa_host_core::files::{FileAction, FileTransfer};
+use dsa_host_core::gapps;
 use dsa_host_core::host_api::{
-    ArmTranslationStatus, ClientError, HostApiClient, NetworkStatus, SettingsReport, Status,
-    TaskList,
+    ArmTranslationStatus, ClientError, GappsStatus, HostApiClient, NetworkStatus, SettingsReport,
+    Status, TaskList,
 };
 use dsa_host_core::memory::MemorySnapshot;
+use dsa_host_core::native_abi;
 use dsa_host_core::session::SessionState;
 use dsa_host_core::tasks::{AppInfo, Task};
+use dsa_host_core::update::store::Fetch;
+use dsa_host_core::update::versions::{Channel, VersionReport};
 use dsa_host_core::widgets::{Widget, WidgetEvent, WidgetProvider};
 use dsa_transport::Connector;
 use serde_json::{json, Value};
@@ -246,12 +315,14 @@ pub const USAGE: &str = "usage: dsa <status | start | stop | freeze | update | \
      tasks | settings [set <name> <value> | device | reset device[.<field>]] | memory | \
      network | gpus | \
      widgets [list | add <provider> | remove <id> | watch] | \
-     apps [list | info <package> | uninstall <package> | settings [<package>]] | \
+     apps [list | info <package> | uninstall <package> | settings [<package>] | \
+     run-as-arm <package> on|off [--erase-data]] | \
      background [list | open <package> | stop <package>] | \
      app-window [<package> [--fixed-size on|off] [--start-size <w>x<h>|auto] | <package> reset] | \
      logcat [-d] [-b <buffers>] [<tag>[:<priority>] ...] | logs collect -o <file.zip> | \
-     arm-translation [status | install <folder> | remove] | files [open]> \
-     arm-translation [status | install <folder> | remove] | reset-data --yes> \
+     arm-translation [status | install <folder> | fetch google [--yes] | remove | use-default] | \
+     files [open] | gapps [status | install [--progress] | remove] | reset-data --yes | \
+     android [version | use <major>|latest [--erase-data]]> \
      [--wait] [--timeout <seconds>] [--json] [--pipe <name> | --socket <path>]";
 
 pub mod device;
@@ -304,6 +375,17 @@ pub enum Command {
     ArmTranslationInstall,
     /// Remove the ARM translation package.
     ArmTranslationRemove,
+    /// Go back to the image's default ARM translator, removing the package installed in its
+    /// place.
+    ArmTranslationUseDefault,
+    /// Make a translation package from Google's ARM translator, and install it.
+    ArmTranslationFetchGoogle,
+    /// Say whether Google Play is installed, and which build.
+    GappsStatus,
+    /// Download Google Play and install it.
+    GappsInstall,
+    /// Remove Google Play.
+    GappsRemove,
     /// List, describe or uninstall the installed apps, or open their settings in Android
     /// ([`Invocation::apps`]).
     Apps,
@@ -315,6 +397,10 @@ pub enum Command {
     FilesOpen,
     /// Erase the user's Android data, once [`Invocation::yes`] confirms it.
     ResetData,
+    /// Show the Android version that runs and the ones that can be chosen.
+    AndroidVersion,
+    /// Choose the Android version [`Invocation::android`] names.
+    AndroidUse,
 }
 
 /// What `dsa app-window` does.
@@ -364,6 +450,8 @@ pub enum AppsAction {
     Uninstall(String),
     /// Open Android's settings of one app, or Android's list of every app.
     Settings(Option<String>),
+    /// Install one app again with its ARM code (`true`) or its x86_64 code.
+    RunAsArm(String, bool),
 }
 
 /// What `dsa widgets` does.
@@ -405,6 +493,7 @@ pub enum Change {
     MemoryLimit(u32),
     DeveloperMode(bool),
     AdbPort(u16),
+    AdbAutoConnect(bool),
     ArmTranslation(bool),
     /// Show the device identity.
     ShowDevice,
@@ -440,6 +529,7 @@ impl Change {
             "resize-trace" => switch().map(Change::ResizeTrace),
             "memory-limit" => parse_memory_limit(value).map(Change::MemoryLimit),
             "developer-mode" => switch().map(Change::DeveloperMode),
+            "adb-auto-connect" => switch().map(Change::AdbAutoConnect),
             "arm-translation" => switch().map(Change::ArmTranslation),
             "stop-without-asking" => switch().map(Change::StopWithoutAsking),
             "file-sharing" => switch().map(Change::FileSharing),
@@ -454,8 +544,8 @@ impl Change {
             _ => Err(format!(
                 "there is no setting {name:?}; the settings are render-gpu, freeze, \
                  clipboard, links-in-android, program-updates, image-updates, input-trace, \
-                 resize-trace, memory-limit, developer-mode, adb-port, arm-translation, \
-                 stop-without-asking, file-sharing, shared-folders, \
+                 resize-trace, memory-limit, developer-mode, adb-port, adb-auto-connect, \
+                 arm-translation, stop-without-asking, file-sharing, shared-folders, \
                  advanced-networking and device.<field>"
             )),
         }
@@ -479,8 +569,8 @@ fn parse_shared_folders(value: &str) -> Result<Vec<String>, String> {
     })
 }
 
-/// A memory limit as `dsa settings set memory-limit` takes it: `auto` (the service's
-/// default size), or a size in MiB, with `G` or `GB` for GiB.
+/// A memory limit as `dsa settings set memory-limit` takes it: `auto` (no fixed
+/// limit), or a size in MiB, with `G` or `GB` for GiB.
 fn parse_memory_limit(value: &str) -> Result<u32, String> {
     let lower = value.trim().to_ascii_lowercase();
     if lower == "auto" || lower == "0" {
@@ -629,8 +719,14 @@ pub struct Invocation {
     pub wait_first_frame: bool,
     /// Where `dsa tap` presses, in Android display pixels from the task's top left corner.
     pub point: Option<(u32, u32)>,
-    /// `dsa reset-data --yes`: the user confirmed that their Android data goes.
+    /// `dsa reset-data --yes`: the user confirmed that their Android data goes. `dsa
+    /// arm-translation fetch google --yes`: the user agreed to download from Google.
     pub yes: bool,
+    /// `dsa android use <major>`: the version to follow.
+    pub android: Option<Channel>,
+    /// `dsa android use <major> --erase-data`: the user agreed that moving to an older Android
+    /// erases its data.
+    pub erase_data: bool,
 }
 
 /// Whether `name` can be an Android package name: dot-separated parts of letters, digits
@@ -640,6 +736,14 @@ fn is_package_name(name: &str) -> bool {
         && name.split('.').all(|part| {
             !part.is_empty() && part.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
         })
+}
+
+/// Whether `command` takes `--yes`: the commands that ask before they act.
+fn takes_yes(command: Option<Command>) -> bool {
+    matches!(
+        command,
+        Some(Command::ResetData | Command::ArmTranslationFetchGoogle)
+    )
 }
 
 /// Parses the arguments after the program name.
@@ -657,6 +761,8 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
     let mut app_window: Option<AppWindowAction> = None;
     let mut json = false;
     let mut yes = false;
+    let mut android = None;
+    let mut erase_data = false;
     let mut progress = false;
     let mut buffers: u32 = 0;
     let mut tags = Vec::new();
@@ -741,6 +847,27 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
             "settings" if command == Some(Command::Apps) && apps.is_none() => {
                 apps = Some(AppsAction::Settings(None));
             }
+            "run-as-arm" if command == Some(Command::Apps) && apps.is_none() => {
+                let usage = "dsa apps run-as-arm needs the app's package and on or off, such as \
+                             dsa apps run-as-arm com.example.game on";
+                let package = args.next().ok_or_else(|| usage.to_string())?;
+                if !is_package_name(package) {
+                    return Err(format!(
+                        "{package:?} is not a package name; dsa apps list shows them, such as \
+                         com.example.notes"
+                    ));
+                }
+                let on = match args
+                    .next()
+                    .map(|value| value.to_ascii_lowercase())
+                    .as_deref()
+                {
+                    Some("on") => true,
+                    Some("off") => false,
+                    _ => return Err(usage.to_string()),
+                };
+                apps = Some(AppsAction::RunAsArm(package.clone(), on));
+            }
             name if command == Some(Command::Apps)
                 && apps == Some(AppsAction::Settings(None))
                 && !name.starts_with('-') =>
@@ -774,10 +901,37 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
                         Command::ArmTranslationInstall
                     }
                     Some("remove") => Command::ArmTranslationRemove,
+                    Some("use-default") => Command::ArmTranslationUseDefault,
+                    Some("fetch") => match args.next().map(String::as_str) {
+                        Some("google") => Command::ArmTranslationFetchGoogle,
+                        _ => {
+                            return Err(format!(
+                                "dsa arm-translation fetch takes google, the translator Google's \
+                                 emulator images carry\n{USAGE}"
+                            ))
+                        }
+                    },
                     Some(other) => {
                         return Err(format!(
-                            "dsa arm-translation takes status, install <folder> or remove, not \
-                             {other:?}\n{USAGE}"
+                            "dsa arm-translation takes status, install <folder>, fetch google, \
+                             remove or use-default, not {other:?}\n{USAGE}"
+                        ))
+                    }
+                });
+            }
+            "gapps" if command.is_none() => {
+                // A bare option such as --json belongs to the default action, status.
+                let action = match args.peek() {
+                    Some(next) if next.starts_with("--") => None,
+                    _ => args.next().map(String::as_str),
+                };
+                command = Some(match action {
+                    None | Some("status") => Command::GappsStatus,
+                    Some("install") => Command::GappsInstall,
+                    Some("remove") => Command::GappsRemove,
+                    Some(other) => {
+                        return Err(format!(
+                            "dsa gapps takes status, install or remove, not {other:?}\n{USAGE}"
                         ))
                     }
                 });
@@ -897,9 +1051,44 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
                 });
             }
             "--json" => json = true,
-            "--yes" if command == Some(Command::ResetData) => yes = true,
+            "--yes" if takes_yes(command) => yes = true,
+            "android" if command.is_none() => {
+                let action = match args.peek() {
+                    Some(next) if next.starts_with("--") => None,
+                    _ => args.next().map(String::as_str),
+                };
+                command = Some(match action {
+                    None | Some("version") => Command::AndroidVersion,
+                    Some("use") => {
+                        let chosen = args.next().ok_or(
+                            "dsa android use needs the Android major version, such as 17, or \
+                             latest; dsa android version lists the supported ones",
+                        )?;
+                        android = Some(Channel::parse(chosen).ok_or_else(|| {
+                            format!(
+                                "{chosen:?} is not an Android major version; give a number such \
+                                 as 17, or latest"
+                            )
+                        })?);
+                        Command::AndroidUse
+                    }
+                    Some(other) => {
+                        return Err(format!(
+                            "dsa android takes version or use <major>, not {other:?}\n{USAGE}"
+                        ))
+                    }
+                });
+            }
+            "--erase-data"
+                if command == Some(Command::AndroidUse)
+                    || matches!(apps, Some(AppsAction::RunAsArm(..))) =>
+            {
+                erase_data = true
+            }
             "reset-data" if command.is_none() => command = Some(Command::ResetData),
-            "--progress" if command == Some(Command::Install) => progress = true,
+            "--progress" if matches!(command, Some(Command::Install | Command::GappsInstall)) => {
+                progress = true
+            }
             "--wait-first-frame" if command == Some(Command::Launch) => wait_first_frame = true,
             number
                 if command == Some(Command::Tap)
@@ -1038,6 +1227,8 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
         wait_first_frame,
         point,
         yes,
+        android,
+        erase_data,
     })
 }
 
@@ -1278,6 +1469,22 @@ pub fn widget_event_line(event: &WidgetEvent, json: bool) -> Option<String> {
     }
 }
 
+/// The settings apps' "Run as ARM" switch of `app`, as one JSON object, while ARM translation
+/// is on in the running Android (`translation`) or not.
+pub fn run_as_arm_json(app: &AppInfo, translation: bool) -> Value {
+    let switch = native_abi::run_as_arm(
+        app.system_app,
+        &app.primary_abi,
+        &app.native_libraries,
+        translation,
+    );
+    json!({
+        "on": switch.on,
+        "available": switch.available(),
+        "reason": switch.unavailable.map(|why| why.code()).unwrap_or_default(),
+    })
+}
+
 /// An installed app as one JSON object. With `icon`, the icon is in it as base64 PNG.
 pub fn app_json(app: &AppInfo, icon: bool) -> Value {
     let mut value = json!({
@@ -1292,6 +1499,8 @@ pub fn app_json(app: &AppInfo, icon: bool) -> Value {
         "data_bytes": app.data_bytes,
         "cache_bytes": app.cache_bytes,
         "total_bytes": app.total_bytes(),
+        "primary_abi": app.primary_abi,
+        "native_abis": app.native_libraries.abis().collect::<Vec<_>>(),
     });
     if icon {
         value["icon_png"] = Value::String(base64(&app.icon_png));
@@ -1335,6 +1544,9 @@ pub fn describe_apps(apps: &[AppInfo]) -> String {
             human_size(app.total_bytes()),
             if app.system_app { "  (system)" } else { "" }
         );
+        if app.primary_abi == native_abi::ARM64 {
+            out.push_str("  (runs as ARM)");
+        }
     }
     out
 }
@@ -1376,8 +1588,26 @@ pub fn describe_app(app: &AppInfo) -> String {
         } else {
             "Installed by you: dsa apps uninstall removes it".to_string()
         },
+        format!(
+            "Native code: {}",
+            if app.primary_abi.is_empty() {
+                "none".to_string()
+            } else {
+                app.primary_abi.clone()
+            }
+        ),
     ]
     .join("\n")
+}
+
+/// Whether the caller's running Android translates ARM code: its ABI list holds arm64-v8a.
+/// False when it cannot be asked.
+fn translates_arm64(client: &mut HostApiClient) -> bool {
+    client
+        .arm_translation()
+        .ok()
+        .and_then(|status| status.guest)
+        .is_some_and(|guest| native_abi::translates_arm64(&guest.abilist))
 }
 
 /// `dsa apps`: makes sure Android runs, then lists or describes its apps with their sizes read
@@ -1404,9 +1634,17 @@ fn apps(
                 .refreshed_apps()
                 .map_err(|e| e.to_string())?
                 .unwrap_or_default();
+            let translation = translates_arm64(&mut client);
             Ok(if invocation.json {
-                json!({ "apps": apps.iter().map(|app| app_json(app, true)).collect::<Vec<_>>() })
-                    .to_string()
+                let apps: Vec<Value> = apps
+                    .iter()
+                    .map(|app| {
+                        let mut value = app_json(app, true);
+                        value["run_as_arm"] = run_as_arm_json(app, translation);
+                        value
+                    })
+                    .collect();
+                json!({ "apps": apps }).to_string()
             } else {
                 describe_apps(&apps)
             })
@@ -1423,7 +1661,9 @@ fn apps(
                     format!("no app of {package} is installed in Android; dsa apps list shows them")
                 })?;
             Ok(if invocation.json {
-                app_json(app, true).to_string()
+                let mut value = app_json(app, true);
+                value["run_as_arm"] = run_as_arm_json(app, translates_arm64(&mut client));
+                value.to_string()
             } else {
                 describe_app(app)
             })
@@ -1447,6 +1687,30 @@ fn apps(
                 .to_string()
             } else {
                 format!("Uninstalled {package}")
+            })
+        }
+        AppsAction::RunAsArm(package, on) => {
+            let outcome = client
+                .set_run_as_arm(&package, on, invocation.erase_data)
+                .map_err(|e| e.to_string())?;
+            if !outcome.done() {
+                return Err(format!(
+                    "not changed ({}): {package}: {outcome}",
+                    outcome.status.code()
+                ));
+            }
+            Ok(if invocation.json {
+                json!({
+                    "package": outcome.package_name,
+                    "status": outcome.status.code(),
+                    "on": outcome.on,
+                    "message": outcome.message,
+                })
+                .to_string()
+            } else if outcome.on {
+                format!("{package} runs as ARM now")
+            } else {
+                format!("{package} runs its x86_64 code now")
             })
         }
         AppsAction::Settings(package) => {
@@ -1676,6 +1940,8 @@ pub fn settings_json(report: &SettingsReport) -> Value {
         "developer_mode": report.settings.developer_mode,
         "adb_port": report.settings.adb_port,
         "adb_address": adb_address(&report.settings),
+        "adb_auto_connect": report.settings.adb_auto_connect,
+        "adb_auto_connect_state": report.adb_auto_connect_state.as_str(),
         "arm_translation": report.settings.arm_translation,
         "stop_without_asking": report.settings.stop_without_asking,
         "file_sharing": report.settings.file_sharing,
@@ -1747,6 +2013,22 @@ pub fn describe_network(report: &SettingsReport) -> String {
     lines.join("\n")
 }
 
+/// Where adb auto-connect stands, in words.
+pub fn describe_auto_connect(
+    state: dsa_host_core::adb_discovery::AutoConnectState,
+) -> &'static str {
+    use dsa_host_core::adb_discovery::AutoConnectState;
+    match state {
+        AutoConnectState::Off => "not watching the adb server",
+        AutoConnectState::WaitingForServer => "waiting for an adb server on this computer",
+        AutoConnectState::WaitingForAndroid => "waiting for Android to answer adb",
+        AutoConnectState::Attached => "adb lists DSA",
+        AutoConnectState::Detached => {
+            "you ran adb disconnect; DSA is attached again when the adb server restarts"
+        }
+    }
+}
+
 /// The address `adb connect` takes in developer mode.
 pub fn adb_address(settings: &dsa_host_core::settings::Settings) -> String {
     format!("127.0.0.1:{}", settings.adb_port)
@@ -1780,6 +2062,93 @@ fn reset_data(invocation: &Invocation, client: &mut HostApiClient) -> Result<Str
     } else {
         "Android's data was reset; the next start boots Android as it was first installed"
             .to_string()
+    })
+}
+
+/// What moving to an older Android major erases, as the command line and the settings app
+/// say it.
+pub const OLDER_ANDROID_WARNING: &str = "Android cannot read data a newer version wrote, so \
+     moving to an older Android version erases the Android data of every user of this \
+     computer: every app they installed, the accounts they signed in to and the data of every \
+     app. Each user's Android starts as it was first installed. DSA's settings stay. This \
+     cannot be undone.";
+
+/// The version report as JSON, for `dsa android version --json` and the settings app.
+pub fn android_versions_json(report: &VersionReport) -> Value {
+    json!({
+        "version": report.version,
+        "android_major": report.android_major,
+        "build": report.build,
+        "build_id": report.build_id,
+        "security_patch": report.security_patch,
+        "channel": match report.channel {
+            Channel::Latest => "latest".to_string(),
+            Channel::Major(major) => major.to_string(),
+        },
+        "supported_majors": report.supported_majors,
+        "target_major": report.target_major,
+        "on_trial": report.on_trial,
+        "notice": report.notice,
+    })
+}
+
+/// The version report in words.
+pub fn android_versions_text(report: &VersionReport) -> String {
+    let mut lines = vec![format!(
+        "Android {} ({}), build {}, security patch {}",
+        report.android_major,
+        report.version,
+        report.build_id.as_deref().unwrap_or("unknown"),
+        report.security_patch.as_deref().unwrap_or("unknown"),
+    )];
+    lines.push(match report.channel {
+        Channel::Latest => format!(
+            "Follows: the newest supported version (Android {})",
+            report.target_major
+        ),
+        Channel::Major(major) => format!("Follows: Android {major}"),
+    });
+    let supported: Vec<String> = report
+        .supported_majors
+        .iter()
+        .map(|m| m.to_string())
+        .collect();
+    lines.push(format!("Supported: Android {}", supported.join(", ")));
+    if report.target_major != report.android_major {
+        lines.push(format!(
+            "Moving to Android {}: it is used once its image is downloaded and Android starts \
+             again",
+            report.target_major
+        ));
+    } else if report.on_trial {
+        lines.push("The image is new and is kept once Android has started from it".into());
+    }
+    if let Some(notice) = &report.notice {
+        lines.push(format!("Update: {notice}"));
+    }
+    lines.join("\n")
+}
+
+/// `dsa android version` and `dsa android use`.
+fn android_version(invocation: &Invocation, client: &mut HostApiClient) -> Result<String, String> {
+    let report = match (invocation.command, invocation.android) {
+        (Command::AndroidUse, Some(channel)) => {
+            match client.use_android_version(channel, invocation.erase_data) {
+                Err(why) if why.data_would_be_lost() => {
+                    return Err(format!(
+                        "{OLDER_ANDROID_WARNING}\nRun dsa android use {} --erase-data to move.",
+                        channel.to_wire()
+                    ))
+                }
+                other => other.map_err(|e| e.to_string())?,
+            }
+        }
+        _ => client.android_versions().map_err(|e| e.to_string())?,
+    };
+    Ok(if invocation.json {
+        android_versions_json(&report).to_string()
+    } else {
+        android_versions_text(&report)
     })
 }
 
@@ -1838,6 +2207,11 @@ pub fn describe_settings(report: &SettingsReport) -> String {
         } else {
             format!("Developer mode: off (adb port {})", settings.adb_port)
         },
+        format!(
+            "adb auto-connect: {} ({})",
+            on_off(settings.adb_auto_connect),
+            describe_auto_connect(report.adb_auto_connect_state)
+        ),
         format!(
             "ARM translation: {} (dsa arm-translation status says whether a package is installed)",
             on_off(settings.arm_translation)
@@ -2068,6 +2442,7 @@ fn settings(invocation: &Invocation, client: &mut HostApiClient) -> Result<Strin
             Change::MemoryLimit(mb) => wanted.memory_limit_mb = *mb,
             Change::DeveloperMode(on) => wanted.developer_mode = *on,
             Change::AdbPort(port) => wanted.adb_port = *port,
+            Change::AdbAutoConnect(on) => wanted.adb_auto_connect = *on,
             Change::ArmTranslation(on) => wanted.arm_translation = *on,
             Change::ShowDevice | Change::Device(..) | Change::ResetDevice(_) => {
                 unreachable!("answered above")
@@ -2119,19 +2494,61 @@ pub fn describe_tasks(list: &TaskList) -> String {
     lines.join("\n")
 }
 
+/// What a start failure's first line means for the user, when it holds an error code or says
+/// that the host cannot run VMs. Other reasons are already plain and stay as they are. The codes
+/// arrive as text, so this names no host API.
+fn plain_start_failure(first_line: &str) -> Option<&'static str> {
+    const VIRTUALIZATION: &str = "virtualization is off or Hyper-V is missing; \
+        turn on Virtual Machine Platform, then restart the PC";
+    const CONFIGURATION: &str = "the host refused the settings for Android's virtual machine; \
+        update or reinstall DSA";
+    const MEMORY: &str = "there is not enough memory to start Android; \
+        close other apps and try again";
+    const DISK: &str = "a disk problem kept Android from starting; \
+        free up space or check the drive, then try again";
+    const GENERAL: &str = "Android could not start; \
+        try again, and check the details if it keeps failing";
+    if first_line.contains("Host Compute System is not available") {
+        return Some(VIRTUALIZATION);
+    }
+    let codes: Vec<String> = first_line
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|token| {
+            token.len() == 10
+                && token.starts_with("0x")
+                && token[2..].chars().all(|c| c.is_ascii_hexdigit())
+        })
+        .map(str::to_ascii_lowercase)
+        .collect();
+    let known = codes.iter().find_map(|code| match code.as_str() {
+        "0x80370102" | "0xc0351000" => Some(VIRTUALIZATION),
+        "0x80070057" | "0x8037010d" => Some(CONFIGURATION),
+        "0x8007000e" | "0x80070008" | "0x800705aa" | "0x800705af" => Some(MEMORY),
+        "0x80070070" | "0x80070027" | "0x80070017" | "0x8007045d" => Some(DISK),
+        _ => None,
+    });
+    known.or_else(|| (!codes.is_empty()).then_some(GENERAL))
+}
+
 /// A line describing `status`, and one more for each piece of news about an update.
 ///
 /// A reason's first line goes in the status line. Any further lines (the end of the guest's
-/// console, after a failed start) follow it as they are, so they can be copied whole.
+/// console, after a failed start) follow it as they are, so they can be copied whole. A failure
+/// that carries an error code reads as a plain sentence, with the raw first line on a
+/// `details:` line below it, because that line can hold a whole HCS document.
 pub fn describe(status: &Status) -> String {
     let mut line = format!("Android: {}", status.state);
     if let Some(reason) = &status.last_reason {
         let mut lines = reason.lines();
-        let _ = write!(
-            line,
-            " (last stopped: {})",
-            lines.next().unwrap_or_default()
-        );
+        let first = lines.next().unwrap_or_default();
+        match plain_start_failure(first) {
+            Some(sentence) => {
+                let _ = write!(line, " (last stopped: {sentence})\ndetails: {first}");
+            }
+            None => {
+                let _ = write!(line, " (last stopped: {first})");
+            }
+        }
         for detail in lines {
             let _ = write!(line, "\n{detail}");
         }
@@ -2256,6 +2673,67 @@ pub fn describe_refusal(name: &str, outcome: &InstallOutcome) -> String {
     )
 }
 
+/// The line `dsa install` and `dsa apk-info` print for a file refused before Android sees it:
+/// a bundle's reason after its stable code, as for a refusal by Android, and a file that is no
+/// APK or bundle with its reason alone.
+pub fn describe_file_refusal(path: &std::path::Path, refusal: &Refusal) -> String {
+    match refusal {
+        Refusal::NotAnApp(why) => why.clone(),
+        _ => {
+            let name = path.file_name().unwrap_or_default().to_string_lossy();
+            format!("not installed ({}): {name}: {refusal}", refusal.code())
+        }
+    }
+}
+
+/// What this computer's Android takes from a split-APK bundle: the ABIs the running Android
+/// lists, or without it those of this computer, with arm64-v8a after x86_64 while ARM
+/// translation is installed and on; the density apps draw at on the main screen; and the
+/// display languages of this computer, which Android follows.
+fn bundle_device(client: Option<&mut HostApiClient>) -> Device {
+    let translation = client.and_then(|client| client.arm_translation().ok());
+    Device::of_host(
+        translation.as_ref(),
+        cfg!(target_arch = "aarch64"),
+        host_density(),
+        &host_locales(),
+    )
+}
+
+#[cfg(windows)]
+fn host_density() -> u32 {
+    dsa_host_windows::monitors::system_density()
+}
+
+/// Apps draw at the guest display's density where the screen's is not known here.
+#[cfg(not(windows))]
+fn host_density() -> u32 {
+    dsa_host_core::compositor::window_sizing::BASE_DENSITY
+}
+
+#[cfg(windows)]
+fn host_locales() -> Vec<String> {
+    dsa_host_windows::compositor::system_settings::read().locales
+}
+
+/// The languages of the environment: `LANGUAGE`'s list, then `LC_ALL`, `LC_MESSAGES` and
+/// `LANG`.
+#[cfg(not(windows))]
+fn host_locales() -> Vec<String> {
+    let mut locales: Vec<String> = Vec::new();
+    if let Ok(list) = std::env::var("LANGUAGE") {
+        locales.extend(list.split(':').filter(|l| !l.is_empty()).map(String::from));
+    }
+    for name in ["LC_ALL", "LC_MESSAGES", "LANG"] {
+        if let Ok(value) = std::env::var(name) {
+            if !value.is_empty() {
+                locales.push(value);
+            }
+        }
+    }
+    locales
+}
+
 /// `dsa install`: opens the APK, makes sure Android runs (and, on Windows, the window manager
 /// that shows the app once it is opened), then streams the APK to the service.
 fn install(
@@ -2268,7 +2746,7 @@ fn install(
         .as_deref()
         .unwrap_or(std::path::Path::new(""));
     // A file that cannot be installed is refused before Android is started for it.
-    let mut apk = ApkFile::open(path)?;
+    let file = InstallFile::open(path).map_err(|refusal| describe_file_refusal(path, &refusal))?;
     let step = |line: &str| {
         if invocation.progress {
             use std::io::Write as _;
@@ -2292,20 +2770,48 @@ fn install(
     client
         .ensure_running(invocation.timeout, Duration::from_millis(250), |_| {})
         .map_err(|e| format!("Android did not start: {e}"))?;
-    drop(client);
-    let name = apk.name.clone();
-    let size = apk.size;
-    step("stage sending");
-    let mut sending = Progress {
-        inner: apk.reader(),
-        sent: 0,
-        size,
-        shown: None,
-        step: &step,
+    let (name, outcome) = match file {
+        InstallFile::Apk(mut apk) => {
+            drop(client);
+            let name = apk.name.clone();
+            let size = apk.size;
+            let libraries = apk.native_libraries.clone();
+            step("stage sending");
+            let mut sending = Progress {
+                inner: apk.reader(),
+                sent: 0,
+                size,
+                shown: None,
+                step: &step,
+            };
+            let outcome = connect(connector, None, false, Duration::from_secs(10))?
+                .install_apk_with_libraries(&name, size, &libraries, &mut sending)
+                .map_err(|e| format!("{name} was not installed: {e}"))?;
+            (name, outcome)
+        }
+        InstallFile::Bundle(bundle) => {
+            // Android runs now, so what it says of its ABIs decides the splits.
+            let device = bundle_device(Some(&mut client));
+            drop(client);
+            let selection = bundle.select(&device);
+            let parts = bundle.parts(&selection);
+            let libraries = bundle.libraries(&selection);
+            let name = bundle.name.clone();
+            step("stage sending");
+            let mut content = bundle.content(&selection);
+            let mut sending = Progress {
+                inner: &mut content,
+                sent: 0,
+                size: bundle.total_size(&selection),
+                shown: None,
+                step: &step,
+            };
+            let outcome = connect(connector, None, false, Duration::from_secs(10))?
+                .install_parts(&name, &parts, &libraries, &mut sending)
+                .map_err(|e| format!("{name} was not installed: {e}"))?;
+            (name, outcome)
+        }
     };
-    let outcome = connect(connector, None, false, Duration::from_secs(10))?
-        .install_apk(&name, size, &mut sending)
-        .map_err(|e| format!("{name} was not installed: {e}"))?;
     if !outcome.installed() {
         return Err(describe_refusal(&name, &outcome));
     }
@@ -2323,13 +2829,23 @@ fn install(
 /// when it is not running, and sends the package's image.
 fn install_arm_translation(
     invocation: &Invocation,
-    mut client: HostApiClient,
+    client: HostApiClient,
     connector: &mut dyn Connector,
 ) -> Result<String, String> {
     let folder = invocation
         .file
         .as_deref()
         .unwrap_or(std::path::Path::new(""));
+    install_package(invocation, client, connector, folder)
+}
+
+/// Installs the translation package in `folder`, starting Android when it is not running.
+fn install_package(
+    invocation: &Invocation,
+    mut client: HostApiClient,
+    connector: &mut dyn Connector,
+    folder: &std::path::Path,
+) -> Result<String, String> {
     let opened = arm_translation::open_package(folder)?;
     let sha256 = arm_translation::file_sha256(&opened.image)?;
     #[cfg(windows)]
@@ -2352,18 +2868,193 @@ fn install_arm_translation(
     Ok(show_arm_translation(invocation, &status, Some(&done)))
 }
 
-/// Where ARM translation stands as one JSON object.
-pub fn arm_translation_json(status: &ArmTranslationStatus) -> Value {
+/// Whether Google's ARM translator can be fetched here: not on an ARM64 computer, whose
+/// Android runs ARM apps without a translator.
+pub const GOOGLE_FETCH_AVAILABLE: bool = cfg!(not(target_arch = "aarch64"));
+
+/// What `dsa arm-translation fetch google` says before it downloads, and asks to agree to.
+pub fn google_notice(image: &google::SdkImage) -> String {
+    format!(
+        "DSA downloads Google's ARM translator from Google's SDK repository:\n  {} ({} MiB, \
+         {})\nIt is Google's software, offered under the Android SDK License: {}\nDSA takes \
+         only the translator's files from it, installs them as a translation package, and \
+         deletes the rest. DSA does not ship or pass on Google's translator.\nA package made \
+         from another translator, such as Digitalis, works the same way: dsa arm-translation \
+         install <folder>.",
+        image.url,
+        image.size >> 20,
+        image.path,
+        google::TERMS
+    )
+}
+
+/// Starts Android when it is not running, as both `dsa gapps install` and `remove` need it.
+fn start_for_gapps(invocation: &Invocation, client: &mut HostApiClient) -> Result<(), String> {
+    #[cfg(windows)]
+    if invocation.endpoint.is_none() {
+        ensure_window_manager()?;
+    }
+    client
+        .ensure_running(invocation.timeout, Duration::from_millis(250), |_| {})
+        .map_err(|e| format!("Android did not start: {e}"))
+}
+
+/// `dsa gapps install`: starts Android when it is not running, then has the service download,
+/// check and send Google Play, printing each step with `--progress`.
+fn install_gapps(
+    invocation: &Invocation,
+    mut client: HostApiClient,
+    connector: &mut dyn Connector,
+) -> Result<String, String> {
+    start_for_gapps(invocation, &mut client)?;
+    drop(client);
+    let mut shown: Option<(gapps::Stage, u64)> = None;
+    let mut step = |news: gapps::Progress| {
+        if !invocation.progress {
+            return;
+        }
+        // One line per step, and one per tenth of the bytes of a step that counts them.
+        let tenth = (news.total / 10).max(1);
+        let new_step = shown.is_none_or(|(stage, _)| stage != news.stage);
+        let new_tenth = shown.is_some_and(|(_, done)| news.done / tenth > done / tenth);
+        if !new_step && !new_tenth {
+            return;
+        }
+        shown = Some((news.stage, news.done));
+        let name = match news.stage {
+            gapps::Stage::Listing => "listing",
+            gapps::Stage::Downloading => "downloading",
+            gapps::Stage::Building => "building",
+            gapps::Stage::Sending => "sending",
+        };
+        use std::io::Write as _;
+        let mut out = std::io::stdout().lock();
+        let _ = if news.total > 0 {
+            writeln!(out, "stage {name} {} {}", news.done, news.total)
+        } else {
+            writeln!(out, "stage {name}")
+        };
+        let _ = out.flush();
+    };
+    let status = connect(connector, None, false, Duration::from_secs(10))?
+        .install_gapps(&mut step)
+        .map_err(|e| format!("Google Play was not installed: {e}"))?;
+    let done = match &status.package {
+        Some(package) => format!(
+            "Installed LiteGapps {} {} for Android {} ({})",
+            package.variant, package.version, package.android_version, package.arch
+        ),
+        None => "Installed Google Play".to_string(),
+    };
+    Ok(show_gapps(invocation, &status, Some(&done)))
+}
+
+/// `dsa gapps remove`: starts Android when it is not running, so the image leaves its disk too.
+fn remove_gapps(invocation: &Invocation, mut client: HostApiClient) -> Result<String, String> {
+    start_for_gapps(invocation, &mut client)?;
+    let status = client.remove_gapps().map_err(|e| e.to_string())?;
+    Ok(show_gapps(invocation, &status, Some("Removed Google Play")))
+}
+
+/// Where Google Play stands as one JSON object.
+pub fn gapps_json(status: &GappsStatus) -> Value {
     json!({
         "package": status.package.as_ref().map(|package| json!({
+            "variant": package.variant,
+            "version": package.version,
+            "android_version": package.android_version,
+            "sdk": package.sdk,
+            "arch": package.arch,
+            "file": package.file,
+            "source": package.source,
+            "md5": package.md5,
+        })),
+        "installed": status.package.is_some(),
+        "android": status.guest.as_ref().map(|guest| json!({
+            "installed": guest.installed,
+            "active": guest.active,
+            "sdk": guest.sdk,
+            "abi": guest.abi,
+            "abilist": guest.abilist,
+            "device_id": guest.device_id,
+        })),
+        "restart_needed": status.restart_needed,
+        "terms_url": gapps::TERMS_URL,
+        "registration_url": gapps::REGISTRATION_URL,
+    })
+}
+
+/// Where Google Play stands, one fact per line, after `done` when an action was taken.
+pub fn describe_gapps(status: &GappsStatus, done: Option<&str>) -> String {
+    let mut lines: Vec<String> = done.map(str::to_string).into_iter().collect();
+    lines.push(match &status.package {
+        None => "Google Play: not installed (dsa gapps install downloads it)".to_string(),
+        Some(package) => format!(
+            "Google Play: LiteGapps {} {} for Android {} ({}), from {}",
+            package.variant, package.version, package.android_version, package.arch, package.source
+        ),
+    });
+    match &status.guest {
+        Some(guest) => {
+            lines.push(format!(
+                "Android: {}",
+                if guest.active {
+                    "runs with Google's apps in this boot"
+                } else {
+                    "runs without Google's apps in this boot"
+                }
+            ));
+            if !guest.device_id.is_empty() {
+                lines.push(format!("Android ID for Google: {}", guest.device_id));
+            }
+        }
+        None => lines.push("Android is not running".to_string()),
+    }
+    if status.restart_needed {
+        lines.push("Restart Android to apply this (dsa stop --wait, then dsa start)".to_string());
+    }
+    if status.package.is_some() {
+        lines.push(format!(
+            "Google's apps follow Google's terms ({}); DSA does not distribute them. Google lets \
+             an uncertified device sign in once it is registered at {}",
+            gapps::TERMS_URL,
+            gapps::REGISTRATION_URL
+        ));
+    }
+    lines.join("\n")
+}
+
+fn show_gapps(invocation: &Invocation, status: &GappsStatus, done: Option<&str>) -> String {
+    if invocation.json {
+        gapps_json(status).to_string()
+    } else {
+        describe_gapps(status, done)
+    }
+}
+
+/// Where ARM translation stands as one JSON object.
+pub fn arm_translation_json(status: &ArmTranslationStatus) -> Value {
+    let package_json = |package: &arm_translation::Package| {
+        json!({
             "name": package.name,
             "version": package.version,
             "library": package.library,
             "abis": package.abis,
             "license": package.license,
+        })
+    };
+    json!({
+        "google_fetch_available": GOOGLE_FETCH_AVAILABLE,
+        "package": status.package.as_ref().map(package_json),
+        "default": status.default.as_ref().map(package_json),
+        "translator": status.translator.as_ref().map(|translator| json!({
+            "source": translator.source.as_str(),
+            "name": translator.package.name,
+            "version": translator.package.version,
+            "license": translator.package.license,
         })),
         "enabled": status.enabled,
-        "supported": status.package.is_some() && status.enabled,
+        "supported": status.translator.is_some(),
         "android": status.guest.as_ref().map(|guest| json!({
             "installed": guest.installed,
             "active": guest.active,
@@ -2375,25 +3066,37 @@ pub fn arm_translation_json(status: &ArmTranslationStatus) -> Value {
 
 /// Where ARM translation stands, one fact per line, after `done` when an action was taken.
 pub fn describe_arm_translation(status: &ArmTranslationStatus, done: Option<&str>) -> String {
+    use arm_translation::Source;
     let mut lines: Vec<String> = done.map(str::to_string).into_iter().collect();
-    lines.push(match (&status.package, status.enabled) {
-        (None, _) => "ARM apps: not supported (no translation package is installed)".to_string(),
-        (Some(package), true) => format!(
-            "ARM apps: supported by {} {} ({})",
-            package.name,
-            package.version,
-            if package.license.is_empty() {
+    let off = status.package.as_ref().or(status.default.as_ref());
+    lines.push(match (&status.translator, off) {
+        (Some(translator), _) => format!(
+            "ARM apps: supported by {} {} ({}), {}",
+            translator.package.name,
+            translator.package.version,
+            if translator.package.license.is_empty() {
                 "licence not given"
             } else {
-                &package.license
+                &translator.package.license
+            },
+            match translator.source {
+                Source::Default => "this Android's default translator",
+                Source::User => "the package you installed",
+                Source::Google => "Google's translator, which you installed",
             }
         ),
-        (Some(package), false) => format!(
-            "ARM apps: not supported ({} {} is installed but turned off; dsa settings set \
-             arm-translation on)",
+        (None, Some(package)) if !status.enabled => format!(
+            "ARM apps: not supported ({} {} is turned off; dsa settings set arm-translation on)",
             package.name, package.version
         ),
+        (None, _) => "ARM apps: not supported (no translation package is installed)".to_string(),
     });
+    if let (Some(default), Some(_)) = (&status.default, &status.package) {
+        lines.push(format!(
+            "Default translator: {} {} (dsa arm-translation use-default goes back to it)",
+            default.name, default.version
+        ));
+    }
     match &status.guest {
         Some(guest) => lines.push(format!(
             "Android installs apps for: {}{}",
@@ -2414,6 +3117,186 @@ pub fn describe_arm_translation(status: &ArmTranslationStatus, done: Option<&str
         lines.push("Restart Android to apply this (dsa stop --wait, then dsa start)".to_string());
     }
     lines.join("\n")
+}
+
+/// The Android major version this computer's Android runs: what the service says of its image,
+/// or the newest this build supports when it does not say.
+fn android_major(client: &mut HostApiClient) -> u32 {
+    if let Ok(report) = client.android_versions() {
+        if report.android_major > 0 {
+            return report.android_major;
+        }
+    }
+    let settings = client.settings().ok();
+    let named = settings.and_then(|report| report.facts.android_version);
+    named
+        .as_deref()
+        .and_then(dsa_host_core::update::versions::major_of_version)
+        .unwrap_or_else(dsa_host_core::update::versions::newest_major)
+}
+
+/// Downloads through curl, which every Linux distribution has, so the command line needs no
+/// TLS library of its own. A path or `file:` URL is read directly, for a mirror on disk.
+#[cfg(all(unix, not(target_os = "macos")))]
+struct CurlFetch;
+
+#[cfg(all(unix, not(target_os = "macos")))]
+impl Fetch for CurlFetch {
+    fn fetch(&self, url: &str, out: &mut dyn std::io::Write) -> Result<u64, String> {
+        use std::io::Read;
+        use std::process::Stdio;
+        if !url.starts_with("https://") {
+            return dsa_host_core::update::store::FileFetch.fetch(url, out);
+        }
+        let mut child = std::process::Command::new("curl")
+            .args(["--fail", "--silent", "--show-error", "--location"])
+            .args(["--proto", "=https", "--proto-redir", "=https"])
+            .args(["--retry", "3", "--connect-timeout", "30", "--", url])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("curl, which downloads here, cannot run: {e}"))?;
+        let mut body = child.stdout.take().ok_or("curl gave no output")?;
+        let copied = std::io::copy(&mut body, out);
+        let mut error = String::new();
+        if let Some(mut stderr) = child.stderr.take() {
+            let _ = stderr.read_to_string(&mut error);
+        }
+        let status = child.wait();
+        let status = status.map_err(|e| format!("curl did not finish: {e}"))?;
+        if !status.success() {
+            return Err(format!("downloading {url}: {}", error.trim()));
+        }
+        copied.map_err(|e| format!("downloading {url}: {e}"))
+    }
+}
+
+/// What downloads from the web here: the platform's own HTTPS.
+fn web_fetch() -> Box<dyn Fetch> {
+    #[cfg(windows)]
+    {
+        Box::new(dsa_host_windows::https::UrlFetch::default())
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Box::new(dsa_host_macos::fetch::CurlFetch)
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        Box::new(CurlFetch)
+    }
+    #[cfg(not(any(windows, unix)))]
+    {
+        Box::new(dsa_host_core::update::store::FileFetch)
+    }
+}
+
+/// Asks on the terminal whether to download, after `notice`. No answer is no.
+fn agree(notice: &str) -> bool {
+    eprintln!("{notice}");
+    eprint!("Download it and accept Google's terms? [y/N] ");
+    let mut answer = String::new();
+    if std::io::stdin().read_line(&mut answer).is_err() {
+        return false;
+    }
+    matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes")
+}
+
+/// `dsa arm-translation fetch google`: finds the image for this computer's Android in Google's
+/// list, asks (unless `--yes`), makes the package in a folder of its own and installs it. The
+/// folder, with the download, is removed whatever happens.
+fn fetch_google(
+    invocation: &Invocation,
+    mut client: HostApiClient,
+    connector: &mut dyn Connector,
+) -> Result<String, String> {
+    if !GOOGLE_FETCH_AVAILABLE {
+        return Err(
+            "Android on this computer is ARM64 and runs ARM apps without a translator, so \
+             there is no translator to fetch"
+                .into(),
+        );
+    }
+    let major = android_major(&mut client);
+    let fetch = web_fetch();
+    let repository = std::env::var("DSA_GOOGLE_REPOSITORY");
+    let repository = repository.unwrap_or_else(|_| google::REPOSITORY.to_string());
+    let image = google::find_image(&*fetch, &repository, major)?;
+    if !invocation.yes && !agree(&google_notice(&image)) {
+        return Err(
+            "Google's ARM translator was not downloaded, and nothing was changed. dsa \
+             arm-translation fetch google --yes agrees to Google's terms without asking"
+                .into(),
+        );
+    }
+    let id = std::process::id();
+    let base = std::env::temp_dir().join(format!("dsa-google-arm-translator-{id}"));
+    let _ = std::fs::remove_dir_all(&base);
+    let package = base.join("package");
+    let quiet = invocation.json;
+    let mut shown = None;
+    let mut progress = |step: google::Progress| {
+        if quiet {
+            return;
+        }
+        match step {
+            google::Progress::Downloading { done, total } => {
+                let percent = (done * 100).checked_div(total).unwrap_or(100);
+                if shown != Some(percent / 5) {
+                    shown = Some(percent / 5);
+                    eprint!("\rDownloading: {} of {} MiB", done >> 20, total >> 20);
+                }
+            }
+            google::Progress::Extracting => eprintln!("\nTaking out the system partition"),
+            google::Progress::Building => eprintln!("Taking out the translator's files"),
+        }
+    };
+    // The download takes minutes; the connection is opened again for the install.
+    drop(client);
+    let work = base.join("download");
+    let made = google::make_package(&*fetch, &image, &work, &package, &mut progress);
+    let installed = made.and_then(|_| {
+        let client = connect(connector, None, false, Duration::from_secs(10))?;
+        install_package(invocation, client, connector, &package)
+    });
+    let _ = std::fs::remove_dir_all(&base);
+    installed
+}
+
+/// `dsa arm-translation use-default`: removes the package installed in place of the image's
+/// default translator, so Android uses the default one from its next start. Refused where
+/// there is no default translator, and changes nothing where it is already the one chosen.
+fn use_default_translator(
+    invocation: &Invocation,
+    mut client: HostApiClient,
+) -> Result<String, String> {
+    let status = client.arm_translation().map_err(|e| e.to_string())?;
+    let Some(default) = status.default.clone() else {
+        return Err(if GOOGLE_FETCH_AVAILABLE {
+            "this Android's image has no default ARM translator; dsa arm-translation install \
+             <folder> or fetch google installs one"
+                .into()
+        } else {
+            "Android on this computer is ARM64 and runs ARM apps without a translator, so it \
+             has no default translator"
+                .into()
+        });
+    };
+    if status.package.is_none() {
+        let done = format!(
+            "Android already uses its default translator, {} {}",
+            default.name, default.version
+        );
+        return Ok(show_arm_translation(invocation, &status, Some(&done)));
+    }
+    let status = client.remove_arm_translation().map_err(|e| e.to_string())?;
+    let done = format!(
+        "Android uses its default translator, {} {}, again; the package installed in its place \
+         is removed",
+        default.name, default.version
+    );
+    Ok(show_arm_translation(invocation, &status, Some(&done)))
 }
 
 fn show_arm_translation(
@@ -2463,13 +3346,32 @@ pub fn apk_info_json(
     installed: Option<&InstalledPackage>,
     kind: Option<InstallKind>,
 ) -> Value {
+    let colour = |argb: Option<u32>| argb.map(|argb| format!("#{argb:08X}"));
+    let vector = |vector: &Vector| {
+        json!({
+            "kind": "vector",
+            "width": vector.width,
+            "height": vector.height,
+            "inset": vector.inset,
+            "paths": vector.paths.iter().map(|path| json!({
+                "data": path.data,
+                "fill": colour(path.fill),
+                "stroke": colour(path.stroke),
+                "stroke_width": path.stroke_width,
+                "even_odd": path.even_odd,
+                "transform": path.transform,
+            })).collect::<Vec<_>>(),
+        })
+    };
     let layer = |layer: &Layer| match layer {
         Layer::Image(png) => json!({ "kind": "image", "png": base64(png) }),
         Layer::Color(argb) => json!({ "kind": "color", "color": format!("#{argb:08X}") }),
+        Layer::Vector(v) => vector(v),
         Layer::Unknown => json!({ "kind": "unknown" }),
     };
     let icon = match &info.icon {
         Some(Icon::Image(png)) => json!({ "kind": "image", "png": base64(png) }),
+        Some(Icon::Vector(v)) => vector(v),
         Some(Icon::Adaptive {
             background,
             foreground,
@@ -2600,11 +3502,15 @@ fn apk_info(invocation: &Invocation, connector: &mut dyn Connector) -> Result<St
         .file
         .as_deref()
         .unwrap_or(std::path::Path::new(""));
-    let info = ApkInfo::read(path)?;
+    let (info, bundle) = read_install_file(path)?;
     let mut android = "unreachable";
     let mut installed = None;
     let mut kind = None;
+    let mut device = None;
     if let Ok(mut client) = connect(connector, None, false, Duration::from_secs(5)) {
+        if bundle.is_some() {
+            device = Some(bundle_device(Some(&mut client)));
+        }
         android = "stopped";
         if client
             .status()
@@ -2621,11 +3527,101 @@ fn apk_info(invocation: &Invocation, connector: &mut dyn Connector) -> Result<St
             }
         }
     }
+    let chosen = bundle.as_ref().map(|bundle| {
+        let device = device.unwrap_or_else(|| bundle_device(None));
+        (bundle, bundle.select(&device))
+    });
+    let chosen = chosen
+        .as_ref()
+        .map(|(bundle, selection)| (*bundle, selection));
     Ok(if invocation.json {
-        apk_info_json(&info, android, installed.as_ref(), kind).to_string()
+        let mut json = apk_info_json(&info, android, installed.as_ref(), kind);
+        add_install_files(&mut json, &info, chosen);
+        json.to_string()
     } else {
-        describe_apk(&info, installed.as_ref(), kind)
+        let mut text = describe_apk(&info, installed.as_ref(), kind);
+        if let Some((bundle, selection)) = chosen {
+            let _ = write!(text, "\n{}", describe_bundle(bundle, selection));
+        }
+        text
     })
+}
+
+/// What `dsa apk-info` reads of the file at `path`: what the APK, or a bundle's base APK, says
+/// of the app, and the bundle. A file named `.apk` is read as an APK; any other as what its
+/// content says.
+fn read_install_file(path: &std::path::Path) -> Result<(ApkInfo, Option<Bundle>), String> {
+    let named_apk = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| dsa_host_core::apk::check_name(name).is_ok());
+    if named_apk {
+        return Ok((ApkInfo::read(path)?, None));
+    }
+    match InstallFile::open(path).map_err(|refusal| describe_file_refusal(path, &refusal))? {
+        InstallFile::Apk(_) => Ok((ApkInfo::read(path)?, None)),
+        InstallFile::Bundle(bundle) => Ok((bundle.base.clone(), Some(*bundle))),
+    }
+}
+
+/// Adds to `dsa apk-info`'s JSON what installing the file sends: the APKs, the expansion files
+/// and their size, of the bundle and the files `selection` takes, or of the one APK.
+pub fn add_install_files(json: &mut Value, info: &ApkInfo, chosen: Option<(&Bundle, &Selection)>) {
+    let fields = match chosen {
+        None => json!({
+            "format": "apk",
+            "apks": ["base.apk"],
+            "split_count": 0,
+            "obbs": [],
+            "total_size": info.size,
+            "install_abi": Value::Null,
+        }),
+        Some((bundle, selection)) => {
+            let parts = bundle.parts(selection);
+            let apks: Vec<&str> = parts
+                .iter()
+                .filter(|part| !part.obb)
+                .map(|part| part.name.as_str())
+                .collect();
+            let obbs: Vec<&str> = parts
+                .iter()
+                .filter(|part| part.obb)
+                .map(|part| part.name.as_str())
+                .collect();
+            json!({
+                "format": bundle.format.code(),
+                "split_count": apks.len().saturating_sub(1),
+                "apks": apks,
+                "obbs": obbs,
+                "total_size": bundle.total_size(selection),
+                "install_abi": selection.abi,
+            })
+        }
+    };
+    if let (Value::Object(json), Value::Object(fields)) = (json, fields) {
+        json.extend(fields);
+    }
+}
+
+/// What `dsa apk-info` says for a person of the files of a bundle an install sends.
+pub fn describe_bundle(bundle: &Bundle, selection: &Selection) -> String {
+    let parts = bundle.parts(selection);
+    let apks = parts.iter().filter(|part| !part.obb).count();
+    let obbs = parts.len() - apks;
+    let mut text = format!(
+        "a split-APK bundle (.{}): installs {apks} of its {} APKs (the base and {} splits)",
+        bundle.format.code(),
+        bundle.apks.len(),
+        apks.saturating_sub(1)
+    );
+    if obbs > 0 {
+        let _ = write!(text, " and {obbs} expansion files");
+    }
+    let _ = write!(text, ", {} bytes in all", bundle.total_size(selection));
+    if let Some(abi) = &selection.abi {
+        let _ = write!(text, ", for {abi}");
+    }
+    text
 }
 
 /// How long `dsa open` and `dsa share` wait for Android to start when it is not running:
@@ -2963,11 +3959,28 @@ pub fn run_with_starter(
         Command::ArmTranslationInstall => {
             return install_arm_translation(invocation, client, connector);
         }
+        Command::ArmTranslationFetchGoogle => {
+            return fetch_google(invocation, client, connector);
+        }
         Command::ArmTranslationRemove => {
             let status = client.remove_arm_translation().map_err(|e| e.to_string())?;
-            let done = "Removed the ARM translation package";
-            return Ok(show_arm_translation(invocation, &status, Some(done)));
+            let done = match &status.default {
+                Some(default) => format!(
+                    "Removed the ARM translation package; Android uses its default translator, \
+                     {} {}, again",
+                    default.name, default.version
+                ),
+                None => "Removed the ARM translation package".to_string(),
+            };
+            return Ok(show_arm_translation(invocation, &status, Some(&done)));
         }
+        Command::ArmTranslationUseDefault => return use_default_translator(invocation, client),
+        Command::GappsStatus => {
+            let status = client.gapps().map_err(|e| e.to_string())?;
+            return Ok(show_gapps(invocation, &status, None));
+        }
+        Command::GappsInstall => return install_gapps(invocation, client, connector),
+        Command::GappsRemove => return remove_gapps(invocation, client),
         Command::Widgets => return widgets(invocation, client, connector),
         Command::Apps => return apps(invocation, client, connector),
         Command::Background => return background(invocation, client),
@@ -2990,6 +4003,9 @@ pub fn run_with_starter(
             });
         }
         Command::ResetData => return reset_data(invocation, &mut client),
+        Command::AndroidVersion | Command::AndroidUse => {
+            return android_version(invocation, &mut client)
+        }
         Command::Memory => {
             let memory = client.memory().map_err(|e| e.to_string())?;
             return Ok(if invocation.json {

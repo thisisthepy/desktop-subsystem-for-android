@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="../../dsa/host/platform/windows/settings/DsaSettings/Assets/logo.png" width="112" height="112" alt="DSA 로고">
+<img src="../../.github/assets/dsa-logo.png" width="112" height="112" alt="DSA 로고">
 
 # Desktop Subsystem for Android™
 
@@ -63,7 +63,8 @@ DSA는 안드로이드를 전용 경량 VM에서 실행하고, 안드로이드 �
   호스트로 돌아갑니다. 안드로이드 동결은 선택 사항이며 기본값은 꺼짐입니다.
 - 안드로이드에 빌려주는 호스트 장치: GPU(gfxstream을 통한 Vulkan 원격, ANGLE을 통한 OpenGL
   ES), 오디오, 동영상 코덱, 마이크, 카메라, 위치, 센서, 전원.
-- x64에서 ARM 전용 앱을 위한, 따로 설치하는 ARM 번역 계층(선택).
+- x64에서 ARM 전용 앱을 위한 ARM 번역 계층. x64 이미지에 오픈 소스 번역기 Digitalis가 함께 들어 있고,
+  Google의 번역기나 다른 묶음으로 바꿀 수 있습니다.
 - 안드로이드 이미지와 DSA 자체의 서명된 자동 업데이트. 실패한 이미지는 마지막으로 정상이던
   이미지로 되돌립니다.
 - Windows 사용자마다 자기 안드로이드와 데이터 디스크를 자기 프로필에 가집니다.
@@ -71,7 +72,9 @@ DSA는 안드로이드를 전용 경량 VM에서 실행하고, 안드로이드 �
   업데이트, adb를 포함한 개발자 모드, 안드로이드의 실시간 로그와 진단.
 
 **함께 배포하지 않는 것:** Google Play 서비스와 앱 스토어(라이선스상 사용자가 선택할
-일입니다), 그리고 Microsoft의 WSA 바이너리.
+일입니다), 그리고 Microsoft의 WSA 바이너리. Google Play가 필요한 사용자는 DSA 설정이나
+`dsa gapps install`로 설치합니다. 그러면 DSA가 공개된 LiteGapps Core 패키지를 그 사용자의
+안드로이드에 맞게 내려받아 시스템 위에 얹습니다. Google 앱은 Google의 약관을 따릅니다.
 
 ## 지원 플랫폼
 
@@ -87,7 +90,9 @@ DSA는 안드로이드를 전용 경량 VM에서 실행하고, 안드로이드 �
 DSA는 가장 새로운 안드로이드 메이저 버전 두 개를 지원합니다. 지금은 Android 16과 Android
 17입니다. 한 버전은 두 단계 새로운 메이저가 나오면 지원이 끝나므로, Android 16은 Android 18이
 출시될 때까지 지원합니다. 이미지 업데이터는 사용자를 지원되는 버전으로 옮기며, 더 낮은
-메이저로는 옮기지 않습니다.
+메이저로는 스스로 옮기지 않습니다. 지원되는 두 버전 가운데 하나를 설정 앱이나
+`dsa android use`로 고를 수 있습니다. 더 오래된 버전으로 옮기면 안드로이드 데이터가 지워집니다.
+안드로이드가 더 새 버전이 쓴 데이터를 읽지 못하기 때문입니다.
 
 <p align="center">
   <img src="../../.github/assets/android-support.svg" alt="DSA가 지원하는 안드로이드 버전의 타임라인: Android 16과 17은 2026년 10월 DSA 0.1.0부터, Android 18과 19는 2027년과 2028년 예정" width="860">
@@ -112,7 +117,7 @@ DSA는 가장 새로운 안드로이드 메이저 버전 두 개를 지원합니
 
 ```
 dsa status                          # 안드로이드 상태와 대기 중인 업데이트
-dsa install app.apk                 # APK 설치
+dsa install app.apk                 # APK나 분할 APK 묶음(.xapk, .apks, .apkm) 설치
 dsa apps list                       # 설치된 앱
 dsa launch com.android.settings     # 앱을 자기 창으로 열기
 dsa settings set clipboard off      # 설정 바꾸기(DSA 설정에도 같은 스위치가 있습니다)
@@ -122,6 +127,12 @@ dsa logs collect -o diag.zip        # 문제 보고에 필요한 모든 것을 z
 
 인자 없이 `dsa`를 실행하면 모든 명령이 나옵니다. 안드로이드 로그는 메모리에만 있고, 누군가
 읽는 동안에만 호스트로 흐릅니다. 문제를 보고할 때 `diag.zip`을 첨부해 주세요.
+
+## 사용 안내서
+
+설치, 앱과 창, APK, 파일, Android 버전, 설정, 메모리, 개발자 모드, 문제 해결, 제거를 차례대로
+설명하는 안내서가 [docs/guides/ko](../guides/ko/README.md)에 있습니다.
+[소개 페이지](../guides/intro/index.html#ko)는 처음 접하는 분께 프로젝트를 설명합니다.
 
 ## 아키텍처
 

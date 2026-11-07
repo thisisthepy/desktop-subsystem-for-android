@@ -31,6 +31,7 @@ pub mod control_type {
     pub const DATA_GRID: i32 = 50028;
     pub const DOCUMENT: i32 = 50030;
     pub const PANE: i32 = 50033;
+    pub const SEPARATOR: i32 = 50038;
 }
 
 /// The UI Automation control patterns a node can support.

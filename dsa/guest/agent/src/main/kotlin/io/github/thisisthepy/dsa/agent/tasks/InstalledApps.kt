@@ -19,6 +19,10 @@ class LauncherApp(
     val appBytes: Long = 0,
     val dataBytes: Long = 0,
     val cacheBytes: Long = 0,
+    /** The ABI the app's native code runs as (the package manager's primary CPU ABI); empty for none. */
+    val primaryAbi: String = "",
+    /** The native libraries of the app's APKs on the device, base and splits together: ABI to names. */
+    val nativeLibraries: Map<String, List<String>> = emptyMap(),
 ) {
     /** Whether the host would show [other] exactly as this. */
     fun sameAs(other: LauncherApp): Boolean =
@@ -32,7 +36,9 @@ class LauncherApp(
             systemApp == other.systemApp &&
             appBytes == other.appBytes &&
             dataBytes == other.dataBytes &&
-            cacheBytes == other.cacheBytes
+            cacheBytes == other.cacheBytes &&
+            primaryAbi == other.primaryAbi &&
+            nativeLibraries == other.nativeLibraries
 }
 
 /** The installed apps a launcher lists, and word of every change to them. */

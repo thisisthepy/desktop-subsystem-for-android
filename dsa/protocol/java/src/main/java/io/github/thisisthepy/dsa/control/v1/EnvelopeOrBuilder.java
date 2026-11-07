@@ -426,6 +426,83 @@ public interface EnvelopeOrBuilder extends
   io.github.thisisthepy.dsa.control.v1.ArmTranslationState getArmTranslationState();
 
   /**
+   * <code>.dsa.control.v1.GappsInstall gapps_install = 400;</code>
+   * @return Whether the gappsInstall field is set.
+   */
+  boolean hasGappsInstall();
+  /**
+   * <code>.dsa.control.v1.GappsInstall gapps_install = 400;</code>
+   * @return The gappsInstall.
+   */
+  io.github.thisisthepy.dsa.control.v1.GappsInstall getGappsInstall();
+
+  /**
+   * <code>.dsa.control.v1.GappsChunk gapps_chunk = 401;</code>
+   * @return Whether the gappsChunk field is set.
+   */
+  boolean hasGappsChunk();
+  /**
+   * <code>.dsa.control.v1.GappsChunk gapps_chunk = 401;</code>
+   * @return The gappsChunk.
+   */
+  io.github.thisisthepy.dsa.control.v1.GappsChunk getGappsChunk();
+
+  /**
+   * <code>.dsa.control.v1.GappsRemove gapps_remove = 402;</code>
+   * @return Whether the gappsRemove field is set.
+   */
+  boolean hasGappsRemove();
+  /**
+   * <code>.dsa.control.v1.GappsRemove gapps_remove = 402;</code>
+   * @return The gappsRemove.
+   */
+  io.github.thisisthepy.dsa.control.v1.GappsRemove getGappsRemove();
+
+  /**
+   * <code>.dsa.control.v1.GappsQuery gapps_query = 403;</code>
+   * @return Whether the gappsQuery field is set.
+   */
+  boolean hasGappsQuery();
+  /**
+   * <code>.dsa.control.v1.GappsQuery gapps_query = 403;</code>
+   * @return The gappsQuery.
+   */
+  io.github.thisisthepy.dsa.control.v1.GappsQuery getGappsQuery();
+
+  /**
+   * <code>.dsa.control.v1.GappsState gapps_state = 404;</code>
+   * @return Whether the gappsState field is set.
+   */
+  boolean hasGappsState();
+  /**
+   * <code>.dsa.control.v1.GappsState gapps_state = 404;</code>
+   * @return The gappsState.
+   */
+  io.github.thisisthepy.dsa.control.v1.GappsState getGappsState();
+
+  /**
+   * <code>.dsa.control.v1.GoogleDeviceIdQuery google_device_id_query = 405;</code>
+   * @return Whether the googleDeviceIdQuery field is set.
+   */
+  boolean hasGoogleDeviceIdQuery();
+  /**
+   * <code>.dsa.control.v1.GoogleDeviceIdQuery google_device_id_query = 405;</code>
+   * @return The googleDeviceIdQuery.
+   */
+  io.github.thisisthepy.dsa.control.v1.GoogleDeviceIdQuery getGoogleDeviceIdQuery();
+
+  /**
+   * <code>.dsa.control.v1.GoogleDeviceId google_device_id = 406;</code>
+   * @return Whether the googleDeviceId field is set.
+   */
+  boolean hasGoogleDeviceId();
+  /**
+   * <code>.dsa.control.v1.GoogleDeviceId google_device_id = 406;</code>
+   * @return The googleDeviceId.
+   */
+  io.github.thisisthepy.dsa.control.v1.GoogleDeviceId getGoogleDeviceId();
+
+  /**
    * <code>.dsa.control.v1.DeviceIdle device_idle = 42;</code>
    * @return Whether the deviceIdle field is set.
    */
@@ -1372,6 +1449,17 @@ public interface EnvelopeOrBuilder extends
   io.github.thisisthepy.dsa.control.v1.SystemSettings getSystemSettings();
 
   /**
+   * <code>.dsa.control.v1.DeviceName device_name = 383;</code>
+   * @return Whether the deviceName field is set.
+   */
+  boolean hasDeviceName();
+  /**
+   * <code>.dsa.control.v1.DeviceName device_name = 383;</code>
+   * @return The deviceName.
+   */
+  io.github.thisisthepy.dsa.control.v1.DeviceName getDeviceName();
+
+  /**
    * <code>.dsa.control.v1.GamepadConnected gamepad_connected = 341;</code>
    * @return Whether the gamepadConnected field is set.
    */
@@ -1491,6 +1579,39 @@ public interface EnvelopeOrBuilder extends
    * @return The dragEnd.
    */
   io.github.thisisthepy.dsa.control.v1.DragEnd getDragEnd();
+
+  /**
+   * <code>.dsa.control.v1.ReinstallApp reinstall_app = 380;</code>
+   * @return Whether the reinstallApp field is set.
+   */
+  boolean hasReinstallApp();
+  /**
+   * <code>.dsa.control.v1.ReinstallApp reinstall_app = 380;</code>
+   * @return The reinstallApp.
+   */
+  io.github.thisisthepy.dsa.control.v1.ReinstallApp getReinstallApp();
+
+  /**
+   * <code>.dsa.control.v1.ReinstallResult reinstall_result = 381;</code>
+   * @return Whether the reinstallResult field is set.
+   */
+  boolean hasReinstallResult();
+  /**
+   * <code>.dsa.control.v1.ReinstallResult reinstall_result = 381;</code>
+   * @return The reinstallResult.
+   */
+  io.github.thisisthepy.dsa.control.v1.ReinstallResult getReinstallResult();
+
+  /**
+   * <code>.dsa.control.v1.NativeLibraryCrash native_library_crash = 382;</code>
+   * @return Whether the nativeLibraryCrash field is set.
+   */
+  boolean hasNativeLibraryCrash();
+  /**
+   * <code>.dsa.control.v1.NativeLibraryCrash native_library_crash = 382;</code>
+   * @return The nativeLibraryCrash.
+   */
+  io.github.thisisthepy.dsa.control.v1.NativeLibraryCrash getNativeLibraryCrash();
 
   public io.github.thisisthepy.dsa.control.v1.Envelope.BodyCase getBodyCase();
 }

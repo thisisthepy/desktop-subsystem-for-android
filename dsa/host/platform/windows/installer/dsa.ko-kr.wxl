@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The package's own words in Korean, for a package built with -culture ko-KR. -->
+<WixLocalization Culture="ko-KR" Language="1042" xmlns="http://wixtoolset.org/schemas/v4/wxl">
+    <String Id="ArpComments" Value="Desktop Subsystem for Android는 독립 오픈 소스 프로젝트이며 Microsoft나 Google과 제휴하거나 그 보증이나 후원을 받지 않습니다. Android는 Google LLC의 상표입니다." />
+    <String Id="SettingsShortcutDescription" Value="Desktop Subsystem for Android의 설정과 상태" />
+    <String Id="ApkFileType" Value="APK 앱 패키지" />
+    <String Id="ApkBundleType" Value="분할 APK 묶음" />
+</WixLocalization>

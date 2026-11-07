@@ -12,6 +12,7 @@ use super::inflate::inflate;
 #[derive(Debug, Clone)]
 pub struct Entry {
     pub name: String,
+    flags: u16,
     method: u16,
     compressed_size: u64,
     size: u64,
@@ -22,6 +23,12 @@ impl Entry {
     /// The entry's length once uncompressed.
     pub fn size(&self) -> u64 {
         self.size
+    }
+
+    /// Whether the entry is encrypted (bit 0 of its general purpose flags), so that it
+    /// cannot be read without a key.
+    pub fn encrypted(&self) -> bool {
+        self.flags & 1 != 0
     }
 }
 
@@ -103,6 +110,7 @@ impl<R: Read + Seek> Archive<R> {
             {
                 return Err("the archive's directory is damaged".into());
             }
+            let flags = u16_at(&directory, at + 8)?;
             let method = u16_at(&directory, at + 10)?;
             let mut compressed_size = u64::from(u32_at(&directory, at + 20)?);
             let mut size = u64::from(u32_at(&directory, at + 24)?);
@@ -135,6 +143,7 @@ impl<R: Read + Seek> Archive<R> {
             }
             entries.push(Entry {
                 name,
+                flags,
                 method,
                 compressed_size,
                 size,
@@ -184,6 +193,23 @@ impl<R: Read + Seek> Archive<R> {
                 entry.name
             )),
         }
+    }
+
+    /// Where the stored or compressed bytes of `entry` are in the file, for an entry too
+    /// large to read into memory: its compression method, the offset and the length.
+    pub fn data_span(&mut self, entry: &Entry) -> Result<(u16, u64, u64), String> {
+        let header = read_at(&mut self.reader, entry.header_offset, 30)?;
+        if !header.starts_with(b"PK\x03\x04") {
+            return Err(format!("the archive's entry {} is damaged", entry.name));
+        }
+        let skip = 30 + u64::from(u16_at(&header, 26)?) + u64::from(u16_at(&header, 28)?);
+        let offset = entry.header_offset + skip;
+        Ok((entry.method, offset, entry.compressed_size))
+    }
+
+    /// The file the archive is read from.
+    pub fn into_inner(self) -> R {
+        self.reader
     }
 
     /// `length` bytes from `offset` in the file, as the signing block needs.

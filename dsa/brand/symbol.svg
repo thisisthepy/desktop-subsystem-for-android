@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <!-- The DSA symbol: one app window with two antennae. Windows uses it as is from 32 px up. -->
+  <defs>
+    <linearGradient id="sym-body" gradientUnits="userSpaceOnUse" x1="8" y1="12" x2="56" y2="60">
+      <stop offset="0" stop-color="#1c8a63"/><stop offset="1" stop-color="#05392a"/>
+    </linearGradient>
+    <linearGradient id="sym-bar" gradientUnits="userSpaceOnUse" x1="10" y1="2" x2="54" y2="28">
+      <stop offset="0" stop-color="#9af8c4"/><stop offset=".5" stop-color="#47e08c"/><stop offset="1" stop-color="#1fb066"/>
+    </linearGradient>
+    <filter id="sym-shadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feDropShadow dx="0" dy=".9" stdDeviation=".7" flood-color="#022218" flood-opacity=".32"/>
+      <feDropShadow dx="0" dy="3.2" stdDeviation="3" flood-color="#022218" flood-opacity=".2"/>
+    </filter>
+    <filter id="sym-bar-shadow" x="-20%" y="-40%" width="140%" height="200%">
+      <feDropShadow dx="0" dy=".8" stdDeviation=".6" flood-color="#022218" flood-opacity=".35"/>
+    </filter>
+  </defs>
+  <g filter="url(#sym-shadow)">
+    <path d="M22 14 L16.5 5 M42 14 L47.5 5" stroke="url(#sym-bar)" stroke-width="4" stroke-linecap="round" fill="none"/>
+    <path d="M13 12h38a9 9 0 0 1 9 9v28a9 9 0 0 1-9 9H13a9 9 0 0 1-9-9V21a9 9 0 0 1 9-9z" fill="url(#sym-body)"/>
+    <path d="M13 12h38a9 9 0 0 1 9 9v4H4v-4a9 9 0 0 1 9-9z" fill="url(#sym-bar)" filter="url(#sym-bar-shadow)"/>
+    <circle cx="40" cy="18.5" r="2.3" fill="#0a5a41"/>
+    <circle cx="48" cy="18.5" r="2.3" fill="#0a5a41"/>
+    <path d="M16 32h32a4 4 0 0 1 4 4v10a4 4 0 0 1-4 4H16a4 4 0 0 1-4-4V36a4 4 0 0 1 4-4z" fill="#3ddc84" opacity=".32"/>
+  </g>
+</svg>

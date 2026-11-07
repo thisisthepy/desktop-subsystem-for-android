@@ -1,0 +1,201 @@
+# Builds Digitalis, the open source (Apache-2.0) ARM64 to x86_64 translator, for each
+# Android version in dsa/guest/arm-translation/digitalis-lock.json, runs its host tests, and
+# makes the ARM translation package ("arm-translation.json" and an erofs "system.img") that
+# the x86_64 image release carries as the default translator.
+#
+# It runs on GitHub's standard runners. A full Digitalis tree is an AOSP checkout of about
+# 300 GB with its output, so the build fetches only the projects the lock lists (each at its
+# pinned commit, the large ones in part), takes the framework libraries the proxies link
+# against and the arm64 guest libraries that are plain AOSP builds from DSA's pinned images,
+# and builds only the files the package holds.
+#
+# It runs by hand, and when the lock changes on develop. Each version's compiler cache is
+# kept between runs, also when a run fails or times out, so a run that stops partway makes
+# the next one shorter.
+
+name: Translator build
+
+on:
+  workflow_dispatch:
+    inputs:
+      android:
+        description: "Build only this version (android16 or android17); empty for every version in the lock"
+        required: false
+        default: ""
+  push:
+    branches: [develop]
+    paths:
+      - dsa/guest/arm-translation/digitalis-lock.json
+
+concurrency:
+  group: translator-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  versions:
+    name: Read the pinned versions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      android: ${{ steps.read.outputs.android }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the lock and list its versions
+        id: read
+        env:
+          ONLY: ${{ inputs.android }}
+        run: |
+          all="$(python3 dsa/guest/arm-translation/digitalis_lock.py versions)"
+          if [[ -n "$ONLY" ]]; then
+            echo "$all" | jq -e --arg v "$ONLY" 'index($v) != null' >/dev/null \
+              || { echo "::error::the lock has no $ONLY; it has $all"; exit 1; }
+            all="$(jq -cn --arg v "$ONLY" '[$v]')"
+          fi
+          echo "android=$all" >> "$GITHUB_OUTPUT"
+
+  translator:
+    name: Build the translator (ubuntu-24.04, ${{ matrix.android }})
+    needs: versions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    strategy:
+      fail-fast: false
+      matrix:
+        android: ${{ fromJSON(needs.versions.outputs.android) }}
+    env:
+      ANDROID_BRANCH: ${{ matrix.android }}
+      CCACHE_DIR: /tmp/dsa-ccache
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Make room on the runner
+        run: .github/scripts/translator/free-disk.sh
+
+      - name: Install the build tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends ccache erofs-utils e2fsprogs jq
+          ccache --version | head -1
+          mkfs.erofs --version 2>&1 | head -1 || true
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Read the pins
+        id: pins
+        run: |
+          version="$(uv run dsa/guest/arm-translation/digitalis_lock.py version "$ANDROID_BRANCH")"
+          major="$(jq -r --arg a "$ANDROID_BRANCH" '.versions[] | select(.android == $a) | .android_major' dsa/guest/arm-translation/digitalis-lock.json)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "major=$major" >> "$GITHUB_OUTPUT"
+          echo "Digitalis $version for Android $major"
+
+      - name: Restore the compiler cache
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/dsa-ccache
+          key: translator-ccache-${{ matrix.android }}-${{ hashFiles('dsa/guest/arm-translation/digitalis-lock.json') }}-${{ github.run_id }}
+          restore-keys: |
+            translator-ccache-${{ matrix.android }}-${{ hashFiles('dsa/guest/arm-translation/digitalis-lock.json') }}-
+            translator-ccache-${{ matrix.android }}-
+
+      # The proxies link the x86_64 image's framework libraries, and the package takes the
+      # arm64 image's ICU, BoringSSL and SQLite. Both images are the ones DSA pins for this
+      # Android version; their archives go before the source comes, to keep the peak low.
+      - name: Take libraries from the pinned images
+        run: |
+          inputs="$DSA_TRANSLATOR_WORK/inputs"
+          for arch in x86_64 arm64; do
+            DSA_AOSP_INPUTS="$inputs" dsa/guest/image/fetch.sh "${{ steps.pins.outputs.major }}" "$arch"
+          done
+          uv run dsa/guest/arm-translation/assemble-digitalis.py framework-libs \
+            --target-files "$(ls "$inputs"/*-x86_64/*target_files*.zip)" --out "$DSA_TRANSLATOR_WORK/framework-libs"
+          uv run dsa/guest/arm-translation/assemble-digitalis.py guest-libs \
+            --target-files "$(ls "$inputs"/*-arm64/*target_files*.zip)" --out "$DSA_TRANSLATOR_WORK/guest-libs"
+          rm -rf "$inputs"
+          ls -l "$DSA_TRANSLATOR_WORK/framework-libs" "$DSA_TRANSLATOR_WORK/guest-libs"
+
+      - name: Fetch the pinned source
+        run: |
+          start=$SECONDS
+          uv run .github/scripts/translator/fetch-source.py --android "$ANDROID_BRANCH" --top "$DSA_TRANSLATOR_WORK/aosp"
+          echo "fetched in $(( (SECONDS - start) / 60 )) minutes"
+          du -sh "$DSA_TRANSLATOR_WORK/aosp"
+          du -sh "$DSA_TRANSLATOR_WORK"/aosp/prebuilts/* 2>/dev/null | sort -h | tail -5
+          df -h / /mnt
+
+      - name: Build the translator and its host tests
+        id: build
+        timeout-minutes: 290
+        run: |
+          start=$SECONDS
+          .github/scripts/translator/build.sh "$DSA_TRANSLATOR_WORK/aosp" "$DSA_TRANSLATOR_WORK/framework-libs"
+          echo "built in $(( (SECONDS - start) / 60 )) minutes"
+          du -sh "$DSA_TRANSLATOR_WORK/aosp/out"
+          df -h / /mnt
+
+      - name: Keep the compiler cache
+        if: always() && steps.pins.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: /tmp/dsa-ccache
+          key: translator-ccache-${{ matrix.android }}-${{ hashFiles('dsa/guest/arm-translation/digitalis-lock.json') }}-${{ github.run_id }}
+
+      - name: Make the package
+        id: package
+        run: |
+          top="$DSA_TRANSLATOR_WORK/aosp"
+          bundle="$DSA_TRANSLATOR_WORK/bundle"
+          package="$DSA_TRANSLATOR_WORK/package"
+          uv run dsa/guest/arm-translation/assemble-digitalis.py collect \
+            --config-mk "$top/frameworks/libs/binary_translation/berberis_config.mk" \
+            --product-out "$top/out/target/product/dsa_translator" \
+            --guest-libs "$DSA_TRANSLATOR_WORK/guest-libs" \
+            --license "$top/digitalis/LICENSE" --sources "$top/.dsa-sources.json" \
+            --out "$bundle"
+          uv run dsa/guest/arm-translation/make-package.py --bundle "$bundle" \
+            --name Digitalis --version "${{ steps.pins.outputs.version }}" --license Apache-2.0 \
+            --out "$package"
+          cp "$top/.dsa-sources.json" "$DSA_TRANSLATOR_WORK/SOURCES.json"
+          (cd "$bundle" && find system -type f -print0 | sort -z | xargs -0 sha256sum) > "$DSA_TRANSLATOR_WORK/CONTENTS.sha256"
+          cat "$package/arm-translation.json"
+          ls -l "$package"
+          echo "package=$package" >> "$GITHUB_OUTPUT"
+
+      - name: Keep the package
+        uses: actions/upload-artifact@v4
+        with:
+          name: arm-translation-${{ matrix.android }}-${{ steps.pins.outputs.version }}
+          path: |
+            ${{ steps.package.outputs.package }}/arm-translation.json
+            ${{ steps.package.outputs.package }}/system.img
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Run the translator's host tests
+        run: .github/scripts/translator/host-tests.sh "$DSA_TRANSLATOR_WORK/aosp" "$DSA_TRANSLATOR_WORK/reports"
+
+      - name: Keep the build's logs and test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: translator-logs-${{ matrix.android }}
+          path: |
+            ${{ env.DSA_TRANSLATOR_WORK }}/aosp/out/error.log
+            ${{ env.DSA_TRANSLATOR_WORK }}/aosp/out/soong.log
+            ${{ env.DSA_TRANSLATOR_WORK }}/aosp/out/verbose.log*
+            ${{ env.DSA_TRANSLATOR_WORK }}/aosp/out/soong_ui.log*
+            ${{ env.DSA_TRANSLATOR_WORK }}/aosp/out/soong/soong.variables
+            ${{ env.DSA_TRANSLATOR_WORK }}/aosp/.dsa-targets
+            ${{ env.DSA_TRANSLATOR_WORK }}/aosp/.dsa-sources.json
+            ${{ env.DSA_TRANSLATOR_WORK }}/reports/
+            ${{ env.DSA_TRANSLATOR_WORK }}/CONTENTS.sha256
+          if-no-files-found: ignore
+          # .dsa-targets and .dsa-sources.json start with a dot, which upload-artifact skips
+          # unless told otherwise.
+          include-hidden-files: true
+          retention-days: 30

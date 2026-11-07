@@ -40,10 +40,11 @@ fn main() -> std::process::ExitCode {
         note(logger.as_deref(), &why);
     }
     dsa_host_windows::compositor::log::input_trace_to(logger.clone());
+    dsa_host_windows::compositor::log::log_panics_to(logger.clone());
     let args: Vec<String> = std::env::args().skip(1).collect();
     let program = std::env::current_exe().unwrap_or_default();
-    // Opened on an .apk file in Explorer: the APK is installed in Android, and the user is told
-    // how that went.
+    // Opened on an .apk file or a split-APK bundle in Explorer: the app is installed in
+    // Android, and the user is told how that went.
     if let Some(path) = dsa_host_windows::app_window::apk_install::install_request(&args) {
         use dsa_host_windows::app_window::apk_install;
         use dsa_host_windows::app_window::launch::tell_user_done;
@@ -190,8 +191,8 @@ fn main() -> std::process::ExitCode {
             }
         };
     }
-    // Opened from the "DSA Files" Start menu shortcut: Android's shared storage opens in
-    // Explorer, Android starting first when it is not running.
+    // Opened from a "DSA Files" shortcut an earlier version made and the user pinned: Android's
+    // shared storage opens in Explorer, Android starting first when it is not running.
     if args
         .iter()
         .any(|arg| arg == dsa_host_windows::android_files::ANDROID_FILES_ARGUMENT)

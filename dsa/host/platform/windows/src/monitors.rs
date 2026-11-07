@@ -41,7 +41,7 @@ pub fn write_record(local_app_data: &Path, monitors: &[(u32, u32)]) -> std::io::
 }
 
 #[cfg(windows)]
-pub use session::{current, record_current, MonitorWatch};
+pub use session::{current, record_current, system_density, MonitorWatch};
 
 #[cfg(windows)]
 mod session {
@@ -52,10 +52,25 @@ mod session {
         EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO,
     };
     use windows_sys::Win32::UI::HiDpi::{
-        SetThreadDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+        GetDpiForSystem, SetThreadDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
     };
 
     use super::write_record;
+
+    /// The density apps draw at on this session's main monitor, as a task's window gives it:
+    /// 160 at a scale of 100%, 240 at 150%. A split-APK bundle's density split is chosen for
+    /// it.
+    pub fn system_density() -> u32 {
+        // SAFETY: no pointers. A thread that is not DPI aware would be told 96 whatever the
+        // scale, so it asks as a per-monitor aware one, and goes back.
+        let dpi = unsafe {
+            let previous = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+            let dpi = GetDpiForSystem();
+            SetThreadDpiAwarenessContext(previous);
+            dpi
+        };
+        dsa_host_core::compositor::window_sizing::density_for_dpi(dpi)
+    }
 
     unsafe extern "system" fn add_monitor(
         monitor: HMONITOR,

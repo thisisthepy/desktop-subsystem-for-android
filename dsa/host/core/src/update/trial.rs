@@ -23,6 +23,11 @@ pub trait Boot {
     fn image_to_blame(&self) -> bool {
         true
     }
+    /// Called with `true` once a failed image is being given up and the previous one is about
+    /// to boot, and with `false` once that boot has ended. In between the guest belongs to
+    /// the rollback: a stop asked for meanwhile waits until it is over, so that what the user
+    /// is left with is the previous image, not nothing.
+    fn rolling_back(&mut self, _on: bool) {}
 }
 
 /// How a start ended.
@@ -38,6 +43,15 @@ pub enum Outcome {
         failed: InstalledImage,
         reason: String,
         image: InstalledImage,
+    },
+    /// The new image did not boot, and the previous one is current again but did not finish
+    /// booting either, for `why`. It stays current: it booted here before, so the next start
+    /// boots it again, and the failed image is not tried again.
+    RolledBackNotReady {
+        failed: InstalledImage,
+        reason: String,
+        image: InstalledImage,
+        why: String,
     },
     /// The new image did not boot and there is no image to go back to: it was the first
     /// one since an installation without a bundled image.
@@ -75,26 +89,36 @@ pub fn start(
             reason,
         }),
         Err(reason) if state.on_trial => {
+            guest.rolling_back(true);
             guest.halt();
-            let image = store.roll_back()?;
+            let image = match store.roll_back() {
+                Ok(image) => image,
+                Err(error) => {
+                    guest.rolling_back(false);
+                    return Err(error);
+                }
+            };
             if !store.has_image(&image.version) {
+                guest.rolling_back(false);
                 return Ok(Outcome::GaveUp {
                     failed: state.current,
                     reason,
                 });
             }
-            guest
-                .boot(&image, &store.image_dir(&image.version), timeout)
-                .map_err(|why| {
-                    UpdateError::Store(format!(
-                        "{} failed to boot ({reason}), and going back to {} failed too: {why}",
-                        state.current.version, image.version
-                    ))
-                })?;
-            Ok(Outcome::RolledBack {
-                failed: state.current,
-                reason,
-                image,
+            let booted = guest.boot(&image, &store.image_dir(&image.version), timeout);
+            guest.rolling_back(false);
+            Ok(match booted {
+                Ok(()) => Outcome::RolledBack {
+                    failed: state.current,
+                    reason,
+                    image,
+                },
+                Err(why) => Outcome::RolledBackNotReady {
+                    failed: state.current,
+                    reason,
+                    image,
+                    why,
+                },
             })
         }
         Err(reason) => Err(UpdateError::Store(format!(

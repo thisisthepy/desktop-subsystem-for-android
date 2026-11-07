@@ -3,8 +3,8 @@
 //!
 //! The daemon samples `/proc/meminfo` and `/proc/pressure/memory` every couple of seconds. It
 //! sends a `GuestMemoryPressure` at once while the guest is short, so the host adds memory
-//! before apps are killed, and every 30 seconds otherwise, so the host sees when memory it
-//! added is no longer needed. This module is the decision and the message; the daemon reads
+//! before apps are killed, at once when a lot of memory has come free (an app closed), so the
+//! host takes back what it added without waiting, and every 30 seconds otherwise. This module is the decision and the message; the daemon reads
 //! the files.
 
 use std::time::{Duration, Instant};
@@ -17,6 +17,9 @@ pub const SAMPLE_INTERVAL: Duration = Duration::from_secs(2);
 
 /// How often a report goes out while the guest is not short.
 pub const CALM_INTERVAL: Duration = Duration::from_secs(30);
+
+/// How much more available memory than the last report sends one at once, in KiB.
+pub const FREED_KB: u64 = 128 * 1024;
 
 /// One sample of the guest's memory.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -79,18 +82,23 @@ impl Sample {
 #[derive(Debug, Default)]
 pub struct PressureReporter {
     last_sent: Option<Instant>,
+    /// The available memory the last report said, in KiB.
+    last_available_kb: u64,
 }
 
 impl PressureReporter {
-    /// Whether to send `sample` now: every sample while the guest is short, else once per
+    /// Whether to send `sample` now: every sample while the guest is short, every sample
+    /// that finds [`FREED_KB`] more available than the last report, else once per
     /// [`CALM_INTERVAL`].
     pub fn due(&mut self, sample: &Sample, now: Instant) -> bool {
         let due = sample.short()
+            || sample.mem_available_kb >= self.last_available_kb.saturating_add(FREED_KB)
             || self
                 .last_sent
                 .is_none_or(|at| now.saturating_duration_since(at) >= CALM_INTERVAL);
         if due {
             self.last_sent = Some(now);
+            self.last_available_kb = sample.mem_available_kb;
         }
         due
     }

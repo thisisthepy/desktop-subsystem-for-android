@@ -13,6 +13,10 @@
 /// The console of the framework's VM: the first virtio console port.
 pub const CONSOLE: &str = "console=hvc0";
 
+/// Free page reporting of every free 4 KiB page, so memory the guest frees goes back at once
+/// whenever the VM's balloon offers reporting, without waiting for whole 2 MiB blocks.
+pub const PAGE_REPORTING: &str = "page_reporting.page_reporting_order=0";
+
 /// The slots a PCI bus has.
 const PCI_SLOTS: u32 = 32;
 
@@ -26,13 +30,14 @@ pub fn boot_devices() -> String {
 
 /// Whether `word` is a setting the macOS host replaces.
 fn replaced(word: &str) -> bool {
-    const KEYS: [&str; 6] = [
+    const KEYS: [&str; 7] = [
         "console=",
         "earlycon=",
         "earlycon",
         "8250.nr_uarts=",
         "androidboot.boot_devices=",
         "panic=",
+        "page_reporting.page_reporting_order=",
     ];
     KEYS.iter()
         .any(|key| word == *key || (key.ends_with('=') && word.starts_with(key)))
@@ -42,7 +47,12 @@ fn replaced(word: &str) -> bool {
 /// The command line for the framework's VM, from the image's command line and the host's
 /// own settings `extra`. With `pstore`, the kernel keeps its last log on the pstore disk.
 pub fn for_virtualization_framework(image: &str, extra: &str, pstore: bool) -> String {
-    let mut words = vec![CONSOLE.to_string(), "panic=-1".to_string(), boot_devices()];
+    let mut words = vec![
+        CONSOLE.to_string(),
+        "panic=-1".to_string(),
+        PAGE_REPORTING.to_string(),
+        boot_devices(),
+    ];
     if pstore {
         words.extend(
             crate::pstore_disk::KERNEL_CMDLINE
@@ -57,5 +67,11 @@ pub fn for_virtualization_framework(image: &str, extra: &str, pstore: bool) -> S
             .filter(|word| !replaced(word))
             .map(str::to_string),
     );
+    // The boot's secret is bootconfig appended to the initrd, and the kernel reads that only
+    // when the command line says so: without it the guest's daemon finds no secret.
+    let flag = dsa_host_core::bootconfig::CMDLINE_FLAG;
+    if !words.iter().any(|word| word == flag) {
+        words.push(flag.to_string());
+    }
     words.join(" ")
 }

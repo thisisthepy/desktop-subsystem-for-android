@@ -565,9 +565,10 @@ It incorporates or links against the following third-party components:
 
 SETTINGS_APP_NOTICE = """DSA Settings
 
-The settings app (settings\\DsaSettings.exe) is developed as part of Desktop Subsystem for
-Android and is licensed under the Apache License, Version 2.0. It is a self-contained WPF
-app: its folder carries the runtime it is built on.
+The settings app (settings\\DsaSettings.exe) and the APK Installer
+(settings\\DsaApkInstaller.exe) are developed as part of Desktop Subsystem for Android and are
+licensed under the Apache License, Version 2.0. They are self-contained WPF apps that share
+one folder: it carries the runtime both are built on.
 
 It incorporates the following third-party components:
 - .NET runtime and WPF (8.0):
@@ -682,7 +683,7 @@ def is_allowed_expression(expr: str, allow_list: set) -> bool:
 # Where each part of DSA is shipped, for the third-party notice.
 PART_TITLES = {
     "setup": "Setup program (setup.exe, DsaSetup.exe)",
-    "settings": "Settings app (settings\\DsaSettings.exe)",
+    "settings": "Settings app and APK Installer (settings\\DsaSettings.exe, DsaApkInstaller.exe)",
     "graphics": "Host graphics path (gfxstream_backend.dll)",
     "guest": "Guest image (vm\\bzImage and the Android image)",
     "linux": "Linux host's VM (/usr/lib/dsa/bin/crosvm and passt)",
@@ -985,7 +986,7 @@ def generate_bundle(workspace_dir: Path, out_dir: Path, master_notice: Path | No
         "   - License: Apache License 2.0, GNU General Public License v2.0, BSD, MIT",
         "   - Detailed attribution notices: carried alongside each image release asset",
         "",
-        "5. Settings App (settings\\DsaSettings.exe)",
+        "5. Settings App and APK Installer (settings\\DsaSettings.exe, DsaApkInstaller.exe)",
         "   - .NET runtime and WPF, WPF UI (lepoco/wpfui)",
         "   - License: MIT License",
         "   - Full details: see licenses/settings-app.txt",

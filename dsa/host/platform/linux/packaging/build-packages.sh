@@ -17,7 +17,12 @@
 #   /etc/dsa/dsa-hostd.json  the service's configuration
 #   systemd units            dsa-hostd.service (system) and dsa-devices.service (user)
 #   udev rules, modules      /dev/kvm and /dev/vhost-vsock for the service and the user
-#   desktop files            DSA Files, and Open, Share and Install in Android for files
+#   desktop files            DSA Settings, DSA Files, and Open, Share and Install in Android
+#   MIME type                split-APK bundles (.xapk, .apks, .apkm), which Install in Android
+#                            opens
+#                            for files
+#   icons                    DSA's and DSA Settings' icons in the hicolor theme
+#   translations             DSA Settings' gettext catalogues
 #   GeoClue                  DSA's entry, so the desktop's agent can let it read the location
 #   AppStream metainfo       what the software center shows when the package is opened
 #   the repository key       /usr/share/keyrings/dsa-archive-keyring.gpg in the .deb,
@@ -217,7 +222,37 @@ install -m 0644 "$here/udev/dsa-modules.conf" "$stage/usr/lib/modules-load.d/dsa
 # The desktop: the file actions and DSA's name for GeoClue.
 install -d "$stage/usr/share/applications" "$stage/etc/geoclue/conf.d"
 install -m 0644 "$here"/desktop/*.desktop "$stage/usr/share/applications/"
+install -d "$stage/usr/share/mime/packages"
+install -m 0644 "$here"/mime/*.xml "$stage/usr/share/mime/packages/"
 install -m 0644 "$here/geoclue/dsa.conf" "$stage/etc/geoclue/conf.d/90-dsa.conf"
+
+# DSA's icons, in the hicolor theme: the colour icon and the symbolic one of DSA and of
+# its companion apps (Settings, APK Installer, Files).
+settings_dir="$here/../settings"
+for kind in scalable symbolic; do
+    install -d "$stage/usr/share/icons/hicolor/$kind/apps"
+    install -m 0644 "$settings_dir/data/icons/hicolor/$kind/apps/"*.svg \
+        "$stage/usr/share/icons/hicolor/$kind/apps/"
+done
+
+# DSA Settings: its desktop entry, its AppStream entry and its translations.
+if has_program dsa-settings; then
+    install -m 0644 "$settings_dir/data/io.github.thisisthepy.DSA.Settings.desktop" \
+        "$stage/usr/share/applications/"
+    install -d "$stage/usr/share/metainfo"
+    sed -e "s|@VERSION@|$version|g" -e "s|@DATE@|$(date -u +%Y-%m-%d)|g" \
+        "$settings_dir/data/io.github.thisisthepy.DSA.Settings.metainfo.xml" \
+        > "$stage/usr/share/metainfo/io.github.thisisthepy.DSA.Settings.metainfo.xml"
+    chmod 0644 "$stage/usr/share/metainfo/io.github.thisisthepy.DSA.Settings.metainfo.xml"
+    command -v msgfmt >/dev/null || die "msgfmt (gettext) is needed to build the translations"
+    while read -r language; do
+        [[ -n "$language" ]] || continue
+        install -d "$stage/usr/share/locale/$language/LC_MESSAGES"
+        msgfmt --check -o "$stage/usr/share/locale/$language/LC_MESSAGES/dsa-settings.mo" \
+            "$settings_dir/po/$language.po"
+        chmod 0644 "$stage/usr/share/locale/$language/LC_MESSAGES/dsa-settings.mo"
+    done < "$settings_dir/po/LINGUAS"
+fi
 
 # What the software center shows for the package.
 install -d "$stage/usr/share/metainfo"
@@ -331,6 +366,12 @@ fi
 if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database -q /usr/share/applications || true
 fi
+if command -v update-mime-database >/dev/null 2>&1; then
+    update-mime-database /usr/share/mime || true
+fi
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor || true
+fi
 EOF
 read -r -d '' before_remove <<EOF || true
 if [ -d /run/systemd/system ]; then
@@ -355,6 +396,9 @@ fi
 if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database -q /usr/share/applications || true
 fi
+if command -v update-mime-database >/dev/null 2>&1; then
+    update-mime-database /usr/share/mime || true
+fi
 EOF
 
 summary="Runs Android apps in windows of their own on the desktop"
@@ -376,7 +420,7 @@ if [[ "$make_deb" -eq 1 ]]; then
         echo "Architecture: $arch"
         echo "Maintainer: thisisthepy <noreply@github.com>"
         echo "Installed-Size: $size_kb"
-        echo "Depends: libc6, libstdc++6, libcap2, libwayland-client0, libdrm2, libvulkan1, systemd, udev"
+        echo "Depends: libc6, libstdc++6, libcap2, libwayland-client0, libdrm2, libvulkan1, libgtk-4-1, libadwaita-1-0, systemd, udev"
         echo "Recommends: pipewire-pulse | pulseaudio, libpulse0, geoclue-2.0, xdg-desktop-portal, cups-client, upower, power-profiles-daemon, iio-sensor-proxy, xdg-utils"
         echo "Section: otherosfs"
         echo "Priority: optional"

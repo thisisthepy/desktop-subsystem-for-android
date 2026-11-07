@@ -9,7 +9,7 @@ the others below), and none may start with "Android": Android may appear only af
 "for", as in "Desktop Subsystem for Android".
 
 Notices: the README files, the setup program, the MSI, the settings app's About page and
-the APK install window carry "Android is a trademark of Google LLC.", and the README
+the APK Installer's window carry "Android is a trademark of Google LLC.", and the README
 files and the setup program say that DSA is independent of Microsoft and Google. The
 first mention of Android in a README reads "Android™".
 
@@ -30,6 +30,7 @@ SKIP_DIRS = {"target", "build", "out", "bin", "obj", ".gradle", "node_modules", 
 
 WINDOWS = "dsa/host/platform/windows"
 SETTINGS = f"{WINDOWS}/settings/DsaSettings"
+APK_INSTALLER = f"{WINDOWS}/settings/DsaApkInstaller"
 SETUP_UI = f"{WINDOWS}/installer/setup-ui"
 
 # Each surface that must carry notices, and which ones.
@@ -37,7 +38,9 @@ NOTICES = {
     "README.md": (TRADEMARK, INDEPENDENT),
     "docs/locales/README_ko.md": (TRADEMARK, INDEPENDENT),
     f"{SETUP_UI}/Text.cs": (TRADEMARK, INDEPENDENT),
-    f"{WINDOWS}/installer/dsa.wxs": (TRADEMARK, INDEPENDENT),
+    # The package's comments are localized: each language's strings carry the notice.
+    f"{WINDOWS}/installer/dsa.en-us.wxl": (TRADEMARK, INDEPENDENT),
+    f"{WINDOWS}/installer/dsa.ko-kr.wxl": (TRADEMARK, INDEPENDENT),
     f"{SETTINGS}/Strings.resx": (TRADEMARK, INDEPENDENT),
     f"{SETTINGS}/Strings.ko.resx": (TRADEMARK, INDEPENDENT),
 }
@@ -45,7 +48,9 @@ NOTICES = {
 # Each surface that must show a notice string by its resource key.
 NOTICE_KEYS = {
     f"{SETTINGS}/Pages/AboutPage.xaml": ["AboutTrademark.Text", "AboutIndependent.Text"],
-    f"{SETTINGS}/ApkInstallWindow.xaml.cs": ["AboutTrademark.Text"],
+    f"{APK_INSTALLER}/InstallerWindow.xaml.cs": ["AboutTrademark.Text"],
+    # The package shows its localized comments, which carry the notice.
+    f"{WINDOWS}/installer/dsa.wxs": ["!(loc.ArpComments)"],
 }
 
 # Resource keys whose value is a name: window titles and the product's own name.

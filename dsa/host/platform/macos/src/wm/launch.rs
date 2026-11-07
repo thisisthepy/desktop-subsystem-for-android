@@ -4,7 +4,9 @@
 //! The bundle is opened through Launch Services (`open -a`), as Launchpad opens it, with
 //! `--shown-by-window-manager` so the window host does not ask Android to start the app again.
 //! An app without a bundle yet gets one first, from its name and icon. Where no bundle can be
-//! made, the window host in DSA.app is run for the app instead, under DSA's own icon.
+//! made, the window host's helper bundle in DSA.app is run for the app instead, under the
+//! helper's own bundle identity, so it never passes for DSA.app (whose program is the settings
+//! app) and opening DSA.app always opens the settings.
 
 use std::path::{Path, PathBuf};
 
@@ -57,10 +59,26 @@ pub fn direct_arguments(package: &str) -> Vec<String> {
     ]
 }
 
-/// The window host program installed beside the window manager (in DSA.app's
-/// `Contents/MacOS`), which each app's bundle copies.
+/// The helper bundle in DSA.app's `Contents/Helpers` that holds the window host, with a
+/// bundle identifier of its own.
+pub const HELPER_APP: &str = "DSA App Window.app";
+
+/// The window host program of an installation, which each app's bundle copies: the one in the
+/// helper bundle (`Contents/Helpers/DSA App Window.app` beside the window manager's
+/// `Contents/MacOS`), else one right beside the window manager, as in a development build.
 pub fn installed_window_host(window_manager: &Path) -> Option<PathBuf> {
-    let program = window_manager.parent()?.join(EXECUTABLE);
+    let programs = window_manager.parent()?;
+    let helper = programs.parent().map(|contents| {
+        contents
+            .join("Helpers")
+            .join(HELPER_APP)
+            .join("Contents/MacOS")
+            .join(EXECUTABLE)
+    });
+    if let Some(helper) = helper.filter(|path| path.is_file()) {
+        return Some(helper);
+    }
+    let program = programs.join(EXECUTABLE);
     program.is_file().then_some(program)
 }
 
@@ -193,6 +211,32 @@ mod tests {
         };
         assert_eq!(app_entry(&app).label, "com.example.plain");
         assert_eq!(app_entry(&notes()).label, "Notes");
+    }
+
+    #[test]
+    fn fr17_the_window_host_runs_from_its_helper_bundle_not_dsa_app() {
+        let contents = folder("helper").join("DSA.app/Contents");
+        let macos = contents.join("MacOS");
+        let helper = contents
+            .join("Helpers")
+            .join(HELPER_APP)
+            .join("Contents/MacOS");
+        std::fs::create_dir_all(&macos).unwrap();
+        std::fs::create_dir_all(&helper).unwrap();
+        std::fs::write(macos.join("dsa-wm"), b"wm").unwrap();
+        // A development build keeps the window host beside the window manager.
+        std::fs::write(macos.join(EXECUTABLE), b"beside").unwrap();
+        assert_eq!(
+            installed_window_host(&macos.join("dsa-wm")),
+            Some(macos.join(EXECUTABLE))
+        );
+        // An installed DSA.app has it in the helper bundle, which wins.
+        std::fs::write(helper.join(EXECUTABLE), b"helper").unwrap();
+        assert_eq!(
+            installed_window_host(&macos.join("dsa-wm")),
+            Some(helper.join(EXECUTABLE))
+        );
+        let _ = std::fs::remove_dir_all(contents.parent().unwrap().parent().unwrap());
     }
 
     #[test]

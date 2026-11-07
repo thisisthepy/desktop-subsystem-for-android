@@ -3,7 +3,7 @@
 //! and point at the files door the service opens.
 #![cfg(windows)]
 
-use dsa_host_windows::android_files::{NAVIGATION_CLSID, NAVIGATION_NAME};
+use dsa_host_windows::android_files::{NAVIGATION_CLSID, NAVIGATION_NAME, NAVIGATION_SORT_ORDER};
 
 const INSTALLER: &str = include_str!("../installer/dsa.wxs");
 
@@ -46,5 +46,27 @@ fn fr29_the_installer_puts_android_in_explorers_navigation_pane() {
             &format!(r#"Name="{NAVIGATION_CLSID}""#)
         ),
         "the entry would show on the desktop too"
+    );
+}
+
+#[test]
+fn fr29_the_machines_entry_sorts_where_each_users_does() {
+    assert!(
+        INSTALLER.contains(&format!(
+            r#"Name="SortOrderIndex" Type="integer" Value="{NAVIGATION_SORT_ORDER}""#
+        )),
+        "the machine's entry and each user's entry sort to different places"
+    );
+}
+
+#[test]
+fn fr29_dsa_files_has_no_start_menu_shortcut_and_an_old_one_is_removed() {
+    assert!(
+        !INSTALLER.contains(r#"Name="DSA Files""#),
+        "a Start menu shortcut would let Windows search find DSA Files"
+    );
+    assert!(
+        INSTALLER.contains(r#"Name="DSA Files.lnk""#),
+        "the shortcut an earlier version made would stay after an upgrade"
     );
 }

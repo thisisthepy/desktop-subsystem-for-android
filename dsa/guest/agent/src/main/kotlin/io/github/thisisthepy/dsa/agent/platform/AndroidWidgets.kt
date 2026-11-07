@@ -13,6 +13,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -31,6 +32,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
 import android.os.SystemClock
+import android.os.UserManager
 import android.util.SizeF
 import android.view.Display
 import android.view.InputDevice
@@ -39,6 +41,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.AnalogClock
 import android.widget.FrameLayout
+import android.widget.RemoteViews
 import android.widget.TextClock
 import io.github.thisisthepy.dsa.agent.Log
 import io.github.thisisthepy.dsa.agent.widgets.FrameGate
@@ -72,21 +75,39 @@ import kotlin.math.ceil
  *
  * A click in a widget runs its PendingIntent on the guest's own display, where apps open as
  * task windows, not on the widget's private display.
+ *
+ * The framework hands a widget's updates only to a view its host made for that widget ID
+ * ([AppWidgetHost.createView]); an update for an ID with no view is dropped with "null
+ * listener". Those views live in the agent's process, so each start makes them again for
+ * every placed widget, and a widget's view is made before anything else about its drawing,
+ * so a window or display that fails to open never leaves the widget deaf. When the window
+ * cannot be opened, the widget is drawn without one, in software ([Renderer]).
  */
 class AndroidWidgets(private val context: Context, private val log: Log) : WidgetPlatform {
     private val manager = AppWidgetManager.getInstance(context)
-    private val host = AppWidgetHost(context, HOST_ID)
+    private val host = object : AppWidgetHost(context, HOST_ID) {
+        override fun onCreateView(context: Context, appWidgetId: Int, appWidget: AppWidgetProviderInfo?): AppWidgetHostView =
+            WidgetView(context) { renderers[appWidgetId]?.requestCapture() }
+    }
     private val displays = context.getSystemService(DisplayManager::class.java)
     private val main = Handler(Looper.getMainLooper())
     private val encoder: Handler by lazy { Handler(HandlerThread("dsa-widget-frames").apply { start() }.looper) }
     private val renderers = ConcurrentHashMap<Int, Renderer>()
+
+    /** Each widget's view, with the density it was made at. Only the main thread uses it. */
+    private val views = HashMap<Int, Pair<Int, AppWidgetHostView>>()
+
+    /** The widgets whose failure to draw was logged, so a retry does not log it again. */
+    private val warned = HashSet<Int>()
     private var onFrame: (Int, Int, Int, ByteArray) -> Unit = { _, _, _, _ -> }
+    private var onFailed: (Int) -> Unit = {}
 
     @Volatile
     private var dozing = false
 
-    override fun start(frame: (Int, Int, Int, ByteArray) -> Unit, changed: () -> Unit) {
+    override fun start(frame: (Int, Int, Int, ByteArray) -> Unit, changed: () -> Unit, failed: (Int) -> Unit) {
         onFrame = frame
+        onFailed = failed
         host.startListening()
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) = changed()
@@ -104,6 +125,48 @@ class AndroidWidgets(private val context: Context, private val log: Log) : Widge
         )
     }
 
+    /**
+     * The framework refuses every widget call ("User 0 must be unlocked for widgets to be
+     * available") until the user's storage is unlocked, which comes after the agent starts.
+     * The broadcast that says it has is the signal to start; the check after registering
+     * covers an unlock that came in between.
+     */
+    override fun whenReady(ready: () -> Unit) {
+        val users = context.getSystemService(UserManager::class.java)
+        if (users == null || users.isUserUnlocked) {
+            ready()
+            return
+        }
+        val once = java.util.concurrent.atomic.AtomicBoolean(false)
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                if (!once.compareAndSet(false, true)) return
+                try {
+                    context.unregisterReceiver(this)
+                } catch (ignored: IllegalArgumentException) {
+                    // Unregistered already.
+                }
+                ready()
+            }
+        }
+        context.registerReceiver(
+            receiver,
+            IntentFilter().apply {
+                addAction(Intent.ACTION_USER_UNLOCKED)
+                addAction(Intent.ACTION_BOOT_COMPLETED)
+            },
+            Context.RECEIVER_EXPORTED,
+        )
+        if (users.isUserUnlocked && once.compareAndSet(false, true)) {
+            try {
+                context.unregisterReceiver(receiver)
+            } catch (ignored: IllegalArgumentException) {
+                // Unregistered already.
+            }
+            ready()
+        }
+    }
+
     override fun providers(): List<WidgetInfo> =
         manager.installedProviders.map(::describe).sortedBy { it.label.lowercase() }
 
@@ -119,7 +182,11 @@ class AndroidWidgets(private val context: Context, private val log: Log) : Widge
     }
 
     override fun delete(widgetId: Int) {
-        main.post { renderers.remove(widgetId)?.close() }
+        main.post {
+            renderers.remove(widgetId)?.close()
+            views.remove(widgetId)
+            warned.remove(widgetId)
+        }
         host.deleteAppWidgetId(widgetId)
     }
 
@@ -132,19 +199,48 @@ class AndroidWidgets(private val context: Context, private val log: Log) : Widge
             try {
                 val old = renderers[widgetId]
                 if (old != null && old.size == size) return@post
+                renderers.remove(widgetId)
                 old?.close()
                 val info = manager.getAppWidgetInfo(widgetId)
                 if (info == null) {
-                    renderers.remove(widgetId)
                     log.warn("widget $widgetId has no app; it is not drawn")
                     return@post
                 }
-                renderers[widgetId] = Renderer(widgetId, info, size)
+                // The view first: from here on the widget's updates reach the agent.
+                val view = viewOf(widgetId, info, size.densityDpi)
+                renderers[widgetId] = Renderer(widgetId, size, view)
+                if (warned.remove(widgetId)) log.info("widget $widgetId draws again")
             } catch (e: Exception) {
-                renderers.remove(widgetId)
-                log.warn("drawing widget $widgetId failed", e)
+                renderers.remove(widgetId)?.close()
+                if (warned.add(widgetId)) log.warn("drawing widget $widgetId failed; trying again", e)
+                onFailed(widgetId)
             }
         }
+    }
+
+    /**
+     * The widget's view, made and registered with the framework when it has none at
+     * [densityDpi]. Making it again replaces the framework's listener for the widget ID.
+     */
+    private fun viewOf(widgetId: Int, info: AppWidgetProviderInfo, densityDpi: Int): AppWidgetHostView {
+        views[widgetId]?.let { (density, view) ->
+            if (density == densityDpi) {
+                (view.parent as? ViewGroup)?.removeView(view)
+                return view
+            }
+        }
+        val view = host.createView(densityContext(densityDpi), widgetId, info)
+        routeClicksToTheMainDisplay(view)
+        view.setPadding(0, 0, 0, 0)
+        views[widgetId] = densityDpi to view
+        return view
+    }
+
+    /** The agent's context at [densityDpi], which a widget's layouts are inflated with. */
+    private fun densityContext(densityDpi: Int): Context {
+        val configuration = Configuration(context.resources.configuration)
+        configuration.densityDpi = densityDpi
+        return context.createConfigurationContext(configuration)
     }
 
     override fun pointer(widgetId: Int, action: PointerAction, pointerId: Int, x: Float, y: Float) {
@@ -217,50 +313,118 @@ class AndroidWidgets(private val context: Context, private val log: Log) : Widge
         }
     }
 
-    /** The root of a widget's window: it hears when any view in it needs drawing again. */
-    private class CaptureRoot(context: Context, private val invalidated: () -> Unit) : FrameLayout(context) {
+    /**
+     * The root of a widget's window: it hears when any view in it needs drawing again.
+     *
+     * FrameLayout's constructor calls requestLayout() before this class's own fields are set,
+     * so the callback is read through a field that is still null at that point.
+     */
+    internal class CaptureRoot(context: Context, invalidated: () -> Unit) : FrameLayout(context) {
+        private val listener: (() -> Unit)? = invalidated
+
         override fun onDescendantInvalidated(child: View, target: View) {
             super.onDescendantInvalidated(child, target)
-            invalidated()
+            listener?.invoke()
         }
 
         override fun invalidate() {
             super.invalidate()
-            invalidated()
+            listener?.invoke()
         }
 
         override fun requestLayout() {
             super.requestLayout()
-            invalidated()
+            listener?.invoke()
         }
     }
 
-    /** One widget's window and drawing. Lives on the main thread. */
-    private inner class Renderer(val id: Int, info: AppWidgetProviderInfo, val size: WidgetSize) {
+    /**
+     * A widget's view as the agent makes it: it says when its app sent new views, which is
+     * the one sign of an update that reaches a view with no window. Its callback is read the
+     * same guarded way, in case the view's constructor reaches an override first.
+     */
+    internal class WidgetView(context: Context, updated: () -> Unit) : AppWidgetHostView(context) {
+        private val listener: (() -> Unit)? = updated
+
+        override fun updateAppWidget(remoteViews: RemoteViews?) {
+            super.updateAppWidget(remoteViews)
+            listener?.invoke()
+        }
+
+        /**
+         * What the view shows when the app's views cannot be shown, as for a while after
+         * the app is stopped: nothing, rather than the framework's error card, so the host
+         * keeps the widget's last image until the app draws again.
+         */
+        override fun getErrorView(): View = View(context)
+    }
+
+    /** The window a widget's views run in: a presentation on a private display of its size. */
+    private class WidgetWindow(
+        private val presentation: Presentation,
+        private val display: VirtualDisplay,
+        private val reader: ImageReader,
+    ) {
+        fun close(log: Log, id: Int) {
+            try {
+                presentation.dismiss()
+            } catch (e: Exception) {
+                log.warn("closing the window of widget $id failed", e)
+            }
+            display.release()
+            reader.close()
+        }
+    }
+
+    /** Opens [root] in a window of [size]; null, with the reason logged, when it cannot be. */
+    private fun openWindow(id: Int, size: WidgetSize, root: View): WidgetWindow? {
+        var reader: ImageReader? = null
+        var display: VirtualDisplay? = null
+        var presentation: Presentation? = null
+        return try {
+            reader = ImageReader.newInstance(size.width, size.height, PixelFormat.RGBA_8888, 2).also {
+                // The window's own drawing is not used; its buffers are given straight back.
+                it.setOnImageAvailableListener({ r -> r.acquireLatestImage()?.close() }, main)
+            }
+            display = displays.createVirtualDisplay("dsa-widget-$id", size.width, size.height, size.densityDpi, reader.surface, 0)
+                ?: error("Android made no display for the widget")
+            presentation = Presentation(context, display.display)
+            presentation.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            presentation.setContentView(root)
+            presentation.show()
+            WidgetWindow(presentation, display, reader)
+        } catch (e: Exception) {
+            try {
+                presentation?.dismiss()
+            } catch (ignored: Exception) {
+                // The window is closed below in any case.
+            }
+            (root.parent as? ViewGroup)?.removeView(root)
+            display?.release()
+            reader?.close()
+            log.warn("the window of widget $id did not open; drawing it without one, in software", e)
+            null
+        }
+    }
+
+    /**
+     * One widget's drawing, of the [view] already registered for it. Lives on the main thread.
+     * The view runs in a window of its own when one opens; without one it is drawn in
+     * software, again each time its app sends new views, and a clock at each tick.
+     */
+    private inner class Renderer(val id: Int, val size: WidgetSize, private val view: AppWidgetHostView) {
         val gate = FrameGate().also { it.dozing = dozing }
         private val width = size.width
         private val height = size.height
-        private val displayReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2).also { reader ->
-            // The window's own drawing is not used; its buffers are given straight back.
-            reader.setOnImageAvailableListener({ it.acquireLatestImage()?.close() }, main)
+        private val root = CaptureRoot(densityContext(size.densityDpi)) { requestCapture() }.also {
+            it.addView(view, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         }
-        private val display: VirtualDisplay = displays.createVirtualDisplay(
-            "dsa-widget-$id",
-            width,
-            height,
-            size.densityDpi,
-            displayReader.surface,
-            0,
-        )
-        private val presentation = Presentation(context, display.display)
-        private val root = CaptureRoot(presentation.context) { requestCapture() }
-        private val view: AppWidgetHostView = host.createView(presentation.context, id, info)
         private val captureReader = ImageReader.newInstance(
             width,
             height,
             PixelFormat.RGBA_8888,
             2,
-            HardwareBuffer.USAGE_CPU_READ_OFTEN or HardwareBuffer.USAGE_GPU_COLOR_OUTPUT,
+            HardwareBuffer.USAGE_CPU_READ_OFTEN or HardwareBuffer.USAGE_GPU_COLOR_OUTPUT or HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE,
         )
         private val node = RenderNode("dsa-widget-$id").also { it.setPosition(0, 0, width, height) }
         private val renderer = HardwareRenderer().also {
@@ -271,56 +435,100 @@ class AndroidWidgets(private val context: Context, private val log: Log) : Widge
             it.setContentRoot(node)
         }
 
+        // Opened last, so nothing after it can fail and leave the window open.
+        private val window: WidgetWindow? = openWindow(id, size, root)
+
         /**
          * Whether this widget is drawn without the GPU: set when the GPU's image of it came
          * back with nothing in it, which a widget never draws.
          */
         @Volatile
-        private var software = false
+        private var software = window == null
         private var captureScheduled = false
         private var tickScheduled = false
         private var closed = false
         private var downTime = 0L
 
         init {
-            routeClicksToTheMainDisplay(view)
-            view.setPadding(0, 0, 0, 0)
-            root.addView(view, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-            presentation.window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-            presentation.setContentView(root)
-            presentation.show()
             val sizes = Bundle()
             view.updateAppWidgetSize(sizes, listOf(SizeF(size.widthDp.toFloat(), size.heightDp.toFloat())))
             captureReader.setOnImageAvailableListener({ reader ->
                 val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
-                val png = try {
-                    val plane = image.planes[0]
-                    if (!software && allClear(plane.buffer, width, height, plane.rowStride, plane.pixelStride)) {
-                        main.post {
-                            if (closed || software) return@post
-                            software = true
-                            log.warn("the GPU's image of widget $id came back empty; drawing it in software from now on")
-                            captureInSoftware()
-                        }
-                        return@setOnImageAvailableListener
-                    }
-                    val stride = plane.rowStride / plane.pixelStride
-                    val full = Bitmap.createBitmap(stride, height, Bitmap.Config.ARGB_8888)
-                    full.copyPixelsFromBuffer(plane.buffer)
-                    val cropped = if (stride == width) full else Bitmap.createBitmap(full, 0, 0, width, height)
-                    encode(cropped).also {
-                        if (cropped !== full) cropped.recycle()
-                        full.recycle()
-                    }
+                val pixels = try {
+                    readBack(image)
                 } catch (e: Exception) {
                     log.warn("reading the image of widget $id failed", e)
                     null
                 } finally {
                     image.close()
                 }
-                if (png != null) onFrame(id, width, height, png)
+                if (pixels == null) return@setOnImageAvailableListener
+                if (isClear(pixels)) {
+                    pixels.recycle()
+                    // Either the widget shows nothing yet (its app has not sent its views),
+                    // or the GPU's drawing did not reach this image. A drawing in software
+                    // tells which; only the second makes the widget draw in software.
+                    main.post { checkClearImage() }
+                    return@setOnImageAvailableListener
+                }
+                send(pixels)
             }, encoder)
             requestCapture()
+        }
+
+        /**
+         * The GPU's image, read back through the GPU: the image wrapped as a hardware bitmap
+         * and copied, which the renderer does with a GPU read. Mapping the buffer for the
+         * CPU instead shows nothing on a guest whose graphics driver keeps the buffer's
+         * contents on the host, and the widget then looked empty.
+         */
+        private fun readBack(image: android.media.Image): Bitmap? {
+            val buffer = image.hardwareBuffer
+            if (buffer != null) {
+                try {
+                    val wrapped = Bitmap.wrapHardwareBuffer(buffer, null)
+                    if (wrapped != null) {
+                        val copy = wrapped.copy(Bitmap.Config.ARGB_8888, false)
+                        wrapped.recycle()
+                        if (copy != null) return copy
+                    }
+                } finally {
+                    buffer.close()
+                }
+            }
+            val plane = image.planes[0]
+            val stride = plane.rowStride / plane.pixelStride
+            val full = Bitmap.createBitmap(stride, height, Bitmap.Config.ARGB_8888)
+            full.copyPixelsFromBuffer(plane.buffer)
+            if (stride == width) return full
+            return Bitmap.createBitmap(full, 0, 0, width, height).also { full.recycle() }
+        }
+
+        /** The GPU's image came back clear: a drawing in software says whether it should have. */
+        private fun checkClearImage() {
+            if (closed || software) return
+            val drawn = drawInSoftware() ?: return
+            if (isClear(drawn)) {
+                // The widget shows nothing yet; the host keeps what it showed before.
+                drawn.recycle()
+                return
+            }
+            software = true
+            log.warn("the GPU's image of widget $id came back empty though the widget shows something; drawing it in software from now on")
+            encoder.post { send(drawn) }
+        }
+
+        /** Sends [pixels] as the widget's image, once, and frees them. */
+        private fun send(pixels: Bitmap) {
+            val png = try {
+                encode(pixels)
+            } catch (e: Exception) {
+                log.warn("encoding the image of widget $id failed", e)
+                null
+            } finally {
+                pixels.recycle()
+            }
+            if (png != null) onFrame(id, width, height, png)
         }
 
         fun requestCapture() {
@@ -370,15 +578,28 @@ class AndroidWidgets(private val context: Context, private val log: Log) : Widge
 
         /** Draws the widget without the GPU, for a view the hardware renderer cannot take. */
         private fun captureInSoftware() {
-            try {
-                val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-                root.draw(Canvas(bitmap))
-                val png = encode(bitmap)
+            val bitmap = drawInSoftware() ?: return
+            if (isClear(bitmap)) {
+                // Nothing to show yet, or the app's views went: the host keeps the last image.
                 bitmap.recycle()
-                encoder.post { onFrame(id, width, height, png) }
-            } catch (e: Exception) {
-                log.warn("drawing widget $id failed", e)
+                return
             }
+            encoder.post { send(bitmap) }
+        }
+
+        /**
+         * The widget drawn in software onto a bitmap with an alpha channel that starts fully
+         * transparent, so what the widget leaves undrawn stays see-through on the desktop.
+         */
+        private fun drawInSoftware(): Bitmap? = try {
+            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            bitmap.setHasAlpha(true)
+            bitmap.eraseColor(Color.TRANSPARENT)
+            root.draw(Canvas(bitmap))
+            bitmap
+        } catch (e: Exception) {
+            log.warn("drawing widget $id failed", e)
+            null
         }
 
         /** Draws a clock again at its next second or minute, whatever its own ticking does. */
@@ -419,16 +640,19 @@ class AndroidWidgets(private val context: Context, private val log: Log) : Widge
 
         fun close() {
             closed = true
-            try {
-                presentation.dismiss()
-            } catch (e: Exception) {
-                log.warn("closing the window of widget $id failed", e)
-            }
+            window?.close(log, id)
+            root.removeAllViews()
             renderer.destroy()
-            display.release()
-            displayReader.close()
             encoder.post { captureReader.close() }
         }
+    }
+
+    /** Whether [bitmap] shows nothing: every pixel's alpha is zero. */
+    private fun isClear(bitmap: Bitmap): Boolean {
+        val buffer = java.nio.ByteBuffer.allocate(bitmap.rowBytes * bitmap.height)
+        bitmap.copyPixelsToBuffer(buffer)
+        buffer.rewind()
+        return allClear(buffer, bitmap.width, bitmap.height, bitmap.rowBytes)
     }
 
     private fun encode(bitmap: Bitmap): ByteArray =

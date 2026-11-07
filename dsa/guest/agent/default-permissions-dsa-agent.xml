@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The runtime permissions the guest agent holds from the first boot, without asking the user.
+  The image installs this file in system_ext/etc/default-permissions/, which the framework
+  reads for its privileged apps. The storage permissions let the agent put the expansion
+  (OBB) files of an app the host installs in the app's folder under Android/obb/, which
+  Android opens to an installer only while it holds them.
+-->
+<exceptions>
+    <exception package="io.github.thisisthepy.dsa.agent">
+        <permission name="android.permission.READ_EXTERNAL_STORAGE" fixed="false" />
+        <permission name="android.permission.WRITE_EXTERNAL_STORAGE" fixed="false" />
+    </exception>
+</exceptions>

@@ -1,7 +1,7 @@
 <!--
     The window Windows' list of installed apps opens to uninstall an Android app. Windows has
     already asked, so it does not ask again: it uninstalls at once and shows the result. It is laid out
-    as the APK install window is, with setup's styles and colours: the caption bar, the hero with
+    as setup's screens are, with setup's styles and colours: the caption bar, the hero with
     the app, a panel for the screen, and the footer layer with its buttons.
 -->
 <Window x:Class="Dsa.Settings.UninstallAppWindow"
@@ -66,7 +66,7 @@
 
             <Grid Margin="0,20,0,0">
                 <StackPanel x:Name="ProgressPanel">
-                    <TextBlock x:Name="ProgressTitle" Style="{StaticResource BodyStrong}" TextTrimming="CharacterEllipsis"
+                    <TextBlock x:Name="ProgressTitle" Style="{StaticResource SectionHeader}" Margin="0" TextTrimming="CharacterEllipsis"
                                AutomationProperties.AutomationId="ProgressTitle" />
                     <Grid x:Name="ProgressMarquee" Margin="0,12,0,0" Height="3" ClipToBounds="True" />
                     <TextBlock x:Name="ProgressDetail" Style="{StaticResource Caption}" Margin="0,12,0,0" />
@@ -84,7 +84,7 @@
                               Stroke="{DynamicResource AccentText}" Data="M3.5,8.5 L6.5,11.5 L12.5,4.5" />
                     </Grid>
                     <StackPanel Grid.Column="1" Margin="12,0,0,0">
-                        <TextBlock x:Name="ResultTitle" Style="{StaticResource BodyStrong}" AutomationProperties.AutomationId="ResultTitle" />
+                        <TextBlock x:Name="ResultTitle" Style="{StaticResource SectionHeader}" Margin="0" AutomationProperties.AutomationId="ResultTitle" />
                         <TextBlock x:Name="ResultText" Style="{StaticResource Body}" Foreground="{DynamicResource TextSecondary}"
                                    AutomationProperties.AutomationId="ResultText" />
                     </StackPanel>

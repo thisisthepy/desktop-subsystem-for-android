@@ -1,0 +1,1312 @@
+diff --git a/host/RenderThread.cpp b/host/RenderThread.cpp
+index 5207b1ca7..2b397d995 100644
+--- a/host/RenderThread.cpp
++++ b/host/RenderThread.cpp
+@@ -67,6 +67,30 @@ struct RenderThread::SnapshotObjects {
+     ReadBuffer* readBuffer;
+ };
+ 
++namespace {
++
++// The FrameBuffer's context structure read lock, held while the GL decoders run. A fatal
++// error in a decoder unwinds through it, and the lock must not stay held after the thread
++// has ended its stream, or every context change after it would wait forever.
++class ContextStructureReadLock {
++   public:
++    ContextStructureReadLock() { FrameBuffer::getFB()->lockContextStructureRead(); }
++    ~ContextStructureReadLock() { unlock(); }
++    void unlock() {
++        if (mLocked) {
++            mLocked = false;
++            FrameBuffer::getFB()->unlockContextStructureRead();
++        }
++    }
++    ContextStructureReadLock(const ContextStructureReadLock&) = delete;
++    ContextStructureReadLock& operator=(const ContextStructureReadLock&) = delete;
++
++   private:
++    bool mLocked = true;
++};
++
++}  // namespace
++
+ static bool getBenchmarkEnabledFromEnv() {
+     auto threadEnabled = android::base::getEnvironmentVariable("ANDROID_EMUGL_RENDERTHREAD_STATS");
+     if (threadEnabled == "1") return true;
+@@ -383,6 +407,13 @@ intptr_t RenderThread::main() {
+ 
+     const ProcessResources* processResources = nullptr;
+     bool anyProgress = false;
++    // A fatal error while this thread decodes its guest's commands (a command the host
++    // cannot carry out, a GPU device the guest's work lost) ends this guest's stream: the
++    // guest process loses its rendering, and every other guest and the process that embeds
++    // the renderer keep running. Only the decoding is covered: what runs after it ends the
++    // thread as before.
++    try {
++    emugl::ScopedGuestFatalErrors guestFatalErrors;
+     while (true) {
+         // Let's make sure we read enough data for at least some processing.
+         uint32_t packetSize;
+@@ -544,9 +575,7 @@ intptr_t RenderThread::main() {
+             // To fix, this driver workaround avoids calling
+             // any sort of GLES call when we are creating/destroying EGL
+             // contexts.
+-            {
+-                FrameBuffer::getFB()->lockContextStructureRead();
+-            }
++            ContextStructureReadLock contextStructureLock;
+ 
+ #if GFXSTREAM_ENABLE_HOST_GLES
+             if (tInfo->m_glInfo) {
+@@ -575,7 +604,7 @@ intptr_t RenderThread::main() {
+             }
+ #endif
+ 
+-            FrameBuffer::getFB()->unlockContextStructureRead();
++            contextStructureLock.unlock();
+             //
+             // try to process some of the command buffer using the
+             // renderControl decoder
+@@ -608,6 +637,15 @@ intptr_t RenderThread::main() {
+ #endif
+         } while (progress);
+     }
++    } catch (const emugl::GuestFatalError& error) {
++        ERR("RenderThread @%p ended its guest's stream after a fatal error: %s", this,
++            error.what());
++        // Both directions close, so the embedder's pumps stop and the guest sees its
++        // connection end.
++        if (mChannel) {
++            mChannel->stopFromHost();
++        }
++    }
+ 
+     if (dumpFP) {
+         fclose(dumpFP);
+diff --git a/host/RendererImpl.cpp b/host/RendererImpl.cpp
+index 2bfc71079..a9960afae 100644
+--- a/host/RendererImpl.cpp
++++ b/host/RendererImpl.cpp
+@@ -25,6 +25,7 @@
+ #include "RenderThread.h"
+ #include "aemu/base/system/System.h"
+ #include "aemu/base/threads/WorkerThread.h"
++#include "host-common/GfxstreamFatalError.h"
+ #include "host-common/logging.h"
+ #include "snapshot/common.h"
+ 
+@@ -66,7 +67,17 @@ public:
+             using android::base::WorkerProcessingResult;
+             struct {
+                 WorkerProcessingResult operator()(CleanProcessResources resources) {
+-                    FrameBuffer::getFB()->cleanupProcGLObjects(resources.puid);
++                    // A fatal error while one guest process's objects are freed (its GPU
++                    // device lost, say) leaves what is left of them, rather than ending
++                    // the process that embeds the renderer.
++                    try {
++                        emugl::ScopedGuestFatalErrors guestFatalErrors;
++                        FrameBuffer::getFB()->cleanupProcGLObjects(resources.puid);
++                    } catch (const emugl::GuestFatalError& error) {
++                        ERR("Cleaning up guest process %llu stopped after a fatal error: %s. "
++                            "What was left of its objects is not freed.",
++                            static_cast<unsigned long long>(resources.puid), error.what());
++                    }
+                     // resources.resource are destroyed automatically when going out of the scope.
+                     return WorkerProcessingResult::Continue;
+                 }
+diff --git a/host/vulkan/VkAndroidNativeBuffer.cpp b/host/vulkan/VkAndroidNativeBuffer.cpp
+index 9a1b68af9..688dabd68 100644
+--- a/host/vulkan/VkAndroidNativeBuffer.cpp
++++ b/host/vulkan/VkAndroidNativeBuffer.cpp
+@@ -69,8 +69,17 @@ VkFence AndroidNativeBufferInfo::QsriWaitFencePool::getFenceFromPool() {
+         mAvailableFences.pop_back();
+         VkResult res = mVk->vkResetFences(mDevice, 1, &fence);
+         if (res != VK_SUCCESS) {
+-            GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
+-                << "Fail to reset Qsri VkFence: " << res << "(" << string_VkResult(res) << ").";
++            // A fence of a lost device: a new one takes its place, and the submission that
++            // uses it reports the loss to the guest.
++            ERR("Failed to reset a Qsri VkFence: %s; making a new one.", string_VkResult(res));
++            mVk->vkDestroyFence(mDevice, fence, nullptr);
++            fence = VK_NULL_HANDLE;
++            VkFenceCreateInfo fenceCreateInfo = {
++                VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
++                0,
++                0,
++            };
++            mVk->vkCreateFence(mDevice, &fenceCreateInfo, nullptr, &fence);
+         }
+         VK_ANB_DEBUG("existing fence in pool: %p. also reset the fence", fence);
+     }
+@@ -96,8 +105,8 @@ AndroidNativeBufferInfo::QsriWaitFencePool::~QsriWaitFencePool() {
+ void AndroidNativeBufferInfo::QsriWaitFencePool::returnFence(VkFence fence) {
+     std::lock_guard<std::mutex> lock(mMutex);
+     if (!mUsedFences.erase(fence)) {
+-        GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
+-            << "Return an unmanaged Qsri VkFence back to the pool.";
++        // Runs on a sync thread, where ending the process would end every guest's rendering.
++        ERR("An unmanaged Qsri VkFence was returned to the pool; it is left.");
+         return;
+     }
+     mAvailableFences.push_back(fence);
+@@ -580,7 +589,13 @@ VkResult AndroidNativeBufferInfo::on_vkAcquireImageANDROID(VkEmulation* emu,
+             semaphore == VK_NULL_HANDLE ? nullptr : &semaphore,
+         };
+         std::lock_guard<std::mutex> qlock(*defaultQueueMutex);
+-        VK_CHECK(vk->vkQueueSubmit(defaultQueue, 1, &submitInfo, fence));
++        {
++            const VkResult submitResult = vk->vkQueueSubmit(defaultQueue, 1, &submitInfo, fence);
++            if (submitResult != VK_SUCCESS) {
++                ERR("Submitting an image acquire failed with %s.", string_VkResult(submitResult));
++                return submitResult;
++            }
++        }
+         return VK_SUCCESS;
+     }
+ 
+@@ -655,7 +670,13 @@ VkResult AndroidNativeBufferInfo::on_vkAcquireImageANDROID(VkEmulation* emu,
+ 
+         std::lock_guard<std::mutex> queueLock(*queueState.queueMutex);
+         // TODO(kaiyili): initiate ownership transfer from DisplayVk here
+-        VK_CHECK(vk->vkQueueSubmit(queueState.queue, 1, &submitInfo, fence));
++        {
++            const VkResult submitResult = vk->vkQueueSubmit(queueState.queue, 1, &submitInfo, fence);
++            if (submitResult != VK_SUCCESS) {
++                ERR("Submitting an image acquire failed with %s.", string_VkResult(submitResult));
++                return submitResult;
++            }
++        }
+     } else {
+         const VkSubmitInfo submitInfo = {
+             VK_STRUCTURE_TYPE_SUBMIT_INFO,
+@@ -669,7 +690,13 @@ VkResult AndroidNativeBufferInfo::on_vkAcquireImageANDROID(VkEmulation* emu,
+             semaphore == VK_NULL_HANDLE ? nullptr : &semaphore,
+         };
+         std::lock_guard<std::mutex> queueLock(*queueState.queueMutex);
+-        VK_CHECK(vk->vkQueueSubmit(queueState.queue, 1, &submitInfo, fence));
++        {
++            const VkResult submitResult = vk->vkQueueSubmit(queueState.queue, 1, &submitInfo, fence);
++            if (submitResult != VK_SUCCESS) {
++                ERR("Submitting an image acquire failed with %s.", string_VkResult(submitResult));
++                return submitResult;
++            }
++        }
+     }
+ 
+     return VK_SUCCESS;
+@@ -838,7 +865,19 @@ VkResult AndroidNativeBufferInfo::on_vkQueueSignalReleaseImageANDROID(
+     // TODO(kaiyili): initiate ownership transfer to DisplayVk here.
+     VkFence qsriFence = mQsriWaitFencePool->getFenceFromPool();
+     std::lock_guard<std::mutex> qLock(*queueMutex);
+-    VK_CHECK(vk->vkQueueSubmit(queueState.queue, 1, &submitInfo, qsriFence));
++    {
++        // A failed submission (a lost device) is the guest's answer, not the end of the
++        // renderer.
++        const VkResult submitResult =
++            vk->vkQueueSubmit(queueState.queue, 1, &submitInfo, qsriFence);
++        if (submitResult != VK_SUCCESS) {
++            ERR("Submitting an image release failed with %s.", string_VkResult(submitResult));
++            mQsriWaitFencePool->returnFence(qsriFence);
++            fb->unlock();
++            mQsriTimeline->signalNextPresentAndPoll();
++            return submitResult;
++        }
++    }
+     auto waitForQsriFenceTask = [this, vk, device = mDevice, qsriFence, traceId] {
+         (void)traceId;
+         GFXSTREAM_TRACE_EVENT(GFXSTREAM_TRACE_DEFAULT_CATEGORY, "Wait for QSRI fence",
+@@ -855,7 +894,8 @@ VkResult AndroidNativeBufferInfo::on_vkQueueSignalReleaseImageANDROID(
+                 break;
+             default:
+                 ERR("Failed to wait for QSRI fence: %s\n", string_VkResult(res));
+-                VK_CHECK(res);
++                // The loss reaches the guest through its next call on the device; the
++                // fence still goes back, so the pool and the release timeline move on.
+         }
+         VK_ANB_DEBUG_OBJ(this, "wait callback: wait for fence %p...(done)", qsriFence);
+         mQsriWaitFencePool->returnFence(qsriFence);
+diff --git a/host/vulkan/VkCommonOperations.cpp b/host/vulkan/VkCommonOperations.cpp
+index 3863023f2..a5cf669f4 100644
+--- a/host/vulkan/VkCommonOperations.cpp
++++ b/host/vulkan/VkCommonOperations.cpp
+@@ -54,6 +54,29 @@
+ 
+ namespace gfxstream {
+ namespace vk {
++
++// A failed call on the emulation's own device fails the one operation, which reports it to
++// its caller, rather than ending the process as VK_CHECK does. A lost device is noted, and
++// the next operation makes a new one. `failed` is what the operation returns; empty in a
++// function that returns nothing.
++#define VK_EMU_TRY(x, failed)                                           \
++    do {                                                                \
++        VkResult vkEmuResult = (x);                                     \
++        if (vkEmuResult != VK_SUCCESS) {                                \
++            noteDeviceFailure(vkEmuResult, #x, __func__, __LINE__);     \
++            return failed;                                              \
++        }                                                               \
++    } while (0)
++
++// The same for a call whose failure leaves nothing to give up.
++#define VK_EMU_LOG(x)                                                   \
++    do {                                                                \
++        VkResult vkEmuResult = (x);                                     \
++        if (vkEmuResult != VK_SUCCESS) {                                \
++            noteDeviceFailure(vkEmuResult, #x, __func__, __LINE__);     \
++        }                                                               \
++    } while (0)
++
+ namespace {
+ 
+ using android::base::AutoLock;
+@@ -1560,7 +1583,68 @@ std::unique_ptr<VkEmulation> VkEmulation::create(VulkanDispatch* gvk,
+         }
+     }
+ 
+-    ivk->vkCreateDevice(emulation->mPhysicalDevice, &dCi, nullptr, &emulation->mDevice);
++    // What the device is made of is kept, so that a device a GPU reset loses can be made
++    // again just the same.
++    {
++        const std::vector<std::string> extensionNames(selectedDeviceExtensionNames.begin(),
++                                                      selectedDeviceExtensionNames.end());
++        const uint32_t queueFamilyIndex = emulation->mDeviceInfo.graphicsQueueFamilyIndices[0];
++        const VkPhysicalDeviceFeatures features = physicalDeviceFeatures.features;
++        const bool ycbcr = samplerYcbcrConversionFeatures != nullptr;
++        const bool checkpoints = commandBufferCheckpointsSupportedAndRequested;
++        const bool robustness2 = emulation->mDeviceInfo.robustness2Features.has_value();
++        const VkPhysicalDeviceRobustness2FeaturesEXT robustness2Features = r2features;
++        const VkPhysicalDevice physicalDevice = emulation->mPhysicalDevice;
++        emulation->mMakeDevice = [=](VkDevice* device) -> VkResult {
++            float queuePriority = 1.0f;
++            VkDeviceQueueCreateInfo queueCi = {};
++            queueCi.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
++            queueCi.queueFamilyIndex = queueFamilyIndex;
++            queueCi.queueCount = 1;
++            queueCi.pQueuePriorities = &queuePriority;
++
++            std::vector<const char*> names;
++            for (const auto& name : extensionNames) {
++                names.push_back(name.c_str());
++            }
++
++            VkDeviceCreateInfo ci = {};
++            ci.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
++            ci.queueCreateInfoCount = 1;
++            ci.pQueueCreateInfos = &queueCi;
++            ci.enabledExtensionCount = static_cast<uint32_t>(names.size());
++            ci.ppEnabledExtensionNames = names.data();
++            auto chain = vk_make_chain_iterator(&ci);
++
++            VkPhysicalDeviceFeatures2 features2 = {};
++            features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
++            features2.features = features;
++            vk_append_struct(&chain, &features2);
++
++            VkPhysicalDeviceSamplerYcbcrConversionFeatures ycbcrFeatures = {};
++            ycbcrFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES;
++            ycbcrFeatures.samplerYcbcrConversion = VK_TRUE;
++            if (ycbcr) {
++                vk_append_struct(&chain, &ycbcrFeatures);
++            }
++
++            VkPhysicalDeviceDiagnosticsConfigFeaturesNV diagnostics = {};
++            diagnostics.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DIAGNOSTICS_CONFIG_FEATURES_NV;
++            diagnostics.diagnosticsConfig = VK_TRUE;
++            if (checkpoints) {
++                vk_append_struct(&chain, &diagnostics);
++            }
++
++            VkPhysicalDeviceRobustness2FeaturesEXT robustness = robustness2Features;
++            robustness.pNext = nullptr;
++            if (robustness2) {
++                vk_append_struct(&chain, &robustness);
++            }
++
++            return ivk->vkCreateDevice(physicalDevice, &ci, nullptr, device);
++        };
++    }
++    res = emulation->mMakeDevice(&emulation->mDevice);
+ 
+     if (res != VK_SUCCESS) {
+         VK_EMU_INIT_RETURN_OR_ABORT_ON_ERROR(res, "Failed to create Vulkan device. Error %s.",
+@@ -1807,6 +1891,7 @@ void VkEmulation::initFeatures(Features features) {
+         }
+         mCompositorVk = CompositorVk::create(*mIvk, mDevice, mPhysicalDevice, mQueue, mQueueLock,
+                                              mQueueFamilyIndex, 3, mDebugUtilsHelper);
++        mCompositor.use(mCompositorVk.get());
+     }
+ 
+     if (features.useVulkanNativeSwapchain) {
+@@ -1840,6 +1925,7 @@ VkEmulation::~VkEmulation() {
+         freeRetiredLocked(/*wait=*/true);
+     }
+ 
++    mCompositor.use(nullptr);
+     mCompositorVk.reset();
+     mDisplayVk.reset();
+ 
+@@ -1943,7 +2029,7 @@ emugl::RenderDocWithMultipleVkInstances* VkEmulation::getRenderDoc() {
+     return mGuestRenderDoc.get();
+ }
+ 
+-Compositor* VkEmulation::getCompositor() { return mCompositorVk.get(); }
++Compositor* VkEmulation::getCompositor() { return mCompositorVk ? &mCompositor : nullptr; }
+ 
+ DisplayVk* VkEmulation::getDisplay() { return mDisplayVk.get(); }
+ 
+@@ -2017,6 +2103,330 @@ VkEmulation::getRepresentativeColorBufferMemoryTypeInfo() const {
+ 
+ void VkEmulation::onVkDeviceLost() { VkDecoderGlobalState::get()->on_DeviceLost(); }
+ 
++namespace {
++
++// What a device's queue and fence calls return after a GPU reset.
++VKAPI_ATTR VkResult VKAPI_CALL lostQueueSubmit(VkQueue, uint32_t, const VkSubmitInfo*, VkFence) {
++    return VK_ERROR_DEVICE_LOST;
++}
++#ifdef VK_VERSION_1_3
++VKAPI_ATTR VkResult VKAPI_CALL lostQueueSubmit2(VkQueue, uint32_t, const VkSubmitInfo2*,
++                                                VkFence) {
++    return VK_ERROR_DEVICE_LOST;
++}
++#endif
++VKAPI_ATTR VkResult VKAPI_CALL lostQueueWaitIdle(VkQueue) { return VK_ERROR_DEVICE_LOST; }
++VKAPI_ATTR VkResult VKAPI_CALL lostDeviceWaitIdle(VkDevice) { return VK_ERROR_DEVICE_LOST; }
++VKAPI_ATTR VkResult VKAPI_CALL lostGetFenceStatus(VkDevice, VkFence) {
++    return VK_ERROR_DEVICE_LOST;
++}
++VKAPI_ATTR VkResult VKAPI_CALL lostWaitForFences(VkDevice, uint32_t, const VkFence*, VkBool32,
++                                                 uint64_t) {
++    return VK_ERROR_DEVICE_LOST;
++}
++
++}  // namespace
++
++void makeDispatchLoseDevice(VulkanDispatch* vk) {
++    if (!vk) {
++        return;
++    }
++    vk->vkQueueSubmit = lostQueueSubmit;
++#ifdef VK_VERSION_1_3
++    vk->vkQueueSubmit2 = lostQueueSubmit2;
++#endif
++    vk->vkQueueWaitIdle = lostQueueWaitIdle;
++    vk->vkDeviceWaitIdle = lostDeviceWaitIdle;
++    vk->vkGetFenceStatus = lostGetFenceStatus;
++    vk->vkWaitForFences = lostWaitForFences;
++}
++
++Compositor::CompositionFinishedWaitable RemakeableCompositor::compose(
++    const CompositionRequest& compositionRequest) {
++    std::lock_guard<std::mutex> lock(mMutex);
++    if (mInner) {
++        try {
++            emugl::ScopedGuestFatalErrors guestFatalErrors;
++            return mInner->compose(compositionRequest);
++        } catch (const emugl::GuestFatalError& error) {
++            ERR("A composition was given up after a fatal error: %s", error.what());
++        }
++    }
++    std::promise<void> done;
++    done.set_value();
++    return done.get_future().share();
++}
++
++void RemakeableCompositor::onImageDestroyed(uint32_t imageId) {
++    std::lock_guard<std::mutex> lock(mMutex);
++    if (mInner) {
++        mInner->onImageDestroyed(imageId);
++    }
++}
++
++void RemakeableCompositor::use(CompositorVk* inner) {
++    std::lock_guard<std::mutex> lock(mMutex);
++    mInner = inner;
++}
++
++void VkEmulation::noteDeviceFailure(VkResult result, const char* call, const char* function,
++                                    int line) {
++    ERR("%s failed with %s in %s (line %d).", call, string_VkResult(result), function, line);
++    if (result == VK_ERROR_DEVICE_LOST) {
++        mDeviceLost.store(true);
++    }
++}
++
++void VkEmulation::noteDeviceLost() { mDeviceLost.store(true); }
++
++void VkEmulation::suspectDeviceLost() { mDeviceSuspect.store(true); }
++
++bool VkEmulation::deviceLostLocked() {
++    if (mDeviceLost.load()) {
++        return true;
++    }
++    if (!mDeviceSuspect.exchange(false) || mDevice == VK_NULL_HANDLE) {
++        return false;
++    }
++    VkResult result;
++    {
++        android::base::AutoLock queueLock(*mQueueLock);
++        result = mDvk->vkQueueWaitIdle(mQueue);
++    }
++    if (result == VK_ERROR_DEVICE_LOST) {
++        mDeviceLost.store(true);
++        return true;
++    }
++    return false;
++}
++
++bool VkEmulation::recoverIfLost() {
++    if (!mDeviceLost.load() && !mDeviceSuspect.load()) {
++        return true;
++    }
++    std::unique_lock<std::shared_mutex> use(mDeviceUse);
++    std::lock_guard<std::mutex> lock(mMutex);
++    if (!deviceLostLocked()) {
++        return mDevice != VK_NULL_HANDLE;
++    }
++    if (!remakeDeviceLocked()) {
++        return false;
++    }
++    mDeviceLost.store(false);
++    return true;
++}
++
++void VkEmulation::loseDeviceForTesting() {
++    std::unique_lock<std::shared_mutex> use(mDeviceUse);
++    std::lock_guard<std::mutex> lock(mMutex);
++    makeDispatchLoseDevice(mDvk);
++    mDeviceSuspect.store(true);
++}
++
++bool VkEmulation::makeDeviceObjectsLocked() {
++    init_vulkan_dispatch_from_device(mIvk, mDevice, mDvk);
++    auto dvk = mDvk;
++
++    if (mDeviceInfo.supportsExternalMemoryImport) {
++        mDeviceInfo.getImageMemoryRequirements2Func =
++            reinterpret_cast<PFN_vkGetImageMemoryRequirements2KHR>(
++                dvk->vkGetDeviceProcAddr(mDevice, "vkGetImageMemoryRequirements2KHR"));
++        mDeviceInfo.getBufferMemoryRequirements2Func =
++            reinterpret_cast<PFN_vkGetBufferMemoryRequirements2KHR>(
++                dvk->vkGetDeviceProcAddr(mDevice, "vkGetBufferMemoryRequirements2KHR"));
++    }
++    if (mDeviceInfo.supportsExternalMemoryExport) {
++#ifdef _WIN32
++        mDeviceInfo.getMemoryHandleFunc = reinterpret_cast<PFN_vkGetMemoryWin32HandleKHR>(
++            dvk->vkGetDeviceProcAddr(mDevice, "vkGetMemoryWin32HandleKHR"));
++#else
++        if (!mInstanceSupportsMoltenVK) {
++            mDeviceInfo.getMemoryHandleFunc = reinterpret_cast<PFN_vkGetMemoryFdKHR>(
++                dvk->vkGetDeviceProcAddr(mDevice, "vkGetMemoryFdKHR"));
++        }
++#endif
++    }
++
++    {
++        android::base::AutoLock queueLock(*mQueueLock);
++        dvk->vkGetDeviceQueue(mDevice, mQueueFamilyIndex, 0, &mQueue);
++    }
++
++    VkCommandPoolCreateInfo poolCi = {};
++    poolCi.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
++    poolCi.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
++    poolCi.queueFamilyIndex = mQueueFamilyIndex;
++    VK_EMU_TRY(dvk->vkCreateCommandPool(mDevice, &poolCi, nullptr, &mCommandPool), false);
++
++    VkCommandBufferAllocateInfo cbAi = {};
++    cbAi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
++    cbAi.commandPool = mCommandPool;
++    cbAi.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
++    cbAi.commandBufferCount = 1;
++    VK_EMU_TRY(dvk->vkAllocateCommandBuffers(mDevice, &cbAi, &mCommandBuffer), false);
++
++    VkFenceCreateInfo fenceCi = {};
++    fenceCi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
++    VK_EMU_TRY(dvk->vkCreateFence(mDevice, &fenceCi, nullptr, &mCommandBufferFence), false);
++
++    VkBufferCreateInfo bufCi = {};
++    bufCi.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
++    bufCi.size = mStaging.size;
++    bufCi.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
++    bufCi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
++    VK_EMU_TRY(dvk->vkCreateBuffer(mDevice, &bufCi, nullptr, &mStaging.buffer), false);
++
++    VkMemoryRequirements memReqs;
++    dvk->vkGetBufferMemoryRequirements(mDevice, mStaging.buffer, &memReqs);
++    mStaging.memory = ExternalMemoryInfo{};
++    mStaging.memory.size = memReqs.size;
++    if (!getStagingMemoryTypeIndex(dvk, mDevice, &mDeviceInfo.memProps,
++                                   &mStaging.memory.typeIndex) ||
++        !((1 << mStaging.memory.typeIndex) & memReqs.memoryTypeBits)) {
++        ERR("No memory type for the staging buffer of the new Vulkan device.");
++        return false;
++    }
++    if (!allocExternalMemory(dvk, &mStaging.memory, false /* not external */,
++                             kNullopt /* deviceAlignment */)) {
++        ERR("Could not allocate the staging buffer of the new Vulkan device.");
++        return false;
++    }
++    VK_EMU_TRY(dvk->vkBindBufferMemory(mDevice, mStaging.buffer, mStaging.memory.memory, 0),
++               false);
++    return true;
++}
++
++bool VkEmulation::remakeDeviceLocked() {
++    ERR("The renderer's Vulkan device on %s was lost (the GPU was reset); making a new one.",
++        mDeviceInfo.physdevProps.deviceName);
++    auto vk = mDvk;
++
++    if (mDevice != VK_NULL_HANDLE) {
++        // Nothing runs on a lost device any more, so nothing is waited for, and Vulkan lets
++        // every object of a lost device be destroyed.
++        for (auto& retired : mRetired) {
++            destroyRetiredLocked(&retired);
++        }
++        mRetired.clear();
++        for (auto& [commandBuffer, fence] : mTransferQueueCommandBufferPool) {
++            vk->vkDestroyFence(mDevice, fence, nullptr);
++        }
++        mTransferQueueCommandBufferPool.clear();
++    }
++
++    // The ColorBuffers are made again at their sizes and formats, under the same handles,
++    // so the guest's buffers keep naming them. What was drawn in them is gone.
++    struct Remade {
++        uint32_t handle;
++        uint32_t width;
++        uint32_t height;
++        GLenum internalFormat;
++        int frameworkFormat;
++        bool vulkanOnly;
++        uint32_t memoryProperty;
++    };
++    std::vector<Remade> colorBuffers;
++    for (auto& [handle, info] : mColorBuffers) {
++        colorBuffers.push_back(Remade{handle, info.width, info.height, info.internalFormat,
++                                      info.frameworkFormat,
++                                      info.vulkanMode == VulkanMode::VulkanOnly,
++                                      info.memoryProperty});
++        if (mDevice != VK_NULL_HANDLE && info.initialized) {
++            if (info.imageView != VK_NULL_HANDLE) {
++                vk->vkDestroyImageView(mDevice, info.imageView, nullptr);
++            }
++            if (info.ycbcrConversion != VK_NULL_HANDLE) {
++                vk->vkDestroySamplerYcbcrConversion(mDevice, info.ycbcrConversion, nullptr);
++            }
++            vk->vkDestroyImage(mDevice, info.image, nullptr);
++            freeExternalMemoryLocked(vk, &info.memory);
++        }
++    }
++    mColorBuffers.clear();
++    if (!mBuffers.empty()) {
++        ERR("%zu Vulkan buffers were lost with the device; the guest's calls on them fail.",
++            mBuffers.size());
++    }
++    if (mDevice != VK_NULL_HANDLE) {
++        for (auto& [handle, info] : mBuffers) {
++            vk->vkDestroyBuffer(mDevice, info.buffer, nullptr);
++            freeExternalMemoryLocked(vk, &info.memory);
++        }
++    }
++    mBuffers.clear();
++
++    // The compositor was made on the lost device. Compositions stop going to it, and it is
++    // left rather than destroyed: its destructor waits on the lost queue and would end the
++    // process.
++    const bool hadCompositor = mCompositorVk != nullptr;
++    mCompositor.use(nullptr);
++    (void)mCompositorVk.release();
++
++    if (mDevice != VK_NULL_HANDLE) {
++        if (mStaging.buffer != VK_NULL_HANDLE) {
++            vk->vkDestroyBuffer(mDevice, mStaging.buffer, nullptr);
++            mStaging.buffer = VK_NULL_HANDLE;
++        }
++        freeExternalMemoryLocked(vk, &mStaging.memory);
++        if (mCommandBufferFence != VK_NULL_HANDLE) {
++            vk->vkDestroyFence(mDevice, mCommandBufferFence, nullptr);
++            mCommandBufferFence = VK_NULL_HANDLE;
++        }
++        if (mCommandPool != VK_NULL_HANDLE) {
++            vk->vkDestroyCommandPool(mDevice, mCommandPool, nullptr);
++            mCommandPool = VK_NULL_HANDLE;
++        }
++        mCommandBuffer = VK_NULL_HANDLE;
++        mIvk->vkDestroyDevice(mDevice, nullptr);
++        mDevice = VK_NULL_HANDLE;
++    }
++    mQueue = VK_NULL_HANDLE;
++
++    if (!mMakeDevice) {
++        ERR("The renderer cannot make a new Vulkan device.");
++        return false;
++    }
++    const VkResult made = mMakeDevice(&mDevice);
++    if (made != VK_SUCCESS) {
++        ERR("Making a new Vulkan device failed with %s; it is tried again at the next "
++            "operation.",
++            string_VkResult(made));
++        mDevice = VK_NULL_HANDLE;
++        return false;
++    }
++    if (!makeDeviceObjectsLocked()) {
++        ERR("The new Vulkan device could not be set up; it is made again at the next "
++            "operation.");
++        mDeviceLost.store(true);
++        return false;
++    }
++
++    if (hadCompositor) {
++        mCompositorVk = CompositorVk::create(*mIvk, mDevice, mPhysicalDevice, mQueue, mQueueLock,
++                                             mQueueFamilyIndex, 3, mDebugUtilsHelper);
++        mCompositor.use(mCompositorVk.get());
++    }
++
++    size_t remade = 0;
++    for (const auto& colorBuffer : colorBuffers) {
++        if (createVkColorBufferLocked(colorBuffer.width, colorBuffer.height,
++                                      colorBuffer.internalFormat,
++                                      static_cast<FrameworkFormat>(colorBuffer.frameworkFormat),
++                                      colorBuffer.handle, colorBuffer.vulkanOnly,
++                                      colorBuffer.memoryProperty)) {
++            ++remade;
++        } else {
++            ERR("ColorBuffer %u could not be made again on the new Vulkan device.",
++                colorBuffer.handle);
++        }
++    }
++    mDeviceGeneration.fetch_add(1);
++    ERR("Made a new Vulkan device (number %llu since the start); %zu of %zu ColorBuffers made "
++        "again.",
++        static_cast<unsigned long long>(mDeviceGeneration.load()), remade, colorBuffers.size());
++    return true;
++}
++
+ std::unique_ptr<gfxstream::DisplaySurface> VkEmulation::createDisplaySurface(
+     FBNativeWindowType window, uint32_t width, uint32_t height) {
+     auto surfaceVk = DisplaySurfaceVk::create(*mIvk, mInstance, window);
+@@ -2976,6 +3386,9 @@ bool VkEmulation::isFormatSupported(GLenum format) {
+ bool VkEmulation::createVkColorBuffer(uint32_t width, uint32_t height, GLenum internalFormat,
+                                       FrameworkFormat frameworkFormat, uint32_t colorBufferHandle,
+                                       bool vulkanOnly, uint32_t memoryProperty) {
++    if (!recoverIfLost()) {
++        return false;
++    }
+     std::lock_guard<std::mutex> lock(mMutex);
+     freeRetiredLocked(/*wait=*/false);
+     auto infoPtr = android::base::find(mColorBuffers, colorBufferHandle);
+@@ -3078,7 +3491,7 @@ void VkEmulation::retireLocked(RetiredResource resource) {
+         }
+         {
+             android::base::AutoLock queueLock(*mQueueLock);
+-            VK_CHECK(vk->vkQueueWaitIdle(mQueue));
++            VK_EMU_LOG(vk->vkQueueWaitIdle(mQueue));
+         }
+         destroyRetiredLocked(&resource);
+         return;
+@@ -3173,6 +3586,9 @@ bool VkEmulation::colorBufferNeedsUpdateBetweenGlAndVk(uint32_t colorBufferHandl
+ }
+ 
+ bool VkEmulation::readColorBufferToBytes(uint32_t colorBufferHandle, std::vector<uint8_t>* bytes) {
++    if (!recoverIfLost()) {
++        return false;
++    }
+     std::lock_guard<std::mutex> lock(mMutex);
+ 
+     auto colorBufferInfo = android::base::find(mColorBuffers, colorBufferHandle);
+@@ -3208,6 +3624,9 @@ bool VkEmulation::readColorBufferToBytes(uint32_t colorBufferHandle, std::vector
+ bool VkEmulation::readColorBufferToBytes(uint32_t colorBufferHandle, uint32_t x, uint32_t y,
+                                          uint32_t w, uint32_t h, void* outPixels,
+                                          uint64_t outPixelsSize) {
++    if (!recoverIfLost()) {
++        return false;
++    }
+     std::lock_guard<std::mutex> lock(mMutex);
+     return readColorBufferToBytesLocked(colorBufferHandle, x, y, w, h, outPixels, outPixelsSize);
+ }
+@@ -3261,7 +3680,7 @@ bool VkEmulation::readColorBufferToBytesLocked(uint32_t colorBufferHandle, uint3
+         .pNext = nullptr,
+         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+     };
+-    VK_CHECK(vk->vkBeginCommandBuffer(mCommandBuffer, &beginInfo));
++    VK_EMU_TRY(vk->vkBeginCommandBuffer(mCommandBuffer, &beginInfo), false);
+ 
+     mDebugUtilsHelper.cmdBeginDebugLabel(mCommandBuffer, "readColorBufferToBytes(ColorBuffer:%d)",
+                                          colorBufferHandle);
+@@ -3328,7 +3747,7 @@ bool VkEmulation::readColorBufferToBytesLocked(uint32_t colorBufferHandle, uint3
+ 
+     mDebugUtilsHelper.cmdEndDebugLabel(mCommandBuffer);
+ 
+-    VK_CHECK(vk->vkEndCommandBuffer(mCommandBuffer));
++    VK_EMU_TRY(vk->vkEndCommandBuffer(mCommandBuffer), false);
+ 
+     const VkSubmitInfo submitInfo = {
+         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+@@ -3344,7 +3763,7 @@ bool VkEmulation::readColorBufferToBytesLocked(uint32_t colorBufferHandle, uint3
+ 
+     {
+         android::base::AutoLock queueLock(*mQueueLock);
+-        VK_CHECK(vk->vkQueueSubmit(mQueue, 1, &submitInfo, mCommandBufferFence));
++        VK_EMU_TRY(vk->vkQueueSubmit(mQueue, 1, &submitInfo, mCommandBufferFence), false);
+     }
+ 
+     static constexpr uint64_t ANB_MAX_WAIT_NS = 5ULL * 1000ULL * 1000ULL * 1000ULL;
+@@ -3359,9 +3778,9 @@ bool VkEmulation::readColorBufferToBytesLocked(uint32_t colorBufferHandle, uint3
+             vk->vkWaitForFences(mDevice, 1, &mCommandBufferFence, VK_TRUE, ANB_MAX_WAIT_NS * 2);
+     }
+ 
+-    VK_CHECK(waitRes);
++    VK_EMU_TRY(waitRes, false);
+ 
+-    VK_CHECK(vk->vkResetFences(mDevice, 1, &mCommandBufferFence));
++    VK_EMU_TRY(vk->vkResetFences(mDevice, 1, &mCommandBufferFence), false);
+ 
+     const VkMappedMemoryRange toInvalidate = {
+         .sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
+@@ -3371,7 +3790,7 @@ bool VkEmulation::readColorBufferToBytesLocked(uint32_t colorBufferHandle, uint3
+         .size = VK_WHOLE_SIZE,
+     };
+ 
+-    VK_CHECK(vk->vkInvalidateMappedMemoryRanges(mDevice, 1, &toInvalidate));
++    VK_EMU_TRY(vk->vkInvalidateMappedMemoryRanges(mDevice, 1, &toInvalidate), false);
+ 
+     const auto* stagingBufferPtr = mStaging.memory.mappedPtr;
+     if (bufferCopySize > outPixelsSize) {
+@@ -3387,6 +3806,9 @@ bool VkEmulation::readColorBufferToBytesLocked(uint32_t colorBufferHandle, uint3
+ 
+ bool VkEmulation::updateColorBufferFromBytes(uint32_t colorBufferHandle,
+                                              const std::vector<uint8_t>& bytes) {
++    if (!recoverIfLost()) {
++        return false;
++    }
+     std::lock_guard<std::mutex> lock(mMutex);
+ 
+     auto colorBufferInfo = android::base::find(mColorBuffers, colorBufferHandle);
+@@ -3402,6 +3824,9 @@ bool VkEmulation::updateColorBufferFromBytes(uint32_t colorBufferHandle,
+ 
+ bool VkEmulation::updateColorBufferFromBytes(uint32_t colorBufferHandle, uint32_t x, uint32_t y,
+                                              uint32_t w, uint32_t h, const void* pixels) {
++    if (!recoverIfLost()) {
++        return false;
++    }
+     std::lock_guard<std::mutex> lock(mMutex);
+     return updateColorBufferFromBytesLocked(colorBufferHandle, x, y, w, h, pixels, 0);
+ }
+@@ -3514,7 +3939,7 @@ bool VkEmulation::updateColorBufferFromBytesLocked(uint32_t colorBufferHandle, u
+         .pNext = nullptr,
+         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+     };
+-    VK_CHECK(vk->vkBeginCommandBuffer(mCommandBuffer, &beginInfo));
++    VK_EMU_TRY(vk->vkBeginCommandBuffer(mCommandBuffer, &beginInfo), false);
+ 
+     mDebugUtilsHelper.cmdBeginDebugLabel(
+         mCommandBuffer, "updateColorBufferFromBytes(ColorBuffer:%d)", colorBufferHandle);
+@@ -3582,7 +4007,7 @@ bool VkEmulation::updateColorBufferFromBytesLocked(uint32_t colorBufferHandle, u
+ 
+     mDebugUtilsHelper.cmdEndDebugLabel(mCommandBuffer);
+ 
+-    VK_CHECK(vk->vkEndCommandBuffer(mCommandBuffer));
++    VK_EMU_TRY(vk->vkEndCommandBuffer(mCommandBuffer), false);
+ 
+     const VkSubmitInfo submitInfo = {
+         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+@@ -3598,13 +4023,13 @@ bool VkEmulation::updateColorBufferFromBytesLocked(uint32_t colorBufferHandle, u
+ 
+     {
+         android::base::AutoLock queueLock(*mQueueLock);
+-        VK_CHECK(vk->vkQueueSubmit(mQueue, 1, &submitInfo, mCommandBufferFence));
++        VK_EMU_TRY(vk->vkQueueSubmit(mQueue, 1, &submitInfo, mCommandBufferFence), false);
+     }
+ 
+     static constexpr uint64_t ANB_MAX_WAIT_NS = 5ULL * 1000ULL * 1000ULL * 1000ULL;
+-    VK_CHECK(vk->vkWaitForFences(mDevice, 1, &mCommandBufferFence, VK_TRUE, ANB_MAX_WAIT_NS));
++    VK_EMU_TRY(vk->vkWaitForFences(mDevice, 1, &mCommandBufferFence, VK_TRUE, ANB_MAX_WAIT_NS), false);
+ 
+-    VK_CHECK(vk->vkResetFences(mDevice, 1, &mCommandBufferFence));
++    VK_EMU_TRY(vk->vkResetFences(mDevice, 1, &mCommandBufferFence), false);
+ 
+     const VkMappedMemoryRange toInvalidate = {
+         .sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
+@@ -3613,7 +4038,7 @@ bool VkEmulation::updateColorBufferFromBytesLocked(uint32_t colorBufferHandle, u
+         .offset = 0,
+         .size = VK_WHOLE_SIZE,
+     };
+-    VK_CHECK(vk->vkInvalidateMappedMemoryRanges(mDevice, 1, &toInvalidate));
++    VK_EMU_TRY(vk->vkInvalidateMappedMemoryRanges(mDevice, 1, &toInvalidate), false);
+ 
+     return true;
+ }
+@@ -3764,6 +4189,10 @@ bool VkEmulation::setupVkBuffer(uint64_t size, uint32_t bufferHandle, bool vulka
+         return false;
+     }
+ 
++    if (!recoverIfLost()) {
++        return false;
++    }
++
+     auto vk = mDvk;
+ 
+     std::lock_guard<std::mutex> lock(mMutex);
+@@ -3969,7 +4398,7 @@ bool VkEmulation::readBufferToBytes(uint32_t bufferHandle, uint64_t offset, uint
+         .pNext = nullptr,
+         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+     };
+-    VK_CHECK(vk->vkBeginCommandBuffer(mCommandBuffer, &beginInfo));
++    VK_EMU_TRY(vk->vkBeginCommandBuffer(mCommandBuffer, &beginInfo), false);
+ 
+     mDebugUtilsHelper.cmdBeginDebugLabel(mCommandBuffer, "readBufferToBytes(Buffer:%d)",
+                                          bufferHandle);
+@@ -3984,7 +4413,7 @@ bool VkEmulation::readBufferToBytes(uint32_t bufferHandle, uint64_t offset, uint
+ 
+     mDebugUtilsHelper.cmdEndDebugLabel(mCommandBuffer);
+ 
+-    VK_CHECK(vk->vkEndCommandBuffer(mCommandBuffer));
++    VK_EMU_TRY(vk->vkEndCommandBuffer(mCommandBuffer), false);
+ 
+     const VkSubmitInfo submitInfo = {
+         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+@@ -4000,14 +4429,14 @@ bool VkEmulation::readBufferToBytes(uint32_t bufferHandle, uint64_t offset, uint
+ 
+     {
+         android::base::AutoLock queueLock(*mQueueLock);
+-        VK_CHECK(vk->vkQueueSubmit(mQueue, 1, &submitInfo, mCommandBufferFence));
++        VK_EMU_TRY(vk->vkQueueSubmit(mQueue, 1, &submitInfo, mCommandBufferFence), false);
+     }
+ 
+     static constexpr uint64_t ANB_MAX_WAIT_NS = 5ULL * 1000ULL * 1000ULL * 1000ULL;
+ 
+-    VK_CHECK(vk->vkWaitForFences(mDevice, 1, &mCommandBufferFence, VK_TRUE, ANB_MAX_WAIT_NS));
++    VK_EMU_TRY(vk->vkWaitForFences(mDevice, 1, &mCommandBufferFence, VK_TRUE, ANB_MAX_WAIT_NS), false);
+ 
+-    VK_CHECK(vk->vkResetFences(mDevice, 1, &mCommandBufferFence));
++    VK_EMU_TRY(vk->vkResetFences(mDevice, 1, &mCommandBufferFence), false);
+ 
+     const VkMappedMemoryRange toInvalidate = {
+         .sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
+@@ -4017,7 +4446,7 @@ bool VkEmulation::readBufferToBytes(uint32_t bufferHandle, uint64_t offset, uint
+         .size = size,
+     };
+ 
+-    VK_CHECK(vk->vkInvalidateMappedMemoryRanges(mDevice, 1, &toInvalidate));
++    VK_EMU_TRY(vk->vkInvalidateMappedMemoryRanges(mDevice, 1, &toInvalidate), false);
+ 
+     const void* srcPtr = reinterpret_cast<const void*>(
+         reinterpret_cast<const char*>(stagingBufferInfo.memory.mappedPtr));
+@@ -4059,14 +4488,14 @@ bool VkEmulation::updateBufferFromBytes(uint32_t bufferHandle, uint64_t offset,
+         .offset = 0,
+         .size = size,
+     };
+-    VK_CHECK(vk->vkFlushMappedMemoryRanges(mDevice, 1, &toFlush));
++    VK_EMU_TRY(vk->vkFlushMappedMemoryRanges(mDevice, 1, &toFlush), false);
+ 
+     const VkCommandBufferBeginInfo beginInfo = {
+         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+         .pNext = nullptr,
+         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+     };
+-    VK_CHECK(vk->vkBeginCommandBuffer(mCommandBuffer, &beginInfo));
++    VK_EMU_TRY(vk->vkBeginCommandBuffer(mCommandBuffer, &beginInfo), false);
+ 
+     mDebugUtilsHelper.cmdBeginDebugLabel(mCommandBuffer, "updateBufferFromBytes(Buffer:%d)",
+                                          bufferHandle);
+@@ -4081,7 +4510,7 @@ bool VkEmulation::updateBufferFromBytes(uint32_t bufferHandle, uint64_t offset,
+ 
+     mDebugUtilsHelper.cmdEndDebugLabel(mCommandBuffer);
+ 
+-    VK_CHECK(vk->vkEndCommandBuffer(mCommandBuffer));
++    VK_EMU_TRY(vk->vkEndCommandBuffer(mCommandBuffer), false);
+ 
+     const VkSubmitInfo submitInfo = {
+         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+@@ -4097,13 +4526,13 @@ bool VkEmulation::updateBufferFromBytes(uint32_t bufferHandle, uint64_t offset,
+ 
+     {
+         android::base::AutoLock queueLock(*mQueueLock);
+-        VK_CHECK(vk->vkQueueSubmit(mQueue, 1, &submitInfo, mCommandBufferFence));
++        VK_EMU_TRY(vk->vkQueueSubmit(mQueue, 1, &submitInfo, mCommandBufferFence), false);
+     }
+ 
+     static constexpr uint64_t ANB_MAX_WAIT_NS = 5ULL * 1000ULL * 1000ULL * 1000ULL;
+-    VK_CHECK(vk->vkWaitForFences(mDevice, 1, &mCommandBufferFence, VK_TRUE, ANB_MAX_WAIT_NS));
++    VK_EMU_TRY(vk->vkWaitForFences(mDevice, 1, &mCommandBufferFence, VK_TRUE, ANB_MAX_WAIT_NS), false);
+ 
+-    VK_CHECK(vk->vkResetFences(mDevice, 1, &mCommandBufferFence));
++    VK_EMU_TRY(vk->vkResetFences(mDevice, 1, &mCommandBufferFence), false);
+ 
+     return true;
+ }
+@@ -4224,21 +4653,23 @@ std::tuple<VkCommandBuffer, VkFence> VkEmulation::allocateQueueTransferCommandBu
+     // not ready, vkGetFenceStatus will return VK_NOT_READY, we will continue to
+     // search and test the next command buffer. If the VkFence is in an error
+     // state, vkGetFenceStatus will return with other VkResult variants, we will
+-    // abort.
++    // fail: the caller then does without the transfer. A lost device is noted and made
++    // again before the next operation.
++    const std::tuple<VkCommandBuffer, VkFence> none(VK_NULL_HANDLE, VK_NULL_HANDLE);
+     for (auto& [commandBuffer, fence] : mTransferQueueCommandBufferPool) {
+         auto res = vk->vkGetFenceStatus(mDevice, fence);
+         if (res == VK_SUCCESS) {
+-            VK_CHECK(vk->vkResetFences(mDevice, 1, &fence));
+-            VK_CHECK(vk->vkResetCommandBuffer(commandBuffer,
+-                                              VK_COMMAND_BUFFER_RESET_RELEASE_RESOURCES_BIT));
++            VK_EMU_TRY(vk->vkResetFences(mDevice, 1, &fence), none);
++            VK_EMU_TRY(vk->vkResetCommandBuffer(commandBuffer,
++                                                VK_COMMAND_BUFFER_RESET_RELEASE_RESOURCES_BIT),
++                       none);
+             return std::make_tuple(commandBuffer, fence);
+         }
+         if (res == VK_NOT_READY) {
+             continue;
+         }
+-        // We either have a device lost, or an invalid fence state. For the device lost case,
+-        // VK_CHECK will ensure we capture the relevant streams.
+-        VK_CHECK(res);
++        // We either have a device lost, or an invalid fence state.
++        VK_EMU_TRY(res, none);
+     }
+     VkCommandBuffer commandBuffer;
+     VkCommandBufferAllocateInfo allocateInfo = {
+@@ -4248,14 +4679,21 @@ std::tuple<VkCommandBuffer, VkFence> VkEmulation::allocateQueueTransferCommandBu
+         .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+         .commandBufferCount = 1,
+     };
+-    VK_CHECK(vk->vkAllocateCommandBuffers(mDevice, &allocateInfo, &commandBuffer));
++    VK_EMU_TRY(vk->vkAllocateCommandBuffers(mDevice, &allocateInfo, &commandBuffer), none);
+     VkFence fence;
+     VkFenceCreateInfo fenceCi = {
+         .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+         .pNext = nullptr,
+         .flags = 0,
+     };
+-    VK_CHECK(vk->vkCreateFence(mDevice, &fenceCi, nullptr, &fence));
++    {
++        VkResult fenceResult = vk->vkCreateFence(mDevice, &fenceCi, nullptr, &fence);
++        if (fenceResult != VK_SUCCESS) {
++            noteDeviceFailure(fenceResult, "vkCreateFence", __func__, __LINE__);
++            vk->vkFreeCommandBuffers(mDevice, mCommandPool, 1, &commandBuffer);
++            return none;
++        }
++    }
+ 
+     const int cbIndex = static_cast<int>(mTransferQueueCommandBufferPool.size());
+     mTransferQueueCommandBufferPool.emplace_back(commandBuffer, fence);
+@@ -4273,6 +4711,9 @@ std::tuple<VkCommandBuffer, VkFence> VkEmulation::allocateQueueTransferCommandBu
+ const VkImageLayout kGuestUseDefaultImageLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+ 
+ void VkEmulation::releaseColorBufferForGuestUse(uint32_t colorBufferHandle) {
++    if (!recoverIfLost()) {
++        return;
++    }
+     std::lock_guard<std::mutex> lock(mMutex);
+ 
+     auto infoPtr = android::base::find(mColorBuffers, colorBufferHandle);
+@@ -4335,8 +4776,11 @@ void VkEmulation::releaseColorBufferForGuestUse(uint32_t colorBufferHandle) {
+ 
+     auto vk = mDvk;
+     auto [commandBuffer, fence] = allocateQueueTransferCommandBufferLocked();
++    if (commandBuffer == VK_NULL_HANDLE) {
++        return;
++    }
+ 
+-    VK_CHECK(vk->vkResetCommandBuffer(commandBuffer, 0));
++    VK_EMU_TRY(vk->vkResetCommandBuffer(commandBuffer, 0), );
+ 
+     const VkCommandBufferBeginInfo beginInfo = {
+         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+@@ -4344,7 +4788,7 @@ void VkEmulation::releaseColorBufferForGuestUse(uint32_t colorBufferHandle) {
+         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+         .pInheritanceInfo = nullptr,
+     };
+-    VK_CHECK(vk->vkBeginCommandBuffer(commandBuffer, &beginInfo));
++    VK_EMU_TRY(vk->vkBeginCommandBuffer(commandBuffer, &beginInfo), );
+ 
+     mDebugUtilsHelper.cmdBeginDebugLabel(
+         commandBuffer, "releaseColorBufferForGuestUse(ColorBuffer:%d)", colorBufferHandle);
+@@ -4362,7 +4806,7 @@ void VkEmulation::releaseColorBufferForGuestUse(uint32_t colorBufferHandle) {
+ 
+     mDebugUtilsHelper.cmdEndDebugLabel(commandBuffer);
+ 
+-    VK_CHECK(vk->vkEndCommandBuffer(commandBuffer));
++    VK_EMU_TRY(vk->vkEndCommandBuffer(commandBuffer), );
+ 
+     const VkSubmitInfo submitInfo = {
+         .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+@@ -4377,11 +4821,11 @@ void VkEmulation::releaseColorBufferForGuestUse(uint32_t colorBufferHandle) {
+     };
+     {
+         android::base::AutoLock queueLock(*mQueueLock);
+-        VK_CHECK(vk->vkQueueSubmit(mQueue, 1, &submitInfo, fence));
++        VK_EMU_TRY(vk->vkQueueSubmit(mQueue, 1, &submitInfo, fence), );
+     }
+ 
+     static constexpr uint64_t ANB_MAX_WAIT_NS = 5ULL * 1000ULL * 1000ULL * 1000ULL;
+-    VK_CHECK(vk->vkWaitForFences(mDevice, 1, &fence, VK_TRUE, ANB_MAX_WAIT_NS));
++    VK_EMU_TRY(vk->vkWaitForFences(mDevice, 1, &fence, VK_TRUE, ANB_MAX_WAIT_NS), );
+ }
+ 
+ std::unique_ptr<BorrowedImageInfoVk> VkEmulation::borrowColorBufferForComposition(
+diff --git a/host/vulkan/VkCommonOperations.h b/host/vulkan/VkCommonOperations.h
+index 13b30b8f4..96f8a770b 100644
+--- a/host/vulkan/VkCommonOperations.h
++++ b/host/vulkan/VkCommonOperations.h
+@@ -20,6 +20,8 @@
+ #include <cstdint>
+ #include <functional>
+ #include <memory>
++#include <mutex>
++#include <shared_mutex>
+ #include <string>
+ #include <unordered_map>
+ #include <unordered_set>
+@@ -57,6 +59,10 @@ namespace vk {
+ 
+ struct VulkanDispatch;
+ 
++// Makes `vk`'s queue and fence calls return VK_ERROR_DEVICE_LOST, as a device's do after a
++// GPU reset, so tests can lose a device on any driver.
++void makeDispatchLoseDevice(VulkanDispatch* vk);
++
+ // Returns a consistent answer for which memory type index is best for staging
+ // memory. This is not the simplest thing in the world because even if a memory
+ // type index is host visible, that doesn't mean a VkBuffer is allowed to be
+@@ -100,6 +106,23 @@ enum class AstcEmulationMode {
+ // associated with a ColorBuffer handle, and depending on host-side support for
+ // GL_EXT_memory_object, also be able to zero-copy render into and readback
+ // with the traditional GL pipeline.
++// The compositor the FrameBuffer and its post worker hold, which stays the same object when
++// the emulation makes a new device after a GPU reset and the compositor inside it is made
++// again for that device. A composition that fails (on a lost device, say) is given up rather
++// than ending the process.
++class RemakeableCompositor : public Compositor {
++   public:
++    CompositionFinishedWaitable compose(const CompositionRequest& compositionRequest) override;
++    void onImageDestroyed(uint32_t imageId) override;
++
++    // From now on compositions go to `inner`, which the emulation owns.
++    void use(CompositorVk* inner);
++
++   private:
++    std::mutex mMutex;
++    CompositorVk* mInner = nullptr;
++};
++
+ class VkEmulation {
+    public:
+     ~VkEmulation();
+@@ -436,6 +459,29 @@ class VkEmulation {
+     std::shared_ptr<android::base::Lock> getQueueLock() const { return mQueueLock; }
+     uint32_t getQueueFamilyIndex() const { return mQueueFamilyIndex; }
+ 
++    // A GPU reset loses the device. The emulation then makes a new device on the same GPU,
++    // and every ColorBuffer again at its size (its contents are gone; the guest draws them
++    // again), at the start of its next operation, instead of ending the process.
++    //
++    // Someone saw VK_ERROR_DEVICE_LOST from the emulation's device.
++    void noteDeviceLost();
++    // Some device was lost: the emulation checks its own at its next operation.
++    void suspectDeviceLost();
++    // Makes a new device if the device is lost. Takes the device lock and mMutex, so the
++    // caller holds neither. Returns whether the device is usable.
++    bool recoverIfLost();
++    // How many times the device has been made again.
++    uint64_t deviceGeneration() const { return mDeviceGeneration.load(); }
++    // Held by code that uses the device, the queue or their objects without mMutex (an
++    // embedder copying color buffers into its windows), so a new device is not made under
++    // it. Code holding it must not call recoverIfLost().
++    std::shared_lock<std::shared_mutex> useDevice() {
++        return std::shared_lock<std::shared_mutex>(mDeviceUse);
++    }
++    // Makes the device's queue and fence calls fail with VK_ERROR_DEVICE_LOST, as they do
++    // after a GPU reset, so a test can see the emulation recover.
++    void loseDeviceForTesting();
++
+    private:
+     VkEmulation() = default;
+ 
+@@ -720,6 +766,25 @@ class VkEmulation {
+     std::vector<std::tuple<VkCommandBuffer, VkFence>> mTransferQueueCommandBufferPool GUARDED_BY(mMutex);
+ 
+     std::unique_ptr<CompositorVk> mCompositorVk;
++    // What getCompositor() hands out: it forwards to mCompositorVk, whichever one that is.
++    RemakeableCompositor mCompositor;
++
++    // Logs a failed call on the device, and notes a lost device.
++    void noteDeviceFailure(VkResult result, const char* call, const char* function, int line);
++    // Whether the device is lost: noted, or found when a loss elsewhere made it suspect.
++    bool deviceLostLocked() REQUIRES(mMutex);
++    // Frees everything made on the lost device and makes it all again on a new one.
++    bool remakeDeviceLocked() REQUIRES(mMutex);
++    // Makes the device, its queue and command objects and the staging buffer; create() and
++    // remakeDeviceLocked() both use it.
++    bool makeDeviceObjectsLocked() REQUIRES(mMutex);
++
++    // Creates a device as create() first did, with the same queue, extensions and features.
++    std::function<VkResult(VkDevice*)> mMakeDevice;
++    std::atomic<bool> mDeviceLost{false};
++    std::atomic<bool> mDeviceSuspect{false};
++    std::atomic<uint64_t> mDeviceGeneration{0};
++    std::shared_mutex mDeviceUse;
+ 
+     // The implementation for Vulkan native swapchain. Only initialized in initVkEmulationFeatures
+     // if useVulkanNativeSwapchain is set.
+diff --git a/host/vulkan/VkDecoderGlobalState.cpp b/host/vulkan/VkDecoderGlobalState.cpp
+index ce34527b2..68de0bf06 100644
+--- a/host/vulkan/VkDecoderGlobalState.cpp
++++ b/host/vulkan/VkDecoderGlobalState.cpp
+@@ -3262,8 +3262,13 @@ class VkDecoderGlobalState::Impl {
+         }
+ 
+         if (!cleanedFences.empty()) {
+-            VK_CHECK(vk->vkResetFences(device, (uint32_t)cleanedFences.size(),
+-                                       cleanedFences.data()));
++            // A failure (a lost device) is the guest's answer, not the end of the renderer.
++            VkResult resetResult = vk->vkResetFences(device, (uint32_t)cleanedFences.size(),
++                                                     cleanedFences.data());
++            if (resetResult != VK_SUCCESS) {
++                ERR("vkResetFences failed with %s.", string_VkResult(resetResult));
++                return resetResult;
++            }
+         }
+ 
+         // For external fences, we unilaterally put them in the pool to ensure they finish
+@@ -3281,7 +3286,11 @@ class VkDecoderGlobalState::Impl {
+         for (auto fence : externalFences) {
+             VkFence replacement = deviceInfo->externalFencePool->pop(&createInfo);
+             if (replacement == VK_NULL_HANDLE) {
+-                VK_CHECK(vk->vkCreateFence(device, &createInfo, 0, &replacement));
++                VkResult createResult = vk->vkCreateFence(device, &createInfo, 0, &replacement);
++                if (createResult != VK_SUCCESS) {
++                    ERR("vkCreateFence failed with %s.", string_VkResult(createResult));
++                    return createResult;
++                }
+             }
+             deviceInfo->externalFencePool->add(fence);
+ 
+@@ -7801,9 +7810,23 @@ class VkDecoderGlobalState::Impl {
+         return VK_SUCCESS;
+     }
+ 
++    // Reports a lost device. The failed call's own check then ends what it serves: on a
++    // thread that serves a guest, only that guest's stream, since a device lost by one
++    // guest's work need not be every guest's.
+     void on_DeviceLost() {
++        ERR("A Vulkan device was lost; the guest's calls on it get VK_ERROR_DEVICE_LOST.");
+         m_vkEmulation->getDeviceLostHelper().onDeviceLost();
+-        GFXSTREAM_ABORT(FatalError(VK_ERROR_DEVICE_LOST));
++        // A GPU reset loses every device on the GPU, the renderer's own among them.
++        m_vkEmulation->suspectDeviceLost();
++    }
++
++    // Makes every guest device's queue and fence calls return VK_ERROR_DEVICE_LOST, as they
++    // do after a GPU reset.
++    void loseDevicesForTesting() {
++        std::lock_guard<std::mutex> lock(mMutex);
++        for (auto& [device, deviceInfo] : mDeviceInfo) {
++            makeDispatchLoseDevice(dispatch_VkDevice(deviceInfo.boxed));
++        }
+     }
+ 
+     void on_CheckOutOfMemory(VkResult result, uint32_t opCode, const VkDecoderContext& context,
+@@ -8672,11 +8695,20 @@ class VkDecoderGlobalState::Impl {
+             // https://bugs.chromium.org/p/chromium/issues/detail?id=1074600
+             // it's important to idle the device before destroying it!
+             VkResult res = deviceDispatch->vkDeviceWaitIdle(device);
+-            if (res != VK_SUCCESS) {
++            if (res == VK_ERROR_DEVICE_LOST) {
++                // Nothing runs on a lost device any more, and Vulkan lets every object of
++                // one be destroyed, so the guest process's objects are freed as usual.
++                ERR("VkDevice %p was lost; destroying its objects anyway.", device);
++            } else if (res != VK_SUCCESS) {
+                 // Something went wrong.. Skip destroying the vulkan objects of the device
+                 // to avoid further issues.
+                 ERR("Cannot destroy Vulkan device and objects. "
+                     "vkDeviceWaitIdle failed with %s [%d].", string_VkResult(res), res);
++                // The pooled fences are left with the rest; the pool must not be destroyed
++                // holding them.
++                if (deviceInfo.externalFencePool) {
++                    (void)deviceInfo.externalFencePool->popAll();
++                }
+                 return;
+             }
+ 
+@@ -10525,6 +10557,8 @@ VkResult VkDecoderGlobalState::on_vkEnumeratePhysicalDeviceGroupsKHR(
+ 
+ void VkDecoderGlobalState::on_DeviceLost() { mImpl->on_DeviceLost(); }
+ 
++void VkDecoderGlobalState::loseDevicesForTesting() { mImpl->loseDevicesForTesting(); }
++
+ void VkDecoderGlobalState::on_CheckOutOfMemory(VkResult result, uint32_t opCode,
+                                                const VkDecoderContext& context,
+                                                std::optional<uint64_t> allocationSize) {
+diff --git a/host/vulkan/VkDecoderGlobalState.h b/host/vulkan/VkDecoderGlobalState.h
+index 6f6646b59..aa0b6e5a4 100644
+--- a/host/vulkan/VkDecoderGlobalState.h
++++ b/host/vulkan/VkDecoderGlobalState.h
+@@ -868,6 +868,10 @@ class VkDecoderGlobalState {
+ 
+     void on_DeviceLost();
+ 
++    // Makes every guest device's queue and fence calls return VK_ERROR_DEVICE_LOST, as they
++    // do after a GPU reset, so tests can lose devices on any driver.
++    void loseDevicesForTesting();
++
+     void on_CheckOutOfMemory(VkResult result, uint32_t opCode, const VkDecoderContext& context,
+                              std::optional<uint64_t> allocationSize = std::nullopt);
+ 
+diff --git a/host/vulkan/VkDecoderInternalStructs.h b/host/vulkan/VkDecoderInternalStructs.h
+index 83bb8cb75..25c8ef4b9 100644
+--- a/host/vulkan/VkDecoderInternalStructs.h
++++ b/host/vulkan/VkDecoderInternalStructs.h
+@@ -52,11 +52,14 @@ class ExternalFencePool {
+     ExternalFencePool(TDispatch* dispatch, VkDevice device)
+         : m_vk(dispatch), mDevice(device), mMaxSize(5) {}
+ 
++    // A pool that still holds fences belongs to a device whose objects could not all be
++    // freed. The fences are left with them: ending the process here, from a destructor,
++    // took every guest's rendering down with one guest's device.
+     ~ExternalFencePool() {
+         if (!mPool.empty()) {
+-            GFXSTREAM_ABORT(emugl::FatalError(emugl::ABORT_REASON_OTHER))
+-                << "External fence pool for device " << static_cast<void*>(mDevice)
+-                << " destroyed but " << mPool.size() << " fences still not destroyed.";
++            ERR("External fence pool for device %p destroyed with %zu fences not destroyed; "
++                "they are left.",
++                static_cast<void*>(mDevice), mPool.size());
+         }
+     }
+ 
+@@ -74,16 +77,10 @@ class ExternalFencePool {
+         {
+             android::base::AutoLock lock(mLock);
+             auto it = std::find_if(mPool.begin(), mPool.end(), [this](const VkFence& fence) {
+-                VkResult status = m_vk->vkGetFenceStatus(mDevice, fence);
+-                if (status != VK_SUCCESS) {
+-                    if (status != VK_NOT_READY) {
+-                        VK_CHECK(status);
+-                    }
+-
+-                    // Status is valid, but fence is not yet signaled
+-                    return false;
+-                }
+-                return true;
++                // Not signaled yet, or not usable at all (its device lost): either way the
++                // caller makes a new fence instead, and the driver's answer to that goes
++                // to the guest.
++                return m_vk->vkGetFenceStatus(mDevice, fence) == VK_SUCCESS;
+             });
+             if (it == mPool.end()) {
+                 return VK_NULL_HANDLE;
+@@ -94,7 +91,12 @@ class ExternalFencePool {
+         }
+ 
+         if (!(pCreateInfo->flags & VK_FENCE_CREATE_SIGNALED_BIT)) {
+-            VK_CHECK(m_vk->vkResetFences(mDevice, 1, &fence));
++            if (m_vk->vkResetFences(mDevice, 1, &fence) != VK_SUCCESS) {
++                // Still the pool's, destroyed with the device.
++                android::base::AutoLock lock(mLock);
++                mPool.push_back(fence);
++                return VK_NULL_HANDLE;
++            }
+         }
+ 
+         return fence;

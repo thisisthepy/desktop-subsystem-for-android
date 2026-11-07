@@ -11,6 +11,8 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::mpsc::Receiver;
 
+use crate::native_abi::NativeLibraries;
+
 /// A rectangle in guest display pixels: left and top inclusive, right and bottom exclusive.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct Bounds {
@@ -122,6 +124,11 @@ pub struct AppInfo {
     pub app_bytes: u64,
     pub data_bytes: u64,
     pub cache_bytes: u64,
+    /// The ABI the app's native code runs as, such as `x86_64` or `arm64-v8a`; empty for an
+    /// app without native code, and for an app that only has a task.
+    pub primary_abi: String,
+    /// The native libraries the app's APKs on the device hold, base and splits together.
+    pub native_libraries: NativeLibraries,
 }
 
 impl AppInfo {

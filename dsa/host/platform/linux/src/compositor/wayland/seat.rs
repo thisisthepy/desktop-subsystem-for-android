@@ -58,6 +58,8 @@ struct Pen {
     left: bool,
     eraser: bool,
     buttons: u32,
+    /// Degrees from upright, (toward the right, toward the user).
+    tilt: (f32, f32),
 }
 
 /// The seat's input state.
@@ -501,6 +503,7 @@ impl State {
             PointerTool::Pen
         };
         let pen_buttons = pen.buttons;
+        let tilt = pen.tilt;
         let Some(window) = self.windows.get(&task_id) else {
             return;
         };
@@ -514,6 +517,7 @@ impl State {
                 position,
                 pressure,
                 buttons: pen_buttons,
+                tilt,
             },
         );
     }
@@ -782,6 +786,7 @@ impl Dispatch<WlTouch, ()> for State {
             position,
             pressure: None,
             buttons: 0,
+            tilt: (0.0, 0.0),
         };
         match event {
             wl_touch::Event::Down {
@@ -993,6 +998,9 @@ impl Dispatch<ZwpTabletToolV2, ()> for State {
             zwp_tablet_tool_v2::Event::Motion { x, y } => pen.position = (x, y),
             zwp_tablet_tool_v2::Event::Pressure { pressure } => {
                 pen.pressure = Some(pressure as f32 / 65535.0)
+            }
+            zwp_tablet_tool_v2::Event::Tilt { tilt_x, tilt_y } => {
+                pen.tilt = (tilt_x as f32, tilt_y as f32)
             }
             zwp_tablet_tool_v2::Event::Button {
                 button,

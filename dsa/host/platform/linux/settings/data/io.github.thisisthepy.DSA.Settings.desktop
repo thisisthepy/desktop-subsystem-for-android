@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=DSA Settings
+Name[ko]=DSA 설정
+Comment=Start and stop Android, and change how Desktop Subsystem for Android works
+Comment[ko]=Android를 시작하고 끄며, Desktop Subsystem for Android의 동작을 바꿉니다
+Exec=/usr/lib/dsa/bin/dsa-settings
+Icon=io.github.thisisthepy.DSA.Settings
+Terminal=false
+Categories=GTK;GNOME;Settings;System;
+Keywords=Android;DSA;apps;memory;adb;
+Keywords[ko]=Android;안드로이드;DSA;앱;메모리;adb;
+StartupNotify=true
+DBusActivatable=false

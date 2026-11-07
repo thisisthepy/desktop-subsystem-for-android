@@ -14,6 +14,9 @@ Requires:       libcap
 Requires:       libwayland-client
 Requires:       libdrm
 Requires:       vulkan-loader
+# What DSA Settings, the settings app, links from the system.
+Requires:       gtk4
+Requires:       libadwaita
 Recommends:     pipewire-pulseaudio
 Recommends:     pulseaudio-libs
 Recommends:     geoclue2

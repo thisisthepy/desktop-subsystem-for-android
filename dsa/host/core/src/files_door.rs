@@ -276,6 +276,8 @@ fn reach(
 ) -> Result<TcpStream, String> {
     let android = androids.android(user)?;
     let deadline = Instant::now() + wait;
+    let mut pause = FIRST_PAUSE;
+    let mut said: Option<String> = None;
     loop {
         let last = match android
             .android_files_with_token(key)
@@ -287,11 +289,31 @@ fn reach(
             },
             Err(why) => why,
         };
-        if Instant::now() >= deadline {
+        let now = Instant::now();
+        if now >= deadline {
             return Err(last);
         }
-        thread::sleep(Duration::from_millis(500));
+        // A refusal that keeps coming is said once, not on every try.
+        if said.as_deref() != Some(last.as_str()) {
+            eprintln!("files door: Android's files for {user} are not there yet: {last}");
+            said = Some(last);
+        }
+        thread::sleep(pause.min(deadline - now));
+        pause = next_pause(pause);
     }
+}
+
+/// How long the door waits before it asks the guest again the first time.
+pub const FIRST_PAUSE: Duration = Duration::from_millis(500);
+
+/// The longest the door waits between two tries.
+pub const LONGEST_PAUSE: Duration = Duration::from_secs(8);
+
+/// The wait after `pause`: twice as long, up to [`LONGEST_PAUSE`]. A server that refuses
+/// every request (its sandbox denying the storage) is then asked a few times a minute, not
+/// twice a second.
+pub fn next_pause(pause: Duration) -> Duration {
+    (pause * 2).min(LONGEST_PAUSE)
 }
 
 /// The socket address of an `http://127.0.0.1:<port>/...` URL.
@@ -338,6 +360,21 @@ fn probe(address: SocketAddr, key: &str) -> Result<TcpStream, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fr29_a_refusing_guest_is_asked_again_less_and_less_often() {
+        let mut pause = FIRST_PAUSE;
+        let mut tries_in_a_minute = 0;
+        let mut spent = Duration::ZERO;
+        while spent < Duration::from_secs(60) {
+            spent += pause;
+            tries_in_a_minute += 1;
+            pause = next_pause(pause);
+        }
+        assert_eq!(next_pause(FIRST_PAUSE), Duration::from_secs(1));
+        assert_eq!(next_pause(LONGEST_PAUSE), LONGEST_PAUSE);
+        assert!(tries_in_a_minute <= 12, "asked {tries_in_a_minute} times");
+    }
 
     #[test]
     fn fr29_the_first_path_segment_is_the_key() {

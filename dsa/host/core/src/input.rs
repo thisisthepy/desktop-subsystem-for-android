@@ -73,6 +73,11 @@ pub struct PointerEvent {
     pub scroll_x: f32,
     /// For [`PointerAction::Scroll`]: notches; positive scrolls up.
     pub scroll_y: f32,
+    /// A pen's tilt in degrees from upright, from -90 to 90: positive leans its top to the
+    /// right. 0 for a pointer that does not measure it.
+    pub tilt_x: f32,
+    /// As `tilt_x`; positive leans its top toward the bottom of the screen (the user).
+    pub tilt_y: f32,
 }
 
 impl PointerEvent {
@@ -94,6 +99,8 @@ impl PointerEvent {
             pressure: 0.0,
             scroll_x: 0.0,
             scroll_y: 0.0,
+            tilt_x: 0.0,
+            tilt_y: 0.0,
         }
     }
 
@@ -123,6 +130,8 @@ impl PointerEvent {
             pressure: self.pressure,
             scroll_x: self.scroll_x,
             scroll_y: self.scroll_y,
+            tilt_x: self.tilt_x,
+            tilt_y: self.tilt_y,
         }
     }
 
@@ -152,6 +161,8 @@ impl PointerEvent {
             pressure: self.pressure,
             scroll_x: self.scroll_x,
             scroll_y: self.scroll_y,
+            tilt_x: self.tilt_x,
+            tilt_y: self.tilt_y,
         }
     }
 
@@ -185,9 +196,11 @@ impl PointerEvent {
             event.pressure,
             event.scroll_x,
             event.scroll_y,
+            event.tilt_x,
+            event.tilt_y,
         ];
         if numbers.iter().any(|number| !number.is_finite()) {
-            return Err("a pointer position, pressure or scroll is not a number".into());
+            return Err("a pointer position, pressure, scroll or tilt is not a number".into());
         }
         Ok(PointerEvent {
             task_id: event.task_id,
@@ -200,6 +213,8 @@ impl PointerEvent {
             pressure: event.pressure.clamp(0.0, 1.0),
             scroll_x: event.scroll_x,
             scroll_y: event.scroll_y,
+            tilt_x: event.tilt_x.clamp(-90.0, 90.0),
+            tilt_y: event.tilt_y.clamp(-90.0, 90.0),
         })
     }
 }
@@ -340,6 +355,9 @@ pub enum WindowInput {
         pressure: Option<f32>,
         /// A pen's barrel buttons ([`buttons::STYLUS_PRIMARY`], [`buttons::STYLUS_SECONDARY`]).
         buttons: u32,
+        /// A pen's tilt in degrees from upright, (toward the right, toward the user), as
+        /// [`PointerEvent::tilt_x`] and [`PointerEvent::tilt_y`]; (0, 0) when not measured.
+        tilt: (f32, f32),
     },
 }
 
@@ -357,6 +375,15 @@ pub struct Mapped {
     /// The events to send to the guest, in order.
     pub events: Vec<PointerEvent>,
     pub capture: Option<Capture>,
+}
+
+/// `value`, or 0 when it is not a number.
+fn finite_or_zero(value: f32) -> f32 {
+    if value.is_finite() {
+        value
+    } else {
+        0.0
+    }
 }
 
 /// One window's pointer state.
@@ -492,6 +519,7 @@ impl PointerMapper {
                 position,
                 pressure,
                 buttons,
+                tilt,
             } => {
                 let action = match phase {
                     ContactPhase::Down => PointerAction::Down,
@@ -506,6 +534,8 @@ impl PointerMapper {
                     PointerEvent::new(self.task_id, action, tool, geometry.to_guest(position));
                 event.pointer_id = pointer_id;
                 event.buttons = buttons;
+                event.tilt_x = finite_or_zero(tilt.0).clamp(-90.0, 90.0);
+                event.tilt_y = finite_or_zero(tilt.1).clamp(-90.0, 90.0);
                 event.pressure = match (pressure, phase) {
                     (Some(pressure), _) => pressure.clamp(0.0, 1.0),
                     (None, ContactPhase::Up) => 1.0,
@@ -825,6 +855,7 @@ mod tests {
             position: at,
             pressure: None,
             buttons: 0,
+            tilt: (0.0, 0.0),
         }
     }
 
@@ -873,6 +904,7 @@ mod tests {
                 position: (10.0, 10.0),
                 pressure: None,
                 buttons: buttons::STYLUS_PRIMARY,
+                tilt: (0.0, 0.0),
             },
             geometry(),
         );
@@ -888,6 +920,7 @@ mod tests {
                 position: (10.0, 10.0),
                 pressure: Some(0.4),
                 buttons: 0,
+                tilt: (25.0, -40.0),
             },
             geometry(),
         );
@@ -897,6 +930,30 @@ mod tests {
             (PointerAction::Down, PointerTool::Eraser)
         );
         assert_eq!(event.pressure, 0.4);
+        assert_eq!((event.tilt_x, event.tilt_y), (25.0, -40.0));
+        let control = event.to_control();
+        assert_eq!((control.tilt_x, control.tilt_y), (25.0, -40.0));
+        let back = PointerEvent::from_wire(&event.to_wire()).unwrap();
+        assert_eq!((back.tilt_x, back.tilt_y), (25.0, -40.0));
+    }
+
+    #[test]
+    fn fr5_a_tilt_past_lying_flat_or_not_a_number_is_kept_in_range() {
+        let mut mapper = PointerMapper::new(3);
+        let press = mapper.handle(
+            WindowInput::Contact {
+                tool: PointerTool::Pen,
+                pointer_id: 2,
+                phase: ContactPhase::Down,
+                position: (10.0, 10.0),
+                pressure: Some(0.4),
+                buttons: 0,
+                tilt: (120.0, f32::NAN),
+            },
+            geometry(),
+        );
+        let event = press.events[0];
+        assert_eq!((event.tilt_x, event.tilt_y), (90.0, 0.0));
     }
 
     #[test]

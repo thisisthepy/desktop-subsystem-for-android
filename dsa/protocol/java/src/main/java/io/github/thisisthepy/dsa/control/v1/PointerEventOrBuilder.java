@@ -98,4 +98,22 @@ public interface PointerEventOrBuilder extends
    * @return The scrollY.
    */
   float getScrollY();
+
+  /**
+   * <pre>
+   * A pen's tilt, in degrees from upright, from -90 to 90: positive `tilt_x` leans its top
+   * toward the right of the screen, positive `tilt_y` toward the bottom (toward the user).
+   * 0 for a pointer that does not measure it.
+   * </pre>
+   *
+   * <code>float tilt_x = 11;</code>
+   * @return The tiltX.
+   */
+  float getTiltX();
+
+  /**
+   * <code>float tilt_y = 12;</code>
+   * @return The tiltY.
+   */
+  float getTiltY();
 }

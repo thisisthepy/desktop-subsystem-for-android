@@ -20,6 +20,10 @@ mkdir -p "$out"
     "$here/shadow_blocks_test.cpp" -o "$out/shadow_blocks_test"
 "$out/shadow_blocks_test"
 
+"$cxx" -std=c++17 -O2 -Wall -Wextra -Werror -I"$here/../include" \
+    "$here/lost_stream_test.cpp" -o "$out/lost_stream_test"
+"$out/lost_stream_test"
+
 # The upstream headers are not ours to warn about.
 upstream=(
     -isystem "$scratch/gfxstream/guest/OpenglSystemCommon"

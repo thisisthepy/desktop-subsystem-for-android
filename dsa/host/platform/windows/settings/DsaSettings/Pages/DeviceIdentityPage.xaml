@@ -14,6 +14,7 @@
                     <StackPanel>
                         <TextBlock Text="{Binding Label}" Style="{StaticResource CardTitle}" />
                         <TextBlock Text="{Binding Description}" Style="{StaticResource CardDescription}" />
+                        <TextBlock Text="{Binding OriginText, Mode=OneWay}" Style="{StaticResource CardDescription}" />
                         <TextBlock Text="{Binding Problem, Mode=OneWay}" Style="{StaticResource CardDescription}"
                                    Foreground="{DynamicResource SystemFillColorCriticalBrush}"
                                    Visibility="{Binding HasProblem, Converter={StaticResource Visible}}" />
@@ -22,6 +23,21 @@
                 <ui:TextBox Width="320" Text="{Binding Value, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                             PlaceholderText="{Binding Placeholder, Mode=OneWay}" ClearButtonEnabled="True"
                             AutomationProperties.Name="{Binding Label}" />
+            </ui:CardControl>
+        </DataTemplate>
+        <!-- A value that follows the computer: its name, what it is for, where it came from,
+             and the value, which can be selected and copied but not changed. -->
+        <DataTemplate x:Key="ComputerCard">
+            <ui:CardControl Margin="0,0,0,4">
+                <ui:CardControl.Header>
+                    <StackPanel>
+                        <TextBlock Text="{Binding Label}" Style="{StaticResource CardTitle}" />
+                        <TextBlock Text="{Binding Description}" Style="{StaticResource CardDescription}" />
+                        <TextBlock Text="{Binding OriginText, Mode=OneWay}" Style="{StaticResource CardDescription}" />
+                    </StackPanel>
+                </ui:CardControl.Header>
+                <TextBox Style="{StaticResource SelectableCode}" MaxWidth="320" Text="{Binding Value, Mode=OneWay}"
+                         AutomationProperties.Name="{Binding Label}" />
             </ui:CardControl>
         </DataTemplate>
     </Page.Resources>
@@ -42,9 +58,9 @@
                 <ui:InfoBar Title="{l:Text IdentityWarning.Title}" Message="{l:Text IdentityWarning.Message}"
                             Severity="Warning" IsClosable="False" IsOpen="True" Margin="0,8,0,0" />
                 <ui:InfoBar Title="{l:Text SettingsErrorBar.Title}" Severity="Error" IsClosable="False"
-                            IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" />
+                            IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" Margin="0,0,0,4" />
                 <ui:InfoBar Title="{l:Text IdentityDoneBar.Title}" Severity="Success" IsClosable="False"
-                            IsOpen="{Binding HasMessage, Mode=OneWay}" Message="{Binding Message, Mode=OneWay}" />
+                            IsOpen="{Binding HasMessage, Mode=OneWay}" Message="{Binding Message, Mode=OneWay}" Margin="0,0,0,4" />
 
                 <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
                     <ui:Button Content="{l:Text IdentitySaveButton.Content}" Appearance="Primary" Icon="{ui:SymbolIcon Save24}"
@@ -59,13 +75,16 @@
                 <TextBlock Text="{l:Text IdentityNamesHeader.Text}" Style="{StaticResource SectionHeader}" />
                 <ItemsControl ItemsSource="{Binding Names, Mode=OneWay}" ItemTemplate="{StaticResource FieldCard}" />
 
+                <TextBlock Text="{l:Text IdentityComputerHeader.Text}" Style="{StaticResource SectionHeader}" />
+                <TextBlock Text="{l:Text IdentityComputerNote.Text}" Style="{StaticResource Note}" />
+                <ItemsControl ItemsSource="{Binding ComputerValues, Mode=OneWay}" ItemTemplate="{StaticResource ComputerCard}" />
+
                 <TextBlock Text="{l:Text IdentityFingerprintHeader.Text}" Style="{StaticResource SectionHeader}" />
                 <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Fingerprint24}">
                     <ui:CardControl.Header>
                         <StackPanel>
                             <TextBlock Text="{l:Text IdentityPreview.Text}" Style="{StaticResource CardTitle}" />
-                            <ui:TextBox IsTextSelectionEnabled="True" MinHeight="0" Text="{Binding FingerprintPreview, Mode=OneWay}" IsReadOnly="True" FontFamily="Consolas"
-                                     BorderThickness="0" Background="Transparent" TextWrapping="Wrap"
+                            <TextBox Style="{StaticResource SelectableCode}" Margin="0,4,0,0" Text="{Binding FingerprintPreview, Mode=OneWay}"
                                      Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                         </StackPanel>
                     </ui:CardControl.Header>

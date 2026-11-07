@@ -17,6 +17,17 @@
 # With rebuild_images off it builds no kernel and no image: the installer takes the kernel
 # from the newest published image and the trust key from the published list, after checking
 # both. That is for a release that changes only the program.
+#
+# Each x86_64 image's release also carries the default ARM translation package
+# (arm-translation.zip, described in its image.json): the Digitalis package the newest
+# passing "Translator build" run on develop made from the pinned lock. Run that workflow
+# first when dsa/guest/arm-translation/digitalis-lock.json changes. arm64 images never
+# carry one, as ARM apps run on them without translation.
+#
+# Each image carries the patched SurfaceFlinger, libhwui and libEGL that recover from a GPU
+# device loss (described in its image.json under "framework"): the files the newest passing
+# "Framework build" run on develop made for that Android version and architecture from the
+# pinned lock and patches. Run that workflow first when dsa/guest/framework changes.
 
 name: Image release
 
@@ -37,6 +48,16 @@ on:
         type: boolean
         required: false
         default: false
+      arm_translation:
+        description: "Release the default ARM translator (from the newest passing Translator build) beside each x86_64 image"
+        type: boolean
+        required: false
+        default: true
+      framework:
+        description: "Lay the patched framework (from the newest passing Framework build) over each image, so it recovers from a GPU device loss"
+        type: boolean
+        required: false
+        default: true
 
 concurrency:
   group: release-image
@@ -152,10 +173,16 @@ jobs:
           # build.sh names the kernel Image-<release>; the arm64 image takes it as Image.
           mv .scratch/kernel-out/Image-* .scratch/kernel-out/Image
 
+      # The arm64 image ships this kernel, so its corresponding source goes with it too.
+      - name: Bundle the kernel source
+        run: dsa/kernel/source-bundle.sh --arch arm64 .scratch/kernel-out/kernel-source.tar.gz .scratch/kernel-out/config-*
+
       - uses: actions/upload-artifact@v4
         with:
           name: kernel-arm64
-          path: .scratch/kernel-out/Image
+          path: |
+            .scratch/kernel-out/Image
+            .scratch/kernel-out/kernel-source.tar.gz
           if-no-files-found: error
 
   channeld:
@@ -468,13 +495,94 @@ jobs:
           path: .scratch/agent/DsaAgent.apk
           if-no-files-found: error
 
+  # The default translator: the packages of the newest passing Translator build on develop
+  # whose versions are the ones the lock pins now.
+  translator:
+    name: Find the default ARM translator
+    if: inputs.rebuild_images && inputs.arm_translation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    outputs:
+      run_id: ${{ steps.find.outputs.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Find the Translator build run with the pinned packages
+        id: find
+        run: |
+          wanted=()
+          for android in $(python3 dsa/guest/arm-translation/digitalis_lock.py versions | jq -r '.[]'); do
+            wanted+=("arm-translation-$android-$(python3 dsa/guest/arm-translation/digitalis_lock.py version "$android")")
+          done
+          echo "looking for ${wanted[*]}"
+          for run in $(gh run list --repo "${{ github.repository }}" --workflow translator.yml --branch develop                          --status success --limit 30 --json databaseId --jq '.[].databaseId'); do
+            names="$(gh api "repos/${{ github.repository }}/actions/runs/$run/artifacts?per_page=100"                        --jq '[.artifacts[] | select(.expired | not) | .name]')"
+            if jq -e --args '. as $have | $ARGS.positional | all(. as $w | $have | index($w))' "${wanted[@]}" <<<"$names" >/dev/null; then
+              echo "run $run has them"
+              echo "run_id=$run" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "::error::No passing Translator build run on develop has ${wanted[*]}. Run the Translator build workflow, or release with arm_translation off."
+          exit 1
+
+  # The patched framework: the files of the newest passing Framework build on develop whose
+  # versions are the ones the lock and the patches name now, for every image.
+  framework:
+    name: Find the patched framework
+    if: inputs.rebuild_images && inputs.framework
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    outputs:
+      run_id: ${{ steps.find.outputs.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Find the Framework build run with the pinned files
+        id: find
+        run: |
+          wanted=()
+          for android in $(python3 dsa/guest/framework/framework_lock.py versions | jq -r '.[]'); do
+            version="$(python3 dsa/guest/framework/framework_lock.py version "$android")"
+            for arch in x86_64 arm64; do
+              wanted+=("framework-$android-$arch-$version")
+            done
+          done
+          echo "looking for ${wanted[*]}"
+          for run in $(gh run list --repo "${{ github.repository }}" --workflow framework.yml --branch develop \
+                         --status success --limit 30 --json databaseId --jq '.[].databaseId'); do
+            names="$(gh api "repos/${{ github.repository }}/actions/runs/$run/artifacts?per_page=100" \
+                       --jq '[.artifacts[] | select(.expired | not) | .name]')"
+            if jq -e --args '. as $have | $ARGS.positional | all(. as $w | $have | index($w))' "${wanted[@]}" <<<"$names" >/dev/null; then
+              echo "run $run has them"
+              echo "run_id=$run" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "::error::No passing Framework build run on develop has ${wanted[*]}. Run the Framework build workflow, or release with framework off."
+          exit 1
+
   image:
     name: Make and publish the guest image (ubuntu-latest, Android ${{ matrix.android }}, ${{ matrix.arch }})
-    needs: [kernel, kernel-arm64, guest-graphics, channeld, hwcomposer, power-hal, gnss-hal, codec2, audio, sensors, camera, agent]
+    needs: [kernel, kernel-arm64, guest-graphics, channeld, hwcomposer, power-hal, gnss-hal, codec2, audio, sensors, camera, agent, translator, framework]
+    # The translator and framework jobs are skipped when the release carries no default
+    # translator or no patched framework.
+    if: inputs.rebuild_images && !cancelled() && !failure()
     runs-on: ubuntu-latest
     timeout-minutes: 180
     permissions:
       contents: write
+      actions: read
     strategy:
       fail-fast: true
       matrix:
@@ -577,6 +685,28 @@ jobs:
       - name: Fetch the pinned inputs
         run: dsa/guest/image/fetch.sh ${{ matrix.android }} ${{ matrix.arch }}
 
+      # Only an x86_64 image takes a translator; on arm64, ARM apps run as they are.
+      - name: Download the default ARM translator
+        id: translator
+        if: matrix.arch == 'x86_64' && needs.translator.outputs.run_id != ''
+        run: |
+          android="android${{ matrix.android }}"
+          name="arm-translation-$android-$(python3 dsa/guest/arm-translation/digitalis_lock.py version "$android")"
+          gh run download "${{ needs.translator.outputs.run_id }}" --repo "${{ github.repository }}"             --name "$name" --dir .scratch/arm-translation
+          ls -l .scratch/arm-translation
+          echo "args=--arm-translation .scratch/arm-translation" >> "$GITHUB_OUTPUT"
+
+      - name: Download the patched framework
+        id: framework
+        if: needs.framework.outputs.run_id != ''
+        run: |
+          android="android${{ matrix.android }}"
+          name="framework-$android-${{ matrix.arch }}-$(python3 dsa/guest/framework/framework_lock.py version "$android")"
+          gh run download "${{ needs.framework.outputs.run_id }}" --repo "${{ github.repository }}" \
+            --name "$name" --dir .scratch/framework
+          cat .scratch/framework/framework.json
+          echo "args=--framework .scratch/framework" >> "$GITHUB_OUTPUT"
+
       - name: Verify graphics libraries ELF dependencies
         run: |
           target_zip=$(echo .scratch/aosp-inputs/*/*target_files*.zip)
@@ -644,6 +774,8 @@ jobs:
           --gnss-hal .scratch/gnss-hal/dsa-gnss
           --agent .scratch/agent/DsaAgent.apk
           --aapt2 .scratch/build-tools/aapt2
+          ${{ steps.translator.outputs.args }}
+          ${{ steps.framework.outputs.args }}
 
       - name: Check the image
         run: uv run dsa/guest/image/check-image.py dsa/target/image/*/ .scratch/image-keys
@@ -665,6 +797,11 @@ jobs:
           done
           # The image carries the kernel, so its release carries the kernel's source.
           files+=(.scratch/kernel-out/kernel-source.tar.gz)
+          # The default ARM translation package, which only x86_64 images have.
+          translator="$(jq -r '.arm_translation.file // empty' "$dir/image.json")"
+          if [ -n "$translator" ]; then
+            files+=("$dir/$translator")
+          fi
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" "${files[@]}" --clobber
           else
@@ -718,13 +855,20 @@ jobs:
       - name: Write the lists
         id: write
         run: |
+          # The supported versions are written once, in dsa/android-versions.json; an image
+          # of another version is a mistake in the inputs, not a version to offer.
           for arch in x86_64 arm64; do
             list=images.json
             [[ "$arch" == arm64 ]] && list=images-arm64.json
-            jq -n --arg arch "$arch" --slurpfile inputs dsa/guest/image/inputs.json \
+            jq -n --slurpfile versions dsa/android-versions.json \
               --slurpfile images <(jq -s . entries/*-"$arch".json) \
-              '{format: 1, supported_majors: ([$inputs[0].images[] | select((.arch // "x86_64") == $arch) | .android_major] | unique), images: $images[0]}' \
+              '{format: 1, supported_majors: ($versions[0].supported_majors | unique), images: $images[0]}' \
               > "$list"
+            stray="$(jq '[.supported_majors as $s | .images[] | select(.android_major as $m | $s | index($m) | not) | .version]' "$list")"
+            if [[ "$stray" != "[]" ]]; then
+              echo "::error::$list has images of unsupported versions: $stray"
+              exit 1
+            fi
             cat "$list"
           done
           # The installer's first screen names the newest Android the list supports.

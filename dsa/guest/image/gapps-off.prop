@@ -1,0 +1,2 @@
+# Google Play is not installed: nothing is laid over the system and nothing is set. The product
+# build.prop imports this file then, so the import always finds a file.

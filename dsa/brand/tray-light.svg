@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <!-- The notification area icon for a light taskbar: one dark colour on a clear background. -->
+  <path d="M22 14 L16.5 5 M42 14 L47.5 5" stroke="#1b1b1b" stroke-width="4.4" stroke-linecap="round" fill="none"/>
+  <path d="M13 12h38a9 9 0 0 1 9 9v28a9 9 0 0 1-9 9H13a9 9 0 0 1-9-9V21a9 9 0 0 1 9-9z M16 32h32a4 4 0 0 1 4 4v10a4 4 0 0 1-4 4H16a4 4 0 0 1-4-4V36a4 4 0 0 1 4-4z" fill="#1b1b1b" fill-rule="evenodd"/>
+</svg>

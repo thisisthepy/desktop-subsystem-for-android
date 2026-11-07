@@ -15,6 +15,7 @@ pub mod fixture;
 pub mod inflate;
 pub mod permissions;
 pub mod signing;
+pub mod vector;
 pub mod zip;
 
 use std::fs::File;
@@ -25,6 +26,7 @@ use arsc::ResourceTable;
 use axml::{Element, Value, TYPE_FIRST_COLOR, TYPE_LAST_COLOR, TYPE_REFERENCE, TYPE_STRING};
 pub use permissions::Permission;
 pub use signing::Signer;
+pub use vector::{Vector, VectorPath};
 use zip::Archive;
 
 /// The framework's resource IDs of the manifest attributes read here.
@@ -48,18 +50,20 @@ const MAX_RESOURCES: usize = 64 * 1024 * 1024;
 pub const MAX_ICON: usize = 4 * 1024 * 1024;
 
 /// One layer of an adaptive icon.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Layer {
     /// A PNG, WebP or JPEG image.
     Image(Vec<u8>),
     /// A solid colour, as 0xAARRGGBB.
     Color(u32),
-    /// A drawable the host does not draw, such as a vector drawable.
+    /// A vector drawable, drawn by the host.
+    Vector(Vector),
+    /// A drawable the host does not draw, such as one whose colours come from the theme.
     Unknown,
 }
 
 /// The app's launcher icon.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Icon {
     /// A PNG, WebP or JPEG image.
     Image(Vec<u8>),
@@ -69,10 +73,12 @@ pub enum Icon {
         background: Layer,
         foreground: Layer,
     },
+    /// A vector drawable, drawn whole in its bounds.
+    Vector(Vector),
 }
 
 /// What an APK says about itself.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ApkInfo {
     pub package: String,
     /// The app's name as its launcher shows it in the default language; None when it has
@@ -276,57 +282,84 @@ fn read_file<R: Read + Seek>(
     archive.read(&entry, limit).ok()
 }
 
-/// The icon the resource `id` stands for: its best image, else its adaptive icon's layers.
+/// The XML files of the resource `id`, best density first, references followed.
+fn xml_files(table: &ResourceTable, id: u32) -> Vec<String> {
+    let mut candidates: Vec<_> = files(table, id, 0)
+        .into_iter()
+        .filter(|(_, path)| path.to_ascii_lowercase().ends_with(".xml"))
+        .collect();
+    candidates.sort_by_key(|(density, _)| -density_rank(*density));
+    candidates.into_iter().map(|(_, path)| path).collect()
+}
+
+fn read_xml<R: Read + Seek>(archive: &mut Archive<R>, path: &str) -> Option<axml::Document> {
+    axml::parse(&read_file(archive, path, MAX_MANIFEST)?).ok()
+}
+
+/// The icon the resource `id` stands for: its best image, else its adaptive icon's layers,
+/// else the vector drawable it is.
 fn icon<R: Read + Seek>(archive: &mut Archive<R>, table: &ResourceTable, id: u32) -> Option<Icon> {
-    let candidates = files(table, id, 0);
-    let images: Vec<_> = candidates
-        .iter()
+    let images: Vec<_> = files(table, id, 0)
+        .into_iter()
         .filter(|(_, path)| is_image(path))
-        .cloned()
         .collect();
     if let Some(path) = best(images) {
         if let Some(image) = read_file(archive, &path, MAX_ICON) {
             return Some(Icon::Image(image));
         }
     }
-    let xml = best(
-        candidates
-            .into_iter()
-            .filter(|(_, path)| path.to_ascii_lowercase().ends_with(".xml"))
-            .collect(),
-    )?;
-    let document = axml::parse(&read_file(archive, &xml, MAX_MANIFEST)?).ok()?;
-    if document.elements.first()?.name != "adaptive-icon" {
-        return None;
-    }
-    let mut layer = |name: &str| -> Layer {
-        let Some(element) = document.elements.iter().find(|e| e.name == name) else {
-            return Layer::Unknown;
+    for xml in xml_files(table, id) {
+        let Some(document) = read_xml(archive, &xml) else {
+            continue;
         };
-        match element
-            .attribute(attr::DRAWABLE, "drawable")
-            .map(|a| a.value)
-        {
-            Some(Value { kind, data }) if (TYPE_FIRST_COLOR..=TYPE_LAST_COLOR).contains(&kind) => {
-                Layer::Color(color(kind, data))
+        match document.elements.first().map(|e| e.name.as_str()) {
+            Some("adaptive-icon") => {
+                let mut layer = |name: &str| -> Layer {
+                    let Some(element) = document.elements.iter().find(|e| e.name == name) else {
+                        return Layer::Unknown;
+                    };
+                    match element
+                        .attribute(attr::DRAWABLE, "drawable")
+                        .map(|a| a.value)
+                    {
+                        Some(Value { kind, data })
+                            if (TYPE_FIRST_COLOR..=TYPE_LAST_COLOR).contains(&kind) =>
+                        {
+                            Layer::Color(color(kind, data))
+                        }
+                        Some(Value {
+                            kind: TYPE_REFERENCE,
+                            data,
+                        }) => layer_of(archive, table, data, 0),
+                        _ => Layer::Unknown,
+                    }
+                };
+                let background = layer("background");
+                let foreground = layer("foreground");
+                return Some(Icon::Adaptive {
+                    background,
+                    foreground,
+                });
             }
-            Some(Value {
-                kind: TYPE_REFERENCE,
-                data,
-            }) => layer_of(archive, table, data),
-            _ => Layer::Unknown,
+            Some(_) => {
+                if let Layer::Vector(vector) = drawable(archive, table, &document, 0) {
+                    return Some(Icon::Vector(vector));
+                }
+            }
+            None => {}
         }
-    };
-    let background = layer("background");
-    let foreground = layer("foreground");
-    Some(Icon::Adaptive {
-        background,
-        foreground,
-    })
+    }
+    None
 }
 
-/// An adaptive icon's layer from the resource `id`: a colour, or its best image.
-fn layer_of<R: Read + Seek>(archive: &mut Archive<R>, table: &ResourceTable, id: u32) -> Layer {
+/// An adaptive icon's layer from the resource `id`: a colour, its best image, or the
+/// drawable XML it is made of (a vector drawable, an inset, a bitmap or a shape).
+fn layer_of<R: Read + Seek>(
+    archive: &mut Archive<R>,
+    table: &ResourceTable,
+    id: u32,
+    depth: usize,
+) -> Layer {
     let mut id = id;
     for _ in 0..8 {
         let values = table.values(id);
@@ -347,15 +380,110 @@ fn layer_of<R: Read + Seek>(archive: &mut Archive<R>, table: &ResourceTable, id:
                     .into_iter()
                     .filter(|(_, path)| is_image(path))
                     .collect();
-                return best(images)
-                    .and_then(|path| read_file(archive, &path, MAX_ICON))
-                    .map(Layer::Image)
-                    .unwrap_or(Layer::Unknown);
+                if let Some(image) =
+                    best(images).and_then(|path| read_file(archive, &path, MAX_ICON))
+                {
+                    return Layer::Image(image);
+                }
+                for xml in xml_files(table, id) {
+                    if let Some(document) = read_xml(archive, &xml) {
+                        let layer = drawable(archive, table, &document, depth);
+                        if layer != Layer::Unknown {
+                            return layer;
+                        }
+                    }
+                }
+                return Layer::Unknown;
             }
             _ => return Layer::Unknown,
         }
     }
     Layer::Unknown
+}
+
+/// A drawable XML file as a layer: a `<vector>`, an `<inset>` around a drawable, a
+/// `<bitmap>` of an image, or a `<shape>` filled with one colour.
+fn drawable<R: Read + Seek>(
+    archive: &mut Archive<R>,
+    table: &ResourceTable,
+    document: &axml::Document,
+    depth: usize,
+) -> Layer {
+    if depth > 4 {
+        return Layer::Unknown;
+    }
+    let Some(root) = document.elements.first() else {
+        return Layer::Unknown;
+    };
+    let reference = |element: &Element, name: &str| {
+        let id = if name == "drawable" {
+            attr::DRAWABLE
+        } else {
+            0
+        };
+        vector::find(element, id, name).map(|a| a.value)
+    };
+    match root.name.as_str() {
+        "vector" => {
+            let mut open = |path: &str| read_xml(archive, path);
+            vector::parse(table, &mut open, document).map_or(Layer::Unknown, Layer::Vector)
+        }
+        "inset" => {
+            let inset = ["inset", "insetLeft"]
+                .iter()
+                .find_map(|name| vector::find(root, 0, name))
+                .and_then(|a| vector::number(table, a))
+                .unwrap_or(0.0);
+            // A dimension inset is in dp of the 108 dp layer; a fraction is of its side.
+            let inset = if inset >= 1.0 { inset / 108.0 } else { inset };
+            let inner = match reference(root, "drawable") {
+                Some(Value {
+                    kind: TYPE_REFERENCE,
+                    data,
+                }) => layer_of(archive, table, data, depth + 1),
+                Some(Value { kind, data })
+                    if (TYPE_FIRST_COLOR..=TYPE_LAST_COLOR).contains(&kind) =>
+                {
+                    Layer::Color(color(kind, data))
+                }
+                _ => Layer::Unknown,
+            };
+            match inner {
+                Layer::Vector(mut vector) => {
+                    vector.inset = (vector.inset + inset).clamp(0.0, 0.49);
+                    Layer::Vector(vector)
+                }
+                other => other,
+            }
+        }
+        "bitmap" => match reference(root, "src") {
+            Some(Value {
+                kind: TYPE_REFERENCE,
+                data,
+            }) => layer_of(archive, table, data, depth + 1),
+            _ => Layer::Unknown,
+        },
+        "shape" => document
+            .elements
+            .iter()
+            .find(|e| e.name == "solid")
+            .and_then(|solid| reference(solid, "color"))
+            .and_then(|value| match value {
+                Value { kind, data } if (TYPE_FIRST_COLOR..=TYPE_LAST_COLOR).contains(&kind) => {
+                    Some(Layer::Color(color(kind, data)))
+                }
+                Value {
+                    kind: TYPE_REFERENCE,
+                    data,
+                } => match layer_of(archive, table, data, depth + 1) {
+                    Layer::Color(argb) => Some(Layer::Color(argb)),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .unwrap_or(Layer::Unknown),
+        _ => Layer::Unknown,
+    }
 }
 
 /// A colour value as 0xAARRGGBB, whichever of the four colour forms it is in.
@@ -377,7 +505,7 @@ fn color(kind: u8, data: u32) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::fixture::{archive, notes_apk, PNG};
+    use super::fixture::{adaptive_vector_apk, archive, notes_apk, PNG};
     use super::*;
     use std::io::Cursor;
 
@@ -404,6 +532,41 @@ mod tests {
         let signer = info.signer.as_ref().expect("signed");
         assert_eq!(signer.certificate, b"\x30\x03\x02\x01\x07");
         assert_eq!(info.signers(), vec![signer.sha256()]);
+    }
+
+    #[test]
+    fn fr11_an_adaptive_icon_with_a_vector_foreground_reads_both_layers() {
+        // The foreground was read as a layer the host does not draw, so the tile showed the
+        // background alone: a plain rounded square.
+        let data = adaptive_vector_apk();
+        let size = data.len() as u64;
+        let info = ApkInfo::read_from(Cursor::new(data), size).unwrap();
+        let Some(Icon::Adaptive {
+            background,
+            foreground,
+        }) = info.icon.clone()
+        else {
+            panic!("not an adaptive icon: {:?}", info.icon);
+        };
+        assert_eq!(background, Layer::Color(0xff42_85f4));
+        let Layer::Vector(vector) = foreground else {
+            panic!("the foreground is not a vector drawable: {foreground:?}");
+        };
+        assert_eq!(
+            (vector.width, vector.height, vector.inset),
+            (108.0, 108.0, 0.0)
+        );
+        assert_eq!(
+            vector.paths,
+            vec![VectorPath {
+                data: "M0,0L10,0L10,10z".into(),
+                fill: Some(0xffdb_4437),
+                stroke: None,
+                stroke_width: 0.0,
+                even_odd: false,
+                transform: [1.0, 0.0, 0.0, 1.0, 10.0, 0.0],
+            }]
+        );
     }
 
     #[test]

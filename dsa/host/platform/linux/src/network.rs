@@ -324,7 +324,13 @@ pub use running::{place_tap, TAP_FD};
 /// passt's arguments, before the socket path: the adapter as a vhost-user device, for one VM
 /// that connects once.
 pub fn passt_args() -> [&'static str; 5] {
-    ["--vhost-user", "--foreground", "--quiet", "--one-off", "--socket"]
+    [
+        "--vhost-user",
+        "--foreground",
+        "--quiet",
+        "--one-off",
+        "--socket",
+    ]
 }
 
 #[cfg(test)]

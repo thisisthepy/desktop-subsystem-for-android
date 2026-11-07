@@ -21,23 +21,38 @@
 //!
 //! The glyphs follow the app's status bar (`ToHost::CaptionTone`): dark over a light one,
 //! light over a dark one. Under a high contrast theme the buttons take the theme's colors.
-//! The title text and the app's icon are not drawn: the taskbar, Alt+Tab and the system menu
-//! show them, and the app's own toolbar names what it shows.
+//!
+//! At the left of the band the window draws the app's icon (the program's icon, which the
+//! taskbar shows too, read at the small icon size of the window's DPI so it stays sharp) and
+//! the app's name (the window's title, in Segoe UI Variable at the caption text size, cut
+//! with an ellipsis before the buttons), both in the glyphs' color and fainter while the
+//! window is inactive. A press on the icon is `HTSYSMENU`, which opens the system menu as
+//! a standard caption icon does.
+//!
+//! An app that draws nothing behind the band (an old theme draws no system bar background)
+//! would leave it black. The presenter samples the band and the row under it from the app's
+//! frames ([`WindowPresenter::on_band_colour`]), and the band is then filled with the app's
+//! top color, with glyphs in the tone that color calls for.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 
 use dsa_host_core::compositor::caption::{
-    paint_buttons, CaptionButton, CaptionHit, CaptionLayout, CaptionPalette, CaptionState,
-    CaptionTone,
+    caption_tone, paint_title_bar, scaled, CaptionButton, CaptionHit, CaptionLayout,
+    CaptionPalette, CaptionState, CaptionTone, TitleBarContent, TITLE_TEXT_AT_100,
 };
 use dsa_host_core::compositor::window_hosts::FromHost;
+use dsa_host_core::tasks::StatusBarAppearance;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Dwm::{
     DwmExtendFrameIntoClientArea, DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE,
 };
 use windows_sys::Win32::Graphics::Gdi::{
-    GetSysColor, ScreenToClient, COLOR_BTNFACE, COLOR_BTNTEXT, COLOR_GRAYTEXT, COLOR_HIGHLIGHT,
-    COLOR_HIGHLIGHTTEXT, SYS_COLOR_INDEX,
+    CreateCompatibleDC, CreateDIBSection, CreateFontIndirectW, DeleteDC, DeleteObject, DrawTextW,
+    GdiFlush, GetSysColor, GetTextFaceW, ScreenToClient, SelectObject, SetBkMode, SetTextColor,
+    ANTIALIASED_QUALITY, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, COLOR_BTNFACE, COLOR_BTNTEXT,
+    COLOR_GRAYTEXT, COLOR_HIGHLIGHT, COLOR_HIGHLIGHTTEXT, DEFAULT_CHARSET, DIB_RGB_COLORS,
+    DT_END_ELLIPSIS, DT_LEFT, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, HDC, HFONT, LOGFONTW,
+    SYS_COLOR_INDEX, TRANSPARENT,
 };
 use windows_sys::Win32::UI::Accessibility::{HCF_HIGHCONTRASTON, HIGHCONTRASTW};
 use windows_sys::Win32::UI::Controls::MARGINS;
@@ -47,10 +62,10 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     DefWindowProcW, GetClientRect, IsZoomed, PostMessageW, SystemParametersInfoW, HTCAPTION,
-    HTCLIENT, HTCLOSE, HTMAXBUTTON, HTMINBUTTON, HTTOP, HTTOPLEFT, HTTOPRIGHT, NCCALCSIZE_PARAMS,
-    SC_CLOSE, SC_MAXIMIZE, SC_MINIMIZE, SC_RESTORE, SPI_GETHIGHCONTRAST, WINDOW_EX_STYLE,
-    WINDOW_STYLE, WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCHITTEST, WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN,
-    WM_NCLBUTTONUP, WM_NCMOUSELEAVE, WM_NCMOUSEMOVE, WM_SYSCOMMAND,
+    HTCLIENT, HTCLOSE, HTMAXBUTTON, HTMINBUTTON, HTSYSMENU, HTTOP, HTTOPLEFT, HTTOPRIGHT,
+    NCCALCSIZE_PARAMS, SC_CLOSE, SC_MAXIMIZE, SC_MINIMIZE, SC_RESTORE, SPI_GETHIGHCONTRAST,
+    WINDOW_EX_STYLE, WINDOW_STYLE, WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCHITTEST, WM_NCLBUTTONDBLCLK,
+    WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMOUSELEAVE, WM_NCMOUSEMOVE, WM_SYSCOMMAND,
 };
 
 use crate::compositor::present::WindowPresenter;
@@ -157,12 +172,168 @@ fn code_of(hit: CaptionHit) -> u32 {
     }
 }
 
-/// A task window's title bar: the tone and state of its buttons, and the height it last
-/// reported.
+/// The hit test code of the client point (`x`, `y`) of a window laid out as `layout`. The
+/// app's icon is `HTSYSMENU`, so a press on it opens the system menu as a caption icon's
+/// does; the rest is as the layout says.
+fn hit_code(layout: &CaptionLayout, x: i32, y: i32) -> u32 {
+    if layout.on_icon(x, y) {
+        return HTSYSMENU;
+    }
+    code_of(layout.hit(x, y))
+}
+
+/// The faces the app's name is written in, the first one installed winning: Segoe UI
+/// Variable at its optical size for caption text, then at its text size, then Segoe UI,
+/// which Windows before 11 has.
+const TITLE_FACES: [&str; 3] = [
+    "Segoe UI Variable Small",
+    "Segoe UI Variable Text",
+    "Segoe UI",
+];
+
+/// The caption font at `dpi`, selected into nothing. Null when none could be made.
+unsafe fn caption_font(dc: HDC, dpi: u32) -> HFONT {
+    for (index, face) in TITLE_FACES.iter().enumerate() {
+        let mut font: LOGFONTW = std::mem::zeroed();
+        // A negative height is the characters' height, as a caption's text size is given.
+        font.lfHeight = -(scaled(TITLE_TEXT_AT_100, dpi) as i32);
+        font.lfWeight = 400;
+        font.lfCharSet = DEFAULT_CHARSET as _;
+        // Gray antialiasing: the text is drawn as coverage, on a transparent band.
+        font.lfQuality = ANTIALIASED_QUALITY as _;
+        let units = face.encode_utf16().take(31);
+        for (slot, unit) in font.lfFaceName.iter_mut().zip(units) {
+            *slot = unit;
+        }
+        let handle = CreateFontIndirectW(&font);
+        if handle.is_null() {
+            continue;
+        }
+        if index == TITLE_FACES.len() - 1 {
+            return handle;
+        }
+        // GDI makes a font of another face when the one asked for is not installed.
+        let old = SelectObject(dc, handle);
+        let mut got = [0u16; 32];
+        let length = GetTextFaceW(dc, 32, got.as_mut_ptr()).max(0) as usize;
+        SelectObject(dc, old);
+        let got = String::from_utf16_lossy(&got[..length.min(got.len())]);
+        if got.trim_end_matches('\0').eq_ignore_ascii_case(face) {
+            return handle;
+        }
+        DeleteObject(handle);
+    }
+    std::ptr::null_mut()
+}
+
+/// `title` laid out in the caption font at `dpi` in a box of `size` pixels, vertically
+/// centred and cut with an ellipsis where it would run past the box, as one coverage byte
+/// per pixel. `None` when there is nothing to draw or GDI cannot draw it.
+unsafe fn title_mask(title: &str, size: (u32, u32), dpi: u32) -> Option<Vec<u8>> {
+    if title.trim().is_empty() || size.0 == 0 || size.1 == 0 {
+        return None;
+    }
+    let (width, height) = (size.0 as i32, size.1 as i32);
+    let dc = CreateCompatibleDC(std::ptr::null_mut());
+    if dc.is_null() {
+        return None;
+    }
+    let mut info: BITMAPINFO = std::mem::zeroed();
+    info.bmiHeader = BITMAPINFOHEADER {
+        biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+        biWidth: width,
+        // Negative: the rows come top first.
+        biHeight: -height,
+        biPlanes: 1,
+        biBitCount: 32,
+        biCompression: BI_RGB,
+        ..std::mem::zeroed()
+    };
+    let mut bits: *mut std::ffi::c_void = std::ptr::null_mut();
+    let bitmap = CreateDIBSection(
+        dc,
+        &info,
+        DIB_RGB_COLORS,
+        &mut bits,
+        std::ptr::null_mut(),
+        0,
+    );
+    if bitmap.is_null() || bits.is_null() {
+        if !bitmap.is_null() {
+            DeleteObject(bitmap);
+        }
+        DeleteDC(dc);
+        return None;
+    }
+    let old_bitmap = SelectObject(dc, bitmap);
+    let font = caption_font(dc, dpi);
+    let old_font = if font.is_null() {
+        None
+    } else {
+        Some(SelectObject(dc, font))
+    };
+    SetBkMode(dc, TRANSPARENT as _);
+    // White on the bitmap's black: each pixel's brightness is the text's coverage.
+    SetTextColor(dc, 0x00FF_FFFF);
+    let mut text: Vec<u16> = title.encode_utf16().collect();
+    let mut rect = RECT {
+        left: 0,
+        top: 0,
+        right: width,
+        bottom: height,
+    };
+    DrawTextW(
+        dc,
+        text.as_mut_ptr(),
+        text.len() as i32,
+        &mut rect,
+        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX,
+    );
+    GdiFlush();
+    let pixels = std::slice::from_raw_parts(bits as *const u8, (width * height * 4) as usize);
+    let mask = pixels
+        .chunks(4)
+        .map(|pixel| pixel[0].max(pixel[1]).max(pixel[2]))
+        .collect();
+    if let Some(old) = old_font {
+        SelectObject(dc, old);
+        DeleteObject(font);
+    }
+    SelectObject(dc, old_bitmap);
+    DeleteObject(bitmap);
+    DeleteDC(dc);
+    Some(mask)
+}
+
+/// What a title bar was drawn from, so a message that changes nothing draws nothing.
+type Drawn = (
+    CaptionLayout,
+    CaptionState,
+    CaptionPalette,
+    u32,
+    String,
+    Option<u32>,
+);
+
+/// A task window's title bar: the tone and state of its buttons, the app's icon and name,
+/// and the height it last reported.
+/// What the title was laid out for: the text, the box it fits in and the DPI.
+type TitleKey = (String, (u32, u32), u32);
+
 pub struct CaptionWindow {
     task_id: i32,
     style: WINDOW_STYLE,
     ex_style: WINDOW_EX_STYLE,
+    /// The program's icon resource: the app's, in an app's copy of the window host.
+    icon_id: usize,
+    /// The app's name: the window's title.
+    title: RefCell<String>,
+    /// The color the band is filled with while the app leaves it empty.
+    fill: Cell<Option<u32>>,
+    /// The icon as last read, and the side it was read at.
+    icon: RefCell<Option<(u32, Option<Vec<u8>>)>>,
+    /// The name as last laid out, and what it was laid out for: text, box and DPI.
+    text: RefCell<Option<(TitleKey, Option<Vec<u8>>)>>,
     tone: Cell<CaptionTone>,
     hovered: Cell<Option<CaptionButton>>,
     pressed: Cell<Option<CaptionButton>>,
@@ -172,22 +343,32 @@ pub struct CaptionWindow {
     /// Whether Windows will say when the pointer leaves the non-client area.
     tracking: Cell<bool>,
     /// What was last drawn, so a message that changes nothing draws nothing.
-    drawn: Cell<Option<(CaptionLayout, CaptionState, CaptionPalette, u32)>>,
+    drawn: RefCell<Option<Drawn>>,
 }
 
 impl CaptionWindow {
-    pub fn new(task_id: i32, style: WINDOW_STYLE, ex_style: WINDOW_EX_STYLE) -> CaptionWindow {
+    pub fn new(
+        task_id: i32,
+        style: WINDOW_STYLE,
+        ex_style: WINDOW_EX_STYLE,
+        icon_id: usize,
+    ) -> CaptionWindow {
         CaptionWindow {
             task_id,
             style,
             ex_style,
+            icon_id,
+            title: RefCell::new(String::new()),
+            fill: Cell::new(None),
+            icon: RefCell::new(None),
+            text: RefCell::new(None),
             tone: Cell::new(CaptionTone::default()),
             hovered: Cell::new(None),
             pressed: Cell::new(None),
             active: Cell::new(true),
             reported: Cell::new(0),
             tracking: Cell::new(false),
-            drawn: Cell::new(None),
+            drawn: RefCell::new(None),
         }
     }
 
@@ -242,14 +423,80 @@ impl CaptionWindow {
         tone: CaptionTone,
         presenter: Option<&WindowPresenter>,
     ) {
-        if self.tone.replace(tone) != tone {
+        let before = self.shown_tone();
+        self.tone.set(tone);
+        if self.shown_tone() != before {
             self.apply_tone(hwnd);
         }
         self.paint(hwnd, presenter);
     }
 
+    /// The band takes `fill` (0xAARRGGBB), the app's top color, while the app leaves the band
+    /// empty, or stays transparent with `None`. The glyphs then take the tone the fill calls
+    /// for.
+    ///
+    /// # Safety
+    ///
+    /// `hwnd` is this window, a live window of the calling thread.
+    pub unsafe fn set_fill(
+        &self,
+        hwnd: HWND,
+        fill: Option<u32>,
+        presenter: Option<&WindowPresenter>,
+    ) {
+        let before = self.shown_tone();
+        self.fill.set(fill);
+        if self.shown_tone() != before {
+            self.apply_tone(hwnd);
+        }
+        self.paint(hwnd, presenter);
+    }
+
+    /// The app's name, which the title bar shows: the window's title.
+    ///
+    /// # Safety
+    ///
+    /// `hwnd` is this window, a live window of the calling thread.
+    pub unsafe fn set_title(&self, hwnd: HWND, title: &str, presenter: Option<&WindowPresenter>) {
+        *self.title.borrow_mut() = title.to_owned();
+        self.paint(hwnd, presenter);
+    }
+
+    /// The tone the glyphs, the name and the frame are drawn in: the one the fill calls for
+    /// while the band is filled, otherwise the app's.
+    fn shown_tone(&self) -> CaptionTone {
+        match self.fill.get() {
+            Some(fill) => caption_tone(StatusBarAppearance::Unspecified, fill),
+            None => self.tone.get(),
+        }
+    }
+
+    /// The app's icon `side` pixels square, read once for each side.
+    fn icon_pixels(&self, side: u32) -> Option<Vec<u8>> {
+        let mut cache = self.icon.borrow_mut();
+        if cache.as_ref().map(|(at, _)| *at) != Some(side) {
+            let pixels = super::splash::icon_pixels(self.icon_id, side)
+                .filter(|(_, size)| *size == (side, side))
+                .map(|(pixels, _)| pixels);
+            *cache = Some((side, pixels));
+        }
+        cache.as_ref().and_then(|(_, pixels)| pixels.clone())
+    }
+
+    /// The app's name laid out for a box of `size` at `dpi`, laid out again only when one of
+    /// them changes.
+    unsafe fn title_pixels(&self, size: (u32, u32), dpi: u32) -> Option<Vec<u8>> {
+        let key = (self.title.borrow().clone(), size, dpi);
+        let mut cache = self.text.borrow_mut();
+        if cache.as_ref().map(|(at, _)| at) != Some(&key) {
+            let mask = title_mask(&key.0, size, dpi);
+            *cache = Some((key, mask));
+        }
+        cache.as_ref().and_then(|(_, mask)| mask.clone())
+    }
+
     unsafe fn apply_tone(&self, hwnd: HWND) {
-        let dark: i32 = i32::from(self.tone.get() == CaptionTone::LightGlyphs);
+        let dark: i32 = i32::from(self.shown_tone() == CaptionTone::LightGlyphs);
         DwmSetWindowAttribute(
             hwnd,
             DWMWA_USE_IMMERSIVE_DARK_MODE as u32,
@@ -273,7 +520,7 @@ impl CaptionWindow {
         }
     }
 
-    /// Draws the buttons as they are now, unless that is what was drawn last.
+    /// Draws the title bar as it is now, unless that is what was drawn last.
     ///
     /// # Safety
     ///
@@ -290,32 +537,46 @@ impl CaptionWindow {
             maximized: IsZoomed(hwnd) != 0,
             active: self.active.get(),
         };
-        let palette = palette(self.tone.get());
-        let now = Some((layout, state, palette, dpi));
-        if self.drawn.get() == now {
+        let palette = palette(self.shown_tone());
+        let now = Some((
+            layout,
+            state,
+            palette,
+            dpi,
+            self.title.borrow().clone(),
+            self.fill.get(),
+        ));
+        if *self.drawn.borrow() == now {
             return;
         }
-        let pixels = paint_buttons(&layout, dpi, &palette, &state);
+        let icon = self.icon_pixels(layout.icon);
+        let title = layout
+            .title_rect()
+            .and_then(|(_, _, width, height)| self.title_pixels((width, height), dpi));
+        let content = TitleBarContent {
+            fill: self.fill.get(),
+            icon: icon.as_deref(),
+            title: title.as_deref(),
+        };
+        let pixels = paint_title_bar(&layout, dpi, &palette, &state, &content);
         if presenter
-            .show_caption(
-                layout.buttons_left(),
-                (3 * layout.button_width, layout.height),
-                &pixels,
-            )
+            .show_caption(0, (layout.width, layout.height), &pixels)
             .is_ok()
         {
-            self.drawn.set(now);
+            *self.drawn.borrow_mut() = now;
         }
     }
 
-    /// Draws the buttons again even if nothing this window knows of changed, as after a
-    /// change of theme.
+    /// Draws the title bar again even if nothing this window knows of changed, as after a
+    /// change of theme or of the system's text settings.
     ///
     /// # Safety
     ///
     /// `hwnd` is this window, a live window of the calling thread.
     pub unsafe fn repaint(&self, hwnd: HWND, presenter: Option<&WindowPresenter>) {
-        self.drawn.set(None);
+        self.drawn.replace(None);
+        self.text.replace(None);
+        self.icon.replace(None);
         self.paint(hwnd, presenter);
     }
 
@@ -377,7 +638,7 @@ impl CaptionWindow {
                     y: ((lparam >> 16) & 0xffff) as i16 as i32,
                 };
                 ScreenToClient(hwnd, &mut point);
-                Some(code_of(self.layout(hwnd).hit(point.x, point.y)) as LRESULT)
+                Some(hit_code(&self.layout(hwnd), point.x, point.y) as LRESULT)
             }
             WM_NCMOUSEMOVE => {
                 if !self.tracking.get() {
@@ -465,6 +726,47 @@ mod tests {
         assert_eq!(code_of(CaptionHit::Caption), HTCAPTION);
         assert_eq!(code_of(CaptionHit::Client), HTCLIENT);
         assert_eq!(button_of(HTCAPTION), None);
+    }
+
+    #[test]
+    fn fr22_the_icon_opens_the_system_menu() {
+        for dpi in [96, 144, 192] {
+            let layout = CaptionLayout::new(scaled(800, dpi), scaled(31, dpi), dpi, 0);
+            let (left, top, side, _) = layout.icon_rect().unwrap();
+            let middle = (left + side as i32 / 2, top + side as i32 / 2);
+            assert_eq!(hit_code(&layout, middle.0, middle.1), HTSYSMENU, "at {dpi}");
+            // The name and the rest of the band still drag the window, and the buttons
+            // keep their codes, the maximize one showing the snap layouts.
+            let (title_left, _, _, _) = layout.title_rect().unwrap();
+            assert_eq!(hit_code(&layout, title_left + 4, middle.1), HTCAPTION);
+            let (max_left, _, width, _) = layout.button_rect(CaptionButton::Maximize);
+            let over_max = max_left + width as i32 / 2;
+            assert_eq!(hit_code(&layout, over_max, middle.1), HTMAXBUTTON);
+            assert_eq!(hit_code(&layout, middle.0, layout.height as i32), HTCLIENT);
+        }
+    }
+
+    #[test]
+    fn fr22_the_apps_name_is_drawn_and_cut_before_its_box_ends() {
+        // SAFETY: GDI calls on objects the function makes and releases itself.
+        unsafe {
+            let short = title_mask("Clock", (300, 31), 96).unwrap();
+            assert_eq!(short.len(), 300 * 31);
+            let inked = |mask: &[u8], from: usize, to: usize| {
+                (0..31).any(|y| (from..to).any(|x| mask[y * 300 + x] > 16))
+            };
+            assert!(inked(&short, 0, 60), "the name starts at the left");
+            assert!(!inked(&short, 100, 300), "a short name ends early");
+            // Nothing above or below the line, which is centred in the band.
+            assert!((0..300).all(|x| short[x] == 0 && short[30 * 300 + x] == 0));
+            let long = "A name far too long to fit in the room the title bar leaves for it";
+            let cut = title_mask(long, (300, 31), 96).unwrap();
+            assert!(
+                inked(&cut, 250, 300),
+                "the ellipsis reaches the end of the box"
+            );
+            assert!(title_mask("", (300, 31), 96).is_none());
+        }
     }
 
     #[test]

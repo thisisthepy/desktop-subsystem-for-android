@@ -23,9 +23,9 @@
                 <ProgressBar IsIndeterminate="True" Margin="0,8,0,0"
                              Visibility="{Binding IsBusy, Converter={StaticResource Visible}}" />
                 <ui:InfoBar Title="{l:Text WidgetsErrorBar.Title}" Severity="Error" IsClosable="False"
-                            IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" />
+                            IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" Margin="0,0,0,4" />
                 <ui:InfoBar Title="{l:Text WidgetsDoneBar.Title}" Severity="Success" IsClosable="False"
-                            IsOpen="{Binding HasMessage, Mode=OneWay}" Message="{Binding Message, Mode=OneWay}" />
+                            IsOpen="{Binding HasMessage, Mode=OneWay}" Message="{Binding Message, Mode=OneWay}" Margin="0,0,0,4" />
 
                 <TextBlock Text="{l:Text WidgetsPlacedHeader.Text}" Style="{StaticResource SectionHeader}" />
                 <TextBlock Text="{l:Text WidgetsPlacedNone.Text}" Style="{StaticResource Note}"

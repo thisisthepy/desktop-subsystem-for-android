@@ -33,6 +33,7 @@
 
 pub mod cmdline;
 pub mod compositor;
+pub mod computer_identity;
 pub mod devices;
 pub mod host_config;
 pub mod input;
@@ -55,6 +56,8 @@ pub(crate) mod gpt;
 #[path = "../../windows/src/pstore_disk.rs"]
 pub(crate) mod pstore_disk;
 
+#[cfg(target_os = "macos")]
+pub mod adb_discovery;
 #[cfg(target_os = "macos")]
 pub mod android_vm;
 #[cfg(target_os = "macos")]

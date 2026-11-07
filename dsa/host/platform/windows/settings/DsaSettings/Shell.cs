@@ -139,4 +139,22 @@ internal static class Shell
             return e.Message;
         }
     }
+
+    /// <summary>The APK Installer, installed beside the settings app in the same folder.</summary>
+    public static string ApkInstallerPath => Path.Combine(AppContext.BaseDirectory, "DsaApkInstaller.exe");
+
+    /// <summary>Opens the APK at <paramref name="apk"/> in the APK Installer, its own program
+    /// with its own window and taskbar entry. Returns why it could not, or null.</summary>
+    public static string? OpenApkInstaller(string apk)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(ApkInstallerPath) { ArgumentList = { "--install-apk", apk }, UseShellExecute = false });
+            return null;
+        }
+        catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            return ApkInstallerPath + ": " + e.Message;
+        }
+    }
 }

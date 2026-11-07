@@ -63,6 +63,17 @@ class Workflow(unittest.TestCase):
         self.assertEqual(ksr.problems(bad),
                          ["job image: publishes a release with the kernel but not kernel-source.tar.gz"])
 
+    def test_nfr7_arm64_kernel_artifact_without_source_fails(self):
+        arm64 = GOOD.replace("  image:\n", """  kernel-arm64:
+    steps:
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kernel-arm64
+          path: out/Image
+  image:
+""", 1)
+        self.assertEqual(ksr.problems(arm64), ["job kernel-arm64: uploads kernel-arm64 without kernel-source.tar.gz"])
+
     def test_nfr7_installer_release_without_source_fails(self):
         bad = GOOD.replace("setup.exe out/kernel-source.tar.gz", "setup.exe")
         self.assertEqual(ksr.problems(bad),

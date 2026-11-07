@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+<!-- The APK Installer: an open cardboard box, three-quarter view, left flap raised. DSA's own
+     drawing, with no DSA mark on it, so it reads as "install a package" at every size. -->
+<defs>
+<linearGradient id="front" x1="40" y1="70" x2="165" y2="250" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#DEB87F"/><stop offset="1" stop-color="#D3A564"/></linearGradient>
+<linearGradient id="side" x1="190" y1="90" x2="195" y2="250" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#C38C45"/><stop offset="0.15" stop-color="#CD984F"/><stop offset="1" stop-color="#C9924B"/></linearGradient>
+<linearGradient id="back" x1="170" y1="12" x2="160" y2="58" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#E2BF8A"/><stop offset="0.8" stop-color="#DAAF71"/><stop offset="1" stop-color="#CFA062"/></linearGradient>
+<linearGradient id="lflap" x1="20" y1="15" x2="80" y2="45" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#E2BE88"/><stop offset="1" stop-color="#D8B279"/></linearGradient>
+<linearGradient id="rflap" x1="170" y1="95" x2="252" y2="79" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#D9AF72"/><stop offset="1" stop-color="#E2BE88"/></linearGradient>
+<linearGradient id="inback" x1="150" y1="45" x2="160" y2="95" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#B8823D"/><stop offset="1" stop-color="#C7944D"/></linearGradient>
+<linearGradient id="inleft" x1="50" y1="45" x2="95" y2="70" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#B98240"/><stop offset="1" stop-color="#AD7433"/></linearGradient>
+<linearGradient id="flapshade" x1="190" y1="94" x2="197" y2="116" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#5A3510" stop-opacity="0.5"/><stop offset="1" stop-color="#5A3510" stop-opacity="0"/></linearGradient>
+<linearGradient id="ground" x1="0" y1="243" x2="0" y2="256" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#000000" stop-opacity="0.12"/><stop offset="1" stop-color="#000000" stop-opacity="0"/></linearGradient>
+</defs>
+<path d="M165 254 L222 237 L232 240 L172 256 Z" fill="url(#ground)"/>
+<path d="M95 35 L113 10 L121 6 L248 42 L246 46 L227 74 L222 76 Z" fill="url(#back)"/>
+<path d="M113 10 L121 6 L248 42 L246 46 Z" fill="#C99657"/>
+<path d="M121 6 L248 42" stroke="#EBCB98" stroke-width="1.2" fill="none"/>
+<path d="M37 57 L95 35 L74 5 L13 20 L11 23 Z" fill="url(#lflap)"/>
+<path d="M11 23 L37 57 L37 60 L10 26 Z" fill="#BE8946"/>
+<path d="M37 57 L95 35 L222 76 L165 98 Z" fill="url(#inback)"/>
+<path d="M37 57 L95 35 L97 76 Z" fill="url(#inleft)"/>
+<path d="M95 35 L222 76" stroke="#A46E30" stroke-width="2" fill="none"/>
+<path d="M95.5 33.6 L222.5 74.6" stroke="#E8C690" stroke-width="1.1" fill="none"/>
+<path d="M37 57 L165 98 L165 254 L37 213 Z" fill="url(#front)"/>
+<path d="M165 98 L222 76 L222 237 L165 254 Z" fill="url(#side)"/>
+<path d="M165 102.5 L222 81.5 L222 99 L165 120 Z" fill="url(#flapshade)"/>
+<path d="M37 57 L165 98" stroke="#E4C28E" stroke-width="1.5" fill="none"/>
+<path d="M37.7 58 L37.7 213" stroke="#E6BE82" stroke-width="1.2" fill="none" opacity="0.8"/>
+<path d="M165 98.5 L165 254" stroke="#E2B36F" stroke-width="1" fill="none" opacity="0.7"/>
+<path d="M165 98 L222 76 L253 77.5 L253 80 L195 97 Z" fill="url(#rflap)"/>
+<path d="M165 98 L195 97 L253 80 L253 84.5 L194 102 L165 102.5 Z" fill="#9C6F3C"/>
+<path d="M165 98.4 L195 97.4 L253 80.4" stroke="#E9C690" stroke-width="1" fill="none"/>
+<path d="M222 76.8 L253 78.2" stroke="#EECA92" stroke-width="1" fill="none"/>
+</svg>

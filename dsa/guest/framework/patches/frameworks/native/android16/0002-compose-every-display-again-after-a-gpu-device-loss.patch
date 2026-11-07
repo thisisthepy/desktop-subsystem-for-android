@@ -1,0 +1,164 @@
+Subject: SurfaceFlinger: compose every display again after RenderEngine was rebuilt
+
+After RenderEngine built its GPU context again, what earlier frames drew through it may be
+gone: the cached client composition and the planner's flattened layers are dropped, and
+every display is composed again in full. SurfaceFlinger then sets debug.dsa.gpu.resets, which
+the apps' renderers wait on, because their devices went with the same GPU.
+
+Applies to frameworks/native at fcbde2bcff56ca1d7bec9cabf8bdca5e288bf103 (Android 16).
+---
+diff --git a/services/surfaceflinger/CompositionEngine/include/compositionengine/Output.h b/services/surfaceflinger/CompositionEngine/include/compositionengine/Output.h
+index 29b0887..9a026b3 100644
+--- a/services/surfaceflinger/CompositionEngine/include/compositionengine/Output.h
++++ b/services/surfaceflinger/CompositionEngine/include/compositionengine/Output.h
+@@ -183,6 +183,11 @@ public:
+     // Enables (or disables) layer caching texture pool on this output
+     virtual void setLayerCachingTexturePoolEnabled(bool) = 0;
+ 
++    // Drops what earlier frames drew through RenderEngine (the cached client composition, the
++    // flattened layers) after RenderEngine built its GPU context again: what the lost device drew
++    // may be gone. The next frame composes the whole output.
++    virtual void onRenderEngineReset() {}
++
+     // Sets the projection state to use
+     virtual void setProjection(ui::Rotation orientation, const Rect& layerStackSpaceRect,
+                                const Rect& orientedDisplaySpaceRect) = 0;
+diff --git a/services/surfaceflinger/CompositionEngine/include/compositionengine/impl/ClientCompositionRequestCache.h b/services/surfaceflinger/CompositionEngine/include/compositionengine/impl/ClientCompositionRequestCache.h
+index c14a6e8..993e1eb 100644
+--- a/services/surfaceflinger/CompositionEngine/include/compositionengine/impl/ClientCompositionRequestCache.h
++++ b/services/surfaceflinger/CompositionEngine/include/compositionengine/impl/ClientCompositionRequestCache.h
+@@ -46,6 +46,7 @@ public:
+     void add(uint64_t bufferId, const renderengine::DisplaySettings& display,
+              const std::vector<LayerFE::LayerSettings>& layerSettings);
+     void remove(uint64_t bufferId);
++    void clear() { mCache.clear(); }
+ 
+ private:
+     uint32_t mMaxCacheSize;
+diff --git a/services/surfaceflinger/CompositionEngine/include/compositionengine/impl/Output.h b/services/surfaceflinger/CompositionEngine/include/compositionengine/impl/Output.h
+index 5a4cfcd..218d914 100644
+--- a/services/surfaceflinger/CompositionEngine/include/compositionengine/impl/Output.h
++++ b/services/surfaceflinger/CompositionEngine/include/compositionengine/impl/Output.h
+@@ -49,6 +49,7 @@ public:
+     void setCompositionEnabled(bool) override;
+     void setLayerCachingEnabled(bool) override;
+     void setLayerCachingTexturePoolEnabled(bool) override;
++    void onRenderEngineReset() override;
+     void setProjection(ui::Rotation orientation, const Rect& layerStackSpaceRect,
+                        const Rect& orientedDisplaySpaceRect) override;
+     void setNextBrightness(float brightness) override;
+diff --git a/services/surfaceflinger/CompositionEngine/src/Output.cpp b/services/surfaceflinger/CompositionEngine/src/Output.cpp
+index 9fe0528..caab26d 100644
+--- a/services/surfaceflinger/CompositionEngine/src/Output.cpp
++++ b/services/surfaceflinger/CompositionEngine/src/Output.cpp
+@@ -173,6 +173,20 @@ void Output::setLayerCachingTexturePoolEnabled(bool enabled) {
+     }
+ }
+ 
++void Output::onRenderEngineReset() {
++    if (mClientCompositionRequestCache) {
++        mClientCompositionRequestCache->clear();
++    }
++    if (mPlanner) {
++        // A new planner holds none of the cached sets the lost device drew.
++        const bool texturePoolEnabled = mPlanner->isTexturePoolEnabled();
++        setLayerCachingEnabled(false);
++        setLayerCachingEnabled(true);
++        setLayerCachingTexturePoolEnabled(texturePoolEnabled);
++    }
++    dirtyEntireOutput();
++}
++
+ void Output::setProjection(ui::Rotation orientation, const Rect& layerStackSpaceRect,
+                            const Rect& orientedDisplaySpaceRect) {
+     auto& outputState = editState();
+diff --git a/services/surfaceflinger/SurfaceFlinger.cpp b/services/surfaceflinger/SurfaceFlinger.cpp
+index c448169..21028c1 100644
+--- a/services/surfaceflinger/SurfaceFlinger.cpp
++++ b/services/surfaceflinger/SurfaceFlinger.cpp
+@@ -61,6 +61,10 @@
+ #include <configstore/Utils.h>
+ #include <cutils/compiler.h>
+ #include <cutils/properties.h>
++#include <sys/system_properties.h>
++
++// Where SurfaceFlinger counts the GPU device resets it recovered from, for the apps' renderers.
++static constexpr const char* kGpuResetsProperty = "debug.dsa.gpu.resets";
+ #include <fmt/format.h>
+ #include <ftl/algorithm.h>
+ #include <ftl/concat.h>
+@@ -952,6 +956,16 @@ void SurfaceFlinger::init() FTL_FAKE_GUARD(kMainThreadContext) {
+     chooseRenderEngineType(builder);
+     mRenderEngine = renderengine::RenderEngine::create(builder.build());
+     mCompositionEngine->setRenderEngine(mRenderEngine.get());
++    // The apps' renderers wait on this property for GPU device resets, so it exists before the
++    // first app starts.
++    if (__system_property_find(kGpuResetsProperty) == nullptr) {
++        property_set(kGpuResetsProperty, "0");
++    }
++    // A frame follows each rebuild of RenderEngine's GPU context, and handles it.
++    mRenderEngine->setDeviceResetListener([this] {
++        static_cast<void>(mScheduler->schedule(
++                [this]() FTL_FAKE_GUARD(kMainThreadContext) { scheduleRepaint(); }));
++    });
+     mOffloadedCompositionEngine->setRenderEngine(mRenderEngine.get());
+     mMaxRenderTargetSize =
+             std::min(getRenderEngine().getMaxTextureSize(), getRenderEngine().getMaxViewportDims());
+@@ -3115,6 +3129,19 @@ std::future<void> SurfaceFlinger::offloadGpuCompositedDisplays(
+     return offloadedCompositionFuture;
+ }
+ 
++void SurfaceFlinger::onRenderEngineReset() {
++    ALOGW("RenderEngine built its GPU context again after a GPU device loss (reset %u). Every "
++          "display is composed again in full, and every app is told to draw again.",
++          mRenderEngineResets);
++    for (const auto& [_, display] : FTL_FAKE_GUARD(mStateLock, mDisplays)) {
++        display->getCompositionDisplay()->onRenderEngineReset();
++    }
++    mGeometryDirty = true;
++    // The apps' renderers wait on this property: their devices went with the same GPU, though
++    // they may not have run into it yet, and what they last drew may be gone.
++    property_set(kGpuResetsProperty, std::to_string(mRenderEngineResets).c_str());
++}
++
+ CompositeResultsPerDisplay SurfaceFlinger::composite(
+         PhysicalDisplayId pacesetterId, const scheduler::FrameTargeters& frameTargeters) {
+     SFTRACE_ASYNC_FOR_TRACK_BEGIN(WorkloadTracer::TRACK_NAME, "Composition",
+@@ -3125,6 +3152,12 @@ CompositeResultsPerDisplay SurfaceFlinger::composite(
+     const VsyncId vsyncId = pacesetterTarget.vsyncId();
+     SFTRACE_NAME(ftl::Concat(__func__, ' ', ftl::to_underlying(vsyncId)).c_str());
+ 
++    if (const uint32_t resets = getRenderEngine().getDeviceResetCount();
++        resets != mRenderEngineResets) {
++        mRenderEngineResets = resets;
++        onRenderEngineReset();
++    }
++
+     compositionengine::CompositionRefreshArgs refreshArgs;
+     // adpf load up hint
+     refreshArgs.powerCallback = this;
+diff --git a/services/surfaceflinger/SurfaceFlinger.h b/services/surfaceflinger/SurfaceFlinger.h
+index 3fa85ea..628d837 100644
+--- a/services/surfaceflinger/SurfaceFlinger.h
++++ b/services/surfaceflinger/SurfaceFlinger.h
+@@ -285,6 +285,10 @@ public:
+     void scheduleComposite(FrameHint);
+     // As above, but also force dirty geometry to repaint.
+     void scheduleRepaint();
++
++    // After RenderEngine built its GPU context again following a device loss: drops what the
++    // displays cached of earlier composition, composes them again in full, and tells the apps.
++    void onRenderEngineReset();
+     // Schedule sampling independently from commit or composite.
+     void scheduleSample();
+ 
+@@ -1402,6 +1406,9 @@ private:
+     std::atomic_bool mMustComposite = false;
+     std::atomic_bool mGeometryDirty = false;
+ 
++    // The RenderEngine device resets this SurfaceFlinger has handled.
++    uint32_t mRenderEngineResets = 0;
++
+     // constant members (no synchronization needed for access)
+     const nsecs_t mBootTime = systemTime();
+     bool mIsUserBuild = true;

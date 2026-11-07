@@ -20,9 +20,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use dsa_host_core::device_identity::{
-    DeviceIdentity, DeviceIdentityStore, FileDeviceIdentities, ImageBuild,
-};
+use dsa_host_core::device_identity::{BootIdentity, FileDeviceIdentities, ImageBuild};
 use dsa_host_core::diagnostics::HostFile;
 use dsa_host_core::guest_display::{display_or_smallest, with_display_size};
 use dsa_host_core::handshake::ControlHandshake;
@@ -30,7 +28,7 @@ use dsa_host_core::host_api::{HostApiService, PerUser, ServiceFacts, UserAndroid
 use dsa_host_core::session::Session;
 use dsa_host_core::settings::{FileSettings, SettingsStore};
 use dsa_host_core::update::service::{
-    check_reporting, next_image_check, UpdateNotices, UpdatingAndroid,
+    check_reporting, next_image_check, CheckNow, StoreVersions, UpdateNotices, UpdatingAndroid,
 };
 use dsa_host_core::update::store::{ImageStore, Recovery};
 use dsa_host_core::window_manager::{WindowManagerHost, WindowManagerKeeper};
@@ -180,7 +178,7 @@ struct Planner {
     name: String,
     store: Option<Arc<ImageStore>>,
     settings: Arc<dyn SettingsStore>,
-    identities: FileDeviceIdentities,
+    identity: Arc<BootIdentity>,
 }
 
 impl Planner {
@@ -200,6 +198,21 @@ impl Planner {
         }
         let cache = self.user.image_cache(&version);
         let template = raw_disk(&files.disk_template, &cache)?;
+        // A disk holding a newer Android's data than this image, after the user chose an older
+        // version and agreed to erase it, starts afresh.
+        if let Some(store) = &self.store {
+            let major = store
+                .state()
+                .map_err(|e| e.to_string())?
+                .current
+                .android_major;
+            let disk = self.user.disk();
+            dsa_host_core::data_reset::erase_if_newer(
+                &disk,
+                &disk.with_extension("image-version"),
+                major,
+            )?;
+        }
         bring_disk_to(&self.user.disk(), &template, &version)?;
         prune_image_cache(&self.user, &version);
         let mut disks = Vec::new();
@@ -250,24 +263,20 @@ impl Planner {
             mac_address: Some(mac_address_for(&self.name)),
             listen_ports,
         };
-        let identity = self.identities.get(&self.name).unwrap_or_else(|why| {
-            eprintln!("{why}; Android starts with the image's device identity");
-            DeviceIdentity::default()
-        });
-        let properties = identity.boot_properties(ImageBuild::from_image_dir(&dir).as_ref());
+        // The user's device identity on this Mac, read again at each start.
+        let properties = self
+            .identity
+            .boot_properties(ImageBuild::from_image_dir(&dir).as_ref());
         Ok(BootPlan {
             vm,
-            properties,
-            bootconfig: arm_translation_bootconfig(&*self.settings, &self.name),
+            properties: Some(properties),
+            bootconfig: dsa_host_core::arm_translation::bootconfig_for(
+                &*self.settings,
+                &self.name,
+                Some(dir.as_path()),
+            ) + &dsa_host_core::gapps::bootconfig_for(&*self.settings, &self.name),
         })
     }
-}
-
-/// The bootconfig that tells the next boot to use the user's ARM translation package.
-fn arm_translation_bootconfig(store: &dyn SettingsStore, user: &str) -> String {
-    let package = store.arm_translation(user).unwrap_or(None);
-    let enabled = store.get(user).map(|s| s.arm_translation).unwrap_or(true);
-    dsa_host_core::arm_translation::bootconfig(package.as_ref(), enabled).to_string()
 }
 
 /// Relays each of the guest's connections to `port` to the socket of the user's program that
@@ -361,6 +370,7 @@ fn check_for_updates(
     config: MacHostConfig,
     store: Arc<ImageStore>,
     notices: Arc<UpdateNotices>,
+    check_now: Arc<CheckNow>,
     settings: Arc<dyn SettingsStore>,
     build: String,
     stop: Arc<AtomicBool>,
@@ -386,11 +396,15 @@ fn check_for_updates(
     };
     while !stop.load(Ordering::Relaxed) {
         next = next_image_check(next, Instant::now(), !no_image(), FIRST_IMAGE_RETRY);
+        // A user who chose another Android version waits for it now, not at the next turn.
+        if check_now.take() {
+            next = Instant::now();
+        }
         if Instant::now() < next {
             thread::sleep(Duration::from_secs(1));
             continue;
         }
-        if !no_image() && !settings.machine().image_updates {
+        if !no_image() && !store.switch_pending() && !settings.machine().image_updates {
             next = Instant::now() + Duration::from_secs(60);
             continue;
         }
@@ -433,13 +447,18 @@ struct Shared {
 fn create_android(shared: &Shared, name: &str) -> Result<Arc<dyn UserAndroid>, String> {
     let config = &shared.config;
     let channels = Arc::new(PortChannels::default());
+    let boot_identity = BootIdentity::new(
+        Arc::new(FileDeviceIdentities::new(config.settings_dir(&shared.user))),
+        name,
+        Arc::new(crate::computer_identity::read),
+    );
     let planner = Planner {
         config: config.clone(),
         user: shared.user.clone(),
         name: name.to_string(),
         store: shared.store.clone(),
         settings: Arc::clone(&shared.settings),
-        identities: FileDeviceIdentities::new(config.settings_dir(&shared.user)),
+        identity: Arc::clone(&boot_identity),
     };
     let launcher = MacVmLauncher::new(
         Box::new(move || planner.plan()),
@@ -484,6 +503,8 @@ fn create_android(shared: &Shared, name: &str) -> Result<Arc<dyn UserAndroid>, S
         session_config,
     );
     session.serve_log_port(Box::new(log), &shared.build);
+    // The Mac's name becomes the guest's device name.
+    session.set_device_name_source(Arc::new(move || boot_identity.device_name()));
     session.serve_file_shares(Box::new(share), Arc::new(user_folders()));
     let dial = |port: u32| {
         let slot = slot.clone();
@@ -495,6 +516,10 @@ fn create_android(shared: &Shared, name: &str) -> Result<Arc<dyn UserAndroid>, S
         })
     };
     session.set_adb_connect(dial(dsa_host_core::adb_bridge::GUEST_ADB_PORT));
+    // Developer mode's port is attached to the user's adb server, and advertised over mDNS on
+    // the loopback address, so adb finds it without `adb connect`.
+    session.set_adb_server(crate::adb_discovery::adb_server());
+    session.set_adb_advertise(crate::adb_discovery::advertiser());
     session.set_android_files_connect(dial(dsa_host_core::file_share::ANDROID_FILES_PORT));
     let session = Arc::new(session);
     Ok(match &shared.store {
@@ -507,6 +532,7 @@ fn create_android(shared: &Shared, name: &str) -> Result<Arc<dyn UserAndroid>, S
                 config.update.as_ref().map_or(300, |u| u.boot_timeout_secs),
             ),
             trial_running: Arc::new(AtomicBool::new(false)),
+            rollback: Default::default(),
         }),
     })
 }
@@ -538,6 +564,7 @@ fn apply_settings(
                 s.shared_folders.clone()
             }),
     );
+    android.adb_auto_connect(settings.as_ref().is_none_or(|s| s.adb_auto_connect));
     if let Some(settings) = settings.as_ref().filter(|s| s.developer_mode) {
         if let Err(why) = android.developer_mode(true, settings.adb_port) {
             eprintln!("{build}: developer mode: {why}");
@@ -585,18 +612,20 @@ pub fn serve(
     let settings: Arc<dyn SettingsStore> = Arc::new(FileSettings::new(config.settings_dir(&user)));
     let store = open_store(&config, build);
     let notices = Arc::new(UpdateNotices::default());
+    let check_now = Arc::new(CheckNow::default());
     if let Some(store) = &store {
-        let (config, store, notices, settings, worker, stop) = (
+        let (config, store, notices, check, settings, worker, stop) = (
             config.clone(),
             Arc::clone(store),
             Arc::clone(&notices),
+            Arc::clone(&check_now),
             Arc::clone(&settings),
             build.to_string(),
             Arc::clone(&stop),
         );
         if let Err(why) = thread::Builder::new()
             .name("dsa-updates".into())
-            .spawn(move || check_for_updates(config, store, notices, settings, worker, stop))
+            .spawn(move || check_for_updates(config, store, notices, check, settings, worker, stop))
         {
             eprintln!("{build}: starting the update check failed: {why}");
         }
@@ -682,8 +711,33 @@ pub fn serve(
                     .ok()
                     .and_then(|(dir, _)| ImageBuild::from_image_dir(&dir))
             }),
-        );
+        )
+        // The defaults the settings show are what this Mac says it is now.
+        .with_computer_identity(Arc::new(crate::computer_identity::read))
+        // An arm64 image runs ARM apps itself and has no default translator; this reports
+        // whatever the image says, which for every image this host boots is none.
+        .with_default_arm_translation({
+            let shared = Arc::clone(&shared);
+            Arc::new(move |_: &str| {
+                current_image(&shared.config, shared.store.as_deref())
+                    .ok()
+                    .and_then(|(dir, _)| dsa_host_core::arm_translation::default_package(&dir))
+            })
+        });
+    // Google Play, for a user who asks: downloaded from LiteGapps and made ready in the
+    // user's own folder.
+    service = service.with_gapps(dsa_host_core::gapps::Source::new(
+        Arc::new(CurlFetch),
+        config.settings_dir(&user).with_file_name("gapps"),
+    ));
     if let Some(store) = &store {
+        // The agent keeps this user's own images, so the choice is theirs alone.
+        service = service.with_android_versions(Arc::new(StoreVersions {
+            store: Arc::clone(store),
+            notices: Arc::clone(&shared.notices),
+            check_now: Arc::clone(&check_now),
+            shared_by_users: false,
+        }));
         let store = Arc::clone(store);
         service = service.with_android_version(Arc::new(move || {
             store.state().ok().map(|state| state.current.version)

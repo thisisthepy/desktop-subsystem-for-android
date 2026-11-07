@@ -130,6 +130,29 @@ class HostGraphicsBuildTests(unittest.TestCase):
         self.assertIn("setDisplayColorBuffer", source)
         self.assertIn("dsa_gfx_display.cpp", CMAKE_FILE.read_text(encoding="utf-8"))
 
+    def test_nfr2_a_display_that_lost_its_window_lets_its_texture_go_at_once(self):
+        source = (HERE / "dsa_gfx_display.cpp").read_text(encoding="utf-8")
+        windows = source[source.index("#ifdef _WIN32"):source.index("#else /* !_WIN32 */")]
+        # Windows has a real forget, not a stub: the import is destroyed on the next pass.
+        self.assertNotIn("dsa_gfx_forget_display(uint32_t) {}", windows)
+        self.assertIn("dsa_gfx_forget_display(uint32_t display_id)", windows)
+        self.assertIn("presenter->forget.empty()", windows)
+        self.assertIn("presenter->targets.erase(it);", windows)
+
+    def test_nfr2_the_renderer_says_what_its_vulkan_memory_holds(self):
+        header = (HERE / "dsa_gfx_backend.h").read_text(encoding="utf-8")
+        self.assertIn("dsa_gfx_get_memory_stats(dsa_gfx_memory_stats* stats)", header)
+        source = (HERE / "dsa_gfx_memory.cpp").read_text(encoding="utf-8")
+        # Every allocation and free of the renderer's device dispatch is counted by kind.
+        self.assertIn("vk->vkAllocateMemory = counted_allocate;", source)
+        self.assertIn("vk->vkFreeMemory = counted_free;", source)
+        self.assertIn("VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT", source)
+        backend = (HERE / "dsa_gfx_backend.cpp").read_text(encoding="utf-8")
+        self.assertIn("dsa_gfx_memory_install();", backend)
+        self.assertIn("dsa_gfx_memory_uninstall();", backend)
+        self.assertEqual(backend.count("dsa_gfx_memory_process_ended();"), 2)
+        self.assertIn("dsa_gfx_memory.cpp", CMAKE_FILE.read_text(encoding="utf-8"))
+
     def test_fr4_only_the_region_a_frame_fills_is_copied(self):
         source = (HERE / "dsa_gfx_display.cpp").read_text(encoding="utf-8")
         # The guest's buffers keep their size while a window is resized; the display's size
@@ -172,6 +195,43 @@ class HostGraphicsBuildTests(unittest.TestCase):
                  "0012-survive-a-host-without-a-vulkan-driver.patch").read_text(encoding="utf-8")
         self.assertIn("+    if (mDvk && mDevice != VK_NULL_HANDLE) {", patch)
         self.assertIn("+    if (mGvk && mInstance != VK_NULL_HANDLE) {", patch)
+
+    def test_pr3_renderer_on_macos_finds_moltenvk_without_being_told(self):
+        # stream_renderer_init clears ANDROID_EMU_VK_ICD, and without portability enumeration
+        # the loader hides MoltenVK: creating the instance failed with
+        # VK_ERROR_INCOMPATIBLE_DRIVER on every Mac.
+        for script in (FETCH_SCRIPT, HERE / "fetch.sh"):
+            self.assertIn("0013", script.read_text(encoding="utf-8"))
+        patch = (HERE.parent / "patches" /
+                 "0013-use-moltenvk-when-the-host-vulkan-is-asked-for.patch").read_text(encoding="utf-8")
+        self.assertIn('+        (vulkanIcd == "moltenvk") || (vulkanIcd.empty() && moltenVKSupported);', patch)
+        self.assertIn('-    const bool moltenVKEnabled = (vulkanIcd == "moltenvk");', patch)
+
+    def test_pr3_renderer_fails_rather_than_crashes_when_no_graphics_api_starts(self):
+        # A guest that asks for Vulkan only gets no GL emulation, and when Vulkan then failed
+        # the GL compositor was taken from the GL emulation that was never made (exit 139).
+        for script in (FETCH_SCRIPT, HERE / "fetch.sh"):
+            self.assertIn("0014", script.read_text(encoding="utf-8"))
+        patch = (HERE.parent / "patches" /
+                 "0014-fail-the-start-when-no-graphics-api-starts.patch").read_text(encoding="utf-8")
+        self.assertIn("+    if (!fb->m_emulationVk && !fb->m_emulationGl) {", patch)
+        self.assertIn("+        return false;", patch)
+
+    def test_nfr5_renderer_survives_a_lost_device_and_a_bad_guest_command(self):
+        # A GPU reset made every guest call end the window manager through on_DeviceLost, and
+        # one guest's bad command did through the decoders' aborts.
+        for script in (FETCH_SCRIPT, HERE / "fetch.sh"):
+            self.assertIn("0015", script.read_text(encoding="utf-8"))
+        patch = (HERE.parent / "patches" /
+                 "0015-survive-a-lost-device-and-a-fatal-guest-error.patch").read_text(encoding="utf-8")
+        self.assertIn("-        GFXSTREAM_ABORT(FatalError(VK_ERROR_DEVICE_LOST));", patch)
+        self.assertIn("+    } catch (const emugl::GuestFatalError& error) {", patch)
+        self.assertIn("+bool VkEmulation::remakeDeviceLocked() {", patch)
+        self.assertNotIn("+            VK_CHECK(", patch)
+        aemu = (HERE.parent / "patches" / "aemu" /
+                "0002-end-a-guest-stream-rather-than-the-host-on-a-fatal-error.patch").read_text(encoding="utf-8")
+        self.assertIn("+        throw GuestFatalError(mOss.str());", aemu)
+        self.assertIn('+    OutputLog(stderr, \'F\', mFile, mLine, 0, "%s", mOss.str().c_str());', aemu)
 
     def test_pr3_gpu_preference_names_clear_x11_macros(self):
         # X11/X.h, which EGL pulls in on Linux, defines None as a macro.

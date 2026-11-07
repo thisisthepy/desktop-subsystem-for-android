@@ -105,9 +105,30 @@ void fr5_what_the_host_sent_back_is_not_sent_to_it_again() {
     check(blocks.changed(memory.data()).empty(), test, "the host has these bytes already");
 }
 
+// An allocation whose last block ends 9 to 31 bytes past a 32-byte step: the hash read those
+// bytes into an 8-byte word, which overran it (SurfaceFlinger aborted on it at boot), and a
+// change past the eighth of them went unseen.
+void fr5_a_change_to_the_last_bytes_of_an_odd_sized_allocation_is_seen() {
+    const char* test = __func__;
+    for (size_t extra = 1; extra < 32; extra++) {
+        const size_t size = 2 * kShadowBlockSize + 32 + extra;
+        for (size_t at = size - extra; at < size; at++) {
+            std::vector<uint8_t> memory(size, 0);
+            ShadowBlocks blocks(memory.size());
+            check(blocks.changed(memory.data()).empty(), test, "nothing written yet");
+            memory[at] = 0x5a;
+            const auto ranges = blocks.changed(memory.data());
+            check(ranges.size() == 1 && ranges[0].offset == 2 * kShadowBlockSize &&
+                      ranges[0].size == 32 + extra,
+                  test, "a byte of the tail changed, and its block is sent");
+        }
+    }
+}
+
 }  // namespace
 
 int main() {
+    fr5_a_change_to_the_last_bytes_of_an_odd_sized_allocation_is_seen();
     fr5_memory_nothing_wrote_to_sends_nothing();
     fr5_a_write_sends_only_its_block();
     fr5_a_change_to_any_byte_of_a_block_is_seen();

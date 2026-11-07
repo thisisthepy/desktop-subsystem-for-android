@@ -1,0 +1,297 @@
+// The x86_64 framework libraries the translator's proxy libraries call into. The build takes
+// them from the pinned x86_64 image (dsa/guest/image/inputs.json) into x86_64/ with
+// `assemble-digitalis.py framework-libs`, whose FRAMEWORK_LIBS lists the same libraries (a
+// test checks the two agree). The proxies link against them and are installed beside them,
+// so linking the image's own libraries is exact; building them would take the framework.
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+cc_prebuilt_library_shared {
+    name: "libEGL",
+    prefer: true,
+    srcs: ["x86_64/libEGL.so"],
+    compile_multilib: "64",
+    installable: false,
+    check_elf_files: false,
+    strip: {
+        none: true,
+    },
+    system_shared_libs: [],
+    stl: "none",
+    header_libs: ["dsa_translator_framework_headers"],
+    export_header_lib_headers: ["dsa_translator_framework_headers"],
+}
+
+cc_prebuilt_library_shared {
+    name: "libGLESv1_CM",
+    prefer: true,
+    srcs: ["x86_64/libGLESv1_CM.so"],
+    compile_multilib: "64",
+    installable: false,
+    check_elf_files: false,
+    strip: {
+        none: true,
+    },
+    system_shared_libs: [],
+    stl: "none",
+    header_libs: ["dsa_translator_framework_headers"],
+    export_header_lib_headers: ["dsa_translator_framework_headers"],
+}
+
+cc_prebuilt_library_shared {
+    name: "libGLESv2",
+    prefer: true,
+    srcs: ["x86_64/libGLESv2.so"],
+    compile_multilib: "64",
+    installable: false,
+    check_elf_files: false,
+    strip: {
+        none: true,
+    },
+    system_shared_libs: [],
+    stl: "none",
+    header_libs: ["dsa_translator_framework_headers"],
+    export_header_lib_headers: ["dsa_translator_framework_headers"],
+}
+
+cc_prebuilt_library_shared {
+    name: "libGLESv3",
+    prefer: true,
+    srcs: ["x86_64/libGLESv3.so"],
+    compile_multilib: "64",
+    installable: false,
+    check_elf_files: false,
+    strip: {
+        none: true,
+    },
+    system_shared_libs: [],
+    stl: "none",
+    header_libs: ["dsa_translator_framework_headers"],
+    export_header_lib_headers: ["dsa_translator_framework_headers"],
+}
+
+cc_prebuilt_library_shared {
+    name: "libOpenMAXAL",
+    prefer: true,
+    srcs: ["x86_64/libOpenMAXAL.so"],
+    compile_multilib: "64",
+    installable: false,
+    check_elf_files: false,
+    strip: {
+        none: true,
+    },
+    system_shared_libs: [],
+    stl: "none",
+    header_libs: ["dsa_translator_framework_headers"],
+    export_header_lib_headers: ["dsa_translator_framework_headers"],
+}
+
+cc_prebuilt_library_shared {
+    name: "libOpenSLES",
+    prefer: true,
+    srcs: ["x86_64/libOpenSLES.so"],
+    compile_multilib: "64",
+    installable: false,
+    check_elf_files: false,
+    strip: {
+        none: true,
+    },
+    system_shared_libs: [],
+    stl: "none",
+    header_libs: ["dsa_translator_framework_headers"],
+    export_header_lib_headers: ["dsa_translator_framework_headers"],
+}
+
+cc_prebuilt_library_shared {
+    name: "libaaudio",
+    prefer: true,
+    srcs: ["x86_64/libaaudio.so"],
+    compile_multilib: "64",
+    installable: false,
+    check_elf_files: false,
+    strip: {
+        none: true,
+    },
+    system_shared_libs: [],
+    stl: "none",
+    header_libs: ["dsa_translator_framework_headers"],
+    export_header_lib_headers: ["dsa_translator_framework_headers"],
+}
+
+cc_prebuilt_library_shared {
+    name: "libamidi",
+    prefer: true,
+    srcs: ["x86_64/libamidi.so"],
+    compile_multilib: "64",
+    installable: false,
+    check_elf_files: false,
+    strip: {
+        none: true,
+    },
+    system_shared_libs: [],
+    stl: "none",
+    header_libs: ["dsa_translator_framework_headers"],
+    export_header_lib_headers: ["dsa_translator_framework_headers"],
+}
+
+cc_prebuilt_library_shared {
+    name: "libandroid",
+    prefer: true,
+    srcs: ["x86_64/libandroid.so"],
+    compile_multilib: "64",
+    installable: false,
+    check_elf_files: false,
+    strip: {
+        none: true,
+    },
+    system_shared_libs: [],
+    stl: "none",
+    header_libs: ["dsa_translator_framework_headers"],
+    export_header_lib_headers: ["dsa_translator_framework_headers"],
+}
+
+cc_prebuilt_library_shared {
+    name: "libandroid_runtime",
+    prefer: true,
+    srcs: ["x86_64/libandroid_runtime.so"],
+    compile_multilib: "64",
+    installable: false,
+    check_elf_files: false,
+    strip: {
+        none: true,
+    },
+    system_shared_libs: [],
+    stl: "none",
+    header_libs: ["dsa_translator_framework_headers"],
+    export_header_lib_headers: ["dsa_translator_framework_headers"],
+}
+
+cc_prebuilt_library_shared {
+    name: "libbinder_ndk",
+    prefer: true,
+    srcs: ["x86_64/libbinder_ndk.so"],
+    compile_multilib: "64",
+    installable: false,
+    check_elf_files: false,
+    strip: {
+        none: true,
+    },
+    system_shared_libs: [],
+    stl: "none",
+    header_libs: ["dsa_translator_framework_headers"],
+    export_header_lib_headers: ["dsa_translator_framework_headers"],
+}
+
+cc_prebuilt_library_shared {
+    name: "libcamera2ndk",
+    prefer: true,
+    srcs: ["x86_64/libcamera2ndk.so"],
+    compile_multilib: "64",
+    installable: false,
+    check_elf_files: false,
+    strip: {
+        none: true,
+    },
+    system_shared_libs: [],
+    stl: "none",
+    header_libs: ["dsa_translator_framework_headers"],
+    export_header_lib_headers: ["dsa_translator_framework_headers"],
+}
+
+cc_prebuilt_library_shared {
+    name: "libjnigraphics",
+    prefer: true,
+    srcs: ["x86_64/libjnigraphics.so"],
+    compile_multilib: "64",
+    installable: false,
+    check_elf_files: false,
+    strip: {
+        none: true,
+    },
+    system_shared_libs: [],
+    stl: "none",
+    header_libs: ["dsa_translator_framework_headers"],
+    export_header_lib_headers: ["dsa_translator_framework_headers"],
+}
+
+cc_prebuilt_library_shared {
+    name: "libmediandk",
+    prefer: true,
+    srcs: ["x86_64/libmediandk.so"],
+    compile_multilib: "64",
+    installable: false,
+    check_elf_files: false,
+    strip: {
+        none: true,
+    },
+    system_shared_libs: [],
+    stl: "none",
+    header_libs: ["dsa_translator_framework_headers"],
+    export_header_lib_headers: ["dsa_translator_framework_headers"],
+}
+
+cc_prebuilt_library_shared {
+    name: "libnativewindow",
+    prefer: true,
+    srcs: ["x86_64/libnativewindow.so"],
+    compile_multilib: "64",
+    installable: false,
+    check_elf_files: false,
+    strip: {
+        none: true,
+    },
+    system_shared_libs: [],
+    stl: "none",
+    header_libs: ["dsa_translator_framework_headers"],
+    export_header_lib_headers: ["dsa_translator_framework_headers"],
+}
+
+cc_prebuilt_library_shared {
+    name: "libneuralnetworks",
+    prefer: true,
+    srcs: ["x86_64/libneuralnetworks.so"],
+    compile_multilib: "64",
+    installable: false,
+    check_elf_files: false,
+    strip: {
+        none: true,
+    },
+    system_shared_libs: [],
+    stl: "none",
+    header_libs: ["dsa_translator_framework_headers"],
+    export_header_lib_headers: ["dsa_translator_framework_headers"],
+}
+
+cc_prebuilt_library_shared {
+    name: "libvulkan",
+    prefer: true,
+    srcs: ["x86_64/libvulkan.so"],
+    compile_multilib: "64",
+    installable: false,
+    check_elf_files: false,
+    strip: {
+        none: true,
+    },
+    system_shared_libs: [],
+    stl: "none",
+    header_libs: ["dsa_translator_framework_headers"],
+    export_header_lib_headers: ["dsa_translator_framework_headers"],
+}
+
+cc_prebuilt_library_shared {
+    name: "libwebviewchromium_plat_support",
+    prefer: true,
+    srcs: ["x86_64/libwebviewchromium_plat_support.so"],
+    compile_multilib: "64",
+    installable: false,
+    check_elf_files: false,
+    strip: {
+        none: true,
+    },
+    system_shared_libs: [],
+    stl: "none",
+    header_libs: ["dsa_translator_framework_headers"],
+    export_header_lib_headers: ["dsa_translator_framework_headers"],
+}

@@ -16,7 +16,8 @@
   %LOCALAPPDATA%\DSA: android.vhdx, android.image-version, pstore.vhd, apps\, notifications\, logs\,
   compositor.json, monitors.txt, start-menu.json, tmp\. The Windows host's paths module (src\paths.rs) is
   the one place that builds them. The settings app (DSA Settings) goes in the program folder's
-  settings folder, with a Start menu shortcut.
+  settings folder, with a Start menu shortcut, and the APK Installer, the program .apk files open
+  in, goes beside it without one.
 
   INSTALLFOLDER (the program) and DATAFOLDER (configuration, logs and images) can be set
   on the command line or from setup.exe's Options. The configuration names them as
@@ -26,7 +27,7 @@
   Build variables (-d): Version, ProductName (with " (test package)" after it for a
   package that only tests the installer), SourceDir (the built binaries and
   dsa-hostd.json),
-  SettingsDir (the published settings app), and,
+  SettingsDir (the published settings app and APK Installer), and,
   when an image is bundled, ImageDir and ImageVersion, plus ImageManifest when the image
   is one make-image.py made (image.json, initrd.img, disk.vhdx) and ImageKernel, the file
   name of its own kernel, when it carries one. KernelName is the kernel's file name:
@@ -54,7 +55,7 @@
                       DowngradeErrorMessage="A newer Desktop Subsystem for Android is already installed." />
         <!-- The trademark and independence notice, shown in Installed apps (the support
              information). The licence bundle below carries it too, in NOTICE.txt. -->
-        <Property Id="ARPCOMMENTS" Value="Desktop Subsystem for Android is an independent open source project, not affiliated with, endorsed by or sponsored by Microsoft or Google. Android is a trademark of Google LLC." />
+        <Property Id="ARPCOMMENTS" Value="!(loc.ArpComments)" />
         <Media Id="1" Cabinet="dsa.cab" EmbedCab="yes" />
         <?ifdef ImageVersion ?>
         <!-- An MSI holds at most 2 GB and an image comes close to that, so the image's
@@ -130,19 +131,32 @@
                                CloseMessage="yes"
                                PromptToContinue="no"
                                RebootPrompt="no" />
+        <util:CloseApplication Id="CloseApkInstaller"
+                               Target="DsaApkInstaller.exe"
+                               CloseMessage="yes"
+                               PromptToContinue="no"
+                               RebootPrompt="no" />
 
-        <!-- The settings app and the runtimes it carries. Its shortcut is named so that
-             searching the Start menu for DSA or for settings finds it. -->
+        <!-- The settings app, the APK Installer, and the runtime both carry in one folder. The
+             settings app's shortcut is named so that searching the Start menu for DSA or for
+             settings finds it. The APK Installer has none: .apk files open it, as Open with
+             lists it. -->
         <ComponentGroup Id="SettingsApp" Directory="SETTINGSFOLDER">
             <Files Include="$(SettingsDir)\**">
                 <Exclude Files="$(SettingsDir)\DsaSettings.exe" />
+                <Exclude Files="$(SettingsDir)\DsaApkInstaller.exe" />
             </Files>
+            <Component Id="ApkInstallerExe" Guid="*">
+                <File Id="ApkInstallerExe" Source="$(SettingsDir)\DsaApkInstaller.exe" KeyPath="yes" />
+            </Component>
             <Component Id="SettingsExe" Guid="*">
                 <File Id="SettingsExe" Source="$(SettingsDir)\DsaSettings.exe" KeyPath="yes">
                     <Shortcut Id="SettingsShortcut"
                               Directory="ProgramMenuFolder"
                               Name="DSA Settings"
-                              Description="Settings and state of Desktop Subsystem for Android"
+                              Description="!(loc.SettingsShortcutDescription)"
+                              DescriptionResourceDll="[INSTALLFOLDER]dsa-app-window.exe"
+                              DescriptionResourceId="104"
                               WorkingDirectory="SETTINGSFOLDER" />
                 </File>
             </Component>
@@ -161,7 +175,7 @@
                 <ServiceInstall Id="DsaHost"
                                 Name="DsaHost"
                                 DisplayName="Desktop Subsystem for Android Service"
-                                Description="Runs each user's Android in its own virtual machine and answers the dsa command and the desktop apps."
+                                Description="@[INSTALLFOLDER]dsa-app-window.exe,-109"
                                 Type="ownProcess"
                                 Start="auto"
                                 ErrorControl="normal"
@@ -187,41 +201,108 @@
             <!-- The app window host. The window manager copies it for each Android app into
                  the user's profile (%LOCALAPPDATA%\DSA\apps\<package>\<Label>.exe), named and drawn as the app. -->
             <Component Id="AppWindowExe" Guid="*">
-                <!-- The "DSA Files" shortcut opens the shared storage of the user's Android in
-                     Explorer, starting Android when it is not running. -->
-                <File Id="AppWindowExe" Source="$(SourceDir)\dsa-app-window.exe" KeyPath="yes">
-                    <Shortcut Id="AndroidFilesShortcut"
-                              Directory="ProgramMenuFolder"
-                              Name="DSA Files"
-                              Description="Files of your Android, in Explorer"
-                              Arguments="--android-files"
-                              WorkingDirectory="INSTALLFOLDER" />
-                </File>
+                <File Id="AppWindowExe" Source="$(SourceDir)\dsa-app-window.exe" KeyPath="yes" />
+                <!-- Android's files are only in Explorer's navigation pane, so Windows search
+                     must not find them. Earlier versions had a "DSA Files" Start menu shortcut
+                     in this component. An upgrade installs first and this component keeps its
+                     ID, so removing the older version would leave that shortcut behind: the
+                     package removes it by name instead. -->
+                <RemoveFile Id="OldAndroidFilesShortcut"
+                            Directory="ProgramMenuFolder"
+                            Name="DSA Files.lnk"
+                            On="both" />
             </Component>
-            <!-- Opening an .apk file in Explorer opens the APK install window of the settings
-                 app, which shows what the file is (its name, icon, version, permissions and
-                 signer), then installs it in the user's Android, starting Android when it is not
-                 running, and shows how the install went. The association is the machine's, like the rest of the
+            <!-- Opening an .apk file in Explorer opens it in the APK Installer, its own program
+                 beside the settings app, which shows what the file is (its name, icon, version,
+                 permissions and signer), then installs it in the user's Android, starting
+                 Android when it is not running, and shows how the install went. Explorer, Open
+                 with and the taskbar show it as "APK Installer", with its own icon and
+                 AppUserModelID. The association is the machine's, like the rest of the
                  installation, so uninstalling removes it for every user at once. A user who
-                 picked another app for .apk files keeps it; DSA is then under Open with. -->
+                 picked another app for .apk files keeps it; the APK Installer is then under
+                 Open with. -->
             <Component Id="ApkFileAssociation" Guid="5e3b8a2c-7d41-4f96-b0c8-2a9e6f1d4c73">
                 <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Dsa.ApkFile"
-                               Type="string" Value="APK app package" KeyPath="yes" />
+                               Type="string" Value="!(loc.ApkFileType)" KeyPath="yes" />
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Dsa.ApkFile"
+                               Name="FriendlyTypeName" Type="string" Value="@[INSTALLFOLDER]dsa-app-window.exe,-106" />
                 <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Dsa.ApkFile\DefaultIcon"
-                               Type="string" Value="&quot;[INSTALLFOLDER]dsa-app-window.exe&quot;,0" />
+                               Type="string" Value="&quot;[SETTINGSFOLDER]DsaApkInstaller.exe&quot;,0" />
                 <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Dsa.ApkFile\shell"
                                Type="string" Value="open" />
                 <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Dsa.ApkFile\shell\open"
-                               Name="MUIVerb" Type="string" Value="Install in Android" />
+                               Name="MUIVerb" Type="string" Value="@[INSTALLFOLDER]dsa-app-window.exe,-105" />
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Dsa.ApkFile\shell\open"
+                               Name="FriendlyAppName" Type="string" Value="@[INSTALLFOLDER]dsa-app-window.exe,-110" />
                 <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Dsa.ApkFile\shell\open\command"
-                               Type="string" Value="&quot;[SETTINGSFOLDER]DsaSettings.exe&quot; --install-apk &quot;%1&quot;" />
+                               Type="string" Value="&quot;[SETTINGSFOLDER]DsaApkInstaller.exe&quot; --install-apk &quot;%1&quot;" />
                 <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\.apk"
                                Type="string" Value="Dsa.ApkFile" />
                 <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\.apk"
                                Name="Content Type" Type="string" Value="application/vnd.android.package-archive" />
                 <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\.apk\OpenWithProgids"
                                Name="Dsa.ApkFile" Type="string" Value="" />
+                <!-- Split-APK bundles (.xapk, .apks, .apkm) open the same way: the APK Installer
+                     tells them apart by what is in them and installs the splits the user's
+                     Android takes. An App Bundle (.aab) is only under Open with, so the tools of
+                     a developer who builds one keep opening it; the APK Installer says why it
+                     does not install one. -->
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Dsa.ApkBundle"
+                               Type="string" Value="!(loc.ApkBundleType)" />
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Dsa.ApkBundle"
+                               Name="FriendlyTypeName" Type="string" Value="@[INSTALLFOLDER]dsa-app-window.exe,-111" />
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Dsa.ApkBundle\DefaultIcon"
+                               Type="string" Value="&quot;[SETTINGSFOLDER]DsaApkInstaller.exe&quot;,0" />
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Dsa.ApkBundle\shell"
+                               Type="string" Value="open" />
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Dsa.ApkBundle\shell\open"
+                               Name="MUIVerb" Type="string" Value="@[INSTALLFOLDER]dsa-app-window.exe,-105" />
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Dsa.ApkBundle\shell\open"
+                               Name="FriendlyAppName" Type="string" Value="@[INSTALLFOLDER]dsa-app-window.exe,-110" />
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Dsa.ApkBundle\shell\open\command"
+                               Type="string" Value="&quot;[SETTINGSFOLDER]DsaApkInstaller.exe&quot; --install-apk &quot;%1&quot;" />
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\.xapk"
+                               Type="string" Value="Dsa.ApkBundle" />
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\.xapk\OpenWithProgids"
+                               Name="Dsa.ApkBundle" Type="string" Value="" />
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\.apks"
+                               Type="string" Value="Dsa.ApkBundle" />
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\.apks\OpenWithProgids"
+                               Name="Dsa.ApkBundle" Type="string" Value="" />
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\.apkm"
+                               Type="string" Value="Dsa.ApkBundle" />
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\.apkm\OpenWithProgids"
+                               Name="Dsa.ApkBundle" Type="string" Value="" />
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\.aab\OpenWithProgids"
+                               Name="Dsa.ApkBundle" Type="string" Value="" />
+                <!-- The program's own entry, which Open with reads its name from, and the types
+                     it opens. -->
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\DsaApkInstaller.exe"
+                               Name="FriendlyAppName" Type="string" Value="@[INSTALLFOLDER]dsa-app-window.exe,-110" />
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\DsaApkInstaller.exe\SupportedTypes"
+                               Name=".apk" Type="string" Value="" />
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\DsaApkInstaller.exe\SupportedTypes"
+                               Name=".xapk" Type="string" Value="" />
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\DsaApkInstaller.exe\SupportedTypes"
+                               Name=".apks" Type="string" Value="" />
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\DsaApkInstaller.exe\SupportedTypes"
+                               Name=".apkm" Type="string" Value="" />
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\DsaApkInstaller.exe\SupportedTypes"
+                               Name=".aab" Type="string" Value="" />
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\DsaApkInstaller.exe\DefaultIcon"
+                               Type="string" Value="&quot;[SETTINGSFOLDER]DsaApkInstaller.exe&quot;,0" />
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\Applications\DsaApkInstaller.exe\shell\open\command"
+                               Type="string" Value="&quot;[SETTINGSFOLDER]DsaApkInstaller.exe&quot; --install-apk &quot;%1&quot;" />
+                <!-- The name Windows shows for the program's AppUserModelID, which it sets for
+                     itself, so its windows are their own group in the taskbar. -->
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\AppUserModelId\Thisisthepy.DSA.ApkInstaller"
+                               Name="DisplayName" Type="string" Value="@[INSTALLFOLDER]dsa-app-window.exe,-110" />
             </Component>
+            <!-- Every word Explorer, the Start menu and the Services console show for DSA is an
+                 indirect string (@file,-id) into the string table of the installed
+                 dsa-app-window.exe, which holds it in English and Korean, so each user sees the
+                 words in their own display language although the package is the machine's.
+                 The IDs are dsa_exe_resources::shell in resources/src/lib.rs. -->
             <!-- Two entries in the context menu of every file (on Windows 11, under Show more
                  options): the installed window host sends the file to the user's Android, which
                  asks which app opens it or takes it. They are the machine's, like the rest of
@@ -229,7 +310,7 @@
                  written into each user's profile would outlive DSA there. -->
             <Component Id="OpenFileInAndroid" Guid="9c6f4b1e-5d2a-4f8e-a3b7-1e0d6c9f2a41">
                 <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\*\shell\DsaOpenInAndroidApp"
-                               Name="MUIVerb" Type="string" Value="Open in an Android app" KeyPath="yes" />
+                               Name="MUIVerb" Type="string" Value="@[INSTALLFOLDER]dsa-app-window.exe,-101" KeyPath="yes" />
                 <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\*\shell\DsaOpenInAndroidApp"
                                Name="Icon" Type="string" Value="&quot;[INSTALLFOLDER]dsa-app-window.exe&quot;,0" />
                 <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\*\shell\DsaOpenInAndroidApp\command"
@@ -237,7 +318,7 @@
             </Component>
             <Component Id="ShareFileWithAndroid" Guid="2b8e7d30-6c41-4a9f-9e25-7f3a0b1c8d52">
                 <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\*\shell\DsaShareWithAndroidApp"
-                               Name="MUIVerb" Type="string" Value="Share with an Android app" KeyPath="yes" />
+                               Name="MUIVerb" Type="string" Value="@[INSTALLFOLDER]dsa-app-window.exe,-102" KeyPath="yes" />
                 <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\*\shell\DsaShareWithAndroidApp"
                                Name="Icon" Type="string" Value="&quot;[INSTALLFOLDER]dsa-app-window.exe&quot;,0" />
                 <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\*\shell\DsaShareWithAndroidApp\command"
@@ -250,16 +331,22 @@
                  the user's key, in the user's classes, where it takes the place of this one,
                  and uninstalling removes those for every user (user_registry.rs). The
                  namespace entry and the desktop hiding are the machine's, so uninstalling
-                 takes the entry out of every user's navigation pane at once. -->
+                 takes the entry out of every user's navigation pane at once. Explorer sorts the
+                 pane by SortOrderIndex: WSL's "Linux" has 119, so 120 puts this directly below
+                 it. -->
             <Component Id="AndroidNavigationPane" Guid="3d7a1f52-8b6e-4c09-a5d4-6e2f9b0c1a87">
                 <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\CLSID\{6F1D4E2A-3B7C-4D85-9A1E-7C2B5D8F0A43}"
                                Type="string" Value="Android" KeyPath="yes" />
                 <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\CLSID\{6F1D4E2A-3B7C-4D85-9A1E-7C2B5D8F0A43}"
+                               Name="LocalizedString" Type="string" Value="@[INSTALLFOLDER]dsa-app-window.exe,-107" />
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\CLSID\{6F1D4E2A-3B7C-4D85-9A1E-7C2B5D8F0A43}"
+                               Name="InfoTip" Type="string" Value="@[INSTALLFOLDER]dsa-app-window.exe,-108" />
+                <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\CLSID\{6F1D4E2A-3B7C-4D85-9A1E-7C2B5D8F0A43}"
                                Name="System.IsPinnedToNameSpaceTree" Type="integer" Value="1" />
                 <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\CLSID\{6F1D4E2A-3B7C-4D85-9A1E-7C2B5D8F0A43}"
-                               Name="SortOrderIndex" Type="integer" Value="66" />
+                               Name="SortOrderIndex" Type="integer" Value="120" />
                 <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\CLSID\{6F1D4E2A-3B7C-4D85-9A1E-7C2B5D8F0A43}\DefaultIcon"
-                               Type="string" Value="[INSTALLFOLDER]dsa-app-window.exe,0" />
+                               Type="string" Value="[INSTALLFOLDER]dsa-app-window.exe,-3" />
                 <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\CLSID\{6F1D4E2A-3B7C-4D85-9A1E-7C2B5D8F0A43}\InProcServer32"
                                Type="expandable" Value="%SystemRoot%\system32\shell32.dll" />
                 <RegistryValue Root="HKLM" Key="SOFTWARE\Classes\CLSID\{6F1D4E2A-3B7C-4D85-9A1E-7C2B5D8F0A43}\Instance"
@@ -521,13 +608,30 @@
                       Execute="deferred"
                       Impersonate="no"
                       Return="ignore" />
+        <!-- A same-version build installs over another build of that version as a major
+             upgrade: its product code is new, so for Windows Installer it is a different
+             product. REINSTALL on the command line (as in REINSTALL=ALL REINSTALLMODE=vamus,
+             the usual way to put a rebuilt package over the same version) would then ask to
+             reinstall features this product does not have yet, so nothing would be installed
+             while the build before it is removed. Before costing, it is cleared when this
+             product is not installed, and the command does what a double-click does. -->
+        <SetProperty Id="REINSTALL" Value="[DSA_NO_VALUE]" Before="CostFinalize" Sequence="both"
+                     Condition="NOT Installed AND REINSTALL" />
+        <!-- The Remove* actions run only on a real uninstall: everything is being removed,
+             not by a newer version taking over (UPGRADINGPRODUCTCODE), not as a repair or
+             reinstall (REINSTALL), and dsa-hostd, which they run, is installed now and being
+             removed. Each runs dsa-hostd from its installed file, which Windows Installer
+             refuses (error 2753) unless the file is installed or being installed; the
+             component states make that hold whatever the command line set. The window
+             managers start only when dsa-hostd is being installed or reinstalled, for the
+             same reason. -->
         <InstallExecuteSequence>
             <Custom Action="StopPrograms" After="StopServices" Condition="NOT UPGRADINGPRODUCTCODE" />
-            <Custom Action="StartWindowManagers" After="RemoveExistingProducts" Condition="NOT REMOVE~=&quot;ALL&quot;" />
-            <Custom Action="RemoveUserData" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
-            <Custom Action="RemoveMachineData" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
-            <Custom Action="RemoveImages" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
-            <Custom Action="RemoveUpdates" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+            <Custom Action="StartWindowManagers" After="RemoveExistingProducts" Condition="$HostdExe=3" />
+            <Custom Action="RemoveUserData" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND NOT REINSTALL AND ?HostdExe=3 AND $HostdExe=2" />
+            <Custom Action="RemoveMachineData" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND NOT REINSTALL AND ?HostdExe=3 AND $HostdExe=2" />
+            <Custom Action="RemoveImages" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND NOT REINSTALL AND ?HostdExe=3 AND $HostdExe=2" />
+            <Custom Action="RemoveUpdates" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND NOT REINSTALL AND ?HostdExe=3 AND $HostdExe=2" />
         </InstallExecuteSequence>
 
         <Feature Id="Main" Title="Desktop Subsystem for Android" Level="1">

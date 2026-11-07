@@ -7,12 +7,18 @@ import io.github.thisisthepy.dsa.agent.channel.ChannelClient
 import io.github.thisisthepy.dsa.agent.channel.ChannelLocator
 import io.github.thisisthepy.dsa.agent.clipboard.ClipboardSync
 import io.github.thisisthepy.dsa.agent.clipboard.GuestClipboard
+import io.github.thisisthepy.dsa.agent.diagnostics.CrashRecordSource
 import io.github.thisisthepy.dsa.agent.diagnostics.DiagnosticsCollector
 import io.github.thisisthepy.dsa.agent.diagnostics.DiagnosticsSource
+import io.github.thisisthepy.dsa.agent.diagnostics.NativeLibraryCrashes
 import io.github.thisisthepy.dsa.agent.input.EditorConnection
 import io.github.thisisthepy.dsa.agent.install.ApkInstaller
+import io.github.thisisthepy.dsa.agent.install.AppReinstaller
 import io.github.thisisthepy.dsa.agent.install.AppUninstaller
+import io.github.thisisthepy.dsa.agent.install.PackageReinstallerPort
 import io.github.thisisthepy.dsa.agent.install.PackageUninstallerPort
+import io.github.thisisthepy.dsa.agent.install.GoogleDeviceIdPort
+import io.github.thisisthepy.dsa.agent.install.GoogleDeviceIds
 import io.github.thisisthepy.dsa.agent.install.PackageInfoPort
 import io.github.thisisthepy.dsa.agent.install.PackageInstallerPort
 import io.github.thisisthepy.dsa.agent.install.PackageQueries
@@ -52,6 +58,8 @@ import io.github.thisisthepy.dsa.agent.print.QueuedPrintJob
 import io.github.thisisthepy.dsa.agent.requests.HostRequests
 import io.github.thisisthepy.dsa.agent.requests.RequestResult
 import io.github.thisisthepy.dsa.agent.requests.TaskActions
+import io.github.thisisthepy.dsa.agent.settings.DeviceNamePort
+import io.github.thisisthepy.dsa.agent.settings.DeviceNameSync
 import io.github.thisisthepy.dsa.agent.settings.SystemSettingsPort
 import io.github.thisisthepy.dsa.agent.settings.SystemSettingsSync
 import io.github.thisisthepy.dsa.agent.tasks.AppInfoSource
@@ -110,7 +118,7 @@ import io.github.thisisthepy.dsa.control.v1.PointerAction
  * the dropbox ([DiagnosticsCollector]). Documents apps print to the agent's print service go
  * to the host, which prints them on its printers ([HostPrinter]). The host's time zone, display
  * languages, regional format, dark theme and accent color become the guest's
- * ([SystemSettingsSync]).
+ * ([SystemSettingsSync]), and the computer's name becomes the guest's device name ([DeviceNameSync]).
  */
 class Agent(
     private val ownPackage: String,
@@ -144,8 +152,14 @@ class Agent(
     media: MediaSource = MediaSource.NONE,
     stopper: AppStopper = AppStopper.NONE,
     packageInstaller: PackageInstallerPort = PackageInstallerPort.NONE,
+    expansionFiles: io.github.thisisthepy.dsa.agent.install.ExpansionFiles =
+        io.github.thisisthepy.dsa.agent.install.ExpansionFiles.NONE,
     packages: PackageInfoPort = PackageInfoPort.NONE,
+    googleDeviceId: GoogleDeviceIdPort = GoogleDeviceIdPort.NONE,
     packageUninstaller: PackageUninstallerPort = PackageUninstallerPort.NONE,
+    packageReinstaller: PackageReinstallerPort = PackageReinstallerPort.NONE,
+    private val crashRecords: CrashRecordSource = CrashRecordSource.NONE,
+    arm64Supported: () -> Boolean = { false },
     widgets: WidgetPlatform = WidgetPlatform.NONE,
     appProcesses: AppProcesses = AppProcesses.NONE,
     widgetStore: WidgetStore = WidgetStore.memory(),
@@ -154,6 +168,7 @@ class Agent(
     diagnostics: DiagnosticsSource = DiagnosticsSource.NONE,
     diagnosticsRunner: (Runnable) -> Unit = { Thread(it, "dsa-diagnostics").start() },
     systemSettings: SystemSettingsPort = SystemSettingsPort.NONE,
+    deviceName: DeviceNamePort = DeviceNamePort.NONE,
     wifi: WifiPort = WifiPort.NONE,
     dragCatcher: DragCatcher = DragCatcher.NONE,
     dragRunner: ((Runnable) -> Unit)? = null,
@@ -207,6 +222,7 @@ class Agent(
     }
     private val clipboardSync = ClipboardSync(clipboard, { frame -> channel.send(frame) }, log, isConnected = { channel.connected })
     private val settingsSync = SystemSettingsSync(systemSettings, log)
+    private val deviceNameSync = DeviceNameSync(deviceName, log)
     private val diagnosticsCollector = DiagnosticsCollector(diagnostics, { frame -> channel.send(frame) }, log, diagnosticsRunner)
     private val backgroundApps = BackgroundApps(
         ownPackage,
@@ -231,6 +247,7 @@ class Agent(
         log,
         post = { work -> scheduler.post(work) },
         onInstalled = { requestAppsRefresh() },
+        expansionFiles = expansionFiles,
     )
     private val printer = HostPrinter(
         { frame -> channel.send(frame) },
@@ -239,6 +256,7 @@ class Agent(
         post = { work -> scheduler.post(work) },
     )
     private val packageQueries = PackageQueries(packages, { frame -> channel.send(frame) }, log)
+    private val googleDeviceIds = GoogleDeviceIds(googleDeviceId, { frame -> channel.send(frame) }, log)
     private val appUninstaller = AppUninstaller(
         ownPackage,
         packageUninstaller,
@@ -246,6 +264,21 @@ class Agent(
         log,
         post = { work -> scheduler.post(work) },
         onUninstalled = { requestAppsRefresh() },
+    )
+    private val appReinstaller = AppReinstaller(
+        ownPackage,
+        packageReinstaller,
+        { frame -> channel.send(frame) },
+        log,
+        post = { work -> scheduler.post(work) },
+        onReinstalled = { requestAppsRefresh() },
+    )
+    private val nativeCrashes = NativeLibraryCrashes(
+        ownPackage,
+        { frame -> channel.send(frame) },
+        log,
+        arm64Supported,
+        clock,
     )
     private val widgetManager = WidgetManager(
         widgets,
@@ -337,6 +370,7 @@ class Agent(
                 scheduler.post(work)
             }
             listenToApps()
+            listenToCrashes()
             channel.start()
             requestRefresh()
         }
@@ -348,6 +382,17 @@ class Agent(
         } catch (e: Exception) {
             log.warn("listening to installed apps failed; trying again", e)
             scheduler.postDelayed(RETRY_MILLIS, ::listenToApps)
+        }
+    }
+
+    /** Reports the apps that end because a native library did not load, while the host listens. */
+    private fun listenToCrashes() {
+        try {
+            crashRecords.listen { tag, text ->
+                scheduler.post { if (channel.connected) nativeCrashes.record(tag, text) }
+            }
+        } catch (e: Exception) {
+            log.warn("listening to the system's crash records failed; crashes of apps are not reported", e)
         }
     }
 
@@ -402,6 +447,7 @@ class Agent(
         channel.send(Envelope.newBuilder().setAgentConnected(AgentConnected.getDefaultInstance()).build().toByteArray())
         reporter.resend()
         settingsSync.connected()
+        deviceNameSync.connected()
         lifecycle.connected()
         clipboardSync.connected()
         notificationForwarder.connected()
@@ -424,6 +470,7 @@ class Agent(
         if (stopRequest(frame)) return
         if (diagnosticsCollector.handle(frame)) return
         if (settingsSync.handle(frame)) return
+        if (deviceNameSync.handle(frame)) return
         if (linksOrFiles(frame)) return
         val result = try {
             requests.handle(frame)
@@ -492,9 +539,11 @@ class Agent(
         if (backgroundApps.handle(envelope)) return true
         if (apkInstaller.handle(envelope)) return true
         if (packageQueries.handle(envelope)) return true
+        if (googleDeviceIds.handle(envelope)) return true
         if (dragOut.handle(envelope)) return true
         if (printer.handle(envelope)) return true
         if (appUninstaller.handle(envelope)) return true
+        if (appReinstaller.handle(envelope)) return true
         when (envelope.bodyCase) {
             Envelope.BodyCase.REFRESH_APPS -> requestAppsRefresh(force = true)
             Envelope.BodyCase.KEY_EVENT -> try {

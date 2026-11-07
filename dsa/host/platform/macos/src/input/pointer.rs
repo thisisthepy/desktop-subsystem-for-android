@@ -56,9 +56,31 @@ pub fn pen_pressure(pressure: f32) -> Option<f32> {
     pressure.is_finite().then(|| pressure.clamp(0.0, 1.0))
 }
 
+/// A pen's tilt in degrees, (toward the right, toward the user), from AppKit's scaled tilt:
+/// -1 to 1 on each axis, where 1 lies flat, and y points up the screen.
+pub fn pen_tilt((x, y): (f64, f64)) -> (f32, f32) {
+    let degrees = |value: f64| {
+        if value.is_finite() {
+            (value.clamp(-1.0, 1.0) * 90.0) as f32
+        } else {
+            0.0
+        }
+    };
+    (degrees(x), -degrees(y))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fr5_a_pens_tilt_is_in_degrees_toward_the_right_and_the_user() {
+        assert_eq!(pen_tilt((0.0, 0.0)), (0.0, 0.0));
+        assert_eq!(pen_tilt((0.5, 0.0)), (45.0, 0.0));
+        // AppKit's y points up the screen; the guest's points down, toward the user.
+        assert_eq!(pen_tilt((0.0, 1.0)), (0.0, -90.0));
+        assert_eq!(pen_tilt((2.0, f64::NAN)), (90.0, 0.0));
+    }
 
     #[test]
     fn fr5_a_point_is_measured_from_the_top_left_in_pixels() {

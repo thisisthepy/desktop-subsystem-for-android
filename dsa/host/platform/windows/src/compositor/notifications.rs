@@ -29,6 +29,7 @@ use std::thread;
 use std::time::Duration;
 
 use dsa_host_core::host_api::HostApiClient;
+use dsa_host_core::native_abi::in_user_language;
 use dsa_host_core::notifications::{Notification, NotificationAction, NotificationEvent};
 use dsa_transport::Connector;
 use sha2::{Digest, Sha256};
@@ -139,6 +140,20 @@ pub fn parse_activation(uri: &str) -> Option<NotificationAction> {
     match verb.trim_end_matches('/') {
         "open" => Some(NotificationAction::Open { key }),
         _ => None,
+    }
+}
+
+/// Whether the user reads Windows in Korean.
+fn user_reads_korean() -> bool {
+    #[cfg(windows)]
+    {
+        // SAFETY: reads the user's display language.
+        let language = unsafe { windows_sys::Win32::Globalization::GetUserDefaultUILanguage() };
+        crate::compositor::widget_menu::is_korean(language)
+    }
+    #[cfg(not(windows))]
+    {
+        false
     }
 }
 
@@ -322,6 +337,7 @@ fn apply(
 ) {
     match event {
         NotificationEvent::Posted(notification) => {
+            let notification = in_user_language(notification, user_reads_korean());
             let app_id = app_user_model_id(&notification.package_name);
             let tag = tag_of(&notification.key);
             let icon = icon_dir.and_then(|dir| write_icon(dir, &tag, &notification.icon_png));
@@ -584,6 +600,7 @@ impl Toasts for WindowsToasts {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dsa_host_core::native_abi::Notice;
 
     fn chat(key: &str) -> Notification {
         Notification {
@@ -601,6 +618,29 @@ mod tests {
     }
 
     const KEY: &str = "0|com.example.chat|1|null|10100";
+
+    #[test]
+    fn fr25_the_offer_to_run_an_app_as_arm_is_shown_in_the_users_language() {
+        let offer = Notification {
+            key: Notice::Offer.key("com.example.game"),
+            app_label: "Game".into(),
+            title: "Game could not start".into(),
+            ..chat(KEY)
+        };
+        let korean = in_user_language(offer.clone(), true);
+        assert_eq!(korean.title, "Game을(를) 시작하지 못했습니다");
+        assert!(korean.text.contains("ARM"), "{}", korean.text);
+        let english = in_user_language(offer, false);
+        assert_eq!(english.title, "Game could not start");
+        // A notification of an app is shown as the app wrote it.
+        assert_eq!(in_user_language(chat(KEY), true), chat(KEY));
+        // A click on the offer reaches the service, which installs the app again.
+        let key = Notice::Offer.key("com.example.game");
+        assert_eq!(
+            parse_activation(&activation_uri(&key)),
+            Some(NotificationAction::Open { key })
+        );
+    }
 
     #[test]
     fn fr8_a_toast_carries_the_title_body_icon_and_click() {

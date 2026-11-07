@@ -12,6 +12,7 @@ members = [
     "host/platform/windows/resources",
     "host/platform/unix",
     "host/platform/linux",
+    "host/platform/linux/settings",
     "host/platform/macos",
     "host/cli",
     "guest/transport",

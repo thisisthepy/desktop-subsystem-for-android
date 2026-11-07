@@ -40,6 +40,21 @@
 (allow platform_app sysfs_zram (dir (search)))
 (allow platform_app sysfs_zram (file (read open getattr)))
 
+; It also reports how much memory the guest has online (the online blocks in
+; /sys/devices/system/memory times block_size_bytes), so the host can tell memory the guest has
+; not yet handed back from memory Android uses. The platform leaves that folder plain sysfs,
+; whose files no app may read, so the report always came without it. A type of its own opens
+; this folder to the agent and nothing else.
+(type dsa_sysfs_memory)
+(roletype object_r dsa_sysfs_memory)
+(typeattributeset fs_type (dsa_sysfs_memory))
+(typeattributeset sysfs_type (dsa_sysfs_memory))
+(genfscon sysfs "/devices/system/memory" (u object_r dsa_sysfs_memory ((s0) (s0))))
+(allow system_app dsa_sysfs_memory (dir (search read open getattr)))
+(allow system_app dsa_sysfs_memory (file (read open getattr)))
+(allow platform_app dsa_sysfs_memory (dir (search read open getattr)))
+(allow platform_app dsa_sysfs_memory (file (read open getattr)))
+
 ; Shared memory is a memfd. libcutils tries one in each process the first time it needs shared
 ; memory: it sizes a test memfd and asks it the ashmem ioctls, and when any step is refused it
 ; falls back to /dev/ashmem for the rest of that process's life, and DSA's kernel has no such

@@ -37,8 +37,12 @@ pub struct FrameRouter<T: FrameTarget> {
     routes: Mutex<HashMap<u32, Arc<T>>>,
     /// The window and texture the renderer was last given for each display. The texture is
     /// kept open while the renderer may still write it: until it is given something else for
-    /// that display.
+    /// that display, or the display loses its window.
     given: Mutex<HashMap<u32, Given<T>>>,
+    /// Told of each display that lost its window, so the renderer lets go of its copy of the
+    /// display's texture at once rather than when a frame that never comes would replace it.
+    #[allow(clippy::type_complexity)]
+    forget: Mutex<Option<Box<dyn Fn(u32) + Send + Sync>>>,
     /// When the last frame arrived, in milliseconds after `start`: the idle memory trim
     /// gives the GPU driver's spare memory back while shown windows have nothing new to show.
     start: Instant,
@@ -50,6 +54,7 @@ impl<T: FrameTarget> Default for FrameRouter<T> {
         FrameRouter {
             routes: Mutex::new(HashMap::new()),
             given: Mutex::new(HashMap::new()),
+            forget: Mutex::new(None),
             start: Instant::now(),
             last_frame_ms: AtomicU64::new(0),
         }
@@ -67,10 +72,45 @@ impl<T: FrameTarget> FrameRouter<T> {
         self.start.elapsed().saturating_sub(last)
     }
 
+    /// Sets what is told of each display that lost its window.
+    pub fn on_forget(&self, forget: Box<dyn Fn(u32) + Send + Sync>) {
+        *self.forget.lock().unwrap_or_else(|e| e.into_inner()) = Some(forget);
+    }
+
     /// Replaces the routes: from now on each display's frames go to its window, and the
-    /// frames of every other display are dropped.
+    /// frames of every other display are dropped. A display that lost its window lets its
+    /// texture go now: a closed task draws no more frames, so waiting for the renderer to
+    /// move on would keep the texture (a whole display's pixels) for as long as the window
+    /// manager runs.
     pub fn set_routes(&self, routes: impl IntoIterator<Item = (u32, Arc<T>)>) {
-        *self.routes.lock().unwrap_or_else(|e| e.into_inner()) = routes.into_iter().collect();
+        let routes: HashMap<u32, Arc<T>> = routes.into_iter().collect();
+        let routed: Vec<u32> = routes.keys().copied().collect();
+        *self.routes.lock().unwrap_or_else(|e| e.into_inner()) = routes;
+        let gone: Vec<u32> = {
+            let mut given = self.given.lock().unwrap_or_else(|e| e.into_inner());
+            let gone: Vec<u32> = given
+                .keys()
+                .copied()
+                .filter(|display| !routed.contains(display))
+                .collect();
+            for display in &gone {
+                given.remove(display);
+            }
+            gone
+        };
+        if gone.is_empty() {
+            return;
+        }
+        if let Some(forget) = self
+            .forget
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+        {
+            for display in gone {
+                forget(display);
+            }
+        }
     }
 
     /// The displays that have a window, in order.
@@ -226,19 +266,29 @@ mod tests {
     }
 
     #[test]
-    fn fr3_a_closed_windows_texture_stays_open_until_the_renderer_moves_on() {
+    fn nfr2_a_closed_windows_texture_goes_at_once_and_the_renderer_is_told() {
         let router = FrameRouter::new();
+        let forgotten = Arc::new(Mutex::new(Vec::new()));
+        let told = Arc::clone(&forgotten);
+        router.on_forget(Box::new(move |display| told.lock().unwrap().push(display)));
         let clock = Window::new(1000);
-        router.set_routes([(3, Arc::clone(&clock))]);
+        let maps = Window::new(2000);
+        router.set_routes([(3, Arc::clone(&clock)), (4, Arc::clone(&maps))]);
         router.target(3, 10, 20);
         router.frame(3, (10, 20));
-        // The window closes: its own reference goes, the renderer may still hold the texture.
+        router.target(4, 10, 20);
+        // The clock's window closes: its own reference goes, and so does the router's, with no
+        // frame for the display ever coming again.
         *clock.current.lock().unwrap() = None;
-        router.set_routes([]);
-        assert_eq!(clock.dropped.load(Ordering::Relaxed), 0);
-        // The renderer's next frame for the display gets nothing, and the texture goes.
-        assert_eq!(router.target(3, 10, 20), None);
+        router.set_routes([(4, Arc::clone(&maps))]);
         assert_eq!(clock.dropped.load(Ordering::Relaxed), 1);
+        assert_eq!(*forgotten.lock().unwrap(), vec![3]);
+        // The window that stays keeps its texture, and nothing is told again.
+        assert_eq!(maps.dropped.load(Ordering::Relaxed), 0);
+        router.set_routes([(4, Arc::clone(&maps))]);
+        assert_eq!(*forgotten.lock().unwrap(), vec![3]);
+        // A late frame of the closed display reaches no window.
+        assert_eq!(router.target(3, 10, 20), None);
         router.frame(3, (10, 20));
         assert_eq!(clock.shown.lock().unwrap().len(), 1);
     }

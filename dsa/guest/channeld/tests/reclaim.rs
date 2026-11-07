@@ -44,104 +44,12 @@ fn nfr2_meminfo_is_read_in_kib_and_shared_memory_is_not_droppable() {
     assert_eq!(info.reclaimable_kb(), info.droppable_kb() + 700000);
 }
 
-#[test]
-fn nfr2_an_idle_guest_drops_its_caches_once_after_the_idle_delay() {
-    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
-    let mostly_free = memory(3000, 400);
-    assert_eq!(reclaimer.decide(secs(0), 0, &mostly_free), None);
-    assert_eq!(reclaimer.decide(secs(30), 0, &mostly_free), None);
-    assert_eq!(
-        reclaimer.decide(secs(60), 0, &mostly_free),
-        Some(Reason::Idle)
-    );
-    // Once per idle stretch, and the cache is no longer most of what is in use.
-    assert_eq!(reclaimer.decide(secs(90), 0, &memory(3500, 200)), None);
-}
-
-#[test]
-fn nfr2_opening_a_task_starts_a_new_idle_stretch() {
-    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
-    let small_cache = memory(2000, 300);
-    reclaimer.decide(secs(0), 0, &small_cache);
-    assert_eq!(
-        reclaimer.decide(secs(60), 0, &small_cache),
-        Some(Reason::Idle)
-    );
-    assert_eq!(reclaimer.decide(secs(90), 2, &small_cache), None);
-    assert_eq!(reclaimer.decide(secs(120), 0, &small_cache), None);
-    // Idle again, a full idle delay after the last task closed, even inside the gap.
-    assert_eq!(
-        reclaimer.decide(secs(180), 0, &small_cache),
-        Some(Reason::Idle)
-    );
-}
-
-#[test]
-fn nfr2_with_tasks_open_caches_are_dropped_only_when_they_are_most_of_memory() {
-    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
-    // 1096 MiB in use, 300 MiB of it cache: not most of it.
-    assert_eq!(reclaimer.decide(secs(0), 1, &memory(3000, 300)), None);
-    // 2096 MiB in use, 1500 MiB of it cache.
-    assert_eq!(
-        reclaimer.decide(secs(30), 1, &memory(2000, 1500)),
-        Some(Reason::MostlyCache)
-    );
-    // Not again before the gap has passed.
-    assert_eq!(reclaimer.decide(secs(60), 1, &memory(2000, 1500)), None);
-    let gap = ReclaimPolicy::default().min_gap.as_secs();
-    assert_eq!(
-        reclaimer.decide(secs(30 + gap), 1, &memory(2000, 1500)),
-        Some(Reason::MostlyCache)
-    );
-}
-
-#[test]
-fn nfr2_a_little_cache_is_not_worth_dropping() {
-    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
-    let tiny = memory(4000, 64);
-    reclaimer.decide(secs(0), 0, &tiny);
-    assert_eq!(reclaimer.decide(secs(120), 0, &tiny), None);
-}
-
 /// An idle guest whose cache is gone, holding `anon` MiB of anonymous memory.
 fn anon_only(anon: u64) -> MemInfo {
     MemInfo {
         anon_pages_kb: anon * MIB,
         ..memory(3000, 0)
     }
-}
-
-#[test]
-fn nfr1_anonymous_memory_alone_is_worth_an_idle_reclaim_but_not_a_busy_one() {
-    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
-    reclaimer.decide(secs(0), 0, &anon_only(700));
-    assert_eq!(
-        reclaimer.decide(secs(60), 0, &anon_only(700)),
-        Some(Reason::Idle)
-    );
-    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
-    assert_eq!(reclaimer.decide(secs(0), 1, &anon_only(700)), None);
-}
-
-#[test]
-fn nfr1_an_idle_guest_reclaims_again_only_when_memory_has_grown_back() {
-    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
-    reclaimer.decide(secs(0), 0, &anon_only(900));
-    assert_eq!(
-        reclaimer.decide(secs(60), 0, &anon_only(900)),
-        Some(Reason::Idle)
-    );
-    // What the reclaim left is the floor.
-    assert_eq!(reclaimer.decide(secs(90), 0, &anon_only(300)), None);
-    // Grown back, but not yet time.
-    assert_eq!(reclaimer.decide(secs(120), 0, &anon_only(500)), None);
-    // Time, but it stayed small.
-    assert_eq!(reclaimer.decide(secs(360), 0, &anon_only(350)), None);
-    // Time, and grown back: this is also how a reclaim made during boot gets its second go.
-    assert_eq!(
-        reclaimer.decide(secs(390), 0, &anon_only(500)),
-        Some(Reason::Idle)
-    );
 }
 
 #[test]
@@ -206,45 +114,6 @@ fn nfr2_the_router_counts_the_open_tasks_the_reclaim_waits_for() {
 }
 
 #[test]
-fn nfr2_open_tasks_get_a_gradual_trim_of_cold_cache_every_so_often() {
-    use dsa_guest_channeld::reclaim::TRIM_PROPERTY;
-    assert!(TRIM_PROPERTY.starts_with("vendor."));
-    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
-    // 1.4 GiB used, 600 MiB of it cache: mostly not cache, but 344 MiB above what is kept.
-    let busy = memory(2600, 600);
-    assert_eq!(
-        reclaimer.decide_under(secs(30), 2, &busy, false),
-        Some(Reason::Gradual)
-    );
-    // Not again before the gap.
-    assert_eq!(reclaimer.decide_under(secs(60), 2, &busy, false), None);
-    assert_eq!(
-        reclaimer.decide_under(secs(75), 2, &busy, false),
-        Some(Reason::Gradual)
-    );
-}
-
-#[test]
-fn nfr2_the_gradual_trim_leaves_the_cache_apps_use_and_waits_out_pressure() {
-    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
-    // 300 MiB of cache is under what the trim keeps plus its least slice.
-    assert_eq!(
-        reclaimer.decide_under(secs(30), 2, &memory(2600, 300), false),
-        None
-    );
-    // Under memory pressure nothing is trimmed, however much cache there is.
-    assert_eq!(
-        reclaimer.decide_under(secs(60), 2, &memory(1500, 900), true),
-        None
-    );
-    // No tasks: the idle reclaim owns that case, not the trim.
-    assert_eq!(
-        reclaimer.decide_under(secs(90), 0, &memory(1500, 900), false),
-        None
-    );
-}
-
-#[test]
 fn nfr2_memory_pressure_is_read_from_the_some_line_and_unreadable_counts_as_busy() {
     use dsa_guest_channeld::reclaim::memory_pressure;
     let calm = "some avg10=0.50 avg60=0.20 avg300=0.10 total=1234\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n";
@@ -289,53 +158,6 @@ fn nfr2_the_router_remembers_whether_the_host_is_short_of_memory() {
     router.from_host(&frame(Body::HostMemory(HostMemory { low: true })));
     router.host_connected();
     assert!(!router.host_memory_low());
-}
-
-#[test]
-fn nfr1_cache_beyond_the_working_set_goes_back_without_host_pressure_in_bounded_steps() {
-    use dsa_guest_channeld::reclaim::TRIM_SIZE_PROPERTY;
-    assert!(TRIM_SIZE_PROPERTY.starts_with("vendor."));
-    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
-    reclaimer.host_short(false);
-    // One app open, 1100 MiB of page cache, the host not short: the cache is trimmed anyway,
-    // at most 128 MiB at a time.
-    let busy = memory(1200, 1100);
-    assert_eq!(
-        reclaimer.decide_under(secs(0), 1, &busy, false),
-        Some(Reason::Gradual)
-    );
-    assert_eq!(reclaimer.trim_mib(), 128);
-    assert_eq!(reclaimer.decide_under(secs(30), 1, &busy, false), None);
-    assert_eq!(
-        reclaimer.decide_under(secs(45), 1, &busy, false),
-        Some(Reason::Gradual)
-    );
-    // Just above the target: only the excess, in whole MiB.
-    assert_eq!(
-        reclaimer.decide_under(secs(90), 1, &memory(3000, 256 + 80), false),
-        Some(Reason::Gradual)
-    );
-    assert_eq!(reclaimer.trim_mib(), 80);
-    // At the target: nothing.
-    assert_eq!(
-        reclaimer.decide_under(secs(135), 1, &memory(3000, 300), false),
-        None
-    );
-}
-
-#[test]
-fn nfr1_an_idle_guest_keeps_its_cache_at_the_working_set_between_full_reclaims() {
-    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
-    reclaimer.decide_under(secs(0), 0, &memory(3000, 400), false);
-    assert_eq!(
-        reclaimer.decide_under(secs(60), 0, &memory(3000, 400), false),
-        Some(Reason::Idle)
-    );
-    // Background work reads files again long before the next full reclaim is due.
-    assert_eq!(
-        reclaimer.decide_under(secs(120), 0, &memory(3000, 600), false),
-        Some(Reason::Gradual)
-    );
 }
 
 #[test]
@@ -394,4 +216,313 @@ fn nfr1_vmstat_file_refaults_are_read_in_kib() {
     let vmstat = "nr_free_pages 1000\nworkingset_refault_anon 7\nworkingset_refault_file 2560\n";
     assert_eq!(file_refaults_kb(vmstat, 4), Some(10240));
     assert_eq!(file_refaults_kb("nr_free_pages 1\n", 4), None);
+}
+
+#[test]
+fn nfr2_an_idle_guest_returns_its_memory_on_the_first_look_once_per_idle_stretch() {
+    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
+    let mostly_free = memory(3000, 400);
+    // No waiting: the first look with no task open reclaims.
+    assert_eq!(
+        reclaimer.decide(secs(0), 0, &mostly_free),
+        Some(Reason::Idle)
+    );
+    // Once per idle stretch, and the cache is no longer most of what is in use.
+    assert_eq!(reclaimer.decide(secs(5), 0, &memory(3500, 200)), None);
+}
+
+#[test]
+fn nfr2_opening_a_task_starts_a_new_idle_stretch() {
+    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
+    let small_cache = memory(2000, 300);
+    assert_eq!(
+        reclaimer.decide(secs(0), 0, &small_cache),
+        Some(Reason::Idle)
+    );
+    assert_eq!(reclaimer.decide(secs(5), 2, &small_cache), None);
+    // The last task closed: idle again, on the very next look.
+    assert_eq!(
+        reclaimer.decide(secs(10), 0, &small_cache),
+        Some(Reason::Idle)
+    );
+}
+
+#[test]
+fn nfr2_with_tasks_open_caches_are_dropped_only_when_they_are_most_of_memory() {
+    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
+    // 1096 MiB in use, 300 MiB of it cache: not most of it, and under the working set
+    // target plus the least trim.
+    assert_eq!(reclaimer.decide(secs(0), 1, &memory(3000, 300)), None);
+    // 2096 MiB in use, 1500 MiB of it cache.
+    assert_eq!(
+        reclaimer.decide(secs(5), 1, &memory(2000, 1500)),
+        Some(Reason::MostlyCache)
+    );
+    // After the drop the cache is small: nothing more to do.
+    assert_eq!(reclaimer.decide(secs(10), 1, &memory(3500, 280)), None);
+}
+
+#[test]
+fn nfr2_a_little_cache_is_not_worth_dropping() {
+    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
+    let tiny = memory(4000, 64);
+    assert_eq!(reclaimer.decide(secs(0), 0, &tiny), None);
+    assert_eq!(reclaimer.decide(secs(120), 0, &tiny), None);
+}
+
+#[test]
+fn nfr1_anonymous_memory_alone_is_worth_an_idle_reclaim_but_not_a_busy_one() {
+    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
+    assert_eq!(
+        reclaimer.decide(secs(0), 0, &anon_only(700)),
+        Some(Reason::Idle)
+    );
+    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
+    assert_eq!(reclaimer.decide(secs(0), 1, &anon_only(700)), None);
+}
+
+#[test]
+fn nfr2_an_idle_guest_reclaims_again_on_the_next_look_that_finds_memory_grown_back() {
+    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
+    assert_eq!(
+        reclaimer.decide(secs(0), 0, &anon_only(900)),
+        Some(Reason::Idle)
+    );
+    // What the reclaim left is the floor.
+    assert_eq!(reclaimer.decide(secs(5), 0, &anon_only(300)), None);
+    // It stayed small.
+    assert_eq!(reclaimer.decide(secs(10), 0, &anon_only(350)), None);
+    // Grown back: reclaimed at once, which is also how a reclaim made during boot gets its
+    // second go.
+    assert_eq!(
+        reclaimer.decide(secs(15), 0, &anon_only(500)),
+        Some(Reason::Idle)
+    );
+}
+
+#[test]
+fn nfr2_open_tasks_get_cold_cache_trimmed_on_every_look_it_is_found() {
+    use dsa_guest_channeld::reclaim::TRIM_PROPERTY;
+    assert!(TRIM_PROPERTY.starts_with("vendor."));
+    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
+    // 1.4 GiB used, 600 MiB of it cache: mostly not cache, but 344 MiB above what is kept.
+    let busy = memory(2600, 600);
+    assert_eq!(
+        reclaimer.decide_under(secs(30), 2, &busy, false),
+        Some(Reason::Gradual)
+    );
+    assert_eq!(reclaimer.trim_mib(), 344);
+    // Cache that came back is trimmed on the next look, with no gap to wait out.
+    assert_eq!(
+        reclaimer.decide_under(secs(35), 2, &busy, false),
+        Some(Reason::Gradual)
+    );
+}
+
+#[test]
+fn nfr2_the_trim_leaves_the_cache_apps_use_and_waits_out_pressure() {
+    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
+    // 300 MiB of cache is under what the trim keeps plus its least slice.
+    assert_eq!(
+        reclaimer.decide_under(secs(30), 2, &memory(2600, 300), false),
+        None
+    );
+    // Under memory pressure nothing is trimmed, however much cache there is.
+    assert_eq!(
+        reclaimer.decide_under(secs(35), 2, &memory(1500, 900), true),
+        None
+    );
+}
+
+#[test]
+fn nfr2_cache_beyond_the_working_set_goes_back_whole_on_the_next_look() {
+    use dsa_guest_channeld::reclaim::TRIM_SIZE_PROPERTY;
+    assert!(TRIM_SIZE_PROPERTY.starts_with("vendor."));
+    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
+    reclaimer.host_short(false);
+    // One app open, 1100 MiB of page cache, the host not short: all 844 MiB above the
+    // working set target go back in one trim, not in slices over minutes.
+    assert_eq!(
+        reclaimer.decide_under(secs(0), 1, &memory(1200, 1100), false),
+        Some(Reason::Gradual)
+    );
+    assert_eq!(reclaimer.trim_mib(), 1100 - 256);
+    // Just above the target: only the excess, in whole MiB.
+    assert_eq!(
+        reclaimer.decide_under(secs(5), 1, &memory(3000, 256 + 80), false),
+        Some(Reason::Gradual)
+    );
+    assert_eq!(reclaimer.trim_mib(), 80);
+    // At the target: nothing.
+    assert_eq!(
+        reclaimer.decide_under(secs(10), 1, &memory(3000, 300), false),
+        None
+    );
+}
+
+#[test]
+fn nfr2_closing_an_app_returns_the_cache_above_the_working_set_on_the_next_look() {
+    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
+    reclaimer.refaults(0);
+    // Two apps open and settled; their files once came back, so the target grew.
+    reclaimer.refaults(40 * MIB);
+    assert_eq!(reclaimer.working_set_target_kb(), 320 * MIB);
+    assert_eq!(
+        reclaimer.decide_under(secs(60), 2, &memory(3000, 300), false),
+        None
+    );
+    // One closes, leaving 900 MiB of cache: the next look trims everything above the floor
+    // at once: no settling delay, no stepping the target down look by look, and the closed
+    // app's refaults no longer hold the trim back.
+    assert_eq!(
+        reclaimer.decide_under(secs(65), 1, &memory(2000, 900), false),
+        Some(Reason::Gradual)
+    );
+    assert_eq!(reclaimer.working_set_target_kb(), 256 * MIB);
+    assert_eq!(reclaimer.trim_mib(), 900 - 256);
+}
+
+#[test]
+fn nfr2_an_idle_guest_keeps_its_cache_at_the_working_set_between_full_reclaims() {
+    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
+    assert_eq!(
+        reclaimer.decide_under(secs(0), 0, &memory(3000, 400), false),
+        Some(Reason::Idle)
+    );
+    // Background work reads files again: the next look trims them.
+    assert_eq!(
+        reclaimer.decide_under(secs(5), 0, &memory(3000, 360), false),
+        Some(Reason::Gradual)
+    );
+}
+
+#[test]
+fn nfr2_the_daemon_looks_at_the_guests_memory_every_few_seconds() {
+    use dsa_guest_channeld::reclaim::CHECK_INTERVAL;
+    assert!(CHECK_INTERVAL <= Duration::from_secs(5));
+}
+
+#[test]
+fn nfr2_a_close_returns_the_closed_apps_memory_at_once_even_while_another_app_opens() {
+    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
+    reclaimer.decide_under(secs(0), 1, &memory(3000, 200), false);
+    // A second app opens at 10 s, and the first closes 5 s later, well inside the 30 s the
+    // new app's files are protected for.
+    reclaimer.decide_under(secs(10), 2, &memory(2500, 500), false);
+    // The close does not wait out that grace: the closed app's cache above the floor goes
+    // back now, as page cache only, so the new app's own memory stays resident.
+    assert_eq!(
+        reclaimer.app_closed(secs(15), 1, &memory(2400, 900)),
+        Some(Reason::Gradual)
+    );
+    assert_eq!(reclaimer.trim_mib(), 900 - 256);
+}
+
+#[test]
+fn nfr2_a_close_with_nothing_opening_reclaims_everything_the_app_left_at_once() {
+    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
+    reclaimer.decide_under(secs(0), 2, &memory(2000, 600), false);
+    assert_eq!(
+        reclaimer.app_closed(secs(60), 1, &memory(2600, 600)),
+        Some(Reason::AppClosed)
+    );
+    // The last app closing too: at once, and it counts as the idle reclaim.
+    assert_eq!(
+        reclaimer.app_closed(secs(61), 0, &memory(3000, 400)),
+        Some(Reason::AppClosed)
+    );
+    assert_eq!(
+        reclaimer.decide_under(secs(65), 0, &memory(3500, 200), false),
+        None
+    );
+}
+
+#[test]
+fn nfr2_the_close_reclaim_starts_when_the_apps_processes_have_exited() {
+    use dsa_guest_channeld::reclaim::{package_running, EXIT_WAIT_LIMIT};
+    let running = vec![
+        "system_server\0".to_string(),
+        "org.example.notes\0".to_string(),
+        "org.example.notes:sync\0".to_string(),
+    ];
+    assert!(package_running(&running, "org.example.notes"));
+    let gone = vec![
+        "system_server\0".to_string(),
+        "org.example.notes2\0".to_string(),
+        String::new(),
+    ];
+    assert!(!package_running(&gone, "org.example.notes"));
+    // A process the agent keeps running does not hold the reclaim back for long.
+    assert!(EXIT_WAIT_LIMIT <= Duration::from_secs(2));
+}
+
+#[test]
+fn nfr2_the_router_names_each_app_whose_last_task_ended() {
+    let (to_host, _host) = mpsc::channel();
+    let router = Router::new(to_host, |_| Err("no agent here".to_string()));
+    let agent = Peer(10);
+    for (task_id, package) in [
+        (1, "org.example.a"),
+        (2, "org.example.a"),
+        (3, "org.example.b"),
+    ] {
+        router
+            .from_guest(
+                agent,
+                frame(Body::TaskUpdated(TaskUpdated {
+                    task_id,
+                    package_name: package.to_string(),
+                    ..Default::default()
+                })),
+            )
+            .unwrap();
+    }
+    for task_id in [1, 3] {
+        router
+            .from_guest(agent, frame(Body::TaskRemoved(TaskRemoved { task_id })))
+            .unwrap();
+    }
+    // org.example.a still has a task.
+    assert_eq!(router.take_closed_packages(), ["org.example.b"]);
+    assert!(router.take_closed_packages().is_empty());
+}
+
+#[test]
+fn nfr2_a_kernel_file_the_reclaimer_cannot_read_is_reported_once() {
+    use dsa_guest_channeld::reclaim::ReadFailures;
+    use std::io::{Error, ErrorKind};
+    fn denied() -> std::io::Result<String> {
+        Err(Error::from(ErrorKind::PermissionDenied))
+    }
+    let mut failures = ReadFailures::default();
+    let first = failures
+        .note("/proc/vmstat", &denied(), "the trim cannot see refaults")
+        .expect("the first failure is reported");
+    assert!(first.contains("/proc/vmstat"), "{first}");
+    assert!(first.contains("SELinux"), "{first}");
+    for _ in 0..10 {
+        assert_eq!(failures.note("/proc/vmstat", &denied(), "x"), None);
+    }
+    // Another file is a report of its own.
+    assert!(failures
+        .note("/proc/pressure/memory", &denied(), "x")
+        .is_some());
+    // Read once, then failing again, it is reported again.
+    assert_eq!(failures.note("/proc/vmstat", &Ok(String::new()), "x"), None);
+    assert!(failures.note("/proc/vmstat", &denied(), "x").is_some());
+}
+
+#[test]
+fn nfr2_an_idle_reclaim_moves_half_the_anonymous_memory_to_zram_not_a_fixed_gigabyte() {
+    use dsa_guest_channeld::reclaim::{reclaim_step_mib, RECLAIM_STEP_PROPERTY};
+    assert!(RECLAIM_STEP_PROPERTY.starts_with("vendor."));
+    // 640 MiB of app memory: four steps of 80 MiB, 320 MiB in all, the coldest first, so the
+    // pages of the processes still running stay resident and are not swapped straight back.
+    let memory = MemInfo {
+        anon_pages_kb: 640 * MIB,
+        ..MemInfo::default()
+    };
+    assert_eq!(reclaim_step_mib(&memory), 80);
+    // A guest with almost none still gets a step init can write.
+    assert_eq!(reclaim_step_mib(&MemInfo::default()), 1);
 }

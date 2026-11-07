@@ -20,9 +20,7 @@ use std::time::{Duration, Instant};
 
 use dsa_host_core::clock_trace::{ClockTrace, HostClock};
 use dsa_host_core::data_reset::TemplateDataDisk;
-use dsa_host_core::device_identity::{
-    DeviceIdentity, DeviceIdentityStore, FileDeviceIdentities, ImageBuild,
-};
+use dsa_host_core::device_identity::{BootIdentity, FileDeviceIdentities, ImageBuild};
 use dsa_host_core::diagnostics::HostFile;
 use dsa_host_core::guest_log::{LogFilter, LogWatch, DEFAULT_BUFFERS, WARN};
 use dsa_host_core::handshake::ControlHandshake;
@@ -36,7 +34,8 @@ use dsa_host_core::power::PowerHub;
 use dsa_host_core::session::{Session, SessionState};
 use dsa_host_core::settings::{FileSettings, SettingsStore};
 use dsa_host_core::update::service::{
-    check_reporting, next_image_check, Download, UpdateNotices, UpdatingAndroid,
+    check_reporting, next_image_check, CheckNow, Download, StoreVersions, UpdateNotices,
+    UpdatingAndroid,
 };
 use dsa_host_core::update::store::{ImageStore, Recovery};
 use dsa_host_core::window_manager::WindowManagerKeeper;
@@ -44,9 +43,9 @@ use dsa_host_unix::paths::{Layout, UnixHostPaths};
 use dsa_host_unix::socket::UnixLocalListener;
 
 use crate::config::HostConfig;
+use crate::crosvm::guest_cid;
 use crate::image::{bring_disk_to, image_files, make_disk, ImageFiles};
 use crate::launcher::{BootPlan, LauncherSetup, LinuxVmLauncher, SharedNetworkStatus};
-use crate::crosvm::guest_cid;
 use crate::signs::BootSigns;
 use crate::users::{uid_of, Account};
 use crate::vsock::{connect_stream, VsockHub};
@@ -105,6 +104,8 @@ pub struct Updates {
     pub notices: Arc<UpdateNotices>,
     pub boot_timeout: Duration,
     pub trial_running: Arc<AtomicBool>,
+    /// Set when a user chose another Android version, so the image is checked for at once.
+    pub check_now: Arc<CheckNow>,
 }
 
 /// Where each user's files are.
@@ -150,17 +151,6 @@ impl UserFiles {
 
 fn settings_store(config: &HostConfig) -> Arc<dyn SettingsStore> {
     Arc::new(FileSettings::new(config.settings_dir()))
-}
-
-/// The bootconfig that tells `user`'s next boot to use their ARM translation package, or
-/// nothing.
-fn arm_translation_bootconfig(store: &dyn SettingsStore, user: &str) -> String {
-    let package = store.arm_translation(user).unwrap_or_else(|why| {
-        eprintln!("{user}: arm translation: the package is not known ({why}); booting without it");
-        None
-    });
-    let enabled = store.get(user).map(|s| s.arm_translation).unwrap_or(true);
-    dsa_host_core::arm_translation::bootconfig(package.as_ref(), enabled).to_string()
 }
 
 /// The image folder the next boot starts from, and its version.
@@ -269,14 +259,28 @@ pub fn create_user_android(
         );
         Box::new(move || -> Result<BootPlan, String> {
             let (dir, version) = current_image(&config, updates.as_ref())?;
-            let mut image =
-                image_files(&dir, config.kernel.as_deref(), &config.kernel_cmdline)?;
+            let mut image = image_files(&dir, config.kernel.as_deref(), &config.kernel_cmdline)?;
             // crosvm attaches raw disks, so a VHDX system disk is read into one once.
             image.system_image = image
                 .system_image
                 .as_deref()
                 .map(crate::image::raw_disk)
                 .transpose()?;
+            // A disk holding a newer Android's data than this image, after the user chose an
+            // older version and agreed to erase it, starts afresh.
+            if let Some(updates) = &updates {
+                let major = updates
+                    .store
+                    .state()
+                    .map_err(|e| e.to_string())?
+                    .current
+                    .android_major;
+                dsa_host_core::data_reset::erase_if_newer(
+                    &disk,
+                    &crate::image::version_file(&disk),
+                    major,
+                )?;
+            }
             match (&image.disk_template, &version) {
                 (Some(template), Some(version)) => bring_disk_to(
                     &account,
@@ -314,6 +318,12 @@ pub fn create_user_android(
         })
     };
     let cid = guest_cid(uid);
+    // What this computer says it is, with what the user chose, read at each start.
+    let boot_identity = BootIdentity::new(
+        Arc::new(FileDeviceIdentities::new(config.settings_dir())),
+        user,
+        Arc::new(crate::computer_identity::read),
+    );
     let mut launcher = LinuxVmLauncher::new(
         LauncherSetup {
             account: account.clone(),
@@ -332,27 +342,27 @@ pub fn create_user_android(
         plan,
     )
     .with_bootconfig({
-        // An installed ARM translation package is used only while the user's setting is on.
+        // An ARM translator (the package the user installed, else the image's default one) is
+        // used only while the user's setting is on; the Google apps the user installed, while
+        // they are installed.
         let (store, user) = (Arc::clone(&store), user.to_string());
-        Box::new(move || arm_translation_bootconfig(&*store, &user))
+        Box::new(move |image: &ImageFiles| {
+            let dir = image.initrd.as_deref().and_then(Path::parent);
+            dsa_host_core::arm_translation::bootconfig_for(&*store, &user, dir)
+                + &dsa_host_core::gapps::bootconfig_for(&*store, &user)
+        })
     })
     .with_boot_properties({
-        // The user's device identity, which Android reads once while it boots.
-        let identities = FileDeviceIdentities::new(config.settings_dir());
-        let (owner, build) = (user.to_string(), build.to_string());
+        // The user's device identity on this computer, which Android reads once while it
+        // boots. The computer is read again at each start, so a renamed one is followed.
+        let identity = Arc::clone(&boot_identity);
         Box::new(move |image: &ImageFiles| {
-            let identity = identities.get(&owner).unwrap_or_else(|why| {
-                eprintln!(
-                    "{owner}: {build}: {why}; Android starts with the image's device identity"
-                );
-                DeviceIdentity::default()
-            });
             let built = image
                 .initrd
                 .as_deref()
                 .and_then(Path::parent)
                 .and_then(ImageBuild::from_image_dir);
-            identity.boot_properties(built.as_ref())
+            Some(identity.boot_properties(built.as_ref()))
         })
     });
     if config.network {
@@ -384,6 +394,8 @@ pub fn create_user_android(
     let session_config = config.session_config();
     let handshake = ControlHandshake::new(build, session_config.connect_timeout);
     let session = Session::new(launcher, Box::new(listener), handshake, session_config);
+    // The computer's name becomes the guest's device name.
+    session.set_device_name_source(Arc::new(move || boot_identity.device_name()));
     // Developer mode's bridge reaches the guest's adbd on its vsock port.
     session.set_adb_connect(Arc::new(|vm_id: &str| {
         connect_stream(
@@ -392,6 +404,10 @@ pub fn create_user_android(
             Duration::from_secs(5),
         )
     }));
+    // Developer mode's port is attached to the user's own adb server, and advertised over
+    // mDNS on the loopback address, so adb finds it without `adb connect`.
+    session.set_adb_server(crate::adb_discovery::adb_server_of(uid));
+    session.set_adb_advertise(crate::adb_discovery::advertiser());
     session.serve_log_port(Box::new(log_listener), build);
     // The user's folders, served with the user's own rights.
     let folders = crate::devices::file_share::UserFolders::for_uid(uid)
@@ -448,6 +464,7 @@ pub fn create_user_android(
             notices: Arc::clone(&updates.notices),
             boot_timeout: updates.boot_timeout,
             trial_running: Arc::clone(&updates.trial_running),
+            rollback: Default::default(),
         }),
     })
 }
@@ -485,6 +502,7 @@ fn open_updates(config: &HostConfig, build: &str) -> Result<Option<Updates>, Str
         notices: Arc::new(UpdateNotices::default()),
         boot_timeout: Duration::from_secs(boot_timeout),
         trial_running: Arc::new(AtomicBool::new(false)),
+        check_now: Arc::new(CheckNow::default()),
     }))
 }
 
@@ -521,12 +539,16 @@ fn check_for_updates(
     let fetch = crate::fetch::CurlFetch;
     while !stop.load(Ordering::Relaxed) {
         next = next_image_check(next, Instant::now(), !no_image(), FIRST_IMAGE_RETRY);
+        // A user who chose another Android version waits for it now, not at the next turn.
+        if updates.check_now.take() {
+            next = Instant::now();
+        }
         if Instant::now() < next {
             thread::sleep(Duration::from_secs(1));
             continue;
         }
         let waiting_for_first = no_image();
-        if !waiting_for_first && !store.machine().image_updates {
+        if !waiting_for_first && !updates.store.switch_pending() && !store.machine().image_updates {
             next = Instant::now() + SETTINGS_RECHECK;
             continue;
         }
@@ -704,18 +726,20 @@ pub fn serve(config: HostConfig, build: &str, stop: Arc<AtomicBool>) -> Result<(
     };
     let networks: Networks = Arc::default();
     let identity_updates = updates.clone();
+    let translator_updates = updates.clone();
     let reset_updates = updates.clone();
     let factory_config = config.clone();
     let factory_build = build.to_string();
     let factory_store = Arc::clone(&store);
     let factory_networks = Arc::clone(&networks);
+    let factory_updates = updates.clone();
     let androids = Arc::new(PerUser::new(move |user: &str| {
         let android = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             create_user_android(
                 &factory_config,
                 &factory_build,
                 user,
-                updates.as_ref(),
+                factory_updates.as_ref(),
                 Some(power.as_ref()),
                 network_of(&factory_networks, user),
             )
@@ -737,6 +761,7 @@ pub fn serve(config: HostConfig, build: &str, stop: Arc<AtomicBool>) -> Result<(
                             s.shared_folders.clone()
                         }),
                 );
+                android.adb_auto_connect(settings.as_ref().is_none_or(|s| s.adb_auto_connect));
                 if let Some(settings) = settings.as_ref().filter(|s| s.developer_mode) {
                     if let Err(why) = android.developer_mode(true, settings.adb_port) {
                         eprintln!("{user}: developer mode: {why}");
@@ -779,6 +804,7 @@ pub fn serve(config: HostConfig, build: &str, stop: Arc<AtomicBool>) -> Result<(
     )
     .with_beside("version");
     let identity_config = config.clone();
+    let translator_config = config.clone();
     let mut service = HostApiService::new(androids.clone(), build)
         .with_data_reset(Arc::new(data_reset))
         .with_program_updates(Arc::new(crate::package_updates::PackageManagerUpdates))
@@ -806,9 +832,31 @@ pub fn serve(config: HostConfig, build: &str, stop: Arc<AtomicBool>) -> Result<(
                 let (dir, _) = current_image(&identity_config, identity_updates.as_ref()).ok()?;
                 ImageBuild::from_image_dir(&dir)
             }),
-        );
+        )
+        // The defaults the settings show are what this computer says it is now.
+        .with_computer_identity(Arc::new(crate::computer_identity::read))
+        // The default ARM translator of the image the next start boots: only an x86_64 image
+        // has one.
+        .with_default_arm_translation(Arc::new(move |_: &str| {
+            let (dir, _) = current_image(&translator_config, translator_updates.as_ref()).ok()?;
+            dsa_host_core::arm_translation::default_package(&dir)
+        }));
     if let Some(source) = android_version {
         service = service.with_android_version(source);
+    }
+    // Google Play, for a user who asks: downloaded from LiteGapps and made ready in the
+    // service's own folder.
+    service = service.with_gapps(dsa_host_core::gapps::Source::new(
+        Arc::new(crate::fetch::CurlFetch),
+        config.settings_dir().with_file_name("gapps"),
+    ));
+    if let Some(updates) = &updates {
+        service = service.with_android_versions(Arc::new(StoreVersions {
+            store: Arc::clone(&updates.store),
+            notices: Arc::clone(&updates.notices),
+            check_now: Arc::clone(&updates.check_now),
+            shared_by_users: true,
+        }));
     }
     {
         let androids = androids.clone();

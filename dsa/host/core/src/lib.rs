@@ -5,7 +5,9 @@
 //! through the traits defined here and in `dsa-transport`.
 //!
 //! - [`session`]: one guest's life from start to stop.
-//! - [`adb_bridge`]: developer mode's loopback port, whose connections go to the guest's adbd.
+//! - [`adb_bridge`]: developer mode's loopback port, whose connections go to the guest's
+//!   adbd, and [`adb_discovery`]: how adb on this computer finds that port by itself
+//!   (auto-connect to the user's adb server, and the port's mDNS advertisement).
 //! - [`accessibility`]: the accessibility tree of a task window, for host accessibility
 //!   clients such as screen readers.
 //! - [`audio`]: the guest's sound, played on the host's default output device.
@@ -23,7 +25,9 @@
 //! - [`location`]: the host's location, which the guest's GNSS HAL gives its apps.
 //! - [`links`]: web links apps in the guest open, which the host opens in its browser.
 //! - [`apk_info`]: what an APK on the host says about itself (its name, icon, version,
-//!   permissions and signer), read from the file before Android sees it.
+//!   permissions and signer), read from the file before Android sees it, and
+//!   [`apk_bundle`]: split-APK bundles (`.xapk`, `.apks`, `.apkm`) and the splits a device
+//!   takes from them.
 //! - [`guest_log`]: the guest's log, streamed only while someone reads it, and
 //!   [`diagnostics`]: the archive a problem report carries.
 //! - [`files`]: host files the user opens or shares in an app in the guest.
@@ -38,11 +42,14 @@
 //! - [`ime`]: text input through the host's input method in a task's window.
 //! - [`file_share`]: the user's host folders in the guest's shared storage, and the guest's
 //!   shared storage on the host.
+//! - [`erofs`]: erofs images, the read-only file systems the host hands the guest as one file.
 //! - [`settings`]: the settings a user changes from the settings app, kept by the service.
 //! - [`system_settings`]: the host's time zone, languages, regional format, theme and accent
 //!   color, which each user's Android follows.
 //! - [`gamepads`]: the host's game controllers, shown to the guest as gamepads.
 //! - [`app_windows`]: a user's window settings for each app.
+//! - [`gapps`]: Google Play for a user who asks for it, downloaded and laid over the guest's
+//!   system as an erofs image.
 //! - [`memory`]: how much memory a user's Android takes, in the guest and on the host.
 //! - [`window_manager`]: keeping a user's window manager running while their Android runs.
 //! - [`compositor`]: platform-neutral graphics stream bookkeeping, renderer interfaces, and
@@ -50,7 +57,9 @@
 
 pub mod accessibility;
 pub mod adb_bridge;
+pub mod adb_discovery;
 pub mod apk;
+pub mod apk_bundle;
 pub mod apk_info;
 pub mod app_windows;
 pub mod apps;
@@ -62,14 +71,17 @@ pub mod camera;
 pub mod clipboard;
 pub mod clock_trace;
 pub mod compositor;
+pub mod computer_identity;
 pub mod data_reset;
 pub mod device_identity;
 pub mod diagnostics;
 pub mod drag;
+pub mod erofs;
 pub mod file_share;
 pub mod files;
 pub mod files_door;
 pub mod gamepads;
+pub mod gapps;
 pub mod guest_display;
 pub mod guest_log;
 pub mod guest_log_api;
@@ -86,6 +98,7 @@ pub mod keys;
 pub mod links;
 pub mod location;
 pub mod memory;
+pub mod native_abi;
 pub mod notifications;
 pub mod power;
 pub mod power_hints;

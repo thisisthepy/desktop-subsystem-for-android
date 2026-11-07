@@ -19,8 +19,9 @@ use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use dsa_exe_resources::{
-    icon_group, names, png_icon, version_info, VersionStrings, ICON_GROUP_ID, LANG_EN_US,
-    RT_GROUP_ICON, RT_ICON, RT_VERSION, VERSION_ID,
+    dib_icon, icon_group, icon_image_side, names, png_icon, version_info, IconImage,
+    VersionStrings, ICON_GROUP_ID, LANG_EN_US, MAX_ICON_IMAGE_SIDE, RT_GROUP_ICON, RT_ICON,
+    RT_RCDATA, RT_VERSION, SPLASH_ICON_ID, VERSION_ID,
 };
 use dsa_host_core::compositor::window_hosts::is_valid_package;
 use dsa_host_core::tasks::AppInfo;
@@ -272,6 +273,26 @@ fn icon_images(path: &Path) -> u16 {
     count
 }
 
+/// The program's icon image from the app's icon `png`. A PNG an icon image holds (256 pixels
+/// or less) goes in as it is. A larger one, which the guest draws so the splash is never
+/// scaled up, is scaled down to 256 pixels and goes in as a bitmap, because Windows reads a
+/// PNG icon image only up to 256 pixels; when it cannot be scaled, it goes in as it is.
+fn icon_image(png: &[u8]) -> Option<IconImage> {
+    let image = png_icon(png)?;
+    let (width, height) = crate::compositor::widgets::png::size(png)?;
+    if width <= MAX_ICON_IMAGE_SIDE && height <= MAX_ICON_IMAGE_SIDE {
+        return Some(image);
+    }
+    let side = icon_image_side(width.max(height));
+    let scaled = crate::compositor::widgets::png::with_com(|| {
+        let decoder = crate::compositor::widgets::png::Decoder::new().ok()?;
+        decoder.decode_straight(png, side, side).ok()
+    });
+    scaled
+        .and_then(|pixels| dib_icon(&pixels, side))
+        .or(Some(image))
+}
+
 /// Rewrites the version information and icon of the program at `path`.
 fn write_resources(
     path: &Path,
@@ -323,7 +344,7 @@ fn write_resources(
     );
     // The installed window host has only an English name, which this replaces; the app's
     // own name already comes in the language Android shows.
-    if let Some(image) = icon.and_then(png_icon) {
+    if let Some(image) = icon.and_then(icon_image) {
         ok &= put(RT_ICON, 1, 0, Some(&image.data));
         // Only the app's image stays, so no size of the window host's own icon shows.
         for id in 2..=images {
@@ -335,6 +356,11 @@ fn write_resources(
             0,
             Some(&icon_group(&[image], 1)),
         );
+    }
+    // The icon as the guest drew it, which the window's splash is drawn from at the size it
+    // has on the window's monitor.
+    if let Some(png) = icon {
+        ok &= put(RT_RCDATA, SPLASH_ICON_ID, 0, Some(png));
     }
     let error = io::Error::last_os_error();
     // SAFETY: ends the update begun above; discards it when something failed.

@@ -1,0 +1,117 @@
+Subject: libEGL: initialize a display again when it lost its GPU device
+
+libEGL counts eglInitialize and eglTerminate, and terminates the driver's display only when the
+count reaches zero. When two users hold a display (HWUI and a WebView, or HWUI and its bitmap
+uploader) and its GPU device is lost, neither user's terminate reaches the driver, and the
+display stays lost for both. eglInitialize on a display whose driver display is lost, or whose
+last initialization failed, now terminates and initializes the driver's display again. The
+objects made on the lost display are refused from then on, as after eglTerminate.
+
+Applies to frameworks/native at ae266dcb706d083868578cfedce381ef44488a07 (Android 17).
+---
+diff --git a/opengl/libs/EGL/egl_display.cpp b/opengl/libs/EGL/egl_display.cpp
+index 8878312..e6d31ce 100644
+--- a/opengl/libs/EGL/egl_display.cpp
++++ b/opengl/libs/EGL/egl_display.cpp
+@@ -237,7 +237,22 @@ EGLDisplay egl_display_t::getPlatformDisplay(EGLNativeDisplayType display,
+     return nullptr;
+ }
+ 
++bool egl_display_t::driverDisplayNeedsInitialize() const {
++    egl_connection_t* const cnx = &gEGLImpl;
++    if (!cnx->dso) {
++        return false;
++    }
++    if (disp.state != egl_display_t::INITIALIZED) {
++        return true;
++    }
++    if (cnx->egl.eglQueryString(disp.dpy, EGL_VENDOR) != nullptr) {
++        return false;
++    }
++    return cnx->egl.eglGetError() == EGL_CONTEXT_LOST;
++}
++
+ EGLBoolean egl_display_t::initialize(EGLint* major, EGLint* minor) {
++    bool reinitialize = false;
+     { // scope for refLock
+         std::unique_lock<std::mutex> _l(refLock);
+         refs++;
+@@ -248,15 +263,24 @@ EGLBoolean egl_display_t::initialize(EGLint* major, EGLint* minor) {
+             while (!eglIsInitialized) {
+                 refCond.wait(_l);
+             }
+-            egl_connection_t* const cnx = &gEGLImpl;
+-
+-            // TODO: If device doesn't provide 1.4 or 1.5 then we'll be
+-            // changing the behavior from the past where we always advertise
+-            // version 1.4. May need to check that revision is valid
+-            // before using cnx->major & cnx->minor
+-            if (major != nullptr) *major = cnx->major;
+-            if (minor != nullptr) *minor = cnx->minor;
+-            return EGL_TRUE;
++            if (!driverDisplayNeedsInitialize()) {
++                egl_connection_t* const cnx = &gEGLImpl;
++
++                // TODO: If device doesn't provide 1.4 or 1.5 then we'll be
++                // changing the behavior from the past where we always advertise
++                // version 1.4. May need to check that revision is valid
++                // before using cnx->major & cnx->minor
++                if (major != nullptr) *major = cnx->major;
++                if (minor != nullptr) *minor = cnx->minor;
++                return EGL_TRUE;
++            }
++            // Another user still holds the display, so terminating it never reaches the driver,
++            // and a display that lost its GPU device would stay lost for every user. It is
++            // initialized again here instead; what the users made on it went with the device.
++            ALOGW("eglInitialize: the display lost its GPU device or never initialized; "
++                  "initializing it again");
++            eglIsInitialized = false;
++            reinitialize = true;
+         }
+         while (eglIsInitialized) {
+             refCond.wait(_l);
+@@ -269,6 +293,27 @@ EGLBoolean egl_display_t::initialize(EGLint* major, EGLint* minor) {
+ 
+         setGLHooksThreadSpecific(&gHooksNoContext);
+ 
++        if (reinitialize && gEGLImpl.dso && disp.state == egl_display_t::INITIALIZED) {
++            egl_connection_t* const lostCnx = &gEGLImpl;
++            if (lostCnx->angleLoaded) {
++                angle::resetAnglePlatform(disp.dpy, lostCnx);
++            }
++            if (lostCnx->egl.eglTerminate(disp.dpy) == EGL_FALSE) {
++                ALOGW("eglTerminate(%p) of the lost display failed (%s)", disp.dpy,
++                      egl_tls_t::egl_strerror(lostCnx->egl.eglGetError()));
++            }
++            disp.state = egl_display_t::TERMINATED;
++            // Every object made on the lost display is gone; its handles are refused from now on,
++            // as after eglTerminate.
++            for (auto o : objects) {
++                o->destroy();
++            }
++            objects.clear();
++            if (lostCnx->angleLoaded && !angle::initializeAnglePlatform(disp.dpy, lostCnx)) {
++                ALOGE("initializeAnglePlatform failed!");
++            }
++        }
++
+         // initialize each EGL and
+         // build our own extension string first, based on the extension we know
+         // and the extension supported by our client implementation
+diff --git a/opengl/libs/EGL/egl_display.h b/opengl/libs/EGL/egl_display.h
+index 867a117..a688265 100644
+--- a/opengl/libs/EGL/egl_display.h
++++ b/opengl/libs/EGL/egl_display.h
+@@ -61,6 +61,12 @@ public:
+     EGLBoolean initialize(EGLint* major, EGLint* minor);
+     EGLBoolean terminate();
+ 
++    // Whether the driver's display needs initializing although a user holds it: it lost its GPU
++    // device (it answers EGL_CONTEXT_LOST), or its last initialization failed. Every object made
++    // on a lost display is gone, and it serves nothing until it is terminated and initialized
++    // again.
++    bool driverDisplayNeedsInitialize() const;
++
+     // add object to this display's list
+     void addObject(egl_object_t* object);
+     // remove object from this display's list

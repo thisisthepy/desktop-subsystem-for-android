@@ -51,12 +51,13 @@ use std::time::Duration;
 
 use dsa_protocol::control::envelope::Body;
 use dsa_protocol::control::{
-    AndroidFiles, ArmTranslationState, Envelope, FileSharing, GuestBoot, LocationRequest,
-    PowerHintKind,
+    AndroidFiles, ArmTranslationState, Envelope, FileSharing, GappsState, GuestBoot,
+    LocationRequest, PowerHintKind,
 };
 
 use crate::arm_translation::ArmTranslation;
 use crate::gamepad::GamepadDevices;
+use crate::gapps::Gapps;
 
 /// The agent's package, which is the name of its process.
 pub const AGENT_PROCESS: &str = "io.github.thisisthepy.dsa.agent";
@@ -71,7 +72,12 @@ pub fn agent_caller(context: Option<&str>, cmdline: Option<&[u8]>) -> Result<(),
         .strip_prefix("u:r:")
         .and_then(|rest| rest.split(':').next())
         .unwrap_or_default();
-    if !matches!(domain, "platform_app" | "system_app") {
+    // Android 17 runs a platform app that targets SDK 36 or later in `platform_app_<sdk>`.
+    let platform_app = domain == "platform_app"
+        || domain
+            .strip_prefix("platform_app_")
+            .is_some_and(|sdk| !sdk.is_empty() && sdk.bytes().all(|b| b.is_ascii_digit()));
+    if !platform_app && domain != "system_app" {
         return Err(format!(
             "the caller runs in {context:?}, not as a platform app"
         ));
@@ -234,12 +240,16 @@ pub struct Router {
     android_files: Option<AndroidFilesSwitch>,
     /// The ARM translation package on the user's disk, which the host installs and removes.
     arm_translation: Option<Arc<ArmTranslation>>,
+    /// The Google apps' image on the user's disk, which the host installs and removes.
+    gapps: Option<Arc<Gapps>>,
     /// The gamepad devices of the host's controllers.
     gamepads: Option<Arc<GamepadDevices>>,
     /// Where the agent's diagnostics go instead of the host's control channel.
     diagnostics: Mutex<Option<Sender<Vec<u8>>>>,
     /// How many times an app's last task has ended, and the wake-up for whoever waits on it.
     apps_closed: (Mutex<u64>, Condvar),
+    /// The packages whose last task ended since the reclaim last asked.
+    closed_packages: Mutex<Vec<String>>,
 }
 
 /// Turns the guest's developer mode (adbd) on or off, as the host says.
@@ -269,9 +279,11 @@ impl Router {
             file_sharing: None,
             android_files: None,
             arm_translation: None,
+            gapps: None,
             gamepads: None,
             diagnostics: Mutex::new(None),
             apps_closed: (Mutex::new(0), Condvar::new()),
+            closed_packages: Mutex::new(Vec::new()),
         }
     }
 
@@ -297,7 +309,21 @@ impl Router {
         *guard
     }
 
-    fn app_closed(&self) {
+    /// The packages whose last task ended since the last call, oldest first.
+    pub fn take_closed_packages(&self) -> Vec<String> {
+        std::mem::take(
+            &mut *self
+                .closed_packages
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()),
+        )
+    }
+
+    fn app_closed(&self, package: &str) {
+        self.closed_packages
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(package.to_string());
         let (count, wake) = &self.apps_closed;
         *count.lock().unwrap_or_else(|e| e.into_inner()) += 1;
         wake.notify_all();
@@ -331,6 +357,12 @@ impl Router {
     /// Hands the host's ARM translation messages to `package`, and its answers to the host.
     pub fn on_arm_translation(mut self, package: Arc<ArmTranslation>) -> Router {
         self.arm_translation = Some(package);
+        self
+    }
+
+    /// Hands the host's messages about the Google apps to `gapps`, and its answers to the host.
+    pub fn on_gapps(mut self, gapps: Arc<Gapps>) -> Router {
+        self.gapps = Some(gapps);
         self
     }
 
@@ -375,6 +407,32 @@ impl Router {
         };
         let _ = self.to_host.send(dsa_protocol::encode(&Envelope {
             body: Some(Body::ArmTranslationState(state)),
+        }));
+        true
+    }
+
+    /// Answers the host's message about the Google apps `body`, and says whether it was one.
+    /// A guest without their store answers that it has none.
+    fn gapps_message(&self, body: &Body) -> bool {
+        let state = match (body, &self.gapps) {
+            (_, Some(gapps)) => match gapps.handle(body) {
+                Some(state) => state,
+                None => return false,
+            },
+            (
+                Body::GappsInstall(_)
+                | Body::GappsChunk(_)
+                | Body::GappsRemove(_)
+                | Body::GappsQuery(_),
+                None,
+            ) => GappsState {
+                error: "this guest cannot keep the Google apps".into(),
+                ..GappsState::default()
+            },
+            _ => return false,
+        };
+        let _ = self.to_host.send(dsa_protocol::encode(&Envelope {
+            body: Some(Body::GappsState(state)),
         }));
         true
     }
@@ -504,6 +562,9 @@ impl Router {
             if self.arm_translation_message(body) {
                 return;
             }
+            if self.gapps_message(body) {
+                return;
+            }
             if self.gamepad_message(body) {
                 return;
             }
@@ -584,6 +645,18 @@ impl Router {
                     "how far the guest has got is the daemon's to say".to_string(),
                 ))
             }
+            Some(Body::GappsState(_)) => {
+                return Err(SendError::NotAllowed(
+                    "where the Google apps stand is the daemon's to say".to_string(),
+                ))
+            }
+            Some(Body::GoogleDeviceId(_)) => {
+                (self.agent_check)(sender).map_err(|why| {
+                    SendError::NotAllowed(format!(
+                        "only the agent says the Google Services Framework Android ID: {why}"
+                    ))
+                })?;
+            }
             Some(Body::AgentConnected(_)) => {
                 if !state.listeners.iter().any(|s| s.peer == sender) {
                     return Err(SendError::NotAllowed(
@@ -609,7 +682,7 @@ impl Router {
                 if let Some(task) = state.tasks.remove(&removed.task_id) {
                     if !state.tasks.values().any(|t| t.package == task.package) {
                         state.apps.remove(&task.package);
-                        self.app_closed();
+                        self.app_closed(&task.package);
                     }
                 }
                 state.deliver(&frame, Some(sender));

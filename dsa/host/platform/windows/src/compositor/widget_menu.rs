@@ -1,5 +1,7 @@
-//! The menu a widget window shows when the user right-clicks it: Resize, with the sizes the
-//! widget allows, and Remove.
+//! The menu of a widget window, which the user opens by right-clicking the widget or with its
+//! "More" button: Resize, with the sizes the widget allows, and Remove. It is a Windows 11
+//! menu ([`crate::compositor::fluent_menu`]), with an icon for each item and a check mark on
+//! the widget's current size.
 //!
 //! Choosing a size resizes the window, which tells the service and Android the new size as a
 //! drag of its edges does. Choosing Remove asks the service to remove the widget; its window
@@ -9,6 +11,9 @@
 //! The menu speaks the user's display language when DSA has it (Korean), else English.
 
 use dsa_host_core::widgets::{clamp_size, Placement, WidgetProvider};
+
+use super::fluent::glyph;
+use super::fluent_menu::{MenuEntry, MenuItem};
 
 /// A size the Resize menu offers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,10 +45,12 @@ pub enum MenuChoice {
     Remove,
 }
 
-/// The menu command of Remove. A size is [`FIRST_SIZE`] plus its place in the list.
-pub const REMOVE: usize = 1;
-/// The menu command of the first size.
-pub const FIRST_SIZE: usize = 100;
+/// The menu item of Remove. A size is [`FIRST_SIZE`] plus its place in the list.
+pub const REMOVE: u32 = 1;
+/// The menu item that opens the sizes.
+pub const RESIZE: u32 = 2;
+/// The menu item of the first size.
+pub const FIRST_SIZE: u32 = 100;
 
 /// The sizes the Resize menu offers for `provider`, each within what the widget allows. A
 /// size equal to one before it is left out, so a widget that cannot be resized offers one.
@@ -76,13 +83,13 @@ pub fn size_choices(provider: &WidgetProvider) -> Vec<SizeChoice> {
     out
 }
 
-/// What the menu command `command` chose among `sizes`; None for no choice (0, as when the
-/// menu was dismissed) or an unknown one.
-pub fn choice_of(command: usize, sizes: &[SizeChoice]) -> Option<MenuChoice> {
+/// What the menu item `command` chose among `sizes`; None for no choice (as when the menu was
+/// dismissed) or an unknown one.
+pub fn choice_of(command: u32, sizes: &[SizeChoice]) -> Option<MenuChoice> {
     if command == REMOVE {
         return Some(MenuChoice::Remove);
     }
-    let size = sizes.get(command.checked_sub(FIRST_SIZE)?)?;
+    let size = sizes.get(command.checked_sub(FIRST_SIZE)? as usize)?;
     Some(MenuChoice::Resize {
         width_dp: size.width_dp,
         height_dp: size.height_dp,
@@ -103,6 +110,10 @@ pub struct MenuText {
     default: &'static str,
     large: &'static str,
     extra_large: &'static str,
+    /// What UI Automation calls the button that opens the menu.
+    pub more: &'static str,
+    /// What UI Automation calls a widget with no name of its own.
+    pub widget: &'static str,
 }
 
 /// The menu's words: Korean for a Korean display language, else English.
@@ -115,6 +126,8 @@ pub fn menu_text(korean: bool) -> MenuText {
             default: "기본 크기",
             large: "크게",
             extra_large: "아주 크게",
+            more: "옵션 더 보기",
+            widget: "위젯",
         }
     } else {
         MenuText {
@@ -124,6 +137,8 @@ pub fn menu_text(korean: bool) -> MenuText {
             default: "Default size",
             large: "Large",
             extra_large: "Extra large",
+            more: "More options",
+            widget: "Widget",
         }
     }
 }
@@ -139,78 +154,87 @@ pub fn size_label(text: &MenuText, choice: &SizeChoice) -> String {
     format!("{name} ({} × {})", choice.width_dp, choice.height_dp)
 }
 
+/// The key that chooses a size while the menu is open: the first letter of its English
+/// name, which Windows' Korean menus use as well.
+fn size_key(name: SizeName) -> char {
+    match name {
+        SizeName::Small => 'S',
+        SizeName::Default => 'D',
+        SizeName::Large => 'L',
+        SizeName::ExtraLarge => 'X',
+    }
+}
+
+/// The menu's entries: Resize, which opens the sizes with the current one checked, a
+/// separator, and Remove. Resize opens with R and Remove is chosen with M (Resize has R).
+pub fn entries(text: &MenuText, sizes: &[SizeChoice], placement: &Placement) -> Vec<MenuEntry> {
+    let sizes: Vec<MenuEntry> = sizes
+        .iter()
+        .zip(FIRST_SIZE..)
+        .map(|(size, id)| {
+            let item = MenuItem::new(id, size_label(text, size));
+            let item = item.with_access_key(size_key(size.name));
+            MenuEntry::Item(item.with_check(is_current(size, placement)))
+        })
+        .collect();
+    let remove = MenuItem::new(REMOVE, text.remove).with_glyph(glyph::UNPIN);
+    let mut out = Vec::with_capacity(3);
+    if !sizes.is_empty() {
+        let resize = MenuItem::new(RESIZE, text.resize).with_glyph(glyph::RESIZE);
+        out.push(MenuEntry::Item(
+            resize.with_access_key('R').with_submenu(sizes),
+        ));
+        out.push(MenuEntry::Separator);
+    }
+    out.push(MenuEntry::Item(remove.with_access_key('M')));
+    out
+}
+
+/// What UI Automation calls the menu of a widget: the widget's own name, or "Widget".
+pub fn menu_name(text: &MenuText, provider: &WidgetProvider) -> String {
+    if provider.label.trim().is_empty() {
+        text.widget.to_string()
+    } else {
+        provider.label.clone()
+    }
+}
+
 /// Whether a Windows language ID is Korean (its primary language is 0x12).
 pub fn is_korean(lang_id: u16) -> bool {
     lang_id & 0x3ff == 0x12
 }
 
-/// Shows the menu of a widget window at `x`, `y` on the screen and returns what the user
-/// chose. `window` is the widget window's handle as a number. Called on the window's own
-/// thread; no state is borrowed while the menu is open.
+/// The menu's words in the user's display language.
+#[cfg(windows)]
+pub fn display_text() -> MenuText {
+    use windows_sys::Win32::Globalization::GetUserDefaultUILanguage;
+    // SAFETY: reads the user's display language.
+    menu_text(is_korean(unsafe { GetUserDefaultUILanguage() }))
+}
+
+/// Shows the menu of a widget window where `anchor` says and returns what the user chose.
+/// `window` is the widget window's handle as a number; `keyboard` says the keyboard opened
+/// the menu. Called on the window's own thread; no state is borrowed while the menu is open.
 #[cfg(windows)]
 pub fn show(
     window: isize,
-    x: i32,
-    y: i32,
+    anchor: super::fluent_menu::Anchor,
+    keyboard: bool,
     provider: &WidgetProvider,
     placement: &Placement,
 ) -> Option<MenuChoice> {
-    use std::ptr::null;
-    use windows_sys::Win32::Foundation::HWND;
-    use windows_sys::Win32::Globalization::GetUserDefaultUILanguage;
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        AppendMenuW, CreatePopupMenu, DestroyMenu, PostMessageW, SetForegroundWindow,
-        TrackPopupMenu, MF_CHECKED, MF_POPUP, MF_SEPARATOR, MF_STRING, TPM_NONOTIFY, TPM_RETURNCMD,
-        TPM_RIGHTBUTTON, WM_NULL,
-    };
-
-    fn wide(text: &str) -> Vec<u16> {
-        text.encode_utf16().chain(std::iter::once(0)).collect()
-    }
-
-    // SAFETY: reads the user's display language.
-    let text = menu_text(is_korean(unsafe { GetUserDefaultUILanguage() }));
+    let text = display_text();
     let sizes = size_choices(provider);
-    let hwnd = window as HWND;
-    // SAFETY: the menus are made, shown and destroyed here, on the window's thread; every
-    // string outlives the call that reads it.
-    unsafe {
-        let menu = CreatePopupMenu();
-        if menu.is_null() {
-            return None;
-        }
-        let sizes_menu = CreatePopupMenu();
-        if !sizes_menu.is_null() {
-            for (i, size) in sizes.iter().enumerate() {
-                let label = wide(&size_label(&text, size));
-                let flags = if is_current(size, placement) {
-                    MF_STRING | MF_CHECKED
-                } else {
-                    MF_STRING
-                };
-                AppendMenuW(sizes_menu, flags, FIRST_SIZE + i, label.as_ptr());
-            }
-            let resize = wide(text.resize);
-            AppendMenuW(menu, MF_POPUP, sizes_menu as usize, resize.as_ptr());
-            AppendMenuW(menu, MF_SEPARATOR, 0, null());
-        }
-        let remove = wide(text.remove);
-        AppendMenuW(menu, MF_STRING, REMOVE, remove.as_ptr());
-        // A menu closes when the user clicks elsewhere only if its window is in front.
-        SetForegroundWindow(hwnd);
-        let command = TrackPopupMenu(
-            menu,
-            TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY,
-            x,
-            y,
-            0,
-            hwnd,
-            null(),
-        );
-        PostMessageW(hwnd, WM_NULL, 0, 0);
-        DestroyMenu(menu);
-        choice_of(command.max(0) as usize, &sizes)
-    }
+    let entries = entries(&text, &sizes, placement);
+    let name = menu_name(&text, provider);
+    let chosen = super::fluent_menu::show(super::fluent_menu::Request {
+        owner: window,
+        anchor,
+        entries: &entries,
+        name: &name,
+        keyboard,
+    })?;
+    choice_of(chosen, &sizes)
 }
 
 #[cfg(test)]
@@ -226,6 +250,15 @@ mod tests {
             default_height_dp: 110,
             resize_mode: 3,
             ..WidgetProvider::default()
+        }
+    }
+
+    fn at(width_dp: u32, height_dp: u32) -> Placement {
+        Placement {
+            x: 0,
+            y: 0,
+            width_dp,
+            height_dp,
         }
     }
 
@@ -270,17 +303,14 @@ mod tests {
             })
         );
         assert_eq!(choice_of(0, &sizes), None);
+        assert_eq!(
+            choice_of(RESIZE, &sizes),
+            None,
+            "Resize only opens the sizes"
+        );
         assert_eq!(choice_of(FIRST_SIZE + 99, &sizes), None);
         assert_eq!(choice_of(50, &sizes), None);
-        assert!(is_current(
-            &sizes[1],
-            &Placement {
-                x: 0,
-                y: 0,
-                width_dp: 180,
-                height_dp: 110
-            }
-        ));
+        assert!(is_current(&sizes[1], &at(180, 110)));
     }
 
     #[test]
@@ -296,5 +326,81 @@ mod tests {
         assert_eq!(size_label(&menu_text(true), &large), "크게 (270 × 165)");
         assert_eq!(menu_text(false).remove, "Remove");
         assert_eq!(menu_text(true).resize, "크기 조정");
+        assert_eq!(menu_text(false).more, "More options");
+        assert_eq!(menu_text(true).more, "옵션 더 보기");
+    }
+
+    #[test]
+    fn fr12_right_clicking_a_widget_offers_resize_and_remove() {
+        let sizes = size_choices(&clock());
+        for korean in [false, true] {
+            let text = menu_text(korean);
+            let menu = entries(&text, &sizes, &at(270, 165));
+            assert_eq!(menu.len(), 3);
+            let resize = menu[0].item().unwrap();
+            assert_eq!(resize.label, text.resize);
+            assert_eq!(resize.glyph, Some(glyph::RESIZE));
+            assert_eq!(resize.access_key, Some('R'));
+            assert_eq!(menu[1], MenuEntry::Separator);
+            let remove = menu[2].item().unwrap();
+            assert_eq!((remove.id, remove.label.as_str()), (REMOVE, text.remove));
+            assert_eq!(remove.glyph, Some(glyph::UNPIN));
+            assert_eq!(remove.access_key, Some('M'));
+            // The sizes, each with its key, and a check mark on the current one only.
+            let offered: Vec<(u32, &str, Option<bool>)> = resize
+                .submenu
+                .iter()
+                .filter_map(MenuEntry::item)
+                .map(|item| (item.id, item.label.as_str(), item.checked))
+                .collect();
+            assert_eq!(offered.len(), sizes.len());
+            assert_eq!(offered[2].0, FIRST_SIZE + 2);
+            assert_eq!(offered[2].1, size_label(&text, &sizes[2]));
+            let checked: Vec<bool> = offered.iter().map(|o| o.2 == Some(true)).collect();
+            assert_eq!(checked, [false, false, true, false]);
+            let keys: Vec<Option<char>> = resize
+                .submenu
+                .iter()
+                .filter_map(MenuEntry::item)
+                .map(|item| item.access_key)
+                .collect();
+            assert_eq!(keys, [Some('S'), Some('D'), Some('L'), Some('X')]);
+        }
+        // A widget with no name is called "Widget".
+        assert_eq!(menu_name(&menu_text(false), &clock()), "Widget");
+        let named = WidgetProvider {
+            label: "Clock".into(),
+            ..clock()
+        };
+        assert_eq!(menu_name(&menu_text(true), &named), "Clock");
+    }
+
+    /// The widget windows never fall back to a plain Win32 popup menu: neither the menu nor
+    /// the windows that open it call the Win32 menu functions.
+    #[test]
+    fn fr12_no_widget_menu_is_a_plain_win32_menu() {
+        let calls = [
+            ["Track", "PopupMenu"].concat(),
+            ["Create", "PopupMenu"].concat(),
+            ["Append", "MenuW"].concat(),
+            ["Insert", "MenuItemW"].concat(),
+        ];
+        let files = [
+            "widget_menu.rs",
+            "widgets.rs",
+            "fluent_menu/mod.rs",
+            "fluent_menu/window.rs",
+        ];
+        let sources = [
+            include_str!("widget_menu.rs"),
+            include_str!("widgets.rs"),
+            include_str!("fluent_menu/mod.rs"),
+            include_str!("fluent_menu/window.rs"),
+        ];
+        for (file, source) in files.into_iter().zip(sources) {
+            for call in &calls {
+                assert!(!source.contains(call.as_str()), "{file} calls {call}");
+            }
+        }
     }
 }

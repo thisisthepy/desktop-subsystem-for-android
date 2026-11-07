@@ -1,0 +1,297 @@
+<!--
+    The APK Installer's window, laid out as App Installer lays out an app package: the question
+    large at the top left with the package, publisher, version and source under it, the app's
+    icon in its tile at the top right, what it asks for under "Capabilities", any notice, and a
+    bottom row with "Launch when ready" on the left and the buttons on the right. While it
+    installs, the row's left side shows the progress bar and what is happening; then the window
+    says how it went.
+-->
+<ui:FluentWindow
+    x:Class="Dsa.ApkInstaller.InstallerWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    xmlns:local="clr-namespace:Dsa.ApkInstaller"
+    Width="600"
+    Height="580"
+    MinWidth="480"
+    MinHeight="420"
+    FontFamily="{StaticResource TextFont}"
+    WindowStartupLocation="CenterScreen"
+    ExtendsContentIntoTitleBar="True"
+    WindowBackdropType="Mica"
+    WindowCornerPreference="Round"
+    ResizeMode="CanMinimize"
+    AllowDrop="True"
+    AutomationProperties.AutomationId="ApkInstallWindow">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <ui:TitleBar x:Name="TitleBar" Grid.Row="0" Height="32" ShowMaximize="False" />
+
+        <Grid Grid.Row="1" Margin="{StaticResource ContentMargin}">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <!-- The app: the question and its lines on the left, its icon in a tile on the right. -->
+            <Grid x:Name="Header" Grid.Row="0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Margin="0,0,24,0" VerticalAlignment="Top">
+                    <TextBlock x:Name="HeroTitle" Style="{StaticResource AppNameText}"
+                               AutomationProperties.AutomationId="HeroTitle" />
+                    <!-- App Installer's lines: the labels in one column and the values in the
+                         next, one 20 px line each with nothing added between them. -->
+                    <Grid x:Name="DetailRows" Margin="0,4,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <TextBlock x:Name="PackageLabel" Grid.Row="0" Style="{StaticResource DetailLabel}" />
+                        <TextBlock x:Name="HeroPackage" Grid.Row="0" Grid.Column="1" Style="{StaticResource DetailLine}"
+                                   AutomationProperties.AutomationId="HeroPackage" />
+                        <TextBlock x:Name="PublisherLabel" Grid.Row="1" Style="{StaticResource DetailLabel}" />
+                        <TextBlock x:Name="PublisherText" Grid.Row="1" Grid.Column="1" Style="{StaticResource DetailLine}"
+                                   AutomationProperties.AutomationId="PublisherText" />
+                        <TextBlock x:Name="VersionLabel" Grid.Row="2" Style="{StaticResource DetailLabel}" />
+                        <TextBlock x:Name="VersionChip" Grid.Row="2" Grid.Column="1" Style="{StaticResource DetailLine}"
+                                   AutomationProperties.AutomationId="VersionChip" />
+                        <TextBlock x:Name="SourceLabel" Grid.Row="3" Style="{StaticResource DetailLabel}" />
+                        <TextBlock x:Name="SourceText" Grid.Row="3" Grid.Column="1" Style="{StaticResource DetailLine}"
+                                   AutomationProperties.AutomationId="SourceText" />
+                    </Grid>
+                </StackPanel>
+                <Border x:Name="AppIconTile" Grid.Column="1" VerticalAlignment="Top" CornerRadius="8"
+                        Width="{StaticResource AppIconTileSize}" Height="{StaticResource AppIconTileSize}"
+                        Background="{StaticResource AppIconTileBrush}">
+                    <Image x:Name="AppIcon" HorizontalAlignment="Center" VerticalAlignment="Center"
+                           Width="{StaticResource AppIconSize}" Height="{StaticResource AppIconSize}"
+                           RenderOptions.BitmapScalingMode="HighQuality"
+                           AutomationProperties.AutomationId="AppIcon">
+                        <Image.Clip>
+                            <RectangleGeometry Rect="0,0,84,84" RadiusX="12" RadiusY="12" />
+                        </Image.Clip>
+                    </Image>
+                </Border>
+            </Grid>
+
+            <Grid Grid.Row="1">
+                <!-- Reading the file. -->
+                <StackPanel x:Name="ReadingPanel" Margin="0,20,0,0">
+                    <TextBlock x:Name="ReadingText" Style="{StaticResource BodyText}" />
+                    <ProgressBar Margin="0,12,0,0" IsIndeterminate="True" />
+                </StackPanel>
+
+                <!-- What the app asks for: the first permissions and More; after More, all of them
+                     and the rest of what the file says, and Less, which folds them again, as App
+                     Installer's link does. All of it scrolls inside the window. -->
+                <DockPanel x:Name="DetailsPanel" Margin="0,20,0,0">
+                    <TextBlock x:Name="PermissionsHeader" DockPanel.Dock="Top" Style="{StaticResource BodyText}"
+                               Margin="0,0,0,4" AutomationProperties.AutomationId="PermissionsHeader" />
+                    <ScrollViewer x:Name="DetailsScroller" VerticalScrollBarVisibility="Auto" Focusable="False"
+                                  AutomationProperties.AutomationId="DetailsScroller">
+                        <StackPanel Margin="0,0,16,8">
+                            <ItemsControl x:Name="PermissionPreview" Focusable="False"
+                                          AutomationProperties.AutomationId="PermissionPreview">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="16" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="&#x2022;" Style="{StaticResource BodyText}"
+                                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                            <TextBlock Grid.Column="1" Text="{Binding Description}" Style="{StaticResource BodyText}"
+                                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                                       TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <ItemsControl x:Name="PermissionList" Focusable="False"
+                                          AutomationProperties.AutomationId="PermissionList">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="0,0,0,8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="16" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="&#x2022;" Style="{StaticResource BodyText}"
+                                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                            <StackPanel Grid.Column="1">
+                                                <TextBlock Text="{Binding Description}" Style="{StaticResource BodyText}"
+                                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                                <TextBlock Text="{Binding Name}" Style="{StaticResource CaptionText}"
+                                                           TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                                            </StackPanel>
+                                            <Border x:Name="SensitiveChip" Grid.Column="2" Margin="8,0,0,0" Padding="8,2"
+                                                    VerticalAlignment="Top" CornerRadius="4"
+                                                    Background="{DynamicResource ControlFillColorSecondaryBrush}">
+                                                <TextBlock Text="{DynamicResource SensitiveText}" Style="{StaticResource CaptionText}"
+                                                           TextWrapping="NoWrap" />
+                                            </Border>
+                                        </Grid>
+                                        <DataTemplate.Triggers>
+                                            <DataTrigger Binding="{Binding Sensitive}" Value="False">
+                                                <Setter TargetName="SensitiveChip" Property="Visibility" Value="Collapsed" />
+                                            </DataTrigger>
+                                        </DataTemplate.Triggers>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <!-- More and Less: one link, a button to the keyboard, and an expand
+                                 and collapse control to UI Automation. -->
+                            <local:ExpandLink x:Name="MoreLink" Style="{StaticResource LinkButton}" Margin="0,4,0,0"
+                                              Click="OnMore" AutomationProperties.AutomationId="MoreLink" />
+
+                            <StackPanel x:Name="ExpandedPanel" Margin="0,12,0,0"
+                                        AutomationProperties.AutomationId="ExpandedPanel">
+                                <ItemsControl x:Name="FactList" Focusable="False"
+                                              AutomationProperties.AutomationId="FactList">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="0,0,0,6">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="120" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="{Binding Name}" Style="{StaticResource CaptionText}" Margin="0,2,8,0" />
+                                                <TextBlock Grid.Column="1" Text="{Binding Value}" Style="{StaticResource BodyText}" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <TextBlock x:Name="TrademarkText" Style="{StaticResource CaptionText}" Margin="0,8,0,0"
+                                           AutomationProperties.AutomationId="TrademarkText" />
+                            </StackPanel>
+                        </StackPanel>
+                    </ScrollViewer>
+                </DockPanel>
+
+                <!-- Installed, or why not. -->
+                <Grid x:Name="ResultPanel" Margin="0,20,0,0" VerticalAlignment="Top">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <ui:SymbolIcon x:Name="ResultGlyph" Symbol="CheckmarkCircle24" Filled="True" FontSize="24"
+                                   VerticalAlignment="Top" Margin="0,0,12,0" />
+                    <StackPanel Grid.Column="1">
+                        <TextBlock x:Name="ResultTitle" Style="{StaticResource SectionHeader}" Margin="0,2,0,4"
+                                   TextWrapping="Wrap" AutomationProperties.AutomationId="ResultTitle" />
+                        <TextBlock x:Name="ResultText" Style="{StaticResource BodyText}"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   AutomationProperties.AutomationId="ResultText" />
+                    </StackPanel>
+                </Grid>
+            </Grid>
+
+            <!-- Notices: what installing does when it is more than a plain install, and why this
+                 PC may not run the app. Each is an icon on its title's line, and a title and
+                 text in one column. -->
+            <StackPanel x:Name="SummaryPanel" Grid.Row="2">
+                <Border x:Name="SummaryBox" Style="{StaticResource NoticeBox}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="28" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Border Height="20" VerticalAlignment="Top" HorizontalAlignment="Left">
+                            <ui:SymbolIcon x:Name="SummaryBadge" Filled="True" FontSize="16" VerticalAlignment="Center" />
+                        </Border>
+                        <StackPanel Grid.Column="1">
+                            <TextBlock x:Name="SummaryTitle" Style="{StaticResource NoticeTitle}"
+                                       AutomationProperties.AutomationId="SummaryTitle" />
+                            <TextBlock x:Name="SummaryText" Style="{StaticResource BodyText}"
+                                       AutomationProperties.AutomationId="SummaryText" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+                <Border x:Name="CompatibilityBox" Style="{StaticResource NoticeBox}"
+                        Background="{DynamicResource InfoBarWarningSeverityBackgroundBrush}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="28" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Border Height="20" VerticalAlignment="Top" HorizontalAlignment="Left">
+                            <ui:SymbolIcon x:Name="CompatibilityBadge" Symbol="Warning24" Filled="True" FontSize="16"
+                                           VerticalAlignment="Center"
+                                           Foreground="{DynamicResource SystemFillColorCautionBrush}" />
+                        </Border>
+                        <StackPanel Grid.Column="1">
+                            <TextBlock x:Name="CompatibilityTitle" Style="{StaticResource NoticeTitle}"
+                                       AutomationProperties.AutomationId="CompatibilityTitle" />
+                            <TextBlock x:Name="CompatibilityText" Style="{StaticResource BodyText}"
+                                       AutomationProperties.AutomationId="CompatibilityWarning" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+            </StackPanel>
+        </Grid>
+
+        <!-- The bottom row: "Launch when ready", or the progress while installing, on the left;
+             the buttons on the right, the main one first, all of one width. -->
+        <Border Grid.Row="2" x:Name="Footer" Padding="{StaticResource FooterPadding}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <CheckBox x:Name="LaunchWhenReady" Grid.Column="0" VerticalAlignment="Center" IsChecked="True"
+                          AutomationProperties.AutomationId="LaunchWhenReady" />
+
+                <StackPanel x:Name="ProgressPanel" Grid.Column="0" Margin="0,0,24,0" VerticalAlignment="Center">
+                    <DockPanel>
+                        <TextBlock x:Name="ProgressPercent" DockPanel.Dock="Right" Style="{StaticResource BodyText}"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   Typography.NumeralAlignment="Tabular" TextWrapping="NoWrap"
+                                   AutomationProperties.AutomationId="ProgressPercent" />
+                        <TextBlock x:Name="ProgressTitle" Style="{StaticResource BodyText}" TextWrapping="NoWrap"
+                                   TextTrimming="CharacterEllipsis" AutomationProperties.AutomationId="ProgressTitle" />
+                    </DockPanel>
+                    <ProgressBar x:Name="Progress" Margin="0,8,0,0" Maximum="100"
+                                 AutomationProperties.AutomationId="ProgressBar" />
+                    <TextBlock x:Name="ProgressDetail" Style="{StaticResource CaptionText}" Margin="0,6,0,0"
+                               TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
+                               AutomationProperties.AutomationId="ProgressDetail" />
+                </StackPanel>
+
+                <UniformGrid x:Name="Buttons" Grid.Column="1" Rows="1" HorizontalAlignment="Right"
+                             VerticalAlignment="Center">
+                    <ui:Button x:Name="InstallButton" Appearance="Primary" Margin="8,0,0,0"
+                               MinWidth="{StaticResource PrimaryButtonMinWidth}"
+                               Click="OnInstall" AutomationProperties.AutomationId="InstallButton" />
+                    <ui:Button x:Name="OpenButton" Appearance="Primary" Margin="8,0,0,0"
+                               MinWidth="{StaticResource PrimaryButtonMinWidth}"
+                               Click="OnOpen" AutomationProperties.AutomationId="OpenButton" />
+                    <ui:Button x:Name="CancelButton" Margin="8,0,0,0" MinWidth="{StaticResource PrimaryButtonMinWidth}"
+                               Click="OnCancel" AutomationProperties.AutomationId="CancelButton" />
+                    <ui:Button x:Name="CloseButton" Margin="8,0,0,0" MinWidth="{StaticResource PrimaryButtonMinWidth}"
+                               Click="OnClose" AutomationProperties.AutomationId="CloseButton" />
+                </UniformGrid>
+            </Grid>
+        </Border>
+    </Grid>
+</ui:FluentWindow>

@@ -1,9 +1,16 @@
 //! The device identity a user chooses, and how it reaches the guest at boot.
 
+use std::sync::Arc;
+
 use dsa_host_core::bootconfig;
+use dsa_host_core::computer_identity::{
+    from_smbios, is_placeholder, same_family, soc_model_of, tidy_manufacturer, ComputerIdentity,
+    ComputerInfo, Origin,
+};
 use dsa_host_core::device_identity::{
-    append_overlay, ramdisk_overlay, split_fingerprint, DeviceIdentity, DeviceIdentityStore, Field,
-    FileDeviceIdentities, ImageBuild, MemoryDeviceIdentities, RAMDISK_PROP_PATH,
+    append_overlay, ramdisk_overlay, split_fingerprint, BootIdentity, DeviceIdentity,
+    DeviceIdentityStore, Field, FileDeviceIdentities, IdentityReport, ImageBuild,
+    MemoryDeviceIdentities, RAMDISK_PROP_PATH,
 };
 
 fn build() -> ImageBuild {
@@ -12,6 +19,69 @@ fn build() -> ImageBuild {
         id: "BP2A.250605.031".into(),
         incremental: "13690935.dsa0123456789ab".into(),
         tags: "release-keys".into(),
+        arch: "x86_64".into(),
+    }
+}
+
+/// A computer that says nothing: every default is DSA's own.
+fn dsa() -> ComputerIdentity {
+    ComputerIdentity::dsa()
+}
+
+/// The firmware of the Galaxy Book4 Ultra this was written on: the sale model number is the
+/// baseboard product, and the system SKU (BOOK4U-G72AG) is not read.
+fn galaxy_book() -> ComputerInfo {
+    ComputerInfo {
+        system_manufacturer: "SAMSUNG ELECTRONICS CO., LTD.".into(),
+        system_product: "960XGL".into(),
+        system_family: "Galaxy Book4 Ultra".into(),
+        system_version: "P10ALX".into(),
+        baseboard_product: "NT960XGP-G72AG".into(),
+        computer_name: "BREW-BOOK".into(),
+        cpu_vendor: "GenuineIntel".into(),
+        cpu_name: "Intel(R) Core(TM) Ultra 7 155H".into(),
+    }
+}
+
+/// A Dell whose model is only in the system product; its baseboard product is a part number.
+fn dell() -> ComputerInfo {
+    ComputerInfo {
+        system_manufacturer: "Dell Inc.".into(),
+        system_product: "XPS 13 9340".into(),
+        system_family: "XPS".into(),
+        system_version: "".into(),
+        baseboard_product: "0KCWT7".into(),
+        computer_name: "DESKTOP-4F2K9QL".into(),
+        cpu_vendor: "GenuineIntel".into(),
+        cpu_name: "Intel(R) Core(TM) Ultra 7 155H".into(),
+    }
+}
+
+/// A Lenovo whose family is a placeholder and whose version is the name it is sold under.
+fn lenovo() -> ComputerInfo {
+    ComputerInfo {
+        system_manufacturer: "LENOVO".into(),
+        system_product: "21HMCTO1WW".into(),
+        system_family: "To be filled by O.E.M.".into(),
+        system_version: "ThinkPad X1 Carbon Gen 11".into(),
+        baseboard_product: "21HMCTO1WW".into(),
+        computer_name: "x1".into(),
+        cpu_vendor: "AuthenticAMD".into(),
+        cpu_name: "AMD Ryzen 7 7840U w/ Radeon 780M Graphics".into(),
+    }
+}
+
+/// A board whose maker left every field with a placeholder.
+fn placeholders() -> ComputerInfo {
+    ComputerInfo {
+        system_manufacturer: "To be filled by O.E.M.".into(),
+        system_product: "System Product Name".into(),
+        system_family: "Default string".into(),
+        system_version: "O.E.M.".into(),
+        baseboard_product: "None".into(),
+        computer_name: "  ".into(),
+        cpu_vendor: "".into(),
+        cpu_name: "Default string".into(),
     }
 }
 
@@ -61,7 +131,7 @@ fn property(text: &str, key: &str) -> Option<String> {
 
 #[test]
 fn fr17_the_defaults_are_dsas_own() {
-    let e = DeviceIdentity::default().effective(Some(&build()));
+    let e = DeviceIdentity::default().effective(Some(&build()), &dsa());
     assert_eq!(e.manufacturer, "thisisthepy");
     assert_eq!(e.brand, "DSA");
     assert_eq!(e.model, "Desktop Subsystem for Android");
@@ -75,18 +145,361 @@ fn fr17_the_defaults_are_dsas_own() {
 }
 
 #[test]
-fn fr17_an_unchanged_identity_adds_nothing_to_the_boot() {
+fn fr17_every_boot_carries_the_identity_with_the_computers_values() {
+    let props =
+        DeviceIdentity::default().boot_properties(Some(&build()), &galaxy_book().identity());
     assert_eq!(
-        DeviceIdentity::default().boot_properties(Some(&build())),
-        None
+        property(&props, "ro.product.manufacturer").as_deref(),
+        Some("Samsung")
     );
-    // Setting a value to its default is no change either.
-    let mut identity = DeviceIdentity::default();
-    identity
-        .set(Field::Model, "Desktop Subsystem for Android")
-        .unwrap();
-    identity.set(Field::Brand, "DSA").unwrap();
-    assert!(identity.is_default());
+    assert_eq!(
+        property(&props, "ro.product.brand").as_deref(),
+        Some("Samsung")
+    );
+    assert_eq!(
+        property(&props, "ro.product.vendor.model").as_deref(),
+        Some("NT960XGP-G72AG")
+    );
+    assert_eq!(
+        property(&props, "ro.product.device").as_deref(),
+        Some("dsa_x86_64")
+    );
+    assert_eq!(
+        property(&props, "ro.product.name").as_deref(),
+        Some("dsa_x86_64")
+    );
+    assert_eq!(
+        property(&props, "ro.product.marketname").as_deref(),
+        Some("Galaxy Book4 Ultra")
+    );
+    assert_eq!(
+        property(&props, "ro.soc.manufacturer").as_deref(),
+        Some("Intel")
+    );
+    assert_eq!(
+        property(&props, "ro.soc.model").as_deref(),
+        Some("Core Ultra 7 155H")
+    );
+    assert_eq!(
+        property(&props, "ro.build.fingerprint").as_deref(),
+        Some("Samsung/dsa_x86_64/dsa_x86_64:16/BP2A.250605.031/13690935.dsa0123456789ab:user/release-keys")
+    );
+    // A computer that says nothing still gets the file, with DSA's values and no chip.
+    let props = DeviceIdentity::default().boot_properties(Some(&build()), &dsa());
+    assert_eq!(
+        property(&props, "ro.product.manufacturer").as_deref(),
+        Some("thisisthepy")
+    );
+    assert_eq!(
+        property(&props, "ro.product.model").as_deref(),
+        Some("Desktop Subsystem for Android")
+    );
+    assert_eq!(property(&props, "ro.soc.manufacturer"), None);
+    assert_eq!(property(&props, "ro.soc.model"), None);
+}
+
+#[test]
+fn fr17_an_arm64_image_is_dsa_arm64() {
+    let arm = ImageBuild {
+        arch: "arm64".into(),
+        ..build()
+    };
+    let e = DeviceIdentity::default().effective(Some(&arm), &dsa());
+    assert_eq!(e.device, "dsa_arm64");
+    assert_eq!(e.name, "dsa_arm64");
+    assert!(e.fingerprint.starts_with("DSA/dsa_arm64/dsa_arm64:16/"));
+    let manifest = serde_json::json!({
+        "arch": "arm64",
+        "identity": {"release": "16", "id": "B", "incremental": "1.dsaab", "tags": "release-keys"}
+    });
+    assert_eq!(
+        ImageBuild::from_manifest(&manifest)
+            .unwrap()
+            .default_device(),
+        "dsa_arm64"
+    );
+}
+
+#[test]
+fn fr17_this_pcs_firmware_gives_its_sale_model_and_name() {
+    let c = galaxy_book().identity();
+    assert_eq!(c.manufacturer.value, "Samsung");
+    assert_eq!(c.brand.value, "Samsung");
+    assert_eq!(c.model.value, "NT960XGP-G72AG");
+    assert_eq!(c.model_name.value, "Galaxy Book4 Ultra");
+    assert_eq!(c.device_name.value, "BREW-BOOK");
+    assert_eq!(c.soc_manufacturer.value, "Intel");
+    assert_eq!(c.soc_model.value, "Core Ultra 7 155H");
+    for derived in [
+        &c.manufacturer,
+        &c.brand,
+        &c.model,
+        &c.model_name,
+        &c.device_name,
+    ] {
+        assert_eq!(derived.origin, Origin::Computer);
+    }
+}
+
+#[test]
+fn fr17_a_model_only_in_the_system_product_is_taken_from_there() {
+    let c = dell().identity();
+    assert_eq!(c.manufacturer.value, "Dell");
+    assert_eq!(c.brand.value, "Dell");
+    assert_eq!(c.model.value, "XPS 13 9340");
+    assert_eq!(c.model_name.value, "XPS");
+    assert_eq!(c.device_name.value, "DESKTOP-4F2K9QL");
+}
+
+#[test]
+fn fr17_a_version_that_names_the_product_is_the_model_name() {
+    let c = lenovo().identity();
+    assert_eq!(c.manufacturer.value, "Lenovo");
+    assert_eq!(c.model.value, "21HMCTO1WW");
+    assert_eq!(c.model_name.value, "ThinkPad X1 Carbon Gen 11");
+    assert_eq!(c.soc_manufacturer.value, "AMD");
+    assert_eq!(c.soc_model.value, "Ryzen 7 7840U");
+}
+
+#[test]
+fn fr17_placeholders_and_empty_values_fall_back_to_dsas_own() {
+    for info in [placeholders(), ComputerInfo::default()] {
+        let c = info.identity();
+        assert_eq!(c.manufacturer, dsa().manufacturer);
+        assert_eq!(c.manufacturer.value, "thisisthepy");
+        assert_eq!(c.manufacturer.origin, Origin::Dsa);
+        assert_eq!(c.brand.value, "DSA");
+        assert_eq!(c.model.value, "Desktop Subsystem for Android");
+        assert_eq!(c.model_name.value, "Desktop Subsystem for Android");
+        assert_eq!(c.device_name.value, "");
+        assert_eq!(c.soc_manufacturer.value, "");
+        assert_eq!(c.soc_model.value, "");
+        // Android then names the device after its model.
+        let report = IdentityReport::new(&DeviceIdentity::default(), Some(&build()), &c);
+        assert_eq!(report.computer.device_name, "Desktop Subsystem for Android");
+        assert!(report.from_computer.is_empty());
+    }
+    // Each field falls back on its own: a known maker on a board with placeholders.
+    let c = ComputerInfo {
+        system_manufacturer: "Micro-Star International Co., Ltd.".into(),
+        ..placeholders()
+    }
+    .identity();
+    assert_eq!(c.manufacturer.value, "MSI");
+    assert_eq!(c.manufacturer.origin, Origin::Computer);
+    assert_eq!(c.model.origin, Origin::Dsa);
+    for placeholder in [
+        "To be filled by O.E.M.",
+        "Default string",
+        "System Product Name",
+        "O.E.M.",
+        "None",
+        "",
+        "   ",
+    ] {
+        assert!(is_placeholder(placeholder), "{placeholder:?}");
+    }
+    assert!(!is_placeholder("960XGL"));
+}
+
+#[test]
+fn fr17_manufacturers_lose_their_legal_suffixes() {
+    for (raw, tidy) in [
+        ("SAMSUNG ELECTRONICS CO., LTD.", "Samsung"),
+        ("Dell Inc.", "Dell"),
+        ("LENOVO", "Lenovo"),
+        ("HP Inc.", "HP"),
+        ("Hewlett-Packard", "HP"),
+        ("ASUSTeK COMPUTER INC.", "ASUS"),
+        ("Micro-Star International Co., Ltd.", "MSI"),
+        ("Acer", "Acer"),
+        ("Microsoft Corporation", "Microsoft"),
+        ("Apple Inc.", "Apple"),
+        ("Example Devices Co., Ltd.", "Example Devices"),
+        ("ACME CORPORATION", "Acme"),
+    ] {
+        assert_eq!(tidy_manufacturer(raw).as_deref(), Some(tidy), "{raw}");
+    }
+    // A brand has no spaces: a maker of two words brands with the first.
+    let c = ComputerInfo {
+        system_manufacturer: "Example Devices Co., Ltd.".into(),
+        ..ComputerInfo::default()
+    }
+    .identity();
+    assert_eq!(c.manufacturer.value, "Example Devices");
+    assert_eq!(c.brand.value, "Example");
+}
+
+#[test]
+fn fr17_the_baseboard_is_the_model_only_in_the_system_products_family() {
+    assert!(same_family("960XGL", "NT960XGP-G72AG"));
+    assert!(same_family("21HMCTO1WW", "21HMCTO1WW"));
+    assert!(!same_family("XPS 13 9340", "0KCWT7"));
+    assert!(!same_family("HP EliteBook 840 G10 Notebook PC", "8B41"));
+}
+
+#[test]
+fn fr17_the_chip_is_the_cpus_maker_and_model() {
+    for (vendor, name, maker, model) in [
+        (
+            "GenuineIntel",
+            "Intel(R) Core(TM) Ultra 7 155H",
+            "Intel",
+            "Core Ultra 7 155H",
+        ),
+        (
+            "AuthenticAMD",
+            "AMD Ryzen 7 7840U w/ Radeon 780M Graphics",
+            "AMD",
+            "Ryzen 7 7840U",
+        ),
+        ("Apple", "Apple M3", "Apple", "M3"),
+        (
+            "Qualcomm Technologies Inc",
+            "Snapdragon(R) X Elite - X1E78100 - Qualcomm(R) Oryon(TM) CPU",
+            "Qualcomm",
+            "Snapdragon X Elite",
+        ),
+        (
+            "GenuineIntel",
+            "13th Gen Intel(R) Core(TM) i7-1360P",
+            "Intel",
+            "Core i7-1360P",
+        ),
+        (
+            "GenuineIntel",
+            "Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz",
+            "Intel",
+            "Core i7-9750H",
+        ),
+        (
+            "AuthenticAMD",
+            "AMD Ryzen 9 5900X 12-Core Processor",
+            "AMD",
+            "Ryzen 9 5900X",
+        ),
+    ] {
+        let c = ComputerInfo {
+            cpu_vendor: vendor.into(),
+            cpu_name: name.into(),
+            ..ComputerInfo::default()
+        }
+        .identity();
+        assert_eq!(c.soc_manufacturer.value, maker, "{name}");
+        assert_eq!(c.soc_model.value, model, "{name}");
+    }
+    assert_eq!(soc_model_of(""), None);
+}
+
+#[test]
+fn fr17_the_users_choice_wins_over_the_computers_and_reset_restores_it() {
+    let computer = galaxy_book().identity();
+    let mut chosen = DeviceIdentity::default();
+    chosen.set(Field::Manufacturer, "thisisthepy").unwrap();
+    chosen.set(Field::Model, "My tablet").unwrap();
+    // DSA's own value typed on purpose is kept, as the default is the computer's.
+    assert!(!chosen.is_default());
+    let report = IdentityReport::new(&chosen, Some(&build()), &computer);
+    assert_eq!(report.effective.manufacturer, "thisisthepy");
+    assert_eq!(report.effective.model, "My tablet");
+    assert_eq!(report.effective.brand, "Samsung");
+    assert_eq!(report.defaults.model, "NT960XGP-G72AG");
+    assert_eq!(report.origin("model"), "computer");
+    assert_eq!(report.origin("device"), "dsa");
+    let props = chosen.boot_properties(Some(&build()), &computer);
+    assert_eq!(
+        property(&props, "ro.product.model").as_deref(),
+        Some("My tablet")
+    );
+    assert_eq!(
+        property(&props, "ro.product.manufacturer").as_deref(),
+        Some("thisisthepy")
+    );
+
+    chosen.reset(Field::Model);
+    chosen.reset(Field::Manufacturer);
+    let report = IdentityReport::new(&chosen, Some(&build()), &computer);
+    assert_eq!(report.effective.model, "NT960XGP-G72AG");
+    assert_eq!(report.effective.manufacturer, "Samsung");
+    // A form factor typed as its default is still no change.
+    chosen.set(Field::Characteristics, "tablet").unwrap();
+    assert!(chosen.is_default());
+}
+
+#[test]
+fn fr17_each_boot_reads_the_computer_and_keeps_its_device_name() {
+    let store = Arc::new(MemoryDeviceIdentities::default());
+    let name = Arc::new(std::sync::Mutex::new("BREW-BOOK".to_string()));
+    let read = {
+        let name = name.clone();
+        Arc::new(move || ComputerInfo {
+            computer_name: name.lock().unwrap().clone(),
+            ..galaxy_book()
+        })
+    };
+    let boot = BootIdentity::new(store.clone(), "me", read);
+    assert_eq!(boot.device_name(), None, "no boot yet");
+    let props = boot.boot_properties(Some(&build()));
+    assert_eq!(
+        property(&props, "ro.product.model").as_deref(),
+        Some("NT960XGP-G72AG")
+    );
+    assert_eq!(boot.device_name().as_deref(), Some("BREW-BOOK"));
+    // The user renames the computer: the next start follows.
+    *name.lock().unwrap() = "Living room".into();
+    boot.boot_properties(Some(&build()));
+    assert_eq!(boot.device_name().as_deref(), Some("Living room"));
+    // The user's choice is read at each boot too.
+    let mut mine = DeviceIdentity::default();
+    mine.set(Field::Model, "My tablet").unwrap();
+    store.set("me", &mine).unwrap();
+    let props = boot.boot_properties(Some(&build()));
+    assert_eq!(
+        property(&props, "ro.product.model").as_deref(),
+        Some("My tablet")
+    );
+}
+
+#[test]
+fn fr17_the_firmware_tables_give_the_system_board_and_processor() {
+    // SMBIOS: type 1 (system), type 2 (baseboard), type 4 (processor), type 127 (end).
+    let mut tables = Vec::new();
+    let mut system = vec![1u8, 0x1b, 0, 1, 1, 2, 3, 0];
+    system.resize(0x1b, 0);
+    system[0x19] = 0; // no SKU
+    system[0x1a] = 4;
+    tables.extend(&system);
+    tables.extend(b"SAMSUNG ELECTRONICS CO., LTD.\0960XGL\0P10ALX\0Galaxy Book4 Ultra\0\0");
+    tables.extend([2u8, 8, 0, 2, 1, 2, 0, 0]);
+    tables.extend(b"SAMSUNG ELECTRONICS CO., LTD.\0NT960XGP-G72AG\0\0");
+    let mut processor = vec![4u8, 0x1a, 0, 3];
+    processor.resize(0x1a, 0);
+    processor[0x07] = 1;
+    processor[0x10] = 2;
+    tables.extend(&processor);
+    tables.extend(b"Intel(R) Corporation\0Intel(R) Core(TM) Ultra 7 155H\0\0");
+    tables.extend([127u8, 4, 0, 4, 0, 0]);
+    let info = from_smbios(&tables);
+    assert_eq!(info.system_manufacturer, "SAMSUNG ELECTRONICS CO., LTD.");
+    assert_eq!(info.system_product, "960XGL");
+    assert_eq!(info.system_version, "P10ALX");
+    assert_eq!(info.system_family, "Galaxy Book4 Ultra");
+    assert_eq!(info.baseboard_product, "NT960XGP-G72AG");
+    assert_eq!(info.cpu_name, "Intel(R) Core(TM) Ultra 7 155H");
+    assert_eq!(info.identity().soc_manufacturer.value, "Intel");
+    // A table cut short reads what it can and does not panic.
+    let cut = from_smbios(&tables[..20]);
+    assert_eq!(cut.system_product, "");
+    // The registry's values come first; the tables fill only what it lacks.
+    let mut registry = ComputerInfo {
+        system_manufacturer: "Samsung Electronics".into(),
+        system_family: "Default string".into(),
+        ..ComputerInfo::default()
+    };
+    registry.fill_from(&info);
+    assert_eq!(registry.system_manufacturer, "Samsung Electronics");
+    assert_eq!(registry.system_family, "Galaxy Book4 Ultra");
+    assert_eq!(registry.baseboard_product, "NT960XGP-G72AG");
 }
 
 #[test]
@@ -98,9 +511,7 @@ fn fr17_a_changed_identity_reaches_every_partition() {
     identity.set(Field::Device, "ex_tab").unwrap();
     identity.set(Field::Name, "ex_tab_x86").unwrap();
     identity.set(Field::Characteristics, "phone").unwrap();
-    let props = identity
-        .boot_properties(Some(&build()))
-        .expect("a property file");
+    let props = identity.boot_properties(Some(&build()), &dsa());
 
     assert_eq!(
         property(&props, "ro.product.model").as_deref(),
@@ -159,7 +570,7 @@ fn fr17_fingerprint_parts_and_the_whole_string_combine_as_set() {
     identity.set(Field::FingerprintType, "userdebug").unwrap();
     identity.set(Field::FingerprintTags, "dev-keys").unwrap();
     identity.set(Field::FingerprintRelease, "15").unwrap();
-    let e = identity.effective(Some(&build()));
+    let e = identity.effective(Some(&build()), &dsa());
     assert_eq!(
         e.fingerprint,
         "DSA/dsa_x86_64/dsa_x86_64:15/BP2A.250605.031/13690935.dsa0123456789ab:userdebug/dev-keys"
@@ -173,7 +584,7 @@ fn fr17_fingerprint_parts_and_the_whole_string_combine_as_set() {
             "google/oriole/oriole:14/UQ1A.240105.004/11206848:user/release-keys",
         )
         .unwrap();
-    let props = identity.boot_properties(Some(&build())).unwrap();
+    let props = identity.boot_properties(Some(&build()), &dsa());
     assert_eq!(
         property(&props, "ro.build.fingerprint").as_deref(),
         Some("google/oriole/oriole:14/UQ1A.240105.004/11206848:user/release-keys")
@@ -185,7 +596,7 @@ fn fr17_fingerprint_parts_and_the_whole_string_combine_as_set() {
     // Without the image's build, only a whole string can be a fingerprint.
     let mut parts_only = DeviceIdentity::default();
     parts_only.set(Field::Brand, "example").unwrap();
-    let props = parts_only.boot_properties(None).unwrap();
+    let props = parts_only.boot_properties(None, &dsa());
     assert_eq!(property(&props, "ro.build.fingerprint"), None);
     assert_eq!(
         property(&props, "ro.product.brand").as_deref(),
@@ -327,6 +738,7 @@ fn fr17_the_identity_file_goes_in_the_initrd_before_the_bootconfig() {
 fn fr17_the_image_build_comes_from_image_json() {
     let manifest: serde_json::Value = serde_json::json!({
         "version": "17.0.0",
+        "arch": "x86_64",
         "identity": {"release": "16", "id": "BP2A.250605.031",
                      "incremental": "13690935.dsa0123456789ab", "tags": "release-keys"}
     });

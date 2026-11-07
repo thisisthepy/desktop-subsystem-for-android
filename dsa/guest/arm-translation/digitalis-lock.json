@@ -1,0 +1,1003 @@
+{
+  "comment": "The pins the translator build (.github/workflows/translator.yml) is made from: per Digitalis branch, the manifest and AOSP superproject commits, and every project the build fetches, each at an exact commit. Refresh with dsa/guest/arm-translation/update-lock.py.",
+  "versions": [
+    {
+      "android": "android17",
+      "android_major": 17,
+      "manifest": {
+        "url": "https://github.com/DigitalisX64/manifest",
+        "branch": "android17",
+        "commit": "9cd175075230ef2cd775ceae412ed36505083a16"
+      },
+      "projects": [
+        {
+          "path": "build/make",
+          "name": "platform/build",
+          "url": "https://android.googlesource.com/platform/build",
+          "commit": "5ce6f787337d0223710bf7d4a16dbe6d2a35f777",
+          "linkfiles": [
+            {
+              "src": "CleanSpec.mk",
+              "dest": "build/CleanSpec.mk"
+            },
+            {
+              "src": "buildspec.mk.default",
+              "dest": "build/buildspec.mk.default"
+            },
+            {
+              "src": "core",
+              "dest": "build/core"
+            },
+            {
+              "src": "envsetup.sh",
+              "dest": "build/envsetup.sh"
+            },
+            {
+              "src": "target",
+              "dest": "build/target"
+            },
+            {
+              "src": "tools",
+              "dest": "build/tools"
+            }
+          ]
+        },
+        {
+          "path": "build/blueprint",
+          "name": "platform/build/blueprint",
+          "url": "https://android.googlesource.com/platform/build/blueprint",
+          "commit": "7f2058de8155b05ea3c3f8317d33bfe732cacf8b"
+        },
+        {
+          "path": "build/soong",
+          "name": "platform/build/soong",
+          "url": "https://android.googlesource.com/platform/build/soong",
+          "commit": "6722dd8833db7482df1a2543ca3fcf67ddf0f7b1",
+          "linkfiles": [
+            {
+              "src": "root.bp",
+              "dest": "Android.bp"
+            },
+            {
+              "src": "bootstrap.bash",
+              "dest": "bootstrap.bash"
+            }
+          ]
+        },
+        {
+          "path": "build/release",
+          "name": "platform/build/release",
+          "url": "https://android.googlesource.com/platform/build/release",
+          "commit": "c85f4aebe46714235599a9bd6430a0fe30c6e8d5"
+        },
+        {
+          "path": "prebuilts/build-tools",
+          "cone": [
+            "common",
+            "linux-x86",
+            "path",
+            "sysroots"
+          ],
+          "name": "platform/prebuilts/build-tools",
+          "url": "https://android.googlesource.com/platform/prebuilts/build-tools",
+          "commit": "9b6c8c6a2f582a9d7817fd8275c8014959c60cc4"
+        },
+        {
+          "path": "prebuilts/clang/host/linux-x86",
+          "cone": [
+            "soong",
+            "{clang}",
+            "clang-stable",
+            "llvm-binutils-stable"
+          ],
+          "name": "platform/prebuilts/clang/host/linux-x86",
+          "url": "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86",
+          "commit": "29182889399818f97baa65ea238c80e8117981eb"
+        },
+        {
+          "path": "prebuilts/gcc/linux-x86/host/x86_64-linux-glibc2.17-4.8",
+          "name": "platform/prebuilts/gcc/linux-x86/host/x86_64-linux-glibc2.17-4.8",
+          "url": "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/host/x86_64-linux-glibc2.17-4.8",
+          "commit": "ae37c9849d97a20b97ff5ce93a5b171c6d5d02ab"
+        },
+        {
+          "path": "prebuilts/go/linux-x86",
+          "name": "platform/prebuilts/go/linux-x86",
+          "url": "https://android.googlesource.com/platform/prebuilts/go/linux-x86",
+          "commit": "05bc4bad6bdd9e5615c147c54e6f1a53bf04c375"
+        },
+        {
+          "path": "prebuilts/jdk/jdk21",
+          "cone": [
+            "linux-x86"
+          ],
+          "name": "platform/prebuilts/jdk/jdk21",
+          "url": "https://android.googlesource.com/platform/prebuilts/jdk/jdk21",
+          "commit": "ef5bcc92586b839ae3dbacc154127092fa4002ec"
+        },
+        {
+          "path": "external/golang-protobuf",
+          "name": "platform/external/golang-protobuf",
+          "url": "https://android.googlesource.com/platform/external/golang-protobuf",
+          "commit": "fcb969a6e0df55f1460721e1b9c4f2c4d2b5a47f"
+        },
+        {
+          "path": "external/starlark-go",
+          "name": "platform/external/starlark-go",
+          "url": "https://android.googlesource.com/platform/external/starlark-go",
+          "commit": "4947cdc739c985f6d86941e22894f5cefe7c9e9a"
+        },
+        {
+          "path": "external/go-cmp",
+          "name": "platform/external/go-cmp",
+          "url": "https://android.googlesource.com/platform/external/go-cmp",
+          "commit": "2f92873cfcd27cbe5efa168d8399038980aef6be"
+        },
+        {
+          "path": "system/tools/aidl",
+          "name": "platform/system/tools/aidl",
+          "url": "https://android.googlesource.com/platform/system/tools/aidl",
+          "commit": "9a94664f74536bf28010207fd1804b04c6435e2c"
+        },
+        {
+          "path": "system/tools/hidl",
+          "name": "platform/system/tools/hidl",
+          "url": "https://android.googlesource.com/platform/system/tools/hidl",
+          "commit": "5d0e05e6535fea94a674a359102bdd42944714f4"
+        },
+        {
+          "path": "system/tools/xsdc",
+          "name": "platform/system/tools/xsdc",
+          "url": "https://android.googlesource.com/platform/system/tools/xsdc",
+          "commit": "f1f0c793dc404e716ac73beb1a8bef9cef97a40d"
+        },
+        {
+          "path": "frameworks/libs/binary_translation",
+          "name": "platform_frameworks_libs_binary_translation",
+          "url": "https://github.com/DigitalisX64/platform_frameworks_libs_binary_translation",
+          "commit": "abefbe2b16006f76e05ddceb920e8c758cf7b318"
+        },
+        {
+          "path": "frameworks/libs/native_bridge_support",
+          "name": "platform/frameworks/libs/native_bridge_support",
+          "url": "https://android.googlesource.com/platform/frameworks/libs/native_bridge_support",
+          "commit": "3d6ed1bcc2f0be54f92cf40458253647e8891176"
+        },
+        {
+          "path": "bionic",
+          "name": "platform/bionic",
+          "url": "https://android.googlesource.com/platform/bionic",
+          "commit": "06356e41c5ed7b12220b24c05ba4fdb873b126a7",
+          "exclude": [
+            "apex/Android.bp"
+          ]
+        },
+        {
+          "path": "external/arm-optimized-routines",
+          "name": "platform/external/arm-optimized-routines",
+          "url": "https://android.googlesource.com/platform/external/arm-optimized-routines",
+          "commit": "498b3de1a06e8cd87b2f9d49d1d8a23ebba5cc5a"
+        },
+        {
+          "path": "external/gwp_asan",
+          "name": "platform/external/gwp_asan",
+          "url": "https://android.googlesource.com/platform/external/gwp_asan",
+          "commit": "54826e96fc883088ac6cfc80240c094e671d6e24"
+        },
+        {
+          "path": "external/jemalloc_new",
+          "name": "platform/external/jemalloc_new",
+          "url": "https://android.googlesource.com/platform/external/jemalloc_new",
+          "commit": "ea1b5aa6741805a9464a2ee9b5716bcd1516b56e"
+        },
+        {
+          "path": "external/llvm-libc",
+          "name": "platform/external/llvm-libc",
+          "url": "https://android.googlesource.com/platform/external/llvm-libc",
+          "commit": "95e08d1d4ccefa41921bc00a369008f7618b7101"
+        },
+        {
+          "path": "external/scudo",
+          "name": "platform/external/scudo",
+          "url": "https://android.googlesource.com/platform/external/scudo",
+          "commit": "15715589eebe155c799ce6fe27005bc8775b86ad"
+        },
+        {
+          "path": "external/compiler-rt",
+          "cone": [
+            "lib/builtins",
+            "lib/cfi"
+          ],
+          "name": "platform/external/compiler-rt",
+          "url": "https://android.googlesource.com/platform/external/compiler-rt",
+          "commit": "a36a1bcac7ec7ac9be29d8b0b5e669d53f7886f7"
+        },
+        {
+          "path": "external/libcxx",
+          "name": "platform/external/libcxx",
+          "url": "https://android.googlesource.com/platform/external/libcxx",
+          "commit": "88894a62bb97313ed9bf79a546f1486de4b2e723"
+        },
+        {
+          "path": "external/libcxxabi",
+          "name": "platform/external/libcxxabi",
+          "url": "https://android.googlesource.com/platform/external/libcxxabi",
+          "commit": "84450eba5a24fe5b7df77ed1307bfada05b14dc7"
+        },
+        {
+          "path": "external/fmtlib",
+          "name": "platform/external/fmtlib",
+          "url": "https://android.googlesource.com/platform/external/fmtlib",
+          "commit": "e3bef0ad2e9d4ea38ba3b4b2b59e0514f7025fed"
+        },
+        {
+          "path": "external/googletest",
+          "name": "platform/external/googletest",
+          "url": "https://android.googlesource.com/platform/external/googletest",
+          "commit": "9bcfc87429e9a9e02ccf2b8424b748f05c4842a5"
+        },
+        {
+          "path": "external/jsoncpp",
+          "name": "platform/external/jsoncpp",
+          "url": "https://android.googlesource.com/platform/external/jsoncpp",
+          "commit": "97cca484243e0dadc1da054e63823a5ce7478e54"
+        },
+        {
+          "path": "external/zlib",
+          "name": "platform/external/zlib",
+          "url": "https://android.googlesource.com/platform/external/zlib",
+          "commit": "8731e6760935ad5289fd64c37d28155a0fa289e3"
+        },
+        {
+          "path": "external/vulkan-headers",
+          "name": "platform/external/vulkan-headers",
+          "url": "https://android.googlesource.com/platform/external/vulkan-headers",
+          "commit": "ee4343a1f27d9faca189b9ac2c064254e23ba2e2"
+        },
+        {
+          "path": "hardware/libhardware",
+          "name": "platform/hardware/libhardware",
+          "url": "https://android.googlesource.com/platform/hardware/libhardware",
+          "commit": "97ee3e33ec5ba48c0eca8341ed377ac4497a0678"
+        },
+        {
+          "path": "libnativehelper",
+          "name": "platform/libnativehelper",
+          "url": "https://android.googlesource.com/platform/libnativehelper",
+          "commit": "5b63a7e308ca88c5c4a2a74dfda9c73ed17cfebb"
+        },
+        {
+          "path": "system/core",
+          "name": "platform/system/core",
+          "url": "https://android.googlesource.com/platform/system/core",
+          "commit": "545d2487e38192a2ce25040897ced877cf6b4f53"
+        },
+        {
+          "path": "system/libbase",
+          "name": "platform/system/libbase",
+          "url": "https://android.googlesource.com/platform/system/libbase",
+          "commit": "fef4173e19d97cd4b4fc09a06bccbf800d0d3937"
+        },
+        {
+          "path": "system/libprocinfo",
+          "name": "platform/system/libprocinfo",
+          "url": "https://android.googlesource.com/platform/system/libprocinfo",
+          "commit": "b58259e79c58deb1132e11d74ea90a2dc441d84f"
+        },
+        {
+          "path": "system/libziparchive",
+          "name": "platform/system/libziparchive",
+          "url": "https://android.googlesource.com/platform/system/libziparchive",
+          "commit": "bdd41f9c99400f241363b035eb64ad3d5f063c82"
+        },
+        {
+          "path": "system/logging",
+          "name": "platform/system/logging",
+          "url": "https://android.googlesource.com/platform/system/logging",
+          "commit": "d35ba620451b28512f46ebb5421f783fd77968d5"
+        },
+        {
+          "path": "art",
+          "patterns": [
+            "/openjdkjvmti/include/",
+            "!Android.bp",
+            "!Android.mk",
+            "!*.go"
+          ],
+          "name": "platform/art",
+          "url": "https://android.googlesource.com/platform/art",
+          "commit": "b753cf97923c3695338d21466fa14c57b480a59a"
+        },
+        {
+          "path": "frameworks/av",
+          "patterns": [
+            "/camera/ndk/include/",
+            "/media/ndk/include/",
+            "/media/libaaudio/include/",
+            "!Android.bp",
+            "!Android.mk",
+            "!*.go"
+          ],
+          "name": "platform/frameworks/av",
+          "url": "https://android.googlesource.com/platform/frameworks/av",
+          "commit": "475269ec44acec82792be6b01fb8e16357d4d2c8"
+        },
+        {
+          "path": "frameworks/base",
+          "patterns": [
+            "/core/jni/include/",
+            "/media/native/midi/include/",
+            "!Android.bp",
+            "!Android.mk",
+            "!*.go"
+          ],
+          "name": "platform/frameworks/base",
+          "url": "https://android.googlesource.com/platform/frameworks/base",
+          "commit": "94b4c163b7dfe5ce3607f7bb8456f9573f7de57d"
+        },
+        {
+          "path": "frameworks/native",
+          "patterns": [
+            "/include/",
+            "/opengl/include/",
+            "/vulkan/include/",
+            "/libs/arect/include/",
+            "/libs/nativebase/include/",
+            "/libs/nativewindow/include/",
+            "/libs/binder/ndk/include_cpp/",
+            "/libs/binder/ndk/include_ndk/",
+            "/libs/binder/ndk/include_platform/",
+            "!Android.bp",
+            "!Android.mk",
+            "!*.go"
+          ],
+          "name": "platform/frameworks/native",
+          "url": "https://android.googlesource.com/platform/frameworks/native",
+          "commit": "ae266dcb706d083868578cfedce381ef44488a07"
+        },
+        {
+          "path": "frameworks/wilhelm",
+          "patterns": [
+            "/include/",
+            "!Android.bp",
+            "!Android.mk",
+            "!*.go"
+          ],
+          "name": "platform/frameworks/wilhelm",
+          "url": "https://android.googlesource.com/platform/frameworks/wilhelm",
+          "commit": "cbc8f246cd0c18d3c286ab39620846badd0676fb"
+        },
+        {
+          "path": "digitalis",
+          "patterns": [
+            "/LICENSE",
+            "/README.md"
+          ],
+          "name": "digitalis",
+          "url": "https://github.com/DigitalisX64/digitalis",
+          "commit": "65e242e3898be362f6160a353297a50d5430b6dc",
+          "linkfiles": [
+            {
+              "src": "CLAUDE.md",
+              "dest": "CLAUDE.md"
+            },
+            {
+              "src": ".claude",
+              "dest": ".claude"
+            }
+          ]
+        },
+        {
+          "path": "external/pogreb",
+          "name": "platform/external/pogreb",
+          "url": "https://android.googlesource.com/platform/external/pogreb",
+          "commit": "46b62444a3e31bf834331a78234deedee386ad88"
+        },
+        {
+          "path": "system/media",
+          "cone": [
+            "audio"
+          ],
+          "name": "platform/system/media",
+          "url": "https://android.googlesource.com/platform/system/media",
+          "commit": "440eb272fd3da0ca7bdae932e61e7fd9be1fd324"
+        },
+        {
+          "path": "system/timezone",
+          "cone": [
+            "output_data"
+          ],
+          "name": "platform/system/timezone",
+          "url": "https://android.googlesource.com/platform/system/timezone",
+          "commit": "cbd571efcf6b551ba83a31147ec7a06182f8ec31"
+        },
+        {
+          "path": "system/apex",
+          "patterns": [
+            "/Android.bp"
+          ],
+          "name": "platform/system/apex",
+          "url": "https://android.googlesource.com/platform/system/apex",
+          "commit": "ce2bb9f710183c864040401d859874b5723e44d8"
+        },
+        {
+          "path": "packages/modules/common",
+          "cone": [
+            "sdk"
+          ],
+          "name": "platform/packages/modules/common",
+          "url": "https://android.googlesource.com/platform/packages/modules/common",
+          "commit": "2c5d816b30e439bdfaf3a52a94e4ee8fbf6d739c"
+        },
+        {
+          "path": "external/google-highway",
+          "name": "platform/external/google-highway",
+          "url": "https://android.googlesource.com/platform/external/google-highway",
+          "commit": "94b90ab8cb9df9b3719a64751ea2fcb62caa3391"
+        },
+        {
+          "path": "system/librustutils",
+          "cone": [
+            "no_std"
+          ],
+          "name": "platform/system/librustutils",
+          "url": "https://android.googlesource.com/platform/system/librustutils",
+          "commit": "7fbb3e4aaf608e51eaa210cf6ba94df5cb782bbc"
+        },
+        {
+          "path": "prebuilts/rust-toolchain/linux-x86",
+          "cone": [
+            "{rust}"
+          ],
+          "name": "platform/prebuilts/rust-toolchain/linux-x86",
+          "url": "https://android.googlesource.com/platform/prebuilts/rust-toolchain/linux-x86",
+          "commit": "fa2b1777b1f5c0471bb54ad4026feb1f6e94ea70"
+        },
+        {
+          "path": "external/rust/android-crates-io",
+          "cone": [
+            "crates/displaydoc",
+            "crates/icu_casemap",
+            "crates/icu_casemap_data",
+            "crates/icu_collections",
+            "crates/icu_locale_core",
+            "crates/icu_properties",
+            "crates/icu_properties_data",
+            "crates/icu_provider",
+            "crates/litemap",
+            "crates/potential_utf",
+            "crates/proc-macro2",
+            "crates/quote",
+            "crates/serde",
+            "crates/serde_core",
+            "crates/serde_derive",
+            "crates/stable_deref_trait",
+            "crates/syn",
+            "crates/synstructure",
+            "crates/tinystr",
+            "crates/unicode-bidi",
+            "crates/unicode-ident",
+            "crates/writeable",
+            "crates/yoke",
+            "crates/yoke-derive",
+            "crates/zerofrom",
+            "crates/zerofrom-derive",
+            "crates/zerotrie",
+            "crates/zerovec",
+            "crates/zerovec-derive"
+          ],
+          "name": "platform/external/rust/android-crates-io",
+          "url": "https://android.googlesource.com/platform/external/rust/android-crates-io",
+          "commit": "1f5e95cd6e996995023c9c0f7df0f15a8a43269e"
+        },
+        {
+          "path": "toolchain/pgo-profiles",
+          "cone": [
+            "sampling"
+          ],
+          "name": "toolchain/pgo-profiles",
+          "url": "https://android.googlesource.com/toolchain/pgo-profiles",
+          "commit": "44bae3346df2d8657cde54a5ee069067d607e689"
+        }
+      ],
+      "superproject": {
+        "url": "https://android.googlesource.com/platform/superproject",
+        "branch": "android17-release",
+        "commit": "d6985d7ea38e602e9b1c94e2ebcbafacd7cc9892"
+      },
+      "aosp_branch": "android17-release"
+    },
+    {
+      "android": "android16",
+      "android_major": 16,
+      "manifest": {
+        "url": "https://github.com/DigitalisX64/manifest",
+        "branch": "android16",
+        "commit": "c04ff674ee0926fe79e690b20493c7b2f0e380b4"
+      },
+      "projects": [
+        {
+          "path": "build/make",
+          "name": "platform/build",
+          "url": "https://android.googlesource.com/platform/build",
+          "commit": "b815dded1eafbf06191a6ae306956bb6ed6fb415",
+          "linkfiles": [
+            {
+              "src": "CleanSpec.mk",
+              "dest": "build/CleanSpec.mk"
+            },
+            {
+              "src": "buildspec.mk.default",
+              "dest": "build/buildspec.mk.default"
+            },
+            {
+              "src": "core",
+              "dest": "build/core"
+            },
+            {
+              "src": "envsetup.sh",
+              "dest": "build/envsetup.sh"
+            },
+            {
+              "src": "target",
+              "dest": "build/target"
+            },
+            {
+              "src": "tools",
+              "dest": "build/tools"
+            }
+          ]
+        },
+        {
+          "path": "build/blueprint",
+          "name": "platform/build/blueprint",
+          "url": "https://android.googlesource.com/platform/build/blueprint",
+          "commit": "c39c8a4c103f1393f015a5befa7726f0c14c9bc2"
+        },
+        {
+          "path": "build/soong",
+          "name": "platform/build/soong",
+          "url": "https://android.googlesource.com/platform/build/soong",
+          "commit": "f389fa2a2a768a93bc99957e2288f3fbee032bff",
+          "linkfiles": [
+            {
+              "src": "root.bp",
+              "dest": "Android.bp"
+            },
+            {
+              "src": "bootstrap.bash",
+              "dest": "bootstrap.bash"
+            }
+          ]
+        },
+        {
+          "path": "build/release",
+          "name": "platform/build/release",
+          "url": "https://android.googlesource.com/platform/build/release",
+          "commit": "0998133091794b56253fd6bd5c33ed0e0e5bd9de"
+        },
+        {
+          "path": "prebuilts/build-tools",
+          "cone": [
+            "common",
+            "linux-x86",
+            "path",
+            "sysroots"
+          ],
+          "name": "platform/prebuilts/build-tools",
+          "url": "https://android.googlesource.com/platform/prebuilts/build-tools",
+          "commit": "412724a805835d89234d67c363f7ada7f5f8a67f"
+        },
+        {
+          "path": "prebuilts/clang/host/linux-x86",
+          "cone": [
+            "soong",
+            "{clang}",
+            "clang-stable",
+            "llvm-binutils-stable"
+          ],
+          "name": "platform/prebuilts/clang/host/linux-x86",
+          "url": "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86",
+          "commit": "9916fb51ccb914d62d35ad9a7b9b21d2ef046928"
+        },
+        {
+          "path": "prebuilts/gcc/linux-x86/host/x86_64-linux-glibc2.17-4.8",
+          "name": "platform/prebuilts/gcc/linux-x86/host/x86_64-linux-glibc2.17-4.8",
+          "url": "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/host/x86_64-linux-glibc2.17-4.8",
+          "commit": "42526331f8063728da346ded09bf59e8d8a98556"
+        },
+        {
+          "path": "prebuilts/go/linux-x86",
+          "name": "platform/prebuilts/go/linux-x86",
+          "url": "https://android.googlesource.com/platform/prebuilts/go/linux-x86",
+          "commit": "71c50d4d0da8b3dee5c70ee45789d001674ca5f6"
+        },
+        {
+          "path": "prebuilts/jdk/jdk21",
+          "cone": [
+            "linux-x86"
+          ],
+          "name": "platform/prebuilts/jdk/jdk21",
+          "url": "https://android.googlesource.com/platform/prebuilts/jdk/jdk21",
+          "commit": "ef5bcc92586b839ae3dbacc154127092fa4002ec"
+        },
+        {
+          "path": "external/golang-protobuf",
+          "name": "platform/external/golang-protobuf",
+          "url": "https://android.googlesource.com/platform/external/golang-protobuf",
+          "commit": "fcb969a6e0df55f1460721e1b9c4f2c4d2b5a47f"
+        },
+        {
+          "path": "external/starlark-go",
+          "name": "platform/external/starlark-go",
+          "url": "https://android.googlesource.com/platform/external/starlark-go",
+          "commit": "4947cdc739c985f6d86941e22894f5cefe7c9e9a"
+        },
+        {
+          "path": "external/go-cmp",
+          "name": "platform/external/go-cmp",
+          "url": "https://android.googlesource.com/platform/external/go-cmp",
+          "commit": "163db04d0a17fd9b25316c6203d2d911a40461f6"
+        },
+        {
+          "path": "system/tools/aidl",
+          "name": "platform/system/tools/aidl",
+          "url": "https://android.googlesource.com/platform/system/tools/aidl",
+          "commit": "3747384b876442e7ea0c355fe5adc75b29362833"
+        },
+        {
+          "path": "system/tools/hidl",
+          "name": "platform/system/tools/hidl",
+          "url": "https://android.googlesource.com/platform/system/tools/hidl",
+          "commit": "9ea202c0fba585c2884a6bb2b1ba2dab46e98a8f"
+        },
+        {
+          "path": "system/tools/xsdc",
+          "name": "platform/system/tools/xsdc",
+          "url": "https://android.googlesource.com/platform/system/tools/xsdc",
+          "commit": "ef55c63066afcba5fd8781c2b056ccbe4c6ce687"
+        },
+        {
+          "path": "frameworks/libs/binary_translation",
+          "name": "platform_frameworks_libs_binary_translation",
+          "url": "https://github.com/DigitalisX64/platform_frameworks_libs_binary_translation",
+          "commit": "8ab8e93225ce10e10ef411de7e377dda6673c335"
+        },
+        {
+          "path": "frameworks/libs/native_bridge_support",
+          "name": "platform/frameworks/libs/native_bridge_support",
+          "url": "https://android.googlesource.com/platform/frameworks/libs/native_bridge_support",
+          "commit": "ffd3f17ebbb244c01c274b6f527d016efc393813"
+        },
+        {
+          "path": "bionic",
+          "name": "platform/bionic",
+          "url": "https://android.googlesource.com/platform/bionic",
+          "commit": "f22516cbc67e81c13cf943ce02f01b8929a98726",
+          "exclude": [
+            "apex/Android.bp"
+          ]
+        },
+        {
+          "path": "external/arm-optimized-routines",
+          "name": "platform/external/arm-optimized-routines",
+          "url": "https://android.googlesource.com/platform/external/arm-optimized-routines",
+          "commit": "1a2b3aeae89d8d89155305e22cec96fc1028081c"
+        },
+        {
+          "path": "external/gwp_asan",
+          "name": "platform/external/gwp_asan",
+          "url": "https://android.googlesource.com/platform/external/gwp_asan",
+          "commit": "06e22138851092a681871acd42d2958f10630cd5"
+        },
+        {
+          "path": "external/jemalloc_new",
+          "name": "platform/external/jemalloc_new",
+          "url": "https://android.googlesource.com/platform/external/jemalloc_new",
+          "commit": "ca47f7d1da1dd5071f88c5fbbf03356f371268a2"
+        },
+        {
+          "path": "external/llvm-libc",
+          "name": "platform/external/llvm-libc",
+          "url": "https://android.googlesource.com/platform/external/llvm-libc",
+          "commit": "24af38d6527d0ee6d61cea5052c83a01725ac98f"
+        },
+        {
+          "path": "external/scudo",
+          "name": "platform/external/scudo",
+          "url": "https://android.googlesource.com/platform/external/scudo",
+          "commit": "03a49bce2224f003b603379a78c88c3dd5bed2af"
+        },
+        {
+          "path": "external/compiler-rt",
+          "cone": [
+            "lib/builtins",
+            "lib/cfi"
+          ],
+          "name": "platform/external/compiler-rt",
+          "url": "https://android.googlesource.com/platform/external/compiler-rt",
+          "commit": "a36a1bcac7ec7ac9be29d8b0b5e669d53f7886f7"
+        },
+        {
+          "path": "external/libcxx",
+          "name": "platform/external/libcxx",
+          "url": "https://android.googlesource.com/platform/external/libcxx",
+          "commit": "88894a62bb97313ed9bf79a546f1486de4b2e723"
+        },
+        {
+          "path": "external/libcxxabi",
+          "name": "platform/external/libcxxabi",
+          "url": "https://android.googlesource.com/platform/external/libcxxabi",
+          "commit": "84450eba5a24fe5b7df77ed1307bfada05b14dc7"
+        },
+        {
+          "path": "external/fmtlib",
+          "name": "platform/external/fmtlib",
+          "url": "https://android.googlesource.com/platform/external/fmtlib",
+          "commit": "d50695f04854e474766da7d713bf8242f4ceb4f8"
+        },
+        {
+          "path": "external/googletest",
+          "name": "platform/external/googletest",
+          "url": "https://android.googlesource.com/platform/external/googletest",
+          "commit": "cbeab5d01811d23ea488efc07f2c31f7c53024e2"
+        },
+        {
+          "path": "external/jsoncpp",
+          "name": "platform/external/jsoncpp",
+          "url": "https://android.googlesource.com/platform/external/jsoncpp",
+          "commit": "c5062d3ff8a6042ef034bd6980966e02abd8762e"
+        },
+        {
+          "path": "external/zlib",
+          "name": "platform/external/zlib",
+          "url": "https://android.googlesource.com/platform/external/zlib",
+          "commit": "a6f47e8bd7c1ba412c4b5a3539aa77fe628d0172"
+        },
+        {
+          "path": "external/vulkan-headers",
+          "name": "platform/external/vulkan-headers",
+          "url": "https://android.googlesource.com/platform/external/vulkan-headers",
+          "commit": "f15cb4157580bb7b3ce04bd2f56c8508c6edf046"
+        },
+        {
+          "path": "hardware/libhardware",
+          "name": "platform/hardware/libhardware",
+          "url": "https://android.googlesource.com/platform/hardware/libhardware",
+          "commit": "67b44bb0f7d1df962e737cfe9baf716bab45792e"
+        },
+        {
+          "path": "libnativehelper",
+          "name": "platform/libnativehelper",
+          "url": "https://android.googlesource.com/platform/libnativehelper",
+          "commit": "2d584ec2da2c5271ed1576593c6590d652806f0d"
+        },
+        {
+          "path": "system/core",
+          "name": "platform/system/core",
+          "url": "https://android.googlesource.com/platform/system/core",
+          "commit": "e9d1fa3705d7fbd0ac1c942bc4c276161bfbfed1"
+        },
+        {
+          "path": "system/libbase",
+          "name": "platform/system/libbase",
+          "url": "https://android.googlesource.com/platform/system/libbase",
+          "commit": "bdf0f4db82fae78492c92a55d473aacc4e963e79"
+        },
+        {
+          "path": "system/libprocinfo",
+          "name": "platform/system/libprocinfo",
+          "url": "https://android.googlesource.com/platform/system/libprocinfo",
+          "commit": "f29c3352895ef664ef31fcf6d1cfcd281297a4b1"
+        },
+        {
+          "path": "system/libziparchive",
+          "name": "platform/system/libziparchive",
+          "url": "https://android.googlesource.com/platform/system/libziparchive",
+          "commit": "94db64a81930e4cc8bacca4010bf935f664c97e1"
+        },
+        {
+          "path": "system/logging",
+          "name": "platform/system/logging",
+          "url": "https://android.googlesource.com/platform/system/logging",
+          "commit": "58dac317ea08b8f275ebd01ce864acab2de30b93"
+        },
+        {
+          "path": "art",
+          "patterns": [
+            "/openjdkjvmti/include/",
+            "!Android.bp",
+            "!Android.mk",
+            "!*.go"
+          ],
+          "name": "platform/art",
+          "url": "https://android.googlesource.com/platform/art",
+          "commit": "1690c6912a7972c9e62c39b48c706de9b8b18b4a"
+        },
+        {
+          "path": "frameworks/av",
+          "patterns": [
+            "/camera/ndk/include/",
+            "/media/ndk/include/",
+            "/media/libaaudio/include/",
+            "!Android.bp",
+            "!Android.mk",
+            "!*.go"
+          ],
+          "name": "platform/frameworks/av",
+          "url": "https://android.googlesource.com/platform/frameworks/av",
+          "commit": "22fd1c5d895e45a49df5582a4b345d8e3b75e46b"
+        },
+        {
+          "path": "frameworks/base",
+          "patterns": [
+            "/core/jni/include/",
+            "/media/native/midi/include/",
+            "!Android.bp",
+            "!Android.mk",
+            "!*.go"
+          ],
+          "name": "platform/frameworks/base",
+          "url": "https://android.googlesource.com/platform/frameworks/base",
+          "commit": "45034f0663f960d9ee5fb0a101a4732b71f6e2f4"
+        },
+        {
+          "path": "frameworks/native",
+          "patterns": [
+            "/include/",
+            "/opengl/include/",
+            "/vulkan/include/",
+            "/libs/arect/include/",
+            "/libs/nativebase/include/",
+            "/libs/nativewindow/include/",
+            "/libs/binder/ndk/include_cpp/",
+            "/libs/binder/ndk/include_ndk/",
+            "/libs/binder/ndk/include_platform/",
+            "!Android.bp",
+            "!Android.mk",
+            "!*.go"
+          ],
+          "name": "platform/frameworks/native",
+          "url": "https://android.googlesource.com/platform/frameworks/native",
+          "commit": "fcbde2bcff56ca1d7bec9cabf8bdca5e288bf103"
+        },
+        {
+          "path": "frameworks/wilhelm",
+          "patterns": [
+            "/include/",
+            "!Android.bp",
+            "!Android.mk",
+            "!*.go"
+          ],
+          "name": "platform/frameworks/wilhelm",
+          "url": "https://android.googlesource.com/platform/frameworks/wilhelm",
+          "commit": "1bd6fdb6d12498f8433fcad4db7a3e5836c7ec5e"
+        },
+        {
+          "path": "digitalis",
+          "patterns": [
+            "/LICENSE",
+            "/README.md"
+          ],
+          "name": "digitalis",
+          "url": "https://github.com/DigitalisX64/digitalis",
+          "commit": "e81431d67766f9a827b568b9137da131daecfa87",
+          "linkfiles": [
+            {
+              "src": "CLAUDE.md",
+              "dest": "CLAUDE.md"
+            },
+            {
+              "src": ".claude",
+              "dest": ".claude"
+            }
+          ]
+        },
+        {
+          "path": "external/pogreb",
+          "name": "platform/external/pogreb",
+          "url": "https://android.googlesource.com/platform/external/pogreb",
+          "commit": "c7851d75ff3a7b8228f548f7235d48cee9130971"
+        },
+        {
+          "path": "system/media",
+          "cone": [
+            "audio"
+          ],
+          "name": "platform/system/media",
+          "url": "https://android.googlesource.com/platform/system/media",
+          "commit": "74807f54ac951b3e7064b8153ef900c6b387b7cf"
+        },
+        {
+          "path": "system/timezone",
+          "cone": [
+            "output_data"
+          ],
+          "name": "platform/system/timezone",
+          "url": "https://android.googlesource.com/platform/system/timezone",
+          "commit": "eb1eda717eca4335d9f15109a86efe91fcb78c13"
+        },
+        {
+          "path": "system/apex",
+          "patterns": [
+            "/Android.bp"
+          ],
+          "name": "platform/system/apex",
+          "url": "https://android.googlesource.com/platform/system/apex",
+          "commit": "97548ed51112062a4d1762a7dffa0cadcc09bda9"
+        },
+        {
+          "path": "packages/modules/common",
+          "cone": [
+            "sdk"
+          ],
+          "name": "platform/packages/modules/common",
+          "url": "https://android.googlesource.com/platform/packages/modules/common",
+          "commit": "deef1ed99f28b761fe55ab4cac61027f6f78f3e8"
+        },
+        {
+          "path": "prebuilts/rust",
+          "cone": [
+            "soong",
+            "linux-x86/{rust}"
+          ],
+          "name": "platform/prebuilts/rust",
+          "url": "https://android.googlesource.com/platform/prebuilts/rust",
+          "commit": "06a4f29f8512c6b77bdce81dd036a3e39954803b"
+        },
+        {
+          "path": "external/rust/android-crates-io",
+          "cone": [
+            "crates/displaydoc",
+            "crates/icu_casemap",
+            "crates/icu_casemap_data",
+            "crates/icu_collections",
+            "crates/icu_locale_core",
+            "crates/icu_properties",
+            "crates/icu_properties_data",
+            "crates/icu_provider",
+            "crates/icu_provider_baked",
+            "crates/litemap",
+            "crates/potential_utf",
+            "crates/proc-macro2",
+            "crates/quote",
+            "crates/serde",
+            "crates/serde_derive",
+            "crates/stable_deref_trait",
+            "crates/syn",
+            "crates/synstructure",
+            "crates/tinystr",
+            "crates/unicode-bidi",
+            "crates/unicode-ident",
+            "crates/writeable",
+            "crates/yoke",
+            "crates/yoke-derive",
+            "crates/zerofrom",
+            "crates/zerofrom-derive",
+            "crates/zerotrie",
+            "crates/zerovec",
+            "crates/zerovec-derive"
+          ],
+          "name": "platform/external/rust/android-crates-io",
+          "url": "https://android.googlesource.com/platform/external/rust/android-crates-io",
+          "commit": "0bb9c7a4cb26e195379037742a853fa381ecc102"
+        },
+        {
+          "path": "toolchain/pgo-profiles",
+          "cone": [
+            "sampling"
+          ],
+          "name": "toolchain/pgo-profiles",
+          "url": "https://android.googlesource.com/toolchain/pgo-profiles",
+          "commit": "09143208038651bf107b8557d79a206b962cb7b6"
+        }
+      ],
+      "superproject": {
+        "url": "https://android.googlesource.com/platform/superproject",
+        "branch": "android16-qpr2-release",
+        "commit": "cc66c82349f536b77341e13862a548c01b048963"
+      },
+      "aosp_branch": "android16-qpr2-release"
+    }
+  ]
+}

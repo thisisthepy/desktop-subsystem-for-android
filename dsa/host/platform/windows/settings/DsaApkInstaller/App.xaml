@@ -1,0 +1,126 @@
+<Application
+    x:Class="Dsa.ApkInstaller.App"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    xmlns:sys="clr-namespace:System;assembly=System.Runtime"
+    ShutdownMode="OnLastWindowClose">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ui:ThemesDictionary Theme="Light" />
+                <ui:ControlsDictionary />
+            </ResourceDictionary.MergedDictionaries>
+
+            <!-- The Windows type ramp, as App Installer uses it: Segoe UI Variable (Display for
+                 the app's name, Text for the rest), Segoe UI where Windows 10 lacks it, and
+                 Malgun Gothic for Korean.
+                   Title       28 px, 36 px line   the app's name
+                   Body Strong 14 px, 20 px line   section headers
+                   Body        14 px, 20 px line   publisher, version, capabilities
+                   Caption     12 px, 16 px line   permission names, the notice
+                 Malgun Gothic has no Semibold, so a Semibold request draws Korean in its Bold, and
+                 App.OnStartup points the strong fonts at the regular ones in Korean. -->
+            <FontFamily x:Key="TextFont">Segoe UI Variable Text, Segoe UI, Malgun Gothic</FontFamily>
+            <FontFamily x:Key="DisplayFont">Segoe UI Variable Display, Segoe UI, Malgun Gothic</FontFamily>
+            <FontFamily x:Key="StrongTextFont">Segoe UI Variable Text Semibold, Segoe UI Semibold, Malgun Gothic</FontFamily>
+            <FontFamily x:Key="StrongDisplayFont">Segoe UI Variable Display Semibold, Segoe UI Semibold, Malgun Gothic</FontFamily>
+
+            <!-- App Installer's spacing: 32 px from the window's sides, the icon's tile 106 px at
+                 the top right with the icon inside it, and the bottom row, without a divider or
+                 a band of its own, 20 px above and 24 px below its controls. -->
+            <Thickness x:Key="ContentMargin">32,12,32,0</Thickness>
+            <Thickness x:Key="FooterPadding">32,20,32,24</Thickness>
+            <sys:Double x:Key="AppIconTileSize">106</sys:Double>
+            <sys:Double x:Key="AppIconSize">84</sys:Double>
+            <!-- The same light grey in both themes, as App Installer's tile: an icon made for a
+                 launcher reads on it whatever the window's colour is. -->
+            <SolidColorBrush x:Key="AppIconTileBrush" Color="#E6E6E6" />
+            <sys:Double x:Key="PrimaryButtonMinWidth">120</sys:Double>
+
+            <Style x:Key="AppNameText" TargetType="TextBlock">
+                <Setter Property="FontFamily" Value="{DynamicResource StrongDisplayFont}" />
+                <Setter Property="FontWeight" Value="Normal" />
+                <Setter Property="FontSize" Value="28" />
+                <Setter Property="LineHeight" Value="36" />
+                <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+            </Style>
+            <!-- A line under the app's name: exactly one 20 px line, as App Installer's rows sit,
+                 about 4 px of air between one line's text and the next. No margin: a margin on
+                 each line stacks on top of the line's own leading. BlockLineHeight holds the
+                 line at 20 px; the default stacking lets a font with a taller line box (Segoe UI
+                 Variable's, or a fallback's) push every row further apart. -->
+            <Style x:Key="DetailLine" TargetType="TextBlock">
+                <Setter Property="FontFamily" Value="{StaticResource TextFont}" />
+                <Setter Property="FontWeight" Value="Normal" />
+                <Setter Property="FontSize" Value="14" />
+                <Setter Property="LineHeight" Value="20" />
+                <Setter Property="LineStackingStrategy" Value="BlockLineHeight" />
+                <Setter Property="Margin" Value="0" />
+                <Setter Property="TextWrapping" Value="NoWrap" />
+                <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+            </Style>
+            <!-- A line's label, in the column before the values. -->
+            <Style x:Key="DetailLabel" TargetType="TextBlock" BasedOn="{StaticResource DetailLine}">
+                <Setter Property="Margin" Value="0,0,8,0" />
+                <Setter Property="TextTrimming" Value="None" />
+            </Style>
+            <Style x:Key="SectionHeader" TargetType="TextBlock">
+                <Setter Property="FontFamily" Value="{DynamicResource StrongTextFont}" />
+                <Setter Property="FontWeight" Value="Normal" />
+                <Setter Property="FontSize" Value="14" />
+                <Setter Property="LineHeight" Value="20" />
+                <Setter Property="Margin" Value="0,20,0,8" />
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+            </Style>
+            <!-- The title line of a notice: Body Strong, without a section header's margins. -->
+            <Style x:Key="NoticeTitle" TargetType="TextBlock" BasedOn="{StaticResource SectionHeader}">
+                <Setter Property="Margin" Value="0" />
+                <Setter Property="TextWrapping" Value="Wrap" />
+            </Style>
+            <!-- A notice: App Installer's InfoBar, the icon in its own column on the title line
+                 and the title and the text in one column beside it. -->
+            <Style x:Key="NoticeBox" TargetType="Border">
+                <Setter Property="CornerRadius" Value="4" />
+                <Setter Property="Padding" Value="12" />
+                <Setter Property="Margin" Value="0,12,0,0" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeColorDefaultBrush}" />
+            </Style>
+            <!-- The More link: words in the accent colour, a button to keyboard and automation. -->
+            <Style x:Key="LinkButton" TargetType="Button">
+                <Setter Property="Cursor" Value="Hand" />
+                <Setter Property="HorizontalAlignment" Value="Left" />
+                <Setter Property="FontFamily" Value="{StaticResource TextFont}" />
+                <Setter Property="FontSize" Value="14" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border Background="Transparent" Padding="0,2">
+                                <ContentPresenter TextElement.Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                            </Border>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+            <Style x:Key="BodyText" TargetType="TextBlock">
+                <Setter Property="FontFamily" Value="{StaticResource TextFont}" />
+                <Setter Property="FontWeight" Value="Normal" />
+                <Setter Property="FontSize" Value="14" />
+                <Setter Property="LineHeight" Value="20" />
+                <Setter Property="TextWrapping" Value="Wrap" />
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+            </Style>
+            <Style x:Key="CaptionText" TargetType="TextBlock">
+                <Setter Property="FontFamily" Value="{StaticResource TextFont}" />
+                <Setter Property="FontWeight" Value="Normal" />
+                <Setter Property="FontSize" Value="12" />
+                <Setter Property="LineHeight" Value="16" />
+                <Setter Property="TextWrapping" Value="Wrap" />
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+            </Style>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

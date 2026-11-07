@@ -1,0 +1,75 @@
+// Header libraries the translator's modules depend on whose own projects the sparse checkout
+// takes headers from only (their Android.bp files are left out, so that the build does not
+// see the libraries those projects build). Each one exports the same folder as the module of
+// the same name in the full AOSP tree. This folder is device/dsa/dsa_translator/headers, so
+// ../../../../ is the top of the tree.
+
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+// frameworks/native/vulkan/Android.bp
+cc_library_headers {
+    name: "hwvulkan_headers",
+    host_supported: true,
+    native_bridge_supported: true,
+    vendor_available: true,
+    header_libs: [
+        "libcutils_headers",
+        "libhardware_headers",
+    ],
+    export_header_lib_headers: [
+        "libcutils_headers",
+        "libhardware_headers",
+    ],
+    export_include_dirs: ["../../../../frameworks/native/vulkan/include"],
+}
+
+// art/openjdkjvmti/Android.bp
+cc_library_headers {
+    name: "libopenjdkjvmti_headers",
+    host_supported: true,
+    native_bridge_supported: true,
+    export_include_dirs: ["../../../../art/openjdkjvmti/include"],
+}
+
+// The NDK and platform headers of the framework libraries in ../prebuilts, which their own
+// modules export in the full tree.
+cc_library_headers {
+    name: "dsa_translator_framework_headers",
+    export_include_dirs: [
+        "../../../../frameworks/native/include",
+        "../../../../frameworks/native/opengl/include",
+        "../../../../frameworks/native/vulkan/include",
+        "../../../../frameworks/native/libs/arect/include",
+        "../../../../frameworks/native/libs/nativebase/include",
+        "../../../../frameworks/native/libs/nativewindow/include",
+        "../../../../frameworks/native/libs/binder/ndk/include_cpp",
+        "../../../../frameworks/native/libs/binder/ndk/include_ndk",
+        "../../../../frameworks/native/libs/binder/ndk/include_platform",
+        "../../../../frameworks/av/camera/ndk/include",
+        "../../../../frameworks/av/media/ndk/include",
+        "../../../../frameworks/av/media/libaaudio/include",
+        "../../../../frameworks/base/core/jni/include",
+        "../../../../frameworks/base/media/native/midi/include",
+        "../../../../frameworks/wilhelm/include",
+    ],
+    header_libs: [
+        "jni_headers",
+        "libcutils_headers",
+        "libhardware_headers",
+        "liblog_headers",
+        "libsystem_headers",
+        "libutils_headers",
+        "vulkan_headers",
+    ],
+    export_header_lib_headers: [
+        "jni_headers",
+        "libcutils_headers",
+        "libhardware_headers",
+        "liblog_headers",
+        "libsystem_headers",
+        "libutils_headers",
+        "vulkan_headers",
+    ],
+}

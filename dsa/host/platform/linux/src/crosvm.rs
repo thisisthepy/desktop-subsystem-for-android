@@ -14,11 +14,14 @@
 //!   ports as on Hyper-V (5000 control, 5001 log, 5590 and 5591 file sharing, 5555 adb), and
 //!   the host's `AF_VSOCK` sockets serve it (see `vsock`);
 //! - memory that returns to the host: a virtio balloon with free page reporting, so the pages
-//!   the guest frees are handed back to the host. A VM that may grow is made at its largest
-//!   size with the balloon holding everything above its starting size (`--init-mem`); the host
-//!   lets the balloon out while the guest is short of memory and takes it back after. crosvm
-//!   has no memory hot-plug device, so this is how the VM grows. Nothing pins guest memory: no
-//!   huge pages, no locked memory;
+//!   the guest frees are handed back to the host. A VM that may grow boots at its starting
+//!   size, with the rest up to its largest size as a virtio-mem region (`--virtio-mem`, from
+//!   the patch DSA's crosvm build applies); the host raises the region's requested size while
+//!   the guest is short of memory and lowers it after, and the blocks the guest unplugs are
+//!   freed on the host at once. The guest kernel keeps page structs only for the memory it
+//!   has, in that memory (`memory_hotplug.memmap_on_memory=1`), and puts plugged memory in
+//!   the movable zone so it can be unplugged again. Nothing pins guest memory: no huge pages,
+//!   no locked memory;
 //! - a virtio network adapter on passt's user-mode NAT (vhost-user), or on a macvtap on the
 //!   host's LAN for advanced networking (see `network`);
 //! - the guest's console on a virtio console (`hvc0`) and its earliest messages on the first
@@ -149,6 +152,17 @@ pub const PSTORE_CMDLINE: &str = "pstore_blk.blkdev=PARTUUID=5f8b3c2e-9a41-4d6e-
 /// the guest kernel (a sync, then power off), with the file systems left clean as well.
 pub const SHUTDOWN_SEQUENCE: [&[u8]; 3] = [b"\x0fs", b"\x0fu", b"\x0fo"];
 
+/// The memory hot-plug settings for the kernel command line: the page structs of plugged
+/// memory live in that memory, so a small VM can take on a lot and keeps page structs only for
+/// what it has, and plugged memory goes online in the movable zone (while the kernel zone
+/// keeps enough to manage it), so the guest can unplug it again.
+pub const MEMORY_HOTPLUG_CMDLINE: &str =
+    "memory_hotplug.memmap_on_memory=1 memory_hotplug.online_policy=auto-movable";
+
+/// The virtio-mem region is a whole number of these, in MiB: the guest's memory block, the unit
+/// Linux adds and removes memory in.
+pub const VIRTIO_MEM_GRANULE_MB: u32 = 128;
+
 /// Writes `value` as one value of a crosvm `key=value,...` option: quoted, with `"` and `\`
 /// escaped, when it holds a character that would end it.
 pub fn escape(value: &str) -> String {
@@ -200,8 +214,8 @@ impl VmConfig {
         // SysRq on the console is how the host asks the guest to sync its disks and power
         // off when it stops the VM (see `SHUTDOWN_SEQUENCE`).
         let mut cmdline = format!(
-            "panic=-1 sysrq_always_enabled=1 page_reporting.page_reporting_order={}",
-            self.page_reporting_order
+            "panic=-1 sysrq_always_enabled=1 page_reporting.page_reporting_order={} {}",
+            self.page_reporting_order, MEMORY_HOTPLUG_CMDLINE
         );
         if self.pstore_disk.is_some() {
             cmdline.push(' ');
@@ -213,6 +227,15 @@ impl VmConfig {
         );
         cmdline.push(' ');
         cmdline.push_str(&image);
+        // The boot's secret is bootconfig appended to the initrd, and the kernel reads that
+        // only when the command line says so: without it the guest's daemon finds no secret.
+        if !image
+            .split_whitespace()
+            .any(|word| word == dsa_host_core::bootconfig::CMDLINE_FLAG)
+        {
+            cmdline.push(' ');
+            cmdline.push_str(dsa_host_core::bootconfig::CMDLINE_FLAG);
+        }
         cmdline
     }
 
@@ -253,12 +276,15 @@ impl VmConfig {
         Ok(())
     }
 
-    /// The memory the VM is made with and the part of it outside the balloon at boot, in MiB.
+    /// The memory the VM boots with and the virtio-mem region above it, in MiB. The region
+    /// takes the VM to its largest size, rounded down to whole memory blocks.
     pub fn memory_layout(&self) -> (u32, Option<u32>) {
-        match self.memory_max_mb.filter(|max| *max > self.memory_mb) {
-            Some(max) => (max, Some(self.memory_mb)),
-            None => (self.memory_mb, None),
-        }
+        let region = self
+            .memory_max_mb
+            .map(|max| max.saturating_sub(self.memory_mb))
+            .map(|mb| mb / VIRTIO_MEM_GRANULE_MB * VIRTIO_MEM_GRANULE_MB)
+            .filter(|mb| *mb > 0);
+        (self.memory_mb, region)
     }
 
     /// crosvm's arguments, after the program name.
@@ -275,12 +301,15 @@ impl VmConfig {
         };
         push("--name", self.name.clone());
         push("--cpus", self.processors.to_string());
-        let (size, init) = self.memory_layout();
+        let (size, region) = self.memory_layout();
         push("--mem", format!("size={size}"));
-        if let Some(init) = init {
-            push("--init-mem", init.to_string());
+        if let Some(region) = region {
+            push("--virtio-mem", region.to_string());
         }
-        push("--socket", self.control_socket.to_string_lossy().into_owned());
+        push(
+            "--socket",
+            self.control_socket.to_string_lossy().into_owned(),
+        );
         if let Some(root) = &self.sandbox_root {
             push("--pivot-root", root.to_string_lossy().into_owned());
         }
@@ -369,9 +398,9 @@ pub fn guest_cid(uid: u32) -> u32 {
     }
 }
 
-/// The balloon size, in bytes, that leaves a VM made with `max_mb` with `mb` MiB.
-pub fn balloon_bytes(max_mb: u64, mb: u64) -> u64 {
-    max_mb.saturating_sub(mb) * 1024 * 1024
+/// The virtio-mem requested size, in bytes, that gives a VM that boots with `base_mb` `mb` MiB.
+pub fn virtio_mem_bytes(base_mb: u64, mb: u64) -> u64 {
+    mb.saturating_sub(base_mb) * 1024 * 1024
 }
 
 // Linux paths: "/a" is not absolute on Windows, where the workspace is also tested.
@@ -515,15 +544,31 @@ mod tests {
     }
 
     #[test]
-    fn nfr2_a_vm_that_may_grow_starts_with_the_balloon_holding_the_rest() {
+    fn nfr2_the_linux_vm_boots_at_its_base_size_with_the_rest_as_virtio_mem() {
         let mut config = config();
         config.memory_max_mb = Some(16384);
         let args = config.crosvm_args().unwrap();
-        assert_eq!(value_of(&args, "--mem"), ["size=16384"]);
-        assert_eq!(value_of(&args, "--init-mem"), ["3072"]);
-        assert_eq!(balloon_bytes(16384, 16384), 0);
-        assert_eq!(balloon_bytes(16384, 3072), 13312 * 1024 * 1024);
-        assert_eq!(balloon_bytes(1024, 2048), 0);
+        // The guest kernel sees only the base at boot, so it keeps page structs for 3 GiB, not
+        // for 16 GiB; the rest is plugged in as it is needed.
+        assert_eq!(value_of(&args, "--mem"), ["size=3072"]);
+        assert_eq!(value_of(&args, "--virtio-mem"), ["13312"]);
+        assert!(value_of(&args, "--init-mem").is_empty());
+        assert!(config
+            .full_kernel_cmdline()
+            .contains("memory_hotplug.memmap_on_memory=1"));
+        assert!(config
+            .full_kernel_cmdline()
+            .contains("memory_hotplug.online_policy=auto-movable"));
+        // Whole memory blocks only.
+        config.memory_max_mb = Some(3072 + 1000);
+        assert_eq!(config.memory_layout(), (3072, Some(896)));
+        config.memory_max_mb = Some(3072 + 100);
+        assert_eq!(config.memory_layout(), (3072, None));
+        config.memory_max_mb = Some(2048);
+        assert_eq!(config.memory_layout(), (3072, None));
+        assert_eq!(virtio_mem_bytes(3072, 3072), 0);
+        assert_eq!(virtio_mem_bytes(3072, 16384), 13312 * 1024 * 1024);
+        assert_eq!(virtio_mem_bytes(3072, 2048), 0);
     }
 
     #[test]
@@ -552,6 +597,27 @@ mod tests {
             .full_kernel_cmdline()
             .contains("sysrq_always_enabled=1"));
         assert_eq!(SHUTDOWN_SEQUENCE, [b"\x0fs", b"\x0fu", b"\x0fo"]);
+    }
+
+    #[test]
+    fn pr1_the_kernel_reads_the_bootconfig_that_carries_the_boot_secret() {
+        let cmdline = config().full_kernel_cmdline();
+        let words: Vec<&str> = cmdline.split_whitespace().collect();
+        assert_eq!(
+            words.iter().filter(|w| **w == "bootconfig").count(),
+            1,
+            "{cmdline}"
+        );
+        let mut config = config();
+        config.kernel_cmdline = format!("{} bootconfig", config.kernel_cmdline);
+        let cmdline = config.full_kernel_cmdline();
+        assert_eq!(
+            cmdline
+                .split_whitespace()
+                .filter(|w| *w == "bootconfig")
+                .count(),
+            1
+        );
     }
 
     #[test]
