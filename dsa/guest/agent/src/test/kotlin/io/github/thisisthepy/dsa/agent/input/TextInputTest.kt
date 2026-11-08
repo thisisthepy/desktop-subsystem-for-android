@@ -1,5 +1,7 @@
 package io.github.thisisthepy.dsa.agent.input
 
+import android.text.InputType
+import android.view.inputmethod.EditorInfo
 import io.github.thisisthepy.dsa.agent.FakeInjector
 import io.github.thisisthepy.dsa.agent.RecordingLog
 import io.github.thisisthepy.dsa.agent.decode
@@ -7,6 +9,9 @@ import io.github.thisisthepy.dsa.agent.tasks.TaskBounds
 import io.github.thisisthepy.dsa.control.v1.ImeCommit
 import io.github.thisisthepy.dsa.control.v1.ImeDeleteSurrounding
 import io.github.thisisthepy.dsa.control.v1.ImeComposition
+import io.github.thisisthepy.dsa.control.v1.ImeInputKind
+import io.github.thisisthepy.dsa.control.v1.ImeSetComposingRegion
+import io.github.thisisthepy.dsa.control.v1.ImeSetSelection
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -52,6 +57,20 @@ class FakeEditor : EditorConnection {
         cursor = from
         return true
     }
+
+    override fun setSelection(start: Int, end: Int): Boolean {
+        calls += "select $start $end"
+        if (!takesText) return false
+        cursor = end
+        return true
+    }
+
+    override fun setComposingRegion(start: Int, end: Int): Boolean {
+        calls += "region $start $end"
+        if (!takesText) return false
+        composing = if (start == end) null else start until end
+        return true
+    }
 }
 
 class TextInputTest {
@@ -85,6 +104,67 @@ class TextInputTest {
 
     private fun commit(text: String, taskId: Int = 7) =
         input.handle(ImeCommit.newBuilder().setTaskId(taskId).setText(text).build())
+
+    @Test
+    fun fr6_the_input_method_selects_and_reconverts_text_in_the_editor() {
+        commit("한글")
+        input.handle(ImeSetSelection.newBuilder().setTaskId(7).setStart(0).setEnd(1).build())
+        input.handle(ImeSetComposingRegion.newBuilder().setTaskId(7).setStart(0).setEnd(1).build())
+        assertEquals(0 until 1, editor.composing)
+        compose("漢")
+        commit("漢")
+        assertEquals("漢글", editor.text.toString())
+        // An empty region ends the composition and keeps its text.
+        input.handle(ImeSetComposingRegion.newBuilder().setTaskId(7).setStart(1).setEnd(1).build())
+        assertEquals(null, editor.composing)
+        assertEquals(listOf("select 0 1", "region 0 1"), editor.calls.filter { it.startsWith("select") || it.startsWith("region 0") })
+    }
+
+    @Test
+    fun fr6_the_editor_goes_to_the_host_for_the_focused_task_once_per_state() {
+        val state = EditorState(ImeInputKind.IME_INPUT_KIND_EMAIL, "me@", 10, 13, 13, 0, 0)
+        input.editorChanged(state)
+        input.editorChanged(state)
+        input.editorChanged(EditorState.NONE)
+        val editors = sent.map { decode(it).imeEditor }
+        assertEquals(2, editors.size)
+        assertEquals(7, editors[0].taskId)
+        assertEquals(ImeInputKind.IME_INPUT_KIND_EMAIL, editors[0].kind)
+        assertEquals("me@", editors[0].text)
+        assertEquals(listOf(10, 13, 13), editors[0].let { listOf(it.textStart, it.selectionStart, it.selectionEnd) })
+        assertEquals(ImeInputKind.IME_INPUT_KIND_NONE, editors[1].kind)
+    }
+
+    @Test
+    fun fr6_no_editor_is_reported_while_no_task_holds_the_focus() {
+        focusedTasks.clear()
+        input.editorChanged(EditorState.NONE)
+        assertTrue(sent.isEmpty())
+    }
+
+    @Test
+    fun fr6_each_input_type_maps_to_the_kind_of_text_the_host_offers_keys_for() {
+        val search = EditorInfo.IME_ACTION_SEARCH
+        val cases = listOf(
+            Triple(InputType.TYPE_NULL, 0, ImeInputKind.IME_INPUT_KIND_NONE),
+            Triple(InputType.TYPE_CLASS_TEXT, 0, ImeInputKind.IME_INPUT_KIND_TEXT),
+            Triple(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD, 0, ImeInputKind.IME_INPUT_KIND_PASSWORD),
+            Triple(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD, 0, ImeInputKind.IME_INPUT_KIND_PASSWORD),
+            Triple(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD, 0, ImeInputKind.IME_INPUT_KIND_PASSWORD),
+            Triple(InputType.TYPE_CLASS_NUMBER, 0, ImeInputKind.IME_INPUT_KIND_NUMBER),
+            Triple(InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD, 0, ImeInputKind.IME_INPUT_KIND_NUMBER_PASSWORD),
+            Triple(InputType.TYPE_CLASS_PHONE, 0, ImeInputKind.IME_INPUT_KIND_PHONE),
+            Triple(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS, 0, ImeInputKind.IME_INPUT_KIND_EMAIL),
+            Triple(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI, 0, ImeInputKind.IME_INPUT_KIND_URL),
+            Triple(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PERSON_NAME, 0, ImeInputKind.IME_INPUT_KIND_PERSON_NAME),
+            Triple(InputType.TYPE_CLASS_DATETIME or InputType.TYPE_DATETIME_VARIATION_DATE, 0, ImeInputKind.IME_INPUT_KIND_DATE),
+            Triple(InputType.TYPE_CLASS_DATETIME or InputType.TYPE_DATETIME_VARIATION_TIME, 0, ImeInputKind.IME_INPUT_KIND_TIME),
+            Triple(InputType.TYPE_CLASS_TEXT, search, ImeInputKind.IME_INPUT_KIND_SEARCH),
+        )
+        for ((type, options, kind) in cases) {
+            assertEquals("$type $options", kind, inputKind(type, options))
+        }
+    }
 
     @Test
     fun fr6_the_input_method_deletes_around_the_cursor() {

@@ -498,6 +498,16 @@ class Agent(
         }
     }
 
+    /**
+     * The focused editor is now [state], as the agent's input method read it. Called from any
+     * thread.
+     */
+    fun editorChanged(state: io.github.thisisthepy.dsa.agent.input.EditorState) {
+        scheduler.post {
+            if (channel.connected) text.editorChanged(state)
+        }
+    }
+
     private fun onConnected() {
         // The daemon tells the host from this that the guest's requests have someone to reach.
         channel.send(Envelope.newBuilder().setAgentConnected(AgentConnected.getDefaultInstance()).build().toByteArray())
@@ -629,6 +639,16 @@ class Agent(
                 text.handle(envelope.imeDeleteSurrounding)
             } catch (e: Exception) {
                 log.warn("deleting text around the cursor failed", e)
+            }
+            Envelope.BodyCase.IME_SET_SELECTION -> try {
+                text.handle(envelope.imeSetSelection)
+            } catch (e: Exception) {
+                log.warn("selecting text in the editor failed", e)
+            }
+            Envelope.BodyCase.IME_SET_COMPOSING_REGION -> try {
+                text.handle(envelope.imeSetComposingRegion)
+            } catch (e: Exception) {
+                log.warn("making text the composition again failed", e)
             }
             else -> return false
         }

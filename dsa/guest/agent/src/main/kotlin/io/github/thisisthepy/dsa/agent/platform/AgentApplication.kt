@@ -103,6 +103,7 @@ class AgentApplication : Application() {
         )
         AgentApplication.agent = agent
         HostInputMethod.onCursor = { rect -> agent.cursorMoved(rect.left, rect.top, rect.right, rect.bottom) }
+        HostInputMethod.onEditor = { state -> agent.editorChanged(state) }
         agent.start()
         dragCatcher.start()
         // Starting windows draw on a thread of their own, so a slow app theme never holds up

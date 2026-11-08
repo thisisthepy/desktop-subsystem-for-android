@@ -9,6 +9,8 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.ExtractedTextRequest
 import android.view.inputmethod.InputConnection
 import io.github.thisisthepy.dsa.agent.input.EditorConnection
+import io.github.thisisthepy.dsa.agent.input.EditorState
+import io.github.thisisthepy.dsa.agent.input.inputKind
 
 /**
  * The guest's input method, which is not a keyboard: it shows nothing, ever, and types what
@@ -25,6 +27,9 @@ import io.github.thisisthepy.dsa.agent.input.EditorConnection
  * The other way, it asks each editor it is bound to for its cursor and passes where it is on
  * the display to the agent, which tells the host, so the host's candidate list appears beside
  * it.
+ * It also describes the editor: the kind of text it takes and its text around the selection,
+ * each time the selection or the text changes, so the host's input method reconverts and
+ * predicts from the editor's own text, and offers the keys for its kind.
  *
  * It runs in the agent's process (the activity manager binds it there), so the agent reaches
  * it directly.
@@ -51,6 +56,71 @@ class HostInputMethod : InputMethodService() {
         // Where the cursor is now, and again whenever it moves.
         currentInputConnection?.requestCursorUpdates(
             InputConnection.CURSOR_UPDATE_IMMEDIATE or InputConnection.CURSOR_UPDATE_MONITOR,
+        )
+        val info = attribute ?: return
+        describe(info.initialSelStart, info.initialSelEnd, -1, -1)
+    }
+
+    override fun onUpdateSelection(
+        oldSelStart: Int,
+        oldSelEnd: Int,
+        newSelStart: Int,
+        newSelEnd: Int,
+        candidatesStart: Int,
+        candidatesEnd: Int,
+    ) {
+        super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
+        describe(newSelStart, newSelEnd, candidatesStart, candidatesEnd)
+    }
+
+    override fun onFinishInput() {
+        super.onFinishInput()
+        onEditor?.invoke(EditorState.NONE)
+    }
+
+    /**
+     * Tells the agent what the focused editor is now: its kind, and its text around the
+     * selection from [selStart] to [selEnd] with the composition from [composeStart] to
+     * [composeEnd] (-1 for none), as the editor reported them.
+     */
+    private fun describe(selStart: Int, selEnd: Int, composeStart: Int, composeEnd: Int) {
+        val report = onEditor ?: return
+        val info = currentInputEditorInfo
+        val ic = editor()
+        if (info == null || ic == null) {
+            report(EditorState.NONE)
+            return
+        }
+        val kind = inputKind(info.inputType, info.imeOptions)
+        if (selStart < 0 || selEnd < 0) {
+            report(EditorState(kind, "", 0, 0, 0, 0, 0))
+            return
+        }
+        val from = minOf(selStart, selEnd)
+        val to = maxOf(selStart, selEnd)
+        val selected = if (to > from) ic.getSelectedText(0)?.toString() else ""
+        val fits = selected != null && selected.length == to - from &&
+            selected.length <= EditorState.MAX_TEXT - 2 * EditorState.REACH
+        if (selected == null || !fits) {
+            // The selection is too long to describe with its text: the cursor at its end.
+            report(EditorState(kind, "", selEnd, selEnd, selEnd, 0, 0))
+            return
+        }
+        val before = ic.getTextBeforeCursor(EditorState.REACH, 0)?.toString().orEmpty().takeLast(from)
+        val after = ic.getTextAfterCursor(EditorState.REACH, 0)?.toString().orEmpty()
+        val start = from - before.length
+        val end = start + before.length + selected.length + after.length
+        val composing = composeStart in start..end && composeEnd in composeStart..end
+        report(
+            EditorState(
+                kind = kind,
+                text = before + selected + after,
+                textStart = start,
+                selectionStart = selStart,
+                selectionEnd = selEnd,
+                compositionStart = if (composing) composeStart else 0,
+                compositionEnd = if (composing) composeEnd else 0,
+            ),
         )
     }
 
@@ -89,6 +159,10 @@ class HostInputMethod : InputMethodService() {
         @Volatile
         var onCursor: ((RectF) -> Unit)? = null
 
+        /** Where the focused editor's kind and text go; called on the input method's thread. */
+        @Volatile
+        var onEditor: ((EditorState) -> Unit)? = null
+
         /** The focused editor, through the input method; the agent calls it on its own thread. */
         val connection: EditorConnection = object : EditorConnection {
             override fun setComposing(text: String, cursor: Int): Boolean {
@@ -125,6 +199,17 @@ class HostInputMethod : InputMethodService() {
             override fun deleteSurrounding(before: Int, after: Int): Boolean {
                 val ic = current?.editor() ?: return false
                 return ic.deleteSurroundingText(before, after)
+            }
+
+            override fun setSelection(start: Int, end: Int): Boolean {
+                val ic = current?.editor() ?: return false
+                return ic.setSelection(start, end)
+            }
+
+            override fun setComposingRegion(start: Int, end: Int): Boolean {
+                val ic = current?.editor() ?: return false
+                // An empty region ends the composition with its text as it is.
+                return if (start == end) ic.finishComposingText() else ic.setComposingRegion(start, end)
             }
         }
 

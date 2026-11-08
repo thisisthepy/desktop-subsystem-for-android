@@ -1,5 +1,7 @@
 package io.github.thisisthepy.dsa.agent.input
 
+import android.text.InputType
+import android.view.inputmethod.EditorInfo
 import io.github.thisisthepy.dsa.agent.Log
 import io.github.thisisthepy.dsa.agent.tasks.TaskBounds
 import io.github.thisisthepy.dsa.control.v1.Envelope
@@ -7,6 +9,10 @@ import io.github.thisisthepy.dsa.control.v1.ImeCommit
 import io.github.thisisthepy.dsa.control.v1.ImeComposition
 import io.github.thisisthepy.dsa.control.v1.ImeCursor
 import io.github.thisisthepy.dsa.control.v1.ImeDeleteSurrounding
+import io.github.thisisthepy.dsa.control.v1.ImeEditor
+import io.github.thisisthepy.dsa.control.v1.ImeInputKind
+import io.github.thisisthepy.dsa.control.v1.ImeSetComposingRegion
+import io.github.thisisthepy.dsa.control.v1.ImeSetSelection
 import io.github.thisisthepy.dsa.control.v1.Rect
 
 /**
@@ -30,13 +36,97 @@ interface EditorConnection {
      */
     fun deleteSurrounding(before: Int, after: Int): Boolean
 
+    /**
+     * Selects from [start] to [end], offsets in UTF-16 code units from the start of the
+     * editor's text, keeping the composition. False when no editor takes text now.
+     */
+    fun setSelection(start: Int, end: Int): Boolean
+
+    /**
+     * Makes the text from [start] to [end] the composition, as the host's input method does
+     * when it reconverts a word; equal offsets end the composition and keep its text. False
+     * when no editor takes text now.
+     */
+    fun setComposingRegion(start: Int, end: Int): Boolean
+
     companion object {
         /** No editor, as before the input method starts. */
         val NONE = object : EditorConnection {
             override fun setComposing(text: String, cursor: Int) = false
             override fun commit(text: String) = false
             override fun deleteSurrounding(before: Int, after: Int) = false
+            override fun setSelection(start: Int, end: Int) = false
+            override fun setComposingRegion(start: Int, end: Int) = false
         }
+    }
+}
+
+/**
+ * The focused editor as the host's input method reads it: the kind of text it takes, and its
+ * text around the selection. Offsets are UTF-16 code units from the start of the editor's
+ * whole text; [selectionStart] is the anchor and [selectionEnd] the active end. A composition
+ * whose start equals its end is none.
+ */
+data class EditorState(
+    val kind: ImeInputKind,
+    val text: String,
+    val textStart: Int,
+    val selectionStart: Int,
+    val selectionEnd: Int,
+    val compositionStart: Int,
+    val compositionEnd: Int,
+) {
+    companion object {
+        /** No editor takes text: the focus is on a view that reads keys, or on nothing. */
+        val NONE = EditorState(ImeInputKind.IME_INPUT_KIND_NONE, "", 0, 0, 0, 0, 0)
+
+        /** The most text around the selection the host takes, in UTF-16 code units. */
+        const val MAX_TEXT = 4096
+
+        /** How far the text reaches on each side of the selection, where the editor's goes on. */
+        const val REACH = 1024
+    }
+}
+
+/**
+ * The kind of text an editor takes, from its EditorInfo's input type and options, so the
+ * host's input method offers the keys for it and keeps composition and prediction out of a
+ * password.
+ */
+fun inputKind(inputType: Int, imeOptions: Int): ImeInputKind {
+    val variation = inputType and InputType.TYPE_MASK_VARIATION
+    return when (inputType and InputType.TYPE_MASK_CLASS) {
+        InputType.TYPE_NULL -> ImeInputKind.IME_INPUT_KIND_NONE
+        InputType.TYPE_CLASS_NUMBER ->
+            if (variation == InputType.TYPE_NUMBER_VARIATION_PASSWORD) {
+                ImeInputKind.IME_INPUT_KIND_NUMBER_PASSWORD
+            } else {
+                ImeInputKind.IME_INPUT_KIND_NUMBER
+            }
+        InputType.TYPE_CLASS_PHONE -> ImeInputKind.IME_INPUT_KIND_PHONE
+        InputType.TYPE_CLASS_DATETIME -> when (variation) {
+            InputType.TYPE_DATETIME_VARIATION_DATE -> ImeInputKind.IME_INPUT_KIND_DATE
+            InputType.TYPE_DATETIME_VARIATION_TIME -> ImeInputKind.IME_INPUT_KIND_TIME
+            else -> ImeInputKind.IME_INPUT_KIND_TEXT
+        }
+        InputType.TYPE_CLASS_TEXT -> when (variation) {
+            InputType.TYPE_TEXT_VARIATION_PASSWORD,
+            InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,
+            InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD,
+            -> ImeInputKind.IME_INPUT_KIND_PASSWORD
+            InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
+            InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS,
+            -> ImeInputKind.IME_INPUT_KIND_EMAIL
+            InputType.TYPE_TEXT_VARIATION_URI -> ImeInputKind.IME_INPUT_KIND_URL
+            InputType.TYPE_TEXT_VARIATION_PERSON_NAME -> ImeInputKind.IME_INPUT_KIND_PERSON_NAME
+            else ->
+                if (imeOptions and EditorInfo.IME_MASK_ACTION == EditorInfo.IME_ACTION_SEARCH) {
+                    ImeInputKind.IME_INPUT_KIND_SEARCH
+                } else {
+                    ImeInputKind.IME_INPUT_KIND_TEXT
+                }
+        }
+        else -> ImeInputKind.IME_INPUT_KIND_TEXT
     }
 }
 
@@ -86,6 +176,7 @@ class TextInput(
 ) {
     private val unknownTasks = HashSet<Int>()
     private var lastCursor: Pair<Int, Rect>? = null
+    private var lastEditor: Pair<Int, EditorState>? = null
     private var failing = false
 
     /** Acts on a composition from the host. */
@@ -125,6 +216,52 @@ class TextInput(
         }
     }
 
+    /** Selects text in the editor, as the host's input method asks. */
+    fun handle(selection: ImeSetSelection) {
+        val taskId = selection.taskId
+        if (!reach(taskId)) return
+        if (selection.start < 0 || selection.end < 0) return
+        if (!editor().setSelection(selection.start, selection.end)) {
+            log.warn("dropped a selection for task $taskId: no editor there takes text")
+        }
+    }
+
+    /** Makes text in the editor the composition again, as the host's input method asks. */
+    fun handle(region: ImeSetComposingRegion) {
+        val taskId = region.taskId
+        if (!reach(taskId)) return
+        if (region.start < 0 || region.end < region.start) return
+        if (!editor().setComposingRegion(region.start, region.end)) {
+            log.warn("dropped a composing region for task $taskId: no editor there takes text")
+        }
+    }
+
+    /**
+     * The focused editor is now [state]. The host hears it for the focused task, once for each
+     * state, so its input method reads the editor's own text.
+     */
+    fun editorChanged(state: EditorState) {
+        val taskId = focusedTask() ?: return
+        if (lastEditor == taskId to state) return
+        lastEditor = taskId to state
+        send(
+            Envelope.newBuilder()
+                .setImeEditor(
+                    ImeEditor.newBuilder()
+                        .setTaskId(taskId)
+                        .setKind(state.kind)
+                        .setText(state.text)
+                        .setTextStart(state.textStart)
+                        .setSelectionStart(state.selectionStart)
+                        .setSelectionEnd(state.selectionEnd)
+                        .setCompositionStart(state.compositionStart)
+                        .setCompositionEnd(state.compositionEnd),
+                )
+                .build()
+                .toByteArray(),
+        )
+    }
+
     /**
      * The focused editor's cursor is at these display pixels. The host hears where it is in
      * the focused task, once for each place it moves to.
@@ -152,6 +289,7 @@ class TextInput(
     fun retainTasks(taskIds: Set<Int>) {
         unknownTasks.removeAll(taskIds)
         if (lastCursor?.first !in taskIds) lastCursor = null
+        if (lastEditor?.first !in taskIds) lastEditor = null
     }
 
     /** Whether text for the task can go to it: the host knows the task, and it holds the focus. */
