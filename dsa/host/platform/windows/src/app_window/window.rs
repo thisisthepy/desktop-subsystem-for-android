@@ -8,9 +8,9 @@
 //! manager says so. Each window hands its mouse, touch and pen messages to its
 //! `PointerWindow` ([`super::pointer`]), which sends the task's pointer events on, its key
 //! messages to its `KeyWindow` ([`super::keys`]), which sends its key events on the same way,
-//! and its input method messages and typed characters to its `ImeWindow` ([`super::ime`]),
-//! which sends the task's text on and places the input method's windows at the cursor the
-//! guest reports.
+//! and its typed characters to its `ImeWindow` ([`super::ime`]), whose text services document
+//! the input method composes in: it sends the task's text on and places the input method's
+//! windows at the cursor the guest reports.
 //!
 //! A window reports its client size, its monitor's scale (once when it opens, then on every
 //! move to another monitor) and the start and end of a drag; the window manager turns them
@@ -99,6 +99,7 @@ use super::ime::ImeWindow;
 use super::keys::KeyWindow;
 use super::pointer::PointerWindow;
 use super::system_menu::{self, SystemMenuItem};
+use super::tsf;
 
 /// A task window that is open, as tests and logs see it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -109,6 +110,9 @@ pub struct OpenWindow {
     /// Where the window places the input method's windows: the cursor of the task's focused
     /// editor, as the guest last reported it.
     pub ime_cursor: Option<dsa_host_core::ime::ImeCursor>,
+    /// The guest's focused editor as the window's input method reads it, as the guest last
+    /// described it.
+    pub ime_editor: Option<dsa_host_core::ime::ImeEditor>,
 }
 
 /// Where a report about a window goes: to the window manager.
@@ -392,6 +396,15 @@ fn run(setup: UiSetup, commands: Receiver<ToHost>, ready: Sender<Result<isize, S
                 });
             }
         }
+        // The input methods compose in the windows through the text services framework,
+        // which runs on this thread for the windows it opens.
+        if let Err(why) = tsf::start_thread() {
+            UI.with(|ui| {
+                if let Some(ui) = ui.borrow().as_ref() {
+                    ui.log(&why);
+                }
+            });
+        }
 
         let mut message: MSG = std::mem::zeroed();
         while GetMessageW(&mut message, std::ptr::null_mut(), 0, 0) > 0 {
@@ -407,6 +420,7 @@ fn run(setup: UiSetup, commands: Receiver<ToHost>, ready: Sender<Result<isize, S
             }
             ui.publish();
         }
+        tsf::end_thread();
         KillTimer(message_window, TICK_TIMER);
         DestroyWindow(message_window);
     }
@@ -845,6 +859,7 @@ unsafe extern "system" fn task_window_proc(
         WM_NCDESTROY => {
             drop_target::revoke(hwnd as isize);
             if let Some(data) = window_data(hwnd) {
+                data.ime.detach();
                 if let Ok(mut tree) = data.accessibility.try_borrow_mut() {
                     tree.close(hwnd as isize);
                 }
@@ -1359,7 +1374,14 @@ impl Ui {
                     ToHost::ImeCursor { task_id, cursor } => {
                         if let Some(hwnd) = self.open.get(&task_id) {
                             if let Some(data) = window_data(*hwnd) {
-                                data.ime.cursor_moved(*hwnd, cursor);
+                                data.ime.cursor_moved(cursor);
+                            }
+                        }
+                    }
+                    ToHost::ImeEditor { task_id, editor } => {
+                        if let Some(hwnd) = self.open.get(&task_id) {
+                            if let Some(data) = window_data(*hwnd) {
+                                data.ime.editor_changed(editor);
                             }
                         }
                     }
@@ -1460,6 +1482,8 @@ impl Ui {
                 hwnd: *hwnd as isize,
                 // SAFETY: a window of this thread.
                 ime_cursor: unsafe { window_data(*hwnd) }.and_then(|data| data.ime.cursor()),
+                // SAFETY: as above.
+                ime_editor: unsafe { window_data(*hwnd) }.and_then(|data| data.ime.editor()),
             })
             .collect();
         listing.sort_by_key(|window| window.task_id);
@@ -1551,6 +1575,14 @@ impl Ui {
             return;
         }
         super::pointer::deliver_contacts_at_once(hwnd);
+        // The input method composes in the window's own document.
+        if let Some(data) = window_data(hwnd) {
+            if let Err(why) = data.ime.attach(hwnd) {
+                self.log(&format!(
+                    "task {task_id}'s window takes no input method: {why}"
+                ));
+            }
+        }
         window_marks::mark_task(hwnd as isize, task_id);
         // The Android window menu, under Windows' own items.
         system_menu::apply(hwnd, self.new_window);

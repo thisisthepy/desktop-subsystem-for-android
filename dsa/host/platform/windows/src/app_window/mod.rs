@@ -25,6 +25,8 @@ pub mod pointer;
 pub mod screenshot;
 pub mod splash;
 pub mod system_menu;
+pub mod text_store;
+pub mod tsf;
 pub mod window;
 
 use std::collections::{HashMap, HashSet};

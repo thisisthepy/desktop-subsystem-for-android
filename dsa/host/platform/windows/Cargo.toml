@@ -59,7 +59,6 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_Controls",
     "Win32_UI_HiDpi",
     "Win32_UI_Shell",
-    "Win32_UI_Input_Ime",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_Input_Pointer",
     "Win32_UI_Input_Touch",
@@ -106,6 +105,9 @@ windows = { version = "0.62", features = [
     "Win32_UI_Shell",
     "Win32_UI_Shell_Common",
     "Win32_UI_Shell_PropertiesSystem",
+    # Text input in each task window: the text services framework's thread manager, document
+    # manager and text store, which every input method composes through.
+    "Win32_UI_TextServices",
     # Toast notifications for the notifications of the user's Android.
     "Data_Xml_Dom",
     # The computer's location, which the user's Android gets as its GNSS location.

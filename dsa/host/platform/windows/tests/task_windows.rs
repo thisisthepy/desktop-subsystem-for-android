@@ -18,7 +18,7 @@ use dsa_host_core::compositor::window_sizing::{density_for_dpi, min_client_size,
 use dsa_host_core::compositor::FakeRenderer;
 use dsa_host_core::host_api::{UserAndroid, UserAndroids};
 use dsa_host_core::host_api_conformance::{FakeAndroid, FakeAndroids, RunningService};
-use dsa_host_core::ime::{ImeCursor, ImeEvent};
+use dsa_host_core::ime::{ImeCursor, ImeEditor, ImeEvent, InputKind};
 use dsa_host_core::input::{buttons, PointerAction, PointerEvent, PointerTool};
 use dsa_host_core::keys::{keycode, meta, KeyAction, KeyEvent};
 use dsa_host_core::tasks::{AppInfo, Bounds, Task, TaskEvent, TaskRequest};
@@ -36,7 +36,6 @@ use windows_sys::Win32::Graphics::Gdi::{
     ClientToScreen, GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
 };
 use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
-use windows_sys::Win32::UI::Input::Ime::{GCS_COMPSTR, GCS_CURSORPOS};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     VK_A, VK_BACK, VK_CONTROL, VK_MENU, VK_OEM_1, VK_RETURN, VK_RIGHT, VK_SHIFT, VK_TAB,
 };
@@ -44,8 +43,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     GetClientRect, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, IsWindow,
     IsWindowVisible, IsZoomed, PostMessageW, SendMessageW, SetWindowPos, ShowWindow, SWP_NOMOVE,
     SWP_NOZORDER, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, WM_CHAR, WM_CLOSE, WM_ENTERSIZEMOVE,
-    WM_EXITSIZEMOVE, WM_IME_CHAR, WM_IME_COMPOSITION, WM_IME_ENDCOMPOSITION,
-    WM_IME_STARTCOMPOSITION, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDOWN, WM_LBUTTONUP,
+    WM_EXITSIZEMOVE, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDOWN, WM_LBUTTONUP,
     WM_MOUSEWHEEL, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 
@@ -1553,25 +1551,49 @@ fn fr6_characters_of_any_layout_reach_the_task_as_text() {
 }
 
 #[test]
-fn fr6_input_method_messages_without_a_composition_send_nothing() {
+fn fr6_the_window_reads_the_editor_the_guest_describes_and_types_into_it() {
     let running = start(None);
     let hwnd = one_task_window(&running);
+    let editor = ImeEditor {
+        kind: InputKind::Email,
+        text: "me@".into(),
+        text_start: 0,
+        selection: (3, 3),
+        composition: None,
+    };
+    running.android.publish(TaskEvent::ImeEditor {
+        task_id: 7,
+        editor: editor.clone(),
+    });
+    wait_for("the window to read the editor", || {
+        (running.windows().first()?.ime_editor.as_ref() == Some(&editor)).then_some(())
+    });
+    // A character typed without an input method goes at the cursor, once.
     unsafe {
-        // The window opens no composition window of its own: the guest's editor shows it.
-        assert_eq!(SendMessageW(hwnd, WM_IME_STARTCOMPOSITION, 0, 0), 0);
-        // No input method composes here, so there is nothing to read.
-        SendMessageW(
-            hwnd,
-            WM_IME_COMPOSITION,
-            0,
-            (GCS_COMPSTR | GCS_CURSORPOS) as isize,
-        );
-        SendMessageW(hwnd, WM_IME_ENDCOMPOSITION, 0, 0);
-        // A commit already carried an input method's characters.
-        SendMessageW(hwnd, WM_IME_CHAR, 0xd55c, 1);
         SendMessageW(hwnd, WM_CHAR, usize::from(b'z'), 1);
     }
     assert_eq!(text(&running, 1), vec![commit("z")]);
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(running.android.text.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn fr6_a_character_typed_where_no_editor_takes_text_still_reaches_the_task() {
+    let running = start(None);
+    let hwnd = one_task_window(&running);
+    running.android.publish(TaskEvent::ImeEditor {
+        task_id: 7,
+        editor: ImeEditor::none(),
+    });
+    wait_for("the window to read that no editor takes text", || {
+        let window = running.windows().first()?.clone();
+        (window.ime_editor?.kind == InputKind::None).then_some(())
+    });
+    // A game reads it as the keys that type it, which the agent finds for the text.
+    unsafe {
+        SendMessageW(hwnd, WM_CHAR, usize::from(b'w'), 1);
+    }
+    assert_eq!(text(&running, 1), vec![commit("w")]);
 }
 
 #[test]
