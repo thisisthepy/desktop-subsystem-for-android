@@ -134,6 +134,12 @@ struct SettingsWindow: View {
         // App Info in a task window's Window menu: the Apps page, searched for that app so its
         // row is the one in view.
         .onOpenURL { url in
+            // A click on DSA's notification about an update: the Updates page.
+            if AppPageLink.isUpdates(url) {
+                page = .updates
+                NSApp.activate(ignoringOtherApps: true)
+                return
+            }
             guard let package = AppPageLink.package(of: url) else { return }
             page = .apps
             model.apps.search = package

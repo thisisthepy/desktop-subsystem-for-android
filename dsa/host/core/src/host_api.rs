@@ -102,6 +102,7 @@ use crate::tasks::{
     AppInfo, AppSettingsPage, Bounds, StatusBarAppearance, Task, TaskEvent, TaskOrientation,
     TaskRequest, TaskRequestError, TaskWatch,
 };
+use crate::update::alerts::{self as update_alerts, UpdateAlert};
 use crate::widgets::{
     self, MemoryWidgetPlacements, Placement, Widget, WidgetError, WidgetEvent, WidgetFrame,
     WidgetPlacements, WidgetProvider, WidgetSize,
@@ -140,6 +141,16 @@ pub trait UserAndroid: Send + Sync {
     /// News about the Android image for the user, if there is any.
     fn update_notice(&self) -> Option<String> {
         None
+    }
+    /// The update alerts `user`'s desktop has not shown yet: for the Android image and for
+    /// DSA, the latest news about each. The watch of `user`'s notifications carries them.
+    fn untold_update_alerts(&self, user: &str) -> Vec<UpdateAlert> {
+        let _ = user;
+        Vec::new()
+    }
+    /// `user`'s desktop was given `alert` to show, so it is not given it again.
+    fn update_alert_told(&self, user: &str, alert: &UpdateAlert) {
+        let _ = (user, alert);
     }
     /// The runtime ID of the VM (such as a GUID on Windows), if running.
     fn vm_id(&self) -> Option<String> {
@@ -2725,15 +2736,16 @@ impl HostApiService {
     fn watch_notifications(&self, mut connection: Box<dyn Connection>, peer: &Peer, id: u64) {
         let watched = match self.androids.android(&peer.user) {
             Err(why) => Err(error(ErrorCode::Unavailable, why)),
-            Ok(android) => android.watch_notifications().ok_or_else(|| {
-                error(
+            Ok(android) => match android.watch_notifications() {
+                Some(watch) => Ok((android, watch)),
+                None => Err(error(
                     ErrorCode::Unavailable,
                     "this Android does not show its notifications on the host".into(),
-                )
-            }),
+                )),
+            },
         };
-        let watch = match watched {
-            Ok(watch) => watch,
+        let (android, watch) = match watched {
+            Ok(watched) => watched,
             Err(body) => {
                 let _ = send(
                     &mut *connection,
@@ -2753,6 +2765,15 @@ impl HostApiService {
             return;
         }
         loop {
+            // The news about updates this user's desktop has not shown yet: raised while it
+            // was not watching, or just now.
+            for alert in android.untold_update_alerts(&peer.user) {
+                let posted = NotificationEvent::Posted(alert.notification());
+                if send(&mut *connection, notification_to_wire(posted)).is_err() {
+                    return;
+                }
+                android.update_alert_told(&peer.user, &alert);
+            }
             loop {
                 match watch.try_recv() {
                     Ok(event) => {
@@ -3417,6 +3438,11 @@ impl HostApiService {
                 )
             }
         };
+        // An update alert is the host's alone: its desktop opens the update settings on a
+        // click, and Android has nothing to open or dismiss.
+        if update_alerts::is_update_key(action.key()) {
+            return response::Body::Done(types::Done {});
+        }
         let android = match self.androids.android(&peer.user) {
             Ok(android) => android,
             Err(why) => return error(ErrorCode::Unavailable, why),

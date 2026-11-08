@@ -733,3 +733,160 @@ fn fr14_losing_the_only_image_brings_the_next_check_forward() {
     let soon = now + Duration::from_secs(60);
     assert_eq!(next_image_check(soon, now, false, retry), soon);
 }
+
+/// Connects as `user`, as if the operating system had reported that user.
+struct DesktopOf(dsa_transport::local::MemoryLocalConnector, &'static str);
+
+impl Connector for DesktopOf {
+    fn connect(
+        &mut self,
+        _: Duration,
+    ) -> Result<Box<dyn dsa_transport::Connection>, dsa_transport::TransportError> {
+        self.0.connect_as(dsa_transport::local::Peer {
+            user: self.1.into(),
+            administrator: false,
+        })
+    }
+}
+
+/// The local API of a service whose users all have `android`.
+fn desktops(
+    android: &Arc<UpdatingAndroid>,
+) -> (
+    dsa_host_core::host_api_conformance::RunningService,
+    dsa_transport::local::MemoryLocalConnector,
+) {
+    let (listener, connector) = dsa_transport::local::pair();
+    let android = Arc::clone(android);
+    let androids = Arc::new(dsa_host_core::host_api::PerUser::new(move |_: &str| {
+        Ok(Arc::clone(&android) as Arc<dyn UserAndroid>)
+    }));
+    let service =
+        dsa_host_core::host_api_conformance::RunningService::start(Box::new(listener), androids);
+    (service, connector)
+}
+
+/// What `user`'s desktop is given to show when it watches their notifications now, as a
+/// window manager does: each notification posted until the watch has been quiet a while.
+fn shown_on_desktop(
+    connector: &dsa_transport::local::MemoryLocalConnector,
+    user: &'static str,
+) -> Vec<dsa_host_core::notifications::Notification> {
+    use dsa_host_core::notifications::NotificationEvent;
+    let mut watch = dsa_host_core::host_api::HostApiClient::connect(
+        &mut DesktopOf(connector.clone(), user),
+        "desktop",
+        WAIT,
+    )
+    .unwrap()
+    .watch_notifications()
+    .unwrap();
+    let mut shown = Vec::new();
+    while let Some(event) = watch.next(Duration::from_millis(500)).unwrap() {
+        if let NotificationEvent::Posted(notification) = event {
+            shown.push(notification);
+        }
+    }
+    shown
+}
+
+fn keys(shown: &[dsa_host_core::notifications::Notification]) -> Vec<&str> {
+    shown.iter().map(|n| n.key.as_str()).collect()
+}
+
+#[test]
+fn fr14_the_desktop_is_told_once_before_and_once_after_an_image_update() {
+    use dsa_host_core::native_abi::in_user_language;
+    use dsa_host_core::update::service::check_alerting;
+    let store = fresh_store();
+    let (android, done) = updating_android(&store, &[]);
+    let android = Arc::new(android);
+    let (_service, desktop) = desktops(&android);
+    let fetch = server(&[16], &[("16.0.2", 16, 2)], &key());
+    let check = || {
+        check_alerting(
+            &store,
+            &fetch,
+            "mem://list.json",
+            &trusted(),
+            &android.notices,
+            &mut |_: &Download| {},
+        )
+        .unwrap()
+    };
+    assert!(check().is_some());
+    let shown = shown_on_desktop(&desktop, "alice");
+    assert_eq!(keys(&shown), ["dsa:update:android:ready:16.0.2"]);
+    let english = in_user_language(shown[0].clone(), false);
+    assert_eq!(english.title, "Android update ready");
+    assert!(
+        english.text.contains("used the next time Android starts"),
+        "{}",
+        english.text
+    );
+    assert_eq!(
+        in_user_language(shown[0].clone(), true).title,
+        "Android 업데이트가 준비되었습니다"
+    );
+    // Checked again and watched again: the same version is not shown twice.
+    assert_eq!(check(), None);
+    assert!(shown_on_desktop(&desktop, "alice").is_empty());
+
+    android.start();
+    assert_eq!(wait_for_notice(&android), "Android was updated to 16.0.2");
+    let shown = shown_on_desktop(&desktop, "alice");
+    assert_eq!(keys(&shown), ["dsa:update:android:applied:16.0.2"]);
+    assert_eq!(
+        in_user_language(shown[0].clone(), false).text,
+        "Android 16.0.2 started and is now in use."
+    );
+    assert!(shown_on_desktop(&desktop, "alice").is_empty());
+    done.store(true, Ordering::Relaxed);
+}
+
+#[test]
+fn fr14_a_desktop_that_was_away_is_told_only_how_the_update_ended() {
+    use dsa_host_core::native_abi::in_user_language;
+    use dsa_host_core::update::service::check_alerting;
+    let store = fresh_store();
+    let (android, done) = updating_android(&store, &["16.0.2"]);
+    let android = Arc::new(android);
+    check_alerting(
+        &store,
+        &server(&[16], &[("16.0.2", 16, 2)], &key()),
+        "mem://list.json",
+        &trusted(),
+        &android.notices,
+        &mut |_: &Download| {},
+    )
+    .unwrap();
+    android.start();
+    let notice = wait_for_notice(&android);
+    assert!(
+        notice.starts_with("Android 16.0.2 did not start"),
+        "{notice}"
+    );
+    // Nobody watched meanwhile. The news that it was ready is old by now; only the failure
+    // is shown, with why.
+    let (_service, desktop) = desktops(&android);
+    let shown = shown_on_desktop(&desktop, "alice");
+    assert_eq!(keys(&shown), ["dsa:update:android:failed:16.0.2"]);
+    let english = in_user_language(shown[0].clone(), false);
+    assert_eq!(english.title, "Android update failed");
+    assert!(
+        english.text.starts_with("Android 16.0.2 was not applied.")
+            && english.text.contains("Android 16.0.1 is in use again"),
+        "{}",
+        english.text
+    );
+    assert_eq!(
+        in_user_language(shown[0].clone(), true).title,
+        "Android 업데이트에 실패했습니다"
+    );
+    assert!(shown_on_desktop(&desktop, "alice").is_empty());
+    assert!(
+        android.session.wait_for(SessionState::Active, WAIT),
+        "the previous image runs again"
+    );
+    done.store(true, Ordering::Relaxed);
+}

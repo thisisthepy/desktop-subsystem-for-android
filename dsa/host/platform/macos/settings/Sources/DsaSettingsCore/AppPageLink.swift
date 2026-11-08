@@ -18,6 +18,13 @@ public enum AppPageLink {
         return isPackage(package) ? package : nil
     }
 
+    /// Whether `url` is the link that opens the Updates page, `dsa-settings://updates`, which a
+    /// click on DSA's notification about an update opens.
+    public static func isUpdates(_ url: URL) -> Bool {
+        url.scheme?.lowercased() == scheme && url.host?.lowercased() == "updates"
+            && url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")).isEmpty
+    }
+
     /// Whether `name` is an Android package name: two or more dot-separated parts, each a
     /// letter followed by letters, digits and underscores.
     public static func isPackage(_ name: String) -> Bool {

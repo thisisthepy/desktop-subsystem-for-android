@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 
 use ed25519_dalek::VerifyingKey;
 
+use super::alerts::{AlertKind, Subject, UpdateAlert, UpdateAlerts};
 use super::manifest::{self, ImageEntry};
 use super::policy::{decide_for, Decision, InstalledImage};
 use super::store::{Fetch, ImageStore};
@@ -32,16 +33,30 @@ use crate::tasks::{AppSettingsPage, TaskRequest, TaskRequestError, TaskWatch};
 use crate::widgets::{WidgetError, WidgetProvider, WidgetSize};
 use std::sync::mpsc::Receiver;
 
-/// The latest news about the image, shared by every user's Android.
+/// The latest news about the image, shared by every user's Android: in words for `dsa status`
+/// and the settings app, and as the alerts each user's desktop shows.
 #[derive(Default)]
-pub struct UpdateNotices(Mutex<Option<String>>);
+pub struct UpdateNotices {
+    text: Mutex<Option<String>>,
+    alerts: UpdateAlerts,
+}
 
 impl UpdateNotices {
     pub fn set(&self, notice: impl Into<String>) {
-        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(notice.into());
+        *self.text.lock().unwrap_or_else(|e| e.into_inner()) = Some(notice.into());
     }
     pub fn get(&self) -> Option<String> {
-        self.0.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        self.text.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// Raises `alert` for every user's desktop, once for its version.
+    pub fn raise(&self, alert: UpdateAlert) -> bool {
+        self.alerts.raise(alert)
+    }
+
+    /// The alerts raised, and which each user was told.
+    pub fn alerts(&self) -> &UpdateAlerts {
+        &self.alerts
     }
 }
 
@@ -193,6 +208,31 @@ pub fn check_reporting(
             )))
         }
     }
+}
+
+/// [`check_reporting`], and raises on `notices` the alert that an image is downloaded and
+/// waits for the next start, when the check put one in place. The service's periodic check
+/// runs this, so every user's desktop is told before the update is applied.
+pub fn check_alerting(
+    store: &ImageStore,
+    fetch: &dyn Fetch,
+    list_url: &str,
+    keys: &[VerifyingKey],
+    notices: &UpdateNotices,
+    downloading: &mut dyn FnMut(&Download),
+) -> Result<Option<String>, UpdateError> {
+    let before = store.state().ok().map(|state| state.current.version);
+    let news = check_reporting(store, fetch, list_url, keys, downloading)?;
+    if let Ok(after) = store.state() {
+        if after.on_trial && before.as_ref() != Some(&after.current.version) {
+            notices.raise(UpdateAlert::new(
+                Subject::Android,
+                AlertKind::Ready,
+                after.current.version,
+            ));
+        }
+    }
+    Ok(news)
 }
 
 /// When the image check runs next. A check scheduled while an image was in place stands,
@@ -371,6 +411,46 @@ impl Boot for TrialBoot {
     }
 }
 
+/// The alert for every user's desktop of how a trial ended: the new image is in use, or it
+/// did not start and was undone. A trial that is still undecided, or that is waiting for its
+/// confirmation, tells nothing yet.
+fn alert_of(outcome: &Outcome) -> Option<UpdateAlert> {
+    match outcome {
+        Outcome::Booted {
+            image,
+            confirmed: true,
+        } => Some(UpdateAlert::new(
+            Subject::Android,
+            AlertKind::Applied,
+            image.version.clone(),
+        )),
+        Outcome::Booted { .. } | Outcome::Undecided { .. } => None,
+        Outcome::RolledBack {
+            failed,
+            reason,
+            image,
+        }
+        | Outcome::RolledBackNotReady {
+            failed,
+            reason,
+            image,
+            ..
+        } => Some(UpdateAlert::failed(
+            Subject::Android,
+            failed.version.clone(),
+            format!(
+                "it did not start ({reason}), so Android {} is in use again",
+                image.version
+            ),
+        )),
+        Outcome::GaveUp { failed, reason } => Some(UpdateAlert::failed(
+            Subject::Android,
+            failed.version.clone(),
+            format!("it did not start ({reason}), and no other image is installed"),
+        )),
+    }
+}
+
 /// What happens to an image that failed its trial, in words for the user.
 fn not_retried(failed: &InstalledImage) -> String {
     format!(
@@ -442,6 +522,12 @@ impl UserAndroid for UpdatingAndroid {
     }
     fn update_notice(&self) -> Option<String> {
         self.notices.get()
+    }
+    fn untold_update_alerts(&self, user: &str) -> Vec<UpdateAlert> {
+        self.notices.alerts().untold(user)
+    }
+    fn update_alert_told(&self, user: &str, alert: &UpdateAlert) {
+        self.notices.alerts().told(user, alert)
     }
     fn vm_id(&self) -> Option<String> {
         UserAndroid::vm_id(&*self.session)
@@ -617,6 +703,9 @@ impl UserAndroid for UpdatingAndroid {
                 rollback,
             };
             let outcome = trial::start(&store, &mut guest, timeout);
+            if let Some(alert) = outcome.as_ref().ok().and_then(alert_of) {
+                notices.raise(alert);
+            }
             notices.set(match outcome {
                 Ok(Outcome::Booted {
                     image,

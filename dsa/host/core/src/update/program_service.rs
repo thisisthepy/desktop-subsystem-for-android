@@ -34,6 +34,7 @@ use ed25519_dalek::VerifyingKey;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use super::alerts::{AlertKind, Subject, UpdateAlert};
 use super::manifest::is_plain_name;
 use super::program::{
     self, ProgramDecision, ProgramError, ProgramManifest, ReleaseChannel, Version,
@@ -328,6 +329,15 @@ impl ProgramUpdates {
         )
     }
 
+    /// Tells the users that installing `version` failed, because of `detail`: in words, and
+    /// on every user's desktop.
+    fn tell_failure(&self, version: &str, detail: &str) {
+        self.tell(self.failure_notice(version, detail));
+        self.status
+            .notices
+            .raise(UpdateAlert::failed(Subject::Program, version, detail));
+    }
+
     /// Tells the users how the installation the state records went: the version running
     /// now is the one setup installed, or setup failed and the old version is still here.
     fn report_last_install(&self) -> Result<(), ProgramError> {
@@ -341,6 +351,11 @@ impl ProgramUpdates {
         if pending.installing {
             if arrived {
                 self.tell(format!("DSA was updated to {}", self.settings.running));
+                self.status.notices.raise(UpdateAlert::new(
+                    Subject::Program,
+                    AlertKind::Applied,
+                    self.settings.running.clone(),
+                ));
                 state = ProgramState::default();
                 self.remove_downloads(None);
             } else {
@@ -349,7 +364,7 @@ impl ProgramUpdates {
                     .as_ref()
                     .map(|log| format!("see {}", log.display()))
                     .unwrap_or_else(|| "setup left no log".into());
-                self.tell(self.failure_notice(&pending.version, &log));
+                self.tell_failure(&pending.version, &log);
                 state.failed = Some(pending.version.clone());
                 state.pending = Some(Pending {
                     installing: false,
@@ -517,6 +532,15 @@ impl ProgramUpdates {
              installs it now)",
             list.version
         ));
+        // `dsa update` installs what it downloads at once, so only the service's own check
+        // tells the desktop that an update waits.
+        if !retry_failed {
+            self.status.notices.raise(UpdateAlert::new(
+                Subject::Program,
+                AlertKind::Ready,
+                list.version.clone(),
+            ));
+        }
         Ok(CheckOutcome::Downloaded(list.version))
     }
 
@@ -698,7 +722,7 @@ impl ProgramUpdates {
         let result = self.start_setup(pending);
         if let Err(error) = &result {
             self.status.set_installing(None);
-            self.tell(self.failure_notice(&version, &error.to_string()));
+            self.tell_failure(&version, &error.to_string());
         }
         result
     }
@@ -771,13 +795,13 @@ impl ProgramUpdates {
             self.log(&error.to_string());
         }
         self.status.set_installing(None);
-        self.tell(self.failure_notice(
+        self.tell_failure(
             version,
             &format!(
                 "setup ended with exit code {code} and the service was not replaced; see {}",
                 log.display()
             ),
-        ));
+        );
     }
 
     /// Removes setup files no longer needed. The one setup ran from cannot be removed by
@@ -875,6 +899,15 @@ impl UserAndroid for WithProgramStatus {
             .flatten()
             .collect();
         (!notices.is_empty()).then(|| notices.join("\n"))
+    }
+    fn untold_update_alerts(&self, user: &str) -> Vec<UpdateAlert> {
+        let mut alerts = self.android.untold_update_alerts(user);
+        alerts.extend(self.status.notices.alerts().untold(user));
+        alerts
+    }
+    fn update_alert_told(&self, user: &str, alert: &UpdateAlert) {
+        self.android.update_alert_told(user, alert);
+        self.status.notices.alerts().told(user, alert);
     }
     fn vm_id(&self) -> Option<String> {
         self.android.vm_id()

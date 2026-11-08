@@ -40,8 +40,9 @@ use crate::input::evdev::EvdevGamepads;
 use crate::renderer::client::RendererClient;
 use crate::shell::dbus::{Notifier, Signal};
 use crate::shell::desktop_entry::{self, Folders};
-use crate::shell::notifications::Shown as ShownNotifications;
+use crate::shell::notifications::{Shown as ShownNotifications, UPDATE_PAGE_ARGUMENTS};
 use dsa_host_core::renderer::{spawn_supervisor, RendererHandler};
+use dsa_host_core::update::alerts::is_update_key;
 use dsa_host_unix::renderer_launch::{CurrentFds, UnixLauncher};
 
 /// The build this program reports to the service.
@@ -120,6 +121,18 @@ fn open_app_page(package: &str) -> Result<(), String> {
         .with_file_name("dsa-settings");
     std::process::Command::new(&program)
         .args(app_page_arguments(package))
+        .spawn()
+        .map(drop)
+        .map_err(|e| format!("could not start {}: {e}", program.display()))
+}
+
+/// Opens DSA Settings on the Updates page, as a click on DSA's news about an update does.
+fn open_update_page() -> Result<(), String> {
+    let program = std::env::current_exe()
+        .map_err(|e| format!("this program's place is not known: {e}"))?
+        .with_file_name("dsa-settings");
+    std::process::Command::new(&program)
+        .args(UPDATE_PAGE_ARGUMENTS)
         .spawn()
         .map(drop)
         .map_err(|e| format!("could not start {}: {e}", program.display()))
@@ -370,8 +383,19 @@ fn show_notifications(requests: Sender<Request>, icons: PathBuf) {
                             },
                             Err(_) => None,
                         };
-                        if let Some(action) = action {
-                            let _ = requests.send(Request::Notification(action));
+                        match action {
+                            // DSA's own news about an update opens the settings where the
+                            // updates are; nothing about it goes to the guest.
+                            Some(NotificationAction::Open { key }) if is_update_key(&key) => {
+                                if let Err(why) = open_update_page() {
+                                    log(&why);
+                                }
+                            }
+                            Some(action) if is_update_key(action.key()) => {}
+                            Some(action) => {
+                                let _ = requests.send(Request::Notification(action));
+                            }
+                            None => {}
                         }
                     });
                     if let Err(why) = watched {

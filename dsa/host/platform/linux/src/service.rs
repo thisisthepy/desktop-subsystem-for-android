@@ -34,7 +34,7 @@ use dsa_host_core::power::PowerHub;
 use dsa_host_core::session::{Session, SessionState};
 use dsa_host_core::settings::{FileSettings, SettingsStore};
 use dsa_host_core::update::service::{
-    check_reporting, next_image_check, CheckNow, Download, StoreVersions, UpdateNotices,
+    check_alerting, next_image_check, CheckNow, Download, StoreVersions, UpdateNotices,
     UpdatingAndroid,
 };
 use dsa_host_core::update::store::{ImageStore, Recovery};
@@ -617,11 +617,12 @@ fn check_for_updates(
             }
             updates.notices.set(notice);
         };
-        match check_reporting(
+        match check_alerting(
             &updates.store,
             &fetch,
             &settings.list_url,
             &keys,
+            &updates.notices,
             &mut announce,
         ) {
             Ok(Some(notice)) => {

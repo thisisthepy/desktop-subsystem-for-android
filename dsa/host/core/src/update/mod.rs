@@ -23,8 +23,12 @@
 //! - [`program_service`]: downloading that setup file, running it once no user's Android
 //!   is running (or at once when a user asks), and telling the users how it went.
 //!
+//! Both tell the user on the desktop through [`alerts`]: an update that is ready, one that was
+//! applied, and one that failed.
+//!
 //! Downloading is behind [`store::Fetch`]; the platform crates supply HTTPS.
 
+pub mod alerts;
 pub mod manifest;
 pub mod policy;
 pub mod program;

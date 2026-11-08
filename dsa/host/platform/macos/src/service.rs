@@ -28,7 +28,7 @@ use dsa_host_core::host_api::{HostApiService, PerUser, ServiceFacts, UserAndroid
 use dsa_host_core::session::Session;
 use dsa_host_core::settings::{FileSettings, SettingsStore};
 use dsa_host_core::update::service::{
-    check_reporting, next_image_check, CheckNow, StoreVersions, UpdateNotices, UpdatingAndroid,
+    check_alerting, next_image_check, CheckNow, StoreVersions, UpdateNotices, UpdatingAndroid,
 };
 use dsa_host_core::update::store::{ImageStore, Recovery};
 use dsa_host_core::window_manager::{WindowManagerHost, WindowManagerKeeper};
@@ -414,7 +414,14 @@ fn check_for_updates(
             }
             notices.set(download.notice());
         };
-        match check_reporting(&store, &CurlFetch, &update.list_url, &keys, &mut announce) {
+        match check_alerting(
+            &store,
+            &CurlFetch,
+            &update.list_url,
+            &keys,
+            &notices,
+            &mut announce,
+        ) {
             Ok(Some(notice)) => {
                 eprintln!("{build}: {notice}");
                 notices.set(notice);

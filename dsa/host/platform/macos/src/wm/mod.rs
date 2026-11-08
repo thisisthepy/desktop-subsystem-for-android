@@ -13,6 +13,8 @@
 //! - [`launch`]: starting an app's window host from its bundle.
 //! - `hosts`, `present`, `graphics`, `run` (macOS only): the window hosts' connections, the
 //!   frames' way to them, the graphics streams, and the loop that runs it all.
+//! - `notifications` (macOS only): the user's notifications, and DSA's own news about updates,
+//!   in the Notification Center.
 
 pub mod frame_slots;
 pub mod launch;
@@ -22,6 +24,8 @@ pub mod manager;
 pub mod graphics;
 #[cfg(target_os = "macos")]
 pub mod hosts;
+#[cfg(target_os = "macos")]
+pub mod notifications;
 #[cfg(target_os = "macos")]
 pub mod present;
 #[cfg(target_os = "macos")]
