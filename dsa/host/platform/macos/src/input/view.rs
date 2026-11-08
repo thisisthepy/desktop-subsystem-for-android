@@ -44,6 +44,9 @@ pub trait InputSink {
     /// Where the cursor of the editor focused in the task is, for the input method's
     /// candidate window; `None` when the guest has not said.
     fn ime_cursor(&self) -> Option<ImeCursor>;
+    /// The editor focused in the task as the agent last described it; `None` when it has
+    /// not.
+    fn ime_editor(&self) -> Option<dsa_host_core::ime::ImeEditor>;
 }
 
 /// `NSEventModifierFlagControl` and `NSEventModifierFlagCommand`.
@@ -370,6 +373,7 @@ unsafe extern "C-unwind" fn key_down(this: &AnyObject, _: Sel, event: *mut AnyOb
     let time = event_time_ms(event);
     // A shortcut with Command goes to the guest as keys; the input method has no part in it.
     if flags & FLAG_COMMAND == 0 {
+        refresh_editor(this);
         with_state(this, |state| state.text.begin_key());
         let array_class = class(c"NSArray").expect("Foundation has NSArray");
         let events: *mut AnyObject = msg_send![array_class, arrayWithObject: event];
@@ -451,11 +455,38 @@ unsafe extern "C-unwind" fn accepts_first_mouse(
 
 // NSTextInputClient.
 
+/// The range AppKit passes, or `None` for `{NSNotFound, 0}`.
+fn range_of(range: NSRange) -> Option<(usize, usize)> {
+    (range.location != NOT_FOUND).then_some((range.location, range.length))
+}
+
+/// Takes the agent's latest description of the editor into the client. Whether the document
+/// changed.
+fn sync_editor(view: &AnyObject) -> bool {
+    with_state(view, |state| match state.sink.ime_editor() {
+        Some(editor) => state.text.describe(editor),
+        None => false,
+    })
+    .unwrap_or(false)
+}
+
+/// Takes the latest description, and tells the input method that what it knows of where
+/// characters stand is out of date when the editor changed.
+unsafe fn refresh_editor(view: &AnyObject) {
+    if sync_editor(view) {
+        let context: *mut AnyObject = msg_send![view, inputContext];
+        if !context.is_null() {
+            let _: () = msg_send![context, invalidateCharacterCoordinates];
+        }
+    }
+}
+
 unsafe extern "C-unwind" fn has_marked_text(this: &AnyObject, _: Sel) -> Bool {
     Bool::new(with_state(this, |state| state.text.has_marked_text()).unwrap_or(false))
 }
 
 unsafe extern "C-unwind" fn marked_range(this: &AnyObject, _: Sel) -> NSRange {
+    sync_editor(this);
     match with_state(this, |state| state.text.marked_range()).flatten() {
         Some((location, length)) => NSRange { location, length },
         None => NSRange {
@@ -466,6 +497,7 @@ unsafe extern "C-unwind" fn marked_range(this: &AnyObject, _: Sel) -> NSRange {
 }
 
 unsafe extern "C-unwind" fn selected_range(this: &AnyObject, _: Sel) -> NSRange {
+    sync_editor(this);
     let (location, length) =
         with_state(this, |state| state.text.selected_range()).unwrap_or((0, 0));
     NSRange { location, length }
@@ -476,14 +508,16 @@ unsafe extern "C-unwind" fn set_marked_text(
     _: Sel,
     text: *mut AnyObject,
     selected: NSRange,
-    _replacement: NSRange,
+    replacement: NSRange,
 ) {
     let text = string_of(text);
     with_state(this, |state| {
-        if let Some(event) = state
-            .text
-            .set_marked_text(&text, (selected.location, selected.length))
-        {
+        let events = state.text.set_marked_text_in(
+            &text,
+            (selected.location, selected.length),
+            range_of(replacement),
+        );
+        for event in events {
             send(state, event);
         }
     });
@@ -503,24 +537,41 @@ unsafe extern "C-unwind" fn valid_attributes(_this: &AnyObject, _: Sel) -> *mut 
 }
 
 unsafe extern "C-unwind" fn attributed_substring(
-    _this: &AnyObject,
+    this: &AnyObject,
     _: Sel,
-    _range: NSRange,
-    _actual: *mut NSRange,
+    range: NSRange,
+    actual: *mut NSRange,
 ) -> *mut AnyObject {
-    // The guest's editor text is not mirrored on the host.
-    std::ptr::null_mut()
+    sync_editor(this);
+    // The guest's editor around its selection, as the agent described it.
+    let Some((text, (location, length))) = with_state(this, |state| {
+        state.text.substring((range.location, range.length))
+    })
+    .flatten() else {
+        return std::ptr::null_mut();
+    };
+    if !actual.is_null() {
+        *actual = NSRange { location, length };
+    }
+    let Ok(class) = class(c"NSAttributedString") else {
+        return std::ptr::null_mut();
+    };
+    let string = ns_string(&text);
+    let allocated: Allocated<AnyObject> = msg_send![class, alloc];
+    let made: Option<Retained<AnyObject>> = msg_send![allocated, initWithString: &*string];
+    // AppKit takes an autoreleased object, which it does not own.
+    made.map_or(std::ptr::null_mut(), Retained::autorelease_return)
 }
 
 unsafe extern "C-unwind" fn insert_text(
     this: &AnyObject,
     _: Sel,
     text: *mut AnyObject,
-    _replacement: NSRange,
+    replacement: NSRange,
 ) {
     let text = string_of(text);
     with_state(this, |state| {
-        if let Some(event) = state.text.insert_text(&text) {
+        for event in state.text.insert_text_in(&text, range_of(replacement)) {
             send(state, event);
         }
     });
@@ -533,10 +584,23 @@ unsafe extern "C-unwind" fn character_index(_this: &AnyObject, _: Sel, _point: C
 unsafe extern "C-unwind" fn first_rect(
     this: &AnyObject,
     _: Sel,
-    _range: NSRange,
-    _actual: *mut NSRange,
+    range: NSRange,
+    actual: *mut NSRange,
 ) -> CGRect {
-    let cursor = with_state(this, |state| state.sink.ime_cursor()).flatten();
+    // Every range is placed at the guest's cursor, which follows the composition.
+    let (cursor, covered) = with_state(this, |state| {
+        (
+            state.sink.ime_cursor(),
+            state.text.rect_range((range.location, range.length)),
+        )
+    })
+    .unwrap_or((None, (range.location, range.length)));
+    if !actual.is_null() {
+        *actual = NSRange {
+            location: covered.0,
+            length: covered.1,
+        };
+    }
     let scale = view_scale(this);
     let bounds: CGRect = msg_send![this, bounds];
     // The editor's cursor in task pixels from the top left, as view points from the bottom

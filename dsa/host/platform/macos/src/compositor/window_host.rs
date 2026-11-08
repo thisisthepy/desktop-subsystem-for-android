@@ -245,10 +245,14 @@ impl WindowEvents for Events {
 
 type Cursors = Arc<Mutex<HashMap<i32, ImeCursor>>>;
 
+/// The editor focused in each task, as the agent last described it.
+type Editors = Arc<Mutex<HashMap<i32, dsa_host_core::ime::ImeEditor>>>;
+
 struct Input {
     task_id: i32,
     events: Sender<InputEvent>,
     cursors: Cursors,
+    editors: Editors,
     files: Sender<PathBuf>,
     drags: Sender<DragOut>,
 }
@@ -266,6 +270,10 @@ impl InputSink for Input {
 
     fn ime_cursor(&self) -> Option<ImeCursor> {
         self.cursors.lock().ok()?.get(&self.task_id).copied()
+    }
+
+    fn ime_editor(&self) -> Option<dsa_host_core::ime::ImeEditor> {
+        self.editors.lock().ok()?.get(&self.task_id).cloned()
     }
 
     fn drag_left(&mut self, x: f32, y: f32) {
@@ -293,6 +301,7 @@ struct State {
     files: Option<Sender<PathBuf>>,
     drags: Option<Sender<DragOut>>,
     cursors: Cursors,
+    editors: Editors,
 }
 
 thread_local! {
@@ -350,6 +359,7 @@ fn show(task_id: i32, title: &str, size: (u32, u32), focused: bool) {
             task_id,
             events: input,
             cursors: Arc::clone(&state.cursors),
+            editors: Arc::clone(&state.editors),
             files,
             drags,
         });
@@ -412,9 +422,12 @@ fn handle(message: ToHost) {
                 cursors.insert(task_id, cursor);
             }
         }),
-        // The window's input method places its windows by the cursor alone; it reads no
-        // surrounding text from the editor's description yet.
-        ToHost::ImeEditor { .. } => {}
+        // The window's input method reads it at its next call.
+        ToHost::ImeEditor { task_id, editor } => STATE.with(|state| {
+            if let Ok(mut editors) = state.borrow().editors.lock() {
+                editors.insert(task_id, editor);
+            }
+        }),
         // macOS draws the title bar and its buttons in the system's own colors.
         ToHost::CaptionTone { .. } => {}
         ToHost::Mode {
