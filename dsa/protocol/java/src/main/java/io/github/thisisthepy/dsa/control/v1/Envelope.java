@@ -39,6 +39,9 @@ public  final class Envelope extends
     IME_COMMIT(18),
     IME_DELETE_SURROUNDING(377),
     IME_CURSOR(19),
+    IME_EDITOR(408),
+    IME_SET_SELECTION(409),
+    IME_SET_COMPOSING_REGION(410),
     REQUEST_GUEST_MEMORY(20),
     GUEST_MEMORY(21),
     INSTALLED_APP(22),
@@ -201,6 +204,9 @@ public  final class Envelope extends
         case 18: return IME_COMMIT;
         case 377: return IME_DELETE_SURROUNDING;
         case 19: return IME_CURSOR;
+        case 408: return IME_EDITOR;
+        case 409: return IME_SET_SELECTION;
+        case 410: return IME_SET_COMPOSING_REGION;
         case 20: return REQUEST_GUEST_MEMORY;
         case 21: return GUEST_MEMORY;
         case 22: return INSTALLED_APP;
@@ -1295,6 +1301,156 @@ public  final class Envelope extends
    */
   private void clearImeCursor() {
     if (bodyCase_ == 19) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int IME_EDITOR_FIELD_NUMBER = 408;
+  /**
+   * <code>.dsa.control.v1.ImeEditor ime_editor = 408;</code>
+   */
+  @java.lang.Override
+  public boolean hasImeEditor() {
+    return bodyCase_ == 408;
+  }
+  /**
+   * <code>.dsa.control.v1.ImeEditor ime_editor = 408;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.ImeEditor getImeEditor() {
+    if (bodyCase_ == 408) {
+       return (io.github.thisisthepy.dsa.control.v1.ImeEditor) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.ImeEditor.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.ImeEditor ime_editor = 408;</code>
+   */
+  private void setImeEditor(io.github.thisisthepy.dsa.control.v1.ImeEditor value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 408;
+  }
+  /**
+   * <code>.dsa.control.v1.ImeEditor ime_editor = 408;</code>
+   */
+  private void mergeImeEditor(io.github.thisisthepy.dsa.control.v1.ImeEditor value) {
+    value.getClass();
+  if (bodyCase_ == 408 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.ImeEditor.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.ImeEditor.newBuilder((io.github.thisisthepy.dsa.control.v1.ImeEditor) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 408;
+  }
+  /**
+   * <code>.dsa.control.v1.ImeEditor ime_editor = 408;</code>
+   */
+  private void clearImeEditor() {
+    if (bodyCase_ == 408) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int IME_SET_SELECTION_FIELD_NUMBER = 409;
+  /**
+   * <code>.dsa.control.v1.ImeSetSelection ime_set_selection = 409;</code>
+   */
+  @java.lang.Override
+  public boolean hasImeSetSelection() {
+    return bodyCase_ == 409;
+  }
+  /**
+   * <code>.dsa.control.v1.ImeSetSelection ime_set_selection = 409;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.ImeSetSelection getImeSetSelection() {
+    if (bodyCase_ == 409) {
+       return (io.github.thisisthepy.dsa.control.v1.ImeSetSelection) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.ImeSetSelection.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.ImeSetSelection ime_set_selection = 409;</code>
+   */
+  private void setImeSetSelection(io.github.thisisthepy.dsa.control.v1.ImeSetSelection value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 409;
+  }
+  /**
+   * <code>.dsa.control.v1.ImeSetSelection ime_set_selection = 409;</code>
+   */
+  private void mergeImeSetSelection(io.github.thisisthepy.dsa.control.v1.ImeSetSelection value) {
+    value.getClass();
+  if (bodyCase_ == 409 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.ImeSetSelection.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.ImeSetSelection.newBuilder((io.github.thisisthepy.dsa.control.v1.ImeSetSelection) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 409;
+  }
+  /**
+   * <code>.dsa.control.v1.ImeSetSelection ime_set_selection = 409;</code>
+   */
+  private void clearImeSetSelection() {
+    if (bodyCase_ == 409) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int IME_SET_COMPOSING_REGION_FIELD_NUMBER = 410;
+  /**
+   * <code>.dsa.control.v1.ImeSetComposingRegion ime_set_composing_region = 410;</code>
+   */
+  @java.lang.Override
+  public boolean hasImeSetComposingRegion() {
+    return bodyCase_ == 410;
+  }
+  /**
+   * <code>.dsa.control.v1.ImeSetComposingRegion ime_set_composing_region = 410;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.ImeSetComposingRegion getImeSetComposingRegion() {
+    if (bodyCase_ == 410) {
+       return (io.github.thisisthepy.dsa.control.v1.ImeSetComposingRegion) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.ImeSetComposingRegion.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.ImeSetComposingRegion ime_set_composing_region = 410;</code>
+   */
+  private void setImeSetComposingRegion(io.github.thisisthepy.dsa.control.v1.ImeSetComposingRegion value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 410;
+  }
+  /**
+   * <code>.dsa.control.v1.ImeSetComposingRegion ime_set_composing_region = 410;</code>
+   */
+  private void mergeImeSetComposingRegion(io.github.thisisthepy.dsa.control.v1.ImeSetComposingRegion value) {
+    value.getClass();
+  if (bodyCase_ == 410 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.ImeSetComposingRegion.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.ImeSetComposingRegion.newBuilder((io.github.thisisthepy.dsa.control.v1.ImeSetComposingRegion) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 410;
+  }
+  /**
+   * <code>.dsa.control.v1.ImeSetComposingRegion ime_set_composing_region = 410;</code>
+   */
+  private void clearImeSetComposingRegion() {
+    if (bodyCase_ == 410) {
       bodyCase_ = 0;
       body_ = null;
     }
@@ -8724,6 +8880,150 @@ public  final class Envelope extends
     }
 
     /**
+     * <code>.dsa.control.v1.ImeEditor ime_editor = 408;</code>
+     */
+    @java.lang.Override
+    public boolean hasImeEditor() {
+      return instance.hasImeEditor();
+    }
+    /**
+     * <code>.dsa.control.v1.ImeEditor ime_editor = 408;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.ImeEditor getImeEditor() {
+      return instance.getImeEditor();
+    }
+    /**
+     * <code>.dsa.control.v1.ImeEditor ime_editor = 408;</code>
+     */
+    public Builder setImeEditor(io.github.thisisthepy.dsa.control.v1.ImeEditor value) {
+      copyOnWrite();
+      instance.setImeEditor(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ImeEditor ime_editor = 408;</code>
+     */
+    public Builder setImeEditor(
+        io.github.thisisthepy.dsa.control.v1.ImeEditor.Builder builderForValue) {
+      copyOnWrite();
+      instance.setImeEditor(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ImeEditor ime_editor = 408;</code>
+     */
+    public Builder mergeImeEditor(io.github.thisisthepy.dsa.control.v1.ImeEditor value) {
+      copyOnWrite();
+      instance.mergeImeEditor(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ImeEditor ime_editor = 408;</code>
+     */
+    public Builder clearImeEditor() {
+      copyOnWrite();
+      instance.clearImeEditor();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.ImeSetSelection ime_set_selection = 409;</code>
+     */
+    @java.lang.Override
+    public boolean hasImeSetSelection() {
+      return instance.hasImeSetSelection();
+    }
+    /**
+     * <code>.dsa.control.v1.ImeSetSelection ime_set_selection = 409;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.ImeSetSelection getImeSetSelection() {
+      return instance.getImeSetSelection();
+    }
+    /**
+     * <code>.dsa.control.v1.ImeSetSelection ime_set_selection = 409;</code>
+     */
+    public Builder setImeSetSelection(io.github.thisisthepy.dsa.control.v1.ImeSetSelection value) {
+      copyOnWrite();
+      instance.setImeSetSelection(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ImeSetSelection ime_set_selection = 409;</code>
+     */
+    public Builder setImeSetSelection(
+        io.github.thisisthepy.dsa.control.v1.ImeSetSelection.Builder builderForValue) {
+      copyOnWrite();
+      instance.setImeSetSelection(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ImeSetSelection ime_set_selection = 409;</code>
+     */
+    public Builder mergeImeSetSelection(io.github.thisisthepy.dsa.control.v1.ImeSetSelection value) {
+      copyOnWrite();
+      instance.mergeImeSetSelection(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ImeSetSelection ime_set_selection = 409;</code>
+     */
+    public Builder clearImeSetSelection() {
+      copyOnWrite();
+      instance.clearImeSetSelection();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.ImeSetComposingRegion ime_set_composing_region = 410;</code>
+     */
+    @java.lang.Override
+    public boolean hasImeSetComposingRegion() {
+      return instance.hasImeSetComposingRegion();
+    }
+    /**
+     * <code>.dsa.control.v1.ImeSetComposingRegion ime_set_composing_region = 410;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.ImeSetComposingRegion getImeSetComposingRegion() {
+      return instance.getImeSetComposingRegion();
+    }
+    /**
+     * <code>.dsa.control.v1.ImeSetComposingRegion ime_set_composing_region = 410;</code>
+     */
+    public Builder setImeSetComposingRegion(io.github.thisisthepy.dsa.control.v1.ImeSetComposingRegion value) {
+      copyOnWrite();
+      instance.setImeSetComposingRegion(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ImeSetComposingRegion ime_set_composing_region = 410;</code>
+     */
+    public Builder setImeSetComposingRegion(
+        io.github.thisisthepy.dsa.control.v1.ImeSetComposingRegion.Builder builderForValue) {
+      copyOnWrite();
+      instance.setImeSetComposingRegion(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ImeSetComposingRegion ime_set_composing_region = 410;</code>
+     */
+    public Builder mergeImeSetComposingRegion(io.github.thisisthepy.dsa.control.v1.ImeSetComposingRegion value) {
+      copyOnWrite();
+      instance.mergeImeSetComposingRegion(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.ImeSetComposingRegion ime_set_composing_region = 410;</code>
+     */
+    public Builder clearImeSetComposingRegion() {
+      copyOnWrite();
+      instance.clearImeSetComposingRegion();
+      return this;
+    }
+
+    /**
      * <code>.dsa.control.v1.RequestGuestMemory request_guest_memory = 20;</code>
      */
     @java.lang.Override
@@ -15032,9 +15332,12 @@ public  final class Envelope extends
             io.github.thisisthepy.dsa.control.v1.GoogleDeviceIdQuery.class,
             io.github.thisisthepy.dsa.control.v1.GoogleDeviceId.class,
             io.github.thisisthepy.dsa.control.v1.DisplayRefresh.class,
+            io.github.thisisthepy.dsa.control.v1.ImeEditor.class,
+            io.github.thisisthepy.dsa.control.v1.ImeSetSelection.class,
+            io.github.thisisthepy.dsa.control.v1.ImeSetComposingRegion.class,
           };
           java.lang.String info =
-              "\u0000\u0093\u0001\u0000\u0001\u0197\u0093\u0000\u0000\u0000\u0001<\u0000\u0002<" +
+              "\u0000\u0096\u0001\u0000\u0001\u019a\u0096\u0000\u0000\u0000\u0001<\u0000\u0002<" +
               "\u0000\u0003<\u0000\u0004<\u0000\u0005<\u0000\u0006<\u0000\u0007<\u0000\b<\u0000" +
               "\t<\u0000\n<\u0000\u000b<\u0000\f<\u0000\r<\u0000\u000f<\u0000\u0010<\u0000\u0011" +
               "<\u0000\u0012<\u0000\u0013<\u0000\u0014<\u0000\u0015<\u0000\u0016<\u0000\u0017<\u0000" +
@@ -15054,7 +15357,7 @@ public  final class Envelope extends
               "\u0157<\u0000\u0158<\u0000\u015e<\u0000\u015f<\u0000\u0160<\u0000\u0161<\u0000\u0162" +
               "<\u0000\u0179<\u0000\u017c<\u0000\u017d<\u0000\u017e<\u0000\u017f<\u0000\u0190<\u0000" +
               "\u0191<\u0000\u0192<\u0000\u0193<\u0000\u0194<\u0000\u0195<\u0000\u0196<\u0000\u0197" +
-              "<\u0000";
+              "<\u0000\u0198<\u0000\u0199<\u0000\u019a<\u0000";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through

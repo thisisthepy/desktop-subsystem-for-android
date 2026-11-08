@@ -333,7 +333,8 @@ Never introduce anything that violates these. If a task seems to require it, sto
   remoting. The dxg path is research, recorded in `docs/RESEARCH.md`, until the owner
   decides otherwise.
 - **The boundary is the HAL (D5).** The kernel, ART and the framework stay in the guest.
-  Devices move to the host as HAL services over RPC Binder. Never forward system calls.
+  Devices move to the host behind guest HAL services that send generated protocol
+  messages over vsock (hvsocket on Windows). Never forward system calls.
 - **The host is the shell (D6).** No launcher, no SystemUI, no keyboard app in the guest
   image. Text input goes through the host IME and the agent's `InputConnection`; never
   round-trip composition through a guest keyboard.

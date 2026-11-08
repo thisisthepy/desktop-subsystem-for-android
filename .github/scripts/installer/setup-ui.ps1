@@ -69,16 +69,40 @@ function Save-SetupScreen([string]$Path) {
     Save-WindowScreen $window $Path
 }
 
-# The top-level window of the process with this id, waiting for it to appear.
+# A new UI Automation element for the window $Window stands for. UI Automation asks a window
+# for its provider (WM_GETOBJECT) once, when it makes the element, and keeps the answer. An app
+# still starting up can miss that question: its UI thread is busy, or its content is not
+# attached yet. The element then stays a bare Win32 window (framework "Win32") with none of
+# the app's controls under it, however long one waits on it. A new element asks again.
+function Update-Window($Window) {
+    # A window that has closed has no handle to ask again; the old element then says so itself.
+    try {
+        $Auto::FromHandle([IntPtr]$Window.Current.NativeWindowHandle)
+    } catch {
+        $Window
+    }
+}
+
+# The top-level window of the process with this id, waiting for it to appear and for the app
+# itself to answer UI Automation for it, which a window seen too early does not (Update-Window).
+# A window that never answers is still returned at the deadline, so the caller's own check
+# fails on it and says what is missing.
 function Wait-ProcessWindow([int]$ProcessId, [int]$Seconds = 60) {
     $condition = New-Object System.Windows.Automation.PropertyCondition($Auto::ProcessIdProperty, $ProcessId)
     $deadline = (Get-Date).AddSeconds($Seconds)
+    $window = $null
     while ((Get-Date) -lt $deadline) {
-        $window = $Auto::RootElement.FindFirst($Scope::Children, $condition)
-        if ($window) { return $window }
+        try {
+            $window = if ($window) { Update-Window $window } else { $Auto::RootElement.FindFirst($Scope::Children, $condition) }
+            if ($window -and $window.Current.FrameworkId -ne 'Win32') { return $window }
+        } catch {
+            # The window closed while it was being read: look for the process's window again.
+            $window = $null
+        }
         Start-Sleep -Milliseconds 500
     }
-    $null
+    if ($window) { Write-Host "the window of process $ProcessId still shows UI Automation only its Win32 frame after $Seconds seconds" }
+    $window
 }
 
 # The label DSA Settings shows for $Page (general, memory, apps, ...) in $Lang (en-US when
@@ -109,17 +133,57 @@ function Find-SettingsPaneItem($Window, [string]$Label) {
     $Window.FindFirst($Scope::Descendants, $condition)
 }
 
+# Says why a pane item could not be found: whether the app still runs, what UI Automation
+# shows of its window, every list item in it (from the raw view, which hides nothing) with
+# whether it can be selected and where it is, and a picture of the screen named $Name.
+function Show-PaneItems($Window, [string]$Name) {
+    $fresh = Update-Window $Window
+    try {
+        $id = $fresh.Current.ProcessId
+        $process = Get-Process -Id $id -ErrorAction SilentlyContinue
+        $state = if ($process) { "runs" } else { "has exited" }
+        Write-Host ("window '{0}' of process {1} ({2}): framework '{3}', the element the test held: framework '{4}'" -f
+            $fresh.Current.Name, $id, $state, $fresh.Current.FrameworkId, $Window.Current.FrameworkId)
+        $walker = [System.Windows.Automation.TreeWalker]::RawViewWalker
+        $stack = New-Object System.Collections.Stack
+        $stack.Push($fresh)
+        $count = 0
+        while ($stack.Count -gt 0) {
+            $element = $stack.Pop()
+            $child = $walker.GetFirstChild($element)
+            while ($child) {
+                if ($child.Current.ControlType -eq [System.Windows.Automation.ControlType]::ListItem) {
+                    $count++
+                    $selectable = [bool]$child.GetCurrentPropertyValue($Auto::IsSelectionItemPatternAvailableProperty)
+                    Write-Host ("list item '{0}' class '{1}': selectable {2}, offscreen {3}, at {4}" -f
+                        $child.Current.Name, $child.Current.ClassName, $selectable, $child.Current.IsOffscreen, $child.Current.BoundingRectangle)
+                }
+                $stack.Push($child)
+                $child = $walker.GetNextSibling($child)
+            }
+        }
+        Write-Host "list items in the window: $count"
+    } catch {
+        Write-Host "reading the window through UI Automation failed: $_"
+    }
+    Show-Desktop $Name
+}
+
 # Opens $Page in the DSA Settings $Window the way a screen reader does: it finds the pane item
 # by its name and selects it through UI Automation, then waits until the item says it is selected.
 function Open-SettingsPage($Window, [string]$Page, [string]$Lang = '', [int]$Seconds = 60) {
     $label = Get-SettingsPageLabel $Page $Lang
     $deadline = (Get-Date).AddSeconds($Seconds)
-    $item = $null
+    $item = Find-SettingsPaneItem $Window $label
     while (-not $item -and (Get-Date) -lt $deadline) {
-        $item = Find-SettingsPaneItem $Window $label
-        if (-not $item) { Start-Sleep -Milliseconds 500 }
+        Start-Sleep -Milliseconds 500
+        # A new element each time, so one made before the app answered cannot hide the pane.
+        $item = Find-SettingsPaneItem (Update-Window $Window) $label
     }
-    if (-not $item) { throw "the navigation pane has no selectable item named '$label' within $Seconds seconds" }
+    if (-not $item) {
+        Show-PaneItems $Window "pane-missing-$Page"
+        throw "the navigation pane has no selectable item named '$label' within $Seconds seconds"
+    }
     $selection = $item.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
     $selection.Select()
     while (-not $selection.Current.IsSelected -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 250 }

@@ -539,6 +539,63 @@ pub struct ImeCursor {
     #[prost(message, optional, tag = "2")]
     pub cursor: ::core::option::Option<Rect>,
 }
+/// Guest to host, from the agent: the editor focused in a task, as the host's input method
+/// reads it: the kind of text it takes, and its text around the selection, so the input method
+/// can reconvert what was typed and predict from what comes before. Sent when an editor gains
+/// the focus, when the focus leaves every editor (`kind` NONE, and no text), and whenever the
+/// editor's text, selection or composition change. Every offset is in UTF-16 code units from
+/// the start of the editor's whole text.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ImeEditor {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+    #[prost(enumeration = "ImeInputKind", tag = "2")]
+    pub kind: i32,
+    /// The editor's text around the selection, at most 4096 UTF-16 code units: what the agent
+    /// read before the selection, the selection, and what it read after it.
+    #[prost(string, tag = "3")]
+    pub text: ::prost::alloc::string::String,
+    /// Where `text` starts in the editor's text.
+    #[prost(uint32, tag = "4")]
+    pub text_start: u32,
+    /// The selection, from `selection_start` to `selection_end`; equal for a cursor. Both lie
+    /// within `text`.
+    #[prost(uint32, tag = "5")]
+    pub selection_start: u32,
+    #[prost(uint32, tag = "6")]
+    pub selection_end: u32,
+    /// The editor's composing region, within `text`; equal when there is none.
+    #[prost(uint32, tag = "7")]
+    pub composition_start: u32,
+    #[prost(uint32, tag = "8")]
+    pub composition_end: u32,
+}
+/// Host to guest: the host's input method selects text in the focused editor of a task, from
+/// `start` to `end` in UTF-16 code units from the start of the editor's text, or puts the
+/// cursor at `start` when they are equal. The agent sets the editor's selection; a composition
+/// stays as it is.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ImeSetSelection {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+    #[prost(uint32, tag = "2")]
+    pub start: u32,
+    #[prost(uint32, tag = "3")]
+    pub end: u32,
+}
+/// Host to guest: the host's input method makes text already in the focused editor of a task
+/// its composition, from `start` to `end` in UTF-16 code units from the start of the editor's
+/// text, as it does when it reconverts a word typed earlier. The next ImeComposition replaces
+/// that text. Equal `start` and `end` end the composition and keep its text as typed.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ImeSetComposingRegion {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+    #[prost(uint32, tag = "2")]
+    pub start: u32,
+    #[prost(uint32, tag = "3")]
+    pub end: u32,
+}
 /// Host to guest: whether the guest's screen is on. The host turns it off once no task window
 /// has been shown (every window closed or minimized) for the time the host is configured to
 /// wait, and on again as soon as a window is shown. While it is off the agent turns the
@@ -2395,7 +2452,7 @@ pub struct GamepadRumble {
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 377, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 40, 41, 407, 110, 140, 150, 151, 152, 153, 154, 400, 401, 402, 403, 404, 405, 406, 42, 43, 44, 45, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 30, 50, 51, 52, 53, 54, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 80, 81, 82, 83, 100, 101, 102, 103, 104, 105, 120, 121, 122, 123, 124, 125, 126, 127, 130, 131, 132, 133, 134, 135, 136, 220, 221, 222, 223, 141, 200, 201, 202, 240, 241, 242, 260, 261, 262, 263, 264, 265, 266, 267, 155, 340, 383, 341, 342, 343, 344, 290, 291, 350, 351, 352, 353, 354, 380, 381, 382"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 377, 19, 408, 409, 410, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 40, 41, 407, 110, 140, 150, 151, 152, 153, 154, 400, 401, 402, 403, 404, 405, 406, 42, 43, 44, 45, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 30, 50, 51, 52, 53, 54, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 80, 81, 82, 83, 100, 101, 102, 103, 104, 105, 120, 121, 122, 123, 124, 125, 126, 127, 130, 131, 132, 133, 134, 135, 136, 220, 221, 222, 223, 141, 200, 201, 202, 240, 241, 242, 260, 261, 262, 263, 264, 265, 266, 267, 155, 340, 383, 341, 342, 343, 344, 290, 291, 350, 351, 352, 353, 354, 380, 381, 382"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -2441,6 +2498,12 @@ pub mod envelope {
         ImeDeleteSurrounding(super::ImeDeleteSurrounding),
         #[prost(message, tag = "19")]
         ImeCursor(super::ImeCursor),
+        #[prost(message, tag = "408")]
+        ImeEditor(super::ImeEditor),
+        #[prost(message, tag = "409")]
+        ImeSetSelection(super::ImeSetSelection),
+        #[prost(message, tag = "410")]
+        ImeSetComposingRegion(super::ImeSetComposingRegion),
         #[prost(message, tag = "20")]
         RequestGuestMemory(super::RequestGuestMemory),
         #[prost(message, tag = "21")]
@@ -3135,6 +3198,74 @@ impl KeyAction {
             "KEY_ACTION_UNSPECIFIED" => Some(Self::Unspecified),
             "KEY_ACTION_DOWN" => Some(Self::Down),
             "KEY_ACTION_UP" => Some(Self::Up),
+            _ => None,
+        }
+    }
+}
+/// What kind of text the editor focused in a task takes, from the input type its app gave it,
+/// so the host's input method and touch keyboard offer the keys for it, and keep composition,
+/// prediction and learning out of a password.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum ImeInputKind {
+    /// The agent did not say. The host takes it as ordinary text.
+    Unspecified = 0,
+    /// No editor in the task takes text: the focus is on a view that reads keys (a game's) or
+    /// on nothing. Typed characters still reach it, as the keys that type them.
+    None = 1,
+    Text = 2,
+    /// A password, shown or hidden.
+    Password = 3,
+    Number = 4,
+    /// A number that is a password, such as a PIN.
+    NumberPassword = 5,
+    Phone = 6,
+    Email = 7,
+    Url = 8,
+    PersonName = 9,
+    Date = 10,
+    Time = 11,
+    /// Text the app searches for: an editor whose action is Search.
+    Search = 12,
+}
+impl ImeInputKind {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "IME_INPUT_KIND_UNSPECIFIED",
+            Self::None => "IME_INPUT_KIND_NONE",
+            Self::Text => "IME_INPUT_KIND_TEXT",
+            Self::Password => "IME_INPUT_KIND_PASSWORD",
+            Self::Number => "IME_INPUT_KIND_NUMBER",
+            Self::NumberPassword => "IME_INPUT_KIND_NUMBER_PASSWORD",
+            Self::Phone => "IME_INPUT_KIND_PHONE",
+            Self::Email => "IME_INPUT_KIND_EMAIL",
+            Self::Url => "IME_INPUT_KIND_URL",
+            Self::PersonName => "IME_INPUT_KIND_PERSON_NAME",
+            Self::Date => "IME_INPUT_KIND_DATE",
+            Self::Time => "IME_INPUT_KIND_TIME",
+            Self::Search => "IME_INPUT_KIND_SEARCH",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "IME_INPUT_KIND_UNSPECIFIED" => Some(Self::Unspecified),
+            "IME_INPUT_KIND_NONE" => Some(Self::None),
+            "IME_INPUT_KIND_TEXT" => Some(Self::Text),
+            "IME_INPUT_KIND_PASSWORD" => Some(Self::Password),
+            "IME_INPUT_KIND_NUMBER" => Some(Self::Number),
+            "IME_INPUT_KIND_NUMBER_PASSWORD" => Some(Self::NumberPassword),
+            "IME_INPUT_KIND_PHONE" => Some(Self::Phone),
+            "IME_INPUT_KIND_EMAIL" => Some(Self::Email),
+            "IME_INPUT_KIND_URL" => Some(Self::Url),
+            "IME_INPUT_KIND_PERSON_NAME" => Some(Self::PersonName),
+            "IME_INPUT_KIND_DATE" => Some(Self::Date),
+            "IME_INPUT_KIND_TIME" => Some(Self::Time),
+            "IME_INPUT_KIND_SEARCH" => Some(Self::Search),
             _ => None,
         }
     }

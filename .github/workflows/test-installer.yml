@@ -19,6 +19,7 @@ on:
     paths:
       - "dsa/**"
       - ".github/workflows/test-installer.yml"
+      - ".github/scripts/installer/**"
   workflow_dispatch:
 
 concurrency:

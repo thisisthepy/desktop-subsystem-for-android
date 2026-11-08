@@ -217,6 +217,39 @@ public interface EnvelopeOrBuilder extends
   io.github.thisisthepy.dsa.control.v1.ImeCursor getImeCursor();
 
   /**
+   * <code>.dsa.control.v1.ImeEditor ime_editor = 408;</code>
+   * @return Whether the imeEditor field is set.
+   */
+  boolean hasImeEditor();
+  /**
+   * <code>.dsa.control.v1.ImeEditor ime_editor = 408;</code>
+   * @return The imeEditor.
+   */
+  io.github.thisisthepy.dsa.control.v1.ImeEditor getImeEditor();
+
+  /**
+   * <code>.dsa.control.v1.ImeSetSelection ime_set_selection = 409;</code>
+   * @return Whether the imeSetSelection field is set.
+   */
+  boolean hasImeSetSelection();
+  /**
+   * <code>.dsa.control.v1.ImeSetSelection ime_set_selection = 409;</code>
+   * @return The imeSetSelection.
+   */
+  io.github.thisisthepy.dsa.control.v1.ImeSetSelection getImeSetSelection();
+
+  /**
+   * <code>.dsa.control.v1.ImeSetComposingRegion ime_set_composing_region = 410;</code>
+   * @return Whether the imeSetComposingRegion field is set.
+   */
+  boolean hasImeSetComposingRegion();
+  /**
+   * <code>.dsa.control.v1.ImeSetComposingRegion ime_set_composing_region = 410;</code>
+   * @return The imeSetComposingRegion.
+   */
+  io.github.thisisthepy.dsa.control.v1.ImeSetComposingRegion getImeSetComposingRegion();
+
+  /**
    * <code>.dsa.control.v1.RequestGuestMemory request_guest_memory = 20;</code>
    * @return Whether the requestGuestMemory field is set.
    */
