@@ -11,4 +11,4 @@
     <circle cx="48" cy="18.5" r="2.3" fill="#0c5a43"/>
     <path d="M16 32h32a4 4 0 0 1 4 4v10a4 4 0 0 1-4 4H16a4 4 0 0 1-4-4V36a4 4 0 0 1 4-4z" fill="#ffffff" opacity=".3"/>
   </g>
-<defs><filter id="badge-shadow" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy=".8" stdDeviation=".8" flood-color="#022218" flood-opacity=".4"/></filter></defs><circle cx="51" cy="51" r="10.5" fill="#ffffff" filter="url(#badge-shadow)"/><g transform="translate(51 51) scale(.88) translate(-50 -50)"><path d="M43 45.2a1.6 1.6 0 0 1 1.6-1.6h3.6l2 2h5.2a1.6 1.6 0 0 1 1.6 1.6v6.8a1.6 1.6 0 0 1-1.6 1.6H44.6a1.6 1.6 0 0 1-1.6-1.6z" fill="#0a5a41"/></g></svg>
+</svg>

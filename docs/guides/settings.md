@@ -25,7 +25,7 @@ one. They are marked "(admin)" below.
 | **Apps** | Installed apps: **Open**, **App info**, **Uninstall**, **Resizable**, the size windows open at | `dsa apps`, `dsa app-window` |
 | **Running in the background** | Apps running with no window: **Open**, **Stop**; whether to ask before stopping | `dsa background`, `stop-without-asking` |
 | **Widgets** | Widgets on your desktop, and **Add to desktop** | `dsa widgets` |
-| **Display & GPU** | **Render GPU**, **Restart the window manager** | `render-gpu`, `dsa gpus` |
+| **Display & GPU** | **Render GPU**, **Restart the window manager**, **Turn off Windows touch gestures in DSA app windows** (Windows 11 only, on by default) | `render-gpu`, `dsa gpus`, `touch-gestures-off` |
 | **Device identity** | This computer first, read only: its name, maker and model, and **Device specifications** with **Copy**. Then the manufacturer, model and build fingerprint Android reports to apps | `dsa settings device`, `device.<field>` |
 | **Network** | How Android reaches the network, its address, DNS servers and gateway, **Advanced networking**, **Developer mode** (adb) | `dsa network`, `advanced-networking`, `developer-mode`, `adb-port`, `adb-auto-connect` |
 | **Updates** | **Android**: the running version and build, the version it follows, the Android update with its progress and **Check now** (admin), **Update the Android image automatically** (admin), **Version to use** (admin). **DSA**: **Update DSA automatically** (admin), **Get pre-release versions** (admin), **Install now** | `dsa android version`, `dsa android use`, `image-updates`, `program-updates`, `prerelease-updates`, `dsa update` |
@@ -67,6 +67,11 @@ one. They are marked "(admin)" below.
 - `shared-folders`: `all`, `none`, or names separated by commas, such as
   `Documents,Pictures`.
 - `adb-port`: a TCP port from 1 to 65535. The default is 58526.
+- `touch-gestures-off`: `on` (the default) turns Windows 11's three- and four-finger touch
+  gestures off while a DSA app window is in front, so apps get up to ten fingers, and puts
+  your own setting back when another window comes to the front. If Windows refuses, the
+  setting can't be used and the settings app says why; you can still turn the gestures off
+  for every app in Windows Settings, under Bluetooth & devices, Touch.
 - `prerelease-updates`: `on` takes pre-releases as well as stable releases, `off` takes stable
   releases only. It starts from the installer you used: a pre-release installer turns it on,
   a stable one leaves it off, and upgrades keep your choice. Every release before 1.0 is a

@@ -102,6 +102,8 @@ use crate::tasks::{
     AppInfo, AppSettingsPage, Bounds, StatusBarAppearance, Task, TaskEvent, TaskOrientation,
     TaskRequest, TaskRequestError, TaskWatch,
 };
+use crate::touch_gestures::TouchGesturesState;
+use crate::update::alerts::{self as update_alerts, UpdateAlert};
 use crate::widgets::{
     self, MemoryWidgetPlacements, Placement, Widget, WidgetError, WidgetEvent, WidgetFrame,
     WidgetPlacements, WidgetProvider, WidgetSize,
@@ -140,6 +142,16 @@ pub trait UserAndroid: Send + Sync {
     /// News about the Android image for the user, if there is any.
     fn update_notice(&self) -> Option<String> {
         None
+    }
+    /// The update alerts `user`'s desktop has not shown yet: for the Android image and for
+    /// DSA, the latest news about each. The watch of `user`'s notifications carries them.
+    fn untold_update_alerts(&self, user: &str) -> Vec<UpdateAlert> {
+        let _ = user;
+        Vec::new()
+    }
+    /// `user`'s desktop was given `alert` to show, so it is not given it again.
+    fn update_alert_told(&self, user: &str, alert: &UpdateAlert) {
+        let _ = (user, alert);
     }
     /// The runtime ID of the VM (such as a GUID on Windows), if running.
     fn vm_id(&self) -> Option<String> {
@@ -1401,6 +1413,9 @@ pub struct SettingsReport {
     /// Where adb auto-connect stands for the caller's Android. Off from a service that does
     /// not report it.
     pub adb_auto_connect_state: AutoConnectState,
+    /// Whether the caller's window manager can turn the host's touch gestures off, as it last
+    /// told the service. Unknown until it has, and from a service that does not report it.
+    pub touch_gestures: TouchGesturesState,
 }
 
 /// How a user's Android reaches the network.
@@ -1667,6 +1682,8 @@ pub struct HostApiService {
     gapps: Option<gapps::Source>,
     /// The default ARM translation package of the image each user's Android starts from.
     default_arm_translation: Option<DefaultArmTranslationSource>,
+    /// What each user's window manager last said about the host's touch gestures, by user.
+    touch_gestures: Mutex<HashMap<String, TouchGesturesState>>,
 }
 
 /// Says what the build of the image a user's Android starts from is, by user.
@@ -1705,6 +1722,7 @@ impl HostApiService {
             versions: None,
             gapps: None,
             default_arm_translation: None,
+            touch_gestures: Mutex::new(HashMap::new()),
         }
     }
 
@@ -2743,15 +2761,16 @@ impl HostApiService {
     fn watch_notifications(&self, mut connection: Box<dyn Connection>, peer: &Peer, id: u64) {
         let watched = match self.androids.android(&peer.user) {
             Err(why) => Err(error(ErrorCode::Unavailable, why)),
-            Ok(android) => android.watch_notifications().ok_or_else(|| {
-                error(
+            Ok(android) => match android.watch_notifications() {
+                Some(watch) => Ok((android, watch)),
+                None => Err(error(
                     ErrorCode::Unavailable,
                     "this Android does not show its notifications on the host".into(),
-                )
-            }),
+                )),
+            },
         };
-        let watch = match watched {
-            Ok(watch) => watch,
+        let (android, watch) = match watched {
+            Ok(watched) => watched,
             Err(body) => {
                 let _ = send(
                     &mut *connection,
@@ -2771,6 +2790,15 @@ impl HostApiService {
             return;
         }
         loop {
+            // The news about updates this user's desktop has not shown yet: raised while it
+            // was not watching, or just now.
+            for alert in android.untold_update_alerts(&peer.user) {
+                let posted = NotificationEvent::Posted(alert.notification());
+                if send(&mut *connection, notification_to_wire(posted)).is_err() {
+                    return;
+                }
+                android.update_alert_told(&peer.user, &alert);
+            }
             loop {
                 match watch.try_recv() {
                     Ok(event) => {
@@ -3435,6 +3463,11 @@ impl HostApiService {
                 )
             }
         };
+        // An update alert is the host's alone: its desktop opens the update settings on a
+        // click, and Android has nothing to open or dismiss.
+        if update_alerts::is_update_key(action.key()) {
+            return response::Body::Done(types::Done {});
+        }
         let android = match self.androids.android(&peer.user) {
             Ok(android) => android,
             Err(why) => return error(ErrorCode::Unavailable, why),
@@ -3868,6 +3901,9 @@ impl HostApiService {
             Some(request::Body::SetWindowsShown(shown)) => {
                 self.request(peer, TaskRequest::WindowsShown { shown: shown.shown })
             }
+            Some(request::Body::ReportTouchGestures(report)) => {
+                self.report_touch_gestures(peer, report)
+            }
             Some(request::Body::ActOnNotification(act)) => self.act_on_notification(peer, act),
             Some(request::Body::ReportPrintJob(report)) => self.report_print_job(peer, report),
             Some(request::Body::ListBackgroundApps(_)) => self.list_background(peer),
@@ -3968,7 +4004,8 @@ impl HostApiService {
                         | request::Body::ResetData(_)
                         | request::Body::GetAndroidVersions(_)
                         | request::Body::UseAndroidVersion(_)
-                        | request::Body::SetRunAsArm(_) => unreachable!("answered above"),
+                        | request::Body::SetRunAsArm(_)
+                        | request::Body::ReportTouchGestures(_) => unreachable!("answered above"),
                     }
                     status(android.as_ref())
                 }
@@ -4605,10 +4642,57 @@ impl HostApiService {
                 let mut wire = settings_to_wire(&settings, &self.facts_now(facts));
                 wire.network = self.network_now(&peer.user, &settings);
                 wire.adb_auto_connect_state = self.adb_auto_connect_now(&peer.user);
+                self.touch_gestures_now(&peer.user, &mut wire);
                 response::Body::Settings(wire)
             }
             Err(why) => error(ErrorCode::Unavailable, why),
         }
+    }
+
+    /// What the caller's window manager last said about the host's touch gestures, into
+    /// `wire`.
+    fn touch_gestures_now(&self, user: &str, wire: &mut types::Settings) {
+        let reports = self
+            .touch_gestures
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let state = reports.get(user).cloned().unwrap_or_default();
+        wire.touch_gestures_state = state.as_str().to_string();
+        wire.touch_gestures_problem = state.problem().to_string();
+    }
+
+    /// Keeps what the caller's window manager says about the host's touch gestures, for the
+    /// settings it reports next.
+    fn report_touch_gestures(
+        &self,
+        peer: &Peer,
+        report: types::ReportTouchGestures,
+    ) -> response::Body {
+        let state = TouchGesturesState::from_wire(&report.state, &report.problem);
+        let mut reports = self
+            .touch_gestures
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if reports.get(&peer.user) != Some(&state) {
+            match &state {
+                TouchGesturesState::Failed(problem) => eprintln!(
+                    "local API: the window manager of {} cannot turn the host's touch gestures \
+                     off: {problem}",
+                    peer.user
+                ),
+                other => eprintln!(
+                    "local API: the window manager of {} says the host's touch gestures are {}",
+                    peer.user,
+                    if other.as_str().is_empty() {
+                        "unknown"
+                    } else {
+                        other.as_str()
+                    }
+                ),
+            }
+        }
+        reports.insert(peer.user.clone(), state);
+        response::Body::Done(types::Done {})
     }
 
     /// Where adb auto-connect stands for the caller's Android, or off when it has none.
@@ -4658,6 +4742,7 @@ impl HostApiService {
             file_sharing: wanted.file_sharing,
             shared_folders: wanted.shared_folders,
             advanced_networking: wanted.advanced_networking,
+            touch_gestures_off: wanted.touch_gestures_off,
             adb_port: match u16::try_from(wanted.adb_port) {
                 Ok(port) => port,
                 Err(_) => {
@@ -4731,7 +4816,8 @@ impl HostApiService {
                     "local API: {} changed the settings: render GPU {}, freeze {}, clipboard \
                      {}, links in Android {}, program updates {} ({} channel), image updates \
                      {}, input trace {}, resize trace {}, developer mode {} (adb port {}, \
-                     auto-connect {}), file sharing {} ({}), advanced networking {}",
+                     auto-connect {}), file sharing {} ({}), advanced networking {}, touch \
+                     gestures off in task windows {}",
                     peer.user,
                     settings.render_gpu,
                     on_off(settings.freeze),
@@ -4749,11 +4835,13 @@ impl HostApiService {
                     on_off(settings.adb_auto_connect),
                     on_off(settings.file_sharing),
                     settings.shared_folders.join(", "),
-                    on_off(settings.advanced_networking)
+                    on_off(settings.advanced_networking),
+                    on_off(settings.touch_gestures_off)
                 );
                 let mut wire = settings_to_wire(&settings, &self.facts_now(facts));
                 wire.network = self.network_now(&peer.user, &settings);
                 wire.adb_auto_connect_state = self.adb_auto_connect_now(&peer.user);
+                self.touch_gestures_now(&peer.user, &mut wire);
                 response::Body::Settings(wire)
             }
             Err(why) => error(ErrorCode::InvalidSetting, why),
@@ -4801,6 +4889,9 @@ fn settings_to_wire(settings: &Settings, facts: &ServiceFacts) -> types::Setting
         file_sharing: settings.file_sharing,
         shared_folders: settings.shared_folders.clone(),
         advanced_networking: settings.advanced_networking,
+        touch_gestures_off: settings.touch_gestures_off,
+        touch_gestures_state: String::new(),
+        touch_gestures_problem: String::new(),
         network: None,
         program_updates_available: facts.program_updates_available,
         update_channel_available: facts.update_channel_available,
@@ -4834,6 +4925,7 @@ fn settings_from_wire(settings: types::Settings) -> SettingsReport {
             file_sharing: settings.file_sharing,
             shared_folders: settings.shared_folders,
             advanced_networking: settings.advanced_networking,
+            touch_gestures_off: settings.touch_gestures_off,
         },
         facts: ServiceFacts {
             version: settings.version,
@@ -4845,6 +4937,10 @@ fn settings_from_wire(settings: types::Settings) -> SettingsReport {
         },
         network: settings.network.map(NetworkStatus::from_wire),
         adb_auto_connect_state: AutoConnectState::parse(&settings.adb_auto_connect_state),
+        touch_gestures: TouchGesturesState::from_wire(
+            &settings.touch_gestures_state,
+            &settings.touch_gestures_problem,
+        ),
     }
 }
 
@@ -5058,6 +5154,17 @@ impl HostApiClient {
         self.done(request::Body::SetWindowsShown(types::SetWindowsShown {
             shown,
         }))
+    }
+
+    /// Tells the service whether the caller's window manager can turn the host's touch
+    /// gestures off, which the settings then report.
+    pub fn report_touch_gestures(&mut self, state: &TouchGesturesState) -> Result<(), ClientError> {
+        self.done(request::Body::ReportTouchGestures(
+            types::ReportTouchGestures {
+                state: state.as_str().to_string(),
+                problem: state.problem().to_string(),
+            },
+        ))
     }
 
     /// Asks the service to install the newest version of DSA now. Downloading it can take

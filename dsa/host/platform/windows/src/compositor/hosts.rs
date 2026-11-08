@@ -690,6 +690,9 @@ pub struct ManagerSetup {
     pub stop: Arc<AtomicBool>,
     /// Told whether any window is shown, for the trim of idle memory.
     pub idle: Arc<Mutex<IdleTrim>>,
+    /// Told, on each change, whether a task window is the active window, for Windows' touch
+    /// gestures. None when nothing follows that.
+    pub fronts: Option<Sender<bool>>,
 }
 
 struct Manager {
@@ -700,6 +703,8 @@ struct Manager {
     shown: ShownWindows,
     /// The task windows that are the active window.
     focused: std::collections::BTreeSet<i32>,
+    /// Whether a task window was the active window, as `fronts` was last told.
+    front: bool,
     setup: ManagerSetup,
 }
 
@@ -713,6 +718,7 @@ pub fn manage(setup: ManagerSetup) {
         remotes: HashMap::new(),
         shown: ShownWindows::new(),
         focused: std::collections::BTreeSet::new(),
+        front: false,
         setup,
     };
     let mut last_tick = Instant::now();
@@ -811,6 +817,11 @@ impl Manager {
                     ));
                 }
                 for task_id in tasks {
+                    // A window that went with its program is no longer the active window,
+                    // though it never said so.
+                    if self.focused.remove(&task_id) {
+                        self.focus_changed();
+                    }
                     self.drop_remote(task_id);
                     // Ending an app's window program closes its windows, as ending any
                     // program does: Android ends their tasks.
@@ -862,7 +873,7 @@ impl Manager {
                 } else {
                     self.focused.remove(&task_id);
                 }
-                FOCUSED_WINDOWS.store(self.focused.len(), Ordering::Relaxed);
+                self.focus_changed();
             }
             FromHost::Shown { task_id, shown } => self.shown.reported(task_id, shown),
             FromHost::MenuChosen { task_id, action } => {
@@ -875,6 +886,20 @@ impl Manager {
                     }
                     None => {}
                 }
+            }
+        }
+    }
+
+    /// Publishes which task windows are the active window, and tells `fronts` when whether
+    /// any is changes.
+    fn focus_changed(&mut self) {
+        FOCUSED_WINDOWS.store(self.focused.len(), Ordering::Relaxed);
+        let front = !self.focused.is_empty();
+        if front != self.front {
+            self.front = front;
+            if let Some(fronts) = &self.setup.fronts {
+                // A touch gestures thread that ended has put the user's value back already.
+                let _ = fronts.send(front);
             }
         }
     }
@@ -970,7 +995,7 @@ impl Manager {
                         },
                         ToHost::Close { task_id } => {
                             self.focused.remove(task_id);
-                            FOCUSED_WINDOWS.store(self.focused.len(), Ordering::Relaxed);
+                            self.focus_changed();
                             self.drop_remote(*task_id)
                         }
                         ToHost::Retitle { .. }

@@ -137,6 +137,19 @@ jobs:
           -ListUrl "$env:MIRROR\images.json" -TrustedKey $env:TEST_PUBLIC_KEY
           -ProgramListUrl "$env:MIRROR\program.json"
 
+      # The setting that turns Windows 11's three- and four-finger touch gestures off while a
+      # task window is in front: with the gestures on and the setting turned on through the
+      # local API, a task window in front makes SystemParametersInfo 0x2030 read 0, another
+      # window in front makes it read the user's value again, and so does the window manager
+      # stopping. The test puts the gestures back as it found them. Server 2022 has no such
+      # gestures, so the test is left out there.
+      - name: fr5_touch_gestures_are_off_only_while_a_task_window_is_in_front
+        if: matrix.version != '2022'
+        working-directory: dsa
+        run: |
+          cargo test --release --target $env:RUST_TARGET -p dsa-host-windows --test task_windows -- --ignored --test-threads 1 --nocapture real_input::fr5_real_touch_gestures_are_off_only_while_a_task_window_is_in_front
+          if ($LASTEXITCODE -ne 0) { throw "the touch gestures were not off only while a task window was in front" }
+
       # Fingers and a pen put into this machine's input with Windows' synthetic pointer
       # devices, on a task window opened over a fake Android: ten fingers and a pinch reach
       # the task as ten touch pointers, a pen with its pressure, barrel button and eraser, and
@@ -166,8 +179,37 @@ jobs:
           Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
           Start-Sleep -Seconds 5
           if (-not (Get-Process explorer -ErrorAction SilentlyContinue)) { Start-Process explorer.exe; Start-Sleep -Seconds 5 }
-          cargo test --release --target $env:RUST_TARGET -p dsa-host-windows --test task_windows -- --ignored --test-threads 1 --nocapture real_input
+          cargo test --release --target $env:RUST_TARGET -p dsa-host-windows --test task_windows -- --ignored --test-threads 1 --nocapture real_input --skip fr5_real_touch_gestures
           if ($LASTEXITCODE -ne 0) { throw "touch or pen input on a task window did not reach its task" }
+
+      # The Android VM's network made through this machine's Host Compute Network, as the
+      # service makes it: the NAT network and its endpoint are removed when the VM stops,
+      # when its start fails and when the service lets go of it; a network left by a service
+      # that ended uncleanly is used again, and one left from moving the VM is removed. No
+      # guest boots here, so the routes are checked from the host's side: the guest's default
+      # route is an address of this computer on its adapter for the network (so the guest's
+      # traffic follows this computer's routes, a VPN's included), and this computer sends to
+      # the guest's address through that adapter. HCN needs the Host Network Service; a runner
+      # image without it says so in a warning.
+      - name: fr28_the_vms_network_is_removed_when_it_stops_and_the_host_reaches_the_guest
+        working-directory: dsa
+        run: |
+          $hns = Get-Service hns -ErrorAction SilentlyContinue
+          if (-not $hns) {
+            Write-Host "::warning::this runner has no Host Network Service, so the VM's network is not checked here"
+            exit 0
+          }
+          Write-Host "Host Network Service: $($hns.Status)"
+          cargo test --release --target $env:RUST_TARGET -p dsa-host-windows --test hcn_network -- --ignored --test-threads 1 --nocapture
+          if ($LASTEXITCODE -ne 0) { throw "the VM's network was not made, removed or routed as it must be" }
+          # Windows takes the host's adapter of a removed network away shortly after.
+          $deadline = (Get-Date).AddSeconds(20)
+          do {
+            $left = Get-NetAdapter -IncludeHidden -ErrorAction SilentlyContinue | Where-Object Name -like 'vEthernet (DSA dsa-test-fr28*'
+            if (-not $left) { break }
+            Start-Sleep -Seconds 2
+          } while ((Get-Date) -lt $deadline)
+          if ($left) { throw "host adapters of the test networks are left: $($left.Name -join ', ')" }
 
       # Nothing is installed yet, so setup.exe opens on its first screen. Pictures of it in
       # the light and the dark theme, of Change, and of the command line help.

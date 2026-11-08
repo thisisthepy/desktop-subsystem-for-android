@@ -23,7 +23,7 @@ dsa settings set <name> <value>     # 하나를 바꿉니다. 스위치는 on이
 | **앱** | 설치된 앱: **열기**, **앱 정보**, **제거**, **크기 조절**, 창이 열리는 크기 | `dsa apps`, `dsa app-window` |
 | **백그라운드에서 실행 중** | 창 없이 실행 중인 앱: **열기**, **중지**, 중지 전에 물을지 여부 | `dsa background`, `stop-without-asking` |
 | **위젯** | 바탕 화면의 위젯, **바탕 화면에 추가** | `dsa widgets` |
-| **디스플레이 및 GPU** | **렌더링 GPU**, **창 관리자 다시 시작** | `render-gpu`, `dsa gpus` |
+| **디스플레이 및 GPU** | **렌더링 GPU**, **창 관리자 다시 시작**, **DSA 앱 창에서 Windows 터치 제스처 끄기**(Windows 11만, 기본값은 켬) | `render-gpu`, `dsa gpus`, `touch-gestures-off` |
 | **기기 정보** | 먼저 바꿀 수 없는 이 컴퓨터의 정보: 이름, 제조사와 모델, **복사**가 있는 **기기 사양**. 그다음 Android가 앱에 알리는 제조사, 모델, 빌드 지문 | `dsa settings device`, `device.<field>` |
 | **네트워크** | Android의 네트워크 연결 방식, 주소, DNS 서버, 게이트웨이, **고급 네트워킹**, **개발자 모드**(adb) | `dsa network`, `advanced-networking`, `developer-mode`, `adb-port`, `adb-auto-connect` |
 | **업데이트** | **Android**: 실행 중인 버전과 빌드, 따르는 버전, 진행률과 **지금 확인**(관리자)이 있는 Android 업데이트, **안드로이드 이미지 자동 업데이트**(관리자), **사용할 버전**(관리자). **DSA**: **DSA 자동 업데이트**(관리자), **프리릴리스 버전 받기**(관리자), **지금 설치** | `dsa android version`, `dsa android use`, `image-updates`, `program-updates`, `prerelease-updates`, `dsa update` |
@@ -63,6 +63,10 @@ dsa settings set <name> <value>     # 하나를 바꿉니다. 스위치는 on이
   같은 크기
 - `shared-folders`: `all`, `none`, 또는 쉼표로 구분한 폴더 이름(예: `Documents,Pictures`)
 - `adb-port`: 1부터 65535까지의 TCP 포트. 기본값은 58526입니다.
+- `touch-gestures-off`: `on`(기본값)이면 DSA 앱 창이 앞에 있는 동안 Windows 11의 세 손가락, 네 손가락 터치
+  제스처를 꺼서 앱이 열 손가락까지 받게 하고, 다른 창이 앞에 오면 원래 설정으로 되돌립니다. Windows가 거부하면
+  이 설정을 쓸 수 없고 설정 앱이 이유를 보여 줍니다. 그래도 Windows 설정의 Bluetooth 및 장치, 터치에서 모든 앱에
+  대해 제스처를 끌 수 있습니다.
 - `prerelease-updates`: `on`이면 정식 버전과 함께 프리릴리스도 받고, `off`이면 정식 버전만 받습니다. 처음 값은
   설치한 설치 파일을 따릅니다. 프리릴리스 설치 파일은 켜고, 정식 설치 파일은 끈 채로 두며, 업그레이드는 고른 값을
   그대로 둡니다. 1.0 전에는 모든 릴리스가 프리릴리스입니다. 꺼도 DSA가 이전 버전으로 돌아가지 않으며, 설치된

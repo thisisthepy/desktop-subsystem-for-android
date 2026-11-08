@@ -9,7 +9,9 @@
 
 It writes the Windows .ico files (16 to 256 px, the small sizes from the small masters),
 the notification area icons, the Linux colour and symbolic SVGs, the macOS .icns (16 to
-1024 px), its layered Icon Composer source and menu bar template, and the README logo.
+1024 px) of DSA and of each companion app, its layered Icon Composer source and menu bar
+template, and the README logo. No icon carries a badge: Settings and Files are the plain
+symbol and the APK Installer is its own open box drawing.
 """
 import json
 import re
@@ -26,71 +28,13 @@ def master(name):
     return (BRAND / f"{name}.svg").read_text(encoding="utf-8")
 
 
-def inner(svg):
-    """The content of an SVG document, without its outer element."""
-    start = svg.index(">", svg.index("<svg")) + 1
-    return svg[start:svg.rindex("</svg>")]
-
-
-def document(content):
-    return (
-        '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">'
-        + content
-        + "</svg>\n"
-    )
-
-
-# Where a badge sits: its glyph, drawn around (50, 50), moved to the disc at (51, 51).
-BADGE_PLACE = "translate(51 51) scale(.88) translate(-50 -50)"
-
-
-# The badge glyphs, centred on (50, 50) in the 64 unit grid, in the colour `c`.
-def glyph(badge, c):
-    if badge == "settings":
-        return (
-            f'<circle cx="50" cy="50" r="5.6" fill="none" stroke="{c}" stroke-width="3.6" '
-            'stroke-dasharray="2.9 1.5"/>'
-            f'<circle cx="50" cy="50" r="4.4" fill="{c}"/>'
-            '<circle cx="50" cy="50" r="1.9" fill="#ffffff"/>'
-        )
-    if badge == "files":
-        return (
-            f'<path d="M43 45.2a1.6 1.6 0 0 1 1.6-1.6h3.6l2 2h5.2a1.6 1.6 0 0 1 1.6 1.6v6.8'
-            f'a1.6 1.6 0 0 1-1.6 1.6H44.6a1.6 1.6 0 0 1-1.6-1.6z" fill="{c}"/>'
-        )
-    raise ValueError(badge)
-
-
-def with_badge(svg, badge):
-    """A colour icon with a companion app's badge: a white disc with a deep green glyph."""
-    if badge is None:
-        return svg
-    badge_svg = (
-        '<defs><filter id="badge-shadow" x="-40%" y="-40%" width="180%" height="180%">'
-        '<feDropShadow dx="0" dy=".8" stdDeviation=".8" flood-color="#022218" '
-        'flood-opacity=".4"/></filter></defs>'
-        '<circle cx="51" cy="51" r="10.5" fill="#ffffff" filter="url(#badge-shadow)"/>'
-        + f'<g transform="{BADGE_PLACE}">{glyph(badge, "#0a5a41")}</g>'
-    )
-    return document(inner(svg) + badge_svg)
-
-
-def symbolic_with_badge(svg, badge, colour):
-    """A one colour icon with a badge: the symbol is cut away around the glyph."""
-    if badge is None:
-        return svg
-    cut = (
-        '<defs><mask id="badge-cut" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64">'
-        '<rect width="64" height="64" fill="#ffffff"/>'
-        '<circle cx="51" cy="51" r="11" fill="#000000"/></mask></defs>'
-    )
-    return document(
-        cut
-        + f'<g mask="url(#badge-cut)">{inner(svg)}</g>'
-        + f'<g transform="{BADGE_PLACE}">'
-        + glyph(badge, colour).replace('fill="#ffffff"', 'fill="none"')
-        + "</g>"
-    )
+def drawings(app, large, small):
+    """The large and small drawings of `app` (None for DSA itself): a companion app's own
+    master, or the plain symbol. No icon is drawn with a badge."""
+    if app in icons.OWN_MASTERS:
+        own = master(icons.OWN_MASTERS[app])
+        return own, own
+    return large, small
 
 
 def render(svg, size):
@@ -135,11 +79,8 @@ def write(out, path, data):
 
 def windows(out):
     large, small = master("symbol"), master("symbol-small")
-    for path, badge in icons.WINDOWS_ICONS:
-        if badge in icons.OWN_MASTERS:
-            big = little = master(icons.OWN_MASTERS[badge])
-        else:
-            big, little = with_badge(large, badge), with_badge(small, badge)
+    for path, app in icons.WINDOWS_ICONS:
+        big, little = drawings(app, large, small)
         images = [
             (size, render(little if size <= icons.SMALL_MAX else big, size))
             for size in icons.ICO_SIZES
@@ -157,16 +98,15 @@ def windows(out):
 
 def linux(out):
     colour, symbolic = master("linux"), master("linux-symbolic")
-    tint = re.search(r'fill="(#[0-9a-f]{6})"', symbolic).group(1)
-    for badge, app_id in icons.LINUX_APPS.items():
+    for app, app_id in icons.LINUX_APPS.items():
         scalable, symbolic_path = icons.linux_paths(app_id)
-        if badge in icons.OWN_MASTERS:
-            own = icons.OWN_MASTERS[badge]
+        if app in icons.OWN_MASTERS:
+            own = icons.OWN_MASTERS[app]
             write(out, scalable, master(own))
             write(out, symbolic_path, master(f"{own}-symbolic"))
-            continue
-        write(out, scalable, with_badge(colour, badge))
-        write(out, symbolic_path, symbolic_with_badge(symbolic, badge, tint))
+        else:
+            write(out, scalable, colour)
+            write(out, symbolic_path, symbolic)
 
 
 def macos_layer(svg, keep):
@@ -183,6 +123,15 @@ def macos(out):
     svg = master("macos")
     chunks = [(kind, render(svg, points * scale)) for kind, points, scale in icons.ICNS_IMAGES]
     write(out, icons.MACOS_ICNS, icns(chunks))
+    for app, path in icons.MACOS_APP_ICNS.items():
+        drawing, _ = drawings(app, svg, svg)
+        if drawing is svg:
+            write(out, path, icns(chunks))
+        else:
+            write(out, path, icns([
+                (kind, render(drawing, points * scale))
+                for kind, points, scale in icons.ICNS_IMAGES
+            ]))
     for name in icons.MACOS_LAYERS:
         layer = macos_layer(svg, name)
         write(out, icons.MACOS_ICON / "Assets" / f"{name}.png", render(layer, icons.MACOS_LAYER_SIZE))

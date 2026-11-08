@@ -5178,6 +5178,170 @@ class ArmTranslationImageTests(unittest.TestCase):
                 sections[-1][1].append(line.strip())
         return sections
 
+    @staticmethod
+    def _allowed(policy):
+        """The (source, target, class, permission) quadruples the policy's allow rules grant."""
+        granted = set()
+        for source, target, kind, perms in re.findall(
+                r"\(allow\s+(\S+)\s+(\S+)\s+\((\S+)\s+\(([^()]*)\)\)\)", policy):
+            granted.update((source, target, kind, perm) for perm in perms.split())
+        return granted
+
+    @staticmethod
+    def _attributes(policy):
+        """The types each typeattributeset of the policy puts in an attribute."""
+        members = {}
+        for attribute, types in re.findall(r"\(typeattributeset\s+(\S+)\s+\(([^()]*)\)\)", policy):
+            members.setdefault(attribute, set()).update(types.split())
+        return members
+
+    @staticmethod
+    def _erofs_mounts(rc):
+        """Each erofs mount of an init script: its mount point, the type its fscontext= gives the
+        superblock (None without one), and the type its context= gives the files."""
+        mounts = []
+        for line in rc.splitlines():
+            line = line.strip()
+            if not line.startswith("mount erofs "):
+                continue
+            point = line.split()[3]
+            fs = re.search(r"\bfscontext=u:object_r:([a-z0-9_]+):s0", line)
+            files = re.search(r"(?<![a-z])context=u:object_r:([a-z0-9_]+):s0", line)
+            mounts.append((point, fs.group(1) if fs else None, files.group(1) if files else None))
+        return mounts
+
+    # The two files of 0.1.9 and PR #487 (context= alone, so the superblock carried the files'
+    # type), which mounted the translator on develop d69b9ff2 and then rebooted Android at
+    # 6.4 s: "avc: denied { getattr } for comm="netbpfload" name="/" dev="loop76"
+    # scontext=u:r:bpfloader:s0 tcontext=u:object_r:system_lib_file:s0 tclass=filesystem".
+    OLD_TRANSLATION_RC = ("on post-fs-data && property:ro.boot.dsa.arm_translation=default\n"
+                          "    mount erofs loop@/system/etc/dsa/arm-translation/default.img /mnt/dsa-arm-translation "
+                          "ro nodev nosuid context=u:object_r:system_lib_file:s0\n")
+    OLD_TRANSLATION_POLICY = ("(allow init labeledfs (filesystem (relabelfrom)))\n"
+                              "(allow init system_lib_file (filesystem (mount relabelfrom relabelto)))\n"
+                              "(allow system_lib_file system_lib_file (filesystem (associate)))\n"
+                              "(allow init system_lib_file (filesystem (getattr)))\n")
+
+    def _context_mount_problems(self, rc_name, policy, rc=None):
+        """What stops each erofs mount of the init script `rc_name` from mounting, or the
+        overlays laid over it from being read. The mount gives the superblock a filesystem type
+        of its own (fscontext=) and the files a file type (context=), and the kernel checks: for
+        the superblock, relabelfrom erofs's own type (labeledfs) and relabelto the new one; for
+        the files, the root first, relabelfrom the superblock's type and the files' type's
+        associate on it; then the mount itself against the superblock's type. A rule missing
+        from that chain fails the mount with "Permission denied" at boot. And statfs on an
+        overlay is checked against the superblock of its top lower layer, so the superblock's
+        type must be an fs_type, which every domain may getattr, and a contextmount_type, the
+        only fs_types the platform lets anything relabel to."""
+        if rc is None:
+            rc = (Path(make_image.__file__).with_name(rc_name)).read_text()
+        mounts = self._erofs_mounts(rc)
+        self.assertTrue(mounts, rc_name)
+        granted = self._allowed(policy)
+        attributes = self._attributes(policy)
+        problems = []
+        for point, fs, files in mounts:
+            if files is None:
+                problems.append(f"{point}: no context=, so the files keep no system type")
+                continue
+            if fs is None:
+                problems.append(f"{point}: no fscontext=, so the superblock carries {files}, a file type, and "
+                                "every domain but init is refused statfs through the overlays")
+                continue
+            for attribute in ("fs_type", "contextmount_type"):
+                if fs not in attributes.get(attribute, set()):
+                    problems.append(f"{point}: {fs} is not a {attribute}")
+            for rule in [("init", "labeledfs", "filesystem", "relabelfrom"),
+                         ("init", fs, "filesystem", "relabelto"),
+                         ("init", fs, "filesystem", "relabelfrom"),
+                         (files, fs, "filesystem", "associate"),
+                         ("init", fs, "filesystem", "mount")]:
+                if rule not in granted:
+                    problems.append(f"{point}: no (allow {rule[0]} {rule[1]} ({rule[2]} ({rule[3]})))")
+        return problems
+
+    def test_fr25_init_may_mount_the_translation_images_labelled_as_system_libraries(self):
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
+            policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+        self.assertEqual(self._context_mount_problems("dsa-arm-translation.rc", policy), [])
+        for point, fs, files in self._erofs_mounts(
+                (Path(make_image.__file__).with_name("dsa-arm-translation.rc")).read_text()):
+            self.assertEqual((fs, files), ("dsa_arm_translation_fs", "system_lib_file"), point)
+        # What 0.1.9 had, which the kernel refused at every boot ("avc: denied { relabelfrom }
+        # ... tcontext=u:object_r:system_lib_file:s0 tclass=filesystem").
+        old = ("(allow init labeledfs (filesystem (mount relabelfrom)))\n"
+               "(allow init system_lib_file (filesystem (relabelto associate)))\n"
+               "(allow system_lib_file labeledfs (filesystem (associate)))\n")
+        self.assertNotEqual(self._context_mount_problems("dsa-arm-translation.rc", old), [])
+
+    def test_fr25_the_translation_image_does_not_reboot_android_once_laid_over(self):
+        # develop d69b9ff2 mounted the image and laid it over, and every domain that statfs'd
+        # /system/bin was then refused (bpfloader first, whose failure reboots Android).
+        problems = self._context_mount_problems("dsa-arm-translation.rc", self.OLD_TRANSLATION_POLICY,
+                                                rc=self.OLD_TRANSLATION_RC)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("no fscontext=", problems[0])
+
+    def test_fr32_init_may_mount_the_google_apps_image_labelled_as_system_files(self):
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
+            policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+        self.assertEqual(self._context_mount_problems("dsa-gapps.rc", policy), [])
+        for point, fs, files in self._erofs_mounts((Path(make_image.__file__).with_name("dsa-gapps.rc")).read_text()):
+            self.assertEqual((fs, files), ("dsa_gapps_fs", "system_file"), point)
+        old = ("(allow init labeledfs (filesystem (mount relabelfrom)))\n"
+               "(allow init system_file (filesystem (relabelto associate)))\n"
+               "(allow system_file labeledfs (filesystem (associate)))\n")
+        self.assertNotEqual(self._context_mount_problems("dsa-gapps.rc", old), [])
+
+    def test_fr25_fr32_the_mount_rules_stay_clear_of_the_platforms_neverallows(self):
+        # The platform's policy (Android 16 and 17) forbids relabelto on any fs_type that is not
+        # a contextmount_type, filesystem associate from an fs_type to a file type, associate
+        # with proc, and any domain creating, writing or relabelling a file or folder of a
+        # contextmount_type. A rule that broke one would stop the policy compiling at boot.
+        fs_types = {"labeledfs", "tmpfs", "rootfs", "proc", "binfmt_miscfs"}
+        for name in ("arm-translation.cil", "gapps.cil"):
+            text = (Path(make_image.__file__).parent / "sepolicy" / name).read_text()
+            attributes = self._attributes(text)
+            declared = attributes.get("fs_type", set())
+            contextmount = attributes.get("contextmount_type", set())
+            for source, target, kind, perm in self._allowed(text):
+                if kind != "filesystem":
+                    self.assertNotIn(target, contextmount, f"{name}: {source} {perm} {kind} on {target}")
+                    continue
+                if perm == "relabelto" and target in fs_types | declared:
+                    self.assertIn(target, contextmount, f"{name}: relabelto {target}")
+                if perm == "associate":
+                    self.assertNotIn(source, fs_types | declared, f"{name}: {source} associate {target}")
+                    self.assertNotEqual(target, "proc", name)
+
+    def test_fr25_fr32_every_domain_may_statfs_the_folders_the_images_are_laid_over(self):
+        # statfs on an overlay is checked against the superblock of its top lower layer, so
+        # every domain that statfs's /system/bin, /product or /system_ext needs filesystem
+        # getattr on the image's superblock type. The platform gives every domain that on
+        # every fs_type ("allow domain fs_type:filesystem getattr" in Android 16 and 17), so
+        # the type is an fs_type and no rule here grants filesystem getattr on a file type,
+        # which every such domain would otherwise need.
+        for name, rc_name in (("arm-translation.cil", "dsa-arm-translation.rc"), ("gapps.cil", "dsa-gapps.rc")):
+            text = (Path(make_image.__file__).parent / "sepolicy" / name).read_text()
+            declared = self._attributes(text).get("fs_type", set())
+            for point, fs, files in self._erofs_mounts((Path(make_image.__file__).with_name(rc_name)).read_text()):
+                self.assertIn(fs, declared, f"{rc_name}: {point}")
+            for source, target, kind, perm in self._allowed(text):
+                if kind == "filesystem" and perm == "getattr":
+                    self.assertIn(target, declared | {"labeledfs"}, f"{name}: {source} getattr {target}")
+
+    def test_fr25_fr32_the_overlays_let_init_start_services_from_the_folders_they_cover(self):
+        # On a nosuid mount the kernel refuses a domain change on exec (develop d69b9ff2:
+        # "avc: denied { nosuid_transition } for comm="init" ... tcontext=u:r:vdc:s0", and vold
+        # failed). /system, /product and /system_ext are not nosuid, so neither are the
+        # overlays laid over them.
+        for rc_name in ("dsa-arm-translation.rc", "dsa-gapps.rc"):
+            rc = (Path(make_image.__file__).with_name(rc_name)).read_text()
+            overlays = [line.strip() for line in rc.splitlines() if line.strip().startswith("mount overlay ")]
+            self.assertTrue(overlays, rc_name)
+            for line in overlays:
+                self.assertNotIn("nosuid", line.split(), f"{rc_name}: {line}")
+
     def test_fr25_the_product_props_import_the_bridge_only_when_the_host_turns_it_on(self):
         with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
             product = archive.read("PRODUCT/etc/build.prop").decode().splitlines()
@@ -5232,10 +5396,11 @@ class ArmTranslationImageTests(unittest.TestCase):
         for value, image in images.items():
             section = sections[f"on post-fs-data && property:ro.boot.dsa.arm_translation={value}"]
             self.assertIn(f"mount erofs loop@{image} /mnt/dsa-arm-translation ro nodev nosuid "
+                          "fscontext=u:object_r:dsa_arm_translation_fs:s0 "
                           "context=u:object_r:system_lib_file:s0", section)
             for directory in ["lib64", "bin", "etc"]:
                 self.assertIn(
-                    f"mount overlay overlay /system/{directory} ro nodev nosuid "
+                    f"mount overlay overlay /system/{directory} ro nodev "
                     f"lowerdir=/mnt/dsa-arm-translation/system/{directory}:/system/{directory}",
                     section,
                 )
@@ -5255,6 +5420,10 @@ class ArmTranslationImageTests(unittest.TestCase):
             self.assertEqual(archive.read("SYSTEM/etc/init/dsa-arm-translation.rc").decode(), rc)
             policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
             self.assertIn("(allow init system_lib_file (dir (mounton)))", policy)
+            self.assertIn("(typeattributeset fs_type (dsa_arm_translation_fs))", policy)
+            self.assertIn("(typeattributeset contextmount_type (dsa_arm_translation_fs))", policy)
+            # No domain is given filesystem getattr on a file type: the superblock is not one.
+            self.assertNotIn("(allow init system_lib_file (filesystem (getattr)))", policy)
             self.assertIn("(allow init proc (dir (mounton)))", policy)
             self.assertIn("(allow init binfmt_miscfs (filesystem (mount)))", policy)
             self.assertIn("(allow init binfmt_miscfs (file (write open getattr)))", policy)
@@ -5381,10 +5550,10 @@ class ArmTranslationImageTests(unittest.TestCase):
         before, after = rc.split(trigger, 1)
         section, rest = after.split("\n\n", 1)
         self.assertIn("mount erofs loop@/data/vendor/dsa/gapps/system.img /mnt/dsa-gapps ro nodev nosuid "
-                      "context=u:object_r:system_file:s0", section)
+                      "fscontext=u:object_r:dsa_gapps_fs:s0 context=u:object_r:system_file:s0", section)
         for partition in ["product", "system_ext"]:
             self.assertIn(
-                f"mount overlay overlay /{partition} ro nodev nosuid "
+                f"mount overlay overlay /{partition} ro nodev "
                 f"lowerdir=/mnt/dsa-gapps/{partition}:/{partition}",
                 section,
             )
@@ -5394,8 +5563,12 @@ class ArmTranslationImageTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
             self.assertEqual(archive.read("SYSTEM/etc/init/dsa-gapps.rc").decode(), rc)
             policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
-            self.assertIn("(allow init system_file (filesystem (relabelto associate)))", policy)
-            self.assertIn("(allow system_file labeledfs (filesystem (associate)))", policy)
+            self.assertIn("(typeattributeset fs_type (dsa_gapps_fs))", policy)
+            self.assertIn("(typeattributeset contextmount_type (dsa_gapps_fs))", policy)
+            self.assertIn("(allow init dsa_gapps_fs (filesystem (mount relabelfrom relabelto)))", policy)
+            self.assertIn("(allow system_file dsa_gapps_fs (filesystem (associate)))", policy)
+            # No domain is given filesystem getattr on a file type: the superblock is not one.
+            self.assertNotIn("(allow init system_file (filesystem (getattr)))", policy)
 
     def test_fr32_x86_64_stays_the_first_abi_when_arm_translation_is_on(self):
         on = (Path(make_image.__file__).with_name("arm-translation-on.prop")).read_text().splitlines()

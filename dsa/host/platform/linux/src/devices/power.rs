@@ -14,9 +14,9 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
-use dsa_host_core::power::{MemoryPressure, PowerHub, PowerState};
+use dsa_host_core::power::{MemoryPressure, PowerHub, PowerState, SleepEvent};
 use zbus::blocking::Connection;
 
 use super::dbus::proxy;
@@ -24,8 +24,9 @@ use super::dbus::proxy;
 /// How often [`follow`] reads the computer's power and memory.
 pub const POLL: Duration = Duration::from_secs(10);
 
-/// How long the guests get to put their data on disk before the computer sleeps.
-pub const SLEEP_WAIT: Duration = Duration::from_secs(4);
+/// How long the guests get to put their data on disk before the computer sleeps: the same
+/// limit on every host, well inside logind's default `InhibitDelayMaxSec`.
+pub use dsa_host_core::power::SLEEP_WAIT;
 
 const UPOWER: &str = "org.freedesktop.UPower";
 
@@ -254,13 +255,11 @@ pub fn watch_sleep(hub: Arc<PowerHub>) -> Result<thread::JoinHandle<()>, String>
                     continue;
                 };
                 if going {
-                    if !hub.host_sleeping(SLEEP_WAIT) {
-                        eprintln!("power: not every Android saved its data before the sleep");
-                    }
+                    hub.on_sleep_event(SleepEvent::Sleeping);
                     // Releasing the delay lets the sleep go on.
                     held = None;
                 } else {
-                    hub.host_woke(SystemTime::now());
+                    hub.on_sleep_event(SleepEvent::Woke);
                     if held.is_none() {
                         held = inhibit();
                     }
@@ -307,6 +306,18 @@ mod tests {
         assert_eq!(refresh_rate(120, balanced.power_saver), 120);
         // Read often enough that the cap follows within a second.
         assert!(SAVER_POLL < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn fr10_linuxs_sleep_waits_for_the_guests_at_most_two_seconds() {
+        assert!(SLEEP_WAIT <= Duration::from_secs(2), "{SLEEP_WAIT:?}");
+        // The wait logind's PrepareForSleep starts is the shared one: with no Android running
+        // it does not hold the sleep at all.
+        let hub = PowerHub::new();
+        let started = std::time::Instant::now();
+        assert!(hub.on_sleep_event(SleepEvent::Sleeping));
+        assert!(hub.on_sleep_event(SleepEvent::Woke));
+        assert!(started.elapsed() < Duration::from_millis(500));
     }
 
     #[test]

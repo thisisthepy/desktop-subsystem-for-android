@@ -1,7 +1,7 @@
 ; Desktop Subsystem for Android (DSA)
 ; ARM app translation (dsa-arm-translation.rc). When the host says translation is on, init
-; mounts a package's erofs image through a loop device, labelled as system libraries, and lays
-; it over /system's lib64, bin and etc with overlayfs: the user's package from
+; mounts a package's erofs image through a loop device, its files labelled as system libraries,
+; and lays it over /system's lib64, bin and etc with overlayfs: the user's package from
 ; /data/vendor/dsa/arm-translation, or the image's default one from /system/etc/dsa (system_file,
 ; which init already reads). It then mounts binfmt_misc on /proc/sys/fs/binfmt_misc, which
 ; nothing else in Android mounts, and registers the package's handlers there.
@@ -11,9 +11,28 @@
 (allow init tmpfs (dir (mounton)))
 (allow init system_file (dir (mounton)))
 (allow init system_lib_file (dir (mounton)))
-(allow init labeledfs (filesystem (mount relabelfrom)))
-(allow init system_lib_file (filesystem (relabelto associate)))
-(allow system_lib_file labeledfs (filesystem (associate)))
+
+; The image's superblock. statfs on an overlay reports the filesystem of its top lower layer,
+; and the kernel checks the caller's filesystem getattr against that superblock's label. So
+; every program that asks how full /system/bin is (bpfloader is the first, and its failure
+; reboots Android) and init itself, when it lays the image over, are checked against this
+; type. As an fs_type it is covered by the platform's "allow domain fs_type:filesystem getattr",
+; as /system's own labeledfs is, so no domain needs a rule of its own. It is a
+; contextmount_type because the platform forbids relabelling a superblock to any other
+; fs_type; the platform keeps such types read-only, and nothing writes to the image.
+(type dsa_arm_translation_fs)
+(roletype object_r dsa_arm_translation_fs)
+(typeattributeset fs_type (dsa_arm_translation_fs))
+(typeattributeset contextmount_type (dsa_arm_translation_fs))
+; init mounts the image with fscontext=dsa_arm_translation_fs and context=system_lib_file. The
+; kernel relabels the superblock from erofs's own type (relabelfrom labeledfs, relabelto the
+; image's type); labels every file system_lib_file, the root first (relabelfrom the image's
+; type, and system_lib_file associates with it); and then checks the mount against the image's
+; type. system_lib_file is a file type, not an fs_type, so the platform's neverallow on an
+; fs_type associating with a file type does not reach it.
+(allow init labeledfs (filesystem (relabelfrom)))
+(allow init dsa_arm_translation_fs (filesystem (mount relabelfrom relabelto)))
+(allow system_lib_file dsa_arm_translation_fs (filesystem (associate)))
 (allow init proc (dir (mounton)))
 (allow init binfmt_miscfs (filesystem (mount)))
 (allow init binfmt_miscfs (file (write open getattr)))

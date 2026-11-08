@@ -374,6 +374,11 @@ pub fn run(places: Places, stop: Arc<AtomicBool>) -> Result<(), String> {
     watch_tasks(places.host_api.clone(), events.clone());
     watch_app_windows(places.host_api.clone(), events.clone(), Arc::clone(&stop));
     drop(events);
+    super::notifications::show(
+        places.host_api.clone(),
+        places.user.root.join("notifications"),
+        Arc::clone(&stop),
+    );
 
     let launcher = AppLauncher {
         folder: places.apps.clone(),

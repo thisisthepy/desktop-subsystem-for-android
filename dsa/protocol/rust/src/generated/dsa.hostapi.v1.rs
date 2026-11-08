@@ -176,6 +176,18 @@ pub struct SetWindowsShown {
     #[prost(bool, tag = "1")]
     pub shown: bool,
 }
+/// Says whether the caller's window manager can turn the host's three- and four-finger touch
+/// gestures off (Settings.touch_gestures_off): `state` is "unsupported", "available" or
+/// "failed", and `problem` says why while it is "failed". The window manager sends it when
+/// it connects and whenever it changes. The service keeps the latest for the caller until it
+/// stops, and reports it in Settings. The service answers Done.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ReportTouchGestures {
+    #[prost(string, tag = "1")]
+    pub state: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub problem: ::prost::alloc::string::String,
+}
 /// Freezes the caller's Android: its processes stop until a task window is shown again. Its
 /// notifications, alarms and widgets stop with them. Returns at once with the status.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
@@ -1612,6 +1624,22 @@ pub struct Settings {
     /// client cannot change it.
     #[prost(bool, tag = "33")]
     pub update_channel_available: bool,
+    /// Whether the host's own three- and four-finger touch gestures are turned off while one of
+    /// the caller's task windows is in front, so apps get every finger, and put back to the
+    /// user's value when another window comes to the front. On unless the user turned it off; a
+    /// client sends back the value it read. The caller's window manager applies it.
+    #[prost(bool, tag = "34")]
+    pub touch_gestures_off: bool,
+    /// Whether the caller's window manager can turn those gestures off: "unsupported" (the host
+    /// has no such gestures, so a client hides the setting), "available", or "failed" (the
+    /// host refused, so a client shows the setting disabled with touch_gestures_problem). Empty
+    /// while the window manager has not said. A client cannot change it.
+    #[prost(string, tag = "35")]
+    pub touch_gestures_state: ::prost::alloc::string::String,
+    /// Why the host refused, in words, while touch_gestures_state is "failed". A client cannot
+    /// change it.
+    #[prost(string, tag = "36")]
+    pub touch_gestures_problem: ::prost::alloc::string::String,
 }
 /// How the caller's Android reaches the network.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -2221,7 +2249,7 @@ pub struct Request {
     pub id: u64,
     #[prost(
         oneof = "request::Body",
-        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 25, 26, 22, 23, 24, 27, 29, 30, 31, 32, 33, 34, 28, 35, 36, 39, 38, 45, 70, 71, 37, 120, 121, 200, 72, 73, 74, 80, 81, 41, 42, 43, 44, 300, 301, 302, 303, 90, 310, 320, 321, 322, 330, 331, 400, 401, 402, 340"
+        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 25, 26, 22, 23, 24, 27, 29, 30, 31, 32, 33, 34, 28, 35, 36, 39, 38, 45, 70, 71, 37, 120, 121, 200, 72, 73, 74, 80, 81, 41, 42, 43, 44, 300, 301, 302, 303, 90, 310, 320, 321, 322, 330, 331, 400, 401, 402, 340, 350"
     )]
     pub body: ::core::option::Option<request::Body>,
 }
@@ -2361,6 +2389,8 @@ pub mod request {
         RemoveGapps(super::RemoveGapps),
         #[prost(message, tag = "340")]
         SetRunAsArm(super::SetRunAsArm),
+        #[prost(message, tag = "350")]
+        ReportTouchGestures(super::ReportTouchGestures),
     }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]

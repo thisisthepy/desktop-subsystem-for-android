@@ -29,10 +29,11 @@ use windows_sys::Win32::System::LibraryLoader::{
 
 use crate::guid::Guid;
 use crate::network::{
-    advanced_adapter, advanced_problem, choose_nat_subnet, endpoint_document, endpoint_facts,
-    endpoint_name, guid_from, host_has_ipv6, ids_from_enumeration, mac_bytes, name_query,
-    nat_ipv6_subnet, nat_network_document, network_facts, network_name, reusable, subnets_in_use,
-    transparent_network_document, EndpointFacts, HostAdapter, Ipv4Subnet, NetworkMode,
+    advanced_adapter, advanced_problem, all_query, choose_nat_subnet, endpoint_document,
+    endpoint_facts, endpoint_name, guid_from, host_has_ipv6, ids_from_enumeration, mac_bytes,
+    moved_leftover, name_query, nat_ipv6_subnet, nat_network_document, nat_path_problem,
+    network_facts, network_name, object_name, reusable, subnets_in_use,
+    transparent_network_document, EndpointFacts, HostAdapter, Ipv4Subnet, NatPath, NetworkMode,
     NetworkStatusFacts,
 };
 use crate::vm::NetworkAdapter;
@@ -58,6 +59,7 @@ struct Api {
     close_network: Close,
     enumerate_endpoints: Enumerate,
     create_endpoint: CreateEndpoint,
+    open_endpoint: Open,
     query_endpoint: Query,
     delete_endpoint: Delete,
     close_endpoint: Close,
@@ -111,6 +113,7 @@ fn load() -> Result<Api, String> {
         close_network: function!("HcnCloseNetwork", Close),
         enumerate_endpoints: function!("HcnEnumerateEndpoints", Enumerate),
         create_endpoint: function!("HcnCreateEndpoint", CreateEndpoint),
+        open_endpoint: function!("HcnOpenEndpoint", Open),
         query_endpoint: function!("HcnQueryEndpointProperties", Query),
         delete_endpoint: function!("HcnDeleteEndpoint", Delete),
         close_endpoint: function!("HcnCloseEndpoint", Close),
@@ -153,7 +156,11 @@ fn check(what: &str, hresult: HRESULT, record: PWSTR) -> Result<(), String> {
 }
 
 fn enumerate(function: Enumerate, what: &str, name: &str) -> Result<Vec<Guid>, String> {
-    let query = wide(&name_query(name));
+    enumerate_matching(function, what, &name_query(name))
+}
+
+fn enumerate_matching(function: Enumerate, what: &str, query: &str) -> Result<Vec<Guid>, String> {
+    let query = wide(query);
     let (mut found, mut record) = (std::ptr::null_mut(), std::ptr::null_mut());
     // SAFETY: a NUL-terminated query and out pointers that outlive the call.
     let hresult = unsafe { function(query.as_ptr(), &mut found, &mut record) };
@@ -185,6 +192,79 @@ fn network_properties(api: &Api, id: &Guid) -> Result<String, String> {
     unsafe { (api.close_network)(handle) };
     check("HcnQueryNetworkProperties", hresult, record)?;
     Ok(properties)
+}
+
+/// The properties of the endpoint `id`, if it can be opened.
+fn endpoint_properties(api: &Api, id: &Guid) -> Result<String, String> {
+    let (mut handle, mut record) = (std::ptr::null_mut(), std::ptr::null_mut());
+    // SAFETY: a live GUID and out pointers.
+    let hresult = unsafe { (api.open_endpoint)(guid_ptr(id), &mut handle, &mut record) };
+    check("HcnOpenEndpoint", hresult, record)?;
+    let query = wide("");
+    let (mut properties, mut record) = (std::ptr::null_mut(), std::ptr::null_mut());
+    // SAFETY: a live handle, a NUL-terminated query and out pointers.
+    let hresult =
+        unsafe { (api.query_endpoint)(handle, query.as_ptr(), &mut properties, &mut record) };
+    let properties = take(properties);
+    // SAFETY: closed once.
+    unsafe { (api.close_endpoint)(handle) };
+    check("HcnQueryEndpointProperties", hresult, record)?;
+    Ok(properties)
+}
+
+/// The IDs of the HCN networks named `name`.
+pub fn networks_named(name: &str) -> Result<Vec<Guid>, String> {
+    let api = api()?;
+    enumerate(api.enumerate_networks, "HcnEnumerateNetworks", name)
+}
+
+/// The IDs of the HCN endpoints named `name`.
+pub fn endpoints_named(name: &str) -> Result<Vec<Guid>, String> {
+    let api = api()?;
+    enumerate(api.enumerate_endpoints, "HcnEnumerateEndpoints", name)
+}
+
+/// Removes the networks and endpoints left from moving VM `vm_name`'s adapter to another host
+/// adapter by a service that ended while the VM was on one: the endpoints first, since an
+/// endpoint holds its network. Called when the VM starts, when none of them is in use.
+fn remove_moved_leftovers(api: &Api, vm_name: &str) {
+    let named = |ids: Vec<Guid>, properties: &dyn Fn(&Guid) -> Result<String, String>| {
+        ids.into_iter()
+            .filter(|id| {
+                properties(id)
+                    .ok()
+                    .and_then(|p| object_name(&p))
+                    .is_some_and(|name| moved_leftover(vm_name, &name))
+            })
+            .collect::<Vec<_>>()
+    };
+    let all = all_query();
+    match enumerate_matching(api.enumerate_endpoints, "HcnEnumerateEndpoints", &all) {
+        Ok(ids) => {
+            for stale in named(ids, &|id| endpoint_properties(api, id)) {
+                match delete(api.delete_endpoint, "HcnDeleteEndpoint", &stale) {
+                    Ok(()) => eprintln!("network: removed an endpoint left from moving {vm_name}"),
+                    Err(why) => eprintln!(
+                        "network: an endpoint left from moving {vm_name} could not be removed: {why}"
+                    ),
+                }
+            }
+        }
+        Err(why) => eprintln!("network: the endpoints left from before cannot be listed: {why}"),
+    }
+    match enumerate_matching(api.enumerate_networks, "HcnEnumerateNetworks", &all) {
+        Ok(ids) => {
+            for stale in named(ids, &|id| network_properties(api, id)) {
+                match delete(api.delete_network, "HcnDeleteNetwork", &stale) {
+                    Ok(()) => eprintln!("network: removed a network left from moving {vm_name}"),
+                    Err(why) => eprintln!(
+                        "network: a network left from moving {vm_name} could not be removed: {why}"
+                    ),
+                }
+            }
+        }
+        Err(why) => eprintln!("network: the networks left from before cannot be listed: {why}"),
+    }
 }
 
 fn create_network(api: &Api, id: &Guid, document: &str) -> Result<Handle, String> {
@@ -250,21 +330,26 @@ pub struct VmNetwork {
     /// The host adapter an advanced network is bound to.
     host_adapter: Option<String>,
     endpoint: EndpointFacts,
+    /// The gateway of a NAT network: the host's address on it, the guest's default route.
+    nat_gateway: Option<Ipv4Addr>,
     problem: Option<String>,
 }
 
 impl VmNetwork {
     /// Makes the network and the endpoint for VM `vm_name`: advanced networking when `advanced`
     /// asks for it and the host has an adapter it can use, NAT otherwise. A network of the
-    /// same name left from before is used again when it is of the kind wanted.
+    /// same name left from before is used again when it is of the kind wanted; one left from
+    /// moving the VM to another host adapter is removed.
     pub fn connect(vm_name: &str, advanced: bool) -> Result<VmNetwork, String> {
+        remove_moved_leftovers(api()?, vm_name);
         VmNetwork::connect_as(vm_name, vm_name, advanced)
     }
 
     /// As [`connect`](Self::connect), with the network and endpoint named after `label`
     /// rather than the VM: a network made to move a running VM to another host adapter must
-    /// not take the name, and so the place, of the one the VM is still on.
-    fn connect_as(vm_name: &str, label: &str, advanced: bool) -> Result<VmNetwork, String> {
+    /// not take the name, and so the place, of the one the VM is still on. A move names it
+    /// `<vm> <n>`, which the VM's next [`connect`](Self::connect) removes if it is left.
+    pub fn connect_as(vm_name: &str, label: &str, advanced: bool) -> Result<VmNetwork, String> {
         let api = api()?;
         let adapters = host_adapters().unwrap_or_else(|why| {
             eprintln!("network: {why}; choosing the network without the host's adapters");
@@ -287,6 +372,7 @@ impl VmNetwork {
             }
         }
         let mut network_id = None;
+        let mut nat_gateway = None;
         for existing in enumerate(api.enumerate_networks, "HcnEnumerateNetworks", &name)? {
             let facts = network_properties(api, &existing)
                 .ok()
@@ -298,6 +384,12 @@ impl VmNetwork {
             {
                 eprintln!("network: using the network {name} left from before");
                 network_id = Some(existing);
+                if mode == NetworkMode::Nat {
+                    nat_gateway = facts
+                        .as_ref()
+                        .and_then(|f| f.subnets.first())
+                        .map(Ipv4Subnet::gateway);
+                }
             } else if let Err(why) = delete(api.delete_network, "HcnDeleteNetwork", &existing) {
                 eprintln!(
                     "network: the network {name} left from before could not be removed: {why}"
@@ -332,8 +424,9 @@ impl VmNetwork {
                             mode = NetworkMode::Nat;
                             host_adapter = None;
                         }
-                        let (handle, ipv6_problem) =
+                        let (handle, subnet, ipv6_problem) =
                             create_nat(api, &id, vm_name, &name, &adapters)?;
+                        nat_gateway = Some(subnet.gateway());
                         // SAFETY: closed once.
                         unsafe { (api.close_network)(handle) };
                         if problem.is_none() {
@@ -379,6 +472,7 @@ impl VmNetwork {
             mode,
             host_adapter,
             endpoint,
+            nat_gateway,
             problem,
         })
     }
@@ -395,15 +489,45 @@ impl VmNetwork {
         self.mode
     }
 
-    /// The network as it stands, with the addresses the guest has been seen using.
+    /// The network's name, which its endpoint's and the host's own adapter's names carry.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The way between the host and a guest behind NAT, as it stands now: whether the host
+    /// still holds the gateway and which adapter it reaches the guest through. `None` on the
+    /// LAN, where the host's NAT is not on the way.
+    pub fn nat_path(&self) -> Option<NatPath> {
+        let gateway = self.nat_gateway?;
+        let guest = self.endpoint.addresses.iter().find_map(|a| match a {
+            IpAddr::V4(v4) => Some(*v4),
+            IpAddr::V6(_) => None,
+        });
+        Some(NatPath {
+            gateway,
+            host_has_gateway: host_holds(gateway),
+            host_route: guest.and_then(host_route_to),
+        })
+    }
+
+    /// The network as it stands, with the addresses the guest has been seen using. Behind
+    /// NAT, a way between the host and the guest that no longer goes through the host's
+    /// network for Android (a VPN that took its subnet, the gateway gone) is its problem.
     pub fn status(&self) -> NetworkStatusFacts {
+        let path = self
+            .nat_path()
+            .and_then(|path| nat_path_problem(&self.name, &self.endpoint, &path));
+        let problem = match (self.problem.clone(), path) {
+            (Some(first), Some(second)) => Some(format!("{first}; {second}")),
+            (first, second) => first.or(second),
+        };
         NetworkStatusFacts {
             mode: self.mode,
             endpoint: self.endpoint.clone(),
             seen: mac_bytes(&self.endpoint.mac_address)
                 .map(|mac| neighbour_addresses(&mac))
                 .unwrap_or_default(),
-            problem: self.problem.clone(),
+            problem,
         }
     }
 
@@ -590,6 +714,15 @@ impl VmNetworking {
     }
 }
 
+/// The service letting go of the VM (it is ending, or the user's Android is made again) takes
+/// its network with it. The launcher holds the VM before its networking, so the VM is gone by
+/// then.
+impl Drop for VmNetworking {
+    fn drop(&mut self) {
+        self.detach();
+    }
+}
+
 /// The status of a user's network, for the settings: `None` while the VM has none.
 pub fn shared_status(shared: &SharedNetwork) -> Option<dsa_host_core::host_api::NetworkStatus> {
     let guard = shared.lock().unwrap_or_else(|e| e.into_inner());
@@ -597,14 +730,15 @@ pub fn shared_status(shared: &SharedNetwork) -> Option<dsa_host_core::host_api::
 }
 
 /// Creates the NAT network `id`, with an IPv6 subnet when the host has IPv6. A Windows that
-/// refuses the IPv6 subnet gets the network without it, and the reason is returned.
+/// refuses the IPv6 subnet gets the network without it, and the reason is returned. The
+/// network's IPv4 subnet is returned too.
 fn create_nat(
     api: &Api,
     id: &Guid,
     vm_name: &str,
     name: &str,
     adapters: &[HostAdapter],
-) -> Result<(Handle, Option<String>), String> {
+) -> Result<(Handle, Ipv4Subnet, Option<String>), String> {
     let in_use: Vec<Ipv4Subnet> = subnets_in_use(adapters);
     let subnet = choose_nat_subnet(vm_name, &in_use).ok_or_else(|| {
         "every NAT subnet DSA uses (172.28.0.0/14) is taken by this computer's networks".to_string()
@@ -612,7 +746,7 @@ fn create_nat(
     if host_has_ipv6(adapters) {
         let document = nat_network_document(name, subnet, Some(nat_ipv6_subnet(vm_name)));
         match create_network(api, id, &document.to_string()) {
-            Ok(handle) => return Ok((handle, None)),
+            Ok(handle) => return Ok((handle, subnet, None)),
             Err(why) => {
                 let problem = format!(
                     "this computer has IPv6, but Windows refused an IPv6 subnet for the NAT \
@@ -620,12 +754,57 @@ fn create_nat(
                 );
                 eprintln!("network: {problem}");
                 let document = nat_network_document(name, subnet, None);
-                return create_network(api, id, &document.to_string()).map(|h| (h, Some(problem)));
+                return create_network(api, id, &document.to_string())
+                    .map(|h| (h, subnet, Some(problem)));
             }
         }
     }
     let document = nat_network_document(name, subnet, None);
-    create_network(api, id, &document.to_string()).map(|handle| (handle, None))
+    create_network(api, id, &document.to_string()).map(|handle| (handle, subnet, None))
+}
+
+/// Whether `address` is one of the host's own addresses now: a socket can be bound to it only
+/// then.
+pub fn host_holds(address: Ipv4Addr) -> bool {
+    std::net::UdpSocket::bind((address, 0)).is_ok()
+}
+
+/// The host adapter, by the name Windows shows, that the host sends to `address` through;
+/// `None` when it has no route there.
+pub fn host_route_to(address: Ipv4Addr) -> Option<String> {
+    use windows_sys::Win32::NetworkManagement::IpHelper::{
+        ConvertInterfaceIndexToLuid, ConvertInterfaceLuidToAlias, GetBestInterfaceEx,
+    };
+    // NDIS_IF_MAX_STRING_SIZE in ifdef.h: the longest adapter name, without its NUL.
+    const IF_MAX_STRING_SIZE: usize = 256;
+    use windows_sys::Win32::NetworkManagement::Ndis::NET_LUID_LH;
+    // SAFETY: an all-zero SOCKADDR_IN is valid; its family and address are set below.
+    let mut destination: SOCKADDR_IN = unsafe { std::mem::zeroed() };
+    destination.sin_family = AF_INET;
+    destination.sin_addr.S_un.S_addr = u32::from(address).to_be();
+    let mut index = 0u32;
+    // SAFETY: a socket address of its family's size and an out pointer.
+    let result = unsafe {
+        GetBestInterfaceEx(
+            &destination as *const SOCKADDR_IN as *const SOCKADDR,
+            &mut index,
+        )
+    };
+    if result != 0 {
+        return None;
+    }
+    // SAFETY: a LUID is plain data, which all zeros is.
+    let mut luid: NET_LUID_LH = unsafe { std::mem::zeroed() };
+    // SAFETY: an interface index and an out pointer.
+    if unsafe { ConvertInterfaceIndexToLuid(index, &mut luid) } != 0 {
+        return None;
+    }
+    let mut alias = [0u16; IF_MAX_STRING_SIZE + 1];
+    // SAFETY: a LUID and a buffer of the length given, in characters.
+    if unsafe { ConvertInterfaceLuidToAlias(&luid, alias.as_mut_ptr(), alias.len()) } != 0 {
+        return None;
+    }
+    Some(from_wide(alias.as_mut_ptr()))
 }
 
 /// An IP address from a socket address, if it is IPv4 or IPv6.

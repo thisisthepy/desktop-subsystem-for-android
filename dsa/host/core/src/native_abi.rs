@@ -589,14 +589,20 @@ impl Notice {
 
 /// `notification` in the user's language. The host's own notifications about running an app
 /// as ARM come from the service in English, with a key that says which they are; a host shows
-/// them in Korean when `korean`. Every other notification is an app's own and stays as it
-/// came.
+/// them in Korean when `korean`. So do its alerts about updates
+/// ([`UpdateAlert`](crate::update::alerts::UpdateAlert)), which carry only why an update failed,
+/// in their text, and get their words here in either language. Every other notification is an
+/// app's own and stays as it came.
 pub fn in_user_language(
     mut notification: crate::notifications::Notification,
     korean: bool,
 ) -> crate::notifications::Notification {
     if let Some((notice, _)) = Notice::parse(&notification.key) {
         let (title, text) = notice.text(&notification.app_label, korean);
+        notification.title = title;
+        notification.text = text;
+    } else if let Some(alert) = crate::update::alerts::UpdateAlert::of_notification(&notification) {
+        let (title, text) = alert.text(korean);
         notification.title = title;
         notification.text = text;
     }

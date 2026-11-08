@@ -571,9 +571,93 @@ fn screenrecord_failure(name: &str, size: &str, recorded: &boot_check::Bounded) 
     )
 }
 
+/// The density a task's app draws at, in dpi: the one Android reports, or 160 (a scale of
+/// 100%) when it reports none.
+fn drawing_dpi(density_dpi: u32) -> u32 {
+    if density_dpi == 0 {
+        160
+    } else {
+        density_dpi
+    }
+}
+
+/// `dp` in pixels at `dpi`.
+fn px_at(dp: u32, dpi: u32) -> u32 {
+    dp * dpi / 160
+}
+
+/// `px` pixels in dp at `dpi`.
+fn dp_at(px: u32, dpi: u32) -> u32 {
+    px * 160 / dpi
+}
+
+/// What to do next to have a page laid out in a task window of a size in dp.
+#[derive(Debug, PartialEq, Eq)]
+enum Step {
+    /// Ask for the window in pixels.
+    Resize { width: u32, height: u32 },
+    /// The size asked for has not come yet.
+    Wait,
+    /// The window has the size: open the page afresh in it.
+    Open,
+    /// The page was opened in the window as it still is, `height_dp` tall.
+    Ready { height_dp: u32 },
+}
+
+/// Brings a task window to `width_dp` x `height_dp` and has the page opened in it at that size.
+///
+/// A size in dp is pixels at the density the task's app draws at now, which can change after
+/// the task appears: the window manager gives the task the density of the monitor its window
+/// is on, and until then the task has the display's. So each look at the task converts with
+/// the density it has then, asks for the window again when that gives another size, and opens
+/// the page again when the window changed after the page was opened in it.
+struct Sizing {
+    width_dp: u32,
+    height_dp: u32,
+    /// The size last asked for, in pixels.
+    asked: Option<(u32, u32)>,
+    /// The density and the size in pixels the window had when the page was opened in it.
+    opened: Option<(u32, u32, u32)>,
+}
+
+impl Sizing {
+    fn new(width_dp: u32, height_dp: u32) -> Self {
+        Sizing {
+            width_dp,
+            height_dp,
+            asked: None,
+            opened: None,
+        }
+    }
+
+    /// The next step for a window `width` x `height` pixels whose app draws at `density_dpi`.
+    fn step(&mut self, width: u32, height: u32, density_dpi: u32) -> Step {
+        let dpi = drawing_dpi(density_dpi);
+        let height_dp = dp_at(height, dpi);
+        if height_dp.abs_diff(self.height_dp) > 2 {
+            self.opened = None;
+            let wanted = (px_at(self.width_dp, dpi), px_at(self.height_dp, dpi));
+            if self.asked == Some(wanted) {
+                return Step::Wait;
+            }
+            self.asked = Some(wanted);
+            return Step::Resize {
+                width: wanted.0,
+                height: wanted.1,
+            };
+        }
+        let now = (dpi, width, height);
+        if self.opened == Some(now) {
+            return Step::Ready { height_dp };
+        }
+        self.opened = Some(now);
+        Step::Open
+    }
+}
+
 /// Gives Settings' task a window `height_dp` tall, then opens its home page afresh in it, so
 /// the page is laid out for that height: the home page keeps its views when its window is
-/// resized. Returns the task's height in dp as Android has it.
+/// resized. Returns the task's height in dp as Android has it once the page opened in it.
 fn open_settings_at(
     api: &mut HostApiClient,
     adb: &Adb,
@@ -595,48 +679,58 @@ fn open_settings_at(
     let _ = adb.shell(&format!("am force-stop {SETTINGS}"));
     api.launch_app(SETTINGS)
         .map_err(|why| format!("opening Settings: {why}"))?;
-    let task = loop {
+    let mut task_id = None;
+    let mut sizing = Sizing::new(WIDTH_DP, height_dp);
+    loop {
         let tasks = api.tasks().map_err(|why| format!("listing tasks: {why}"))?;
-        if let Some(task) = tasks
-            .tasks
-            .into_iter()
-            .find(|task| task.package_name == SETTINGS && !before.contains(&task.task_id))
-        {
-            break task;
-        }
-        if Instant::now() >= deadline {
-            return Err("Settings' task never appeared".into());
-        }
-        std::thread::sleep(Duration::from_millis(500));
-    };
-    let dpi = if task.density_dpi == 0 {
-        160
-    } else {
-        task.density_dpi
-    };
-    let px = |dp: u32| dp * dpi / 160;
-    api.resize_task(task.task_id, px(WIDTH_DP), px(height_dp), false)
-        .map_err(|why| format!("resizing Settings' task: {why}"))?;
-    let height = loop {
-        let tasks = api.tasks().map_err(|why| format!("listing tasks: {why}"))?;
-        let bounds = tasks
+        let new = |task: &dsa_host_core::tasks::Task| {
+            task.package_name == SETTINGS && !before.contains(&task.task_id)
+        };
+        // The task this launch opened, or the one Settings has after its page was opened
+        // afresh, should that be another.
+        let task = tasks
             .tasks
             .iter()
-            .find(|t| t.task_id == task.task_id)
-            .map(|t| t.bounds)
-            .ok_or("Settings' task went away")?;
-        let height = (bounds.bottom - bounds.top).max(0) as u32 * 160 / dpi;
-        if height.abs_diff(height_dp) <= 2 || Instant::now() >= deadline {
-            break height;
+            .find(|task| Some(task.task_id) == task_id && new(task))
+            .or_else(|| tasks.tasks.iter().find(|task| new(task)));
+        let Some(task) = task else {
+            if Instant::now() >= deadline {
+                return Err(match task_id {
+                    Some(_) => "Settings' task went away".into(),
+                    None => "Settings' task never appeared".into(),
+                });
+            }
+            std::thread::sleep(Duration::from_millis(500));
+            continue;
+        };
+        task_id = Some(task.task_id);
+        let (width, height) = (task.bounds.width(), task.bounds.height());
+        let step = sizing.step(width, height, task.density_dpi);
+        if Instant::now() >= deadline && !matches!(step, Step::Ready { .. }) {
+            let dpi = drawing_dpi(task.density_dpi);
+            return Err(format!(
+                "Settings' task is {width}x{height} pixels at {dpi} dpi, {} dp tall, and did \
+                 not settle at the {height_dp} dp asked for with its home page opened in it",
+                dp_at(height, dpi)
+            ));
         }
-        std::thread::sleep(Duration::from_millis(500));
-    };
-    adb.shell(&format!(
-        "am start -W --activity-clear-task -n {SETTINGS_HOME}"
-    ))?;
-    // The page lays out and draws its list.
-    std::thread::sleep(Duration::from_secs(5));
-    Ok(height)
+        match step {
+            Step::Resize { width, height } => {
+                api.resize_task(task.task_id, width, height, false)
+                    .map_err(|why| format!("resizing Settings' task: {why}"))?;
+                std::thread::sleep(Duration::from_millis(500));
+            }
+            Step::Wait => std::thread::sleep(Duration::from_millis(500)),
+            Step::Open => {
+                adb.shell(&format!(
+                    "am start -W --activity-clear-task -n {SETTINGS_HOME}"
+                ))?;
+                // The page lays out and draws its list.
+                std::thread::sleep(Duration::from_secs(5));
+            }
+            Step::Ready { height_dp } => return Ok(height_dp),
+        }
+    }
 }
 
 #[test]
@@ -673,6 +767,61 @@ fn fr34_the_dump_parser_reads_nodes_their_parents_and_bounds() {
         .cloned()
         .collect();
     assert_eq!(large_title(&folded).unwrap(), None);
+}
+
+#[test]
+fn fr34_a_window_s_height_in_dp_is_read_at_the_density_its_app_draws_at() {
+    // 692 pixels are under 600 dp at the display's 213 dpi, but not at the 160 dpi the
+    // window manager gives a task on a monitor at a scale of 100%: there the large title
+    // rightly opens expanded.
+    assert_eq!(dp_at(692, drawing_dpi(213)), 519);
+    assert_eq!(dp_at(692, drawing_dpi(160)), 692);
+    assert_eq!(px_at(SHORT_DP, drawing_dpi(160)), SHORT_DP);
+    // A task whose density is not known draws at a scale of 100%.
+    assert_eq!(drawing_dpi(0), 160);
+}
+
+#[test]
+fn fr34_a_window_sized_before_its_density_changed_is_sized_and_opened_again() {
+    let mut sizing = Sizing::new(WIDTH_DP, SHORT_DP);
+    // Listed at the display's 213 dpi: asked for 520 dp in those pixels.
+    assert_eq!(
+        sizing.step(639, 1065, 213),
+        Step::Resize {
+            width: 639,
+            height: 692
+        }
+    );
+    assert_eq!(sizing.step(639, 1065, 213), Step::Wait);
+    assert_eq!(sizing.step(639, 692, 213), Step::Open);
+    // The window manager then sets the monitor's 160 dpi: the window is 692 dp tall, and the
+    // page opened in it is not the short window's.
+    assert_eq!(
+        sizing.step(639, 692, 160),
+        Step::Resize {
+            width: 480,
+            height: 520
+        }
+    );
+    assert_eq!(sizing.step(480, 520, 160), Step::Open);
+    assert_eq!(sizing.step(480, 520, 160), Step::Ready { height_dp: 520 });
+}
+
+#[test]
+fn fr34_a_page_counts_as_opened_at_a_size_only_while_its_window_keeps_it() {
+    let mut sizing = Sizing::new(WIDTH_DP, TALL_DP);
+    assert_eq!(sizing.step(480, 800, 160), Step::Open);
+    // The window moved to a monitor of another scale after the page opened: the same pixels
+    // are another size, so the page is opened again once the window has the size again.
+    assert_eq!(
+        sizing.step(480, 800, 240),
+        Step::Resize {
+            width: 720,
+            height: 1200
+        }
+    );
+    assert_eq!(sizing.step(720, 1200, 240), Step::Open);
+    assert_eq!(sizing.step(720, 1200, 240), Step::Ready { height_dp: 800 });
 }
 
 #[test]

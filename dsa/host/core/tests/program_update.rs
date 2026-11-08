@@ -1040,3 +1040,183 @@ fn fr15_on_the_prerelease_channel_a_list_that_cannot_be_read_does_not_stop_the_o
         Err(ProgramError::BadSignature(_))
     ));
 }
+
+/// Connects as `user`, as if the operating system had reported that user.
+struct DesktopOf(dsa_transport::local::MemoryLocalConnector, &'static str);
+
+impl dsa_transport::Connector for DesktopOf {
+    fn connect(
+        &mut self,
+        _: Duration,
+    ) -> Result<Box<dyn dsa_transport::Connection>, dsa_transport::TransportError> {
+        self.0.connect_as(dsa_transport::local::Peer {
+            user: self.1.into(),
+            administrator: false,
+        })
+    }
+}
+
+/// The local API of a service whose users' Android tell about the program updates of
+/// `status`, as the installed service wraps them.
+fn desktops(
+    status: &Arc<ProgramStatus>,
+) -> (
+    dsa_host_core::host_api_conformance::RunningService,
+    dsa_transport::local::MemoryLocalConnector,
+) {
+    let (listener, connector) = dsa_transport::local::pair();
+    let status = Arc::clone(status);
+    let androids = Arc::new(dsa_host_core::host_api::PerUser::new(move |_: &str| {
+        Ok(Arc::new(WithProgramStatus {
+            android: Arc::new(FakeAndroid::new()),
+            status: Arc::clone(&status),
+        }) as Arc<dyn UserAndroid>)
+    }));
+    let service =
+        dsa_host_core::host_api_conformance::RunningService::start(Box::new(listener), androids);
+    (service, connector)
+}
+
+/// What `user`'s desktop is given to show when it watches their notifications now, as a
+/// window manager does: each notification posted until the watch has been quiet a while.
+fn shown_on_desktop(
+    connector: &dsa_transport::local::MemoryLocalConnector,
+    user: &'static str,
+) -> Vec<dsa_host_core::notifications::Notification> {
+    use dsa_host_core::notifications::NotificationEvent;
+    let mut desktop = DesktopOf(connector.clone(), user);
+    let mut watch = dsa_host_core::host_api::HostApiClient::connect(
+        &mut desktop,
+        "desktop",
+        Duration::from_secs(10),
+    )
+    .unwrap()
+    .watch_notifications()
+    .unwrap();
+    let mut shown = Vec::new();
+    while let Some(event) = watch.next(Duration::from_millis(500)).unwrap() {
+        if let NotificationEvent::Posted(notification) = event {
+            shown.push(notification);
+        }
+    }
+    shown
+}
+
+fn keys(shown: &[dsa_host_core::notifications::Notification]) -> Vec<&str> {
+    shown.iter().map(|n| n.key.as_str()).collect()
+}
+
+#[test]
+fn fr15_each_desktop_is_told_once_that_an_update_waits_to_install() {
+    use dsa_host_core::native_abi::in_user_language;
+    let h = Harness::new();
+    h.fetch
+        .publish(&list_of("0.1.1", b"setup"), b"setup", &project_key());
+    let (updates, status) = h.service("0.1.0");
+    let (_service, desktop) = desktops(&status);
+    assert!(shown_on_desktop(&desktop, "alice").is_empty());
+
+    updates.check().unwrap();
+    let shown = shown_on_desktop(&desktop, "alice");
+    assert_eq!(keys(&shown), ["dsa:update:program:ready:0.1.1"]);
+    let korean = in_user_language(shown[0].clone(), true);
+    assert_eq!(korean.title, "DSA 업데이트가 준비되었습니다");
+    assert!(korean.text.contains("DSA 0.1.1"), "{}", korean.text);
+    let english = in_user_language(shown[0].clone(), false);
+    assert_eq!(english.title, "DSA update ready");
+    assert!(
+        english
+            .text
+            .contains("installs when Android is not running"),
+        "{}",
+        english.text
+    );
+
+    // The same version again, from another check or another watch, is not shown again.
+    assert_eq!(
+        updates.check().unwrap(),
+        CheckOutcome::AlreadyDownloaded("0.1.1".into())
+    );
+    assert!(shown_on_desktop(&desktop, "alice").is_empty());
+    // Each user is told on their own desktop.
+    assert_eq!(
+        keys(&shown_on_desktop(&desktop, "bob")),
+        ["dsa:update:program:ready:0.1.1"]
+    );
+}
+
+#[test]
+fn fr15_after_an_update_the_desktop_is_told_the_new_version_once() {
+    use dsa_host_core::native_abi::in_user_language;
+    let h = Harness::new();
+    h.fetch
+        .publish(&list_of("0.1.1", b"setup"), b"setup", &project_key());
+    let (old, _) = h.service("0.1.0");
+    old.install_now().unwrap();
+    drop(old);
+    // The service setup started is told before any desktop has connected to it.
+    let (_new, status) = h.service("0.1.1");
+    let (_service, desktop) = desktops(&status);
+    let shown = shown_on_desktop(&desktop, "alice");
+    assert_eq!(keys(&shown), ["dsa:update:program:applied:0.1.1"]);
+    let english = in_user_language(shown[0].clone(), false);
+    assert_eq!(english.title, "DSA updated");
+    assert_eq!(english.text, "DSA 0.1.1 is installed.");
+    assert_eq!(
+        in_user_language(shown[0].clone(), true).title,
+        "DSA를 업데이트했습니다"
+    );
+    assert!(shown_on_desktop(&desktop, "alice").is_empty());
+}
+
+#[test]
+fn fr15_a_failed_update_is_told_on_the_desktop_with_why_and_only_once() {
+    use dsa_host_core::native_abi::in_user_language;
+    let h = Harness::new();
+    h.fetch
+        .publish(&list_of("0.1.1", b"setup"), b"setup", &project_key());
+    let (old, _) = h.service("0.1.0");
+    old.install_now().unwrap();
+    drop(old);
+    // Setup failed and rolled back: the old version starts again.
+    let (again, status) = h.service("0.1.0");
+    let (_service, desktop) = desktops(&status);
+    let shown = shown_on_desktop(&desktop, "alice");
+    assert_eq!(keys(&shown), ["dsa:update:program:failed:0.1.1"]);
+    let english = in_user_language(shown[0].clone(), false);
+    assert_eq!(english.title, "DSA update failed");
+    assert!(
+        english.text.contains("previous version is still in use")
+            && english.text.contains("setup-0.1.1.log"),
+        "{}",
+        english.text
+    );
+    let korean = in_user_language(shown[0].clone(), true);
+    assert!(korean.text.contains("이유:"), "{}", korean.text);
+    // A check that finds the same failed version says nothing new.
+    assert!(matches!(
+        again.check().unwrap(),
+        CheckOutcome::FailedBefore(_)
+    ));
+    assert!(shown_on_desktop(&desktop, "alice").is_empty());
+}
+
+#[test]
+fn fr15_a_click_on_an_update_alert_does_not_reach_android() {
+    use dsa_host_core::notifications::NotificationAction;
+    let h = Harness::new();
+    let (_updates, status) = h.service("0.1.0");
+    let (_service, desktop) = desktops(&status);
+    let mut client = dsa_host_core::host_api::HostApiClient::connect(
+        &mut DesktopOf(desktop.clone(), "alice"),
+        "desktop",
+        Duration::from_secs(10),
+    )
+    .unwrap();
+    // Android is not even running; the click is the host's to act on, so it is taken.
+    client
+        .act_on_notification(&NotificationAction::Open {
+            key: "dsa:update:program:ready:0.1.1".into(),
+        })
+        .unwrap();
+}

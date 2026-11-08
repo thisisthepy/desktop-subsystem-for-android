@@ -50,6 +50,7 @@ internal sealed class KeyText : ITextSource
         "Background_Playing" => "playing {0}",
         "Background_Paused" => "paused {0}",
         "Background_Stopped" => "stopped {0}",
+        "TouchGestures_Failed" => "cannot be used: {0}",
         _ => key,
     };
 }

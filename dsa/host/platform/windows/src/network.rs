@@ -19,10 +19,19 @@
 //!   moves to another adapter, the host makes a network on that one and moves the VM's adapter
 //!   to it while the VM runs.
 //!
+//! Behind NAT, the guest's default route is the gateway, which is the host's own address on
+//! its adapter for the network (`vEthernet (DSA <vm>)`): the host forwards the guest's traffic
+//! and translates it, so it leaves through whatever route the host takes, a VPN's included.
+//! The host reaches the guest's address the other way, through the same adapter, whose subnet
+//! route is more specific than any default route a VPN adds. Both are checked while the VM
+//! runs ([`nat_path_problem`]) and reported in the status when they do not hold.
+//!
 //! The user's WSL network and the Hyper-V switches the user made are never touched: the
 //! networks here are named after the VM, are not persistent (Windows removes them at restart),
-//! and are deleted when the VM stops. A network of the same name left by a service that did not
-//! stop cleanly is used again when it is of the kind wanted, and replaced otherwise.
+//! and are deleted when the VM stops, when it fails to start and when the service lets go of
+//! it. A network of the same name left by a service that did not stop cleanly is used again
+//! when it is of the kind wanted, and replaced otherwise; one left from moving the VM to
+//! another host adapter is removed at the VM's next start.
 //!
 //! This module only builds and reads the documents, so it is tested on every platform. The
 //! calls into `computenetwork.dll` are in `hcn` (Windows only).
@@ -227,6 +236,96 @@ pub fn name_query(name: &str) -> String {
         "Filter": json!({ "Name": name }).to_string(),
     })
     .to_string()
+}
+
+/// The query that finds every HCN object of a kind, whatever its name.
+pub fn all_query() -> String {
+    json!({ "SchemaVersion": schema() }).to_string()
+}
+
+/// The name in an HCN network's or endpoint's properties, if it has one.
+pub fn object_name(properties: &str) -> Option<String> {
+    let value: Value = serde_json::from_str(properties).ok()?;
+    Some(field(&value, "Name")?.as_str()?.to_string())
+}
+
+/// Whether `name` is a network or endpoint made to move VM `vm_name`'s adapter to another host
+/// adapter (`DSA <vm> <n>` and `DSA <vm> <n> eth0`). The move names them after a count so they
+/// do not take the place of the one the VM is on; a service that ends while such a network is
+/// in use leaves it behind under that name, which the VM's own network name never matches.
+pub fn moved_leftover(vm_name: &str, name: &str) -> bool {
+    let Some(rest) = name.strip_prefix(&format!("{} ", network_name(vm_name))) else {
+        return false;
+    };
+    let count = rest.strip_suffix(" eth0").unwrap_or(rest);
+    !count.is_empty() && count.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// The name Windows gives the host's own adapter on the NAT network `network_name`: the
+/// connection sharing gateway, through which the host reaches the guest.
+pub fn host_side_adapter(network_name: &str) -> String {
+    format!("vEthernet ({network_name})")
+}
+
+/// What the host found on the way between it and a guest behind NAT, for
+/// [`nat_path_problem`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NatPath {
+    /// The gateway the NAT network was made with: the host's address on that network.
+    pub gateway: Ipv4Addr,
+    /// Whether the gateway is one of the host's own addresses now.
+    pub host_has_gateway: bool,
+    /// The host adapter the host sends to the guest's IPv4 address through, by name; `None`
+    /// when the host has no route to it.
+    pub host_route: Option<String>,
+}
+
+/// Why traffic between the host and a guest behind NAT would not go as it must, if it would
+/// not: the guest's default route must be the NAT gateway, an address of the host, so that the
+/// guest's traffic is forwarded by the host and follows the host's routes (a VPN's among them);
+/// and the host must send to the guest's address through its own adapter on that network, so
+/// that programs on the host reach the guest's servers.
+pub fn nat_path_problem(
+    network_name: &str,
+    endpoint: &EndpointFacts,
+    path: &NatPath,
+) -> Option<String> {
+    let mut problems = Vec::new();
+    match endpoint.gateway {
+        Some(IpAddr::V4(gateway)) if gateway != path.gateway => problems.push(format!(
+            "Android's default route goes to {gateway}, not to this computer ({}), so its traffic \
+             does not follow this computer's routes or VPN",
+            path.gateway
+        )),
+        _ => {}
+    }
+    if !path.host_has_gateway {
+        problems.push(format!(
+            "this computer does not hold the NAT gateway address {} any more, so Android's traffic \
+             has nowhere to go",
+            path.gateway
+        ));
+    }
+    let guest = endpoint.addresses.iter().find_map(|a| match a {
+        IpAddr::V4(v4) => Some(*v4),
+        IpAddr::V6(_) => None,
+    });
+    if let Some(guest) = guest {
+        let own = host_side_adapter(network_name);
+        match path.host_route.as_deref() {
+            Some(route) if route.eq_ignore_ascii_case(&own) => {}
+            Some(route) => problems.push(format!(
+                "this computer sends to Android's address {guest} through {route} rather than its \
+                 network for Android, so programs here cannot reach Android's servers; a VPN that \
+                 takes {guest}'s subnet does this"
+            )),
+            None => problems.push(format!(
+                "this computer has no route to Android's address {guest}, so programs here cannot \
+                 reach Android's servers"
+            )),
+        }
+    }
+    (!problems.is_empty()).then(|| problems.join("; "))
 }
 
 /// The IDs in an HCN enumeration (a JSON array of GUID strings, with or without braces).

@@ -4,8 +4,9 @@
 //! Android may be frozen when idle, whether their clipboard is shared with it, whether web
 //! links open in apps in their Android instead of the host's browser, and developer mode
 //! (whether adb reaches their Android) with the loopback port adb connects to and whether that
-//! port is attached to their adb server by itself, and file sharing
-//! (which of their host folders their Android shows in its shared storage). The others are the
+//! port is attached to their adb server by itself, file sharing
+//! (which of their host folders their Android shows in its shared storage), and whether the
+//! host's own touch gestures are off while one of their task windows is in front. The others are the
 //! machine's, shared by every user: whether the service updates DSA itself, whether it takes
 //! pre-releases of DSA as well as stable releases, whether it downloads new Android images,
 //! and whether DSA's processes write the input trace and the per-stage resize trace to their
@@ -25,7 +26,8 @@
 //!                              "arm_translation": true,
 //!                              "file_sharing": true,
 //!                              "shared_folders": ["Documents", "Pictures"],
-//!                              "advanced_networking": false}
+//!                              "advanced_networking": false,
+//!                              "touch_gestures_off": true}
 //! <dir>/users/<user>.app-windows.json
 //!                             the user's window settings for each app
 //! <dir>/users/<user>.arm-translation.json
@@ -117,6 +119,10 @@ pub struct Settings {
     /// The host folders shared while file sharing is on, by name, in the order of
     /// [`file_share::FOLDERS`]. All of them by default.
     pub shared_folders: Vec<String>,
+    /// Whether the host's three- and four-finger touch gestures are off while one of the
+    /// user's task windows is in front, so apps get every finger. On by default; the user's
+    /// window manager applies it.
+    pub touch_gestures_off: bool,
 }
 
 impl Default for Settings {
@@ -140,6 +146,7 @@ impl Default for Settings {
             arm_translation: true,
             file_sharing: true,
             shared_folders: file_share::all_folders(),
+            touch_gestures_off: true,
         }
     }
 }
@@ -231,6 +238,8 @@ pub struct UserSettings {
     pub shared_folders: Vec<String>,
     #[serde(default)]
     pub advanced_networking: bool,
+    #[serde(default = "yes")]
+    pub touch_gestures_off: bool,
 }
 
 impl Default for UserSettings {
@@ -249,6 +258,7 @@ impl Default for UserSettings {
             file_sharing: true,
             shared_folders: file_share::all_folders(),
             advanced_networking: false,
+            touch_gestures_off: true,
         }
     }
 }
@@ -275,6 +285,7 @@ impl UserSettings {
             file_sharing: settings.file_sharing,
             shared_folders,
             advanced_networking: settings.advanced_networking,
+            touch_gestures_off: settings.touch_gestures_off,
         }
     }
 }
@@ -545,6 +556,7 @@ fn combine(mine: UserSettings, machine: MachineSettings) -> Settings {
         // a file kept by another release still reads.
         shared_folders: file_share::normalise_folders(&mine.shared_folders)
             .unwrap_or_else(|_| file_share::known_folders(&mine.shared_folders)),
+        touch_gestures_off: mine.touch_gestures_off,
     }
 }
 
@@ -893,6 +905,7 @@ mod tests {
                     arm_translation: false,
                     file_sharing: false,
                     shared_folders: vec!["Pictures".into()],
+                    touch_gestures_off: false,
                 },
             )
             .unwrap();
@@ -1169,6 +1182,37 @@ mod tests {
             "the user's own"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fr5_touch_gestures_off_is_on_by_default_and_kept_per_user() {
+        let dir = scratch("touch-gestures");
+        let store = FileSettings::new(&dir);
+        assert!(store.get("uid:1000").unwrap().touch_gestures_off);
+        let saved = store
+            .set(
+                "uid:1000",
+                &Settings {
+                    touch_gestures_off: false,
+                    ..Settings::default()
+                },
+            )
+            .unwrap();
+        assert!(!saved.touch_gestures_off);
+        let again = FileSettings::new(&dir);
+        assert!(!again.get("uid:1000").unwrap().touch_gestures_off);
+        assert!(
+            again.get("uid:1001").unwrap().touch_gestures_off,
+            "the user's own"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fr5_a_settings_file_from_before_touch_gestures_reads_it_as_on() {
+        let kept: UserSettings = serde_json::from_str(r#"{"clipboard": false}"#).unwrap();
+        assert!(!kept.clipboard);
+        assert!(kept.touch_gestures_off);
     }
 
     #[test]

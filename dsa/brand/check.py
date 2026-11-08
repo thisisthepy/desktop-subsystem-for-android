@@ -93,16 +93,18 @@ def fr17_every_linux_app_has_a_colour_and_a_symbolic_icon(out):
 
 
 def fr17_the_macos_icon_holds_every_size_and_its_layers(out):
-    data = read(out, icons.MACOS_ICNS)
-    if data is not None:
+    for path in [icons.MACOS_ICNS, *icons.MACOS_APP_ICNS.values()]:
+        data = read(out, path)
+        if data is None:
+            continue
         chunks = icns_chunks(data)
         if chunks is None:
-            fail("DSA.icns is not an .icns file")
-        else:
-            for kind, points, scale in icons.ICNS_IMAGES:
-                pixels = points * scale
-                if chunks.get(kind) != (pixels, pixels):
-                    fail(f"DSA.icns lacks the {points} pt @{scale}x image ({kind.decode()})")
+            fail(f"{path.name} is not an .icns file")
+            continue
+        for kind, points, scale in icons.ICNS_IMAGES:
+            pixels = points * scale
+            if chunks.get(kind) != (pixels, pixels):
+                fail(f"{path.name} lacks the {points} pt @{scale}x image ({kind.decode()})")
     manifest = read(out, icons.MACOS_ICON / "icon.json")
     if manifest is not None:
         names = {
@@ -130,16 +132,15 @@ def fr17_the_readme_logo_is_there(out):
         fail(f"the README logo is not {size} px")
 
 
-def fr11_the_apk_installer_icon_is_its_own_drawing(out):
-    """The APK Installer ships the open box master, not the DSA symbol with a badge.
+def fr11_the_apk_installer_is_the_open_box_with_no_badge(out):
+    """The APK Installer ships the open box master on every host, with no badge on it and
+    not the DSA symbol.
 
     The colour master is the open cardboard box with plain fills and gradients only (no
     filter or mask, so every renderer draws it the same), and the symbolic one is that box
     as a one colour outline on the 16 px grid. The earlier parcel with an arrow fails both.
     """
-    for badge, name in icons.OWN_MASTERS.items():
-        if badge in icons.BADGES:
-            fail(f"{badge} is both drawn from {name}.svg and given a badge")
+    for app, name in icons.OWN_MASTERS.items():
         own = (icons.BRAND / f"{name}.svg").read_text(encoding="utf-8")
         if "open cardboard box" not in own or "arrow" in own:
             fail(f"{name}.svg is not the open cardboard box")
@@ -152,30 +153,91 @@ def fr11_the_apk_installer_icon_is_its_own_drawing(out):
         symbol = (icons.BRAND / "symbol.svg").read_text(encoding="utf-8")
         if inner_paths(symbol) & inner_paths(own):
             fail(f"{name}.svg reuses the DSA symbol's shapes")
-        scalable, symbolic = icons.linux_paths(icons.LINUX_APPS[badge])
+        scalable, symbolic = icons.linux_paths(icons.LINUX_APPS[app])
         for path, master in ((scalable, name), (symbolic, f"{name}-symbolic")):
             data = read(out, path)
             expected = (icons.BRAND / f"{master}.svg").read_bytes()
             if data is not None and data.replace(b"\r\n", b"\n") != expected.replace(b"\r\n", b"\n"):
                 fail(f"{path.name} is not {master}.svg")
-        path = next(p for p, b in icons.WINDOWS_ICONS if b == badge)
+        path = next(p for p, a in icons.WINDOWS_ICONS if a == app)
         ico_data, png = read(out, path.with_suffix(".ico")), read(out, path.with_suffix(".png"))
         if ico_data is not None and png is not None and png not in ico_data:
             fail(f"{path.name}.ico and {path.name}.png are not the same drawing")
+        icns = read(out, icons.MACOS_APP_ICNS[app])
+        # The 256 px image of the .icns is the same rendering as the Windows one.
+        if icns is not None and png is not None and png not in icns:
+            fail(f"{icons.MACOS_APP_ICNS[app].name} is not {name}.svg")
+        has_badge(out, app)
 
 
-def fr29_the_explorer_entry_icon_has_no_badge(out):
-    """Android's entry in Explorer's navigation pane is the plain DSA symbol, like the
-    plain penguin of WSL's "Linux" beside it, with no folder badge in the corner."""
-    files = icons.WINDOWS / "resources" / "icons" / "files"
-    logo = icons.WINDOWS / "installer" / "setup-ui" / "assets" / "logo"
-    badge = next(b for p, b in icons.WINDOWS_ICONS if p == files)
-    if badge is not None:
-        fail(f"files.ico is drawn with the {badge} badge")
-    for suffix in (".ico", ".png"):
-        ours, plain = read(out, files.with_suffix(suffix)), read(out, logo.with_suffix(suffix))
-        if ours is not None and plain is not None and ours != plain:
-            fail(f"files{suffix} is not the plain DSA symbol of logo{suffix}")
+def plain_symbol(out, app):
+    """Fails unless every icon of `app` on every host is the plain DSA symbol: the same files
+    as DSA's own icon, so nothing is drawn on top of it."""
+    plain_windows = icons.WINDOWS / "installer" / "setup-ui" / "assets" / "logo"
+    for path, _ in (p for p in icons.WINDOWS_ICONS if p[1] == app):
+        for suffix in (".ico", ".png"):
+            ours = read(out, path.with_suffix(suffix))
+            plain = read(out, plain_windows.with_suffix(suffix))
+            if ours is not None and plain is not None and ours != plain:
+                fail(f"{path.name}{suffix} ({app}) is not the plain DSA symbol of logo{suffix}")
+    plain_linux = icons.linux_paths(icons.LINUX_APPS[None])
+    for ours_path, plain_path in zip(icons.linux_paths(icons.LINUX_APPS[app]), plain_linux):
+        ours, plain = read(out, ours_path), read(out, plain_path)
+        if ours is not None and plain is not None and lf(ours) != lf(plain):
+            fail(f"{ours_path.name} is not the plain DSA symbol of {plain_path.name}")
+    ours, plain = read(out, icons.MACOS_APP_ICNS[app]), read(out, icons.MACOS_ICNS)
+    if ours is not None and plain is not None and ours != plain:
+        fail(f"{icons.MACOS_APP_ICNS[app].name} is not the plain DSA symbol of DSA.icns")
+    has_badge(out, app)
+
+
+# What a badge is drawn with: the white disc's shadow and the cut the symbolic icon made
+# around it, and the disc itself, in the lower right corner of the 64 unit grid.
+BADGE_MARKS = [b"badge", b'cx="51" cy="51"']
+
+
+def lf(text):
+    """A text file with the line ends a checkout on Windows may have given it undone."""
+    return text.replace(b"\r\n", b"\n")
+
+
+def has_badge(out, app):
+    """Fails if a vector icon of `app`, or the master it is drawn from, draws a badge."""
+    paths = list(icons.linux_paths(icons.LINUX_APPS[app]))
+    if app in icons.OWN_MASTERS:
+        own = icons.OWN_MASTERS[app]
+        paths += [icons.BRAND / f"{own}.svg", icons.BRAND / f"{own}-symbolic.svg"]
+    for path in paths:
+        data = path.read_bytes() if path.parent == icons.BRAND else read(out, path)
+        if data is not None and any(mark in data for mark in BADGE_MARKS):
+            fail(f"{path.name} ({app}) draws a badge")
+
+
+def fr17_the_settings_icon_has_no_badge(out):
+    """Settings is the plain DSA symbol on Windows, Linux and macOS, with no gear badge."""
+    plain_symbol(out, "settings")
+
+
+def fr29_the_files_icon_has_no_badge(out):
+    """Android's entry in Explorer's navigation pane and DSA Files on Linux and macOS are
+    the plain DSA symbol, like the plain penguin of WSL's "Linux", with no folder badge."""
+    plain_symbol(out, "files")
+
+
+def fr17_no_icon_has_a_badge(out):
+    """Every companion app is checked, and the generator can no longer draw a badge."""
+    checked = {"settings", "files", *icons.OWN_MASTERS}
+    if set(icons.COMPANION_APPS) != checked:
+        fail(f"the companion apps {sorted(set(icons.COMPANION_APPS) - checked)} are not checked")
+    for app in icons.COMPANION_APPS:
+        has_badge(out, app)
+    generator = (icons.BRAND / "generate.py").read_text(encoding="utf-8")
+    for drawing in ("feDropShadow", "badge-", "with_badge", "glyph("):
+        if drawing in generator:
+            fail(f"generate.py draws a badge ({drawing})")
+    for svg in sorted(icons.BRAND.glob("*.svg")):
+        if any(mark in svg.read_bytes() for mark in BADGE_MARKS):
+            fail(f"the master {svg.name} draws a badge")
 
 
 def inner_paths(svg):
@@ -191,8 +253,10 @@ def main(argv):
         fr17_every_linux_app_has_a_colour_and_a_symbolic_icon,
         fr17_the_macos_icon_holds_every_size_and_its_layers,
         fr17_the_readme_logo_is_there,
-        fr11_the_apk_installer_icon_is_its_own_drawing,
-        fr29_the_explorer_entry_icon_has_no_badge,
+        fr17_the_settings_icon_has_no_badge,
+        fr11_the_apk_installer_is_the_open_box_with_no_badge,
+        fr29_the_files_icon_has_no_badge,
+        fr17_no_icon_has_a_badge,
     ]
     for check in checks:
         before = len(failures)

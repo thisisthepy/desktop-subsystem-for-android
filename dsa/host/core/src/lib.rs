@@ -113,6 +113,7 @@ pub mod session;
 pub mod settings;
 pub mod system_settings;
 pub mod tasks;
+pub mod touch_gestures;
 pub mod update;
 pub mod video;
 pub mod widgets;

@@ -23,6 +23,8 @@
 //! - [`devices`]: sound, video decoding, cameras, location, printing, web links, shared
 //!   folders, game controllers, and the system settings each user's Android follows, lent by
 //!   the user's device lender (`dsa-devices`).
+//! - [`power`]: the Mac's battery, Low Power Mode, and its sleep and wake, which each user's
+//!   Android follows.
 //! - [`wm`]: the window manager (`dsa-wm`): the renderer, the guest's graphics streams, and
 //!   one window host per app, each given its tasks' frames.
 //!
@@ -39,6 +41,7 @@ pub mod display_power;
 pub mod host_config;
 pub mod input;
 pub mod launchd;
+pub mod power;
 pub mod shell;
 pub mod user_disk;
 /// The image's VHDX disks read into raw images, shared with the Linux host.

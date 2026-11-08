@@ -8,13 +8,20 @@
 # place it reads them from for that partition's apps. The fingerprint that makes the boot an
 # upgrade comes from /system/etc/dsa/gapps-on.prop, which the product build.prop imports on the
 # same condition. A system script, because only init itself may lay anything over a partition.
+#
+# The image's files are labelled system files (context=), and its superblock gets a filesystem
+# type of its own (fscontext=, sepolicy/gapps.cil). statfs on /product or /system_ext reports
+# the image's superblock, the overlay's top lower layer, so a superblock labelled as files
+# would refuse that to every program but init. The overlays are not nosuid, as the partitions
+# are not: where nosuid is set, the kernel refuses init's domain change into every service it
+# starts from them.
 on post-fs-data && property:ro.boot.dsa.gapps=on
     mkdir /data/vendor/dsa 0771 system system
     mkdir /data/vendor/dsa/gapps 0770 system system
     mkdir /mnt/dsa-gapps 0755 root root
-    mount erofs loop@/data/vendor/dsa/gapps/system.img /mnt/dsa-gapps ro nodev nosuid context=u:object_r:system_file:s0
-    mount overlay overlay /product ro nodev nosuid lowerdir=/mnt/dsa-gapps/product:/product
-    mount overlay overlay /system_ext ro nodev nosuid lowerdir=/mnt/dsa-gapps/system_ext:/system_ext
+    mount erofs loop@/data/vendor/dsa/gapps/system.img /mnt/dsa-gapps ro nodev nosuid fscontext=u:object_r:dsa_gapps_fs:s0 context=u:object_r:system_file:s0
+    mount overlay overlay /product ro nodev lowerdir=/mnt/dsa-gapps/product:/product
+    mount overlay overlay /system_ext ro nodev lowerdir=/mnt/dsa-gapps/system_ext:/system_ext
 
 # Without the image the directory still exists, so dsa-channeld can write one the user installs
 # while Android runs; it takes effect at the next start.

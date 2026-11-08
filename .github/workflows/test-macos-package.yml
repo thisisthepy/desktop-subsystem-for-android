@@ -105,6 +105,21 @@ jobs:
           for size in 16x16 16x16@2x 32x32 32x32@2x 128x128 128x128@2x 256x256 256x256@2x 512x512 512x512@2x; do
             test -s "icon-check.iconset/icon_$size.png"
           done
+          # Each companion app has its own icon with every size, none with a badge: Settings
+          # and Files are DSA's own icon, the APK Installer the open box.
+          for icon in Settings ApkInstaller Files; do
+            rm -rf icon-check.iconset
+            iconutil -c iconset -o icon-check.iconset "DSA.app/Contents/Resources/$icon.icns"
+            for size in 16x16 16x16@2x 32x32 32x32@2x 128x128 128x128@2x 256x256 256x256@2x 512x512 512x512@2x; do
+              test -s "icon-check.iconset/icon_$size.png"
+            done
+          done
+          cmp DSA.app/Contents/Resources/Settings.icns DSA.app/Contents/Resources/DSA.icns
+          cmp DSA.app/Contents/Resources/Files.icns DSA.app/Contents/Resources/DSA.icns
+          if cmp -s DSA.app/Contents/Resources/ApkInstaller.icns DSA.app/Contents/Resources/DSA.icns; then
+            echo "ApkInstaller.icns is DSA's own icon, not the open box" >&2
+            exit 1
+          fi
           # The settings app speaks English and Korean.
           plutil -extract CFBundleLocalizations xml1 -o - DSA.app/Contents/Info.plist | grep -Fq '<string>ko</string>'
           for language in en ko; do

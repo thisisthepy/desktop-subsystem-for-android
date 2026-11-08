@@ -84,6 +84,13 @@ pub const NAVIGATION_SORT_ORDER: u32 = 0x78;
 /// The value, beside the entry in the user's own classes, that holds the user's key.
 pub const KEY_VALUE: &str = "DsaFilesKey";
 
+/// The value of the entry that holds the DSA release that wrote it. A new release differs,
+/// so the entry is written again and Explorer is told to read its icons again, once per
+/// upgrade for each user. Explorer caches an icon by file and index: without this, the
+/// Start menu would go on showing the settings app's earlier drawing (with a gear badge)
+/// from `DsaSettings.exe,0`, whose index cannot move.
+pub const VERSION_VALUE: &str = "DsaVersion";
+
 /// The shell's folder shortcut object, which shows a folder (here a UNC path) as its own entry.
 const FOLDER_SHORTCUT_CLSID: &str = "{0E5AAE11-A475-4c5b-AB00-C66DE400274E}";
 
@@ -132,6 +139,7 @@ pub fn navigation_values(
         // Shown in the navigation pane, directly below WSL's "Linux".
         ("", Some("System.IsPinnedToNameSpaceTree"), Dword(1)),
         ("", Some("SortOrderIndex"), Dword(NAVIGATION_SORT_ORDER)),
+        ("", Some(VERSION_VALUE), Text(crate::VERSION.into())),
         (
             "DefaultIcon",
             None,
@@ -189,6 +197,7 @@ pub fn entry_is_current(
                     | ("DefaultIcon", None)
                     | ("", Some("InfoTip"))
                     | ("", Some("SortOrderIndex"))
+                    | ("", Some(VERSION_VALUE))
             )
         })
         .all(|(subkey, name, value)| stored(subkey, name).as_ref() == Some(&value))
@@ -379,7 +388,7 @@ pub fn register_in_navigation_pane() -> Result<String, String> {
             registry::set(&sub, name, &value)?;
         }
     }
-    // Explorer reads its namespace again.
+    // Explorer reads its namespace again, and its icons: after an upgrade, the new drawings.
     // SAFETY: an event with no items.
     unsafe {
         windows_sys::Win32::UI::Shell::SHChangeNotify(
@@ -528,6 +537,28 @@ mod tests {
         };
         assert!(current(Some(NAVIGATION_SORT_ORDER)));
         assert!(!current(Some(0x42)));
+        assert!(!current(None));
+    }
+
+    #[test]
+    fn fr17_an_upgrade_makes_explorer_read_the_icons_without_a_badge_again() {
+        // The settings app's icon lost its gear badge, but its index in DsaSettings.exe is
+        // still 0, which Explorer has cached. An entry written by another release is written
+        // again, and writing it tells Explorer to read its icons again.
+        let values = navigation_values("icon.exe", "target");
+        let current = |version: Option<&str>| {
+            entry_is_current("icon.exe", "target", |subkey, name| {
+                if name == Some(VERSION_VALUE) {
+                    return version.map(|v| RegValue::Text(v.into()));
+                }
+                values
+                    .iter()
+                    .find(|(s, n, _)| *s == subkey && *n == name)
+                    .map(|(_, _, v)| v.clone())
+            })
+        };
+        assert!(current(Some(crate::VERSION)));
+        assert!(!current(Some("0.0.0-earlier")));
         assert!(!current(None));
     }
 

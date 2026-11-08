@@ -1,18 +1,12 @@
 //! The guest display's refresh rate on macOS: the Mac's fastest display, capped at 60 Hz in
 //! Low Power Mode.
 //!
-//! The agent runs in the user's login session, so it reads both itself: the displays' current
-//! modes from Core Graphics, and Low Power Mode from `NSProcessInfo`. [`follow`] reads Low
-//! Power Mode every [`SAVER_POLL`], so the cap follows within a second of the user turning it
-//! on or off, and the displays every [`dsa_host_core::guest_refresh::MONITOR_POLL`]. Each goes
-//! to the user's session, whose rule ([`dsa_host_core::guest_refresh::refresh_rate`]) sets the
-//! rate the guest's display refreshes at. The Mac's battery state is not read here.
-
-use std::time::Duration;
-
-/// How often [`follow`] reads Low Power Mode: often enough that the guest's display follows
-/// within a second. Reading it is a property of the process's info.
-pub const SAVER_POLL: Duration = Duration::from_millis(500);
+//! The agent runs in the user's login session, so it reads the displays' current modes from
+//! Core Graphics itself, every [`dsa_host_core::guest_refresh::MONITOR_POLL`] ([`follow`]),
+//! and hands the fastest to the user's session. Low Power Mode comes with the Mac's power
+//! ([`crate::power`]), and with it the session's rule
+//! ([`dsa_host_core::guest_refresh::refresh_rate`]) sets the rate the guest's display
+//! refreshes at.
 
 /// A display mode's refresh rate as Core Graphics gives it, in whole hertz. Core Graphics
 /// gives 0 for a display whose rate it does not name, which is no known rate.
@@ -28,13 +22,10 @@ mod mac {
     use std::ffi::c_void;
     use std::sync::Weak;
 
-    use objc2::msg_send;
-    use objc2::runtime::AnyObject;
-
-    use dsa_host_core::guest_refresh::{fastest, MONITOR_POLL};
+    use dsa_host_core::guest_refresh::{fastest, follow_monitors, MONITOR_POLL};
     use dsa_host_core::session::Session;
 
-    use super::{hz_from_mode_rate, SAVER_POLL};
+    use super::hz_from_mode_rate;
 
     #[link(name = "CoreGraphics", kind = "framework")]
     extern "C" {
@@ -76,56 +67,15 @@ mod mac {
         fastest(rates)
     }
 
-    /// Whether Low Power Mode is on. False on a Mac or macOS without it.
-    pub fn low_power_mode() -> bool {
-        let Ok(class) = crate::objc::class(c"NSProcessInfo") else {
-            return false;
-        };
-        // SAFETY: NSProcessInfo's shared instance and a BOOL property it has had since
-        // macOS 12; one that does not respond is taken to be off.
-        unsafe {
-            let info: *mut AnyObject = msg_send![class, processInfo];
-            if info.is_null() {
-                return false;
-            }
-            let responds: bool = msg_send![
-                info,
-                respondsToSelector: objc2::sel!(isLowPowerModeEnabled)
-            ];
-            if !responds {
-                return false;
-            }
-            let on: bool = msg_send![info, isLowPowerModeEnabled];
-            on
-        }
-    }
-
-    /// Hands Low Power Mode and the fastest display's rate to `session` until it is gone.
-    /// Run it on a thread of its own.
+    /// Hands the fastest display's rate to `session` until it is gone. Run it on a thread of
+    /// its own.
     pub fn follow(session: Weak<Session>) {
-        let displays_every = (MONITOR_POLL.as_millis() / SAVER_POLL.as_millis()).max(1) as u32;
-        let mut tick = 0u32;
-        loop {
-            let saver = low_power_mode();
-            let displays = (tick % displays_every == 0)
-                .then(fastest_display_hz)
-                .flatten();
-            let Some(session) = session.upgrade() else {
-                return;
-            };
-            session.set_battery_saver(saver);
-            if let Some(hz) = displays {
-                session.set_monitor_refresh(hz);
-            }
-            drop(session);
-            tick = tick.wrapping_add(1);
-            std::thread::sleep(SAVER_POLL);
-        }
+        follow_monitors(session, fastest_display_hz, MONITOR_POLL);
     }
 }
 
 #[cfg(target_os = "macos")]
-pub use mac::{fastest_display_hz, follow, low_power_mode};
+pub use mac::{fastest_display_hz, follow};
 
 #[cfg(test)]
 mod tests {
@@ -142,10 +92,13 @@ mod tests {
 
     #[test]
     fn fr10_battery_saver_caps_the_guest_refresh_rate_in_low_power_mode() {
+        use crate::power::{from_power_sources, SAVER_POLL};
         let promotion = hz_from_mode_rate(120.0);
-        assert_eq!(refresh_rate(promotion, true), 60);
-        assert_eq!(refresh_rate(promotion, false), 120);
-        assert_eq!(refresh_rate(hz_from_mode_rate(60.0), true), 60);
-        assert!(SAVER_POLL < Duration::from_secs(1));
+        let low_power = from_power_sources(None, &[], true).power_saver;
+        assert_eq!(refresh_rate(promotion, low_power), 60);
+        let normal = from_power_sources(None, &[], false).power_saver;
+        assert_eq!(refresh_rate(promotion, normal), 120);
+        assert_eq!(refresh_rate(hz_from_mode_rate(60.0), low_power), 60);
+        assert!(SAVER_POLL < std::time::Duration::from_secs(1));
     }
 }

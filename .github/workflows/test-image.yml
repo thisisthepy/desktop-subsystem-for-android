@@ -31,12 +31,16 @@ on:
       - "dsa/host/platform/linux/tests/widgets.rs"
       - "dsa/host/platform/linux/tests/media.rs"
       - "dsa/host/platform/linux/tests/system_screens.rs"
+      - "dsa/host/platform/linux/tests/overlays.rs"
       - "dsa/host/platform/linux/tests/boot_check/**"
       - ".github/scripts/linux-vm-test/stop-boot-check-leftovers.sh"
       - ".github/workflows/test-image.yml"
       - "scripts/tests/image-graphics-workflow.test.sh"
       - "scripts/tests/image-audio-workflow.test.sh"
       - "scripts/tests/image-media-workflow.test.sh"
+      - "scripts/tests/image-boot-overlays-workflow.test.sh"
+      - "scripts/tests/image-boot-check-image-dir.test.sh"
+      - "dsa/host/platform/linux/src/config.rs"
   workflow_dispatch:
     inputs:
       keep_disk:
@@ -627,6 +631,30 @@ jobs:
           name: guest-agent
           path: .scratch/agent
 
+      # The default ARM translator a released x86_64 Android 17 image carries, from the newest
+      # release that has one, so the image booted below lays it over its system as a release
+      # does and the overlay check has it to look at.
+      - name: Download the default ARM translator
+        id: translator
+        if: matrix.android == '17' && matrix.arch == 'x86_64'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          repo="${{ github.repository }}"
+          for tag in $(gh release list -R "$repo" -L 50 --json tagName -q '.[] | select(.tagName | startswith("android-17") and (endswith("-arm64") | not)) | .tagName'); do
+            if gh release view "$tag" -R "$repo" --json assets -q '.assets[].name' | grep -qx 'arm-translation.zip'; then
+              echo "default ARM translator from: $tag"
+              gh release download "$tag" -R "$repo" -p arm-translation.zip -D "$RUNNER_TEMP/arm-translation-zip"
+              unzip -o "$RUNNER_TEMP/arm-translation-zip/arm-translation.zip" -d .scratch/arm-translation
+              rm -rf "$RUNNER_TEMP/arm-translation-zip"
+              ls -l .scratch/arm-translation
+              echo "args=--arm-translation .scratch/arm-translation" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "::error::no published x86_64 Android 17 image release carries arm-translation.zip"
+          exit 1
+
       - name: Make the image
         run: |
           args=(--major "${{ matrix.android }}" --arch ${{ matrix.arch }} --keys .scratch/image-keys)
@@ -641,6 +669,7 @@ jobs:
           args+=(--gnss-hal .scratch/gnss-hal/dsa-gnss)
           args+=(--agent .scratch/agent/DsaAgent.apk)
           args+=(--aapt2 .scratch/build-tools/aapt2)
+          args+=(${{ steps.translator.outputs.args }})
           uv run dsa/guest/image/make-image.py "${args[@]}"
 
       - name: Check the image
@@ -716,7 +745,12 @@ jobs:
           echo "kernel release: $tag"
           gh release download "$tag" -R "${{ github.repository }}" -p bzImage -D "$RUNNER_TEMP"
           echo "DSA_WIDGET_TEST_KERNEL=$RUNNER_TEMP/bzImage" >> "$GITHUB_ENV"
-          image="$(ls -d "$PWD"/dsa/target/image/*/ | head -1)"
+          # Out of Cargo's target folder before the Rust build is restored: when the cache
+          # restored is not an exact match (a changed Cargo.toml), rust-cache cleans that
+          # folder and deletes every file in it that is not Cargo's, the image's disks too.
+          mkdir -p .scratch/boot-image
+          mv dsa/target/image/*/ .scratch/boot-image/
+          image="$(ls -d "$PWD"/.scratch/boot-image/*/ | head -1)"
           ls -l "$image"
           echo "DSA_WIDGET_TEST_IMAGE=$image" >> "$GITHUB_ENV"
 
@@ -731,7 +765,7 @@ jobs:
       - name: Build the widget boot check
         if: matrix.android == '17' && matrix.arch == 'x86_64'
         working-directory: dsa
-        run: cargo test -p dsa-host-linux --test widgets --test system_screens --test media --no-run && cargo build -p dsa-host-linux --bin dsa-compositor
+        run: cargo test -p dsa-host-linux --test widgets --test system_screens --test media --test overlays --no-run && cargo build -p dsa-host-linux --bin dsa-compositor
 
       # Android's renderer runs in the window manager (dsa-compositor), which needs a desktop
       # session: a headless Wayland compositor stands in for it, with Mesa's software Vulkan
@@ -852,6 +886,7 @@ jobs:
           path: .scratch/media-probe
 
       - name: Play sound and run codecs in an app on the booted image
+        id: media
         if: >-
           !cancelled() && steps.probe.outcome == 'success'
           && matrix.android == '17' && matrix.arch == 'x86_64'
@@ -889,4 +924,51 @@ jobs:
           path: |
             /tmp/media-test-*/*.log
             /tmp/media-test-*/*.txt
+          if-no-files-found: ignore
+
+      # The same image booted again with SELinux enforcing, twice. First with its default ARM
+      # translator: the package must be mounted and laid over /system, and binfmt_misc
+      # mounted with the package's rules in place. Then with a small Google apps build,
+      # installed through the local API from a mirror in the check's folder: after Android
+      # starts again the image must be mounted and laid over /product and /system_ext. In
+      # neither boot may init log a failed command of the overlay scripts or a denial of a
+      # mount.
+      - name: Lay the ARM translator and Google Play over the booted system
+        if: >-
+          !cancelled()
+          && (success() || steps.widget.outcome == 'failure' || steps.screens.outcome == 'failure' || steps.media.outcome == 'failure')
+          && matrix.android == '17' && matrix.arch == 'x86_64'
+        timeout-minutes: 16
+        working-directory: dsa
+        run: |
+          # What an earlier check that timed out left running holds the VM's vsock ports.
+          bash "$GITHUB_WORKSPACE/.github/scripts/linux-vm-test/stop-boot-check-leftovers.sh"
+          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+          sudo mkdir -p "$XDG_RUNTIME_DIR"
+          sudo chown "$(id -u):$(id -g)" "$XDG_RUNTIME_DIR"
+          chmod 0700 "$XDG_RUNTIME_DIR"
+          export GFXSTREAM_BACKEND_PATH=/usr/lib/dsa/bin/libgfxstream_backend.so
+          if [[ ! -S "$XDG_RUNTIME_DIR/bus" ]]; then
+            dbus-daemon --session --address="unix:path=$XDG_RUNTIME_DIR/bus" --fork
+          fi
+          export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+          if [[ ! -S "$XDG_RUNTIME_DIR/wayland-dsa" ]]; then
+            weston --backend=headless --socket=wayland-dsa --idle-time=0 --width=1920 --height=1080 &
+            for _ in $(seq 50); do
+              [[ -S "$XDG_RUNTIME_DIR/wayland-dsa" ]] && break
+              sleep 0.2
+            done
+          fi
+          export WAYLAND_DISPLAY=wayland-dsa
+          export DSA_ADB="$GITHUB_WORKSPACE/.scratch/platform-tools/adb"
+          cargo test -p dsa-host-linux --test overlays -- --nocapture --test-threads 1
+
+      - name: Keep the overlay check's logs
+        if: always() && matrix.android == '17' && matrix.arch == 'x86_64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: overlay-check-logs
+          path: |
+            /tmp/overlays-test-*/*.log
+            /tmp/overlays-test-*/*.txt
           if-no-files-found: ignore

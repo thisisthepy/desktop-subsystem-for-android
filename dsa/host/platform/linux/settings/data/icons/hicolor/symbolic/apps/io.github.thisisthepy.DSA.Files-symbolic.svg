@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><defs><mask id="badge-cut" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64"><rect width="64" height="64" fill="#ffffff"/><circle cx="51" cy="51" r="11" fill="#000000"/></mask></defs><g mask="url(#badge-cut)">
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
   <!-- The symbolic icon for GNOME: one colour, the inner panel left open; the panel recolours it. -->
   <path d="M22 14 L16.5 5 M42 14 L47.5 5" stroke="#2e3436" stroke-width="4.4" stroke-linecap="round" fill="none"/>
   <path d="M13 12h38a9 9 0 0 1 9 9v28a9 9 0 0 1-9 9H13a9 9 0 0 1-9-9V21a9 9 0 0 1 9-9z M16 32h32a4 4 0 0 1 4 4v10a4 4 0 0 1-4 4H16a4 4 0 0 1-4-4V36a4 4 0 0 1 4-4z" fill="#2e3436" fill-rule="evenodd"/>
-</g><g transform="translate(51 51) scale(.88) translate(-50 -50)"><path d="M43 45.2a1.6 1.6 0 0 1 1.6-1.6h3.6l2 2h5.2a1.6 1.6 0 0 1 1.6 1.6v6.8a1.6 1.6 0 0 1-1.6 1.6H44.6a1.6 1.6 0 0 1-1.6-1.6z" fill="#2e3436"/></g></svg>
+</svg>

@@ -48,6 +48,12 @@ pub const APP_ID_PREFIX: &str = "Thisisthepy.DSA.";
 /// removed on upgrade and uninstall.
 pub const OLD_APP_ID_PREFIX: &str = "DSA.";
 
+/// DSA's own AppUserModelID, which its own toasts (the news about updates) are shown under, so
+/// Windows names them DSA rather than an Android app. No package is one word, so no app's ID
+/// is this one; it starts with [`APP_ID_PREFIX`], so uninstalling removes its key with the
+/// apps' keys.
+pub const DSA_APP_ID: &str = "Thisisthepy.DSA.Notices";
+
 /// The AppUserModelID of `package`'s windows and Start menu shortcut. Every app has its own,
 /// so the taskbar never groups two apps together.
 pub fn app_user_model_id(package: &str) -> String {

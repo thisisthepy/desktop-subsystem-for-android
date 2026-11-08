@@ -238,6 +238,16 @@ message SetWindowsShown {
   bool shown = 1;
 }
 
+// Says whether the caller's window manager can turn the host's three- and four-finger touch
+// gestures off (Settings.touch_gestures_off): `state` is "unsupported", "available" or
+// "failed", and `problem` says why while it is "failed". The window manager sends it when
+// it connects and whenever it changes. The service keeps the latest for the caller until it
+// stops, and reports it in Settings. The service answers Done.
+message ReportTouchGestures {
+  string state = 1;
+  string problem = 2;
+}
+
 // Freezes the caller's Android: its processes stop until a task window is shown again. Its
 // notifications, alarms and widgets stop with them. Returns at once with the status.
 message FreezeSession {}
@@ -1477,6 +1487,19 @@ message Settings {
   // itself, or the package repository entries DSA's package registered follow the channel. A
   // client cannot change it.
   bool update_channel_available = 33;
+  // Whether the host's own three- and four-finger touch gestures are turned off while one of
+  // the caller's task windows is in front, so apps get every finger, and put back to the
+  // user's value when another window comes to the front. On unless the user turned it off; a
+  // client sends back the value it read. The caller's window manager applies it.
+  bool touch_gestures_off = 34;
+  // Whether the caller's window manager can turn those gestures off: "unsupported" (the host
+  // has no such gestures, so a client hides the setting), "available", or "failed" (the
+  // host refused, so a client shows the setting disabled with touch_gestures_problem). Empty
+  // while the window manager has not said. A client cannot change it.
+  string touch_gestures_state = 35;
+  // Why the host refused, in words, while touch_gestures_state is "failed". A client cannot
+  // change it.
+  string touch_gestures_problem = 36;
   // A run mode setting (run_mode, a RunMode enum, stop_after_secs and keep_for_notifications)
   // was here and is gone: an idle Android stays in Doze. Its numbers and names are never
   // used again, so an older peer that still sends them is read without them. The enum name
@@ -2053,6 +2076,7 @@ message Request {
     GetGapps get_gapps = 401;
     RemoveGapps remove_gapps = 402;
     SetRunAsArm set_run_as_arm = 340;
+    ReportTouchGestures report_touch_gestures = 350;
   }
 }
 

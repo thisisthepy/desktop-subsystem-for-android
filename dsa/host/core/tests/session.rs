@@ -2064,6 +2064,44 @@ fn fr10_the_wait_before_the_host_sleeps_ends_in_time_without_an_answer() {
 }
 
 #[test]
+fn fr10_every_hosts_sleep_notification_waits_at_most_two_seconds_for_the_guest() {
+    use dsa_host_core::power::{SleepEvent, SLEEP_WAIT};
+    assert_eq!(SLEEP_WAIT, Duration::from_secs(2));
+    let hub = Arc::new(PowerHub::new());
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    let session = Arc::new(session);
+    session.windows_shown(true).unwrap();
+    hub.attach(&session);
+    session.start();
+    let mut agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+
+    // A guest that answers ends the wait with its answer.
+    let sleeping = {
+        let hub = Arc::clone(&hub);
+        thread::spawn(move || hub.on_sleep_event(SleepEvent::Sleeping))
+    };
+    assert_eq!(next_body(&mut agent), screen(false));
+    assert_eq!(next_body(&mut agent), host_sleep(true, 0));
+    send_body(&mut agent, sleep_ready());
+    assert!(sleeping.join().unwrap());
+    assert!(hub.on_sleep_event(SleepEvent::Woke));
+    assert!(matches!(next_body(&mut agent), Body::HostSleep(_)));
+    assert_eq!(next_body(&mut agent), screen(true));
+    assert!(session.wait_for(SessionState::Active, WAIT));
+
+    // A guest that does not answer holds the host's sleep for no more than two seconds.
+    let started = std::time::Instant::now();
+    assert!(!hub.on_sleep_event(SleepEvent::Sleeping));
+    let waited = started.elapsed();
+    assert!(
+        waited < SLEEP_WAIT + Duration::from_millis(500),
+        "waited {waited:?}"
+    );
+}
+
+#[test]
 fn fr10_a_dozing_guest_stays_dozing_when_the_host_wakes_and_has_its_clock_set() {
     let (session, mut agent, _launcher) = lifecycle_session(None);
     dozing(&session, &mut agent);

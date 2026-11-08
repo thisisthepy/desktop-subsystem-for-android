@@ -108,6 +108,10 @@ cp "$root/LICENSE" "$app/Contents/Resources/licenses/DSA.txt"
 # and the menu bar's template image at 1x and 2x.
 cp "$here/icon/DSA.icns" "$app/Contents/Resources/DSA.icns"
 cp "$here/icon/DSA.icns" "$helper/Contents/Resources/DSA.icns"
+# Each companion app's own icon in the same format and sizes, none with a badge: the settings
+# app (DSA.app itself) and Files are the plain symbol, the APK Installer the open box.
+cp "$here/icon/Settings.icns" "$here/icon/ApkInstaller.icns" "$here/icon/Files.icns" \
+    "$app/Contents/Resources/"
 cp "$here/icon/MenuBarTemplate.png" "$here/icon/MenuBarTemplate@2x.png" "$app/Contents/Resources/"
 # The same picture as a layered Icon Composer source, for the Liquid Glass look. It goes
 # beside the package and the disk image.

@@ -19,6 +19,12 @@
 //!
 //! A toast the user dismisses (`UserCanceled`) is dismissed in Android too; the service
 //! leaves a notification its app made one the user cannot dismiss.
+//!
+//! The same watch carries DSA's own news about updates: that an update of Android or of DSA
+//! is ready, was applied, or failed. Those toasts are DSA's ([`DSA_APP_ID`], under the
+//! settings app's logo), one per kind of update, so the news that an update was applied
+//! replaces the news that it was ready. A click on one opens the settings app's Updates page
+//! ([`open_update_settings`]); nothing about it goes to Android.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -31,11 +37,18 @@ use std::time::Duration;
 use dsa_host_core::host_api::HostApiClient;
 use dsa_host_core::native_abi::in_user_language;
 use dsa_host_core::notifications::{Notification, NotificationAction, NotificationEvent};
+use dsa_host_core::update::alerts::{is_update_key, thread_of};
 use dsa_transport::Connector;
 use sha2::{Digest, Sha256};
 
 use crate::compositor::log::{note, CompositorLogger};
-pub use crate::start_menu::app_user_model_id;
+pub use crate::start_menu::{app_user_model_id, DSA_APP_ID};
+
+/// The settings app's logo, which DSA's own toasts show.
+const DSA_LOGO_PNG: &[u8] = include_bytes!("../../settings/DsaSettings/Assets/logo.png");
+
+/// The arguments that open DSA's settings on the Updates page.
+pub const UPDATE_PAGE_ARGUMENTS: [&str; 2] = ["--page", "updates"];
 
 /// What the window manager calls itself to the service.
 const BUILD: &str = "dsa-wm notifications";
@@ -314,6 +327,10 @@ fn dismissals(
     logger: Option<&CompositorLogger>,
 ) {
     while let Ok(key) = dismissed.try_recv() {
+        // DSA's own news is not Android's to dismiss.
+        if is_update_key(&key) {
+            continue;
+        }
         let result = HostApiClient::connect(connector, BUILD, ANSWER).and_then(|mut client| {
             client.act_on_notification(&NotificationAction::Dismiss { key })
         });
@@ -338,9 +355,16 @@ fn apply(
     match event {
         NotificationEvent::Posted(notification) => {
             let notification = in_user_language(notification, user_reads_korean());
-            let app_id = app_user_model_id(&notification.package_name);
-            let tag = tag_of(&notification.key);
-            let icon = icon_dir.and_then(|dir| write_icon(dir, &tag, &notification.icon_png));
+            let ours = thread_of(&notification.key);
+            let (app_id, tag, icon_png) = match &ours {
+                Some(thread) => (DSA_APP_ID.to_string(), tag_of(thread), DSA_LOGO_PNG),
+                None => (
+                    app_user_model_id(&notification.package_name),
+                    tag_of(&notification.key),
+                    notification.icon_png.as_slice(),
+                ),
+            };
+            let icon = icon_dir.and_then(|dir| write_icon(dir, &tag, icon_png));
             let xml = toast_xml(&notification, icon.as_deref());
             let label = if notification.app_label.trim().is_empty() {
                 notification.package_name.clone()
@@ -415,11 +439,30 @@ pub fn activate(uri: &str, connector: &mut dyn Connector) -> Result<(), String> 
             windows_sys::Win32::UI::WindowsAndMessaging::ASFW_ANY,
         );
     }
+    // DSA's own news about an update opens the settings where the updates are.
+    if is_update_key(action.key()) {
+        return match action {
+            NotificationAction::Open { .. } => open_update_settings(),
+            NotificationAction::Dismiss { .. } => Ok(()),
+        };
+    }
     let mut client = HostApiClient::connect(connector, "dsa-wm notification click", ANSWER)
         .map_err(|e| e.to_string())?;
     client
         .act_on_notification(&action)
         .map_err(|e| e.to_string())
+}
+
+/// Opens DSA's settings (the settings app installed beside this program) on the Updates page.
+/// The settings app runs on its own; nothing waits for it.
+pub fn open_update_settings() -> Result<(), String> {
+    let program =
+        crate::start_menu::default_uninstaller().ok_or("the settings app's place is not known")?;
+    std::process::Command::new(&program)
+        .args(UPDATE_PAGE_ARGUMENTS)
+        .spawn()
+        .map(drop)
+        .map_err(|e| format!("could not start {}: {e}", program.display()))
 }
 
 /// Registers the protocol a click on a toast launches, for the current user, to run
@@ -791,6 +834,40 @@ mod tests {
             None,
         );
         assert_eq!(toasts.removed.len(), 1);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn fr15_update_news_is_dsas_own_toast_and_the_newer_replaces_the_older() {
+        use dsa_host_core::update::alerts::{AlertKind, Subject, UpdateAlert};
+        let dir = std::env::temp_dir().join(format!("dsa-update-toasts-{}", std::process::id()));
+        let mut toasts = Recorded::default();
+        let mut shown = HashMap::new();
+        let (tx, _rx) = mpsc::channel();
+        let ready = UpdateAlert::new(Subject::Program, AlertKind::Ready, "0.1.10");
+        let applied = UpdateAlert::new(Subject::Program, AlertKind::Applied, "0.1.10");
+        for alert in [&ready, &applied] {
+            apply(
+                NotificationEvent::Posted(alert.notification()),
+                &mut toasts,
+                &mut shown,
+                Some(&dir),
+                &tx,
+                None,
+            );
+        }
+        let tag = tag_of("dsa:update:program");
+        assert_eq!(
+            toasts.shown,
+            vec![(DSA_APP_ID.to_string(), tag.clone(), false); 2],
+            "both under DSA's own ID, the second in place of the first"
+        );
+        assert!(dir.join(format!("{tag}.png")).exists(), "the logo is shown");
+        // A click opens the settings, so the click URI names the alert.
+        let uri = activation_uri(&applied.key());
+        let action = parse_activation(&uri).unwrap();
+        assert!(dsa_host_core::update::alerts::is_update_key(action.key()));
+        assert_eq!(UPDATE_PAGE_ARGUMENTS, ["--page", "updates"]);
         let _ = std::fs::remove_dir_all(dir);
     }
 

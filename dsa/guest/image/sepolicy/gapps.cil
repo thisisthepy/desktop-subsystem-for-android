@@ -1,13 +1,32 @@
 ; Desktop Subsystem for Android (DSA)
 ; Google Play, when the user installed it (dsa-gapps.rc). When the host says a Google apps image
-; is installed, init mounts the image from /data/vendor/dsa/gapps through a loop device,
-; labelled as system files, as the partitions it lays it over are, and lays it over /product and
-; /system_ext with overlayfs.
+; is installed, init mounts the image from /data/vendor/dsa/gapps through a loop device, its
+; files labelled as system files, as the partitions it lays it over are, and lays it over
+; /product and /system_ext with overlayfs.
 (allow init vendor_data_file (file (read open getattr)))
 (allow init loop_control_device (chr_file (read write open ioctl getattr)))
 (allow init loop_device (blk_file (read open ioctl getattr)))
 (allow init tmpfs (dir (mounton)))
 (allow init system_file (dir (mounton)))
-(allow init labeledfs (filesystem (mount relabelfrom)))
-(allow init system_file (filesystem (relabelto associate)))
-(allow system_file labeledfs (filesystem (associate)))
+
+; The image's superblock. statfs on an overlay reports the filesystem of its top lower layer,
+; and the kernel checks the caller's filesystem getattr against that superblock's label. So
+; every program that asks how full /product or /system_ext is, and init itself when it lays
+; the image over, are checked against this type. As an fs_type it is covered by the
+; platform's "allow domain fs_type:filesystem getattr", as those partitions' own labeledfs is,
+; so no domain needs a rule of its own. It is a contextmount_type because the platform forbids
+; relabelling a superblock to any other fs_type; the platform keeps such types read-only, and
+; nothing writes to the image.
+(type dsa_gapps_fs)
+(roletype object_r dsa_gapps_fs)
+(typeattributeset fs_type (dsa_gapps_fs))
+(typeattributeset contextmount_type (dsa_gapps_fs))
+; init mounts the image with fscontext=dsa_gapps_fs and context=system_file. The kernel
+; relabels the superblock from erofs's own type (relabelfrom labeledfs, relabelto the image's
+; type); labels every file system_file, the root first (relabelfrom the image's type, and
+; system_file associates with it); and then checks the mount against the image's type.
+; system_file is a file type, not an fs_type, so the platform's neverallow on an fs_type
+; associating with a file type does not reach it.
+(allow init labeledfs (filesystem (relabelfrom)))
+(allow init dsa_gapps_fs (filesystem (mount relabelfrom relabelto)))
+(allow system_file dsa_gapps_fs (filesystem (associate)))

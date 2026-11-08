@@ -2,11 +2,12 @@
 
 use dsa_host_windows::guid::Guid;
 use dsa_host_windows::network::{
-    add_adapter_request, advanced_adapter, advanced_problem, choose_nat_subnet, endpoint_document,
-    endpoint_facts, guid_from, host_has_ipv6, ids_from_enumeration, mac_bytes, name_query,
-    nat_ipv6_subnet, nat_network_document, network_facts, network_name, remove_adapter_request,
-    reusable, subnets_in_use, transparent_network_document, EndpointFacts, HostAdapter, Ipv4Subnet,
-    NetworkMode, NetworkStatusFacts,
+    add_adapter_request, advanced_adapter, advanced_problem, all_query, choose_nat_subnet,
+    endpoint_document, endpoint_facts, endpoint_name, guid_from, host_has_ipv6, host_side_adapter,
+    ids_from_enumeration, mac_bytes, moved_leftover, name_query, nat_ipv6_subnet,
+    nat_network_document, nat_path_problem, network_facts, network_name, object_name,
+    remove_adapter_request, reusable, subnets_in_use, transparent_network_document, EndpointFacts,
+    HostAdapter, Ipv4Subnet, NatPath, NetworkMode, NetworkStatusFacts,
 };
 use dsa_host_windows::vm::NetworkAdapter;
 use serde_json::Value;
@@ -232,4 +233,106 @@ fn fr28_the_adapter_moves_to_a_new_endpoint_while_the_vm_runs() {
     // IDs are fresh for each seed and look like version 4 GUIDs.
     assert_ne!(guid_from("a"), guid_from("b"));
     assert_eq!(guid_from("a").data3 >> 12, 4);
+}
+
+#[test]
+fn fr28_networks_left_from_moving_the_vm_are_found_by_name_for_that_vm_only() {
+    let query: Value = serde_json::from_str(&all_query()).unwrap();
+    assert!(
+        query.get("Filter").is_none(),
+        "every network, whatever its name"
+    );
+    assert_eq!(
+        object_name(r#"{"Name":"DSA vm 3","Type":"Transparent"}"#).as_deref(),
+        Some("DSA vm 3")
+    );
+    assert_eq!(object_name("{}"), None);
+    // A move names its network and endpoint after a count.
+    assert!(moved_leftover(VM, &network_name(&format!("{VM} 1"))));
+    assert!(moved_leftover(VM, &endpoint_name(&format!("{VM} 12"))));
+    // The VM's own network is used again rather than removed; another VM's is not touched.
+    assert!(!moved_leftover(VM, &network_name(VM)));
+    assert!(!moved_leftover(VM, &endpoint_name(VM)));
+    assert!(!moved_leftover(VM, &network_name(&format!("{VM}0 1"))));
+    assert!(!moved_leftover(
+        VM,
+        &network_name("dsa-android-S-1-5-21-1-2-3-1002 1")
+    ));
+    assert!(!moved_leftover(VM, "Default Switch"));
+    assert!(!moved_leftover(VM, &format!("DSA {VM} x")));
+    assert!(!moved_leftover(VM, &format!("DSA {VM} ")));
+}
+
+fn nat_endpoint() -> EndpointFacts {
+    endpoint_facts(
+        r#"{"MacAddress":"00-15-5D-12-34-56",
+            "IpConfigurations":[{"IpAddress":"172.28.5.2","PrefixLength":24}],
+            "Routes":[{"NextHop":"172.28.5.1","DestinationPrefix":"0.0.0.0/0"}]}"#,
+    )
+    .unwrap()
+}
+
+#[test]
+fn fr28_the_guests_default_route_is_the_hosts_nat_so_the_hosts_routes_and_vpn_apply() {
+    let name = network_name(VM);
+    let good = NatPath {
+        gateway: "172.28.5.1".parse().unwrap(),
+        host_has_gateway: true,
+        host_route: Some(host_side_adapter(&name)),
+    };
+    assert_eq!(nat_path_problem(&name, &nat_endpoint(), &good), None);
+    // The NAT document gives the guest the gateway as its default route.
+    let subnet = subnet("172.28.5.0/24");
+    let doc = nat_network_document(&name, subnet, None);
+    assert_eq!(
+        doc["Ipams"][0]["Subnets"][0]["Routes"][0]["NextHop"],
+        good.gateway.to_string()
+    );
+    // A guest routed anywhere but the host does not go where the host's routes (a VPN's) go.
+    let elsewhere = EndpointFacts {
+        gateway: Some("172.28.5.254".parse().unwrap()),
+        ..nat_endpoint()
+    };
+    let problem = nat_path_problem(&name, &elsewhere, &good).unwrap();
+    assert!(problem.contains("VPN"), "{problem}");
+    // Nor does one whose gateway the host no longer holds.
+    let gone = NatPath {
+        host_has_gateway: false,
+        ..good
+    };
+    let problem = nat_path_problem(&name, &nat_endpoint(), &gone).unwrap();
+    assert!(problem.contains("172.28.5.1"), "{problem}");
+}
+
+#[test]
+fn fr28_the_host_reaches_the_guests_address_through_its_network_for_android() {
+    let name = network_name(VM);
+    assert_eq!(host_side_adapter(&name), format!("vEthernet (DSA {VM})"));
+    let path = |route: Option<&str>| NatPath {
+        gateway: "172.28.5.1".parse().unwrap(),
+        host_has_gateway: true,
+        host_route: route.map(str::to_string),
+    };
+    let own = host_side_adapter(&name);
+    assert_eq!(
+        nat_path_problem(&name, &nat_endpoint(), &path(Some(&own))),
+        None
+    );
+    // Windows' adapter names are not case sensitive.
+    assert_eq!(
+        nat_path_problem(&name, &nat_endpoint(), &path(Some(&own.to_uppercase()))),
+        None
+    );
+    // A VPN that takes the guest's subnet sends the host's traffic for it into the tunnel.
+    let problem = nat_path_problem(&name, &nat_endpoint(), &path(Some("Corporate VPN"))).unwrap();
+    assert!(problem.contains("Corporate VPN"), "{problem}");
+    assert!(problem.contains("172.28.5.2"), "{problem}");
+    let problem = nat_path_problem(&name, &nat_endpoint(), &path(None)).unwrap();
+    assert!(problem.contains("no route"), "{problem}");
+    // An endpoint without an IPv4 address has nothing for the host to reach.
+    let no_address = EndpointFacts {
+        addresses: vec![],
+        ..nat_endpoint()
+    };
+    assert_eq!(nat_path_problem(&name, &no_address, &path(None)), None);
 }

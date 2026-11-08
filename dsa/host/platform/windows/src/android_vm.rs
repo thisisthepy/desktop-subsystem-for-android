@@ -358,6 +358,45 @@ impl AndroidVmLauncher {
         }
     }
 
+    /// Creates and starts the VM `config` describes, booting from `boot`.
+    fn create_and_start(
+        &mut self,
+        config: &AndroidVmConfig,
+        boot: &BootFiles,
+    ) -> Result<(), String> {
+        let document = config
+            .to_hcs_document()
+            .map_err(|e| e.to_string())?
+            .to_string();
+        let system =
+            ComputeSystem::create(&self.id, &document, CALL_TIMEOUT).map_err(|e| e.to_string())?;
+        // The VM opens its disk when it starts. A disk in the user's profile admits only the
+        // user, SYSTEM and administrators, so the VM is let in to that one file first.
+        let mut access = vec![config.data_disk.clone()];
+        access.extend(boot.vm_access());
+        access.extend(config.pstore_disk.iter().cloned());
+        for path in &access {
+            grant_vm_access(&self.id, path).map_err(|e| {
+                format!(
+                    "the Android VM could not be given access to {}: {e}",
+                    path.display()
+                )
+            })?;
+        }
+        // On any failure below the system is dropped, which closes the handle and so
+        // removes the VM.
+        system.start(CALL_TIMEOUT).map_err(|e| e.to_string())?;
+        // Without its ID nothing can reach the VM, so a VM whose ID cannot be read is of no
+        // use.
+        let vm_id = system
+            .runtime_id(CALL_TIMEOUT)
+            .map_err(|e| format!("the Android VM started but its ID could not be read: {e}"))?;
+        *self.vm_id.lock().unwrap_or_else(|e| e.into_inner()) = Some(vm_id);
+        self.system = Some(system);
+        self.memory_base = Some(u64::from(config.memory_mb));
+        Ok(())
+    }
+
     /// Holds the running VM's ID, for the control channel's listener to bind to. It is set
     /// once the VM has started and cleared once it has stopped.
     pub fn vm_id_slot(&self) -> VmIdSlot {
@@ -428,37 +467,15 @@ impl GuestLauncher for AndroidVmLauncher {
         if let Some(networking) = &mut self.networking {
             config.network_adapter = networking.attach(&self.id);
         }
-        let document = config
-            .to_hcs_document()
-            .map_err(|e| e.to_string())?
-            .to_string();
-        let system =
-            ComputeSystem::create(&self.id, &document, CALL_TIMEOUT).map_err(|e| e.to_string())?;
-        // The VM opens its disk when it starts. A disk in the user's profile admits only the
-        // user, SYSTEM and administrators, so the VM is let in to that one file first.
-        let mut access = vec![config.data_disk.clone()];
-        access.extend(boot.vm_access());
-        access.extend(config.pstore_disk.iter().cloned());
-        for path in &access {
-            grant_vm_access(&self.id, path).map_err(|e| {
-                format!(
-                    "the Android VM could not be given access to {}: {e}",
-                    path.display()
-                )
-            })?;
+        let started = self.create_and_start(&config, &boot);
+        // A VM that did not come up leaves no network behind, whether or not the session
+        // stops it afterwards.
+        if started.is_err() {
+            if let Some(networking) = &mut self.networking {
+                networking.detach();
+            }
         }
-        // On any failure below the system is dropped, which closes the handle and so
-        // removes the VM.
-        system.start(CALL_TIMEOUT).map_err(|e| e.to_string())?;
-        // Without its ID nothing can reach the VM, so a VM whose ID cannot be read is of no
-        // use.
-        let vm_id = system
-            .runtime_id(CALL_TIMEOUT)
-            .map_err(|e| format!("the Android VM started but its ID could not be read: {e}"))?;
-        *self.vm_id.lock().unwrap_or_else(|e| e.into_inner()) = Some(vm_id);
-        self.system = Some(system);
-        self.memory_base = Some(u64::from(config.memory_mb));
-        Ok(())
+        started
     }
 
     fn stop(&mut self, timeout: Duration) -> Result<(), String> {
@@ -471,7 +488,8 @@ impl GuestLauncher for AndroidVmLauncher {
             }
             return Ok(());
         };
-        // A VM that has already exited (it died during boot) only needs its handle closed.
+        // A VM that has already exited (it died during boot, or crashed) only needs its handle
+        // closed.
         if !system.wait_exited(Duration::ZERO) {
             // A guest that cannot take the request (still booting, or hung) is terminated
             // below.

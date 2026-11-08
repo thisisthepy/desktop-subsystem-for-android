@@ -131,6 +131,11 @@ pub struct HostConfig {
     /// the service starts none.
     #[serde(default)]
     pub window_manager: Option<Vec<String>>,
+    /// Where Google Play's builds are read from: a mirror laid out as LiteGapps' project on
+    /// SourceForge is, given as an `https:` address, a `file:` address or a folder. Without
+    /// it, LiteGapps' own project.
+    #[serde(default)]
+    pub gapps_project: Option<String>,
 }
 
 /// Why a configuration file cannot be used.
@@ -281,5 +286,17 @@ mod tests {
         );
         assert_eq!(config.vm_name, "dsa-android");
         assert!(config.first_image.is_none());
+        assert!(config.gapps_project.is_none());
+    }
+
+    #[test]
+    fn fr32_google_play_can_be_read_from_a_mirror() {
+        let config =
+            HostConfig::parse(r#"{ "image_dir": "/a", "gapps_project": "file:///srv/litegapps" }"#)
+                .unwrap();
+        assert_eq!(
+            config.gapps_project.as_deref(),
+            Some("file:///srv/litegapps")
+        );
     }
 }

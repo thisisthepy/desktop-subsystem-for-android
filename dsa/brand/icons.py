@@ -23,12 +23,14 @@ ICNS_IMAGES = [
     (b"ic09", 512, 1), (b"ic10", 512, 2),
 ]
 
-# The companion apps' badges, drawn on the symbol's lower right corner.
-BADGES = ["settings", "files"]
+# The companion apps. No icon carries a badge: Settings and Files are the plain DSA symbol,
+# the same drawing as DSA's own icon, because a mark in the corner is too small to read at
+# 16 px and makes three icons of one program.
+COMPANION_APPS = ["settings", "apk", "files"]
 
-# Companion apps drawn from their own master instead of the symbol with a badge: the APK
-# Installer is an open cardboard box, with no DSA mark on it. Each also has a
-# `<master>-symbolic.svg` for Linux.
+# Companion apps drawn from their own master instead of the plain symbol: the APK Installer
+# is an open cardboard box, with no DSA mark on it. Each also has a `<master>-symbolic.svg`
+# for Linux.
 OWN_MASTERS = {"apk": "apk-installer"}
 
 WINDOWS = DSA / "host" / "platform" / "windows"
@@ -36,14 +38,15 @@ LINUX_ICONS = DSA / "host" / "platform" / "linux" / "settings" / "data" / "icons
 MACOS = DSA / "host" / "platform" / "macos" / "packaging" / "icon"
 LINUX_ID = "io.github.thisisthepy.DSA"
 
-# Windows: (file, badge or None). Each .ico holds ICO_SIZES; the PNG beside it is 256 px.
+# Windows: (file, companion app or None for DSA itself). Each .ico holds ICO_SIZES; the PNG
+# beside it is 256 px.
 WINDOWS_ICONS = [
     (WINDOWS / "installer" / "setup-ui" / "assets" / "logo", None),
     (WINDOWS / "settings" / "DsaSettings" / "Assets" / "logo", "settings"),
     (WINDOWS / "settings" / "DsaApkInstaller" / "Assets" / "apk-installer", "apk"),
-    # Android's entry in Explorer's navigation pane is the plain symbol, like WSL's "Linux"
-    # beside it is the plain penguin: a badge in the corner is too small to read at 16 px.
-    (WINDOWS / "resources" / "icons" / "files", None),
+    # Android's entry in Explorer's navigation pane, the plain symbol, like WSL's "Linux"
+    # beside it is the plain penguin.
+    (WINDOWS / "resources" / "icons" / "files", "files"),
 ]
 # The notification area: one colour, for a light and for a dark taskbar.
 WINDOWS_TRAY = {
@@ -68,6 +71,13 @@ def linux_paths(app_id):
 
 
 MACOS_ICNS = MACOS / "DSA.icns"
+# Each companion app's own .icns, with the same images as DSA.icns. The settings app is
+# DSA.app itself, so Settings.icns and Files.icns are the same file as DSA.icns.
+MACOS_APP_ICNS = {
+    "settings": MACOS / "Settings.icns",
+    "apk": MACOS / "ApkInstaller.icns",
+    "files": MACOS / "Files.icns",
+}
 MACOS_ICON = MACOS / "DSA.icon"
 MACOS_LAYERS = ["title-bar", "window"]
 MACOS_LAYER_SIZE = 1024

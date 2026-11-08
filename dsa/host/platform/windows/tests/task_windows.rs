@@ -16,17 +16,19 @@ use std::time::{Duration, Instant};
 
 use dsa_host_core::compositor::window_sizing::{density_for_dpi, min_client_size, rescale};
 use dsa_host_core::compositor::FakeRenderer;
-use dsa_host_core::host_api::{UserAndroid, UserAndroids};
+use dsa_host_core::host_api::{HostApiService, ServiceFacts, UserAndroid, UserAndroids};
 use dsa_host_core::host_api_conformance::{FakeAndroid, FakeAndroids, RunningService};
 use dsa_host_core::ime::{ImeCursor, ImeEditor, ImeEvent, InputKind};
 use dsa_host_core::input::{buttons, PointerAction, PointerEvent, PointerTool};
 use dsa_host_core::keys::{keycode, meta, KeyAction, KeyEvent};
+use dsa_host_core::settings::MemorySettings;
 use dsa_host_core::tasks::{AppInfo, Bounds, Task, TaskEvent, TaskRequest};
 use dsa_host_windows::app_window::window::OpenWindow;
 use dsa_host_windows::app_window::{self, HostSetup};
 use dsa_host_windows::compositor::adapter::{DisplayPresenter, DisplaySink};
 use dsa_host_windows::compositor::hosts::HostLauncher;
 use dsa_host_windows::compositor::tasks::serve_input;
+use dsa_host_windows::compositor::touch_gestures::TouchGestureSetup;
 use dsa_host_windows::compositor::{Compositor, CompositorConfig};
 use dsa_transport::local::{self, MemoryLocalConnector, Peer};
 use dsa_transport::memory::{self, MemoryConnector};
@@ -160,9 +162,25 @@ impl Running {
 }
 
 fn start(presenter: Option<Arc<CapturingPresenter>>) -> Running {
+    start_with(presenter, None)
+}
+
+/// [`start`], with Windows' touch gestures turned off through `touch_gestures` while a task
+/// window is in front.
+fn start_with(
+    presenter: Option<Arc<CapturingPresenter>>,
+    touch_gestures: Option<TouchGestureSetup>,
+) -> Running {
     let (api_listener, api_connector) = local::pair();
     let androids = Arc::new(FakeAndroids::default());
-    let service = RunningService::start(Box::new(api_listener), androids.clone());
+    // The touch gestures follow the user's setting, which the service keeps.
+    let service = if touch_gestures.is_some() {
+        let service = HostApiService::new(androids.clone(), "test service")
+            .with_settings(Arc::new(MemorySettings::default()), ServiceFacts::default());
+        RunningService::start_service(Box::new(api_listener), service)
+    } else {
+        RunningService::start(Box::new(api_listener), androids.clone())
+    };
     let config = CompositorConfig {
         status_poll_interval: Duration::from_millis(50),
         ..Default::default()
@@ -193,6 +211,9 @@ fn start(presenter: Option<Arc<CapturingPresenter>>) -> Running {
     );
     if let Some(presenter) = presenter {
         compositor = compositor.with_display_presenter(presenter);
+    }
+    if let Some(setup) = touch_gestures {
+        compositor = compositor.with_touch_gestures(setup);
     }
     let stop = Arc::new(AtomicBool::new(false));
     let flag = Arc::clone(&stop);
@@ -1670,6 +1691,7 @@ fn fr10_minimizing_and_closing_every_task_window_tells_the_guest_none_is_shown()
 /// desktop.
 mod real_input {
     use super::*;
+    use dsa_host_windows::compositor::touch_gestures::{GestureSetting, SystemGestures};
     use std::ffi::c_void;
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::Threading::{
@@ -2356,6 +2378,177 @@ mod real_input {
                 .iter()
                 .all(|event| event.action != PointerAction::Down),
             "a tap on the title bar reached the task"
+        );
+    }
+
+    /// Windows' touch gesture setting, put back to what it was when dropped.
+    struct GesturesAsFound(u32);
+
+    impl Drop for GesturesAsFound {
+        fn drop(&mut self) {
+            if let Err(why) = SystemGestures::default().write(self.0) {
+                eprintln!(
+                    "the touch gestures could not be put back to {}: {why}",
+                    self.0
+                );
+            }
+        }
+    }
+
+    fn wait_for_gestures(what: &str, wanted: impl Fn(u32) -> bool) -> u32 {
+        let deadline = Instant::now() + WAIT;
+        loop {
+            // This thread's own window gets its messages.
+            pump_messages();
+            let now = SystemGestures::default()
+                .read()
+                .expect("reading the touch gestures (SystemParametersInfo 0x2030)");
+            if wanted(now) {
+                return now;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for {what}: SystemParametersInfo 0x2030 reads {now}; the \
+                 foreground window is {}",
+                describe_window(unsafe { GetForegroundWindow() })
+            );
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    fn pump_messages() {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            DispatchMessageW, PeekMessageW, TranslateMessage, MSG, PM_REMOVE,
+        };
+        // SAFETY: reads and dispatches this thread's own messages.
+        unsafe {
+            let mut message: MSG = std::mem::zeroed();
+            while PeekMessageW(&mut message, std::ptr::null_mut(), 0, 0, PM_REMOVE) != 0 {
+                TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+        }
+    }
+
+    /// A plain window of this test, the other program a user switches to.
+    fn other_window() -> HWND {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            CreateWindowExW, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+        };
+        let class: Vec<u16> = "STATIC\0".encode_utf16().collect();
+        let title: Vec<u16> = "Another program\0".encode_utf16().collect();
+        // SAFETY: a window of a system class, owned by this thread, with null-terminated
+        // names that outlive the call.
+        let hwnd = unsafe {
+            CreateWindowExW(
+                0,
+                class.as_ptr(),
+                title.as_ptr(),
+                WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                40,
+                40,
+                400,
+                300,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
+            )
+        };
+        assert!(!hwnd.is_null(), "{}", std::io::Error::last_os_error());
+        hwnd
+    }
+
+    #[test]
+    #[ignore = "changes the machine's real touch gestures; the Installer test workflow runs it"]
+    fn fr5_real_touch_gestures_are_off_only_while_a_task_window_is_in_front() {
+        use dsa_host_core::host_api::HostApiClient;
+        use dsa_host_core::settings::Settings;
+        use windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow;
+
+        let found = SystemGestures::default()
+            .read()
+            .expect("reading the touch gestures (SystemParametersInfo 0x2030)");
+        let _put_back = GesturesAsFound(found);
+        // On, as Windows 11 has them unless the user turned them off.
+        SystemGestures::default()
+            .write(1)
+            .expect("turning the touch gestures on (SystemParametersInfo 0x2031)");
+        let original = 1;
+        eprintln!("touch gestures: Windows read {found}; turned on ({original}) for the test");
+
+        let record = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
+            "touch-gestures-original-{}.txt",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&record);
+        let running = start_with(None, Some(TouchGestureSetup::system(record.clone())));
+        // The setting, turned on through the local API as the settings app does.
+        let mut client =
+            HostApiClient::connect(&mut AsUser(running._api.clone()), "test settings", WAIT)
+                .expect("connecting to the service");
+        let on = client
+            .set_settings(&Settings {
+                touch_gestures_off: true,
+                ..Settings::default()
+            })
+            .expect("turning the setting on");
+        assert!(on.settings.touch_gestures_off);
+
+        running.android.start();
+        running
+            .android
+            .publish(TaskEvent::Updated(task(7, "Paint", 800, 600)));
+        let open = windows_of(&running, 1);
+        let (width, height) = client_size(open[0].hwnd);
+        let (task_window, _) = window_on_top(&running, &[(width / 2, height * 3 / 4)]);
+        wait_for_gestures(
+            "the gestures to go off with the task window in front",
+            |now| now == 0,
+        );
+        assert_eq!(
+            std::fs::read_to_string(&record).ok().as_deref(),
+            Some("1"),
+            "the user's value is kept while they are off"
+        );
+        eprintln!(
+            "touch gestures: off with {} in front",
+            describe_window(task_window)
+        );
+
+        let other = other_window();
+        let deadline = Instant::now() + WAIT;
+        while unsafe { GetForegroundWindow() } != other {
+            assert!(
+                Instant::now() < deadline,
+                "timed out bringing another window to the front; the foreground window is {}",
+                describe_window(unsafe { GetForegroundWindow() })
+            );
+            // An Alt tap lets this process move the foreground.
+            unsafe {
+                keybd_event(VK_MENU as u8, 0, 0, 0);
+                keybd_event(VK_MENU as u8, 0, KEYEVENTF_KEYUP, 0);
+                SetForegroundWindow(other);
+            }
+            pump_messages();
+            thread::sleep(Duration::from_millis(50));
+        }
+        let back = wait_for_gestures(
+            "the user's value to be back with another window in front",
+            |now| now == original,
+        );
+        eprintln!("touch gestures: back to {back} with another window in front");
+        assert!(!record.exists(), "nothing is kept once the value is back");
+
+        // In front again, then the window manager stops: the value is back.
+        unsafe { DestroyWindow(other) };
+        window_on_top(&running, &[(width / 2, height * 3 / 4)]);
+        wait_for_gestures("the gestures to go off again", |now| now == 0);
+        drop(client);
+        drop(running);
+        wait_for_gestures(
+            "the user's value to be back once the window manager stopped",
+            |now| now == original,
         );
     }
 }

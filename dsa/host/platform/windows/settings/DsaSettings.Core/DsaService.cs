@@ -120,7 +120,20 @@ public sealed partial class DsaService
         Bool(json, "adb_auto_connect", missing: true),
         ReadAdbAutoConnectState(OptionalString(json, "adb_auto_connect_state")),
         Bool(json, "prerelease_updates"),
-        Bool(json, "update_channel_available"));
+        Bool(json, "update_channel_available"),
+        Bool(json, "touch_gestures_off", missing: true),
+        ReadTouchGesturesState(OptionalString(json, "touch_gestures_state")),
+        OptionalString(json, "touch_gestures_problem") is { Length: > 0 } problem ? problem : null);
+
+    /// <summary>The touch gestures state a name stands for. An empty or unknown name, as an
+    /// older service gives, is unknown.</summary>
+    public static TouchGesturesState ReadTouchGesturesState(string? name) => name switch
+    {
+        "unsupported" => TouchGesturesState.Unsupported,
+        "available" => TouchGesturesState.Available,
+        "failed" => TouchGesturesState.Failed,
+        _ => TouchGesturesState.Unknown,
+    };
 
     /// <summary>The auto-connect state a name stands for. An empty or unknown name, as an older
     /// service gives, is off.</summary>
@@ -183,6 +196,10 @@ public sealed partial class DsaService
     /// <summary>Whether developer mode's port is attached to this computer's adb server by
     /// itself.</summary>
     public Task<SettingsInfo> SetAdbAutoConnectAsync(bool on) => SetAsync("adb-auto-connect", on ? "on" : "off");
+
+    /// <summary>Whether Windows' three- and four-finger touch gestures are off while a DSA app
+    /// window is in front.</summary>
+    public Task<SettingsInfo> SetTouchGesturesOffAsync(bool on) => SetAsync("touch-gestures-off", on ? "on" : "off");
 
     /// <summary>Whether stopping an app from the notification area skips the question that
     /// confirms it.</summary>

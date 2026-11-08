@@ -328,6 +328,15 @@ after two minutes. `"keep_window_manager": false` turns this off.
   is its own pointer. The window holds the mouse while a button is down, so a drag that
   leaves it still ends in the task. Input goes to the service on a connection of its own,
   which answers none of it, so a fast pointer is never held back.
+- Windows 11 keeps three or more fingers from every app while its three- and four-finger
+  touch gestures are on, and no public API turns them off for one app. So while a task
+  window is the active window, the window manager turns them off for the user (the
+  `touch-gestures-off` setting, on by default) and puts the user's own value back as soon
+  as another window is. The value is kept in `touch-gestures-original.txt` in the user's DSA
+  folder while the gestures are off, so a window manager that crashed puts it back when it
+  next starts. If Windows refuses the change (the action is one Settings uses but does not
+  document), the window manager leaves the gestures alone and the settings app says why.
+  Windows 10 and Windows Server 2022 have no such gestures and are left alone.
 - The keys pressed in the window that has the keyboard focus go to its task on the same
   connection, as Android key codes with their repeats and with Shift, Ctrl, Alt and the
   Windows key (each with its side) and the locks: the keys that type nothing or a control

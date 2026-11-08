@@ -268,6 +268,21 @@
   <data name="RenderGpuAppliesBar.Message" xml:space="preserve">
     <value>바꾼 렌더링 GPU는 창 관리자가 다시 시작할 때 적용됩니다. 다음에 로그인할 때 적용되며, 아래에서 바로 다시 시작할 수도 있습니다.</value>
   </data>
+  <data name="TouchGesturesCard.Header" xml:space="preserve">
+    <value>DSA 앱 창에서 Windows 터치 제스처 끄기</value>
+  </data>
+  <data name="TouchGesturesCard.Description" xml:space="preserve">
+    <value>기본값은 켬입니다. DSA 앱 창이 앞에 있는 동안 Windows의 세 손가락, 네 손가락 터치 제스처가 꺼지므로, 게임과 그림 앱이 열 손가락까지 받습니다. 다른 앱에서는 Windows 설정에서 정한 대로 제스처가 동작합니다.</value>
+  </data>
+  <data name="TouchGestures_Failed" xml:space="preserve">
+    <value>이 설정을 쓸 수 없습니다. Windows가 터치 제스처를 바꾸지 못하게 했습니다({0}). Windows 설정에서 모든 앱에 대해 끌 수 있습니다.</value>
+  </data>
+  <data name="TouchGestures_NoReason" xml:space="preserve">
+    <value>이유가 알려지지 않았습니다</value>
+  </data>
+  <data name="TouchSettingsLink.Content" xml:space="preserve">
+    <value>터치 설정 열기</value>
+  </data>
   <data name="RestartWindowManagerCard.Header" xml:space="preserve">
     <value>창 관리자 다시 시작</value>
   </data>

@@ -198,7 +198,10 @@
 //! is whether stopping an app that runs in the background skips the question that confirms it.
 //! `advanced-networking` (off by default) puts the user's Android on this computer's network as
 //! a device of its own, so other devices there reach it, instead of behind a NAT network of its
-//! own; it applies the next time Android starts.
+//! own; it applies the next time Android starts. `touch-gestures-off` (on by default) turns
+//! Windows 11's three- and four-finger touch gestures off while a DSA app window is in front,
+//! so apps get every finger, and puts the user's own value back when another window comes to
+//! the front; `dsa settings` says whether the window manager can do it on this computer.
 //! `dsa settings set <name> <value>` changes one;
 //! the switches take `on` or `off`. `dsa memory` shows how much memory the user's Android
 //! takes, on the host and inside Android. `dsa network` shows how the user's Android reaches
@@ -308,6 +311,7 @@ use dsa_host_core::memory::MemorySnapshot;
 use dsa_host_core::native_abi;
 use dsa_host_core::session::SessionState;
 use dsa_host_core::tasks::{AppInfo, Task};
+use dsa_host_core::touch_gestures::TouchGesturesState;
 use dsa_host_core::update::store::Fetch;
 use dsa_host_core::update::versions::{Channel, VersionReport};
 use dsa_host_core::widgets::{Widget, WidgetEvent, WidgetProvider};
@@ -513,6 +517,7 @@ pub enum Change {
     /// The folders to share, in the order the service keeps them.
     SharedFolders(Vec<String>),
     AdvancedNetworking(bool),
+    TouchGesturesOff(bool),
 }
 
 impl Change {
@@ -543,6 +548,7 @@ impl Change {
             "file-sharing" => switch().map(Change::FileSharing),
             "shared-folders" => parse_shared_folders(value).map(Change::SharedFolders),
             "advanced-networking" => switch().map(Change::AdvancedNetworking),
+            "touch-gestures-off" => switch().map(Change::TouchGesturesOff),
             "adb-port" => match value.parse::<u16>() {
                 Ok(port) if port > 0 => Ok(Change::AdbPort(port)),
                 _ => Err(format!(
@@ -554,7 +560,7 @@ impl Change {
                  clipboard, links-in-android, program-updates, prerelease-updates, \
                  image-updates, input-trace, resize-trace, memory-limit, developer-mode, adb-port, adb-auto-connect, \
                  arm-translation, stop-without-asking, file-sharing, shared-folders, \
-                 advanced-networking and device.<field>"
+                 advanced-networking, touch-gestures-off and device.<field>"
             )),
         }
     }
@@ -1956,6 +1962,9 @@ pub fn settings_json(report: &SettingsReport) -> Value {
         "file_sharing": report.settings.file_sharing,
         "shared_folders": report.settings.shared_folders,
         "advanced_networking": report.settings.advanced_networking,
+        "touch_gestures_off": report.settings.touch_gestures_off,
+        "touch_gestures_state": report.touch_gestures.as_str(),
+        "touch_gestures_problem": report.touch_gestures.problem(),
         "network": network_json(report.network.as_ref()),
         "program_updates_available": report.facts.program_updates_available,
         "update_channel_available": report.facts.update_channel_available,
@@ -2036,6 +2045,21 @@ pub fn describe_auto_connect(
         AutoConnectState::Detached => {
             "you ran adb disconnect; DSA is attached again when the adb server restarts"
         }
+    }
+}
+
+/// Whether the window manager can turn the host's touch gestures off, in words.
+pub fn describe_touch_gestures(state: &TouchGesturesState) -> String {
+    match state {
+        TouchGesturesState::Unknown => "the window manager has not said yet".to_string(),
+        TouchGesturesState::Unsupported => "this computer has no such gestures".to_string(),
+        TouchGesturesState::Available => {
+            "the window manager turns them off while a DSA app window is in front".to_string()
+        }
+        TouchGesturesState::Failed(problem) => format!(
+            "cannot be used: Windows refused ({problem}); change them in Windows Settings, \
+             Bluetooth & devices, Touch (ms-settings:devices-touch)"
+        ),
     }
 }
 
@@ -2261,8 +2285,22 @@ pub fn describe_settings(report: &SettingsReport) -> String {
             "Advanced networking: {} (dsa network shows the addresses)",
             on_off(settings.advanced_networking)
         ),
-        format!("Service version: {}", facts.version),
     ];
+    // Only Windows 11 has such gestures. Hidden where the window manager found none, as the
+    // settings app hides it.
+    let has_gestures = match report.touch_gestures {
+        TouchGesturesState::Unsupported => false,
+        TouchGesturesState::Unknown => cfg!(windows),
+        TouchGesturesState::Available | TouchGesturesState::Failed(_) => true,
+    };
+    if has_gestures {
+        lines.push(format!(
+            "Touch gestures off in DSA app windows: {} ({})",
+            on_off(settings.touch_gestures_off),
+            describe_touch_gestures(&report.touch_gestures)
+        ));
+    }
+    lines.push(format!("Service version: {}", facts.version));
     if let Some(version) = &facts.android_version {
         lines.push(format!("Android image: {version}"));
     }
@@ -2480,6 +2518,7 @@ fn settings(invocation: &Invocation, client: &mut HostApiClient) -> Result<Strin
             Change::FileSharing(on) => wanted.file_sharing = *on,
             Change::SharedFolders(folders) => wanted.shared_folders = folders.clone(),
             Change::AdvancedNetworking(on) => wanted.advanced_networking = *on,
+            Change::TouchGesturesOff(on) => wanted.touch_gestures_off = *on,
         }
         report = client.set_settings(&wanted).map_err(|e| e.to_string())?;
     }

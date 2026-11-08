@@ -268,6 +268,21 @@
   <data name="RenderGpuAppliesBar.Message" xml:space="preserve">
     <value>A new render GPU takes effect when the window manager starts again: at the next sign-in, or when you restart it below.</value>
   </data>
+  <data name="TouchGesturesCard.Header" xml:space="preserve">
+    <value>Turn off Windows touch gestures in DSA app windows</value>
+  </data>
+  <data name="TouchGesturesCard.Description" xml:space="preserve">
+    <value>On by default. While a DSA app window is in front, Windows' three- and four-finger touch gestures are off, so games and drawing apps get up to ten fingers. Other apps keep the gestures as you set them in Windows Settings.</value>
+  </data>
+  <data name="TouchGestures_Failed" xml:space="preserve">
+    <value>This setting can't be used: Windows refused to change its touch gestures ({0}). You can turn them off for every app in Windows Settings.</value>
+  </data>
+  <data name="TouchGestures_NoReason" xml:space="preserve">
+    <value>no reason given</value>
+  </data>
+  <data name="TouchSettingsLink.Content" xml:space="preserve">
+    <value>Open touch settings</value>
+  </data>
   <data name="RestartWindowManagerCard.Header" xml:space="preserve">
     <value>Restart the window manager</value>
   </data>

@@ -121,14 +121,8 @@ pub fn follow(
     }
 }
 
-/// What a suspend or resume notification from Windows says.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SleepEvent {
-    /// The computer is about to sleep, hibernate or enter modern standby's sleep.
-    Sleeping,
-    /// The computer woke.
-    Woke,
-}
+/// What a suspend or resume notification from Windows says: the hosts' shared sleep events.
+pub use dsa_host_core::power::{SleepEvent, SLEEP_WAIT};
 
 /// `PBT_APMSUSPEND`.
 const PBT_APMSUSPEND: u32 = 0x4;
@@ -147,29 +141,10 @@ pub fn sleep_event(broadcast_type: u32) -> Option<SleepEvent> {
     }
 }
 
-/// How long the computer's sleep waits for the guests to put their data on disk. Windows
-/// gives a suspend notification only a short time.
-pub const SLEEP_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
-
 /// Hands `event` to `hub`: before the computer sleeps every Android writes its data, waited
 /// for at most [`SLEEP_WAIT`]; when it wakes every Android has its clock set.
 pub fn on_sleep_event(hub: &dsa_host_core::power::PowerHub, event: SleepEvent) {
-    match event {
-        SleepEvent::Sleeping => {
-            eprintln!("power: the computer is going to sleep");
-            if !hub.host_sleeping(SLEEP_WAIT) {
-                eprintln!(
-                    "power: an Android did not say its data was written within {} s; the \
-                     computer sleeps anyway",
-                    SLEEP_WAIT.as_secs()
-                );
-            }
-        }
-        SleepEvent::Woke => {
-            eprintln!("power: the computer woke");
-            hub.host_woke(std::time::SystemTime::now());
-        }
-    }
+    hub.on_sleep_event(event);
 }
 
 /// `DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS`.

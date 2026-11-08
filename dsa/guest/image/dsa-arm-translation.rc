@@ -9,6 +9,13 @@
 # /system/etc/dsa/arm-translation-<value>.prop, which the product build.prop imports on the
 # same condition. A system script, because only init itself may lay anything over /system.
 #
+# The image's files are labelled system libraries (context=), and its superblock gets a
+# filesystem type of its own (fscontext=, sepolicy/arm-translation.cil). statfs on /system/bin
+# reports the image's superblock, the overlay's top lower layer, so a superblock labelled as
+# files would refuse that to every program but init, and bpfloader's refusal reboots Android.
+# The overlays are not nosuid, as /system is not: where nosuid is set, the kernel refuses init's
+# domain change into every service it starts from /system/bin, vold and apexd among them.
+#
 # ARM64 programs an app starts run through the package's translator: init mounts binfmt_misc,
 # which nothing else in Android mounts, and registers the package's handlers. Init has no
 # "or" for property triggers, and an action it triggers from here would run only after the
@@ -17,20 +24,20 @@ on post-fs-data && property:ro.boot.dsa.arm_translation=on
     mkdir /data/vendor/dsa 0771 system system
     mkdir /data/vendor/dsa/arm-translation 0770 system system
     mkdir /mnt/dsa-arm-translation 0755 root root
-    mount erofs loop@/data/vendor/dsa/arm-translation/system.img /mnt/dsa-arm-translation ro nodev nosuid context=u:object_r:system_lib_file:s0
-    mount overlay overlay /system/lib64 ro nodev nosuid lowerdir=/mnt/dsa-arm-translation/system/lib64:/system/lib64
-    mount overlay overlay /system/bin ro nodev nosuid lowerdir=/mnt/dsa-arm-translation/system/bin:/system/bin
-    mount overlay overlay /system/etc ro nodev nosuid lowerdir=/mnt/dsa-arm-translation/system/etc:/system/etc
+    mount erofs loop@/data/vendor/dsa/arm-translation/system.img /mnt/dsa-arm-translation ro nodev nosuid fscontext=u:object_r:dsa_arm_translation_fs:s0 context=u:object_r:system_lib_file:s0
+    mount overlay overlay /system/lib64 ro nodev lowerdir=/mnt/dsa-arm-translation/system/lib64:/system/lib64
+    mount overlay overlay /system/bin ro nodev lowerdir=/mnt/dsa-arm-translation/system/bin:/system/bin
+    mount overlay overlay /system/etc ro nodev lowerdir=/mnt/dsa-arm-translation/system/etc:/system/etc
     mount binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc nodev noexec nosuid
     copy /mnt/dsa-arm-translation/system/etc/binfmt_misc/arm64_exe /proc/sys/fs/binfmt_misc/register
     copy /mnt/dsa-arm-translation/system/etc/binfmt_misc/arm64_dyn /proc/sys/fs/binfmt_misc/register
 
 on post-fs-data && property:ro.boot.dsa.arm_translation=default
     mkdir /mnt/dsa-arm-translation 0755 root root
-    mount erofs loop@/system/etc/dsa/arm-translation/default.img /mnt/dsa-arm-translation ro nodev nosuid context=u:object_r:system_lib_file:s0
-    mount overlay overlay /system/lib64 ro nodev nosuid lowerdir=/mnt/dsa-arm-translation/system/lib64:/system/lib64
-    mount overlay overlay /system/bin ro nodev nosuid lowerdir=/mnt/dsa-arm-translation/system/bin:/system/bin
-    mount overlay overlay /system/etc ro nodev nosuid lowerdir=/mnt/dsa-arm-translation/system/etc:/system/etc
+    mount erofs loop@/system/etc/dsa/arm-translation/default.img /mnt/dsa-arm-translation ro nodev nosuid fscontext=u:object_r:dsa_arm_translation_fs:s0 context=u:object_r:system_lib_file:s0
+    mount overlay overlay /system/lib64 ro nodev lowerdir=/mnt/dsa-arm-translation/system/lib64:/system/lib64
+    mount overlay overlay /system/bin ro nodev lowerdir=/mnt/dsa-arm-translation/system/bin:/system/bin
+    mount overlay overlay /system/etc ro nodev lowerdir=/mnt/dsa-arm-translation/system/etc:/system/etc
     mount binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc nodev noexec nosuid
     copy /mnt/dsa-arm-translation/system/etc/binfmt_misc/arm64_exe /proc/sys/fs/binfmt_misc/register
     copy /mnt/dsa-arm-translation/system/etc/binfmt_misc/arm64_dyn /proc/sys/fs/binfmt_misc/register

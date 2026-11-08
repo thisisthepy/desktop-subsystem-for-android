@@ -46,6 +46,7 @@ pub mod shutdown;
 pub mod single_instance;
 pub mod system_settings;
 pub mod tasks;
+pub mod touch_gestures;
 pub mod trim;
 pub mod widget_automation;
 pub mod widget_menu;
@@ -158,6 +159,9 @@ pub struct Compositor {
     /// Whether the apps that run in the background in the user's Android are shown in the
     /// notification area, with their media sessions in Windows' media controls.
     show_background: bool,
+    /// Turns Windows' touch gestures off while a task window is in front, when the user's
+    /// setting says so. None leaves them alone.
+    touch_gestures: Option<touch_gestures::TouchGestureSetup>,
 }
 
 /// The installed apps an event from the watch of the tasks carries, if it carries them.
@@ -263,6 +267,7 @@ impl Compositor {
             print_jobs: true,
             give_location: true,
             show_background: true,
+            touch_gestures: touch_gestures::TouchGestureSetup::for_this_user(),
         }
     }
 
@@ -299,6 +304,7 @@ impl Compositor {
             print_jobs: false,
             give_location: false,
             show_background: false,
+            touch_gestures: None,
         }
     }
 
@@ -356,6 +362,14 @@ impl Compositor {
     ) -> Compositor {
         self.host_listener = Some(listener);
         self.launcher = Some(launcher);
+        self
+    }
+
+    /// Turns Windows' touch gestures off through `setup` while a task window is in front, when
+    /// the user's setting says so. [`Compositor::new`] does it for the user this process runs
+    /// as; [`Compositor::with_custom_transport`] leaves them alone.
+    pub fn with_touch_gestures(mut self, setup: touch_gestures::TouchGestureSetup) -> Compositor {
+        self.touch_gestures = Some(setup);
         self
     }
 
@@ -1037,6 +1051,15 @@ impl Compositor {
     fn start_task_windows(&mut self, stop: &Arc<AtomicBool>) -> TaskWindowThreads {
         let logger = self.logger.clone();
         let log = |message: &str| note(logger.as_deref(), message);
+        // First of all, a value an earlier run left off is put back, even when no task window
+        // can open now.
+        let gestures = self.touch_gestures.take().map(|setup| {
+            let (gestures, notes) = touch_gestures::TouchGestures::start(setup);
+            for line in &notes {
+                log(line);
+            }
+            gestures
+        });
         let router = Arc::new(FrameRouter::new());
         if let Some(presenter) = &self.presenter {
             let presenter = Arc::clone(presenter);
@@ -1101,6 +1124,18 @@ impl Compositor {
         let (events_tx, events_rx) = mpsc::channel();
         let (requests_tx, requests_rx) = mpsc::channel();
         let manager_stop = Arc::new(AtomicBool::new(false));
+        let (fronts_tx, fronts_rx) = mpsc::channel();
+        let gestures_thread = gestures.and_then(|gestures| {
+            let connector = (self.local_api_connector)();
+            let stop = Arc::clone(&manager_stop);
+            let logger = self.logger.clone();
+            thread::Builder::new()
+                .name("dsa-wm-touch-gestures".into())
+                .spawn(move || touch_gestures::follow(connector, fronts_rx, gestures, stop, logger))
+                .map_err(|e| log(&format!("could not start the touch gestures' thread: {e}")))
+                .ok()
+        });
+        let fronts = gestures_thread.as_ref().map(|_| fronts_tx);
         let idle = Arc::new(Mutex::new(IdleTrim::new(IDLE_TRIM_DELAY, Instant::now())));
         let trim_gpu = gpu.clone();
         let trim_renderer = self.presenter.clone();
@@ -1115,6 +1150,7 @@ impl Compositor {
             listing: Arc::clone(&self.windows),
             stop: Arc::clone(&manager_stop),
             idle: Arc::clone(&idle),
+            fronts,
         };
         let manager = thread::Builder::new()
             .name("dsa-wm-manager".into())
@@ -1236,6 +1272,7 @@ impl Compositor {
                 trimmer,
                 start_menu,
                 app_windows,
+                gestures_thread,
             ]
             .into_iter()
             .flatten()

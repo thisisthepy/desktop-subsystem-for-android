@@ -1306,6 +1306,10 @@ macro_rules! host_api_conformance {
             );
         }
         #[test]
+        fn fr5_touch_gestures_off_is_on_by_default_and_reports_what_the_window_manager_said() {
+            $crate::host_api_conformance::touch_gestures_report_reaches_the_settings(&mut || $make);
+        }
+        #[test]
         fn fr20_adb_auto_connect_is_on_by_default_reaches_the_callers_android_and_reports_its_state(
         ) {
             $crate::host_api_conformance::adb_auto_connect_reaches_the_caller(&mut || $make);
@@ -3026,6 +3030,49 @@ pub fn developer_mode_reaches_the_caller(make: MakeLocal<'_>) {
     assert_eq!(
         *androids.of(&user).unwrap().developer_mode.lock().unwrap(),
         vec![(true, 58526), (true, 5037), (false, 58526)]
+    );
+}
+
+pub fn touch_gestures_report_reaches_the_settings(make: MakeLocal<'_>) {
+    use crate::touch_gestures::TouchGesturesState;
+    let (listener, mut connector, user) = make();
+    let store = Arc::new(MemorySettings::default());
+    let androids = Arc::new(FakeAndroids::default());
+    let service =
+        HostApiService::new(androids, "test service").with_settings(store.clone(), facts());
+    let _service = RunningService::start_service(listener, service);
+    let mut client = connect(&mut *connector);
+    let fresh = client.settings().unwrap();
+    assert!(fresh.settings.touch_gestures_off, "on by default");
+    assert_eq!(fresh.touch_gestures, TouchGesturesState::Unknown);
+
+    client
+        .report_touch_gestures(&TouchGesturesState::Available)
+        .expect("the window manager's report");
+    assert_eq!(
+        client.settings().unwrap().touch_gestures,
+        TouchGesturesState::Available
+    );
+
+    let failed = TouchGesturesState::Failed("access is denied".into());
+    client.report_touch_gestures(&failed).unwrap();
+    // A client that turns the setting off still sees why it cannot be used.
+    let off = client
+        .set_settings(&Settings {
+            touch_gestures_off: false,
+            ..Settings::default()
+        })
+        .expect("turning the setting off");
+    assert!(!off.settings.touch_gestures_off);
+    assert_eq!(off.touch_gestures, failed);
+    assert!(!store.get(&user).unwrap().touch_gestures_off);
+
+    client
+        .report_touch_gestures(&TouchGesturesState::Unsupported)
+        .unwrap();
+    assert_eq!(
+        client.settings().unwrap().touch_gestures,
+        TouchGesturesState::Unsupported
     );
 }
 

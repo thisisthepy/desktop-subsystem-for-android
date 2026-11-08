@@ -20,8 +20,9 @@
 //! The devices that need the user's desktop session (sound, cameras, location, sensors,
 //! printing, links and settings) run in a process of the user's: [`start_guest_ports`] serves
 //! the guest's device ports, which the service relays from the user's own VM to sockets in
-//! the user's runtime folder ([`relay`]), and [`start_followers`] follows the local API. The
-//! folders and the power belong to the service: [`file_share::UserFolders`] and
+//! the user's runtime folder ([`relay`]), and [`start_followers`] follows the local API. In an
+//! X11 session without Wayland [`start_monitor_refresh`] records the monitors' refresh rate,
+//! as the window manager does in a Wayland session. The folders and the power belong to the service: [`file_share::UserFolders`] and
 //! [`power::follow`].
 //!
 //! Nothing here takes the host down. A device the computer does not have, or a service that
@@ -122,6 +123,24 @@ pub fn start_guest_ports(stop: &Arc<AtomicBool>, log: &Log) -> Vec<JoinHandle<()
     }
 
     threads
+}
+
+/// Records the monitors' refresh rate from the X display until `stop`, in an X11 session
+/// without Wayland, where no window manager hears it from Wayland
+/// ([`crate::monitor_refresh::follow_x11`]). In any other session it starts nothing.
+pub fn start_monitor_refresh(stop: &Arc<AtomicBool>, log: &Log) -> Option<JoinHandle<()>> {
+    if !crate::monitor_refresh::in_x11_only_session() {
+        return None;
+    }
+    let (stop, run_log) = (Arc::clone(stop), Arc::clone(log));
+    spawn("dsa-monitor-refresh", log, move || {
+        if let Err(why) = crate::monitor_refresh::follow_x11(stop, &*run_log) {
+            run_log(&format!(
+                "display: the monitors' refresh rate is not followed, so Android keeps the \
+                 rate it booted with: {why}"
+            ));
+        }
+    })
 }
 
 /// Which followers of the local API to run.

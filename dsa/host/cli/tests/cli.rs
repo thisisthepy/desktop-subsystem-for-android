@@ -966,6 +966,64 @@ fn fr20_adb_auto_connect_is_on_by_default_and_dsa_turns_it_off() {
 }
 
 #[test]
+fn fr5_touch_gestures_off_is_on_by_default_and_dsa_turns_it_off() {
+    use dsa_cli::Change;
+    assert_eq!(
+        parse(&args("settings set touch-gestures-off off"))
+            .unwrap()
+            .change,
+        Some(Change::TouchGesturesOff(false))
+    );
+    assert_eq!(
+        parse(&args("settings set touch-gestures-off on"))
+            .unwrap()
+            .change,
+        Some(Change::TouchGesturesOff(true))
+    );
+    assert!(parse(&args("settings set touch-gestures-off maybe")).is_err());
+    let ((listener, _, _), endpoint) = local_pair();
+    let _service = settings_service(listener);
+    let settings = json_of(&dsa(&endpoint, "settings --json"));
+    assert_eq!(settings["touch_gestures_off"], true);
+    assert_eq!(settings["touch_gestures_state"], "");
+    assert_eq!(settings["touch_gestures_problem"], "");
+    let changed = json_of(&dsa(
+        &endpoint,
+        "settings set touch-gestures-off off --json",
+    ));
+    assert_eq!(changed["touch_gestures_off"], false);
+}
+
+#[test]
+fn fr5_the_touch_gestures_line_says_why_it_cannot_be_used_and_is_hidden_without_gestures() {
+    use dsa_host_core::host_api::SettingsReport;
+    use dsa_host_core::touch_gestures::TouchGesturesState;
+    let report = |state: TouchGesturesState| SettingsReport {
+        settings: dsa_host_core::settings::Settings::default(),
+        facts: Default::default(),
+        network: None,
+        adb_auto_connect_state: Default::default(),
+        touch_gestures: state,
+    };
+    let line = |report: &SettingsReport| {
+        dsa_cli::describe_settings(report)
+            .lines()
+            .find(|line| line.starts_with("Touch gestures off in DSA app windows:"))
+            .map(str::to_string)
+    };
+    let failed = line(&report(TouchGesturesState::Failed(
+        "access is denied".into(),
+    )))
+    .expect("a touch gestures line");
+    assert!(failed.contains("access is denied"), "{failed}");
+    assert!(failed.contains("ms-settings:devices-touch"), "{failed}");
+    assert_eq!(line(&report(TouchGesturesState::Unsupported)), None);
+    assert!(line(&report(TouchGesturesState::Available))
+        .unwrap()
+        .starts_with("Touch gestures off in DSA app windows: on"));
+}
+
+#[test]
 fn fr20_the_auto_connect_state_is_described_in_words() {
     use dsa_host_core::adb_discovery::AutoConnectState;
     assert_eq!(
@@ -2825,6 +2883,7 @@ fn fr15_settings_say_where_program_updates_come_from() {
         },
         network: None,
         adb_auto_connect_state: Default::default(),
+        touch_gestures: Default::default(),
     };
     let text = dsa_cli::describe_settings(&report);
     let line = text
@@ -3047,6 +3106,7 @@ fn fr15_dsa_settings_chooses_whether_to_take_prereleases() {
         },
         network: None,
         adb_auto_connect_state: Default::default(),
+        touch_gestures: Default::default(),
     };
     let channel_line = |report: &SettingsReport| {
         dsa_cli::describe_settings(report)

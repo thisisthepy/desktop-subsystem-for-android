@@ -96,6 +96,20 @@ impl MemoryPressure {
     }
 }
 
+/// What the host's platform says about its sleep, from its suspend and resume notification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SleepEvent {
+    /// The host is about to sleep, hibernate or enter modern standby's sleep.
+    Sleeping,
+    /// The host woke.
+    Woke,
+}
+
+/// How long the host's sleep waits for the guests to put their data on disk. A host's suspend
+/// notification gives its programs only a short time, and a sleep that a person asked for
+/// must not wait on a guest that does not answer.
+pub const SLEEP_WAIT: Duration = Duration::from_secs(2);
+
 /// Hands the host's power, and whether the host is short of memory, to every Android the
 /// service runs: the latest state to each new one, and every change to all of them.
 #[derive(Default)]
@@ -182,6 +196,32 @@ impl PowerHub {
             }
         }
         all
+    }
+
+    /// Hands one of the host's sleep notifications to every session, as every host does: before
+    /// the host sleeps each guest puts its data on disk, waited for at most [`SLEEP_WAIT`] in
+    /// all; when it wakes each guest has its clock set to the host's. Returns whether the
+    /// sleep's wait ended with every guest's answer (always true on waking).
+    pub fn on_sleep_event(&self, event: SleepEvent) -> bool {
+        match event {
+            SleepEvent::Sleeping => {
+                eprintln!("power: the computer is going to sleep");
+                let answered = self.host_sleeping(SLEEP_WAIT);
+                if !answered {
+                    eprintln!(
+                        "power: an Android did not say its data was written within {} s; the \
+                         computer sleeps anyway",
+                        SLEEP_WAIT.as_secs()
+                    );
+                }
+                answered
+            }
+            SleepEvent::Woke => {
+                eprintln!("power: the computer woke");
+                self.host_woke(SystemTime::now());
+                true
+            }
+        }
     }
 
     /// Says that the host woke, its wall clock reading `wall_clock`, to every session.

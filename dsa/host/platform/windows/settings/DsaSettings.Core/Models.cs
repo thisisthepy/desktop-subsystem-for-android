@@ -52,7 +52,10 @@ public sealed record SettingsInfo(
     bool AdbAutoConnect = true,
     AdbAutoConnectState AdbAutoConnectState = AdbAutoConnectState.Off,
     bool PrereleaseUpdates = false,
-    bool UpdateChannelAvailable = false)
+    bool UpdateChannelAvailable = false,
+    bool TouchGesturesOff = true,
+    TouchGesturesState TouchGesturesState = TouchGesturesState.Unknown,
+    string? TouchGesturesProblem = null)
 {
     /// <summary>The Windows folders that can be shared with Android, in the order the service
     /// keeps them.</summary>
@@ -94,6 +97,20 @@ public enum AdbAutoConnectState
     /// <summary>The user ran adb disconnect; DSA is attached again when the adb server
     /// restarts.</summary>
     Detached,
+}
+
+/// <summary>Whether the window manager can turn Windows' three- and four-finger touch gestures
+/// off while a DSA app window is in front, as it last told the service.</summary>
+public enum TouchGesturesState
+{
+    /// <summary>The window manager has not said yet, as when it is not running.</summary>
+    Unknown,
+    /// <summary>This Windows has no such gestures (Windows 10, Windows Server 2022).</summary>
+    Unsupported,
+    /// <summary>The window manager can turn them off.</summary>
+    Available,
+    /// <summary>Windows refused; <see cref="SettingsInfo.TouchGesturesProblem"/> says why.</summary>
+    Failed,
 }
 
 /// <summary>How Android reaches the network.</summary>

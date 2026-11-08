@@ -4,8 +4,17 @@
 //! so a notification posted again replaces its banner and one removed in the guest leaves
 //! the Notification Center. Clicking a banner opens the notification in the guest; clearing
 //! it dismisses it there.
+//!
+//! The same watch carries DSA's own news about updates: that an update is ready, was applied,
+//! or failed. One kind of update has one identifier ([`thread_of`]), so the news that an
+//! update was applied replaces the news that it was ready, and a click on it opens the
+//! settings app's Updates page ([`UPDATES_URL`]); nothing about it goes to the guest.
 
 use dsa_host_core::notifications::Notification;
+use dsa_host_core::update::alerts::thread_of;
+
+/// The link that opens the settings app on its Updates page.
+pub const UPDATES_URL: &str = "dsa-settings://updates";
 
 /// The category every DSA notification has, which asks macOS to report dismissals.
 pub const CATEGORY: &str = "org.thisisthepy.dsa.notification";
@@ -55,13 +64,23 @@ pub fn content(notification: &Notification) -> Content {
     } else {
         Interruption::Passive
     };
-    Content {
-        identifier: notification.key.clone(),
-        title,
-        subtitle,
-        body: notification.text.clone(),
-        thread: notification.package_name.clone(),
-        interruption,
+    match thread_of(&notification.key) {
+        Some(thread) => Content {
+            identifier: thread.clone(),
+            title,
+            subtitle,
+            body: notification.text.clone(),
+            thread,
+            interruption,
+        },
+        None => Content {
+            identifier: notification.key.clone(),
+            title,
+            subtitle,
+            body: notification.text.clone(),
+            thread: notification.package_name.clone(),
+            interruption,
+        },
     }
 }
 
@@ -378,6 +397,22 @@ mod tests {
             ("Example", "")
         );
         assert_eq!(untitled.body, "Hello");
+    }
+
+    #[test]
+    fn fr14_update_news_has_one_identifier_per_kind_of_update() {
+        use dsa_host_core::update::alerts::{is_update_key, AlertKind, Subject, UpdateAlert};
+        let ready = UpdateAlert::new(Subject::Android, AlertKind::Ready, "16.0.3").notification();
+        let applied =
+            UpdateAlert::new(Subject::Android, AlertKind::Applied, "16.0.3").notification();
+        let (ready, applied) = (content(&ready), content(&applied));
+        assert_eq!(ready.identifier, "dsa:update:android");
+        assert_eq!(applied.identifier, ready.identifier);
+        assert_eq!(ready.subtitle, "DSA");
+        assert_eq!(ready.interruption, Interruption::Active);
+        // A click names the identifier, which is the host's to act on.
+        assert!(is_update_key(&applied.identifier));
+        assert_eq!(UPDATES_URL, "dsa-settings://updates");
     }
 
     #[test]

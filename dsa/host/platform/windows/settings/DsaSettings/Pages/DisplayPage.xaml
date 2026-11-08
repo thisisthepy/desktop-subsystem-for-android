@@ -46,6 +46,25 @@
                 <ui:InfoBar Message="{l:Text RenderGpuAppliesBar.Message}" Severity="Informational" IsClosable="False" IsOpen="True"
                             Margin="0,0,0,4" />
 
+                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon TapDouble24}"
+                                Visibility="{Binding ShowTouchGestures, Converter={StaticResource Visible}}">
+                    <ui:CardControl.Header>
+                        <StackPanel>
+                            <TextBlock Text="{l:Text TouchGesturesCard.Header}" Style="{StaticResource CardTitle}" />
+                            <TextBlock Text="{l:Text TouchGesturesCard.Description}" Style="{StaticResource CardDescription}" />
+                            <TextBlock Text="{Binding TouchGesturesProblemText, Mode=OneWay}" Style="{StaticResource CardDescription}"
+                                       Foreground="{DynamicResource SystemFillColorCriticalBrush}" Margin="0,4,0,0"
+                                       Visibility="{Binding TouchGesturesFailed, Converter={StaticResource Visible}}" />
+                            <ui:HyperlinkButton Content="{l:Text TouchSettingsLink.Content}" Click="OnOpenTouchSettings"
+                                                Padding="0" Margin="0,4,0,0" HorizontalAlignment="Left"
+                                                Visibility="{Binding TouchGesturesFailed, Converter={StaticResource Visible}}" />
+                        </StackPanel>
+                    </ui:CardControl.Header>
+                    <ui:ToggleSwitch x:Name="TouchGesturesSwitch" IsChecked="{Binding TouchGesturesOff, Mode=OneWay}"
+                                     IsEnabled="{Binding CanChangeTouchGestures, Mode=OneWay}" Click="OnTouchGesturesToggled"
+                                     AutomationProperties.Name="{l:Text TouchGesturesCard.Header}" />
+                </ui:CardControl>
+
                 <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon ArrowClockwise24}">
                     <ui:CardControl.Header>
                         <StackPanel>

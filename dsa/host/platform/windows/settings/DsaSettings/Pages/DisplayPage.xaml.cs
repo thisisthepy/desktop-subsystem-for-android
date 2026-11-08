@@ -25,6 +25,24 @@ public partial class DisplayPage : Page
         }
     }
 
+    private async void OnTouchGesturesToggled(object sender, RoutedEventArgs e) =>
+        await ViewModel.SetTouchGesturesOffAsync(TouchGesturesSwitch.IsChecked == true);
+
+    /// <summary>Opens Windows Settings at its touch page, where the gestures are changed for
+    /// every app.</summary>
+    private void OnOpenTouchSettings(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(
+                new System.Diagnostics.ProcessStartInfo(SettingsViewModel.TouchSettingsUri) { UseShellExecute = true });
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            // No Settings app opens that page on this computer, so nothing opens.
+        }
+    }
+
     private async void OnRestartWindowManager(object sender, RoutedEventArgs e)
     {
         var confirmed = await Shell.Confirm(App.Text.Get("RestartWindowManagerTitle"),

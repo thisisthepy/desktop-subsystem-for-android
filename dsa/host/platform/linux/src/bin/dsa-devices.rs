@@ -67,6 +67,7 @@ fn main() {
         threads.extend(devices::start_guest_ports(&stop, &log));
     }
     threads.extend(devices::start_followers(connect, which, &stop, &log));
+    threads.extend(devices::start_monitor_refresh(&stop, &log));
     eprintln!("dsa-devices {}: running", dsa_host_linux::VERSION);
     while !stop.load(Ordering::Relaxed) {
         std::thread::sleep(std::time::Duration::from_millis(200));
