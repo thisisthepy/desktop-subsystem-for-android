@@ -14,12 +14,12 @@ use dsa_protocol::control::{
     AuthProof, CancelInstall, ClipboardSharing, ClipboardText, ClockAnswer, ClockProbe, CloseTask,
     DeviceIdle, Envelope, FileAction, FileChunk, FileProgress, GuestBoot, GuestMemory,
     GuestNotification, Hello, HelloAccepted, HelloRejected, ImeCommit, ImeComposition, ImeCursor,
-    InstallApk, InstallPart, InstallProgress, InstallResult, InstallStatus, KeyAction, KeyEvent,
-    LaunchApp, LinkHandling, NodeAction, NodeRange, NotificationClicked, NotificationDismissed,
-    NotificationRemoved, OpenFile, OpenLink, PackageState, PointerAction, PointerEvent,
-    PointerTool, PowerHint, PowerHintKind, PowerState, ProcessMemory, QueryPackage, Rect,
-    RejectReason, RequestGuestMemory, ResizeTask, Role, ScreenState, SetTaskDensity, TaskFrames,
-    TaskRemoved, TaskUpdated,
+    ImeEditor, ImeInputKind, ImeSetComposingRegion, ImeSetSelection, InstallApk, InstallPart,
+    InstallProgress, InstallResult, InstallStatus, KeyAction, KeyEvent, LaunchApp, LinkHandling,
+    NodeAction, NodeRange, NotificationClicked, NotificationDismissed, NotificationRemoved,
+    OpenFile, OpenLink, PackageState, PointerAction, PointerEvent, PointerTool, PowerHint,
+    PowerHintKind, PowerState, ProcessMemory, QueryPackage, Rect, RejectReason, RequestGuestMemory,
+    ResizeTask, Role, ScreenState, SetTaskDensity, TaskFrames, TaskRemoved, TaskUpdated,
 };
 use dsa_protocol::control::{
     AddWidget, ListWidgetProviders, RemoveWidget, ResizeWidget, WidgetAdded, WidgetFrame,
@@ -442,6 +442,43 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
                     right: 102,
                     bottom: 240,
                 }),
+            })),
+        ),
+        (
+            "ime_editor_email",
+            wrap(Body::ImeEditor(ImeEditor {
+                task_id: 42,
+                kind: ImeInputKind::Email as i32,
+                text: "\u{d55c}a".into(),
+                text_start: 10,
+                selection_start: 12,
+                selection_end: 12,
+                composition_start: 10,
+                composition_end: 11,
+            })),
+        ),
+        (
+            "ime_editor_none",
+            wrap(Body::ImeEditor(ImeEditor {
+                task_id: 7,
+                kind: ImeInputKind::None as i32,
+                ..ImeEditor::default()
+            })),
+        ),
+        (
+            "ime_set_selection",
+            wrap(Body::ImeSetSelection(ImeSetSelection {
+                task_id: 42,
+                start: 3,
+                end: 7,
+            })),
+        ),
+        (
+            "ime_set_composing_region",
+            wrap(Body::ImeSetComposingRegion(ImeSetComposingRegion {
+                task_id: 42,
+                start: 0,
+                end: 1,
             })),
         ),
         (

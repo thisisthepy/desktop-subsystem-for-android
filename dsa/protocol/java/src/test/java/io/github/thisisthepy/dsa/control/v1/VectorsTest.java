@@ -287,6 +287,34 @@ public final class VectorsTest {
                                 .setRight(102)
                                 .setBottom(240)))
                 .build());
+        cases.put("ime_editor_email", Envelope.newBuilder()
+                .setImeEditor(ImeEditor.newBuilder()
+                        .setTaskId(42)
+                        .setKind(ImeInputKind.IME_INPUT_KIND_EMAIL)
+                        .setText("한a")
+                        .setTextStart(10)
+                        .setSelectionStart(12)
+                        .setSelectionEnd(12)
+                        .setCompositionStart(10)
+                        .setCompositionEnd(11))
+                .build());
+        cases.put("ime_editor_none", Envelope.newBuilder()
+                .setImeEditor(ImeEditor.newBuilder()
+                        .setTaskId(7)
+                        .setKind(ImeInputKind.IME_INPUT_KIND_NONE))
+                .build());
+        cases.put("ime_set_selection", Envelope.newBuilder()
+                .setImeSetSelection(ImeSetSelection.newBuilder()
+                        .setTaskId(42)
+                        .setStart(3)
+                        .setEnd(7))
+                .build());
+        cases.put("ime_set_composing_region", Envelope.newBuilder()
+                .setImeSetComposingRegion(ImeSetComposingRegion.newBuilder()
+                        .setTaskId(42)
+                        .setStart(0)
+                        .setEnd(1))
+                .build());
         cases.put("screen_state_off", Envelope.newBuilder()
                 .setScreenState(ScreenState.newBuilder().setOn(false))
                 .build());

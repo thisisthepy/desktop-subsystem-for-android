@@ -284,6 +284,35 @@ std::map<std::string, v1::Envelope> Cases() {
     rect->set_right(102);
     rect->set_bottom(240);
   }
+  {
+    v1::ImeEditor* editor = cases["ime_editor_email"].mutable_ime_editor();
+    editor->set_task_id(42);
+    editor->set_kind(v1::IME_INPUT_KIND_EMAIL);
+    editor->set_text("\xed\x95\x9c" "a");
+    editor->set_text_start(10);
+    editor->set_selection_start(12);
+    editor->set_selection_end(12);
+    editor->set_composition_start(10);
+    editor->set_composition_end(11);
+  }
+  {
+    v1::ImeEditor* editor = cases["ime_editor_none"].mutable_ime_editor();
+    editor->set_task_id(7);
+    editor->set_kind(v1::IME_INPUT_KIND_NONE);
+  }
+  {
+    v1::ImeSetSelection* selection = cases["ime_set_selection"].mutable_ime_set_selection();
+    selection->set_task_id(42);
+    selection->set_start(3);
+    selection->set_end(7);
+  }
+  {
+    v1::ImeSetComposingRegion* region =
+        cases["ime_set_composing_region"].mutable_ime_set_composing_region();
+    region->set_task_id(42);
+    region->set_start(0);
+    region->set_end(1);
+  }
   cases["screen_state_off"].mutable_screen_state()->set_on(false);
   cases["screen_state_on"].mutable_screen_state()->set_on(true);
   {
