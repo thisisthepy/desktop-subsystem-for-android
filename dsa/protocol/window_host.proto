@@ -215,6 +215,41 @@ message ImeCursor {
   int32 bottom = 5;
 }
 
+// What kind of text the editor focused in a task takes, as its app declared it.
+enum ImeInputKind {
+  // The guest did not say. Taken as ordinary text.
+  IME_INPUT_KIND_UNSPECIFIED = 0;
+  // No editor in the task takes text; typed characters reach it as keys.
+  IME_INPUT_KIND_NONE = 1;
+  IME_INPUT_KIND_TEXT = 2;
+  IME_INPUT_KIND_PASSWORD = 3;
+  IME_INPUT_KIND_NUMBER = 4;
+  // A number that is a password, such as a PIN.
+  IME_INPUT_KIND_NUMBER_PASSWORD = 5;
+  IME_INPUT_KIND_PHONE = 6;
+  IME_INPUT_KIND_EMAIL = 7;
+  IME_INPUT_KIND_URL = 8;
+  IME_INPUT_KIND_PERSON_NAME = 9;
+  IME_INPUT_KIND_DATE = 10;
+  IME_INPUT_KIND_TIME = 11;
+  IME_INPUT_KIND_SEARCH = 12;
+}
+
+// Window manager to window host: the editor focused in the task, as the window's input method
+// reads it: its kind, and its text around the selection, so the input method reconverts and
+// predicts from the editor's own text. Offsets are in UTF-16 code units from the start of the
+// editor's whole text; there is no composition when its start equals its end.
+message ImeEditor {
+  int32 task_id = 1;
+  ImeInputKind kind = 2;
+  string text = 3;
+  uint32 text_start = 4;
+  uint32 selection_start = 5;
+  uint32 selection_end = 6;
+  uint32 composition_start = 7;
+  uint32 composition_end = 8;
+}
+
 // Window host to window manager: the task's window was minimized (`shown` false), or shown
 // again after it was. A window that opens is shown until it says otherwise.
 message WindowShown {
@@ -360,5 +395,6 @@ message Envelope {
     MenuChosen menu_chosen = 35;
     SetCaptionBack set_caption_back = 36;
     SetWindowMode set_window_mode = 60;
+    ImeEditor ime_editor = 61;
   }
 }

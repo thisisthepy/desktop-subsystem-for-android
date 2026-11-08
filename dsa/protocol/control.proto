@@ -586,6 +586,74 @@ message ImeCursor {
   Rect cursor = 2;
 }
 
+// What kind of text the editor focused in a task takes, from the input type its app gave it,
+// so the host's input method and touch keyboard offer the keys for it, and keep composition,
+// prediction and learning out of a password.
+enum ImeInputKind {
+  // The agent did not say. The host takes it as ordinary text.
+  IME_INPUT_KIND_UNSPECIFIED = 0;
+  // No editor in the task takes text: the focus is on a view that reads keys (a game's) or
+  // on nothing. Typed characters still reach it, as the keys that type them.
+  IME_INPUT_KIND_NONE = 1;
+  IME_INPUT_KIND_TEXT = 2;
+  // A password, shown or hidden.
+  IME_INPUT_KIND_PASSWORD = 3;
+  IME_INPUT_KIND_NUMBER = 4;
+  // A number that is a password, such as a PIN.
+  IME_INPUT_KIND_NUMBER_PASSWORD = 5;
+  IME_INPUT_KIND_PHONE = 6;
+  IME_INPUT_KIND_EMAIL = 7;
+  IME_INPUT_KIND_URL = 8;
+  IME_INPUT_KIND_PERSON_NAME = 9;
+  IME_INPUT_KIND_DATE = 10;
+  IME_INPUT_KIND_TIME = 11;
+  // Text the app searches for: an editor whose action is Search.
+  IME_INPUT_KIND_SEARCH = 12;
+}
+
+// Guest to host, from the agent: the editor focused in a task, as the host's input method
+// reads it: the kind of text it takes, and its text around the selection, so the input method
+// can reconvert what was typed and predict from what comes before. Sent when an editor gains
+// the focus, when the focus leaves every editor (`kind` NONE, and no text), and whenever the
+// editor's text, selection or composition change. Every offset is in UTF-16 code units from
+// the start of the editor's whole text.
+message ImeEditor {
+  int32 task_id = 1;
+  ImeInputKind kind = 2;
+  // The editor's text around the selection, at most 4096 UTF-16 code units: what the agent
+  // read before the selection, the selection, and what it read after it.
+  string text = 3;
+  // Where `text` starts in the editor's text.
+  uint32 text_start = 4;
+  // The selection, from `selection_start` to `selection_end`; equal for a cursor. Both lie
+  // within `text`.
+  uint32 selection_start = 5;
+  uint32 selection_end = 6;
+  // The editor's composing region, within `text`; equal when there is none.
+  uint32 composition_start = 7;
+  uint32 composition_end = 8;
+}
+
+// Host to guest: the host's input method selects text in the focused editor of a task, from
+// `start` to `end` in UTF-16 code units from the start of the editor's text, or puts the
+// cursor at `start` when they are equal. The agent sets the editor's selection; a composition
+// stays as it is.
+message ImeSetSelection {
+  int32 task_id = 1;
+  uint32 start = 2;
+  uint32 end = 3;
+}
+
+// Host to guest: the host's input method makes text already in the focused editor of a task
+// its composition, from `start` to `end` in UTF-16 code units from the start of the editor's
+// text, as it does when it reconverts a word typed earlier. The next ImeComposition replaces
+// that text. Equal `start` and `end` end the composition and keep its text as typed.
+message ImeSetComposingRegion {
+  int32 task_id = 1;
+  uint32 start = 2;
+  uint32 end = 3;
+}
+
 // Host to guest: whether the guest's screen is on. The host turns it off once no task window
 // has been shown (every window closed or minimized) for the time the host is configured to
 // wait, and on again as soon as a window is shown. While it is off the agent turns the
@@ -2247,6 +2315,9 @@ message Envelope {
     ImeCommit ime_commit = 18;
     ImeDeleteSurrounding ime_delete_surrounding = 377;
     ImeCursor ime_cursor = 19;
+    ImeEditor ime_editor = 408;
+    ImeSetSelection ime_set_selection = 409;
+    ImeSetComposingRegion ime_set_composing_region = 410;
     RequestGuestMemory request_guest_memory = 20;
     GuestMemory guest_memory = 21;
     InstalledApp installed_app = 22;

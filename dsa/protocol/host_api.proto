@@ -8,8 +8,9 @@
 // A connection carries requests and their responses, until the client sends WatchTasks.
 // From the answer to that request on, the connection carries only TaskEvent frames from
 // the service; a client that sends anything more on it is disconnected. In the same way,
-// from the answer to StreamInput on, the connection carries only PointerEvent, KeyEvent,
-// ImeComposition and ImeCommit frames from the client, and the service answers none of them.
+// from the answer to StreamInput on, the connection carries only PointerEvent, KeyEvent and
+// text input frames (ImeComposition, ImeCommit, ImeDeleteSurrounding, ImeSetSelection and
+// ImeSetComposingRegion) from the client, and the service answers none of them.
 // From the answer to WatchLog on, the connection carries only LogEntries frames from the
 // service, and from the answer to CollectDiagnostics on, only DiagnosticsData frames.
 //
@@ -223,8 +224,8 @@ message SetTaskCaption {
 }
 
 // Turns the connection into a stream of input for the caller's Android: after the answer
-// (Done), the client sends only PointerEvent, KeyEvent, ImeComposition and ImeCommit frames, which the service passes on
-// as they come, without answering them. Input is never waited on, so a pointer that moves
+// (Done), the client sends only PointerEvent, KeyEvent and text input frames, which the
+// service passes on as they come, without answering them. Input is never waited on, so a pointer that moves
 // fast is not held back by the answers.
 message StreamInput {}
 
@@ -959,6 +960,59 @@ message ImeCursor {
   Rect cursor = 2;
 }
 
+// What kind of text the editor focused in a task takes, as its app declared it.
+enum ImeInputKind {
+  // The guest did not say. Taken as ordinary text.
+  IME_INPUT_KIND_UNSPECIFIED = 0;
+  // No editor in the task takes text; typed characters reach it as keys.
+  IME_INPUT_KIND_NONE = 1;
+  IME_INPUT_KIND_TEXT = 2;
+  IME_INPUT_KIND_PASSWORD = 3;
+  IME_INPUT_KIND_NUMBER = 4;
+  // A number that is a password, such as a PIN.
+  IME_INPUT_KIND_NUMBER_PASSWORD = 5;
+  IME_INPUT_KIND_PHONE = 6;
+  IME_INPUT_KIND_EMAIL = 7;
+  IME_INPUT_KIND_URL = 8;
+  IME_INPUT_KIND_PERSON_NAME = 9;
+  IME_INPUT_KIND_DATE = 10;
+  IME_INPUT_KIND_TIME = 11;
+  IME_INPUT_KIND_SEARCH = 12;
+}
+
+// The editor focused in a task, as the input method reads it: its kind, and its text around
+// the selection. Offsets are in UTF-16 code units from the start of the editor's whole text;
+// the selection and the composition lie within `text`, and there is no composition when its
+// start equals its end.
+message ImeEditor {
+  int32 task_id = 1;
+  ImeInputKind kind = 2;
+  string text = 3;
+  uint32 text_start = 4;
+  uint32 selection_start = 5;
+  uint32 selection_end = 6;
+  uint32 composition_start = 7;
+  uint32 composition_end = 8;
+}
+
+// The host's input method selects text in the focused editor of a task, sent on a connection
+// that streams input: from `start` to `end` in UTF-16 code units from the start of the
+// editor's text, or the cursor at `start` when they are equal.
+message ImeSetSelection {
+  int32 task_id = 1;
+  uint32 start = 2;
+  uint32 end = 3;
+}
+
+// The host's input method makes text already in the focused editor of a task its
+// composition, sent on a connection that streams input, as it does when it reconverts a word.
+// Equal `start` and `end` end the composition and keep its text.
+message ImeSetComposingRegion {
+  int32 task_id = 1;
+  uint32 start = 2;
+  uint32 end = 3;
+}
+
 // A rectangle in Android display pixels: left and top inclusive, right and bottom
 // exclusive.
 message Rect {
@@ -1136,6 +1190,8 @@ message TaskEvent {
     TaskFrames frames = 3;
     AppInfo app = 4;
     ImeCursor ime_cursor = 5;
+    // The editor focused in the task changed, as the input method reads it.
+    ImeEditor ime_editor = 7;
     // The apps installed in the caller's Android changed: the whole list, as it is now.
     InstalledApps installed = 6;
   }
@@ -2046,6 +2102,8 @@ message Envelope {
     ImeComposition ime_composition = 9;
     ImeCommit ime_commit = 10;
     ImeDeleteSurrounding ime_delete_surrounding = 333;
+    ImeSetSelection ime_set_selection = 334;
+    ImeSetComposingRegion ime_set_composing_region = 335;
     OpenLink open_link = 12;
     FileChunk file_chunk = 13;
     ClipboardText clipboard_text = 11;
