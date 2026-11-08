@@ -150,6 +150,9 @@ pub struct State {
     pub(crate) touch: Option<WlTouch>,
     pub(crate) data_device: Option<WlDataDevice>,
     pub(crate) text_input: Option<ZwpTextInputV3>,
+    /// Whether the input method is on for the window that has the keyboard: off where the
+    /// guest's focused view takes no text.
+    pub(crate) text_input_enabled: bool,
     /// Each output's scale and size in pixels.
     pub(crate) outputs: HashMap<u32, (i32, (i32, i32))>,
     /// Each output's current refresh rate, in millihertz.
@@ -258,6 +261,7 @@ impl Desktop {
             touch: None,
             data_device: None,
             text_input: None,
+            text_input_enabled: false,
             outputs: HashMap::new(),
             output_refresh: HashMap::new(),
             refresh_recorder: crate::monitor_refresh::RefreshRecorder::new(

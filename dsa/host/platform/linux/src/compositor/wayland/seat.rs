@@ -27,7 +27,7 @@ use wayland_protocols::wp::tablet::zv2::client::{
     zwp_tablet_v2::ZwpTabletV2,
 };
 use wayland_protocols::wp::text_input::zv3::client::zwp_text_input_v3::{
-    self, ContentHint, ContentPurpose, ZwpTextInputV3,
+    self, ChangeCause, ContentHint, ContentPurpose, ZwpTextInputV3,
 };
 use wayland_protocols::xdg::shell::client::xdg_toplevel::ResizeEdge;
 
@@ -652,6 +652,59 @@ impl State {
         }
     }
 
+    /// Gives the input method the guest's focused editor in the window that has the keyboard:
+    /// its surrounding text and its content type, or turns the input method off where no
+    /// editor takes text, so keys reach a game as keys.
+    pub(crate) fn describe_editor(&mut self, task_id: i32) {
+        if self.seat_state.keyboard_focus != Some(task_id) {
+            return;
+        }
+        let Some(text_input) = self.text_input.clone() else {
+            return;
+        };
+        let Some(window) = self.windows.get_mut(&task_id) else {
+            return;
+        };
+        let Some(kind) = window.ime.editor().map(|editor| editor.kind) else {
+            return;
+        };
+        if !kind.takes_text() {
+            if self.text_input_enabled {
+                text_input.disable();
+                text_input.commit();
+                self.text_input_enabled = false;
+            }
+            return;
+        }
+        // Enabling resets the input method's state, so it is done once, not per change.
+        let enabled_now = !self.text_input_enabled;
+        if enabled_now {
+            text_input.enable();
+            self.text_input_enabled = true;
+        }
+        if let Some(surrounding) = window.ime.surrounding() {
+            text_input.set_surrounding_text(
+                surrounding.text,
+                surrounding.cursor,
+                surrounding.anchor,
+            );
+            text_input.set_text_change_cause(if window.ime.is_composing() {
+                ChangeCause::InputMethod
+            } else {
+                ChangeCause::Other
+            });
+        }
+        let (hint, purpose) = crate::input::text_input::content_type(kind);
+        text_input.set_content_type(
+            ContentHint::from_bits_truncate(hint),
+            ContentPurpose::try_from(purpose).unwrap_or(ContentPurpose::Normal),
+        );
+        text_input.commit();
+        if enabled_now {
+            self.place_input_method(task_id);
+        }
+    }
+
     /// Puts the input method's windows beside the cursor of the guest's focused editor.
     pub(crate) fn place_input_method(&mut self, task_id: i32) {
         let (Some(text_input), Some(window)) = (&self.text_input, self.windows.get(&task_id))
@@ -1081,14 +1134,18 @@ impl Dispatch<ZwpTextInputV3, ()> for State {
         match event {
             zwp_text_input_v3::Event::Enter { surface } => {
                 text_input.enable();
+                state.text_input_enabled = true;
                 text_input.set_content_type(ContentHint::empty(), ContentPurpose::Normal);
                 text_input.commit();
                 if let Some(task_id) = task_of(&surface) {
                     state.place_input_method(task_id);
+                    // The editor the guest described last, once the window has the keyboard.
+                    state.describe_editor(task_id);
                 }
             }
             zwp_text_input_v3::Event::Leave { surface } => {
                 text_input.disable();
+                state.text_input_enabled = false;
                 text_input.commit();
                 if let Some(task_id) = task_of(&surface) {
                     let events = match state.windows.get_mut(&task_id) {
