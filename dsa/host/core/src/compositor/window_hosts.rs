@@ -89,6 +89,11 @@ pub enum ToHost {
         task_id: i32,
         cursor: crate::ime::ImeCursor,
     },
+    /// The editor focused in the task, as the window's input method reads it.
+    ImeEditor {
+        task_id: i32,
+        editor: crate::ime::ImeEditor,
+    },
     /// The tone of the window's caption buttons, which follows the app's status bar.
     CaptionTone {
         task_id: i32,
@@ -129,6 +134,7 @@ impl ToHost {
             | ToHost::Resize { task_id, .. }
             | ToHost::TaskSize { task_id, .. }
             | ToHost::ImeCursor { task_id, .. }
+            | ToHost::ImeEditor { task_id, .. }
             | ToHost::CaptionTone { task_id, .. }
             | ToHost::Mode { task_id, .. }
             | ToHost::CaptionMode { task_id, .. }
@@ -467,6 +473,10 @@ impl WindowHosts {
             WindowChange::ImeCursor { task_id, cursor } => self.forward(ToHost::ImeCursor {
                 task_id: *task_id,
                 cursor: *cursor,
+            }),
+            WindowChange::ImeEditor { task_id, editor } => self.forward(ToHost::ImeEditor {
+                task_id: *task_id,
+                editor: editor.clone(),
             }),
             WindowChange::CaptionTone { task_id, tone } => self.forward(ToHost::CaptionTone {
                 task_id: *task_id,
@@ -830,6 +840,21 @@ pub fn to_wire(message: &ToHost) -> Body {
                 bottom: cursor.bottom,
             })
         }
+        ToHost::ImeEditor { task_id, editor } => {
+            let (composition_start, composition_end) = editor
+                .composition
+                .unwrap_or((editor.selection.1, editor.selection.1));
+            Body::ImeEditor(dsa_protocol::window_host::types::ImeEditor {
+                task_id,
+                kind: editor.kind.number(),
+                text: editor.text,
+                text_start: editor.text_start,
+                selection_start: editor.selection.0,
+                selection_end: editor.selection.1,
+                composition_start,
+                composition_end,
+            })
+        }
         ToHost::CaptionTone { task_id, tone } => {
             use dsa_protocol::window_host::types::{CaptionTone as WireTone, SetCaptionTone};
             let tone = match tone {
@@ -926,6 +951,18 @@ pub fn to_host_from_wire(body: &Body) -> Option<ToHost> {
                 right: cursor.right,
                 bottom: cursor.bottom,
             },
+        },
+        // A description that makes no sense is dropped; the next one replaces it.
+        Body::ImeEditor(editor) => ToHost::ImeEditor {
+            task_id: editor.task_id,
+            editor: crate::ime::ImeEditor::checked(
+                editor.kind,
+                &editor.text,
+                editor.text_start,
+                (editor.selection_start, editor.selection_end),
+                (editor.composition_start, editor.composition_end),
+            )
+            .ok()?,
         },
         Body::SetCaptionTone(set) => {
             use dsa_protocol::window_host::types::CaptionTone as WireTone;
@@ -1629,6 +1666,20 @@ mod tests {
                     right: 14,
                     bottom: 60,
                 },
+            },
+            ToHost::ImeEditor {
+                task_id: 7,
+                editor: crate::ime::ImeEditor {
+                    kind: crate::ime::InputKind::Email,
+                    text: "\u{d55c}a\u{1f600}".into(),
+                    text_start: 40,
+                    selection: (44, 41),
+                    composition: Some((40, 41)),
+                },
+            },
+            ToHost::ImeEditor {
+                task_id: 7,
+                editor: crate::ime::ImeEditor::none(),
             },
             ToHost::CaptionTone {
                 task_id: 8,

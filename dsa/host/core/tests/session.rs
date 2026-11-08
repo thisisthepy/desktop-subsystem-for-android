@@ -1568,6 +1568,52 @@ fn fr6_the_cursor_of_a_tasks_editor_reaches_a_watcher() {
     );
 }
 
+#[test]
+fn fr6_the_editor_of_a_task_reaches_a_watcher_and_a_description_that_makes_no_sense_does_not() {
+    let (session, mut agent, _launcher) = active_session();
+    let watch = session.watch_tasks();
+    send_body(&mut agent, task_updated(7, "Clock"));
+    let described = |selection_end| {
+        Body::ImeEditor(dsa_protocol::control::ImeEditor {
+            task_id: 7,
+            kind: dsa_protocol::control::ImeInputKind::Password as i32,
+            text: "ab".into(),
+            text_start: 10,
+            selection_start: 12,
+            selection_end,
+            composition_start: 0,
+            composition_end: 0,
+        })
+    };
+    // A selection past the end of the text is dropped; the next description is taken.
+    send_body(&mut agent, described(40));
+    send_body(&mut agent, described(11));
+    send_body(
+        &mut agent,
+        Body::TaskRemoved(dsa_protocol::control::TaskRemoved { task_id: 7 }),
+    );
+    let events: Vec<TaskEvent> = (0..3)
+        .map(|_| watch.events.recv_timeout(WAIT).expect("a task event"))
+        .collect();
+    assert_eq!(
+        events,
+        vec![
+            TaskEvent::Updated(clock(7, "Clock")),
+            TaskEvent::ImeEditor {
+                task_id: 7,
+                editor: dsa_host_core::ime::ImeEditor {
+                    kind: dsa_host_core::ime::InputKind::Password,
+                    text: "ab".into(),
+                    text_start: 10,
+                    selection: (12, 11),
+                    composition: None,
+                },
+            },
+            TaskEvent::Removed { task_id: 7 },
+        ]
+    );
+}
+
 /// A control channel over a loopback socket, which can share its socket between a reader
 /// and a sender as hvsocket and vsock do; the in-memory one cannot.
 struct Tcp(std::net::TcpStream);

@@ -138,7 +138,7 @@ use crate::guest_log::{
     serve_log_connection, DiagnosticsEvent, LogDumpEvent, LogEntry, LogFilter, LogHub,
     LogPortMessage, LogWatch, STREAM_TAIL,
 };
-use crate::ime::{ImeCursor, ImeEvent};
+use crate::ime::{ImeCursor, ImeEditor, ImeEvent};
 use crate::input::{PointerAction, PointerEvent};
 use crate::keys::KeyEvent;
 use crate::links::{self, LinkGate};
@@ -5739,6 +5739,16 @@ impl Worker {
                     },
                 });
             }
+            Some(Body::ImeEditor(editor)) => match ImeEditor::from_control(&editor) {
+                Ok((task_id, editor)) => self
+                    .shared
+                    .publish_task(TaskEvent::ImeEditor { task_id, editor }),
+                Err(why) => eprintln!(
+                    "text input: dropped the agent's description of the editor in task {}: \
+                     {why}",
+                    editor.task_id
+                ),
+            },
             Some(Body::GuestMemory(memory)) => {
                 let memory = GuestMemory::from_control(memory);
                 self.shared.set_guest_memory(Some((memory, Instant::now())));
@@ -5913,6 +5923,8 @@ impl Worker {
             | Some(Body::ImeComposition(_))
             | Some(Body::ImeCommit(_))
             | Some(Body::ImeDeleteSurrounding(_))
+            | Some(Body::ImeSetSelection(_))
+            | Some(Body::ImeSetComposingRegion(_))
             | Some(Body::LinkHandling(_))
             | Some(Body::OpenFile(_))
             | Some(Body::FileChunk(_))

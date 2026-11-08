@@ -63,6 +63,12 @@ pub enum WindowChange {
         task_id: i32,
         cursor: crate::ime::ImeCursor,
     },
+    /// The editor focused in the task is this: the window's input method reads the editor's
+    /// kind and its text around the selection from it.
+    ImeEditor {
+        task_id: i32,
+        editor: crate::ime::ImeEditor,
+    },
     /// The window's caption buttons take this tone, to stay readable over the app's status
     /// bar. Comes with every window that opens, and whenever the app's status bar changes
     /// tone.
@@ -461,6 +467,15 @@ impl TaskWindows {
                 vec![WindowChange::ImeCursor {
                     task_id: *task_id,
                     cursor: *cursor,
+                }]
+            }
+            TaskEvent::ImeEditor { task_id, editor } => {
+                if !self.has_window(*task_id) {
+                    return Vec::new();
+                }
+                vec![WindowChange::ImeEditor {
+                    task_id: *task_id,
+                    editor: editor.clone(),
                 }]
             }
         }

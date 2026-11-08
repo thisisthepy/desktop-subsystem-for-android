@@ -84,7 +84,7 @@ use crate::files::{self, FileAction, FileTransfer};
 use crate::gamepads::{GamepadEvent, GamepadInfo, GamepadRumble, GamepadState};
 use crate::gapps::{self, GappsPackage, GuestGapps};
 use crate::guest_log::{DiagnosticsEvent, LogDumpEvent, LogEntry, LogFilter, LogWatch};
-use crate::ime::{ImeCursor, ImeEvent};
+use crate::ime::{ImeCursor, ImeEditor, ImeEvent};
 use crate::input::{InputEvent, PointerEvent};
 use crate::keys::KeyEvent;
 use crate::location::{Fix, LocationEvent, Wanted};
@@ -1218,6 +1218,7 @@ fn event_to_wire(event: TaskEvent) -> types::TaskEvent {
                 bottom: cursor.bottom,
             }),
         }),
+        TaskEvent::ImeEditor { task_id, editor } => Event::ImeEditor(editor.to_wire(task_id)),
     };
     types::TaskEvent { body: Some(body) }
 }
@@ -1247,6 +1248,11 @@ fn event_from_wire(event: types::TaskEvent) -> Option<TaskEvent> {
                 },
             }
         }
+        // A description that makes no sense is dropped; the next one replaces it.
+        Event::ImeEditor(editor) => {
+            let (task_id, editor) = ImeEditor::from_wire(&editor).ok()?;
+            TaskEvent::ImeEditor { task_id, editor }
+        }
     })
 }
 
@@ -1266,7 +1272,9 @@ fn tasks_to_wire(events: Vec<TaskEvent>) -> types::Tasks {
             }),
             TaskEvent::App(app) => tasks.apps.push(app_to_wire(app)),
             TaskEvent::Installed(apps) => tasks.installed = Some(installed_to_wire(Some(apps))),
-            TaskEvent::Removed { .. } | TaskEvent::ImeCursor { .. } => {}
+            TaskEvent::Removed { .. }
+            | TaskEvent::ImeCursor { .. }
+            | TaskEvent::ImeEditor { .. } => {}
         }
     }
     tasks
@@ -2402,6 +2410,16 @@ impl HostApiService {
                 }) => ImeEvent::from_wire_delete(&delete)
                     .map(InputEvent::Ime)
                     .map_err(|why| format!("dropped a deletion: {why}")),
+                Ok(Envelope {
+                    body: Some(Body::ImeSetSelection(selection)),
+                }) => ImeEvent::from_wire_selection(&selection)
+                    .map(InputEvent::Ime)
+                    .map_err(|why| format!("dropped a selection: {why}")),
+                Ok(Envelope {
+                    body: Some(Body::ImeSetComposingRegion(region)),
+                }) => ImeEvent::from_wire_composing_region(&region)
+                    .map(InputEvent::Ime)
+                    .map_err(|why| format!("dropped a composing region: {why}")),
                 Ok(_) => {
                     eprintln!(
                         "local API: a client of {} sent something other than input on a \

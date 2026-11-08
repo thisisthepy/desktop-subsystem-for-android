@@ -412,6 +412,9 @@ fn handle(message: ToHost) {
                 cursors.insert(task_id, cursor);
             }
         }),
+        // The window's input method places its windows by the cursor alone; it reads no
+        // surrounding text from the editor's description yet.
+        ToHost::ImeEditor { .. } => {}
         // macOS draws the title bar and its buttons in the system's own colors.
         ToHost::CaptionTone { .. } => {}
         ToHost::Mode {
