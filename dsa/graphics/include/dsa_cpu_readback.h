@@ -19,6 +19,9 @@
 // Every other buffer pays nothing: a process with no such buffer never waits or reads, and
 // one with them reads only those a submit since the last read back may have drawn into. A
 // buffer the CPU also writes keeps what the CPU wrote, which a read back would overwrite.
+// The one exception is a buffer the composer also uses: SurfaceFlinger's capture asks for CPU
+// writes too (GRALLOC_USAGE_SW_WRITE_OFTEN, beside the read), but only the GPU draws into it,
+// and without it screencap read zeros.
 
 #pragma once
 
@@ -35,11 +38,12 @@ namespace dsa {
 inline constexpr uint64_t kUsageCpuReadMask = 0xFULL;
 inline constexpr uint64_t kUsageCpuWriteMask = 0xF0ULL;
 inline constexpr uint64_t kUsageGpuColorOutput = 1ULL << 9;
+inline constexpr uint64_t kUsageComposerOverlay = 1ULL << 11;
 
 // Whether a buffer with this usage gets the GPU's drawing copied back for the CPU.
 inline bool wantsCpuReadback(uint64_t usage) {
     return (usage & kUsageCpuReadMask) != 0 && (usage & kUsageGpuColorOutput) != 0 &&
-           (usage & kUsageCpuWriteMask) == 0;
+           ((usage & kUsageCpuWriteMask) == 0 || (usage & kUsageComposerOverlay) != 0);
 }
 
 // How one buffer format comes back from the host.

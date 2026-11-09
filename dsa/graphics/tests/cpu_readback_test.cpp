@@ -31,6 +31,10 @@ constexpr uint64_t kComposerOverlay = 1 << 11;
 static void pr3_only_a_buffer_the_gpu_draws_and_the_cpu_only_reads_is_read_back() {
     // SurfaceFlinger's capture for screencap, and an ImageReader a renderer draws into.
     EXPECT(dsa::wantsCpuReadback(kGpuColorOutput | kGpuSampled | kComposerOverlay | kCpuReadOften));
+    // SurfaceFlinger's capture as Android 16 and 17 really allocate it, CPU writes included
+    // (image test run 42539160677 read zeros from every screencap without it).
+    EXPECT(dsa::wantsCpuReadback(kGpuColorOutput | kGpuSampled | kComposerOverlay | kCpuReadOften |
+                                 kCpuWriteOften));
     EXPECT(dsa::wantsCpuReadback(kGpuColorOutput | kCpuReadRarely));
     // A window an app draws for the screen: no CPU reads it, so it pays nothing.
     EXPECT(!dsa::wantsCpuReadback(kGpuColorOutput | kGpuSampled | kComposerOverlay));
