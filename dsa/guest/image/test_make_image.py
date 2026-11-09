@@ -5324,6 +5324,42 @@ class ArmTranslationImageTests(unittest.TestCase):
                "(allow system_file labeledfs (filesystem (associate)))\n")
         self.assertNotEqual(self._context_mount_problems("dsa-gapps.rc", old), [])
 
+    # The flags init's mount command knows (system/core/init/builtins.cpp, mount_flags[], and
+    # "wait"). Init passes the kernel only the last argument that is none of these, as the
+    # mount's data, and drops every other one without a word.
+    INIT_MOUNT_FLAGS = {"noatime", "noexec", "nosuid", "nodev", "nodiratime", "ro", "rw", "remount",
+                        "bind", "rec", "unbindable", "private", "slave", "shared", "nosymfollow",
+                        "defaults", "wait"}
+
+    @classmethod
+    def _dropped_mount_options(cls, rc):
+        """The options of each mount command in an init script that init drops: every argument
+        after the mount point that is not a flag init knows, except the last one."""
+        dropped = []
+        for line in rc.splitlines():
+            words = line.split()
+            if not words or words[0] != "mount":
+                continue
+            options = [word for word in words[4:-1] if word not in cls.INIT_MOUNT_FLAGS]
+            if options:
+                dropped.append((words[3], options))
+        return dropped
+
+    def test_fr25_fr32_init_hands_every_mount_option_to_the_kernel(self):
+        for name in ["dsa-arm-translation.rc", "dsa-gapps.rc"]:
+            rc = (Path(make_image.__file__).with_name(name)).read_text()
+            self.assertEqual(self._dropped_mount_options(rc), [], name)
+        # develop 406c30d7 named fscontext= and context= as two arguments. Init dropped
+        # fscontext=, so the kernel relabelled the superblock to the files' type and refused it
+        # at every boot: "avc: denied { relabelto } for comm="init" scontext=u:r:init:s0
+        # tcontext=u:object_r:system_lib_file:s0 tclass=filesystem", then "mount() failed:
+        # Permission denied".
+        old = ("    mount erofs loop@/system/etc/dsa/arm-translation/default.img /mnt/dsa-arm-translation "
+               "ro nodev nosuid fscontext=u:object_r:dsa_arm_translation_fs:s0 "
+               "context=u:object_r:system_lib_file:s0\n")
+        self.assertEqual(self._dropped_mount_options(old),
+                         [("/mnt/dsa-arm-translation", ["fscontext=u:object_r:dsa_arm_translation_fs:s0"])])
+
     def test_fr25_fr32_the_mount_rules_stay_clear_of_the_platforms_neverallows(self):
         # The platform's policy (Android 16 and 17) forbids relabelto on any fs_type that is not
         # a contextmount_type, filesystem associate from an fs_type to a file type, associate
@@ -5427,7 +5463,7 @@ class ArmTranslationImageTests(unittest.TestCase):
         for value, image in images.items():
             section = sections[f"on post-fs-data && property:ro.boot.dsa.arm_translation={value}"]
             self.assertIn(f"mount erofs loop@{image} /mnt/dsa-arm-translation ro nodev nosuid "
-                          "fscontext=u:object_r:dsa_arm_translation_fs:s0 "
+                          "fscontext=u:object_r:dsa_arm_translation_fs:s0,"
                           "context=u:object_r:system_lib_file:s0", section)
             for directory in ["lib64", "bin", "etc"]:
                 self.assertIn(
@@ -5581,7 +5617,7 @@ class ArmTranslationImageTests(unittest.TestCase):
         before, after = rc.split(trigger, 1)
         section, rest = after.split("\n\n", 1)
         self.assertIn("mount erofs loop@/data/vendor/dsa/gapps/system.img /mnt/dsa-gapps ro nodev nosuid "
-                      "fscontext=u:object_r:dsa_gapps_fs:s0 context=u:object_r:system_file:s0", section)
+                      "fscontext=u:object_r:dsa_gapps_fs:s0,context=u:object_r:system_file:s0", section)
         for partition in ["product", "system_ext"]:
             self.assertIn(
                 f"mount overlay overlay /{partition} ro nodev "
