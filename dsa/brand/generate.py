@@ -140,7 +140,7 @@ def macos(out):
         {
             "name": name.replace("-", " ").capitalize(),
             "layers": [{"name": name, "image-name": f"{name}.png", "glass": True}],
-            "shadow": {"kind": "neutral", "opacity": 0.5},
+            "shadow": {"kind": "neutral", "opacity": 0.25},
             "translucency": {"enabled": True, "value": 0.3 if name == "title-bar" else 0.15},
         }
         for name in icons.MACOS_LAYERS

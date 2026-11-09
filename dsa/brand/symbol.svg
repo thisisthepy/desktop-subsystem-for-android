@@ -8,8 +8,8 @@
       <stop offset="0" stop-color="#9af8c4"/><stop offset=".5" stop-color="#47e08c"/><stop offset="1" stop-color="#1fb066"/>
     </linearGradient>
     <filter id="sym-shadow" x="-30%" y="-30%" width="160%" height="170%">
-      <feDropShadow dx="0" dy=".9" stdDeviation=".7" flood-color="#022218" flood-opacity=".32"/>
-      <feDropShadow dx="0" dy="3.2" stdDeviation="3" flood-color="#022218" flood-opacity=".2"/>
+      <feDropShadow dx="0" dy=".9" stdDeviation=".7" flood-color="#022218" flood-opacity=".16"/>
+      <feDropShadow dx="0" dy="3.2" stdDeviation="3" flood-color="#022218" flood-opacity=".1"/>
     </filter>
     <filter id="sym-bar-shadow" x="-20%" y="-40%" width="140%" height="200%">
       <feDropShadow dx="0" dy=".8" stdDeviation=".6" flood-color="#022218" flood-opacity=".35"/>

@@ -17,7 +17,7 @@
       ],
       "shadow": {
         "kind": "neutral",
-        "opacity": 0.5
+        "opacity": 0.25
       },
       "translucency": {
         "enabled": true,
@@ -35,7 +35,7 @@
       ],
       "shadow": {
         "kind": "neutral",
-        "opacity": 0.5
+        "opacity": 0.25
       },
       "translucency": {
         "enabled": true,

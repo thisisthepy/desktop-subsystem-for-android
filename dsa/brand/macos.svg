@@ -18,7 +18,7 @@
       <feDropShadow dx="0" dy="1.4" stdDeviation="1.3" flood-color="#000" flood-opacity=".28"/>
     </filter>
     <filter id="mac-window-shadow" x="-30%" y="-30%" width="160%" height="180%">
-      <feDropShadow dx="0" dy="2" stdDeviation="1.8" flood-color="#021c14" flood-opacity=".5"/>
+      <feDropShadow dx="0" dy="2" stdDeviation="1.8" flood-color="#021c14" flood-opacity=".25"/>
     </filter>
   </defs>
   <g id="tile">
