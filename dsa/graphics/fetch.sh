@@ -70,8 +70,9 @@ if ((${#mesa_patches[@]})); then
 fi
 # patches/guest/mesa come after them, each on the tree the ones before made: a stream to the
 # host renderer that ended (the renderer restarted, or ended this guest's stream) reports a
-# lost device instead of ending the process, and what the GPU drew into a buffer a CPU reads
-# is copied back from the host into the buffer's memory.
+# lost device instead of ending the process, what the GPU drew into a buffer a CPU reads
+# is copied back from the host into the buffer's memory, and Android's loader gets every core
+# command it looks up, whatever Vulkan version the app asked for.
 for patch in "$patch_dir"/guest/mesa/*.patch; do
     git -C "$mesa_dir" apply --recount --check "$patch"
     git -C "$mesa_dir" apply --recount "$patch"

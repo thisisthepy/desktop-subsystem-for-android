@@ -1,0 +1,25 @@
+diff --git a/src/gfxstream/guest/vulkan/gfxstream_vk_device.cpp b/src/gfxstream/guest/vulkan/gfxstream_vk_device.cpp
+index 85be211..6ee14e2 100644
+--- a/src/gfxstream/guest/vulkan/gfxstream_vk_device.cpp
++++ b/src/gfxstream/guest/vulkan/gfxstream_vk_device.cpp
+@@ -677,7 +677,19 @@ vk_icdGetInstanceProcAddr(VkInstance instance, const char* pName) {
+ 
+ PFN_vkVoidFunction gfxstream_vk_GetInstanceProcAddr(VkInstance _instance, const char* pName) {
+     VK_FROM_HANDLE(gfxstream_vk_instance, instance, _instance);
+-    return vk_instance_get_proc_addr(&instance->vk, &gfxstream_vk_instance_entrypoints, pName);
++    PFN_vkVoidFunction func =
++        vk_instance_get_proc_addr(&instance->vk, &gfxstream_vk_instance_entrypoints, pName);
++#if DETECT_OS_ANDROID
++    // Android's loader asks once, right after vkCreateInstance, for every command it may call
++    // on the app's behalf, and calls the core Vulkan 1.1 ones whatever version the app asked
++    // for: vkGetPhysicalDeviceSurfaceFormatsKHR calls vkGetPhysicalDeviceImageFormatProperties2
++    // for an app that asked for 1.0 too. The checked lookup answers NULL for those, so the
++    // loader called address 0 and the app died. This driver has every one of them.
++    if (!func && instance) {
++        func = vk_instance_get_proc_addr_unchecked(&instance->vk, pName);
++    }
++#endif
++    return func;
+ }
+ 
+ PFN_vkVoidFunction gfxstream_vk_GetDeviceProcAddr(VkDevice _device, const char* pName) {

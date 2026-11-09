@@ -106,7 +106,8 @@ class CpuReadbackPatchTests(unittest.TestCase):
         self.assertIn('for patch in "$patch_dir"/guest/mesa/*.patch; do', script)
         self.assertLess(script.index('"$patch_dir"/0008-*.patch'), script.index('"$patch_dir"/guest/mesa/*.patch'))
         names = sorted(p.name for p in (HERE / "patches/guest/mesa").glob("*.patch"))
-        self.assertEqual(names[-1], PATCH.name)
+        # After the lost-stream patch, whose tree it is made on.
+        self.assertEqual(names[names.index(PATCH.name) - 1][:5], "0001-")
         self.assertIn('"$here/cpu_readback_test.cpp"', TESTS.read_text(encoding="utf-8"))
 
 
