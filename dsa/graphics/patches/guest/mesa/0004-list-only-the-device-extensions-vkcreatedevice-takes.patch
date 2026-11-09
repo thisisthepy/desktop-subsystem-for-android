@@ -1,0 +1,42 @@
+diff --git a/src/gfxstream/guest/vulkan/gfxstream_vk_device.cpp b/src/gfxstream/guest/vulkan/gfxstream_vk_device.cpp
+index 6ee14e2..ce18323 100644
+--- a/src/gfxstream/guest/vulkan/gfxstream_vk_device.cpp
++++ b/src/gfxstream/guest/vulkan/gfxstream_vk_device.cpp
+@@ -463,25 +463,23 @@ VkResult gfxstream_vk_EnumerateInstanceExtensionProperties(const char* pLayerNam
+                                                       pProperties);
+ }
+ 
++// Mesa's runtime, built with Android's strict extension rules (android-strict, on by default
++// for Android), lists only the extensions Android allows at this API level and vkCreateDevice
++// refuses every other one with VK_ERROR_EXTENSION_NOT_PRESENT. This driver listed every
++// extension the host has, so an app that enables all it is offered, as the Vulkan CTS does,
++// could not create a device at all. The runtime's own listing applies the same rule as
++// vkCreateDevice.
++extern "C" VKAPI_ATTR VkResult VKAPI_CALL vk_common_EnumerateDeviceExtensionProperties(
++    VkPhysicalDevice physicalDevice, const char* pLayerName, uint32_t* pPropertyCount,
++    VkExtensionProperties* pProperties);
++
+ VkResult gfxstream_vk_EnumerateDeviceExtensionProperties(VkPhysicalDevice physicalDevice,
+                                                          const char* pLayerName,
+                                                          uint32_t* pPropertyCount,
+                                                          VkExtensionProperties* pProperties) {
+     MESA_TRACE_SCOPE("vkEnumerateDeviceExtensionProperties");
+-    (void)pLayerName;
+-    VK_FROM_HANDLE(vk_physical_device, pdevice, physicalDevice);
+-
+-    VK_OUTARRAY_MAKE_TYPED(VkExtensionProperties, out, pProperties, pPropertyCount);
+-
+-    for (int i = 0; i < VK_DEVICE_EXTENSION_COUNT; i++) {
+-        if (!pdevice->supported_extensions.extensions[i]) continue;
+-
+-        vk_outarray_append_typed(VkExtensionProperties, &out, prop) {
+-            *prop = vk_device_extensions[i];
+-        }
+-    }
+-
+-    return vk_outarray_status(&out);
++    return vk_common_EnumerateDeviceExtensionProperties(physicalDevice, pLayerName,
++                                                        pPropertyCount, pProperties);
+ }
+ 
+ VkResult gfxstream_vk_CreateDevice(VkPhysicalDevice physicalDevice,

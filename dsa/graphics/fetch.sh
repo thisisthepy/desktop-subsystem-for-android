@@ -71,8 +71,9 @@ fi
 # patches/guest/mesa come after them, each on the tree the ones before made: a stream to the
 # host renderer that ended (the renderer restarted, or ended this guest's stream) reports a
 # lost device instead of ending the process, what the GPU drew into a buffer a CPU reads
-# is copied back from the host into the buffer's memory, and Android's loader gets every core
-# command it looks up, whatever Vulkan version the app asked for.
+# is copied back from the host into the buffer's memory, Android's loader gets every core
+# command it looks up, whatever Vulkan version the app asked for, and the driver lists only
+# the device extensions its vkCreateDevice takes.
 for patch in "$patch_dir"/guest/mesa/*.patch; do
     git -C "$mesa_dir" apply --recount --check "$patch"
     git -C "$mesa_dir" apply --recount "$patch"
