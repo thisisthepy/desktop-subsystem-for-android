@@ -25,8 +25,8 @@ use crate::console_pipe::ConsoleCapture;
 use crate::guid::Guid;
 use crate::hcs::{grant_vm_access, ComputeSystem};
 use crate::vm::{
-    fine_grained_memory_supported, hosting_process_name_suffix_supported, AndroidVmConfig,
-    GuestArch, HOSTING_PROCESS_NAME_SUFFIX,
+    fine_grained_memory_supported, gpu_assignment_request, hosting_process_name_suffix_supported,
+    AndroidVmConfig, GuestArch, HOSTING_PROCESS_NAME_SUFFIX,
 };
 use crate::vm_listener::VmIdSlot;
 
@@ -388,6 +388,17 @@ impl AndroidVmLauncher {
         // On any failure below the system is dropped, which closes the handle and so
         // removes the VM.
         system.start(CALL_TIMEOUT).map_err(|e| e.to_string())?;
+        // HCS assigns GPUs only to a running VM, as WSL does it. A host whose driver cannot
+        // paravirtualize its GPU refuses; Android still renders through the host renderer, so
+        // the VM keeps running and the reason goes to the log.
+        if config.gpu_paravirtualization {
+            if let Err(e) = system.modify(&gpu_assignment_request(), CALL_TIMEOUT) {
+                eprintln!(
+                    "the Android VM got no paravirtualized GPU and renders through the host \
+                     renderer only: {e}"
+                );
+            }
+        }
         // Without its ID nothing can reach the VM, so a VM whose ID cannot be read is of no
         // use.
         let vm_id = system

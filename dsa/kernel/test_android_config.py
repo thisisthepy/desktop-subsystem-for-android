@@ -9,6 +9,7 @@ from pathlib import Path
 CONFIG = Path(__file__).with_name("android.config")
 ARM64_CONFIG = Path(__file__).with_name("android-arm64.config")
 VIRTIO_CONFIG = Path(__file__).with_name("virtio.config")
+DXG_CONFIG = Path(__file__).with_name("dxg.config")
 PATCHES = Path(__file__).with_name("patches")
 BUILD = Path(__file__).with_name("build.sh")
 
@@ -446,6 +447,27 @@ class AndroidKernelConfigTests(unittest.TestCase):
         self.assertLess(body.index("obj-$(CONFIG_HYPERV_VSOCKETS) += hv_sock.o"),
                         body.index("obj-$(CONFIG_VIRTIO_VSOCKETS) += vmw_vsock_virtio_transport.o"))
 
+    def test_pr3_the_paravirtualized_gpu_driver_is_built_in_for_both_architectures(self):
+        # The dxg graphics path needs /dev/dxg in the guest. The VM loads no modules, so the
+        # WSL tree's dxgkrnl is built in, with the VMBus, dma-buf, sync file and virtual PCI
+        # pieces it uses, and the fragment is merged for both kernels.
+        config = DXG_CONFIG.read_text().splitlines()
+        for option in ["CONFIG_DXGKRNL=y", "CONFIG_HYPERV=y", "CONFIG_HYPERV_VMBUS=y",
+                       "CONFIG_DMA_SHARED_BUFFER=y", "CONFIG_SYNC_FILE=y", "CONFIG_PCI_HYPERV=y"]:
+            self.assertIn(option, config)
+        script = BUILD.read_text()
+        self.assertEqual(script.count('"$kernel_dir/dxg.config"'), 2)
+        self.assertNotIn("CONFIG_DXGKRNL", CONFIG.read_text())
+        self.assertNotIn("CONFIG_DXGKRNL", ARM64_CONFIG.read_text())
+
+    def test_pr3_the_dxg_fragment_does_not_contradict_the_other_fragments(self):
+        others = "\n".join(path.read_text() for path in (CONFIG, ARM64_CONFIG, VIRTIO_CONFIG))
+        for line in fragment_lines(DXG_CONFIG):
+            name = line.split("=")[0].removeprefix("# ").split(" ")[0]
+            for other in others.splitlines():
+                if re.match(rf"^(# )?{name}[= ]", other):
+                    self.assertEqual(other, line, name)
+
     def test_fr27_no_patch_touches_x86_only_code(self):
         # The same patches apply to both architectures' builds.
         for patch in PATCHES.glob("*.patch"):
@@ -472,7 +494,8 @@ class AndroidKernelConfigTests(unittest.TestCase):
         named = os.environ.get("DSA_KERNEL_ARCH")
         if named:
             self.assertEqual(arch, named, f"{merged} is a {built} configuration, not {named}")
-        fragments = [CONFIG] + ([ARM64_CONFIG] if arch == "arm64" else []) + [VIRTIO_CONFIG]
+        fragments = ([CONFIG] + ([ARM64_CONFIG] if arch == "arm64" else [])
+                     + [VIRTIO_CONFIG, DXG_CONFIG])
         for fragment in fragments:
             for line in fragment_lines(fragment):
                 self.assertIn(line, lines, f"{fragment.name} for {arch}")

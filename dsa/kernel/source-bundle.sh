@@ -28,13 +28,13 @@ case "$arch" in
     x86_64)
         kernel_file=bzImage
         base_config=Microsoft/config-wsl
-        fragments="android.config and virtio.config"
+        fragments="android.config, virtio.config and dxg.config"
         make_args=""
         ;;
     arm64)
         kernel_file=Image
         base_config=Microsoft/config-wsl-arm64
-        fragments="android.config, android-arm64.config and virtio.config"
+        fragments="android.config, android-arm64.config, virtio.config and dxg.config"
         make_args="ARCH=arm64 "
         ;;
     *) echo "unknown architecture $arch (x86_64 or arm64)" >&2; exit 2 ;;

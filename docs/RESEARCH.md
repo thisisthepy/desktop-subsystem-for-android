@@ -2211,3 +2211,125 @@ FR-36의 주소 변환(`Geocoder`)을 호스트가 무엇으로 답할지 2026-1
 - 빌드 전부. 축소 트리에서 vendor Rust 바이너리를 빌드한 적이 없다. 잠금에 더한 프로젝트와 상자는 Android.bp의 의존을 정적으로 따라가 고른 것이고, AIDL Rust 백엔드, vendor 변형의 LLNDK 스텁, `TARGET_COPY_OUT_VENDOR := vendor`의 설치 경로, 축소 트리의 clippy가 통과하는지는 Framework build가 처음 보인다.
 - 17 대상 파일의 vendor에 `libssl.so`가 없는지와 그 APEX의 내용. 16 것만 풀어 보았다. `make-image.py`가 바이너리의 `DT_NEEDED`를 vendor와 LLNDK에 대조하므로 빠진 것은 이미지 빌드가 멈춘다.
 - 실기 동작: 기존 설치의 키가 모두 갱신되는지, vold의 메타데이터 키 갱신, 키가 없는 부팅에서 호스트 키로 싼 덩어리가 실패하는 모습.
+
+## R29. dxg 그래픽 경로: Hyper-V GPU 준가상화 위의 Mesa d3d12와 Dozen (INTENT D4, PR-3, NFR-7)
+
+질문: INTENT D4의 대안 경로, 곧 게스트의 `/dev/dxg`(WSL이 쓰는 GPU-PV) 위에 Mesa의 d3d12(OpenGL ES)와 Dozen(Vulkan)을 두고 버퍼를 호스트 합성기와 나누는 경로를 DSA의 VM에서 열 수 있는가. 무엇이 필요하고, 무엇이 막는가.
+
+답(2026-11-11): **호스트와 커널 쪽은 열 수 있다. 사용자 공간이 막는다.** HCS로 WSL과 같은 GPU 할당을 요청할 수 있고, DSA 커널은 이미 dxgkrnl을 내장하고 있다. 그러나 Mesa의 두 드라이버가 올라서는 Direct3D 12 런타임(`libd3d12.so`, `libd3d12core.so`)과 DXCore(`libdxcore.so`), 그리고 GPU 회사의 사용자 모드 드라이버는 모두 Microsoft와 GPU 회사의 비공개 바이너리이고, glibc로 빌드되어 안드로이드(bionic)의 링커가 올리지 못한다. 열린 대체물은 찾지 못했다. 그래서 이번 단계는 호스트 설정 뒤의 비활성 골격만 넣는다.
+
+### 확인한 버전
+
+| 대상 | 버전 |
+|---|---|
+| WSL | `microsoft/WSL` `master` `c7a28eb1` (2026-11-10). `src/windows/common/hcs.cpp`, `hcs_schema.h`, `HcsVirtualMachineBackend.cpp`, `src/windows/service/exe/WslCoreVm.cpp`, `CMakeLists.txt`, `packages.config`, `msipackage/package.wix.in` |
+| WSL 커널 | `linux-msft-wsl-6.18.54.1` (`d504d40a`), DSA가 고정한 태그. `drivers/hv/dxgkrnl/`, `include/uapi/misc/d3dkmthk.h`, `arch/x86/configs/config-wsl`, `arch/arm64/configs/config-wsl-arm64` |
+| Mesa | `main` `e04357c4` (2026-11-10). `src/gallium/drivers/d3d12/`, `src/microsoft/vulkan/`, `docs/features.txt`, `meson.options` |
+| AOSP | `frameworks/native` `main`의 `vulkan/libvulkan/driver.cpp`, `opengl/libs/EGL/Loader.cpp` |
+| 호스트 | 이 PC(Windows 11 Pro 26300)의 `C:\Program Files\WSL\lib`와 `C:\Windows\System32\DriverStore\FileRepository`의 리눅스 라이브러리 |
+| HCS 스키마 | Microsoft Learn의 HCS schema reference (2026-11-11 확인) |
+
+### 방법
+
+- WSL의 원본에서 GPU를 붙이는 코드 경로(`AddGpu`, `AddMirroredGpu`)와 MMIO 설정을 읽었다.
+- 커널 태그의 dxgkrnl 원본과 두 아키텍처의 WSL 설정에서 `CONFIG_DXGKRNL`과 그 의존을 확인했다.
+- Mesa `main`의 d3d12와 Dozen 원본에서 런타임을 여는 곳과 보고하는 Vulkan 판, 확장 목록(`docs/features.txt`)을 읽었다.
+- 이 PC에 있는 WSL의 D3D12와 DXCore 라이브러리, GPU 회사 드라이버 패키지의 리눅스 라이브러리를 실행하지 않고 ELF 헤더만 읽어 `DT_NEEDED`와 기계 종류를 뽑았다(`.scratch/d4-dxg/probe/elf_needs.py`).
+- 아무것도 빌드하거나 실행하지 않았다. GPU 할당, 버퍼 공유, 성능은 실기로 확인하지 않았다.
+
+### 호스트: Windows와 HCS
+
+- **드라이버 조건.** GPU-PV의 연산 경로는 WDDM 2.9 드라이버부터다. WDDM 2.5 이상은 GPU 가상화를 지원하지만, WSL의 `/dev/dxg`가 쓰는 경로는 2.9가 필요하다고 Microsoft가 밝혔다([DirectX ❤ Linux](https://devblogs.microsoft.com/directx/directx-heart-linux/)).
+- **할당 방식.** WSL은 VM을 만드는 문서에 GPU를 넣지 않는다. VM이 시작한 뒤 수정 요청 하나로 붙인다(`WslCoreVm.cpp`의 `m_backend->AddGpu({})`, `hcs.cpp`의 `AddMirroredGpu`).
+  - 요청: `ResourcePath` `VirtualMachine/ComputeTopology/Gpu`, `RequestType` `Update`, `Settings` `{ "AssignmentMode": "Mirror", "AllowVendorExtension": true }`.
+  - `DisableGdiAcceleration`, `DisablePresentation`은 스키마 2.7 이상이고 빌드 22545 이상일 때만 넣는다. 그 전 호스트는 이 필드가 있는 요청을 거절한다(`IsDisableVgpuSettingsSupported`).
+  - 스키마 문서의 `GpuConfiguration`은 `AssignmentMode`(`Disabled`, `Default`, `List`, `Mirror`), `AssignmentRequest`, `AllowVendorExtension`을 2.0부터 둔다. `Mirror`는 "지금과 앞으로의 GPU를 모두 할당"이다. GPU-PV의 `List`는 장치 인터페이스와 `0xffff`를 주면 HCS가 빈 파티션을 찾는다([HCS schema reference](https://learn.microsoft.com/en-us/virtualization/api/hcs/schemareference)).
+  - WSL 밖의 HCS VM에 이 요청이 통하는지는 원본만으로 판단했다. WSL도 일반 HCS 호출(`HcsModifyComputeSystem`)을 쓰고 WSL 전용 권한을 따로 쓰지 않으므로 통할 것으로 본다(추론, 실기 미확인).
+- **MMIO 창.** WSL은 높은 MMIO 창을 기본 16 GiB로 두고(`DEFAULT_HIGH_MMIO_GAP_IN_MB`), 게스트 주소를 36비트로 잡아 그 꼭대기에 창의 시작을 고정한다(`HighMmioGapInMB`, `HighMmioBaseInMB`, `MaximumGuestAddressBits = 36`). 두 필드는 스키마 2.3부터 있어 DSA의 문서(2.3)에 넣을 수 있다. dxgkrnl은 CPU로 잠근 호스트 GPU 메모리를 이 창으로 게스트에 매핑한다(아래). DSA의 VM은 메모리를 호스트 크기까지 늘리므로 시작을 고정하면 그 상한이 생긴다. 그래서 골격은 크기만 주고 위치는 HCS에 맡긴다. 그래도 되는지는 실기로 확인해야 한다.
+- **사용자 모드 라이브러리의 출처.** WSL은 GPU가 켜지면 9P로 세 폴더를 게스트에 읽기 전용으로 보인다. `%SystemRoot%\System32\DriverStore\FileRepository`(GPU 회사 드라이버 패키지, 리눅스용 사용자 모드 드라이버가 들어 있다), `%SystemRoot%\System32\lxss\lib`(있을 때만, 이 PC에서는 NVIDIA의 CUDA 라이브러리만 있다), WSL 설치 폴더의 `lib`(`libd3d12.so`, `libd3d12core.so`, `libdxcore.so`).
+  - WSL은 이 셋을 Microsoft 내부 NuGet 피드의 패키지에서 가져온다(`packages.config`의 `Microsoft.Direct3D.Linux` 1.611.1, `Microsoft.DXCore.Linux.amd64fre`/`arm64fre` 10.0.26100.1, `CMakeLists.txt`의 "Architecture-specific nuget packages from the OS repo"). 공개 NuGet에는 없다(nuget.org 404). WSL 원본(MIT)에는 이 바이너리의 원본이 없고, 설치 폴더의 `NOTICE.txt`에도 이것의 라이선스가 없다.
+
+### 게스트 커널
+
+- dxgkrnl은 WSL 커널 트리의 `drivers/hv/dxgkrnl`(GPL-2.0)에 있고, `config-wsl`과 `config-wsl-arm64` 모두 `CONFIG_DXGKRNL=y`다. DSA의 조각은 이것을 끄지 않으므로 **지금 배포되는 DSA 커널에도 이미 들어 있다.**
+- `Kconfig`: `tristate`, `HYPERV`와 64비트에 의존, `DMA_SHARED_BUFFER`와 `SYNC_FILE`을 고른다.
+- `dxgmodule.c`: 모듈이 시작할 때 `misc_register`로 `/dev/dxg`를 만든다. GPU와 상관없다. VMBus 채널 둘(`HV_GPUP_DXGK_GLOBAL_GUID`, `HV_GPUP_DXGK_VGPU_GUID`)과 가상 PCI 장치(`1414:008e` 렌더, `1414:008a` 연산 전용)에 붙는다. 호스트가 GPU를 할당하지 않으면 붙을 것이 없다.
+- 사용자 공간 인터페이스는 `include/uapi/misc/d3dkmthk.h`(GPL-2.0 WITH Linux-syscall-note)의 D3DKMT ioctl이다. 열린 헤더라 사용자 공간 코드가 직접 쓸 수 있다.
+- 결정: `dsa/kernel/dxg.config`가 `CONFIG_DXGKRNL=y`와 그 의존(VMBus, dma-buf, sync file, Hyper-V 가상 PCI)을 두 아키텍처에 고정한다. 업스트림이 바꾸면 빌드의 조각 검사가 멈춘다.
+
+### 게스트 사용자 공간: Mesa와 그 아래
+
+- **Mesa가 여는 것.** d3d12 Gallium 드라이버는 `util_dl_open("libd3d12.so")`로 D3D12 런타임을 열고(`d3d12_screen.cpp`), 리눅스에서는 `libdxcore.so`로 어댑터를 찾는다(`d3d12_dxcore_screen.cpp`). Dozen도 `libd3d12.so`를 연다(`dzn_device.c`). 이 둘이 없으면 두 드라이버 모두 장치를 내지 못한다. Mesa의 원본은 MIT이고, Mesa가 쓰는 DirectX-Headers도 MIT다. 그 아래의 런타임과 DXCore만 비공개다.
+- **런타임 아래.** D3D12 런타임은 다시 GPU 회사의 사용자 모드 드라이버를 연다. 이 PC의 드라이버 패키지에 그것이 있다: NVIDIA `nvsm.inf_amd64_*\libnvwgf2umx.so`, Intel `iigd_dch.inf_amd64_*\libigd12umd64.so`, `libigd12um64xe2.so` 등.
+- **ELF로 본 것.** 모두 x86_64(`e_machine` 62)이고 glibc를 요구한다.
+
+  | 파일 | `DT_NEEDED` |
+  |---|---|
+  | WSL `libd3d12.so` | `libc.so.6`, `libpthread.so.0`, `libm.so.6`, `libdl.so.2` |
+  | WSL `libd3d12core.so` | 위와 같고 `libdxcore.so` |
+  | WSL `libdxcore.so` | `libc.so.6`, `libpthread.so.0`, `libm.so.6`, `libdl.so.2` |
+  | NVIDIA `libnvwgf2umx.so` | 위와 같고 `librt.so.1` |
+  | Intel `libigd12umd64.so` | `libstdc++.so.6`, `libm.so.6`, `libgcc_s.so.1`, `libc.so.6` (`GLIBC_2.34`까지) |
+
+  안드로이드의 bionic은 `libc.so`, `libm.so`, `libdl.so`라는 이름이고 glibc의 기호 판을 주지 않는다. 그래서 이 파일들은 안드로이드 프로세스에 올라가지 않는다.
+- **WSA.** dxgkrnl 패치의 소개는 "WSL을 움직이고, 곧 WSA를 움직일" 드라이버라고 썼다([patch v2 00/24](https://patchew.org/linux/cover.1644025661.git.iourit@linux.microsoft.com/)). Microsoft는 WSA를 위해 Mesa의 EGL/GLES를 D3D12 준가상화 위에서 돌리는 패치를 냈다(Mesa MR !13532, "android: A few patches towards d3d12 support for Windows Subsystem for Android"). 페이지는 봇 차단으로 열지 못했다. WSA가 bionic용 런타임을 어떻게 얻었는지는 확인하지 못했다. 어느 쪽이든 WSA 이미지의 Microsoft 바이너리는 C1과 NFR-7이 금한다.
+- **열린 대체물.** 찾지 못했다. vkd3d와 vkd3d-proton은 반대 방향(D3D12를 Vulkan 위에)이다. D3DKMT ioctl은 열려 있지만, 그 위에서 GPU 회사의 사용자 모드 드라이버를 부르는 D3D12 런타임과 DDI를 새로 쓰는 것은 큰 일이고, 그래도 회사 드라이버는 비공개에 glibc다.
+
+### Mesa d3d12와 Dozen의 안드로이드 쪽 상태
+
+- **Dozen의 Vulkan 판.** `DZN_API_VERSION`은 1.2이고 `conformanceVersion`은 0.0.0.0(적합성 미통과)이다. `docs/features.txt`에서 `dzn`은 "Vulkan 1.0 -- all DONE"에만 있고 1.1, 1.2, 1.3 줄에는 없다. 1.3의 개별 확장 가운데 `VK_KHR_dynamic_rendering`, `VK_KHR_synchronization2`는 있고 `VK_KHR_maintenance4`는 없다. 안드로이드는 13 이상으로 출시하는 장치에 Vulkan 1.3을, 16 이상에 1.4를 요구한다([Implement Vulkan](https://source.android.com/docs/core/graphics/implement-vulkan)).
+- **안드로이드 창 시스템.** Dozen에는 `VK_ANDROID_native_buffer`(안드로이드 Vulkan 로더가 스왑체인에 쓰는 것)도, `VK_ANDROID_external_memory_android_hardware_buffer`도, `VK_EXT_external_memory_dma_buf`도 없다(`docs/features.txt`, `dzn_device.c`에 android 언급 없음). 외부 메모리는 Win32 핸들과 불투명 fd, D3D12 리소스와 힙 핸들뿐이다. 그래서 지금 Dozen은 안드로이드에서 창에 그리지 못하고, gralloc 버퍼를 가져오지 못한다.
+- **ANGLE on Dozen.** ANGLE의 안드로이드 Vulkan 백엔드는 gralloc 버퍼를 하드웨어 버퍼 확장으로 가져온다. 위 확장이 없으므로 ANGLE은 Dozen 위에서 창에 그리지 못한다고 본다(추론, 실기 미확인). 두 겹의 변환(GLES에서 Vulkan, Vulkan에서 D3D12)이기도 하다.
+- **d3d12의 OpenGL ES.** `docs/features.txt`에서 d3d12는 GLES 3.1까지이고 3.2 줄에는 없다. DSA는 앱과 Play에 GLES 3.2를 알린다(`OPENGLES_VERSION`). d3d12로 바꾸면 그 값을 내려야 하고, Play가 숨기는 앱이 생긴다. 또 PR-3은 모든 앱의 GLES를 ANGLE로 정했다. 그래서 골격에서 d3d12 GLES는 기본이 아니고 `androidboot.dsa.egl=dxg`로만 고른다.
+- **안드로이드 EGL과 gralloc.** WSA 패치의 설명(검색 결과의 인용)은 DRM 장치 없이 시작하려고 swrast 경로를 빌려 쓰고, 안드로이드에서는 `kms_swrast`만 되므로 VGEM을 쓴다고 했다. dxg로 그린 결과를 안드로이드 버퍼에 담으려면 dxg 할당으로 버퍼를 만드는 gralloc(AIDL allocator와 mapper)이 따로 있어야 한다. 지금 이미지의 minigbm은 vkms의 dumb 버퍼(공유 메모리)를 주므로 그대로는 GPU 메모리가 아니다.
+- **성능 보고.** Mesa 이슈 #4761("Gallium d3d12 backend performance is slow")이 있다. 내용은 열지 못했다.
+
+### 버퍼를 호스트 창에 복사 없이 올리기
+
+- GPU-PV에서 게스트의 할당은 처음부터 호스트 GPU 메모리에 있다. 남은 일은 그 리소스를 DSA 합성기(`dsa-wm`)가 열 수 있는 NT 핸들로 바꾸는 것이다.
+- dxgkrnl에는 그 요청이 있다. `LX_DXSHAREOBJECTWITHHOST`(`_IOWR(0x47, 0x44, struct d3dkmt_shareobjectwithhost)`)는 장치와 객체 핸들을 받아 전역 VMBus 채널로 `DXGK_VMBCOMMAND_SHAREOBJECTWITHHOST`를 보내고, 호스트가 준 `object_vail_nt_handle`을 돌려준다(`dxgvmbus.c`). 이름의 VAIL은 WSLg가 VM 경계 너머로 창을 보내는 방식이다. 그 밖에 `LX_DXSHAREOBJECTS`, `LX_DXOPENRESOURCEFROMNTHANDLE`, `LX_DXCREATESYNCFILE`, `LX_DXOPENSYNCOBJECTFROMNTHANDLE2`가 있다.
+- 돌려받은 핸들이 어느 호스트 프로세스의 핸들 표에 있는지(VM 작업자 프로세스로 보인다), 다른 프로세스가 어떻게 여는지는 원본에 없다. SYSTEM으로 도는 DSA 서비스가 그 프로세스에서 `DuplicateHandle`로 `dsa-wm`에 넘기고, `dsa-wm`이 `ID3D11Device1::OpenSharedResource1`로 여는 것이 가설이다. 지금 렌더러가 프레임을 넘기는 방식(`dsa_gfx_backend.h`의 D3D11 공유 NT 핸들 텍스처)과 같은 끝이 된다. 이 가설이 첫 실험이다.
+- WSLg의 2020년 발표는 D3D12 경로에서 스왑체인으로 GPU 복사 한 번이 남고, 복사가 없으려면 vGPU가 있어야 한다고 했다([XDC2020 X11 and Wayland applications in WSL](https://lpc.events/event/9/contributions/611/attachments/702/1298/XDC2020_-_X11_and_Wayland_applications_in_WSL.pdf)). 공유 메모리는 virtio-fs와 VAIL이다([WSLg Architecture](https://devblogs.microsoft.com/commandline/wslg-architecture/)).
+- 동기화: 게스트의 sync file과 호스트의 D3D11 펜스 사이를 잇는 방법도 확인해야 한다(`LX_DXCREATESYNCFILE`이 출발점).
+
+### gfxstream 원격과 비교한 기대
+
+측정은 없다. 아래는 원본으로 본 추론이다.
+
+- **호출마다의 직렬화가 없어진다.** 지금은 Vulkan 호출을 직렬화해 Hyper-V 소켓으로 보내고 호스트가 디코드해 실행한다. dxg에서는 게스트 사용자 모드 드라이버가 명령 버퍼를 만들고, 커널 경계(VMBus 메시지)는 제출과 할당 같은 D3DKMT 호출 때만 넘는다.
+- **CPU로 매핑한 메모리를 바로 쓴다.** gfxstream 경로는 Hyper-V가 호스트 GPU 메모리를 게스트에 매핑해 주지 않아 사본을 두고 맞춘다(DSA의 gfxstream 패치 0003, R26의 guest/mesa 0005와 0007). dxgkrnl은 `dxgvmb_send_lock2`가 받은 `cpu_visible_buffer_offset`을 `dxg_map_iospace`로 게스트의 높은 MMIO 창에 매핑한다(`io_remap_pfn_range`, 캐시하지 않으면 write-combine). 유니폼, 정점, 스테이징 버퍼를 자주 쓰는 3D 게임에서 차이가 가장 클 것이다.
+- **잃는 것.** Dozen은 SPIR-V를 DXIL로 바꾸고 Vulkan의 의미를 D3D12에 맞춰 흉내 낸다. ANGLE까지 두면 변환이 두 겹이다. 일반 앱은 지금보다 느려질 수도 있다. 게스트 쪽 셰이더 변환은 게스트 CPU와 메모리를 쓴다.
+- PR-3의 측정 기준(일반 앱 스크롤, GLES 게임, Vulkan 게임의 프레임 시간, CPU, 게스트와 호스트 메모리)으로 비교해야 판단할 수 있다.
+
+### 막는 것
+
+1. **라이선스: D3D12 런타임과 DXCore.** Microsoft의 비공개 바이너리다. C1(열린 소스만)과 NFR-7(모든 구성 요소의 소스 공개, Apache-2.0과 함께 배포 가능)에 따라 DSA가 실을 수 없다. 사용자 PC의 WSL 폴더에서 실행 때 읽게 하는 것(싣지 않음)은 배포가 아니지만, C1의 취지에 맞는지는 소유자가 정할 일이다. WSL이 없는 PC에는 그 파일도 없다.
+2. **라이선스: GPU 회사의 사용자 모드 드라이버.** 사용자 PC의 드라이버 패키지에 있고, 사용자가 설치한 Windows 드라이버의 일부다. DSA가 싣지 않고 실행 때 읽는 것이 WSL의 방식이다.
+3. **glibc와 bionic.** 위 다섯 파일이 모두 glibc용이라 안드로이드 프로세스에 올라가지 않는다. 길은 셋이다. (a) Microsoft와 회사가 bionic판을 내는 것(DSA가 어찌할 수 없다), (b) 게스트 안에 glibc로 도는 렌더 서버를 두고 앱이 그리로 보내는 것(다시 원격이지만 VM 경계는 넘지 않는다. CPU 매핑 이점은 서버 프로세스에만 남는다), (c) 한 프로세스에 두 libc를 올리는 것(TLS와 스레드가 충돌해 믿을 수 없다).
+4. **Dozen의 안드로이드 지원.** `VK_ANDROID_native_buffer`, 하드웨어 버퍼 확장, Vulkan 1.3이 없다. 적합성도 통과하지 않았다. 안드로이드의 창과 gralloc에 그리려면 Mesa에 그 부분을 새로 써야 한다.
+5. **gralloc.** dxg 할당으로 버퍼를 만들고 그 핸들을 호스트에 넘기는 allocator와 mapper가 없다.
+6. **호스트 쪽 핸들.** `object_vail_nt_handle`을 `dsa-wm`이 여는 방법이 문서에 없다.
+7. **GLES 3.2와 PR-3.** d3d12는 GLES 3.1까지이고, PR-3은 모든 앱의 GLES를 ANGLE로 정했다.
+
+### 결정
+
+- 이번 단계는 아무것도 바꾸지 않는 골격만 넣는다(브랜치 `feat/d4-dxg-path`).
+  - 호스트: `dsa-hostd`의 설정 파일 키 `gpu_paravirtualization`(기본 꺼짐). 켜면 VM 문서의 `HighMmioGapInMB`를 16384로 두고, 커널 명령줄에 `androidboot.dsa.gpu=dxg androidboot.dsa.vulkan=dxg`를 넣고, VM이 시작한 뒤 위의 `Mirror` 요청을 보낸다. 호스트가 거절하면 로그를 남기고 VM은 그대로 돈다.
+  - 커널: `dsa/kernel/dxg.config`(위).
+  - 이미지: `make-image.py --dxg-drivers <폴더>`(기본 없음). 폴더의 `vulkan.dxg.so`, `libEGL_dxg.so`, `libGLESv1_CM_dxg.so`, `libGLESv2_dxg.so`와 `lib/`의 라이브러리를 vendor에 같은 프로세스 HAL로 싣고, product `build.prop`이 `vulkan-${ro.boot.dsa.vulkan:-ranchu}.prop`과 `egl-${ro.boot.dsa.egl:-angle}.prop`을 가져온다. `/dev/dxg`는 `gpu_device`로 붙이고 `ueventd.rc`로 그래픽 클라이언트에 연다. glibc용 라이브러리와 D3D12 런타임, DXCore, GPU 회사 드라이버 이름의 파일은 거절한다. 그래서 지금 그 폴더로 만든 이미지는 장치를 얻지 못한다.
+- INTENT D4, PR-3, NFR-7은 바꾸지 않았다. 바꿀지는 소유자가 정한다.
+
+### 다음 단계(제안)
+
+1. 실기에서 GPU 할당만 시험한다: 설정을 켜고 부팅한 뒤 게스트 커널 로그에 dxgkrnl이 어댑터를 찾았는지, `/dev/dxg`에서 어댑터를 열거할 수 있는지(D3DKMT ioctl만 쓰는 작은 도구로). 거절되면 그 HRESULT. 높은 MMIO 창의 위치를 HCS에 맡겨도 되는지.
+2. 호스트 핸들 실험: 게스트에서 할당 하나를 `LX_DXSHAREOBJECTWITHHOST`로 넘기고, 돌려받은 값을 서비스가 VM 작업자 프로세스에서 복제해 `dsa-wm`이 D3D11로 열 수 있는지.
+3. 소유자 결정 두 가지: 사용자 PC에 있는 Microsoft와 GPU 회사 바이너리를 싣지 않고 실행 때 읽는 것을 C1 아래에서 허락하는지, 허락한다면 glibc 렌더 서버(3의 b)를 받아들이는지.
+4. 1과 2가 되면 Mesa 쪽 일을 잰다: Dozen의 `VK_ANDROID_native_buffer`와 하드웨어 버퍼, dxg gralloc. 그 전에는 Mesa를 이미지에 넣지 않는다.
+
+### 확인하지 못한 것
+
+- 실기 동작 전부: HCS가 DSA의 VM에 GPU를 붙이는지, 높은 MMIO 창 위치, 게스트의 어댑터 열거, 핸들 공유, 성능.
+- WSA가 bionic용 런타임을 어떻게 얻었는지, Mesa MR !13532와 이슈 #4761의 내용(gitlab.freedesktop.org의 봇 차단).
+- WSL `lib` 폴더의 세 라이브러리에 붙은 라이선스 조건. 설치 폴더에도 원본 저장소에도 문서가 없다.
+- arm64 호스트의 같은 파일들. 이 PC는 x86_64다.
+- GPU-PV 할당이 유휴 메모리 반환(NFR-2)에 주는 영향.

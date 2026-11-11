@@ -501,6 +501,27 @@ rendering on Intel(R) Arc(TM) Graphics (LUID 00000000:00019bec), the GPU asked f
 When nothing matches, the second line says that the renderer ranked the GPUs itself, and
 why.
 
+### Paravirtualized GPU (experimental, off)
+
+`"gpu_paravirtualization": true` in the service's configuration file gives each user's Android
+VM Hyper-V's paravirtualized GPU, the one WSL gives its VM (the guest kernel's `/dev/dxg`).
+It is off by default and no installation turns it on. It is the start of a second graphics
+path, in which drivers inside Android talk to the host GPU directly instead of through the
+renderer; that path is not usable yet, because no open source Direct3D 12 runtime for
+Android exists to put under them.
+
+With the setting on, the service:
+
+- makes the VM's high MMIO window 16 GiB, where the guest maps the host GPU memory it
+  writes with the CPU;
+- puts `androidboot.dsa.gpu=dxg androidboot.dsa.vulkan=dxg` on the kernel command line;
+- asks HCS, once the VM runs, to give it every GPU of the computer (`Mirror`, as WSL does).
+  A display driver without GPU paravirtualization (WDDM 2.9 or later) refuses, the service
+  logs why, and Android runs as before.
+
+An image built without the dxg drivers ignores the boot arguments, so Android keeps rendering
+through `dsa-wm`.
+
 `dsa launch <package>` starts an app in a window of its own, and `dsa tasks` lists the
 tasks that have one.
 

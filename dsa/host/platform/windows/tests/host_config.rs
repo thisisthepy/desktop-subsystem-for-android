@@ -794,3 +794,23 @@ fn fr15_an_upgrade_from_before_the_channels_reads_the_lists_of_both_channels() {
         ReleaseChannel::Stable
     );
 }
+
+#[test]
+fn pr3_gpu_paravirtualization_is_off_unless_the_file_turns_it_on() {
+    let sid = "S-1-5-21-1-2-3-1001";
+    let config = HostConfig::parse(MINIMAL).unwrap();
+    assert!(!config.gpu_paravirtualization);
+    assert!(!config.vm_config(Some(sid)).unwrap().gpu_paravirtualization);
+    let example = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("dsa-hostd.example.json");
+    let example = HostConfig::parse(&std::fs::read_to_string(example).unwrap()).unwrap();
+    assert!(
+        !example.gpu_paravirtualization,
+        "no installation turns it on"
+    );
+    let json = MINIMAL.replace("\n}", ",\n  \"gpu_paravirtualization\": true\n}");
+    let config = HostConfig::parse(&json).unwrap();
+    assert!(config.gpu_paravirtualization);
+    assert!(config.vm_config(Some(sid)).unwrap().gpu_paravirtualization);
+    let user = config.user_vm_with(sid, &profiles).unwrap();
+    assert!(user.config.gpu_paravirtualization);
+}
