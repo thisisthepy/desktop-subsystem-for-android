@@ -18,9 +18,20 @@
 # what stays in zram again during the idle reclaim (dsa-channeld.rc), about a fifth smaller. It
 # must be named before swapon_all sizes the device; a kernel without multi-compression refuses
 # the write, and zram then keeps LZ4 alone.
+#
+# What stays cold in zram for long goes on to its backing file on the data disk (fstab.dsa),
+# which costs the host disk space instead of memory. Writing wears the user's disk, so zram
+# writes nothing until dsa-channeld hands it a budget: with the limit on and no budget, a
+# writeback writes nothing. The daemon writes back only while no app is open, only pages no one
+# has used for vendor.dsa.memory.writeback_age seconds, and within a daily budget
+# (dsa-channeld.rc). The boot can set both times (androidboot.dsa.zram_writeback_after and
+# androidboot.dsa.zram_writeback_age), for a check that cannot wait for the defaults.
 on boot
     write /sys/devices/virtual/block/zram0/recomp_algorithm "algo=zstd priority=1"
     swapon_all /vendor/etc/fstab.dsa
+    write /sys/devices/virtual/block/zram0/writeback_limit_enable 1
+    setprop vendor.dsa.memory.writeback_after ${ro.boot.dsa.zram_writeback_after:-600}
+    setprop vendor.dsa.memory.writeback_age ${ro.boot.dsa.zram_writeback_age:-1800}
     write /proc/sys/vm/swappiness 100
     write /proc/sys/vm/page-cluster 0
     write /proc/sys/vm/compaction_proactiveness 40

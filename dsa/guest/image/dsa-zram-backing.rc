@@ -1,0 +1,14 @@
+# zram's backing file. fs_mgr makes /data/per_boot/zram_swap when swapon_all turns the swap
+# on (fstab.dsa's zram_backingdev_size, dsa-memory.rc), but only in a folder that exists, and
+# this Android makes none. The folder has a type of its own (memory.cil), which init may write
+# and the kernel's loop driver may read and write, and nothing else may open.
+#
+# What zram wrote there is for this boot only. The file of the last boot goes first, so no page
+# of it outlives the boot it was swapped out in, and fs_mgr allocates a fresh one.
+#
+# A system script, because only init itself may make a folder at the top of /data; init's
+# vendor scripts run as vendor_init, which may not.
+on post-fs-data
+    mkdir /data/per_boot 0700 root root
+    restorecon_recursive /data/per_boot
+    rm /data/per_boot/zram_swap

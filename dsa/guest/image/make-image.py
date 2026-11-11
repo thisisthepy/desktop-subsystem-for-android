@@ -3099,10 +3099,14 @@ TRACE_RC = "SYSTEM/etc/init/dsa-trace.rc"
 # a panic. A system script, because only init itself may write the kernel's printk levels.
 CONSOLE_RC = "SYSTEM/etc/init/dsa-console.rc"
 SU_GUARD_RC = "SYSTEM/etc/init/dsa-su-guard.rc"
+# Makes the folder for zram's backing file (fstab.dsa) and removes the last boot's file. A
+# system script, because only init itself may make a folder at the top of /data.
+ZRAM_BACKING_RC = "SYSTEM/etc/init/dsa-zram-backing.rc"
 SYSTEM_FS_CONFIG = "META/filesystem_config.txt"
 TRACE_FS_CONFIG = [
     "system/etc/init/dsa-trace.rc 0 0 644 capabilities=0x0",
     "system/etc/init/dsa-console.rc 0 0 644 capabilities=0x0",
+    "system/etc/init/dsa-zram-backing.rc 0 0 644 capabilities=0x0",
 ]
 # ARM app translation. The host puts androidboot.dsa.arm_translation=on in the boot's
 # bootconfig while the user has a translation package installed (`dsa arm-translation
@@ -3858,6 +3862,23 @@ TRIM_PROPERTY_CONTEXT = f"{TRIM_PROPERTY} u:object_r:dsa_memory_prop:s0 exact bo
 # How many MiB the next gradual trim takes; the daemon sets it before the trim property.
 TRIM_SIZE_PROPERTY = "vendor.dsa.memory.trim_size"
 TRIM_SIZE_PROPERTY_CONTEXT = f"{TRIM_SIZE_PROPERTY} u:object_r:dsa_memory_prop:s0 exact int"
+# The zram writeback (dsa-channeld.rc): the daemon sets the budget of the run, in 4 KiB pages,
+# and then the property init acts on. init sets how long no app must be open before a
+# writeback and how long a page must go unused before it is written (dsa-memory.rc), from the
+# boot's androidboot values or the defaults, and the daemon reads them. The daemon keeps what it
+# wrote today in the persistent property, so a restart of Android does not start a new day's
+# budget.
+WRITEBACK_PROPERTY_CONTEXTS = {
+    "vendor.dsa.memory.writeback": "vendor.dsa.memory.writeback u:object_r:dsa_memory_prop:s0 exact bool",
+    "vendor.dsa.memory.writeback_pages":
+        "vendor.dsa.memory.writeback_pages u:object_r:dsa_memory_prop:s0 exact int",
+    "vendor.dsa.memory.writeback_after":
+        "vendor.dsa.memory.writeback_after u:object_r:dsa_memory_prop:s0 exact int",
+    "vendor.dsa.memory.writeback_age":
+        "vendor.dsa.memory.writeback_age u:object_r:dsa_memory_prop:s0 exact int",
+    "persist.vendor.dsa.memory.writeback_day":
+        "persist.vendor.dsa.memory.writeback_day u:object_r:dsa_memory_prop:s0 exact string",
+}
 # init sets this when Android has finished booting, and the daemon tells the host.
 BOOT_PROPERTY = "vendor.dsa.boot_completed"
 BOOT_PROPERTY_CONTEXT = f"{BOOT_PROPERTY} u:object_r:dsa_boot_prop:s0 exact bool"
@@ -3890,6 +3911,11 @@ PLAT_FILE_CONTEXTS = "SYSTEM/etc/selinux/plat_file_contexts"
 SU_CLIENT_BINARY = "SYSTEM/bin/su"
 SU_CLIENT_PATH = "/system/bin/su"
 SU_CLIENT_CONTEXT = f"{SU_CLIENT_PATH} u:object_r:dsa_su_exec:s0"
+# zram's backing file, /data/per_boot/zram_swap (fstab.dsa), and its folder, which
+# dsa-zram-backing.rc makes. A type of its own (memory.cil), so the loop driver may read and
+# write it and nothing else may open it. memory.cil is in every image, so the label is too.
+ZRAM_BACKING_PATH = "/data/per_boot(/.*)?"
+ZRAM_BACKING_CONTEXT = f"{ZRAM_BACKING_PATH} u:object_r:dsa_zram_backing_file:s0"
 # The userdebug target_files build ships AOSP's own setuid su at /system/xbin/su (mode 04750,
 # root:shell). Even when the kernel's su guard hides its inode in LSM hooks, generic VFS
 # permission checks run DAC (generic_permission) before security_inode_permission, so an
@@ -4475,6 +4501,9 @@ def update_vendor_property_contexts(text):
         lines.append(TRIM_PROPERTY_CONTEXT)
     if not any(line.split()[:1] == [TRIM_SIZE_PROPERTY] for line in lines):
         lines.append(TRIM_SIZE_PROPERTY_CONTEXT)
+    for name, context in WRITEBACK_PROPERTY_CONTEXTS.items():
+        if not any(line.split()[:1] == [name] for line in lines):
+            lines.append(context)
     if not any(line.split()[:1] == [BOOT_PROPERTY] for line in lines):
         lines.append(BOOT_PROPERTY_CONTEXT)
     if not any(line.split()[:1] == [ADB_PROPERTY] for line in lines):
@@ -4490,6 +4519,14 @@ def update_vendor_property_contexts(text):
     for name, context in GAPPS_COMPILE_PROPERTY_CONTEXTS.items():
         if not any(line.split()[:1] == [name] for line in lines):
             lines.append(context)
+    return "\n".join(lines) + "\n"
+
+
+def with_zram_backing_context(fc_text):
+    """Labels zram's backing folder (ZRAM_BACKING_CONTEXT) in plat_file_contexts. A line the
+    build already has for the same path goes: a second specification for it would conflict."""
+    lines = [line for line in fc_text.splitlines() if line.split()[:1] != [ZRAM_BACKING_PATH]]
+    lines.append(ZRAM_BACKING_CONTEXT)
     return "\n".join(lines) + "\n"
 
 
@@ -5280,6 +5317,8 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
         file_contexts = []
         for name in PARTITION_FILE_CONTEXTS:
             text = zin.read(name).decode() if name in names else ""
+            if name == PLAT_FILE_CONTEXTS:
+                text = with_zram_backing_context(text)
             if name == PLAT_FILE_CONTEXTS and channeld_payload is not None:
                 text = update_plat_file_contexts(text)
             if name == "VENDOR/etc/selinux/vendor_file_contexts":
@@ -5437,8 +5476,11 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                         for overlay_name in design_payloads:
                             text = add_filesystem_config(text, overlay_fs_config(overlay_name))
                     data = text.encode()
-                elif name == PLAT_FILE_CONTEXTS and channeld_payload is not None:
-                    data = update_plat_file_contexts(data.decode()).encode()
+                elif name == PLAT_FILE_CONTEXTS:
+                    text = with_zram_backing_context(data.decode())
+                    if channeld_payload is not None:
+                        text = update_plat_file_contexts(text)
+                    data = text.encode()
                 elif name in ("VENDOR/etc/selinux/vendor_file_contexts", "META/vendor_file_contexts"):
                     data = update_vendor_file_contexts(data.decode(), channeld_payload is not None,
                                                        has_hwcomposer, has_power, codec2=has_codec2,
@@ -5461,6 +5503,7 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
         zout.writestr(DISPLAY_RC, (HERE / "dsa-display.rc").read_bytes())
         zout.writestr(TRACE_RC, (HERE / "dsa-trace.rc").read_bytes())
         zout.writestr(CONSOLE_RC, (HERE / "dsa-console.rc").read_bytes())
+        zout.writestr(ZRAM_BACKING_RC, (HERE / "dsa-zram-backing.rc").read_bytes())
         zout.writestr(ARM_TRANSLATION_RC, (HERE / "dsa-arm-translation.rc").read_bytes())
         for target, source_file in ARM_TRANSLATION_PROPS.items():
             zout.writestr(target, source_file.read_bytes())

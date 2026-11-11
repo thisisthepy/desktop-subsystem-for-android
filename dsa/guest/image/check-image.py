@@ -252,6 +252,15 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
     problems += make_image.prebuilt_oat_problems(z)
     if "VENDOR/etc/fstab.dsa" not in names:
         problems.append("the Hyper-V mount table is missing")
+    elif b"zram_backingdev_size=" not in z.read("VENDOR/etc/fstab.dsa"):
+        problems.append("the mount table gives zram no backing file, so its cold pages stay in memory")
+    # fs_mgr makes zram's backing file only in a folder that exists, which this script makes.
+    if make_image.ZRAM_BACKING_RC not in names:
+        problems.append(f"{make_image.ZRAM_BACKING_RC} is missing, so zram starts without its backing file")
+    plat_contexts = "SYSTEM/etc/selinux/plat_file_contexts"
+    if plat_contexts in names and make_image.ZRAM_BACKING_CONTEXT not in z.read(plat_contexts).decode().splitlines():
+        problems.append("plat_file_contexts does not label zram's backing folder, so the loop driver "
+                        "may not read or write the file")
     if "SYSTEM/etc/selinux/plat_sepolicy.cil" not in names:
         problems.append("plat_sepolicy.cil is missing from the image")
     else:
