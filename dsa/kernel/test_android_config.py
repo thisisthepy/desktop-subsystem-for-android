@@ -141,6 +141,55 @@ class AndroidKernelConfigTests(unittest.TestCase):
         self.assertIn("CONFIG_LRU_GEN=y", config)
         self.assertIn("CONFIG_LRU_GEN_ENABLED=y", config)
 
+    def test_nfr1_the_slab_caches_can_be_read_one_by_one(self):
+        # Without SLUB's debugging support there is no /proc/slabinfo, and the guest's
+        # unreclaimable slab is one sum the memory measurement cannot break down. The support
+        # stays idle: nothing turns its checks on.
+        lines = fragment_lines(CONFIG)
+        self.assertIn("CONFIG_SLUB_DEBUG=y", lines)
+        self.assertIn("# CONFIG_SLUB_DEBUG_ON is not set", lines)
+
+    def test_nfr1_a_read_only_ext4_mount_keeps_no_conversion_thread(self):
+        # Android mounts every APEX package as a read-only ext4 image (about 75 with Google
+        # Play), and each mount kept a rescuer thread for a conversion workqueue it can never
+        # use. The patch makes the workqueue only for a mount that can write, or when one is
+        # remounted read-write, and guards every other use of it.
+        patch = (PATCHES / "ext4-rsv-conversion-read-only.patch").read_text()
+        self.assertIn("+++ b/fs/ext4/super.c", patch)
+        self.assertIn("+++ b/fs/ext4/page-io.c", patch)
+        self.assertIn("+\tif (!sb_rdonly(sb) || !bdev_read_only(sb->s_bdev)) {", patch)
+        self.assertIn("+static int ext4_alloc_rsv_conversion_wq(struct super_block *sb)", patch)
+        # Remounting read-write makes it before the file system may write.
+        self.assertIn("+\t\t\tif (!sbi->rsv_conversion_wq) {", patch)
+        # Unmounting, syncing and a write's completion each cope with a mount without one.
+        self.assertIn("+\tif (sbi->rsv_conversion_wq)\n+\t\tdestroy_workqueue(sbi->rsv_conversion_wq);", patch)
+        self.assertIn("+\tif (sbi->rsv_conversion_wq)\n+\t\tflush_workqueue(sbi->rsv_conversion_wq);", patch)
+        self.assertIn("+\tif (WARN_ON_ONCE(!wq))\n+\t\twq = system_unbound_wq;", patch)
+
+    def test_nfr1_the_ext4_patch_hunks_count_their_lines(self):
+        # git apply refuses a hunk whose header miscounts its lines.
+        header = re.compile(r"^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@")
+        old_left = new_left = 0
+        current = None
+        for line in (PATCHES / "ext4-rsv-conversion-read-only.patch").read_text().splitlines():
+            match = header.match(line)
+            if match:
+                self.assertEqual((old_left, new_left), (0, 0), current)
+                current = line
+                old_left = int(match.group(1) or 1)
+                new_left = int(match.group(2) or 1)
+                continue
+            if old_left == 0 and new_left == 0:
+                continue
+            if line.startswith("+"):
+                new_left -= 1
+            elif line.startswith("-"):
+                old_left -= 1
+            else:
+                old_left -= 1
+                new_left -= 1
+        self.assertEqual((old_left, new_left), (0, 0), current)
+
     def test_pr6_the_kernel_reads_the_bootconfig_that_carries_the_boot_secret(self):
         # Without it the kernel ignores the bootconfig the host appends to the initrd, the
         # guest's control daemon finds no secret, and the session never becomes active.
