@@ -2400,3 +2400,72 @@ FR-4의 프레임 규칙(창은 앱이 그 크기로 그린 프레임과 함께�
 - 실제로 프레임마다 몇 MiB를 다시 읽었는지. 0005 뒤의 읽어 오기에는 추적 줄이 없었다. 이제 위의 줄이 남긴다.
 - 렌더러의 해시 비용. 조각마다 호스트가 매핑을 읽어 해시하므로, 매핑이 아주 큰 앱(수백 MiB)에서는 펜스마다 수십 ms가 될 수 있다. 그때는 제출이 없었던 장치의 조각을 건너뛰는 것이 다음 단계다.
 - 다른 GPU. 읽어 오는 형식은 HOST_CACHED뿐이므로 렌더러는 캐시되는 메모리만 읽는다. 다른 메모리 형식 구성을 가진 GPU에서는 재 보지 않았다.
+
+## R30. 읽기 전용 시스템 이미지를 게스트가 캐시하지 않고 호스트에서 매핑하기: 가상 영구 메모리와 DAX (NFR-1, NFR-2)
+
+**질문.** 게스트는 읽기 전용 파티션(system, system_ext, product, vendor, 추가 기능 erofs 이미지)을 자기 페이지 캐시에 읽어 두고, Windows는 같은 이미지 파일을 자기 파일 캐시에 둔다. 같은 바이트가 두 벌이고, 게스트 쪽 벌은 VM이 잡는 메모리다(소유자 PC에서 약 200 MiB, R26의 페이지 캐시 214-741 MiB 가운데 일부). 읽기 전용 디스크를 Hyper-V 가상 영구 메모리(vPMEM)로 붙이고 게스트가 DAX로 마운트하면 게스트 캐시 없이 호스트의 매핑에서 바로 읽는가. 무엇이 필요하고, 무엇을 잃고, 얼마나 주는가.
+
+**기준.** 이 조사에서 빌드하거나 실행하지 않았다. 설치된 DSA와 바탕 화면은 건드리지 않았다. 읽은 것은 아래 원본과 소유자 PC의 파일 크기다.
+
+| 자료 | 버전 |
+|---|---|
+| HCS 스키마 참조(`VirtualPMemController`, `VirtualPMemDevice`, `VirtualPMemMapping`, `VirtualPMemBackingType`, `VirtualPMemImageFormat`) | learn.microsoft.com, 2026-11-11에 읽음 |
+| hcsshim `internal/hcs/schema2/virtual_p_mem_*.go`, `internal/uvm/create_lcow.go`, `internal/vm/vmutils/constants.go`, `internal/guest/storage/pmem/pmem.go` | `main`, 2026-11-11 |
+| WSL 커널 `Microsoft/config-wsl`(= `arch/x86/configs/config-wsl`), `arch/arm64/configs/config-wsl-arm64`, `drivers/acpi/nfit/core.c`, `drivers/nvdimm/{pmem.c,namespace_devs.c,pfn_devs.c,virtio_pmem.c,nd_virtio.c}`, `drivers/dax/super.c`, `drivers/md/dm-verity-target.c`, `fs/erofs/{inode.c,super.c}` | `linux-msft-wsl-6.18.54.1`(erofs, dax, dm는 같은 6.18 원본) |
+| crosvm `src/crosvm/cmdline.rs`, `devices/device_virtio_pmem/src/lib.rs`, `Cargo.toml` | `b1aa4d87`(`versions.env`의 고정 리비전) |
+| AOSP `build/make/tools/releasetools/build_image.py` | `main`, 2026-11-11 |
+| Cuttlefish `aosp_cf_x86_64_only_phone-target_files-15581820.zip`의 `META/misc_info.txt`, `IMAGES/`, 파일 목록 | Android 16, 소유자 PC의 `.scratch/aosp-inputs` |
+| 소유자 PC의 이미지 `C:\ProgramData\DSA\images\images\17.0.0-16373615-13\system.vhdx` | 크기만 읽음 |
+
+### Windows: HCS의 가상 영구 메모리
+
+1. 스키마. `VirtualMachine.Devices.VirtualPMem`은 `VirtualPMemController`다: `Devices`(번호에서 `VirtualPMemDevice`로, 2.0), `MaximumCount`(uint8, 2.0. 0이 아니면 `HostPath` 없는 빈 장치를 그 수까지 더한다), `MaximumSizeBytes`(2.0. 빈 장치의 크기, 없으면 512 MB), `Backing`(`Virtual` 또는 `Physical`, 2.1). 장치는 `HostPath`, `ReadOnly`, `ImageFormat`(`Vhdx` 또는 `Vhd1`, 2.0), `SizeBytes`와 `Mappings`(2.2, 한 장치에 여러 파일을 겹쳐 놓는 기능)를 가진다. 스키마 2.0과 2.1은 Windows 10 1809 SDK부터이므로 DSA가 쓰는 2.3 문서와 Windows 11 클라이언트에서 쓸 수 있는 필드다.
+2. Microsoft 자신의 쓰임새(hcsshim, 리눅스 컨테이너용 유틸리티 VM). 루트 파일 시스템을 `root=/dev/pmem0`으로 부팅하고, 장치 0을 `HostPath` = rootfs.vhd, `ReadOnly: true`, `ImageFormat: "Vhd1"`(확장자가 vhdx일 때만 `Vhdx`)로 둔다. 기본 장치 수는 64(최대 128), 기본 크기는 4 GiB이고 `Backing`은 정하지 않는다. arm64에서는 장치 수를 0으로 해서 vPMEM을 쓰지 않는다. 게스트 쪽(`pmem.go`)은 ext4를 `MS_RDONLY`, `noload`로 마운트하고 DAX를 쓰지 않으며, dm-linear와 dm-verity를 pmem 위에 둔다. 곧 Microsoft는 vPMEM을 계층 공유에 쓰고, DAX는 쓰지 않는다. DSA가 DAX로 쓰는 것은 Microsoft가 보여 준 적 없는 조합이다.
+3. 형식. vPMEM은 파일을 VM 주소 공간에 그대로 매핑하므로 평면 이미지가 필요하다. `Vhd1`(고정 VHD: 디스크 바이트 뒤 512바이트 꼬리말)은 hcsshim이 쓰는 형식이다. 이미지의 `system.vhdx`는 동적 VHDX라 그대로 쓸 수 없다. 사용자의 `addons.vhd`는 이미 고정 VHD다.
+4. 크기 정렬. 스키마에는 정렬 규칙이 적혀 있지 않다. 게스트 쪽에서는 리눅스가 영구 메모리를 2 MiB 단위(subsection)로 매핑하고, 영역의 시작이나 크기가 그 단위가 아니면 페이지 구조를 만들지 못해 DAX가 꺼진다(`devm_memremap_pages`의 범위 검사, `nd_pfn_validate`의 `memremap_compat_align`). 그래서 디스크를 2 MiB 배수로 만든다.
+5. Windows가 매핑한 페이지를 세는 방법. `Backing: "Virtual"`은 파일을 매핑한 것이고 `Physical`은 VM 메모리로 채운 것이라는 이름이지만, 문서에 설명이 없다. 매핑한 페이지는 깨끗한 파일 페이지이므로 vmmem 작업 집합에 들어와도 Windows가 대기 목록으로 내려 다시 읽을 수 있을 것으로 본다. 여러 사용자의 VM이 같은 이미지를 열면 한 벌을 나눠 쓸 것이다. 둘 다 확인하지 못했다(아래).
+
+### 게스트 커널
+
+1. WSL 설정에 이미 있는 것: `LIBNVDIMM=y`, `BLK_DEV_PMEM=y`(arm64는 `m`), `VIRTIO_PMEM=y`, `DAX=y`, `FS_DAX=y`, `FS_DAX_PMD=y`, `ZONE_DEVICE=y`, `MEMORY_HOTREMOVE=y`, `SPARSEMEM_VMEMMAP=y`, `ND_PFN=y`. 없는 것: `ACPI_NFIT`(Hyper-V vPMEM을 알리는 ACPI 표의 드라이버)이 두 아키텍처 모두 `m`이다. 이미지는 모듈을 싣지 않으므로 `android.config`에 `ACPI_NFIT=y`, `BLK_DEV_PMEM=y` 등을 적었다.
+2. 원시 이름 공간의 DAX. `pmem.c`는 pfn 장치이거나 `pmem_should_map_pages()`가 참일 때만 블록 장치에 DAX를 준다. 그 함수는 영역에 `ND_REGION_PAGEMAP`이 있어야 참인데, `virtio_pmem.c`는 이 표시를 붙이고 `acpi/nfit/core.c`는 붙이지 않는다. 그래서 Hyper-V의 원시 이름 공간은 그대로는 DAX가 없다. 다른 길인 pfn 정보 블록(`NVDIMM_PFN_INFO`, 이름 공간 4 KiB 지점)은 장치에 써야 만들어진다(`nd_pfn_init`은 읽기 전용 영역이면 `-ENXIO`). 여러 VM이 나눠 쓰는 읽기 전용 이미지에는 쓸 수 없다. 그래서 패치(`pmem-dax.patch`)가 NFIT의 PM 영역에 `ND_REGION_PAGEMAP`을 붙인다. 이때 페이지 구조(4 KiB마다 64바이트, 1.56%)는 게스트 메모리에 놓인다.
+3. by-name 링크. Android의 첫 단계 init과 ueventd는 부팅 장치 아래의 디스크에만 `/dev/block/by-name` 링크를 만들고, 디스크의 부팅 장치는 경로를 거슬러 처음 만나는 플랫폼 장치(또는 PCI 슬롯)로 정한다. NFIT의 NVDIMM 버스는 ACPI 장치 아래라 링크가 없다(VMBus가 그랬다, `vmbus-platform-device.patch`). virtio-pmem은 PCI 아래지만 crosvm이 pmem 장치의 슬롯을 스스로 고르고(`--pmem`에 `pci-address`가 없다), 정할 수 없는 슬롯을 부팅 장치로 적을 수 없다. 그래서 같은 패치가 두 버스를 각각 플랫폼 장치 `nfit`, `virtio-pmem` 아래에 둔다. NFIT의 DSM 호출과 알림은 계속 `acpi_desc->dev`(ACPI 장치)로 가고, virtio-pmem의 플러시는 영역의 `provider_data`(virtio 장치)로 가므로 부모를 바꿔도 깨지지 않는다.
+4. erofs의 DAX(6.18). `dax`, `dax=always`, `dax=never` 마운트 옵션이 있고, 블록 크기가 페이지 크기여야 하며("unsupported blocksize for DAX"), 장치가 DAX를 못 하면 "DAX unsupported by block device. Turning off DAX."를 남기고 옵션을 지운 채 마운트한다. 파일마다는 `S_ISREG`이고 배치가 `EROFS_INODE_FLAT_PLAIN` 또는 `EROFS_INODE_CHUNK_BASED`일 때만 DAX다. 압축한 파일과 마지막 블록을 inode에 넣은 파일(FLAT_INLINE)은 이전처럼 캐시된다. 파일 기반 마운트(R26의 add-on 이미지)는 DAX 장치를 얻지 않는다.
+5. device-mapper. dm-linear는 DAX를 통과시키고(`linear_dax_direct_access`, 파티션 시작을 더한다), dm-verity는 `direct_access`가 없다. 논리 파티션(super 안의 system 등)은 dm-linear만 두면 DAX가 되고, dm-verity를 두면 안 된다. `fs_dax_get_by_bdev`는 파티션의 시작과 크기가 페이지 배수가 아니면 "unaligned partition for dax"로 거절한다. sgdisk는 1 MiB, liblp는 1 MiB로 정렬하므로 맞는다.
+
+### Android의 마운트 표와 검증
+
+1. 마운트 표는 `androidboot.fstab_suffix`로 고른다. 첫 단계는 bootconfig, 그다음 커널 명령줄에서 읽지만, 두 번째 단계와 ueventd는 `ro.boot.*` 속성을 읽고 그 속성은 명령줄이 먼저 정한다(읽기 전용 속성이라 처음 값이 남는다). 그래서 호스트는 bootconfig에 더하지 않고 명령줄의 `androidboot.fstab_suffix`와 `androidboot.boot_devices`를 그 자리에서 바꾼다.
+2. 이미지는 `fstab.dsa`에서 `fstab.dsa_dax`를 만든다. 논리 파티션 항목만 바뀐다: 마운트 옵션에 `dax=always`, fs_mgr 플래그에서 `avb`, `avb=...`, `avb_keys=...`를 뺀다. `/data`, `/metadata`, misc, zram, boot 계열의 검증 항목은 그대로다. 그래서 부팅이 vbmeta와 boot, init_boot, vendor_boot의 해시를 이전처럼 확인하고 스스로에 대해 알리는 값(`ro.boot.avb_version` 등)이 같다.
+3. 검증. DAX와 dm-verity는 함께 쓸 수 없다. erofs에는 fs-verity가 없다. 그래서 이 방식에서는 시스템 파티션의 블록 검증을 게스트가 하지 않고 호스트가 맡는다: 디스크는 서비스가 서명된 목록의 SHA-256으로 확인한 `system.vhdx`에서 서비스(SYSTEM)가 만든 사본이고, SYSTEM과 관리자만 쓸 수 있는 이미지 저장소에 있으며, VM에 읽기 전용으로 붙는다. 부팅은 이미 `verifiedbootstate=orange`, `device_state=unlocked`이므로 부팅 상태가 바뀌지 않는다. 잃는 것은 호스트 파일이 부팅 뒤 바뀌었을 때 게스트가 그것을 알아차리는 것이다. 이 설정을 기본으로 켜기 전에 소유자가 이 맞바꿈을 정해야 한다.
+
+### 이미지의 압축
+
+1. 공개 빌드(Android 16 `15581820`)의 `misc_info.txt`: `erofs_default_compressor=lz4hc,9`, `erofs_default_compress_hints`는 `0 .*\.apex$`(APEX만 압축하지 않음). 이미지 크기는 system 729 MB, system_ext 257 MB, product 250 MB, vendor 304 MB(합 약 1.55 GB)이고, 같은 파티션의 파일은 압축 전 959, 347, 364, 297 MiB(합 약 1.98 GiB)다. 곧 지금의 이미지에서는 APEX 말고는 DAX가 되지 않는다.
+2. `make-image.py --uncompressed-erofs`는 `misc_info.txt`에서 압축기를 `none`으로, 압축 힌트와 파티션별 압축기, pcluster 크기를 빼고, `erofs_share_dup_blocks`(`build_image.py`에서 `--chunksize 4096`)를 켠다. 4 KiB 청크 배치는 FLAT_INLINE을 피하고(erofs가 DAX로 매핑하는 배치) 같은 블록을 한 번만 저장한다.
+3. 막는 것: 소유자 PC의 `system.vhdx`(Android 17, 압축)는 1,803,550,720바이트다. 압축을 풀면 약 0.4 GiB가 늘어(위 비율, DSA가 앱을 빼고 odex를 더하는 몫은 재지 않았다) 2.2 GB 안팎이 되고, GitHub 릴리스 자산 하나의 한도(2 GiB)를 넘을 것으로 본다. 그래서 공개 이미지는 지금처럼 압축하고, 압축하지 않은 이미지는 Image test가 측정에만 만든다. 공개하려면 릴리스가 큰 파일을 나눠 싣거나(서명된 목록과 내려받기 코드 변경) 압축해 전달해야 한다. 소유자가 정할 일이다.
+
+### 다른 호스트
+
+- Linux(crosvm). `--pmem path=...,ro=true`. crosvm은 파일을 읽기 전용으로 매핑하고, 크기를 2 MiB 배수로 맞춘 매핑 영역을 만들어 끝을 익명 메모리로 채운다. 원시 `system.img`와 `addons.img`를 그대로 붙인다.
+- macOS(Virtualization.framework). virtio-pmem이나 DAX 창(virtiofs의 공유 메모리 영역)에 해당하는 장치가 없다. 블록 장치로 남는다.
+
+### 바꾼 것
+
+- 커널: `android.config`에 영구 메모리와 DAX 설정, `patches/pmem-dax.patch`(NFIT 영역의 `ND_REGION_PAGEMAP`, NFIT와 virtio-pmem 버스의 플랫폼 부모). 시험 `test_nfr1_the_system_images_can_be_mapped_from_persistent_memory_with_dax`, `test_nfr1_the_pmem_patch_hunks_count_their_lines`.
+- 이미지: 모든 이미지에 `fstab.dsa_dax`(파티션과 첫 단계 램디스크), `image.json`의 `"direct_mapped": {"fstab_suffix", "uncompressed_erofs"}`, 시스템 디스크를 2 MiB 배수로, `--uncompressed-erofs`, `check-image.py`의 확인. Google 앱과 번역기 스크립트에 `gapps_image=dax`, `arm_translation_image=dax`일 때 각 이미지의 파티션에서 `dax=always`로 마운트하는 동작. 시험 `test_nfr1_*`(make-image).
+- 추가 기능 디스크(호스트 공통): 각 이미지의 바이트를 덮는 GPT 파티션 `dsa_gapps`, `dsa_arm_translation`을 erofs 파티션 안에 겹쳐 둔다(리눅스 GPT 파서는 겹침을 막지 않는다). 디스크 크기를 2 MiB 배수로. 보통 부팅은 이전처럼 파일에서 마운트하고 새 파티션을 쓰지 않는다. 이전 DSA의 디스크는 이 모드로 처음 부팅할 때 다시 쓴다.
+- 호스트: 설정 `direct_mapped_images`(기본 꺼짐, Windows `dsa-hostd.json`, Linux 설정 파일). Windows는 x86_64에서만, 이미지가 이 모드의 표를 가질 때만, 첫 부팅에 `CreateVirtualDisk`(원본 VHDX, `CREATE_VIRTUAL_DISK_FLAG_FULL_PHYSICAL_ALLOCATION`)로 `system.pmem.vhd`를 만들고, HCS 문서에 `VirtualPMem`(장치 0 시스템, 장치 1 추가 기능, `ReadOnly`, `Vhd1`, `Backing: Virtual`)을 두고 그 디스크들을 SCSI에서 뺀다. Linux는 `--pmem`. 둘 다 명령줄의 부팅 장치에 `nfit` 또는 `virtio-pmem`을 더하고 표를 `dsa_dax`로 바꾼다. 실패하면 그 부팅은 이전처럼 붙인다.
+- 측정: Image test의 "Measure the direct-mapped read-only disks against the cached ones on the booted image". 압축하지 않은 이미지를 따로 만들어(`direct-mapped-image`, 실패해도 다른 확인을 막지 않는다) DAX 모드로 Google Play를 설치하고 창 하나를 연 채 재고, 서비스를 설정을 끈 채 다시 띄워 같은 것을 잰다. 게스트 페이지 캐시, 사용량, VM 상주와 private, crosvm의 익명/파일/공유 페이지를 작업 요약에 남긴다. 매핑된 부팅이 `/system`, `/vendor`, `/product`, `/system_ext`, `/mnt/dsa-gapps`를 `dax=always`로 마운트하지 못했으면 실패한다.
+
+### 기대하는 절감
+
+- 게스트 페이지 캐시에서 읽기 전용 파티션과 Google 앱 이미지의 몫이 빠진다. 소유자 PC의 약 200 MiB 가운데 압축하지 않은 이미지에서는 대부분, 지금의 압축 이미지에서는 APEX 몫만이다(APEX 페이로드는 loop와 dm-verity 위 ext4라 그 안쪽은 여전히 캐시된다).
+- 대신 게스트가 매핑한 디스크의 페이지 구조를 잡는다: 압축하지 않은 시스템 디스크 약 2.2 GB에 약 34 MiB, Google 앱 디스크 약 0.6 GB에 약 9 MiB. 이것은 되돌릴 수 없는 커널 메모리다.
+- 그래서 VM이 잡는 몫은 약 100-170 MiB 주고(추정), 같은 페이지는 Windows 파일 캐시에 한 벌만 남을 것으로 본다. 앱이 열려 있을 때 이미지의 실행 코드를 다시 읽는 일(R26의 되읽기)은 게스트 회수의 대상이 아니게 된다.
+
+### 확인하지 못한 것
+
+- 실제 Hyper-V에서 되는지 전부. Windows 11 클라이언트의 WSL이 아닌 HCS VM이 `VirtualPMem`과 `Vhd1`을 받는지, `MaximumSizeBytes`가 파일이 있는 장치의 크기를 제한하는지, NFIT가 어떤 모양(라벨 없는 원시 이름 공간인지, 읽기 전용 표시)으로 오는지, 영역의 물리 주소가 2 MiB에 맞는지. 소유자 PC에서 설정을 켜고 부팅해 콘솔 로그의 `nd_pmem`, `pmem0`, erofs의 DAX 줄과 `/proc/self/mountinfo`의 `dax=always`를 보고, `dsa memory`로 게스트 캐시와 vmmem 상주, private를 끈 때와 견줘야 한다. 작업 관리자가 매핑된 파일 페이지를 vmmem의 메모리로 보이는지, 메모리가 모자랄 때 Windows가 그것을 대기 목록으로 내리는지도 그때 본다.
+- ARM64 Windows. hcsshim이 vPMEM을 끄므로 DSA도 쓰지 않는다. 되는지 시험한 적은 없다.
+- CI의 첫 측정값. 이 변경의 develop 실행이 처음 남긴다. 측정이 끝나기 전에는 설정을 기본으로 켜지 않는다.
