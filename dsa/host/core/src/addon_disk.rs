@@ -22,7 +22,12 @@
 //! ```
 //!
 //! erofs keeps each file whole and block aligned, so the guest mounts each image from it
-//! file-backed with `directio` and reads it once. Installing or removing an add-on writes a
+//! file-backed with `directio` and reads it once. The partition table also names each image's
+//! own bytes as a partition of their own ([`Addon::partition_name`]), inside the erofs
+//! partition: the host's direct-mapped mode attaches the disk as persistent memory, and the
+//! guest mounts each image from its partition with DAX, which a file-backed mount cannot have,
+//! so its files are mapped from the host and not cached. Every other boot ignores them. The disk
+//! is a whole number of 2 MiB, the sections Linux maps persistent memory in. Installing or removing an add-on writes a
 //! whole new disk beside the attached one (the pending disk), with the images of the other
 //! add-ons copied over, because the running VM keeps the attached disk open. The next start of
 //! Android puts the pending disk in its place before the VM opens it
@@ -45,6 +50,9 @@ use crate::erofs::Stream;
 pub const PARTITION_NAME: &str = "dsa_addons";
 /// The partition's UUID.
 pub const PARTITION_UUID: &str = "8d1c4e7a-3b52-4f19-a6e0-5c2b9d7f4e13";
+/// The UUIDs of the partitions that name each add-on's image ([`Addon::partition_name`]).
+const GAPPS_PARTITION_UUID: &str = "4a7e2c19-8b3d-4f60-9c15-6e0d3b8a2f71";
+const ARM_TRANSLATION_PARTITION_UUID: &str = "c25f8e03-7a14-4b9d-8e62-1f4a9c3d5b08";
 /// The disk's GUID, in its partition table and its VHD footer.
 const DISK_GUID: &str = "b3f0a9d4-6e21-4c8b-9f57-2a4d1e8c6b90";
 /// GPT's type for Linux file system data, the generic Linux type.
@@ -55,6 +63,9 @@ pub const BOOTCONFIG_ON: &str = "androidboot.dsa.addon_disk = \"on\"\n";
 
 const SECTOR: u64 = 512;
 const MIB: u64 = 1 << 20;
+/// The disk is a whole number of these: Linux maps persistent memory in 2 MiB sections, and a
+/// device of another size gets no page structs, so no DAX.
+const SECTION: u64 = 2 * MIB;
 /// The partition starts at 1 MiB and its size is a whole number of MiB, as partitioning tools
 /// align them.
 const PARTITION_FIRST_SECTOR: u64 = MIB / SECTOR;
@@ -93,6 +104,22 @@ impl Addon {
         match self {
             Addon::Gapps => "gapps.img",
             Addon::ArmTranslation => "arm-translation.img",
+        }
+    }
+
+    /// The partition that names the image's bytes on the disk, which the guest mounts the
+    /// image from in the host's direct-mapped mode (`/dev/block/by-name/<name>`).
+    pub fn partition_name(self) -> &'static str {
+        match self {
+            Addon::Gapps => "dsa_gapps",
+            Addon::ArmTranslation => "dsa_arm_translation",
+        }
+    }
+
+    fn partition_uuid(self) -> &'static str {
+        match self {
+            Addon::Gapps => GAPPS_PARTITION_UUID,
+            Addon::ArmTranslation => ARM_TRANSLATION_PARTITION_UUID,
         }
     }
 
@@ -136,6 +163,33 @@ pub fn bootconfig(attached: &[Addon]) -> &'static str {
     } else {
         BOOTCONFIG_ON
     }
+}
+
+/// The bootconfig line that tells the guest its read-only disks are persistent memory this
+/// boot (the host's direct-mapped mode).
+pub const DIRECT_MAPPED_BOOTCONFIG: &str = "androidboot.dsa.direct_mapped = \"on\"\n";
+
+/// A boot's bootconfig, `text`, for the host's direct-mapped mode: each add-on image the boot
+/// takes from the disk (`"disk"`) is mounted from its own partition on the persistent memory
+/// instead (`"dax"`), and the guest is told the mode is on. An image still in `/data` stays
+/// where it is.
+pub fn direct_mapped_bootconfig(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + DIRECT_MAPPED_BOOTCONFIG.len());
+    for line in text.split_inclusive('\n') {
+        let mapped = line
+            .strip_prefix("androidboot.dsa.")
+            .and_then(|rest| rest.split_once(" = "))
+            .filter(|(key, value)| key.ends_with("_image") && value.trim_end() == "\"disk\"");
+        match mapped {
+            Some((key, _)) => out.push_str(&format!("androidboot.dsa.{key} = \"dax\"\n")),
+            None => out.push_str(line),
+        }
+    }
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(DIRECT_MAPPED_BOOTCONFIG);
+    out
 }
 
 /// One add-on's image on a disk: where its bytes start in the disk file, and how many.
@@ -380,6 +434,50 @@ impl AddonDisk {
         entries.into_iter().map(|entry| entry.addon).collect()
     }
 
+    /// Whether the disk in place can be persistent memory in the host's direct-mapped mode: a
+    /// whole number of 2 MiB, with a partition over each image it holds. A disk written by a
+    /// DSA from before the mode has neither.
+    pub fn is_mappable(&self) -> bool {
+        let _change = lock();
+        is_mappable(&self.path, self.format)
+    }
+
+    /// Writes the disk in place again in the layout the direct-mapped mode maps, with the same
+    /// images, when it is not in it already. For a start of the VM, which must not be running,
+    /// after [`prepare_for_boot`](Self::prepare_for_boot). A disk that cannot be written again
+    /// is left as it was, and the error says why.
+    pub fn bring_to_mappable_layout(&self) -> Result<(), String> {
+        let _change = lock();
+        if !self.path.is_file() || is_mappable(&self.path, self.format) {
+            return Ok(());
+        }
+        let entries = Self::entries_of(&self.path);
+        if entries.is_empty() {
+            return Ok(());
+        }
+        let order: Vec<Addon> = entries.iter().map(|entry| entry.addon).collect();
+        let partial = self.partial_path();
+        let written = write_disk(&partial, self.format, &order, &mut |stream, which| {
+            let entry = entries
+                .iter()
+                .find(|entry| entry.addon == which)
+                .expect("every add-on written is on the disk");
+            copy_kept(stream, entry, &self.path)
+        })
+        .and_then(|()| {
+            fs::rename(&partial, &self.path).map_err(|e| {
+                format!(
+                    "the add-on disk {} cannot be replaced: {e}",
+                    self.path.display()
+                )
+            })
+        });
+        if written.is_err() {
+            let _ = fs::remove_file(&partial);
+        }
+        written
+    }
+
     /// Removes the disk, the pending one and any half-written one, as removing DSA does.
     pub fn delete(&self) {
         let _change = lock();
@@ -448,14 +546,29 @@ fn write_disk(
     let mut out = stream.finish()?;
     let fs_bytes = out.stream_position().map_err(io_text(path))?;
     let mut file = out.inner;
-    let partition_sectors = fs_bytes.div_ceil(MIB) * MIB / SECTOR;
+    // 1 MiB before the partition and 1 MiB after it, so the disk is a whole number of sections
+    // when the partition is.
+    let partition_sectors = fs_bytes.div_ceil(SECTION) * SECTION / SECTOR;
     let sectors = PARTITION_FIRST_SECTOR + partition_sectors + MIB / SECTOR;
     let disk_bytes = sectors * SECTOR;
     file.set_len(disk_bytes).map_err(io_text(path))?;
-    for (at, data) in partition_table(sectors, partition_sectors) {
-        file.seek(SeekFrom::Start(at)).map_err(io_text(path))?;
-        file.write_all(&data).map_err(io_text(path))?;
-    }
+    let write_table = |file: &mut File, images: &[Entry]| -> Result<(), String> {
+        for (at, data) in partition_table(sectors, partition_sectors, images) {
+            file.seek(SeekFrom::Start(at)).map_err(io_text(path))?;
+            file.write_all(&data).map_err(io_text(path))?;
+        }
+        file.flush().map_err(io_text(path))
+    };
+    // Each image's own partition comes from where the file system put the image, which the
+    // disk is read back for once its erofs partition is in the table.
+    write_table(&mut file, &[])?;
+    let images = read_entries(path).map_err(|e| {
+        format!(
+            "the new add-on disk {} cannot be read back: {e}",
+            path.display()
+        )
+    })?;
+    write_table(&mut file, &images)?;
     if format == Format::Vhd {
         file.seek(SeekFrom::Start(disk_bytes))
             .map_err(io_text(path))?;
@@ -560,9 +673,21 @@ fn gpt_header(sectors: u64, current: u64, backup: u64, entries_lba: u64, crc: u3
     h
 }
 
-/// The partition table of a disk of `sectors` whose one partition has `partition_sectors`:
-/// each piece with the byte it goes at.
-fn partition_table(sectors: u64, partition_sectors: u64) -> Vec<(u64, Vec<u8>)> {
+/// Writes one partition entry: its type, UUID, first and last sector, and name.
+fn put_entry(entry: &mut [u8], uuid: &str, first: u64, last: u64, name: &str) {
+    entry[0..16].copy_from_slice(&guid_bytes(LINUX_DATA_TYPE));
+    entry[16..32].copy_from_slice(&guid_bytes(uuid));
+    entry[32..40].copy_from_slice(&first.to_le_bytes());
+    entry[40..48].copy_from_slice(&last.to_le_bytes());
+    for (i, unit) in name.encode_utf16().enumerate() {
+        entry[56 + i * 2..58 + i * 2].copy_from_slice(&unit.to_le_bytes());
+    }
+}
+
+/// The partition table of a disk of `sectors` whose erofs partition has `partition_sectors`,
+/// then a partition for each image in `images` over the image's bytes inside the erofs
+/// partition, in whole blocks: each piece with the byte it goes at.
+fn partition_table(sectors: u64, partition_sectors: u64, images: &[Entry]) -> Vec<(u64, Vec<u8>)> {
     let mut mbr = vec![0u8; 512];
     mbr[446 + 1..446 + 4].copy_from_slice(&[0x00, 0x02, 0x00]);
     mbr[446 + 4] = 0xEE;
@@ -574,13 +699,26 @@ fn partition_table(sectors: u64, partition_sectors: u64) -> Vec<(u64, Vec<u8>)> 
     mbr[511] = 0xAA;
 
     let mut entries = vec![0u8; (ENTRIES * ENTRY_BYTES) as usize];
-    entries[0..16].copy_from_slice(&guid_bytes(LINUX_DATA_TYPE));
-    entries[16..32].copy_from_slice(&guid_bytes(PARTITION_UUID));
-    entries[32..40].copy_from_slice(&PARTITION_FIRST_SECTOR.to_le_bytes());
     let last = PARTITION_FIRST_SECTOR + partition_sectors - 1;
-    entries[40..48].copy_from_slice(&last.to_le_bytes());
-    for (i, unit) in PARTITION_NAME.encode_utf16().enumerate() {
-        entries[56 + i * 2..58 + i * 2].copy_from_slice(&unit.to_le_bytes());
+    let mut slots = entries.chunks_mut(ENTRY_BYTES as usize);
+    if let Some(slot) = slots.next() {
+        put_entry(
+            slot,
+            PARTITION_UUID,
+            PARTITION_FIRST_SECTOR,
+            last,
+            PARTITION_NAME,
+        );
+    }
+    for (image, slot) in images.iter().zip(slots) {
+        let end = (image.offset + image.size.div_ceil(BLOCK) * BLOCK) / SECTOR;
+        put_entry(
+            slot,
+            image.addon.partition_uuid(),
+            image.offset / SECTOR,
+            end.min(last + 1) - 1,
+            image.addon.partition_name(),
+        );
     }
     let crc = crc32(&entries);
     let backup_entries = sectors - 1 - ENTRY_SECTORS;
@@ -667,6 +805,60 @@ fn u32_at(data: &[u8], at: usize) -> u32 {
 
 fn u64_at(data: &[u8], at: usize) -> u64 {
     u64::from_le_bytes(data[at..at + 8].try_into().expect("eight bytes"))
+}
+
+/// Whether the disk at `path`, kept in `format`, is in the layout the direct-mapped mode maps:
+/// a whole number of 2 MiB, and each image on it covered from its first byte by a partition of
+/// its own, named for it, in whole blocks.
+fn is_mappable(path: &Path, format: Format) -> bool {
+    let check = || -> io::Result<bool> {
+        let mut file = File::open(path)?;
+        let length = file.metadata()?.len();
+        let footer = if format == Format::Vhd {
+            FOOTER_BYTES
+        } else {
+            0
+        };
+        if length < footer || (length - footer) % SECTION != 0 {
+            return Ok(false);
+        }
+        let header = read_at(&mut file, SECTOR, 92)?;
+        let entries_lba = u64_at(&header, 72);
+        let count = u64::from(u32_at(&header, 80)).min(ENTRIES * 4);
+        let entry_bytes = u64::from(u32_at(&header, 84));
+        if entry_bytes < 128 {
+            return Ok(false);
+        }
+        let table = read_at(
+            &mut file,
+            entries_lba * SECTOR,
+            (count * entry_bytes) as usize,
+        )?;
+        let images = read_entries(path)?;
+        Ok(!images.is_empty()
+            && images.iter().all(|image| {
+                let wanted: Vec<u8> = image
+                    .addon
+                    .partition_name()
+                    .encode_utf16()
+                    .flat_map(u16::to_le_bytes)
+                    .collect();
+                table.chunks(entry_bytes as usize).any(|entry| {
+                    let name = &entry[56..128];
+                    let first = u64_at(entry, 32);
+                    let last = u64_at(entry, 40);
+                    name.starts_with(&wanted)
+                        && name[wanted.len()..].iter().all(|&b| b == 0)
+                        && first.checked_mul(SECTOR) == Some(image.offset)
+                        && last
+                            .checked_sub(first)
+                            .and_then(|span| span.checked_add(1))
+                            .and_then(|sectors| sectors.checked_mul(SECTOR))
+                            == Some(image.size.div_ceil(BLOCK) * BLOCK)
+                })
+            }))
+    };
+    check().unwrap_or(false)
 }
 
 /// The add-on images on the disk at `path`, read the way the guest finds them: the partition
@@ -993,6 +1185,127 @@ mod tests {
             gapps
         );
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The partition entry `index` of the disk `bytes`: its first and last sector and name.
+    fn partition(bytes: &[u8], index: usize) -> (u64, u64, String) {
+        let entry = &bytes[1024 + index * 128..1024 + (index + 1) * 128];
+        let name: Vec<u16> = entry[56..128]
+            .chunks(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .take_while(|&unit| unit != 0)
+            .collect();
+        (
+            u64_at(entry, 32),
+            u64_at(entry, 40),
+            String::from_utf16(&name).unwrap(),
+        )
+    }
+
+    #[test]
+    fn nfr1_each_image_has_a_partition_of_its_own_for_the_direct_mapped_mode() {
+        // In the host's direct-mapped mode the disk is persistent memory, and the guest mounts
+        // each image from a partition over its own bytes with DAX, which a file-backed mount
+        // cannot have.
+        let dir = scratch("mapped");
+        let disk = AddonDisk::new(dir.join("addons.vhd"), Format::Vhd);
+        let gapps = image("product/app/a.apk", &[7u8; 10_000]);
+        let translator = image("system/lib64/libdsa_native_bridge.so", b"bridge");
+        install(&disk, Addon::Gapps, &gapps).unwrap();
+        install(&disk, Addon::ArmTranslation, &translator).unwrap();
+        disk.prepare_for_boot();
+        let bytes = fs::read(disk.path()).unwrap();
+        let disk_bytes = bytes.len() as u64 - FOOTER_BYTES;
+        assert_eq!(disk_bytes % SECTION, 0, "a whole number of 2 MiB sections");
+        let (first, last, name) = partition(&bytes, 0);
+        assert_eq!(name, PARTITION_NAME);
+        assert_eq!(first, PARTITION_FIRST_SECTOR);
+        for (index, (addon, data)) in [(Addon::Gapps, &gapps), (Addon::ArmTranslation, &translator)]
+            .into_iter()
+            .enumerate()
+        {
+            let (start, end, name) = partition(&bytes, index + 1);
+            assert_eq!(name, addon.partition_name());
+            // Inside the erofs partition, on a page, a whole number of pages, and holding the
+            // image byte for byte from its first sector.
+            assert!(start >= first && end <= last, "{name}");
+            assert_eq!(start * SECTOR % BLOCK, 0, "{name}");
+            assert_eq!((end + 1 - start) * SECTOR % BLOCK, 0, "{name}");
+            assert_eq!(
+                (end + 1 - start) * SECTOR,
+                (data.len() as u64).div_ceil(BLOCK) * BLOCK,
+                "{name}"
+            );
+            let at = (start * SECTOR) as usize;
+            assert_eq!(&bytes[at..at + data.len()], &data[..], "{name}");
+        }
+        assert_eq!(partition(&bytes, 3).2, "", "nothing else");
+        // Both partition tables carry them, under one checksum.
+        let header = &bytes[512..604];
+        let crc = u32_at(header, 88);
+        assert_eq!(crc32(&bytes[1024..1024 + 128 * 128]), crc);
+        let backup_entries = (disk_bytes / SECTOR - 1 - ENTRY_SECTORS) * SECTOR;
+        assert_eq!(
+            bytes[backup_entries as usize..backup_entries as usize + 128 * 128],
+            bytes[1024..1024 + 128 * 128]
+        );
+        // The disk still reads as before: the images by name in the erofs partition.
+        assert_eq!(disk.attached(), [Addon::Gapps, Addon::ArmTranslation]);
+        assert_eq!(read_back(disk.path(), Addon::Gapps).unwrap(), gapps);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn nfr1_a_disk_from_before_the_direct_mapped_mode_is_written_again_in_its_layout() {
+        let dir = scratch("older");
+        let disk = AddonDisk::new(dir.join("addons.img"), Format::Raw);
+        let gapps = image("product/app/a.apk", &[9u8; 30_000]);
+        install(&disk, Addon::Gapps, &gapps).unwrap();
+        disk.prepare_for_boot();
+        assert!(disk.is_mappable());
+        // As an older DSA wrote it: no partition over the image.
+        let mut bytes = fs::read(disk.path()).unwrap();
+        let sectors = bytes.len() as u64 / SECTOR;
+        let (first, last, _) = partition(&bytes, 0);
+        for (at, data) in partition_table(sectors, last + 1 - first, &[]) {
+            bytes[at as usize..at as usize + data.len()].copy_from_slice(&data);
+        }
+        fs::write(disk.path(), &bytes).unwrap();
+        assert!(!disk.is_mappable());
+        assert_eq!(disk.attached(), [Addon::Gapps], "it still reads as before");
+        disk.bring_to_mappable_layout().unwrap();
+        assert!(disk.is_mappable());
+        assert_eq!(disk.attached(), [Addon::Gapps]);
+        assert_eq!(read_back(disk.path(), Addon::Gapps).unwrap(), gapps);
+        assert!(!disk.partial_path().exists());
+        // A disk in the layout already is left alone, and no disk at all is nothing to do.
+        let before = fs::metadata(disk.path()).unwrap().modified().unwrap();
+        disk.bring_to_mappable_layout().unwrap();
+        assert_eq!(
+            fs::metadata(disk.path()).unwrap().modified().unwrap(),
+            before
+        );
+        disk.delete();
+        disk.bring_to_mappable_layout().unwrap();
+        assert!(!disk.is_mappable());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn nfr1_a_direct_mapped_boot_mounts_each_image_from_its_partition() {
+        let normal = format!(
+            "{BOOTCONFIG_ON}androidboot.dsa.gapps = \"on\"\n{}{}",
+            image_bootconfig("gapps_image", true),
+            image_bootconfig("arm_translation_image", false)
+        );
+        assert_eq!(
+            direct_mapped_bootconfig(&normal),
+            "androidboot.dsa.addon_disk = \"on\"\nandroidboot.dsa.gapps = \"on\"\n\
+             androidboot.dsa.gapps_image = \"dax\"\n\
+             androidboot.dsa.arm_translation_image = \"data\"\n\
+             androidboot.dsa.direct_mapped = \"on\"\n"
+        );
+        assert_eq!(direct_mapped_bootconfig(""), DIRECT_MAPPED_BOOTCONFIG);
     }
 
     #[test]
