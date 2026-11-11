@@ -2301,6 +2301,60 @@ PSS(`dumpsys meminfo`, zram에 있는 몫을 압축 전 크기로 센다): Play 
 - 앱이 다시 열 때 디스크에서 읽어 들이는 지연. writeback된 페이지는 VHDX 위 ext4 위 loop에서 동기로 읽힌다. 30분 넘게 쓰이지 않은 페이지만 내보내므로 드물다고 보지만, Play 스토어처럼 오래 닫혀 있다가 여는 앱의 첫 화면이 느려지는지 실기에서 봐야 한다.
 - `rereport`가 Hyper-V의 이미 돌려받은 범위를 다시 받는 비용. hv_balloon은 범위마다 hypercall 묶음 하나이고 압축 정리 뒤의 빈 메모리는 큰 블록이라 적다고 본다.
 
+### 커널 slab의 내역을 root로 읽기, 커널과 system_server 줄이기 (2026-11-11, v0.2.4 대상)
+
+**기준.** 위 유휴 기준선의 수치(PR #622와 #626, 소유자 PC, v0.2.2, Google Play)가 출발점이다. 큰 몫은 회수 못 하는 slab 100, vmalloc 60, 페이지 테이블 40, 커널 스택 21 MiB(스레드 1347개, 그중 ext4-rsv-conversion 75개), system_server PSS 131 MiB(실제 비용 76 MiB)다. 이 절의 작업은 브랜치 `feat/slab-system-server`에서 했고, 이 PC에서 빌드, 시험, 부팅을 하지 않았다. 읽은 소스: WSL 커널 `linux-msft-wsl-6.18.54.1`의 `arch/x86/configs/config-wsl`, `fs/ext4/super.c`, `fs/ext4/page-io.c`(GitHub의 원본을 `.scratch/`에 받아 읽었다), 이미지의 Android 16 `plat_sepolicy.cil`(`proc_slabinfo`, `proc_vmallocinfo`의 레이블, shell의 `debug_prop` 설정 권한, MLS 제약).
+
+**slab을 캐시별로 읽지 못했던 까닭.** 둘이 겹쳤다. config-wsl이 `CONFIG_SLUB_DEBUG`를 꺼서 `/proc/slabinfo`가 없고 `/sys/kernel/slab/*`에는 객체 수와 slab 수가 없다. 있어도 `/proc/slabinfo`와 `/proc/vmallocinfo`는 root만 읽는 0400이다(SELinux는 shell에게 `proc_slabinfo` 읽기를 허락하지만 DAC가 막는다). user 빌드라 `adb root`가 없다.
+
+**바꾼 것: 재는 쪽.**
+
+1. 커널에 `CONFIG_SLUB_DEBUG=y`(검사는 켜지 않는다, `CONFIG_SLUB_DEBUG_ON` 꺼짐). 비용은 캐시마다 카운터 몇 개다.
+2. `dsa-channeld --memory-report`. init이 root로, 읽기만 하는 자기 도메인(`dsa_memory_report`, `channeld.cil`, 앱의 `/proc` 항목을 읽으려고 `mlstrustedsubject`)과 `readproc` 그룹으로 띄운다. 개발자 모드가 켜져 있을 때 shell이 `debug.dsa.memory_report`를 1로 두면 돈다. 커널 로그에 `memory report:` 줄로 쓴다: `/proc/meminfo`의 커널 항목, slab 캐시 상위 40개와 쓰지 않는 몫, vmalloc을 부른 함수별 합(주소는 쓰지 않는다), 커널 스레드 종류별과 프로세스별 스레드 수(스레드마다 커널 스택 16 KiB), 페이지 테이블 상위 15개, 살아 있는 cgroup과 지워졌지만 메모리를 쥔 cgroup의 수, dm-bufio 캐시(dm-verity 해시 블록) 크기.
+3. CI의 메모리 측정(PR #625의 boot check)이 읽기 직후 보고를 받아 `memory.md`와 `memory.json`에 "The guest kernel's memory" 표를 더한다. system_server도 함께 적는다: `dumpsys meminfo -d <pid>`의 App Summary와 binder 객체 수, 스레드 이름(숫자를 `#`으로 묶은 모양별 수), `dumpsys -l`의 서비스 목록, `pm list features`, ART 힙 설정, `am dumpheap`의 결과. 원본 파일은 artifact `memory-measurement`의 `memory-kernel*.txt`, `memory-system-server.txt`, `memory-services.txt`, `memory-features.txt`다.
+4. 사용자 PC에서 같은 보고를 보려면(개발자 모드): `adb shell "setprop debug.dsa.memory_report 0; setprop debug.dsa.memory_report 1"` 뒤 `adb logcat -d -b kernel | grep "memory report:"`.
+
+**바꾼 것: 줄이는 쪽.**
+
+| 변경 | 무엇이 주나 | 기대 절감(재지 않음) |
+|---|---|---|
+| 커널 패치 `ext4-rsv-conversion-read-only.patch`: 읽기 전용 장치를 읽기 전용으로 붙인 ext4는 변환 워크큐를 만들지 않고, 읽기와 쓰기로 다시 붙일 때 만든다. 해제, sync, 쓰기 완료가 워크큐 없는 마운트를 견딘다 | APEX 마운트마다 하나씩이던 rescuer 스레드 75개(task_struct, 커널 스택 16 KiB, 워크큐 구조) | 2-3 MiB, 스레드 75개 |
+| Linux와 macOS 호스트도 Windows의 부팅 메모리 설정(`swiotlb=2048`, `kfence.sample_interval=0`, dentry·inode·TCP·UDP 해시 크기)을 준다. 상수는 `dsa-host-core`로 옮겼다 | Linux 게스트의 해시 표(3 GiB에서 약 8 MiB), 메모리가 4 GiB를 넘는 VM의 64 MiB 바운스 버퍼 | Linux 게스트에서 약 8 MiB. Windows는 이미 이 값이다. CI의 수치가 Windows 사용자 게스트의 커널 비용과 같은 조건이 된다 |
+| Wi-Fi Direct, Wi-Fi Aware, Wi-Fi RTT, Thread 기능을 거둔다(`unavailable-features.xml`). 게스트의 Wi-Fi는 virt_wifi(호스트 네트워크 위의 station 하나)이고 Thread HAL은 이미 뺐다 | system_server의 WifiP2pService, WifiAwareService, RttService, Thread 서비스(각자 스레드, 상태 기계, 힙) | 2-5 MiB |
+| `dalvik.vm.heapmaxfree` 8m에서 4m | 힙이 가장 큰 프로세스(system_server, Play 서비스, 화면의 앱)가 GC 사이에 늘어나는 폭. 이 프로세스들은 배경으로 가지 않아 ART가 줄이지 않는다 | 4-8 MiB. 비용은 이 프로세스들의 GC가 두 배 잦아지는 것(동시 GC, 멈춤 1 ms 안) |
+| `vm.vfs_cache_pressure` 100에서 200 | 회수(작업 집합 trim 포함) 때 dentry와 inode를 두 배 쉽게 거둔다. 유휴 회수는 원래 모두 버린다 | 회수 가능한 slab이 앱을 쓰는 동안 더 빨리 돌아온다. 크기는 덤프가 보여 준다 |
+
+Windows 게스트 기준 합은 약 8-16 MiB로 본다. 250 MiB 목표에 견주면 작다. 이 변경의 주된 값은 다음 측정에서 slab 100 MiB와 vmalloc 60 MiB가 무엇인지 처음으로 보인다는 데 있다.
+
+**살펴보고 바꾸지 않은 커널 설정과 그 까닭.**
+
+- `CONFIG_SLAB_MERGE_DEFAULT`. config-wsl이 끈다(보안 강화: 캐시를 섞지 않아 힙 공격을 어렵게 한다). 켜면 같은 모양의 캐시가 합쳐져 캐시마다 남는 부분 slab과 CPU별 slab이 준다. 수 MiB에서 10 MiB 남짓을 볼 수 있지만 보안 강화를 푸는 일이라 소유자가 정한다. 덤프의 `slab-total`의 쓰지 않는 몫이 이 판단의 근거다. 덤프의 캐시 이름도 합쳐진 이름으로 바뀌므로 내역을 먼저 본 뒤에 정하는 것이 맞다.
+- `CONFIG_NR_CPUS=512`, `CONFIG_NODES_SHIFT=10`(NUMA 노드 1024). per-CPU와 노드별 할당은 실제 CPU와 노드 수로 잡히고, 정적 배열과 `cpumask`, `nodemask`만 커진다. 합쳐 1 MiB 안으로 본다. 큰 호스트에서 VM에 프로세서를 많이 주는 경우를 막을 위험이 더 크다.
+- `CONFIG_AUDIT`. 태스크마다 audit 문맥(약 1 KiB, 1347개면 약 1.3 MiB)을 잡지만 SELinux 거절이 logd의 auditd로 가는 길이다.
+- BTF는 netbpfload가 쓰므로 남긴다(위 기준선과 같다). ftrace, debugfs도 perfetto와 atrace 때문에 남긴다.
+- dm-verity의 kverityd와 kdmflush 스레드. dm 테이블은 fs_mgr와 apexd가 만들므로 DSA가 정하지 않는다. dm-bufio 캐시 크기(`dm_bufio.max_cache_size_bytes`, `max_age_seconds`)는 덤프의 `bufio` 줄을 본 뒤 정한다. 기준선의 "이름 없는 것 64 MiB"가 이 캐시일 수 있다(dm-bufio는 4 KiB 블록을 slab이 아니라 페이지로 잡는다).
+- netd의 BPF 맵. 미리 할당되는 해시 맵은 vmalloc에 잡힌다(덤프에 `bpf_map_area_alloc`로 보일 것이다). 크기는 netd와 Connectivity 모듈이 정해서 이미지 설정으로 바꿀 수 없다.
+- binder 버퍼. 프로세스마다 1 MiB 남짓을 가상으로 매핑하고 쓰는 페이지만 잡으므로 바꿀 것이 없다. binder 객체의 slab은 덤프가 보여 준다.
+- 공유 워크큐 하나로 ext4 변환을 모으는 안. loop 위의 쓰기 가능한 ext4가 아래 ext4의 변환을 기다리는 경우 한 줄로 선 작업이 서로를 기다릴 수 있어 택하지 않았다. 읽기 전용 장치일 때만 만들지 않는 쪽은 그런 의존이 없다.
+
+**system_server: 설정과 오버레이로 할 수 있는 것.** Android 16과 17의 `SystemServer.startOtherServices`는 서비스 대부분을 기능(`hasSystemFeature`)으로 가르고, `config_` 자원으로 가르는 것은 적다. 패키지 이름 문자열로 켜지는 서비스(content capture, app prediction, smartspace, search UI, translation, music recognition, system captions, ambient context, rotation resolver, wallpaper effects)는 AOSP의 `config.xml`이 비워 두므로 이미 시작하지 않는다(Pixel의 GMS 오버레이가 채우는 값이다). 그래서 기능을 거두는 쪽이 이번에 할 수 있는 거의 전부였다. 기능이 남은 것 가운데 일부러 남긴 것: 인쇄(`android.software.print`, 앱의 인쇄를 호스트 프린터로 잇는 길), 백업, 동반 기기(CDM이 없으면 `getSystemService`가 null이라 죽는 앱이 있다), MIDI(앱 사이의 가상 MIDI), 배경 화면 서비스(`config_enableWallpaperService`를 끄면 `WallpaperManager`를 부르는 앱이 `DeadSystemException`으로 죽는다), 자동 완성과 자격 증명(비밀번호 관리자와 패스키). 어느 것을 끄면 얼마가 주는지는 `dumpsys meminfo`로 나뉘지 않으므로, 하나씩 끈 이미지로 재야 한다.
+
+**system_server: 프레임워크 빌드가 있어야 하는 것.** Framework 빌드(`framework.yml`)는 이미지의 빌드와 같은 소스에서 라이브러리 몇 개만 만들고 `services.jar`를 만들지 않는다. 다음은 모두 `frameworks/base`의 `services.jar`를 고쳐야 한다:
+
+- 서비스를 시작하지 않거나 늦게 시작하기: 전화 프로세스(`com.android.phone`, 영구 프로세스라 system_server가 바로 다시 띄운다), WebView zygote(`WebViewUpdateService`가 부팅 때 띄운다, PSS 6.9 MiB), 텔레포니 레지스트리, 음성 상호작용. 시작하지 않을 때는 `getSystemService`가 null을 돌려 죽는 앱이 없게 빈 서비스를 남겨야 한다.
+- 필요한 빌드: 이미지의 빌드 번호와 같은 `frameworks/base` 체크아웃(Framework 빌드가 이미 받는 소스), `m services`로 `services.jar`, 그리고 system_server의 미리 컴파일한 코드(`/system/framework/oat/x86_64/services.odex`, `.vdex`, `.art`). 미리 컴파일한 것을 jar와 함께 바꾸지 않으면 odrefresh가 첫 부팅에 기기에서 다시 컴파일한다(부팅이 수십 초 길어지고 `/data`에 둔다). 바꾼 jar는 이미지 서명(시스템 파티션의 dm-verity와 vbmeta)에 다시 들어가야 하는데, 이 부분은 지금 make-image가 시스템 파일을 바꿀 때와 같은 길이다. CI 비용은 Framework 빌드에 `services` 대상 하나를 더하는 것(수십 분)이다.
+- zygote 프리로드 줄이기. `/system/etc/preloaded-classes` 목록만 고치면 거의 바뀌지 않는다: 프리로드되는 클래스 대부분이 부팅 이미지(`boot.art`)에 이미 들어 있고, 부팅 이미지는 빌드의 부팅 이미지 프로필로 dex2oat가 만든다. 부팅 이미지를 다시 만들려면 프레임워크 빌드가 필요하다. 위 기준선의 까닭(그 페이지를 모든 앱이 나눠 쓴다)도 그대로라 이번에는 하지 않았다.
+- system_server의 힙 덤프. user 빌드에서 `am dumpheap`은 디버그 가능하지 않은 프로세스를 거절하고, perfetto의 Java 힙 그래프도 user 빌드에서는 profileable 앱만 받는다. 서비스별 힙을 보려면 `ro.debuggable=1` 시험 이미지가 있어야 한다. CI는 시도하고 거절된 답을 보고에 적는다.
+
+**ART 힙 설정.** `heapmaxfree`만 바꿨다(위 표). `heaptargetutilization` 0.75와 `heapminfree` 512k는 이미 1 GiB 휴대전화의 값이다. `heapgrowthlimit`과 `heapsize`는 늘어날 수 있는 한도일 뿐 잡는 메모리가 아니므로, 앱이 쓸 수 있는 메모리를 줄이지 않게 그대로 둔다. `heapstartsize`는 첫 GC 전까지만 의미가 있어 두었다.
+
+**확인하지 못한 것.**
+
+- 위 모든 절감은 기대값이다. Image test(커널은 이 커밋에서 만든 것)의 메모리 측정이 처음 돌 때 덤프와 함께 잰다.
+- 덤프가 실제로 나오는지: SELinux enforcing에서 `dsa_memory_report`가 `/proc/<pid>`, `/sys/fs/cgroup/cgroup.stat`, `/sys/module/dm_bufio/parameters/current_allocated_bytes`를 읽을 수 있는지, init이 `debug.` 속성 변경으로 서비스를 띄우는지, `logcat -b kernel`이 `/dev/kmsg`에 쓴 줄을 보여 주는지. 안 나오면 측정은 실패하지 않고 job summary에 경고와 까닭을 적고, `memory-kernel-log.txt`에 커널 로그를 남긴다.
+- ext4 패치가 커널 빌드에 붙고 APEX 마운트에서 스레드가 사라지는지: 덤프의 `threads kernel ext4-rsv-conver` 줄이 없어져야 한다. `/data`가 ext4면 그 마운트의 하나는 남는다.
+- 거둔 Wi-Fi 기능을 찾는 앱이 그 하드웨어가 없는 기기처럼 동작하는지.
+
 ## R27. 호스트 주소 변환: 행정 경계 데이터 고르기 (FR-36)
 
 FR-36의 주소 변환(`Geocoder`)을 호스트가 무엇으로 답할지 2026-11-10에 조사했다. 처음에는 공개 서버(Nominatim, `CLGeocoder`)를 썼으나, 소유자가 같은 날 FR-36을 바꿨다(PR #579). Google Play가 없을 때만 DSA가 답하고, 호스트에 둔 행정 경계 데이터로 좌표를 시, 구, 동 수준의 주소로 바꾸며, 서버와 키 없이 위치가 밖으로 나가지 않아야 한다. 아래는 그 조건으로 다시 고른 결과다.
