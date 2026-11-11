@@ -1139,8 +1139,16 @@ pub fn committed_line(c: &CommittedMemory) -> String {
 /// check, within a second; pages touched again come back from the standby list on their own.
 pub const IDLE_TRIM_DELAY: Duration = Duration::ZERO;
 
+/// How long after a give-back the window manager gives memory back again while still no task
+/// window is shown. While Android dozes the window manager keeps working (task and memory
+/// events, the guest's notifications), and what that touches stays in its working set until
+/// Windows runs short; one give-back per idle stretch left it there for hours. Five minutes
+/// keeps the cost (a working set emptied and a few log lines) small.
+pub const IDLE_TRIM_REPEAT: Duration = Duration::from_secs(5 * 60);
+
 /// Decides when a host process that serves task windows (the window manager) should give
-/// back the memory it is not using: once each time no task window has been open for a while.
+/// back the memory it is not using: each time no task window has been open for a while, and
+/// again every [`IDLE_TRIM_REPEAT`] while none is.
 ///
 /// While windows are open its memory is in use (the renderer, each task's frames); once the
 /// last one closes, most of it is not, but the system takes it back only under pressure, so
@@ -1154,6 +1162,9 @@ pub struct IdleTrim {
     all_hidden: bool,
     idle_since: Option<Instant>,
     trimmed: bool,
+    /// When the current idle stretch last gave memory back.
+    last_trim: Option<Instant>,
+    repeat: Duration,
     /// The current quiet stretch (windows shown, no new frame) has had its trim.
     quiet_trimmed: bool,
 }
@@ -1172,6 +1183,8 @@ impl IdleTrim {
             all_hidden: false,
             idle_since: Some(now),
             trimmed: false,
+            last_trim: None,
+            repeat: IDLE_TRIM_REPEAT,
             quiet_trimmed: false,
         }
     }
@@ -1214,6 +1227,7 @@ impl IdleTrim {
         if !self.open.is_empty() && !self.all_hidden {
             self.idle_since = None;
             self.trimmed = false;
+            self.last_trim = None;
         } else if self.idle_since.is_none() {
             self.idle_since = Some(now);
         }
@@ -1233,14 +1247,19 @@ impl IdleTrim {
         due
     }
 
-    /// Whether to give memory back now. True once per idle stretch.
+    /// Whether to give memory back now: once the idle stretch is `delay` old, and again every
+    /// [`IDLE_TRIM_REPEAT`] after that until a window is shown.
     pub fn due(&mut self, now: Instant) -> bool {
-        let due = !self.trimmed
-            && self
-                .idle_since
-                .is_some_and(|since| now.saturating_duration_since(since) >= self.delay);
+        let idle = self
+            .idle_since
+            .is_some_and(|since| now.saturating_duration_since(since) >= self.delay);
+        let again = self
+            .last_trim
+            .is_some_and(|at| now.saturating_duration_since(at) >= self.repeat);
+        let due = idle && (!self.trimmed || again);
         if due {
             self.trimmed = true;
+            self.last_trim = Some(now);
         }
         due
     }
