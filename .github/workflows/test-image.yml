@@ -7,7 +7,8 @@
 # The Android 17 x86_64 image is then booted by eight boot checks at once, each on a runner of
 # its own, with the guest kernel built from the same commit. That image is kept in the Actions
 # cache, keyed on everything that decides it, so a run whose inputs did not change takes it
-# from there instead of making it again; the checks run on it all the same.
+# from there instead of making it again; the checks run on it all the same. A ninth check boots
+# the same image made with uncompressed partitions, to measure the host's direct-mapped mode.
 
 name: Image test
 
@@ -55,6 +56,10 @@ on:
       - "scripts/tests/image-cache-workflow.test.sh"
       - "scripts/tests/image-boot-parallel-workflow.test.sh"
       - "dsa/host/platform/linux/src/config.rs"
+      - "dsa/host/platform/linux/src/crosvm.rs"
+      - "dsa/host/platform/linux/src/launcher.rs"
+      - "dsa/host/core/src/addon_disk.rs"
+      - "dsa/host/core/src/direct_mapped.rs"
   workflow_dispatch:
     inputs:
       keep_disk:
@@ -857,6 +862,11 @@ jobs:
           args+=(--agent .scratch/agent/DsaAgent.apk)
           args+=(--aapt2 .scratch/build-tools/aapt2)
           args+=(${{ steps.translator.outputs.args }})
+          # The direct-mapped measurement's image: its read-only partitions uncompressed, so
+          # that every file of them is mapped.
+          if [[ "${UNCOMPRESSED_EROFS:-false}" == true ]]; then
+            args+=(--uncompressed-erofs)
+          fi
           printf '%s\n' "${args[@]}" > .scratch/image-args
           programs=(.scratch/guest-graphics .scratch/channeld .scratch/hwcomposer .scratch/codec2 .scratch/audio
                     .scratch/sensors .scratch/camera .scratch/power-hal .scratch/gnss-hal .scratch/agent
@@ -908,7 +918,7 @@ jobs:
       - name: Keep the ramdisk and the manifest
         uses: actions/upload-artifact@v4
         with:
-          name: image-android-${{ matrix.android }}-${{ matrix.arch }}
+          name: image-android-${{ matrix.android }}-${{ matrix.arch }}${{ env.UNCOMPRESSED_EROFS == 'true' && '-uncompressed' || '' }}
           path: |
             dsa/target/image/*/image.json
             dsa/target/image/*/initrd.img
@@ -917,7 +927,7 @@ jobs:
         if: inputs.keep_disk
         uses: actions/upload-artifact@v4
         with:
-          name: image-disk-android-${{ matrix.android }}-${{ matrix.arch }}
+          name: image-disk-android-${{ matrix.android }}-${{ matrix.arch }}${{ env.UNCOMPRESSED_EROFS == 'true' && '-uncompressed' || '' }}
           path: |
             dsa/target/image/*/system.vhdx
             dsa/target/image/*/data.vhdx
@@ -931,7 +941,7 @@ jobs:
         if: env.BOOT_IMAGE == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: boot-image
+          name: ${{ env.BOOT_IMAGE_ARTIFACT || 'boot-image' }}
           path: |
             dsa/target/image/
             !dsa/target/image/*/signed-target_files.zip
@@ -989,6 +999,31 @@ jobs:
     env:
       CACHE_IMAGE: "true"
       BOOT_IMAGE: "true"
+    steps: *image-steps
+
+  # The same image with its read-only partitions uncompressed, which the direct-mapped
+  # measurement boots: erofs maps only a file stored whole, so this is the image whose every
+  # file the host's direct-mapped mode maps. Not cached: one image fills the cache's share for
+  # images. It may fail without holding up the other boot checks, which boot the image above;
+  # the measurement then fails for want of its image.
+  direct-mapped-image:
+    name: Make and check the uncompressed guest image (ubuntu-latest, Android ${{ matrix.android }}, ${{ matrix.arch }})
+    needs: [guest-programs, agent]
+    if: github.event_name != 'workflow_dispatch' || inputs.android == '17' || inputs.android == 'all'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    continue-on-error: true
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        android: ["17"]
+        arch: [x86_64]
+    env:
+      CACHE_IMAGE: "false"
+      BOOT_IMAGE: "true"
+      BOOT_IMAGE_ARTIFACT: direct-mapped-boot-image
+      UNCOMPRESSED_EROFS: "true"
     steps: *image-steps
 
   # The kernel the boot checks boot, built from this commit's dsa/kernel/ rather than taken
@@ -1091,7 +1126,7 @@ jobs:
   # takes most of the step.
   boot-check:
     name: ${{ matrix.check }} (ubuntu-latest, Android 17, x86_64)
-    needs: [boot-image, boot-checks, graphics-test-apps, boot-kernel]
+    needs: [boot-image, boot-checks, graphics-test-apps, boot-kernel, direct-mapped-image]
     runs-on: ubuntu-latest
     timeout-minutes: 50
     strategy:
@@ -1154,7 +1189,7 @@ jobs:
             keep: Keep the overlay check's logs
             artifact: overlay-check-logs
             # The idle reclaim and memory measurements boot on runners of their own, below.
-            filter: --skip nfr3_the_idle_reclaim_with_google_apps_is_measured --skip nfr1_the_memory_with_google_play_and_one_app_window_is_measured
+            filter: --skip nfr3_the_idle_reclaim_with_google_apps_is_measured --skip nfr1_the_memory_with_google_play_and_one_app_window_is_measured --skip nfr1_nfr2_the_direct_mapped_disks_are_measured_against_the_cached_ones
             logs: |
               /tmp/overlays-test-*/*.log
               /tmp/overlays-test-*/*.txt
@@ -1181,6 +1216,23 @@ jobs:
             logs: |
               /tmp/overlays-test-*/*.log
               /tmp/overlays-test-*/memory*
+              /tmp/overlays-test-*/google-play-mounts.txt
+          # The host's direct-mapped mode (off by default) against the cached disks: the image
+          # with uncompressed partitions, booted with its read-only disks on virtio-pmem, mapped
+          # with DAX, and then on virtio-blk, with Google Play and one app window each time. The
+          # guest's page cache and the VM's memory of both go on the job's page.
+          - check: Measure the direct-mapped read-only disks against the cached ones on the booted image
+            test: overlays
+            image: direct-mapped
+            timeout: 40
+            keep: Keep the direct-mapped measurement
+            artifact: direct-mapped-measurement
+            filter: nfr1_nfr2_the_direct_mapped_disks_are_measured_against_the_cached_ones
+            summary: /tmp/overlays-test-*/direct-mapped.md
+            logs: |
+              /tmp/overlays-test-*/*.log
+              /tmp/overlays-test-*/direct-mapped*
+              /tmp/overlays-test-*/cached*
               /tmp/overlays-test-*/google-play-mounts.txt
     steps:
       - uses: actions/checkout@v4
@@ -1209,10 +1261,18 @@ jobs:
 
       # Out of Cargo's target folder: the image is never kept where rust-cache cleans.
       - name: Download the image
+        if: matrix.image != 'direct-mapped'
         uses: actions/download-artifact@v4
         with:
           name: boot-image
           path: .scratch/boot-image
+
+      - name: Download the image with uncompressed partitions
+        if: matrix.image == 'direct-mapped'
+        uses: actions/download-artifact@v4
+        with:
+          name: direct-mapped-boot-image
+          path: .scratch/direct-mapped-image
 
       - name: Download the kernel built from this commit
         uses: actions/download-artifact@v4
@@ -1224,7 +1284,13 @@ jobs:
         run: |
           test -f .scratch/boot-kernel/bzImage || { echo "the boot-kernel job left no bzImage"; exit 1; }
           echo "DSA_WIDGET_TEST_KERNEL=$PWD/.scratch/boot-kernel/bzImage" >> "$GITHUB_ENV"
-          image="$(ls -d "$PWD"/.scratch/boot-image/*/ | head -1)"
+          if [[ "${{ matrix.image }}" == direct-mapped ]]; then
+            image="$(ls -d "$PWD"/.scratch/direct-mapped-image/*/ | head -1)"
+            jq -e '.direct_mapped.uncompressed_erofs == true' "$image/image.json" \
+              || { echo "the direct-mapped measurement's image is not uncompressed"; exit 1; }
+          else
+            image="$(ls -d "$PWD"/.scratch/boot-image/*/ | head -1)"
+          fi
           test -f "$image/system.vhdx" || { echo "the downloaded image has no system.vhdx"; exit 1; }
           ls -l "$image"
           echo "DSA_WIDGET_TEST_IMAGE=$image" >> "$GITHUB_ENV"

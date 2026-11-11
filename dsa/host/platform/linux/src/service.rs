@@ -410,7 +410,8 @@ pub fn create_user_android(
                 .and_then(ImageBuild::from_image_dir);
             Some(identity.boot_properties(built.as_ref()))
         })
-    });
+    })
+    .with_direct_mapped(config.direct_mapped_images);
     if config.network {
         let (store, user) = (Arc::clone(&store), user.to_string());
         launcher = launcher.with_networking(

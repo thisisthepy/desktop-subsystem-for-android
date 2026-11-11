@@ -2507,6 +2507,11 @@ struct GooglePlayBoot {
     /// Which Google apps build was installed, and the image mounted from it, for the report.
     gapps: String,
     mounted: String,
+    /// The service's configuration file and what it says, so a measurement can start the
+    /// service again with a setting changed.
+    config: PathBuf,
+    settings: serde_json::Value,
+    socket: PathBuf,
 }
 
 impl GooglePlayBoot {
@@ -2527,6 +2532,7 @@ fn boot_with_google_play(
     after: Duration,
     memory_mb: u64,
     processors: u64,
+    direct_mapped: bool,
 ) -> Option<GooglePlayBoot> {
     let (Some(crosvm), Some(image)) = (
         std::env::var_os("DSA_CROSVM").map(PathBuf::from),
@@ -2562,6 +2568,7 @@ fn boot_with_google_play(
         "processors": processors,
         "data_disk_size_gb": 8,
         "gapps_project": format!("file://{}", mirror.display()),
+        "direct_mapped_images": direct_mapped,
     });
     std::fs::write(&config, settings.to_string()).unwrap();
     let service = Service::spawn(
@@ -2728,6 +2735,9 @@ fn boot_with_google_play(
         started,
         gapps,
         mounted,
+        config,
+        settings,
+        socket,
     })
 }
 
@@ -2740,6 +2750,7 @@ fn nfr3_the_idle_reclaim_with_google_apps_is_measured_on_the_booted_image() {
         IDLE_WINDOW + Duration::from_secs(180),
         IDLE_MEMORY_MB,
         IDLE_PROCESSORS,
+        false,
     ) else {
         return;
     };
@@ -2884,18 +2895,10 @@ fn runner_environment() -> String {
     )
 }
 
-#[test]
-fn nfr1_the_memory_with_google_play_and_one_app_window_is_measured_on_the_booted_image() {
-    let deadline = Instant::now() + MEMORY_BUDGET;
-    let _watchdog = Watchdog::start("the memory measurement", MEMORY_BUDGET + OVERRUN);
-    let after =
-        MEMORY_APP_WAIT + MEMORY_SETTLE + MEMORY_EVERY * MEMORY_READINGS + Duration::from_secs(180);
-    let Some(mut boot) = boot_with_google_play(deadline, after, IDLE_MEMORY_MB, IDLE_PROCESSORS)
-    else {
-        return;
-    };
-
-    // One app window, as a user opens it.
+/// Opens one window of [`MEMORY_APP`], as a user does, leaves it untouched for a minute and
+/// reads the memory [`MEMORY_READINGS`] times as `dsa memory` reads it. What each reading said
+/// goes to `<name>-readings.txt` in the boot's folder.
+fn one_window_readings(boot: &mut GooglePlayBoot, name: &str) -> Vec<memory_check::Reading> {
     eprintln!(
         "{} s: opening {MEMORY_APP}",
         boot.started.elapsed().as_secs()
@@ -2936,7 +2939,212 @@ fn nfr1_the_memory_with_google_play_and_one_app_window_is_measured_on_the_booted
             readings.push(reading);
         }
     }
-    let _ = std::fs::write(boot.dir.join("memory-readings.txt"), raw.join("\n---\n"));
+    let _ = std::fs::write(
+        boot.dir.join(format!("{name}-readings.txt")),
+        raw.join("\n---\n"),
+    );
+    readings
+}
+
+/// What the VM's crosvm process holds by kind, from `/proc/<pid>/status`: the largest crosvm
+/// the runner has, which is the VM's main process (its device processes hold little).
+fn crosvm_resident() -> memory_check::direct_mapped::Resident {
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return Default::default();
+    };
+    entries
+        .flatten()
+        .filter(|entry| {
+            std::fs::read_to_string(entry.path().join("comm"))
+                .is_ok_and(|name| name.trim() == "crosvm")
+        })
+        .map(|entry| {
+            let status = std::fs::read_to_string(entry.path().join("status")).unwrap_or_default();
+            memory_check::direct_mapped::resident(&status)
+        })
+        .max_by_key(|resident| resident.anon_kb + resident.file_kb + resident.shmem_kb)
+        .unwrap_or_default()
+}
+
+/// The direct-mapped measurement, its three boots and LiteGapps' download included, stays
+/// under thirty-four minutes.
+const DIRECT_MAPPED_BUDGET: Duration = Duration::from_secs(2040);
+
+#[test]
+fn nfr1_nfr2_the_direct_mapped_disks_are_measured_against_the_cached_ones_on_the_booted_image() {
+    // The same image twice: its system and add-on disks first on virtio-pmem, mapped with DAX
+    // (Google Play is installed in this mode), then on virtio-blk, cached by the guest, with
+    // Google Play and one app window both times. It fails only when the mapped boot did not map
+    // its read-only partitions; the numbers are reported, not judged.
+    let deadline = Instant::now() + DIRECT_MAPPED_BUDGET;
+    let _watchdog = Watchdog::start(
+        "the direct-mapped measurement",
+        DIRECT_MAPPED_BUDGET + OVERRUN,
+    );
+    let one_window =
+        MEMORY_APP_WAIT + MEMORY_SETTLE + MEMORY_EVERY * MEMORY_READINGS + Duration::from_secs(60);
+    // The mapped measurement, then a boot and the cached measurement.
+    let after = one_window * 2 + Duration::from_secs(420);
+    let Some(mut boot) =
+        boot_with_google_play(deadline, after, IDLE_MEMORY_MB, IDLE_PROCESSORS, true)
+    else {
+        return;
+    };
+    let mapped_table = boot
+        .adb
+        .shell("cat /proc/self/mountinfo")
+        .unwrap_or_default();
+    let _ = std::fs::write(boot.dir.join("direct-mapped-mounts.txt"), &mapped_table);
+    let devices = boot
+        .adb
+        .shell(
+            "ls -l /sys/block /dev/block/by-name; getprop ro.boot.boot_devices; \
+             getprop ro.boot.fstab_suffix; getprop ro.boot.dsa.direct_mapped; \
+             getprop ro.boot.dsa.gapps_image",
+        )
+        .unwrap_or_default();
+    let _ = std::fs::write(boot.dir.join("direct-mapped-devices.txt"), &devices);
+    let kernel = boot
+        .adb
+        .shell("logcat -d -b kernel -v monotonic")
+        .unwrap_or_default();
+    let dax_lines: Vec<&str> = kernel
+        .lines()
+        .filter(|line| {
+            let line = line.to_ascii_lowercase();
+            line.contains("dax") || line.contains("pmem") || line.contains("nvdimm")
+        })
+        .collect();
+    let _ = std::fs::write(
+        boot.dir.join("direct-mapped-kernel.txt"),
+        dax_lines.join("\n"),
+    );
+    let mapped_mounts = memory_check::direct_mapped::erofs_mounts(&mapped_table);
+    let problems = memory_check::direct_mapped::mapping_problems(&mapped_mounts, GAPPS_POINT);
+    if !problems.is_empty() {
+        boot.fail(format!(
+            "the direct-mapped boot did not map its read-only disks:\n{}\nthe kernel said:\n{}",
+            problems.join("\n"),
+            dax_lines.join("\n")
+        ));
+    }
+    let mapped = one_window_readings(&mut boot, "direct-mapped");
+    let mapped_crosvm = crosvm_resident();
+
+    // The service again with the disks on virtio-blk; Google Play stays installed.
+    eprintln!(
+        "{} s: starting Android again with its disks cached",
+        boot.started.elapsed().as_secs()
+    );
+    if let Err(why) = boot.api.stop() {
+        boot.fail(format!("stopping Android: {why}"));
+    }
+    let stop_until = Instant::now() + Duration::from_secs(120);
+    loop {
+        use dsa_host_core::session::SessionState;
+        match boot.api.status() {
+            Ok(status) if status.state == SessionState::Stopped => break,
+            Ok(_) if Instant::now() < stop_until => std::thread::sleep(Duration::from_secs(1)),
+            Ok(status) => boot.fail(format!("Android did not stop: it is {:?}", status.state)),
+            Err(why) => boot.fail(format!("reading the status: {why}")),
+        }
+    }
+    boot.settings["direct_mapped_images"] = serde_json::Value::Bool(false);
+    std::fs::write(&boot.config, boot.settings.to_string()).unwrap();
+    // The old service ends before the new one takes its socket: a stand-in that exits at once
+    // takes its place first, which stops it.
+    boot.service = Service::spawn(&mut Command::new("true"), boot.dir.join("between.log"));
+    let _ = std::fs::remove_file(&boot.socket);
+    boot.service = Service::spawn(
+        Command::new(env!("CARGO_BIN_EXE_dsa-linux-hostd"))
+            .arg("--config")
+            .arg(&boot.config),
+        boot.dir.join("hostd-cached.log"),
+    );
+    boot.api = client(&boot.socket, Duration::from_secs(30));
+    read_log(&boot.socket, &boot.log);
+    let rest = deadline
+        .saturating_duration_since(Instant::now())
+        .saturating_sub(one_window + Duration::from_secs(60));
+    let started = boot.started;
+    if let Err(why) = boot
+        .api
+        .ensure_running(rest, Duration::from_secs(2), |state| {
+            eprintln!("{} s: Android is {state:?}", started.elapsed().as_secs());
+        })
+    {
+        boot.fail(format!(
+            "Android did not become ready with its disks cached: {why}"
+        ));
+    }
+    if let Err(why) = boot.adb.connect(Duration::from_secs(120)) {
+        boot.fail(format!(
+            "adb did not reach the guest after the restart: {why}"
+        ));
+    }
+    let cached_table = boot
+        .adb
+        .shell("cat /proc/self/mountinfo")
+        .unwrap_or_default();
+    let _ = std::fs::write(boot.dir.join("cached-mounts.txt"), &cached_table);
+    let cached_mounts = memory_check::direct_mapped::erofs_mounts(&cached_table);
+    if cached_mounts.iter().any(|m| m.dax) {
+        boot.fail(
+            "the boot with the setting off still mapped a disk with DAX; see cached-mounts.txt"
+                .into(),
+        );
+    }
+    let cached = one_window_readings(&mut boot, "cached");
+    let cached_crosvm = crosvm_resident();
+
+    let google_play = format!("{}, its image mounted from {}", boot.gapps, boot.mounted);
+    let environment = runner_environment();
+    let setting = memory_check::Setting {
+        google_play: &google_play,
+        app: "Settings",
+        memory_mb: IDLE_MEMORY_MB,
+        processors: IDLE_PROCESSORS,
+        environment: &environment,
+    };
+    let Some(report) = memory_check::direct_mapped::report(
+        &memory_check::direct_mapped::Boot {
+            readings: &cached,
+            crosvm: cached_crosvm,
+            mounts: &cached_mounts,
+        },
+        &memory_check::direct_mapped::Boot {
+            readings: &mapped,
+            crosvm: mapped_crosvm,
+            mounts: &mapped_mounts,
+        },
+        &setting,
+    ) else {
+        boot.fail(
+            "a boot had no reading with both the guest's report and the VM's process, so \
+             nothing was measured; they are in direct-mapped-readings.txt and cached-readings.txt"
+                .into(),
+        );
+    };
+    let _ = std::fs::write(boot.dir.join("direct-mapped.md"), &report.markdown);
+    let _ = std::fs::write(
+        boot.dir.join("direct-mapped.json"),
+        serde_json::to_string_pretty(&report.json).unwrap_or_default(),
+    );
+    println!("{}", report.markdown);
+}
+
+#[test]
+fn nfr1_the_memory_with_google_play_and_one_app_window_is_measured_on_the_booted_image() {
+    let deadline = Instant::now() + MEMORY_BUDGET;
+    let _watchdog = Watchdog::start("the memory measurement", MEMORY_BUDGET + OVERRUN);
+    let after =
+        MEMORY_APP_WAIT + MEMORY_SETTLE + MEMORY_EVERY * MEMORY_READINGS + Duration::from_secs(180);
+    let Some(mut boot) =
+        boot_with_google_play(deadline, after, IDLE_MEMORY_MB, IDLE_PROCESSORS, false)
+    else {
+        return;
+    };
+    let readings = one_window_readings(&mut boot, "memory");
     let dumpsys = boot.adb.shell("dumpsys meminfo").unwrap_or_default();
     let _ = std::fs::write(boot.dir.join("memory-dumpsys.txt"), &dumpsys);
     let pss = memory_check::pss_by_process(&dumpsys);

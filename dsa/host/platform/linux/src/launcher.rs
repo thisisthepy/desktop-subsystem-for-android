@@ -172,6 +172,9 @@ pub struct LinuxVmLauncher {
     signs: Arc<Mutex<BootSigns>>,
     /// What the last finished boot's console says, for a start that failed.
     report: Option<String>,
+    /// Whether each boot maps the read-only disks as virtio-pmem (the host's direct-mapped
+    /// mode), where the image can.
+    direct_mapped: bool,
 }
 
 /// What a launcher is made from: who it is for and where their files are.
@@ -221,7 +224,63 @@ impl LinuxVmLauncher {
             vmm_tail: Tail::default(),
             signs: Arc::default(),
             report: None,
+            direct_mapped: false,
         }
+    }
+
+    /// Maps the read-only disks (the system disk, and the add-on disk while there is one) as
+    /// virtio-pmem at each boot whose image carries the direct-mapped mode's mount table, so
+    /// the guest maps their files instead of caching them (`dsa_host_core::direct_mapped`).
+    /// Off, every boot attaches them as virtio-blk disks.
+    pub fn with_direct_mapped(mut self, on: bool) -> LinuxVmLauncher {
+        self.direct_mapped = on;
+        self
+    }
+
+    /// How this boot maps its read-only disks, when the direct-mapped mode is on and the image
+    /// `files` names can: the image's support for it, and whether the add-on disk at
+    /// `addon_disk` is in the layout the mode maps (it is written again in it if not).
+    fn direct_mapped_disks(
+        &self,
+        files: &ImageFiles,
+        addon_disk: Option<&Path>,
+    ) -> Option<crate::crosvm::DirectMapped> {
+        if !self.direct_mapped {
+            return None;
+        }
+        let why = |why: &str| {
+            eprintln!(
+                "{}: {why}; Android starts with its disks on virtio-blk this time",
+                self.name
+            )
+        };
+        if files.system_image.is_none() {
+            why("the image has no separate system disk to map");
+            return None;
+        }
+        let Some(support) = files
+            .initrd
+            .as_deref()
+            .and_then(Path::parent)
+            .and_then(dsa_host_core::direct_mapped::ImageSupport::from_image_dir)
+        else {
+            why("the image has no mount table for the direct-mapped mode");
+            return None;
+        };
+        let addons = addon_disk.is_some_and(|path| {
+            let disk = dsa_host_core::addon_disk::AddonDisk::new(
+                path,
+                dsa_host_core::addon_disk::Format::Raw,
+            );
+            if let Err(e) = disk.bring_to_mappable_layout() {
+                eprintln!(
+                    "{}: direct-mapped: {e}; the add-on disk stays on virtio-blk",
+                    self.name
+                );
+            }
+            disk.is_mappable()
+        });
+        Some(crate::crosvm::DirectMapped { support, addons })
     }
 
     /// Gives each boot a network adapter: on the LAN while `advanced` says so, else NAT. The
@@ -267,6 +326,7 @@ impl LinuxVmLauncher {
         &mut self,
         files: &ImageFiles,
         secret: &BootSecret,
+        mapped: Option<&crate::crosvm::DirectMapped>,
     ) -> Result<TransientFile, String> {
         let source = files.initrd.as_ref().ok_or(
             "the Android image has no initrd, which is what carries the boot's secret to the guest",
@@ -276,11 +336,20 @@ impl LinuxVmLauncher {
         if let Some(properties) = self.boot_properties.as_mut().and_then(|p| p(files)) {
             image = append_overlay(&image, &ramdisk_overlay(&properties));
         }
-        let more = self
+        let mut more = self
             .bootconfig
             .as_mut()
             .map(|b| b(files))
             .unwrap_or_default();
+        // In the direct-mapped mode the add-on images come from their own partitions on the
+        // persistent memory, while the add-on disk is mapped.
+        match mapped {
+            Some(mapped) if mapped.addons => {
+                more = dsa_host_core::addon_disk::direct_mapped_bootconfig(&more)
+            }
+            Some(_) => more.push_str(dsa_host_core::addon_disk::DIRECT_MAPPED_BOOTCONFIG),
+            None => {}
+        }
         let text = format!("{}{more}", bootconfig_entry(secret));
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -357,7 +426,15 @@ impl LinuxVmLauncher {
             }
             None => None,
         };
-        let initrd = self.boot_initrd(&plan.files, secret)?;
+        let direct_mapped = self.direct_mapped_disks(&plan.files, addon_disk.as_deref());
+        if direct_mapped.is_some() {
+            // A disk written again in the mode's layout is a new file, which crosvm opens as
+            // the user.
+            if let Some(path) = &addon_disk {
+                self.account.own(path)?;
+            }
+        }
+        let initrd = self.boot_initrd(&plan.files, secret, direct_mapped.as_ref())?;
         let (backend, mac, tap) = match &mut self.networking {
             Some(networking) => {
                 let advanced = (networking.advanced)();
@@ -400,6 +477,7 @@ impl LinuxVmLauncher {
             sandbox_root,
             network: backend,
             mac_address: mac.unwrap_or_else(|| crate::crosvm::mac_address(self.account.uid)),
+            direct_mapped,
         };
         let args = config.crosvm_args().map_err(|e| e.to_string())?;
         let mut command = Command::new(&self.crosvm);

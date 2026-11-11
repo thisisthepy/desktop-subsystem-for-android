@@ -49,4 +49,18 @@ grep -Fq 'filter: nfr1_the_memory_with_google_play_and_one_app_window_is_measure
 grep -Fq 'summary: /tmp/overlays-test-*/memory.md' "$workflow"
 grep -Fq '/tmp/overlays-test-*/memory*' "$workflow"
 grep -Fq '"dsa/host/platform/linux/tests/memory_check/**"' "$workflow"
+# The host's direct-mapped mode is measured against the cached disks on a runner of its own,
+# on the image made with uncompressed partitions; the overlay check leaves it out, and the
+# other checks do not wait for that image to succeed.
+grep -Fq -- '--skip nfr1_nfr2_the_direct_mapped_disks_are_measured_against_the_cached_ones' "$workflow"
+grep -Fq 'filter: nfr1_nfr2_the_direct_mapped_disks_are_measured_against_the_cached_ones' "$workflow"
+grep -Fq 'summary: /tmp/overlays-test-*/direct-mapped.md' "$workflow"
+grep -Fq 'image: direct-mapped' "$workflow"
+grep -Fq 'name: direct-mapped-boot-image' "$workflow"
+grep -Fq 'UNCOMPRESSED_EROFS: "true"' "$workflow"
+grep -Fq 'args+=(--uncompressed-erofs)' "$workflow"
+direct="$(sed -n '/^  direct-mapped-image:$/,/^  [a-z-]*:$/p' "$workflow")"
+grep -Fq 'continue-on-error: true' <<<"$direct"
+grep -Fq 'steps: *image-steps' <<<"$direct"
+grep -Fq 'CACHE_IMAGE: "false"' <<<"$direct"
 echo "image boot overlays workflow: ok"
