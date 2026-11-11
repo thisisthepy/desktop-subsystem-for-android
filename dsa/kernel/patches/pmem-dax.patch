@@ -1,0 +1,129 @@
+diff --git a/drivers/acpi/nfit/core.c b/drivers/acpi/nfit/core.c
+--- a/drivers/acpi/nfit/core.c
++++ b/drivers/acpi/nfit/core.c
+@@ -6,6 +6,7 @@
+ #include <linux/libnvdimm.h>
+ #include <linux/module.h>
+ #include <linux/nospec.h>
++#include <linux/platform_device.h>
+ #include <linux/mutex.h>
+ #include <linux/ndctl.h>
+ #include <linux/sysfs.h>
+@@ -2658,6 +2659,16 @@
+ 	else if (acpi_desc->platform_cap & ACPI_NFIT_CAPABILITY_MEM_FLUSH)
+ 		set_bit(ND_REGION_PERSIST_MEMCTRL, &ndr_desc->flags);
+ 
++	/*
++	 * Give a persistent memory region's raw namespace page structs, so a file system on it
++	 * can map its files directly (DAX). Without the flag a raw namespace has none, and
++	 * DAX would need a pfn info block written into the namespace, which a read-only
++	 * device shared by several machines cannot take. The page structs live in system
++	 * memory (the namespace is never told to keep them itself).
++	 */
++	if (nfit_spa_type(spa) == NFIT_SPA_PM)
++		set_bit(ND_REGION_PAGEMAP, &ndr_desc->flags);
++
+ 	list_for_each_entry(nfit_memdev, &acpi_desc->memdevs, list) {
+ 		struct acpi_nfit_memory_map *memdev = nfit_memdev->memdev;
+ 		struct nd_mapping_desc *mapping;
+@@ -3073,6 +3084,32 @@
+ 	acpi_desc->nvdimm_bus = NULL;
+ }
+ 
++/*
++ * The parent of the NVDIMM bus: a platform device named "nfit" rather than the ACPI device.
++ * Android's init makes /dev/block/by-name links only for disks below a boot device, and it
++ * finds a disk's boot device by walking up to the first platform device, so a persistent
++ * memory disk below the ACPI device alone would get no links. The ACPI device stays the
++ * provider: every DSM call and notification still goes through acpi_desc->dev.
++ */
++static struct device *acpi_nfit_bus_parent(struct device *dev)
++{
++	static struct platform_device *parent;
++
++	if (!parent) {
++		struct platform_device *made;
++
++		made = platform_device_register_simple("nfit", PLATFORM_DEVID_NONE,
++						       NULL, 0);
++		if (IS_ERR(made)) {
++			dev_warn(dev, "no platform device for the NVDIMM bus (%ld)\n",
++				 PTR_ERR(made));
++			return dev;
++		}
++		parent = made;
++	}
++	return &parent->dev;
++}
++
+ int acpi_nfit_init(struct acpi_nfit_desc *acpi_desc, void *data, acpi_size sz)
+ {
+ 	struct device *dev = acpi_desc->dev;
+@@ -3083,7 +3120,7 @@
+ 	if (!acpi_desc->nvdimm_bus) {
+ 		acpi_nfit_init_dsms(acpi_desc);
+ 
+-		acpi_desc->nvdimm_bus = nvdimm_bus_register(dev,
++		acpi_desc->nvdimm_bus = nvdimm_bus_register(acpi_nfit_bus_parent(dev),
+ 				&acpi_desc->nd_desc);
+ 		if (!acpi_desc->nvdimm_bus)
+ 			return -ENOMEM;
+diff --git a/drivers/nvdimm/virtio_pmem.c b/drivers/nvdimm/virtio_pmem.c
+--- a/drivers/nvdimm/virtio_pmem.c
++++ b/drivers/nvdimm/virtio_pmem.c
+@@ -6,6 +6,8 @@
+  * from host and registers the virtual pmem device
+  * with libnvdimm core.
+  */
++#include <linux/mutex.h>
++#include <linux/platform_device.h>
+ #include "virtio_pmem.h"
+ #include "nd.h"
+ 
+@@ -43,6 +45,37 @@
+ 	return 0;
+ }
+ 
++/*
++ * The parent of each NVDIMM bus: a platform device named "virtio-pmem" rather than the virtio
++ * device. Android's init makes /dev/block/by-name links only for disks below a boot device,
++ * and finds a disk's boot device by walking up to the first platform device, or else by its
++ * PCI slot, which the VMM picks for a pmem device itself. The virtio device stays the
++ * provider: flushes reach it through the region's provider data.
++ */
++static struct device *virtio_pmem_bus_parent(struct virtio_device *vdev)
++{
++	static struct platform_device *parent;
++	static DEFINE_MUTEX(parent_lock);
++	struct device *found = &vdev->dev;
++
++	mutex_lock(&parent_lock);
++	if (!parent) {
++		struct platform_device *made;
++
++		made = platform_device_register_simple("virtio-pmem",
++						       PLATFORM_DEVID_NONE, NULL, 0);
++		if (IS_ERR(made))
++			dev_warn(&vdev->dev, "no platform device for the NVDIMM bus (%ld)\n",
++				 PTR_ERR(made));
++		else
++			parent = made;
++	}
++	if (parent)
++		found = &parent->dev;
++	mutex_unlock(&parent_lock);
++	return found;
++}
++
+ static int virtio_pmem_probe(struct virtio_device *vdev)
+ {
+ 	struct nd_region_desc ndr_desc = {};
+@@ -96,7 +129,7 @@
+ 	vpmem->nd_desc.provider_name = "virtio-pmem";
+ 	vpmem->nd_desc.module = THIS_MODULE;
+ 
+-	vpmem->nvdimm_bus = nvdimm_bus_register(&vdev->dev,
++	vpmem->nvdimm_bus = nvdimm_bus_register(virtio_pmem_bus_parent(vdev),
+ 						&vpmem->nd_desc);
+ 	if (!vpmem->nvdimm_bus) {
+ 		dev_err(&vdev->dev, "failed to register device with nvdimm_bus\n");
