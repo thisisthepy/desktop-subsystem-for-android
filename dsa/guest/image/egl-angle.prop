@@ -1,0 +1,4 @@
+# The default OpenGL ES driver, ANGLE over whichever Vulkan driver the boot chose, as the
+# build.prop already says. The product build.prop of an image made with --dxg-drivers imports
+# this file when the boot asks for no other, so the import always finds a file.
+ro.hardware.egl=angle

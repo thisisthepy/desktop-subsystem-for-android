@@ -7094,5 +7094,162 @@ class KeyMintKeyImageTests(unittest.TestCase):
         self.assertEqual(len(problems), len(expected), problems)
 
 
+class DxgDriverTests(unittest.TestCase):
+    """The image's half of the dxg graphics path: the drivers ride along only with --dxg-drivers,
+    only a boot that asks uses them, and no closed or glibc binary gets in."""
+
+    @staticmethod
+    def _library(machine=62, needed=("libc.so", "libm.so", "libdl.so", "liblog.so"), body=b""):
+        """A 64-bit ELF library for `machine` that needs `needed`."""
+        return KeyMintImageTests._elf(machine, list(needed), body)
+
+    def _drivers(self, root, machine=62, extra=None, needed=None):
+        folder = root / "dxg"
+        folder.mkdir()
+        for name in make_image.DXG_DRIVER_FILES:
+            libs = list(needed) if needed is not None else ["libc.so", "libm.so", "libdl.so", "libglapi.so"]
+            (folder / name).write_bytes(self._library(machine, libs, name.encode()))
+        (folder / "lib").mkdir()
+        (folder / "lib/libglapi.so").write_bytes(self._library(machine, ["libc.so"], b"glapi"))
+        for name, data in (extra or {}).items():
+            (folder / name).parent.mkdir(parents=True, exist_ok=True)
+            (folder / name).write_bytes(data)
+        return folder
+
+    def _modify(self, root, dxg_drivers=None, ueventd=None):
+        source = root / "target-files.zip"
+        with zipfile.ZipFile(source, "w") as archive:
+            archive.writestr("SYSTEM/etc/selinux/plat_sepolicy.cil", "(type init)\n")
+            archive.writestr("SYSTEM/build.prop", "ro.debuggable=1\n")
+            archive.writestr("META/vendor_filesystem_config.txt", "vendor/bin/sh 0 2000 755 capabilities=0x0\n")
+            archive.writestr("META/filesystem_config.txt", "system/bin/sh 0 2000 755 capabilities=0x0\n")
+            archive.writestr("PRODUCT/etc/build.prop", "ro.product.product.name=dsa\n")
+            archive.writestr("VENDOR/etc/selinux/vendor_file_contexts",
+                             "/(vendor|system/vendor)/bin/sh u:object_r:vendor_shell_exec:s0\n")
+            if ueventd is not None:
+                archive.writestr(make_image.DXG_UEVENTD, ueventd)
+        modified = root / "modified.zip"
+        make_image.modify(source, modified, dxg_drivers=dxg_drivers)
+        return zipfile.ZipFile(modified)
+
+    def test_pr3_an_image_without_dxg_drivers_has_no_trace_of_them(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self._modify(Path(tmp)) as archive:
+                names = set(archive.namelist())
+                product = archive.read("PRODUCT/etc/build.prop").decode()
+                contexts = archive.read("VENDOR/etc/selinux/vendor_file_contexts").decode()
+        for target in [*make_image.DXG_DRIVER_FILES.values(), *make_image.DXG_PROPS, make_image.DXG_UEVENTD]:
+            self.assertNotIn(target, names)
+        for line in make_image.DXG_IMPORTS:
+            self.assertNotIn(line, product)
+        self.assertNotIn("/dev/dxg", contexts)
+        # The build.prop still picks the host renderer's drivers.
+        self.assertEqual(make_image.GRAPHICS_PROPS["ro.hardware.vulkan"], "ranchu")
+        self.assertEqual(make_image.GRAPHICS_PROPS["ro.hardware.egl"], "angle")
+
+    def test_pr3_the_dxg_drivers_are_vendor_libraries_a_boot_argument_selects(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            drivers = self._drivers(root)
+            with self._modify(root, dxg_drivers=drivers) as archive:
+                names = set(archive.namelist())
+                product = archive.read("PRODUCT/etc/build.prop").decode().splitlines()
+                contexts = archive.read("VENDOR/etc/selinux/vendor_file_contexts").decode().splitlines()
+                vendor_fs = archive.read("META/vendor_filesystem_config.txt").decode().splitlines()
+                system_fs = archive.read("META/filesystem_config.txt").decode().splitlines()
+                ueventd = archive.read(make_image.DXG_UEVENTD).decode().splitlines()
+                props = {name: archive.read(name).decode() for name in make_image.DXG_PROPS}
+                vulkan = archive.read("VENDOR/lib64/hw/vulkan.dxg.so")
+                glapi = archive.read("VENDOR/lib64/libglapi.so")
+            self.assertEqual(vulkan, (drivers / "vulkan.dxg.so").read_bytes())
+            self.assertEqual(glapi, (drivers / "lib/libglapi.so").read_bytes())
+        for target in make_image.DXG_DRIVER_FILES.values():
+            self.assertIn(target, names)
+            path = target[len("VENDOR/"):]
+            # Loaded into every app's process, so labelled as a same-process HAL.
+            self.assertIn(f"/vendor/{re.escape(path)} u:object_r:same_process_hal_file:s0", contexts)
+            self.assertIn(f"vendor/{path} 0 0 644 capabilities=0x0", vendor_fs)
+        # The imports come after the build's own properties, so they win; the default files say
+        # what the build.prop says, so a boot that asks for nothing renders as before.
+        for line in make_image.DXG_IMPORTS:
+            self.assertIn(line, product)
+        self.assertIn("ro.hardware.vulkan=dxg", props["SYSTEM/etc/dsa/vulkan-dxg.prop"].splitlines())
+        self.assertIn("ro.hardware.vulkan=ranchu", props["SYSTEM/etc/dsa/vulkan-ranchu.prop"].splitlines())
+        self.assertIn("ro.hardware.egl=dxg", props["SYSTEM/etc/dsa/egl-dxg.prop"].splitlines())
+        self.assertIn("ro.hardware.egl=angle", props["SYSTEM/etc/dsa/egl-angle.prop"].splitlines())
+        self.assertIn("import /system/etc/dsa/vulkan-${ro.boot.dsa.vulkan:-ranchu}.prop", product)
+        self.assertIn("import /system/etc/dsa/egl-${ro.boot.dsa.egl:-angle}.prop", product)
+        # The Google Play and ARM translation imports stay last.
+        self.assertEqual(product[-1], make_image.ARM_TRANSLATION_IMPORT)
+        self.assertLess(product.index(make_image.DXG_IMPORTS[-1]), product.index(make_image.GAPPS_IMPORT))
+        for name in make_image.DXG_PROPS:
+            self.assertIn(f"system/{name[len('SYSTEM/'):]} 0 0 644 capabilities=0x0", system_fs)
+        # Every graphics client may open the device, which has the label apps use for a GPU.
+        self.assertIn("/dev/dxg u:object_r:gpu_device:s0", contexts)
+        self.assertIn("/dev/dxg 0666 system graphics", ueventd)
+        self.assertIn("vendor/etc/ueventd.rc 0 0 644 capabilities=0x0", vendor_fs)
+
+    def test_pr3_the_vendor_ueventd_rules_keep_theirs_and_gain_the_device(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            own = "/dev/dri/* 0666 system graphics\n/dev/dxg 0600 root root\n"
+            with self._modify(root, dxg_drivers=self._drivers(root), ueventd=own) as archive:
+                rules = archive.read(make_image.DXG_UEVENTD).decode().splitlines()
+                self.assertEqual(archive.namelist().count(make_image.DXG_UEVENTD), 1)
+        self.assertIn("/dev/dri/* 0666 system graphics", rules)
+        self.assertEqual([rule for rule in rules if rule.startswith("/dev/dxg")], ["/dev/dxg 0666 system graphics"])
+
+    def test_nfr7_no_closed_direct3d_runtime_or_gpu_vendor_driver_enters_the_image(self):
+        # Mesa loads Microsoft's Direct3D 12 runtime and DXCore at run time. Those, and the
+        # vendors' user-mode drivers in their Windows driver packages, are closed binaries.
+        for name in ["libd3d12.so", "lib/libd3d12core.so", "lib/libdxcore.so", "lib/libnvwgf2umx.so",
+                     "lib/libigd12umd64.so", "lib/libigd12um64xe2.so", "lib/libcuda.so.1", "nested/libdxcore.so"]:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+                drivers = self._drivers(Path(tmp), extra={name: self._library()})
+                with self.assertRaises(ValueError) as caught:
+                    make_image.checked_dxg_drivers(drivers, "x86_64")
+                self.assertIn("closed Microsoft or GPU vendor binary", str(caught.exception))
+                self.assertIn(Path(name).name, str(caught.exception))
+
+    def test_pr3_a_library_built_against_glibc_is_refused(self):
+        # WSL's libraries need glibc (libc.so.6, libpthread.so.0, ...), which Android's linker
+        # cannot load.
+        with tempfile.TemporaryDirectory() as tmp:
+            drivers = self._drivers(Path(tmp), needed=["libc.so.6", "libpthread.so.0", "libdl.so.2"])
+            with self.assertRaises(ValueError) as caught:
+                make_image.checked_dxg_drivers(drivers, "x86_64")
+        message = str(caught.exception)
+        self.assertIn("built against glibc", message)
+        self.assertIn("libc.so.6", message)
+        self.assertIn("libpthread.so.0", message)
+
+    def test_pr3_drivers_for_another_architecture_or_missing_are_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            drivers = self._drivers(Path(tmp), machine=183)
+            with self.assertRaises(ValueError) as caught:
+                make_image.checked_dxg_drivers(drivers, "x86_64")
+            self.assertIn("not x86_64 (62)", str(caught.exception))
+            self.assertEqual(sorted(make_image.checked_dxg_drivers(drivers, "arm64")),
+                             sorted([*make_image.DXG_DRIVER_FILES.values(), "VENDOR/lib64/libglapi.so"]))
+            (drivers / "libEGL_dxg.so").unlink()
+            with self.assertRaises(ValueError) as caught:
+                make_image.checked_dxg_drivers(drivers, "arm64")
+            self.assertIn("libEGL_dxg.so is missing", str(caught.exception))
+
+    def test_pr3_a_library_the_drivers_need_must_be_in_vendor_or_the_llndk(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            drivers = self._drivers(Path(tmp), needed=["libc.so", "libglapi.so", "libdrm.so", "libnativewindow.so"])
+            payloads = make_image.checked_dxg_drivers(drivers, "x86_64")
+        problems = make_image.dxg_library_problems(payloads, ["VENDOR/lib64/libc++.so"])
+        self.assertEqual(len(problems), len(make_image.DXG_DRIVER_FILES), problems)
+        self.assertTrue(all("needs libdrm.so" in problem for problem in problems), problems)
+        self.assertEqual(make_image.dxg_library_problems(payloads, ["VENDOR/lib64/libdrm.so"]), [])
+
+    def test_pr3_the_image_json_says_which_boot_arguments_select_the_drivers(self):
+        self.assertEqual(make_image.DXG_MANIFEST, {"vulkan": "dxg", "egl": "dxg"})
+        self.assertIn("ro.boot.dsa.vulkan", make_image.DXG_IMPORTS[0])
+        self.assertIn("ro.boot.dsa.egl", make_image.DXG_IMPORTS[1])
+
+
 if __name__ == "__main__":
     unittest.main()

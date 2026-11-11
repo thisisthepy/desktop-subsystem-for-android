@@ -357,6 +357,19 @@ aapt2 from the Android SDK's build-tools for the system screen overlays.
   version and tags under `identity`, and its `arch`, so the host can compose a fingerprint.
 - Every APK, APEX and verified boot image is re-signed. The published build is signed with
   AOSP's test keys, whose private halves are public.
+- With `--dxg-drivers <folder>` (an experiment; no release passes it), the image also carries
+  Mesa's Dozen Vulkan driver and its d3d12 OpenGL ES driver as `vulkan.dxg.so` and
+  `libEGL_dxg.so`, `libGLESv1_CM_dxg.so`, `libGLESv2_dxg.so`, with any library they need from
+  the folder's `lib/`. They reach the host GPU through the kernel's `/dev/dxg`, which the host
+  gives the VM only when its `gpu_paravirtualization` setting is on. The product `build.prop`
+  imports `vulkan-${ro.boot.dsa.vulkan:-ranchu}.prop` and `egl-${ro.boot.dsa.egl:-angle}.prop`,
+  so a boot without `androidboot.dsa.vulkan=dxg` keeps the host renderer's drivers. `/dev/dxg`
+  is labelled `gpu_device` and opened to graphics clients (`ueventd.rc`). The image refuses a
+  folder holding a library built against glibc, which Android's linker cannot load, or one of
+  the closed binaries Mesa would load on a Linux desktop: Microsoft's Direct3D 12 runtime and
+  DXCore, and the GPU vendors' user-mode drivers. That leaves Mesa without the Direct3D 12
+  runtime it needs, so the path does not render yet; `image.json` says `"dxg"` for such an
+  image.
 
 ## Tracing a click
 
