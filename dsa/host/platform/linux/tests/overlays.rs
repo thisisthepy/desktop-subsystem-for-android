@@ -94,12 +94,15 @@
 //! (the host's processes, the service's own, and the guest's report), plus the guest's PSS by
 //! process from `dumpsys meminfo`. The medians go to `memory.md` and `memory.json`
 //! (`memory_check`), with every reading beside them, and how much more the VM holds than the
-//! guest uses. Then it closes the window and waits for the zram writeback, which the boot's
-//! command line lets run 30 s after no app is in use, of pages unused for 60 s, and reads the
-//! memory again: the zram store before and after, what was written, and the VM's excess over
-//! the guest's use with the window open and closed. It fails on a large regression against the
-//! baseline recorded in `memory_check/baseline.json`, and when the guest's zram has no backing
-//! file.
+//! guest uses. Beside the numbers it says what they are made of: the guest kernel's largest
+//! slab caches, vmalloc users and threads, which the guest reads as root when the shell asks
+//! (`dsa-channeld --memory-report`), and system_server's App Summary, threads and services,
+//! its ART heap settings and, where the build allows one, its heap dump. Then it closes the
+//! window and waits for the zram writeback, which the boot's command line lets run 30 s after
+//! no app is in use, of pages unused for 60 s, and reads the memory again: the zram store
+//! before and after, what was written, and the VM's excess over the guest's use with the
+//! window open and closed. It fails on a large regression against the baseline recorded in
+//! `memory_check/baseline.json`, and when the guest's zram has no backing file.
 //!
 //! Runs when CI gives it what it needs: `DSA_CROSVM` names the crosvm to run,
 //! `DSA_WIDGET_TEST_IMAGE` the image folder built from the commit under test (made with a
@@ -2827,9 +2830,12 @@ fn nfr3_the_idle_reclaim_with_google_apps_is_measured_on_the_booted_image() {
     }
 }
 
-/// The memory measurement, both boots, LiteGapps' download and the part after the window
-/// closes included, stays under twenty-six minutes.
-const MEMORY_BUDGET: Duration = Duration::from_secs(1560);
+/// The memory measurement, both boots, LiteGapps' download, the kernel and system_server
+/// reports and the part after the window closes included, stays under twenty-nine minutes,
+/// inside the job's thirty-four.
+const MEMORY_BUDGET: Duration = Duration::from_secs(1740);
+/// How long the heap dump of system_server, and then copying it out, may each take.
+const HEAP_DUMP_WAIT: Duration = Duration::from_secs(60);
 /// The zram writeback's times for this check, on the guest's kernel command line: a writeback
 /// 30 s after no app is in use, of pages unused for 60 s. The defaults (ten minutes, half an
 /// hour) are longer than the check can wait.
@@ -2877,6 +2883,105 @@ fn service_memory() -> memory_check::ServiceMemory {
     memory_check::ServiceMemory::default()
 }
 
+/// How long the guest has to write its kernel memory report once asked.
+const KERNEL_REPORT_WAIT: Duration = Duration::from_secs(60);
+
+/// Asks the guest for its kernel memory report (root reads the slab caches, vmalloc users and
+/// threads, which the shell cannot) and waits for it in the kernel log. The log goes to
+/// `memory-kernel-log.txt` and the report's lines to `memory-kernel.txt`.
+fn kernel_memory_report(adb: &Adb, dir: &Path) -> Result<Vec<String>, String> {
+    let property = memory_check::KERNEL_REPORT_PROPERTY;
+    adb.shell(&format!("setprop {property} 0; setprop {property} 1"))?;
+    let until = Instant::now() + KERNEL_REPORT_WAIT;
+    let mut log = String::new();
+    loop {
+        if let Ok(text) = adb.shell("logcat -d -b kernel") {
+            log = text;
+        }
+        if let Some(lines) = memory_check::kernel_report(&log) {
+            let _ = std::fs::write(dir.join("memory-kernel-log.txt"), &log);
+            let _ = std::fs::write(dir.join("memory-kernel.txt"), lines.join("\n"));
+            return Ok(lines);
+        }
+        if Instant::now() >= until {
+            let _ = std::fs::write(dir.join("memory-kernel-log.txt"), &log);
+            return Err(format!(
+                "the guest wrote no whole report to the kernel log within {} s of {property} \
+                 set to 1 (dsa_memory_report in dsa-channeld.rc; look in memory-kernel-log.txt \
+                 for its lines and for an avc denial of dsa_memory_report)",
+                KERNEL_REPORT_WAIT.as_secs()
+            ));
+        }
+        std::thread::sleep(Duration::from_secs(2));
+    }
+}
+
+/// system_server's memory: its `dumpsys meminfo` (`memory-system-server.txt`, with ART's
+/// details), its threads, the services it lists (`memory-services.txt`), the ART heap
+/// settings, and a heap dump when the build allows one (`memory-system-server.hprof`; a user
+/// build refuses it, and the report says what it answered).
+fn system_server_memory(adb: &Adb, dir: &Path) -> (String, serde_json::Value) {
+    let pid = adb
+        .shell("pidof system_server")
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let meminfo = if pid.is_empty() {
+        String::new()
+    } else {
+        adb.shell(&format!("dumpsys meminfo -d {pid}"))
+            .unwrap_or_else(|why| why)
+    };
+    let _ = std::fs::write(dir.join("memory-system-server.txt"), &meminfo);
+    let threads = if pid.is_empty() {
+        String::new()
+    } else {
+        adb.shell(&format!("cat /proc/{pid}/task/*/comm"))
+            .unwrap_or_default()
+    };
+    let services = adb.shell("dumpsys -l").unwrap_or_default();
+    let _ = std::fs::write(dir.join("memory-services.txt"), &services);
+    let heap_settings = memory_check::heap_settings(&adb.shell("getprop").unwrap_or_default());
+    let heap_dump = if pid.is_empty() {
+        "system_server was not found".to_string()
+    } else {
+        let path = "/data/local/tmp/system_server.hprof";
+        let answer = adb
+            .run_for(
+                &["shell", &format!("am dumpheap {pid} {path}")],
+                HEAP_DUMP_WAIT,
+            )
+            .map(|out| String::from_utf8_lossy(&out).into_owned())
+            .unwrap_or_else(|why| why);
+        let kept = dir.join("memory-system-server.hprof");
+        let kept_path = kept.to_string_lossy().into_owned();
+        let pulled = adb
+            .run_for(&["pull", path, kept_path.as_str()], HEAP_DUMP_WAIT)
+            .is_ok()
+            && std::fs::metadata(&kept).is_ok_and(|m| m.len() > 0);
+        let _ = adb.shell(&format!("rm -f {path}"));
+        if pulled {
+            "kept as memory-system-server.hprof".to_string()
+        } else {
+            let answer: String = answer
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .chars()
+                .take(300)
+                .collect();
+            format!("none (`am dumpheap` answered: {answer})")
+        }
+    };
+    memory_check::system_server_report(&memory_check::SystemServer {
+        meminfo: &meminfo,
+        threads: &threads,
+        services: &services,
+        heap_settings: &heap_settings,
+        heap_dump: &heap_dump,
+    })
+}
+
 /// The runner the measurement ran on: its kernel, processor and memory.
 fn runner_environment() -> String {
     let kernel = std::fs::read_to_string("/proc/sys/kernel/osrelease").unwrap_or_default();
@@ -2911,6 +3016,8 @@ fn nfr1_the_memory_with_google_play_and_one_app_window_is_measured_on_the_booted
         + MEMORY_SETTLE
         + MEMORY_EVERY * (MEMORY_READINGS + MEMORY_IDLE_READINGS)
         + MEMORY_WRITEBACK_WAIT
+        + KERNEL_REPORT_WAIT
+        + HEAP_DUMP_WAIT * 2
         + Duration::from_secs(180);
     let Some(mut boot) = boot_with_google_play(
         deadline,
@@ -2964,9 +3071,12 @@ fn nfr1_the_memory_with_google_play_and_one_app_window_is_measured_on_the_booted
         }
     }
     let _ = std::fs::write(boot.dir.join("memory-readings.txt"), raw.join("\n---\n"));
+    // What the kernel's part is made of, read by root in the guest right after the readings.
+    let kernel = kernel_memory_report(&boot.adb, &boot.dir);
     let dumpsys = boot.adb.shell("dumpsys meminfo").unwrap_or_default();
     let _ = std::fs::write(boot.dir.join("memory-dumpsys.txt"), &dumpsys);
     let pss = memory_check::pss_by_process(&dumpsys);
+    let (system_server_md, system_server_json) = system_server_memory(&boot.adb, &boot.dir);
 
     let baseline: serde_json::Value =
         serde_json::from_str(memory_check::BASELINE).expect("the memory baseline is JSON");
@@ -2985,6 +3095,23 @@ fn nfr1_the_memory_with_google_play_and_one_app_window_is_measured_on_the_booted
              process, so nothing was measured; they are in memory-readings.txt"
         ));
     };
+    report.markdown.push('\n');
+    match &kernel {
+        Ok(lines) => {
+            report
+                .markdown
+                .push_str(&memory_check::kernel_markdown(lines));
+            report.json["kernel_report"] = serde_json::json!(lines);
+        }
+        Err(why) => {
+            report.markdown.push_str(&format!(
+                "## The guest kernel's memory\n\nNo kernel memory report: {why}\n\n"
+            ));
+            report.json["kernel_report"] = serde_json::json!({ "error": why });
+        }
+    }
+    report.markdown.push_str(&system_server_md);
+    report.json["system_server"] = system_server_json;
 
     // The window closes: the idle reclaim, the free pages reported again, and the zram
     // writeback, at the times the boot set. The numbers again, beside the ones above.
@@ -3070,6 +3197,9 @@ fn nfr1_the_memory_with_google_play_and_one_app_window_is_measured_on_the_booted
         serde_json::to_string_pretty(&report.json).unwrap_or_default(),
     );
     println!("{}", report.markdown);
+    if let Err(why) = &kernel {
+        println!("::warning::no kernel memory report: {why}");
+    }
     if !problems.is_empty() {
         boot.fail(problems.join("\n"));
     }

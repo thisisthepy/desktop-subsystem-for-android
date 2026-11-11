@@ -24,6 +24,7 @@
 //! [`keymint_key`] fetches KeyMint's root key from the host once each boot, for KeyMint alone.
 //! [`dns_stub`] answers the guest's DNS queries with the host's resolver, and
 //! [`dns_redirect`] sets the packet filter rules that send those queries to it.
+//! [`memory_report`] says what the guest kernel's own memory is made of, when the shell asks.
 //!
 //! The daemon answers the host's clock probes itself ([`clock_answer`]), from the thread that
 //! reads the connection, so the answer carries the guest's clock as close to the probe's
@@ -43,6 +44,7 @@ pub mod image_store;
 pub mod keymint_key;
 pub mod logbridge;
 pub mod logd;
+pub mod memory_report;
 pub mod pageout;
 pub mod pressure;
 pub mod reclaim;
