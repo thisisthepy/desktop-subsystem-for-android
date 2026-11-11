@@ -113,6 +113,7 @@ pub mod network;
 pub mod paths;
 #[cfg(windows)]
 pub mod pipe;
+pub mod pmem_disk;
 pub mod power;
 #[cfg(windows)]
 pub mod profile;

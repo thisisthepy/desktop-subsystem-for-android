@@ -748,6 +748,30 @@ What keeps the number small:
 - `dsa-wm` empties its working set 30 seconds after the last task window closes, and logs
   how much it held. Memory it touches again comes back by itself.
 
+### Direct-mapped read-only disks
+
+Off by default, while its saving is measured: `"direct_mapped_images": true` in
+`dsa-hostd.json` (read when the service starts). Each boot then attaches the image's system
+disk and the user's add-on disk as Hyper-V virtual persistent memory instead of SCSI disks.
+The guest mounts the read-only partitions with DAX: it maps each file from the host's mapping
+of the image instead of reading it into a page cache of its own, on top of Windows' file cache
+of the same file. The pages the VM maps are clean file pages, which Windows can drop and read
+again; the guest keeps page structs for the mapped disks, about 1.6% of their size.
+
+- It works on x86_64 PCs only (Hyper-V on ARM64 boots with the disks on SCSI), and only for an
+  image that carries the mode's mount table (`direct_mapped` in its `image.json`); any other
+  boot attaches the disks as before, with a line in the service's log saying why.
+- Virtual persistent memory maps a flat image, so the first boot of each image makes a fixed
+  VHD of its system disk beside it (`system.pmem.vhd`, as large as the disk) with Windows' own
+  virtual disk service, and the next boots use it. The published `system.vhdx` stays as it
+  was. An add-on disk from an earlier DSA is written again in the layout the mode maps.
+- A mapped partition cannot be checked by dm-verity in the guest. The disk is the one the
+  service checked against the signed release list, kept where only SYSTEM and administrators
+  may write, and attached read only.
+- Only files stored uncompressed are mapped. The published images compress their partitions,
+  so the mode saves most on an image made with `make-image.py --uncompressed-erofs`, which the
+  image CI's direct-mapped measurement boots.
+
 ## DSA Settings
 
 `settings/` is the settings app, a WPF app in C# with WPF UI (MIT), an open source

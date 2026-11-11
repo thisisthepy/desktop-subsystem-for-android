@@ -429,6 +429,7 @@ pub fn create_user_android(
         )
     })
     .with_memory_max(memory_max)
+    .with_direct_mapped(config.direct_mapped_images)
     .with_boot_dir(config.machine_root().tmp())
     .with_bootconfig({
         // An ARM translator (the package the user installed, else the image's default one) is

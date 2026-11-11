@@ -77,6 +77,58 @@ pub struct AndroidVmLauncher {
     /// The VM's network, made at each start and removed at each stop. Without it the VM has
     /// no network adapter.
     networking: Option<crate::hcn::VmNetworking>,
+    /// Whether each boot maps the read-only disks as persistent memory (the host's
+    /// direct-mapped mode), where the host and the image can.
+    direct_mapped: bool,
+}
+
+/// How the boot `config` describes maps its read-only disks in the host's direct-mapped mode:
+/// the system disk as a fixed VHD made from the image's, and the add-on disk, brought to the
+/// layout the mode maps, while there is one. An error says why this boot cannot, and the boot
+/// then attaches its disks as SCSI disks: a host other than x86_64, an image from before the
+/// mode, or a copy that could not be made.
+pub fn direct_mapped_disks(config: &AndroidVmConfig) -> Result<crate::vm::DirectMapped, String> {
+    if GuestArch::HOST != GuestArch::X86_64 {
+        return Err("the direct-mapped mode is for x86_64 hosts only".into());
+    }
+    let system = config
+        .system_image
+        .as_ref()
+        .ok_or("the image has no separate system disk to map")?;
+    let support = system
+        .parent()
+        .and_then(dsa_host_core::direct_mapped::ImageSupport::from_image_dir)
+        .ok_or("the image has no mount table for the direct-mapped mode")?;
+    if !support.uncompressed_erofs {
+        eprintln!(
+            "direct-mapped: the image's read-only partitions are compressed, so only their \
+             uncompressed files are mapped; the rest is cached by the guest as before"
+        );
+    }
+    let (system_disk, system_bytes) = crate::pmem_disk::prepare_system_disk(system)?;
+    let addon_bytes = match &config.addon_disk {
+        None => None,
+        Some(path) => {
+            let disk = dsa_host_core::addon_disk::AddonDisk::new(
+                path,
+                dsa_host_core::addon_disk::Format::Vhd,
+            );
+            match disk.bring_to_mappable_layout() {
+                Ok(()) if disk.is_mappable() => crate::pmem_disk::fixed_vhd_disk_bytes(path).ok(),
+                Ok(()) => None,
+                Err(why) => {
+                    eprintln!("direct-mapped: {why}; the add-on disk stays on SCSI");
+                    None
+                }
+            }
+        }
+    };
+    Ok(crate::vm::DirectMapped {
+        system_disk,
+        system_bytes,
+        addon_bytes,
+        support,
+    })
 }
 
 /// Supplies more bootconfig lines (`key = "value"`) for each boot of the VM configured so.
@@ -246,7 +298,17 @@ impl AndroidVmLauncher {
             bootconfig: None,
             boot_properties: None,
             networking: None,
+            direct_mapped: false,
         }
+    }
+
+    /// Maps the read-only disks (the system disk, and the add-on disk while there is one) as
+    /// virtual persistent memory at each boot where the host and the image can, so the guest
+    /// maps their files instead of caching them (see [`direct_mapped_disks`]). Off, every boot
+    /// attaches them as SCSI disks.
+    pub fn with_direct_mapped(mut self, on: bool) -> AndroidVmLauncher {
+        self.direct_mapped = on;
+        self
     }
 
     /// Gives each boot a network adapter on the network `networking` makes for it.
@@ -377,6 +439,12 @@ impl AndroidVmLauncher {
         access.extend(boot.vm_access());
         access.extend(config.pstore_disk.iter().cloned());
         access.extend(config.addon_disk.iter().cloned());
+        access.extend(
+            config
+                .direct_mapped
+                .iter()
+                .map(|mapped| mapped.system_disk.clone()),
+        );
         for path in &access {
             grant_vm_access(&self.id, path).map_err(|e| {
                 format!(
@@ -438,13 +506,31 @@ impl GuestLauncher for AndroidVmLauncher {
                 config.addon_disk = None;
             }
         }
+        if self.direct_mapped {
+            match direct_mapped_disks(&config) {
+                Ok(mapped) => config.direct_mapped = Some(mapped),
+                Err(why) => eprintln!(
+                    "{}: {why}; Android starts with its disks on SCSI this time",
+                    self.id
+                ),
+            }
+        }
         // Removed on every way out of this function: by then the VM has read them or will
         // never run.
-        let more = self
+        let mut more = self
             .bootconfig
             .as_mut()
             .map(|source| source(&config))
             .unwrap_or_default();
+        if let Some(mapped) = &config.direct_mapped {
+            // The add-on images come from their own partitions on the persistent memory, while
+            // the add-on disk is mapped; the system's from the image's table for the mode.
+            if mapped.addon_bytes.is_some() {
+                more = dsa_host_core::addon_disk::direct_mapped_bootconfig(&more);
+            } else {
+                more.push_str(dsa_host_core::addon_disk::DIRECT_MAPPED_BOOTCONFIG);
+            }
+        }
         let properties = self
             .boot_properties
             .as_mut()
