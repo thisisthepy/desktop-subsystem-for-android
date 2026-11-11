@@ -2941,6 +2941,9 @@ fn system_server_memory(adb: &Adb, dir: &Path) -> (String, serde_json::Value) {
     };
     let services = adb.shell("dumpsys -l").unwrap_or_default();
     let _ = std::fs::write(dir.join("memory-services.txt"), &services);
+    // The features decide which services system_server starts.
+    let features = adb.shell("pm list features").unwrap_or_default();
+    let _ = std::fs::write(dir.join("memory-features.txt"), &features);
     let heap_settings = memory_check::heap_settings(&adb.shell("getprop").unwrap_or_default());
     let heap_dump = if pid.is_empty() {
         "system_server was not found".to_string()

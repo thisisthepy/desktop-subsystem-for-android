@@ -2578,6 +2578,29 @@ class GuestMemoryTests(unittest.TestCase):
                 policy,
             )
 
+    def test_nfr1_dentries_and_inodes_are_reclaimed_twice_as_readily(self):
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
+            rc = archive.read("VENDOR/etc/init/dsa-memory.rc").decode()
+            self.assertIn("write /proc/sys/vm/vfs_cache_pressure 200", rc)
+            policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+            self.assertIn(
+                '(genfscon proc "/sys/vm/vfs_cache_pressure" (u object_r dsa_proc_vm_tunable',
+                policy,
+            )
+
+    def test_nfr1_system_server_starts_no_service_for_a_radio_virt_wifi_does_not_have(self):
+        # virt_wifi is a station on the host's network: no Wi-Fi Direct, Aware or round-trip
+        # timing, and the Thread HAL is removed. Declared, system_server starts a service and
+        # its threads for each.
+        self.assertIn("com.android.hardware.threadnetwork", make_image.REMOVED_APEXES)
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
+            xml = archive.read("VENDOR/etc/permissions/dsa-unavailable-features.xml").decode()
+        for feature in ["android.hardware.wifi.direct", "android.hardware.wifi.aware",
+                        "android.hardware.wifi.rtt", "android.hardware.thread_network"]:
+            self.assertIn(f'<unavailable-feature name="{feature}" />', xml)
+        # Wi-Fi itself stays: apps see the host's network as a Wi-Fi network.
+        self.assertNotIn('<unavailable-feature name="android.hardware.wifi" />', xml)
+
     def test_nfr1_swapon_all_does_not_stop_at_the_missing_max_comp_streams(self):
         # fs_mgr opens /sys/block/zram0/max_comp_streams for any value of 0 or more, its
         # default, and skips the device when the file is missing, as it is on the guest's
@@ -2720,7 +2743,7 @@ class GuestMemoryTests(unittest.TestCase):
         props = make_image.edit_props("dalvik.vm.heapmaxfree=32m\ndalvik.vm.heapsize=512m\n").splitlines()
         self.assertIn("dalvik.vm.heaptargetutilization=0.75", props)
         self.assertIn("dalvik.vm.heapminfree=512k", props)
-        self.assertIn("dalvik.vm.heapmaxfree=8m", props)
+        self.assertIn("dalvik.vm.heapmaxfree=4m", props)
         self.assertNotIn("dalvik.vm.heapmaxfree=32m", props)
         self.assertIn("dalvik.vm.heapsize=512m", props)
         self.assertNotIn("ro.config.low_ram", "\n".join(props))
