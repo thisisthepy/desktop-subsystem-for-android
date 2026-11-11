@@ -290,6 +290,14 @@ pub struct HostConfig {
     /// (`dsa-hostd <config.json>`), the setting alone turns freezing on.
     #[serde(default)]
     pub freeze_after_minutes: Option<u64>,
+    /// Give the Android VM Hyper-V's paravirtualized GPU (GPU-PV, the guest's `/dev/dxg`), as
+    /// WSL gives its own VM, for trying the guest's dxg graphics drivers. Off by default, and
+    /// off in every installation: Android renders through the host renderer either way, and
+    /// only an image built with the dxg drivers uses the GPU. The host's display driver must
+    /// support GPU paravirtualization (WDDM 2.9 or later); one that does not leaves the VM
+    /// without it, which the service logs.
+    #[serde(default)]
+    pub gpu_paravirtualization: bool,
     /// The machine's DSA folder: the folder the configuration file is in, which `dsa-hostd`
     /// fills in when it reads the file. Not a key of the file.
     #[serde(skip)]
@@ -686,6 +694,7 @@ impl HostConfig {
             hosting_process_name_suffix: None,
             fine_grained_memory: false,
             network_adapter: None,
+            gpu_paravirtualization: self.gpu_paravirtualization,
         }
     }
 

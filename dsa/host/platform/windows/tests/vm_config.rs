@@ -70,6 +70,7 @@ fn config() -> AndroidVmConfig {
         hosting_process_name_suffix: None,
         fine_grained_memory: false,
         network_adapter: None,
+        gpu_paravirtualization: false,
     }
 }
 
@@ -577,4 +578,97 @@ fn nfr2_the_guest_kernel_sets_little_memory_aside_at_boot() {
         // The user's own parameters still come last, so they can override these.
         assert!(cmdline.ends_with("androidboot.hardware=dsa"), "{cmdline}");
     }
+}
+
+#[test]
+fn pr3_without_gpu_paravirtualization_the_vm_has_no_gpu_settings() {
+    for (arch, config) in [
+        (GuestArch::X86_64, config()),
+        (GuestArch::Arm64, arm64_config()),
+    ] {
+        let doc = config.to_hcs_document_for(arch).unwrap();
+        let memory = &doc["VirtualMachine"]["ComputeTopology"]["Memory"];
+        assert!(memory.get("HighMmioGapInMB").is_none(), "{memory}");
+        assert!(doc["VirtualMachine"]["ComputeTopology"]
+            .get("Gpu")
+            .is_none());
+        let cmdline = config.full_kernel_cmdline_for(arch);
+        assert!(!cmdline.contains("androidboot.dsa.gpu"), "{cmdline}");
+        assert!(!cmdline.contains("androidboot.dsa.vulkan"), "{cmdline}");
+    }
+}
+
+#[test]
+fn pr3_gpu_paravirtualization_widens_the_high_mmio_window_and_tells_the_guest() {
+    use dsa_host_windows::vm::{GPU_HIGH_MMIO_GAP_MB, GPU_PARAVIRTUALIZATION_CMDLINE};
+    for (arch, mut config) in [
+        (GuestArch::X86_64, config()),
+        (GuestArch::Arm64, arm64_config()),
+    ] {
+        let without = config.to_hcs_document_for(arch).unwrap();
+        config.gpu_paravirtualization = true;
+        let doc = config.to_hcs_document_for(arch).unwrap();
+        let memory = &doc["VirtualMachine"]["ComputeTopology"]["Memory"];
+        assert_eq!(memory["HighMmioGapInMB"], GPU_HIGH_MMIO_GAP_MB);
+        assert_eq!(GPU_HIGH_MMIO_GAP_MB, 16 * 1024);
+        // HCS places the window: a fixed base would cap how far the VM's memory can grow.
+        assert!(memory.get("HighMmioBaseInMB").is_none());
+        // The GPU is assigned to the running VM, not in the document that creates it.
+        assert!(doc["VirtualMachine"]["ComputeTopology"]
+            .get("Gpu")
+            .is_none());
+        // Apart from the window and the boot's command line, nothing changes.
+        let comparable = |doc: &Value| -> Value {
+            let mut doc = doc.clone();
+            doc["VirtualMachine"]["Chipset"] = Value::Null;
+            if let Some(memory) = doc["VirtualMachine"]["ComputeTopology"]["Memory"].as_object_mut()
+            {
+                memory.remove("HighMmioGapInMB");
+            }
+            doc
+        };
+        assert_eq!(comparable(&doc), comparable(&without));
+        let cmdline = config.full_kernel_cmdline_for(arch);
+        assert!(
+            cmdline.contains(GPU_PARAVIRTUALIZATION_CMDLINE),
+            "{cmdline}"
+        );
+        let words: Vec<&str> = cmdline.split_whitespace().collect();
+        assert!(words.contains(&"androidboot.dsa.gpu=dxg"), "{cmdline}");
+        assert!(words.contains(&"androidboot.dsa.vulkan=dxg"), "{cmdline}");
+    }
+}
+
+#[test]
+fn pr3_a_vulkan_driver_named_in_the_configured_command_line_wins_over_dxg() {
+    let mut config = config();
+    config.gpu_paravirtualization = true;
+    config.kernel_cmdline = "androidboot.dsa.vulkan=ranchu".into();
+    let cmdline = config.full_kernel_cmdline_for(GuestArch::X86_64);
+    let dxg = cmdline.find("androidboot.dsa.vulkan=dxg").unwrap();
+    let own = cmdline.find("androidboot.dsa.vulkan=ranchu").unwrap();
+    // Android keeps the last value of a repeated androidboot key.
+    assert!(dxg < own, "{cmdline}");
+    assert!(
+        cmdline.ends_with("androidboot.dsa.vulkan=ranchu"),
+        "{cmdline}"
+    );
+}
+
+#[test]
+fn pr3_the_gpu_assignment_request_gives_the_vm_every_host_gpu() {
+    use dsa_host_windows::vm::{gpu_assignment_request, GPU_RESOURCE_PATH};
+    let request: Value = serde_json::from_str(&gpu_assignment_request()).unwrap();
+    assert_eq!(
+        request["ResourcePath"],
+        "VirtualMachine/ComputeTopology/Gpu"
+    );
+    assert_eq!(request["ResourcePath"], GPU_RESOURCE_PATH);
+    assert_eq!(request["RequestType"], "Update");
+    let settings = request["Settings"].as_object().unwrap();
+    assert_eq!(settings["AssignmentMode"], "Mirror");
+    assert_eq!(settings["AllowVendorExtension"], true);
+    // Builds before 22545 refuse a request with the settings that turn presentation and GDI
+    // acceleration off, so they are never sent.
+    assert_eq!(settings.len(), 2, "{request}");
 }

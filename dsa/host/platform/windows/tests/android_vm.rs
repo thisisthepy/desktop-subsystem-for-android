@@ -44,6 +44,7 @@ fn missing_files() -> AndroidVmConfig {
         hosting_process_name_suffix: None,
         fine_grained_memory: false,
         network_adapter: None,
+        gpu_paravirtualization: false,
     }
 }
 
