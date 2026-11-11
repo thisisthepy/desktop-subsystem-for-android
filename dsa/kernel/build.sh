@@ -2,11 +2,12 @@
 # Builds the guest kernel: the WSL kernel source at the tag in wsl-kernel.tag, configured
 # with WSL's configuration for the architecture plus android.config:
 #
-#   x86_64  Microsoft/config-wsl + android.config + virtio.config, built as bzImage
+#   x86_64  Microsoft/config-wsl + android.config + virtio.config + dxg.config, built as
+#           bzImage
 #   arm64   Microsoft/config-wsl-arm64 + android.config + android-arm64.config +
-#           virtio.config, built as Image (the EFI stub Hyper-V's UEFI firmware starts on
-#           ARM64 Windows hosts, and the uncompressed Image Apple's Virtualization framework
-#           boots directly on Apple silicon Macs)
+#           virtio.config + dxg.config, built as Image (the EFI stub Hyper-V's UEFI
+#           firmware starts on ARM64 Windows hosts, and the uncompressed Image Apple's
+#           Virtualization framework boots directly on Apple silicon Macs)
 #
 #   dsa/kernel/build.sh                         configure, check, and build for x86_64
 #   dsa/kernel/build.sh --arch arm64            the same for arm64
@@ -46,7 +47,7 @@ done
 case "$arch" in
     x86_64)
         base_config="Microsoft/config-wsl"
-        fragments=("$kernel_dir/android.config" "$kernel_dir/virtio.config")
+        fragments=("$kernel_dir/android.config" "$kernel_dir/virtio.config" "$kernel_dir/dxg.config")
         image_target=bzImage
         image_path=arch/x86/boot/bzImage
         kernel_arch=x86_64
@@ -56,7 +57,7 @@ case "$arch" in
         ;;
     arm64)
         base_config="Microsoft/config-wsl-arm64"
-        fragments=("$kernel_dir/android.config" "$kernel_dir/android-arm64.config" "$kernel_dir/virtio.config")
+        fragments=("$kernel_dir/android.config" "$kernel_dir/android-arm64.config" "$kernel_dir/virtio.config" "$kernel_dir/dxg.config")
         image_target=Image
         image_path=arch/arm64/boot/Image
         kernel_arch=arm64
