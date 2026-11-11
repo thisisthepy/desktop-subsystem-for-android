@@ -14,7 +14,7 @@ default is x86_64. The arm64 guest runs no 32-bit ARM code, because the target h
 | `pack-keys.sh`, `unpack-keys.sh` | Split the key set into repository secrets and put it back |
 | `make-image.py` | Changes, re-signs and lays out the image |
 | `check-image.py` | Checks a made image |
-| `fstab.dsa` | The guest's mount table on Hyper-V |
+| `fstab.dsa` | The guest's mount table on Hyper-V; `make-image.py` makes `fstab.dsa_dax` from it for the host's direct-mapped mode (the logical partitions with `dax=always` and without dm-verity), and `--uncompressed-erofs` builds the read-only partitions uncompressed so that mode maps every file |
 | `dsa-console.rc` | Quiets the serial console once boot completes, so it carries only the kernel's early boot and a panic |
 | `unavailable-features.xml` | Hardware features the VM lacks, withdrawn from the system |
 | `dsa-channeld.rc` | The service that runs the control channel daemon, and the trigger that drops the guest's caches when it asks |

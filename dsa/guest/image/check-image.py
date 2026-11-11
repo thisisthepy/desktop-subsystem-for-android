@@ -234,6 +234,7 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
     problems += make_image.prebuilt_oat_problems(z)
     if "VENDOR/etc/fstab.dsa" not in names:
         problems.append("the Hyper-V mount table is missing")
+    problems += make_image.direct_mapped_problems(names, z.read, manifest.get("direct_mapped"))
     if "SYSTEM/etc/selinux/plat_sepolicy.cil" not in names:
         problems.append("plat_sepolicy.cil is missing from the image")
     else:
