@@ -78,6 +78,13 @@ impl RenderGpu {
 /// data folder, before the settings app kept it. `None` when the file is missing or unusable.
 pub fn previous_render_gpu(local_app_data: &Path) -> Option<String> {
     let path = default_settings_file(Some(local_app_data));
+    #[cfg(windows)]
+    {
+        let root = crate::paths::UserRoot::in_local_app_data(local_app_data);
+        if std::fs::symlink_metadata(root.dir()).is_ok() {
+            crate::safe_fs::guard_files(root.dir(), &[&path]).ok()?;
+        }
+    }
     if !path.exists() {
         return None;
     }

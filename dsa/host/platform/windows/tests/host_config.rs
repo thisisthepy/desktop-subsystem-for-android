@@ -228,6 +228,36 @@ fn pr5_each_users_disk_is_in_their_own_profile_without_a_data_folder() {
 }
 
 #[test]
+fn fr32_the_disks_the_service_writes_are_in_the_machines_folder_not_the_users_profile() {
+    let mut config = HostConfig::parse(PROFILES).unwrap();
+    config.machine_root = Some(PathBuf::from(r"C:\ProgramData\DSA"));
+    let alice = config
+        .user_vm_with("S-1-5-21-1-2-3-1001", &profiles)
+        .unwrap();
+    assert_eq!(
+        alice.config.addon_disk,
+        Some(PathBuf::from(
+            r"C:\ProgramData\DSA\users\S-1-5-21-1-2-3-1001\addons.vhd"
+        ))
+    );
+    assert_eq!(
+        alice.config.pstore_disk,
+        Some(PathBuf::from(
+            r"C:\ProgramData\DSA\users\S-1-5-21-1-2-3-1001\pstore.vhd"
+        ))
+    );
+    // A data folder is the service's own, so they stay beside the disk there.
+    let shared = HostConfig::parse(SERVICE).unwrap();
+    let bob = shared.user_vm("S-1-5-21-1-2-3-1002").unwrap();
+    assert_eq!(
+        bob.config.addon_disk,
+        Some(PathBuf::from(
+            r"C:\ProgramData\DSA\users\S-1-5-21-1-2-3-1002\addons.vhd"
+        ))
+    );
+}
+
+#[test]
 fn fr2_one_vm_by_hand_keeps_its_disk_in_the_users_profile_without_a_data_disk() {
     let config = HostConfig::parse(PROFILES).unwrap();
     let vm = config

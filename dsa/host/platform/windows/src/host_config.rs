@@ -593,7 +593,16 @@ impl HostConfig {
         };
         let vm_name = format!("{}-{sid}", self.vm_name);
         let console_log = self.console_log_path(sid, &disk);
-        let config = self.base_vm_config(&vm_name, disk, vec![sid.into()]);
+        let mut config = self.base_vm_config(&vm_name, disk, vec![sid.into()]);
+        // The service writes the add-on and pstore disks as SYSTEM, so a user whose Android
+        // disk is in their own profile, which they can change, has those two in the machine's
+        // folder for them, which only SYSTEM and Administrators write. A `data_dir` folder is
+        // the service's own, so they stay beside the disk there.
+        if disk_in_profile {
+            let machine = self.machine_root();
+            config.addon_disk = Some(machine.user_addon_disk(sid));
+            config.pstore_disk = Some(machine.user_pstore_disk(sid));
+        }
         Ok(UserVm {
             vm_name,
             config,

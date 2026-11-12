@@ -147,7 +147,7 @@ fn fr19_every_file_has_its_place_in_one_of_the_two_roots() {
     let user = UserRoot::in_local_app_data(Path::new(r"C:\Users\alice\AppData\Local"));
     let under = |rest: &str| PathBuf::from(format!(r"C:\Users\alice\AppData\Local\DSA\{rest}"));
     assert_eq!(user.android_disk(), under("android.vhdx"));
-    assert_eq!(user.pstore_disk(), under("pstore.vhd"));
+    assert_eq!(user.old_pstore_disk(), under("pstore.vhd"));
     assert_eq!(user.apps(), under("apps"));
     assert_eq!(user.notifications(), under("notifications"));
     assert_eq!(user.window_manager_log(), under(r"logs\dsa-wm.log"));
@@ -243,7 +243,7 @@ fn fr19_uninstalling_leaves_only_the_users_android_disk() {
     std::fs::create_dir_all(&programs).unwrap();
     std::fs::write(user.android_disk(), b"disk").unwrap();
     std::fs::write(user.android_disk_version(), b"16").unwrap();
-    std::fs::write(user.pstore_disk(), b"pstore").unwrap();
+    std::fs::write(user.old_pstore_disk(), b"pstore").unwrap();
     std::fs::write(user.window_manager_log(), b"log").unwrap();
     std::fs::write(user.compositor_settings(), b"{}").unwrap();
     std::fs::write(user.monitors(), b"1920x1080").unwrap();
