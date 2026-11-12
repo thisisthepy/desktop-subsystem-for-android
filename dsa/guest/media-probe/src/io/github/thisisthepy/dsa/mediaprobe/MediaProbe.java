@@ -127,6 +127,8 @@ public final class MediaProbe extends Instrumentation {
                 rootVisible(results);
             } else if (check.equals("root_request")) {
                 rootRequest(results);
+            } else if (check.equals("root_stdin")) {
+                rootStdin(results);
             } else if (check.equals("https")) {
                 HttpsCheck.run(url, address, certificate, results);
             } else {
@@ -151,6 +153,16 @@ public final class MediaProbe extends Instrumentation {
     private void rootRequest(Bundle results) throws Exception {
         Process process = new ProcessBuilder("/system/bin/su", "-c", "id")
                 .redirectErrorStream(true).start();
+        String output = new String(process.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        results.putString("root.output", output.trim());
+        results.putInt("root.exit", process.waitFor());
+    }
+
+    private void rootStdin(Bundle results) throws Exception {
+        Process process = new ProcessBuilder("/system/bin/su")
+                .redirectErrorStream(true).start();
+        process.getOutputStream().write("id\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        process.getOutputStream().close();
         String output = new String(process.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
         results.putString("root.output", output.trim());
         results.putInt("root.exit", process.waitFor());
