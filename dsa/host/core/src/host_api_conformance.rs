@@ -725,6 +725,11 @@ impl UserAndroid for FakeAndroid {
         let slot = match addon {
             Addon::Gapps => &self.gapps_image,
             Addon::ArmTranslation => &self.arm_image,
+            Addon::Widevine => {
+                return Err(InstallError::Refused(
+                    "no DSA kept the Widevine module on Android's disk".into(),
+                ))
+            }
         };
         let image = slot.lock().unwrap();
         let Some(image) = image.as_ref() else {
@@ -1353,6 +1358,14 @@ macro_rules! host_api_conformance {
         #[test]
         fn fr25_the_images_default_translator_is_used_until_a_package_replaces_it() {
             $crate::host_api_conformance::default_arm_translation_reaches_the_caller(&mut || $make);
+        }
+        #[test]
+        fn fr37_widevine_is_installed_reported_and_removed() {
+            $crate::host_api_conformance::widevine_reaches_the_caller(&mut || $make);
+        }
+        #[test]
+        fn fr37_a_module_that_is_not_widevines_or_not_for_this_android_is_refused() {
+            $crate::host_api_conformance::unusable_widevine_is_refused(&mut || $make);
         }
         #[test]
         fn fr32_google_play_is_installed_reported_and_removed() {
@@ -3397,6 +3410,136 @@ pub fn arm_translation_reaches_the_caller(make: MakeLocal<'_>) {
     assert!(!removed.restart_needed);
     assert!(!disk.holds(Addon::ArmTranslation));
     assert_eq!(store.arm_translation(&user).unwrap(), None);
+}
+
+fn widevine_package(apex: &[u8]) -> crate::widevine::WidevinePackage {
+    crate::widevine::WidevinePackage {
+        apex: format!("{}.apex", crate::widevine::MODULE),
+        version: "BE2A.250530.026.F3 (API 36, r7)".into(),
+        android_major: 16,
+        abi: crate::widevine::guest_abi().into(),
+        source: "https://dl.google.com/android/repository/sys-img/google_apis/x86_64-36_r07.zip"
+            .into(),
+        size: apex.len() as u64,
+        sha256: crate::widevine::sha256_hex(apex),
+        license: "android-sdk-license".into(),
+    }
+}
+
+pub fn widevine_reaches_the_caller(make: MakeLocal<'_>) {
+    use crate::widevine::fixture::apex;
+    let (listener, mut connector, user) = make();
+    let store = Arc::new(MemorySettings::default());
+    let androids = Arc::new(FakeAndroids::default());
+    let disks = addon_disks(addon_dir("widevine"));
+    let service = HostApiService::new(androids.clone(), "test service")
+        .with_settings(store.clone(), facts())
+        .with_addon_disks(disks.clone());
+    let _service = RunningService::start_service(listener, service);
+    let mut client = connect(&mut *connector);
+    let none = client.widevine().expect("asking where Widevine stands");
+    assert_eq!(none.package, None);
+    assert!(!none.on_disk && !none.restart_needed);
+
+    // Android need not run.
+    let module = apex(crate::widevine::MODULE, crate::widevine::guest_abi());
+    let package = widevine_package(&module);
+    let installed = connect(&mut *connector)
+        .install_widevine(&package, &mut module.as_slice())
+        .expect("installing Widevine");
+    assert_eq!(installed.package, Some(package.clone()));
+    assert!(installed.on_disk);
+    assert!(!installed.running && !installed.restart_needed);
+    // The APEX is on the caller's add-on disk, unchanged, as the one file of its image.
+    let disk = disks(&user).unwrap();
+    let image = disk
+        .image(Addon::Widevine)
+        .expect("the image is on the disk");
+    let files = crate::erofs::read::files(&image);
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[&package.apex], module);
+    assert_eq!(store.widevine(&user).unwrap(), Some(package.clone()));
+    let next = disk.prepare_for_boot();
+    assert!(next.contains(&Addon::Widevine));
+    assert!(crate::widevine::bootconfig_for(&*store, &user, &next)
+        .starts_with(crate::widevine::BOOTCONFIG_ON));
+
+    client.start().unwrap();
+    let running = client.widevine().expect("asking again");
+    assert!(running.running && running.active && !running.restart_needed);
+
+    let removed = client.remove_widevine().expect("removing Widevine");
+    assert_eq!(removed.package, None);
+    assert!(!removed.on_disk);
+    assert!(
+        removed.active,
+        "the running Android keeps what it started with"
+    );
+    assert!(removed.restart_needed);
+    assert!(!disk.holds(Addon::Widevine));
+    assert_eq!(store.widevine(&user).unwrap(), None);
+    assert_eq!(
+        crate::widevine::bootconfig_for(&*store, &user, &[]),
+        crate::widevine::BOOTCONFIG_OFF
+    );
+}
+
+pub fn unusable_widevine_is_refused(make: MakeLocal<'_>) {
+    use crate::widevine::fixture::apex;
+    let (listener, mut connector, user) = make();
+    let store = Arc::new(MemorySettings::default());
+    let androids = Arc::new(FakeAndroids::default());
+    let disks = addon_disks(addon_dir("widevine-refused"));
+    let service = HostApiService::new(androids, "test service")
+        .with_settings(store.clone(), facts())
+        .with_addon_disks(disks.clone());
+    let _service = RunningService::start_service(listener, service);
+    let abi = crate::widevine::guest_abi();
+    let other_abi = if abi == "x86_64" {
+        "arm64-v8a"
+    } else {
+        "x86_64"
+    };
+    let other_module = apex("com.android.other", abi);
+    let foreign = apex(crate::widevine::MODULE, other_abi);
+    let good = apex(crate::widevine::MODULE, abi);
+    let cases: Vec<(crate::widevine::WidevinePackage, Vec<u8>)> = vec![
+        // Described for another processor: refused before anything is sent.
+        (
+            crate::widevine::WidevinePackage {
+                abi: other_abi.into(),
+                ..widevine_package(&foreign)
+            },
+            foreign.clone(),
+        ),
+        // Described for this one, but built for another.
+        (widevine_package(&foreign), foreign),
+        // Another module.
+        (widevine_package(&other_module), other_module),
+        // Not what was described.
+        (
+            crate::widevine::WidevinePackage {
+                sha256: "1".repeat(64),
+                ..widevine_package(&good)
+            },
+            good,
+        ),
+    ];
+    for (package, data) in cases {
+        let refused = connect(&mut *connector).install_widevine(&package, &mut data.as_slice());
+        assert!(
+            matches!(
+                refused,
+                Err(ClientError::Service {
+                    code: ErrorCode::InstallRefused,
+                    ..
+                })
+            ),
+            "{package:?}: {refused:?}"
+        );
+        assert_eq!(store.widevine(&user).unwrap(), None);
+        assert!(!disks(&user).unwrap().holds(Addon::Widevine));
+    }
 }
 
 fn default_arm_package() -> Package {

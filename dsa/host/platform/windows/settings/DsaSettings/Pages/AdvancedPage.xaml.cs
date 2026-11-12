@@ -57,6 +57,22 @@ public partial class AdvancedPage : Page
 
     private void OnOpenGoogleArmTerms(object sender, RoutedEventArgs e) => OpenWebPage(ViewModel.GoogleArmTermsUrl);
 
+    /// <summary>Says where Widevine comes from and under which terms, and takes it only when the
+    /// user accepts.</summary>
+    private async void OnInstallWidevine(object sender, RoutedEventArgs e)
+    {
+        if (await Shell.Confirm(App.Text.Get("WidevineConfirm.Title"), ViewModel.WidevineNotice,
+                App.Text.Get("WidevineConfirm.Action")))
+        {
+            await ViewModel.InstallWidevineAsync();
+        }
+    }
+
+    private async void OnRemoveWidevine(object sender, RoutedEventArgs e) =>
+        await ViewModel.RemoveWidevineAsync();
+
+    private void OnOpenWidevineTerms(object sender, RoutedEventArgs e) => OpenWebPage(ViewModel.WidevineTermsUrl);
+
     private async void OnInstallGapps(object sender, RoutedEventArgs e) =>
         await ViewModel.InstallGappsAsync();
 

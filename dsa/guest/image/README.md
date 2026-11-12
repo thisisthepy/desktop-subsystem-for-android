@@ -264,10 +264,10 @@ aapt2 from the Android SDK's build-tools for the system screen overlays.
   permission its privileged apps ask for (`dsa-gapps-privapp-permissions.xml` in each
   partition's `etc/permissions`), so the log should stay empty. `sepolicy/gapps.cil` lets init
   lay the image over.
-- The add-on images a user installs (the Google apps, an ARM translation package) are on the
+- The add-on images a user installs (the Google apps, an ARM translation package, Widevine) are on the
   user's add-on disk, which the host builds, one per user, and attaches to the VM read only.
   Its one partition, `dsa_addons`, is an erofs file system holding each image as a plain,
-  uncompressed file (`gapps.img`, `arm-translation.img`). While the host attaches it, it puts
+  uncompressed file (`gapps.img`, `arm-translation.img`, `widevine.img`). While the host attaches it, it puts
   `androidboot.dsa.addon_disk=on` in the bootconfig, and `dsa-addons.rc` mounts the partition
   at `/mnt/dsa-addons` at `post-fs`, before the scripts above mount the images from it with
   `directio`. The images used to be in the encrypted `/data`, where ext4 gives an encrypted file
@@ -278,6 +278,18 @@ aapt2 from the Android SDK's build-tools for the system screen overlays.
   and the scripts mount that copy; meanwhile the host reads it through dsa-channeld, puts it on
   the add-on disk, and has dsa-channeld delete it, so the next boot mounts it from the disk.
   `sepolicy/addons.cil` lets init mount the disk, and `check-image.py` checks the scripts.
+- Widevine, for a user who installs it (`dsa drm widevine install`): the host takes Google's
+  `com.google.android.widevine` APEX, unchanged, out of Google's emulator system image of this
+  Android version and architecture, and puts it on the add-on disk as `widevine.img`, an erofs
+  image whose one file is the APEX. DSA ships none of it. While it is there the host puts
+  `androidboot.dsa.widevine=on` in the bootconfig, and `dsa-widevine.rc` lays the image over
+  `/vendor/apex` at `post-fs`, so `apexd` activates it at `post-fs-data` as a vendor APEX and
+  checks its signature against Google's key. After the user removes it the host says
+  `androidboot.dsa.widevine=off`, and the script removes the device certificates the module kept
+  in `/data/vendor/mediadrm`. `sepolicy/widevine.cil` lets init mount and lay the image over;
+  where the vendor policy does not declare the module's own types (`hal_drm_widevine`,
+  `mediadrm_vendor_data_file`), `sepolicy/widevine-hal.cil` declares them, so the image carries
+  the policy before anything is installed. `check-image.py` checks both.
 - Cuttlefish's `seriallogging.rc` is removed. Its logger writes to a virtio console Hyper-V
   does not have, and init would restart it every five seconds for as long as the guest runs.
 - `sepolicy/memory.cil` lets the audio HAL and the software codecs share memory through

@@ -476,6 +476,7 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
         problems += make_image.gapps_folder_problems(names)
     # The add-on disk the Google apps and a user's ARM translation package are mounted from.
     problems += make_image.addon_disk_problems(names, z.read)
+    problems += make_image.widevine_problems(names, z.read)
     if "SYSTEM/etc/dsa/gapps-on.prop" in names:
         on = [line.strip() for line in
               z.read("SYSTEM/etc/dsa/gapps-on.prop").decode(errors="replace").splitlines()]

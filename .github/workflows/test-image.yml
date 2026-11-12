@@ -1186,8 +1186,9 @@ jobs:
             timeout: 18
             keep: Keep the media check's logs
             artifact: media-check-logs
-            # The root check and the root certificate check boot on runners of their own, below.
-            filter: --skip fr35_an_app_needs_approval_and_su_is_hidden_when_disabled --skip fr28_
+            # The root check, the root certificate check and the Widevine check boot on runners
+            # of their own, below.
+            filter: --skip fr35_an_app_needs_approval_and_su_is_hidden_when_disabled --skip fr28_ --skip fr37_widevine_is_offered_only_when_installed
             logs: |
               .scratch/media-*/*.log
               .scratch/media-*/*.txt
@@ -1210,6 +1211,16 @@ jobs:
             logs: |
               .scratch/certs-*/*.log
               .scratch/certs-*/*.txt
+              ~/.local/share/dsa/logs/android-console.log*
+          - check: Offer Widevine to an app only while it is installed on the booted image
+            test: media
+            timeout: 27
+            keep: Keep the Widevine check's logs
+            artifact: widevine-check-logs
+            filter: fr37_widevine_is_offered_only_when_installed
+            logs: |
+              .scratch/drm-*/*.log
+              .scratch/drm-*/*.txt
               ~/.local/share/dsa/logs/android-console.log*
           - check: Resolve a name only the host knows on the booted image
             test: dns

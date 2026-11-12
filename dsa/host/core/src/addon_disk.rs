@@ -1,5 +1,5 @@
 //! The user's add-on disk: the images of the add-ons a user installed (the Google apps, an ARM
-//! translation package), on a disk the host attaches to their VM read only.
+//! translation package, Widevine), on a disk the host attaches to their VM read only.
 //!
 //! Each add-on is an erofs image the guest mounts at boot. The images used to live on the
 //! user's Android disk, in `/data`, which is encrypted: ext4 gives an encrypted file no direct
@@ -16,7 +16,8 @@
 //! ```text
 //! sector 0          protective MBR
 //! sectors 1-33      GPT header and partition entries
-//! 1 MiB             the partition: erofs, with gapps.img and arm-translation.img at its root
+//! 1 MiB             the partition: erofs, with gapps.img, arm-translation.img and
+//!                   widevine.img at its root
 //! the last 1 MiB    the backup partition entries and GPT header
 //! [Vhd only]        a fixed VHD footer, so Hyper-V attaches the file as a disk
 //! ```
@@ -61,6 +62,7 @@ pub const PARTITION_UUID: &str = "8d1c4e7a-3b52-4f19-a6e0-5c2b9d7f4e13";
 /// The UUIDs of the partitions that name each add-on's image ([`Addon::partition_name`]).
 const GAPPS_PARTITION_UUID: &str = "4a7e2c19-8b3d-4f60-9c15-6e0d3b8a2f71";
 const ARM_TRANSLATION_PARTITION_UUID: &str = "c25f8e03-7a14-4b9d-8e62-1f4a9c3d5b08";
+const WIDEVINE_PARTITION_UUID: &str = "7e1b9a42-5c63-4d80-a1f4-8b2e3c7d6a59";
 /// The disk's GUID, in its partition table and its VHD footer.
 const DISK_GUID: &str = "b3f0a9d4-6e21-4c8b-9f57-2a4d1e8c6b90";
 /// GPT's type for Linux file system data, the generic Linux type.
@@ -200,11 +202,13 @@ pub enum Addon {
     /// A translation package the user installed (their own or Google's translator), which the
     /// guest binds into `/system`.
     ArmTranslation,
+    /// Google's Widevine DRM module, which the guest lays over `/vendor/apex` for `apexd`.
+    Widevine,
 }
 
 impl Addon {
     /// Every add-on, in the order the disk holds them.
-    pub const ALL: [Addon; 2] = [Addon::Gapps, Addon::ArmTranslation];
+    pub const ALL: [Addon; 3] = [Addon::Gapps, Addon::ArmTranslation, Addon::Widevine];
 
     /// The image's name on the disk, where the guest's init scripts mount it from
     /// (`/mnt/dsa-addons/<name>`).
@@ -212,6 +216,7 @@ impl Addon {
         match self {
             Addon::Gapps => "gapps.img",
             Addon::ArmTranslation => "arm-translation.img",
+            Addon::Widevine => "widevine.img",
         }
     }
 
@@ -221,6 +226,7 @@ impl Addon {
         match self {
             Addon::Gapps => "dsa_gapps",
             Addon::ArmTranslation => "dsa_arm_translation",
+            Addon::Widevine => "dsa_widevine",
         }
     }
 
@@ -228,6 +234,7 @@ impl Addon {
         match self {
             Addon::Gapps => GAPPS_PARTITION_UUID,
             Addon::ArmTranslation => ARM_TRANSLATION_PARTITION_UUID,
+            Addon::Widevine => WIDEVINE_PARTITION_UUID,
         }
     }
 
@@ -236,6 +243,7 @@ impl Addon {
         match self {
             Addon::Gapps => "the Google apps image",
             Addon::ArmTranslation => "the ARM translation image",
+            Addon::Widevine => "the Widevine DRM image",
         }
     }
 
@@ -1662,6 +1670,28 @@ mod tests {
             u64_at(entry, 40),
             String::from_utf16(&name).unwrap(),
         )
+    }
+
+    #[test]
+    fn fr37_the_widevine_image_has_its_own_partition_beside_the_other_addons() {
+        let dir = scratch("widevine");
+        let disk = AddonDisk::new(dir.join("addons.vhd"), Format::Vhd);
+        let gapps = image("product/app/a.apk", &[7u8; 10_000]);
+        let widevine = image("com.google.android.widevine.apex", b"apex");
+        install(&disk, Addon::Widevine, &widevine).unwrap();
+        install(&disk, Addon::Gapps, &gapps).unwrap();
+        // In the order the disk holds them, whatever the order they were installed in.
+        assert_eq!(disk.prepare_for_boot(), [Addon::Gapps, Addon::Widevine]);
+        let bytes = fs::read(disk.path()).unwrap();
+        assert_eq!(partition(&bytes, 0).2, PARTITION_NAME);
+        assert_eq!(partition(&bytes, 1).2, "dsa_gapps");
+        assert_eq!(partition(&bytes, 2).2, "dsa_widevine");
+        assert_eq!(read_back(disk.path(), Addon::Widevine).unwrap(), widevine);
+        // The disk the service wrote is one it reads back: its partition is allowed.
+        assert_eq!(disk.attached(), [Addon::Gapps, Addon::Widevine]);
+        assert!(disk.remove(Addon::Widevine).unwrap());
+        assert_eq!(disk.prepare_for_boot(), [Addon::Gapps]);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

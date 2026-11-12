@@ -1472,6 +1472,104 @@ fn fr25_dsa_refuses_googles_image_when_its_hash_differs() {
 }
 
 #[test]
+fn fr37_dsa_drm_widevine_commands_are_parsed() {
+    assert_eq!(
+        parse(&args("drm widevine")).unwrap().command,
+        Cmd::WidevineStatus
+    );
+    assert_eq!(
+        parse(&args("drm widevine status --json")).unwrap().command,
+        Cmd::WidevineStatus
+    );
+    let install = parse(&args("drm widevine install --yes")).unwrap();
+    assert_eq!(install.command, Cmd::WidevineInstall);
+    assert!(install.yes);
+    assert_eq!(
+        parse(&args("drm widevine remove")).unwrap().command,
+        Cmd::WidevineRemove
+    );
+    assert!(parse(&args("drm playready")).is_err());
+    assert!(parse(&args("drm widevine upgrade")).is_err());
+    assert!(parse(&args("drm widevine remove --yes")).is_err());
+}
+
+#[test]
+fn fr37_dsa_takes_widevine_from_googles_image_only_when_agreed_and_removes_it() {
+    use dsa_host_core::widevine::{self, fixture};
+    let id = std::process::id();
+    let repository = std::env::temp_dir().join(format!("dsa-cli-widevine-{id}"));
+    let _ = std::fs::remove_dir_all(&repository);
+    let abi = widevine::guest_abi();
+    let module = fixture::apex(widevine::MODULE, abi);
+    // The service's facts say Android 17, so the image of API 37 is the one taken.
+    let zip = fixture::image_archive("37", abi, Some(&module));
+    fixture::write_repository(&repository, &[("37.0", abi, &zip)]).unwrap();
+    let ((listener, _, _), endpoint) = local_pair();
+    let _service = settings_service(listener);
+    let none = json_of(&dsa(&endpoint, "drm widevine --json"));
+    assert!(none["package"].is_null(), "{none}");
+    assert_eq!(none["installed"], false);
+    assert_eq!(none["security_level"], "L3");
+
+    // Asked with nobody to answer, it says where the download comes from and its terms, and
+    // changes nothing.
+    let asked = dsa_with_repository(&endpoint, "drm widevine install", &repository);
+    assert!(!asked.status.success());
+    let said = stderr(&asked);
+    assert!(said.contains("Android SDK License"), "{said}");
+    assert!(said.contains("nothing was changed"), "{said}");
+    assert!(json_of(&dsa(&endpoint, "drm widevine --json"))["package"].is_null());
+
+    let line = "drm widevine install --yes --json";
+    let installed = json_of(&dsa_with_repository(&endpoint, line, &repository));
+    assert_eq!(installed["installed"], true, "{installed}");
+    assert_eq!(installed["on_disk"], true);
+    assert_eq!(installed["package"]["abi"], abi);
+    assert_eq!(installed["package"]["android_major"], 17);
+    assert_eq!(
+        installed["package"]["apex"],
+        "com.google.android.widevine.apex"
+    );
+    assert_eq!(installed["package"]["size"], module.len());
+    assert_eq!(
+        installed["package"]["sha256"],
+        widevine::sha256_hex(&module)
+    );
+    let text = stdout(&dsa(&endpoint, "drm widevine status"));
+    assert!(text.contains("standard definition"), "{text}");
+    assert!(text.contains("browser or app"), "{text}");
+
+    let removed = json_of(&dsa(&endpoint, "drm widevine remove --json"));
+    assert!(removed["package"].is_null());
+    assert_eq!(removed["on_disk"], false);
+    let _ = std::fs::remove_dir_all(&repository);
+}
+
+#[test]
+fn fr37_dsa_refuses_an_image_without_widevine_and_changes_nothing() {
+    use dsa_host_core::widevine::{self, fixture};
+    let id = std::process::id();
+    let repository = std::env::temp_dir().join(format!("dsa-cli-widevine-none-{id}"));
+    let _ = std::fs::remove_dir_all(&repository);
+    let abi = widevine::guest_abi();
+    let zip = fixture::image_archive("37", abi, None);
+    fixture::write_repository(&repository, &[("37.0", abi, &zip)]).unwrap();
+    let ((listener, _, _), endpoint) = local_pair();
+    let _service = settings_service(listener);
+    let refused = dsa_with_repository(&endpoint, "drm widevine install --yes", &repository);
+    assert!(!refused.status.success());
+    assert!(
+        stderr(&refused).contains("holds no Widevine module"),
+        "{}",
+        stderr(&refused)
+    );
+    let none = json_of(&dsa(&endpoint, "drm widevine --json"));
+    assert!(none["package"].is_null(), "the stored state is unchanged");
+    assert_eq!(none["on_disk"], false);
+    let _ = std::fs::remove_dir_all(&repository);
+}
+
+#[test]
 fn fr17_dsa_status_json_reports_the_state_and_the_last_reason() {
     let ((listener, _, _), endpoint) = local_pair();
     let _service = RunningService::start(listener, Arc::new(FakeAndroids::default()));
