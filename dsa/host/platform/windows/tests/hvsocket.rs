@@ -32,3 +32,27 @@ fn hvsocket_loopback() -> (Box<dyn Listener>, Box<dyn Connector>) {
 }
 
 dsa_transport::transport_conformance!(hvsocket_loopback());
+
+/// The window manager starts processes (a fresh graphics renderer when Android's VM stops,
+/// the app windows) while it listens for the guest. A listening socket those processes
+/// inherited kept its address after the window manager closed it, so when Android started
+/// again in the same VM the window manager's audio, video, camera and sensor ports could
+/// not listen again (AddrInUse) for as long as the renderer ran.
+#[test]
+fn nfr5_a_child_process_does_not_keep_a_closed_listeners_address() {
+    let service_id = fresh_service();
+    let listener = HvSocketListener::bind(Guid::LOOPBACK, service_id)
+        .expect("binding a Hyper-V socket on the loopback partition");
+    // A child that outlives the listener, started the way the window manager starts its
+    // renderer: std::process::Command, which lets the child inherit inheritable handles.
+    let mut child = std::process::Command::new("cmd")
+        .args(["/c", "ping", "-n", "6", "127.0.0.1"])
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("starting a child process");
+    drop(listener);
+    let again = HvSocketListener::bind(Guid::LOOPBACK, service_id);
+    let _ = child.kill();
+    let _ = child.wait();
+    again.expect("listening again on the address a closed listener used, while a child runs");
+}
