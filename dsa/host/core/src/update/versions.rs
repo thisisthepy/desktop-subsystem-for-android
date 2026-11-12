@@ -103,6 +103,27 @@ pub fn major_of_version(version: &str) -> Option<u32> {
     digits.parse().ok()
 }
 
+/// The number of the development build an image version names: `7` in
+/// `17.0.0-16373615-15-dev.7`. The Development build workflow makes such images for testing on
+/// one computer and never publishes them. `None` for a released image.
+pub fn development_build_of(version: &str) -> Option<u64> {
+    let (_, number) = version.trim().rsplit_once("-dev.")?;
+    if number.is_empty() || !number.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    number.parse().ok()
+}
+
+/// How images are ordered, newest last: by major version, then build, and within one build a
+/// released image after every development build of it, and development builds by their
+/// number. A development build takes the revision after the newest released one, so the
+/// release that later takes that revision replaces it, and a newer development build of the
+/// same revision replaces an older one.
+pub fn image_order(android_major: u32, build: u64, version: &str) -> (u32, u64, u64) {
+    let within = development_build_of(version).map_or(u64::MAX, |n| n.min(u64::MAX - 1));
+    (android_major, build, within)
+}
+
 /// What a user sees of the Android version: what runs, what is chosen, and what can be.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VersionReport {

@@ -34,25 +34,22 @@ fn nfr2_the_vm_grows_when_the_guest_runs_short_up_to_its_maximum() {
     let mut growth = MemoryGrowth::new(3072, 6144);
     // Plenty free: nothing to do.
     assert_eq!(growth.on_pressure(&pressure(2900, 1500, 0.0), start), None);
-    // Short: grows to what it uses (2600 MiB) plus half again, in whole 128 MiB blocks.
+    // Short: grows to what it uses (2600 MiB) plus a third again, in whole 128 MiB blocks.
     assert_eq!(
         growth.on_pressure(&pressure(2900, 300, 0.0), start),
-        Some(GrowthAction::Resize(3968))
+        Some(GrowthAction::Resize(3584))
     );
     growth.applied();
-    // The guest sees it; still short a while later: grows to the maximum and no further.
-    let later = start + Duration::from_secs(6);
-    assert_eq!(
-        growth.on_pressure(&pressure(3800, 300, 20.0), later),
-        Some(GrowthAction::Resize(5376))
-    );
-    growth.applied();
-    let later = later + Duration::from_secs(6);
-    assert_eq!(
-        growth.on_pressure(&pressure(5200, 300, 20.0), later),
-        Some(GrowthAction::Resize(6144))
-    );
-    growth.applied();
+    // The guest sees it; still short a while later: grows on, to the maximum and no further.
+    let mut later = start;
+    for (total, grown) in [(3400, 4224), (4100, 5120), (4900, 6144)] {
+        later += Duration::from_secs(6);
+        assert_eq!(
+            growth.on_pressure(&pressure(total, 300, 20.0), later),
+            Some(GrowthAction::Resize(grown))
+        );
+        growth.applied();
+    }
     let later = later + Duration::from_secs(6);
     assert_eq!(growth.on_pressure(&pressure(5900, 300, 20.0), later), None);
     assert_eq!(growth.current_mb(), 6144);
@@ -65,7 +62,7 @@ fn nfr2_the_vm_grows_only_as_far_as_the_guest_needs_since_added_memory_keeps_its
     let mut growth = MemoryGrowth::new(2048, 29042);
     // As on the owner's PC: Android had grown to 2560 MiB (2483 MiB after the kernel's own)
     // and ran short with 509 MiB available. Half the size again took it to 3840 MiB; what it
-    // uses plus 1 GiB of headroom is 3072 MiB.
+    // uses plus 768 MiB of headroom, and at least 512 MiB more, is 3072 MiB.
     assert_eq!(
         growth.on_pressure(&pressure(1950, 450, 12.0), start),
         Some(GrowthAction::Resize(2560))
@@ -77,11 +74,11 @@ fn nfr2_the_vm_grows_only_as_far_as_the_guest_needs_since_added_memory_keeps_its
         Some(GrowthAction::Resize(3072))
     );
     growth.applied();
-    // A guest that uses almost all of it grows by about half again.
+    // A guest that uses almost all of it grows by about a third again.
     let t = t + Duration::from_secs(6);
     assert_eq!(
         growth.on_pressure(&pressure(2995, 100, 30.0), t),
-        Some(GrowthAction::Resize(4352))
+        Some(GrowthAction::Resize(3968))
     );
 }
 
@@ -92,7 +89,7 @@ fn nfr2_the_vm_gives_memory_back_on_the_next_calm_report_but_not_below_its_base(
     let mut growth = MemoryGrowth::new(3072, 16384);
     assert_eq!(
         growth.on_pressure(&pressure(2900, 100, 0.0), start),
-        Some(GrowthAction::Resize(4224))
+        Some(GrowthAction::Resize(3840))
     );
     growth.applied();
     // Still settling right after the growth.
@@ -135,10 +132,10 @@ fn nfr2_a_timed_out_shrink_is_retried_in_smaller_steps_until_the_vm_is_back_at_i
     let mut growth = MemoryGrowth::new(3072, 16384);
     assert_eq!(
         growth.on_pressure(&pressure(2900, 100, 0.0), start),
-        Some(GrowthAction::Resize(4224))
+        Some(GrowthAction::Resize(3840))
     );
     growth.applied();
-    // The apps closed: all 1152 MiB is asked back at once, and Hyper-V times out.
+    // The apps closed: all 768 MiB is asked back at once, and Hyper-V times out.
     let t = start + Duration::from_secs(5);
     assert_eq!(
         growth.on_pressure(&pressure(4400, 3600, 0.0), t),
@@ -147,7 +144,7 @@ fn nfr2_a_timed_out_shrink_is_retried_in_smaller_steps_until_the_vm_is_back_at_i
     growth.refused(t);
     assert_eq!(
         growth.current_mb(),
-        4224,
+        3840,
         "the VM counts as still at its size"
     );
     assert!(!growth.stopped(), "a failure does not stop later resizes");
@@ -155,11 +152,11 @@ fn nfr2_a_timed_out_shrink_is_retried_in_smaller_steps_until_the_vm_is_back_at_i
     // Nothing during the wait.
     let t = t + Duration::from_secs(2);
     assert_eq!(growth.on_pressure(&pressure(4400, 3600, 0.0), t), None);
-    // Then half the step that failed (576 MiB, in whole 128 MiB blocks).
+    // Then half the step that failed (384 MiB, in whole 128 MiB blocks).
     let t = t + Duration::from_secs(3);
     assert_eq!(
         growth.on_pressure(&pressure(4100, 3300, 0.0), t),
-        Some(GrowthAction::Resize(3584))
+        Some(GrowthAction::Resize(3456))
     );
     // It times out again: half again, after twice the wait.
     growth.refused(t);
@@ -167,7 +164,7 @@ fn nfr2_a_timed_out_shrink_is_retried_in_smaller_steps_until_the_vm_is_back_at_i
     let t = t + Duration::from_secs(10);
     assert_eq!(
         growth.on_pressure(&pressure(4100, 3300, 0.0), t),
-        Some(GrowthAction::Resize(3840))
+        Some(GrowthAction::Resize(3584))
     );
     growth.applied();
     // Each step that goes through lets the next double, down to the base.
@@ -182,7 +179,7 @@ fn nfr2_a_timed_out_shrink_is_retried_in_smaller_steps_until_the_vm_is_back_at_i
     let t = t + Duration::from_secs(5);
     assert_eq!(
         growth.on_pressure(&pressure(2900, 100, 0.0), t),
-        Some(GrowthAction::Resize(4224))
+        Some(GrowthAction::Resize(3840))
     );
 }
 
@@ -207,7 +204,7 @@ fn nfr2_a_refused_growth_is_retried_smaller_and_the_wait_never_passes_five_minut
         }
     }
     // Each try half the one before, down to the guest's 128 MiB blocks.
-    assert_eq!(&asked[..5], &[4224, 3712, 3456, 3328, 3200]);
+    assert_eq!(&asked[..5], &[3840, 3456, 3328, 3200, 3200]);
     assert!(asked[5..].iter().all(|&mb| mb == 3200), "{asked:?}");
     assert!(!growth.stopped());
 }

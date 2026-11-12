@@ -473,8 +473,7 @@ impl ImageStore {
     /// again by the same build. Returns whether it was adopted.
     pub fn adopt_bundled(&self, bundled: &InstalledImage) -> Result<bool, UpdateError> {
         let mut state = self.state()?;
-        let newer = (bundled.android_major, bundled.build)
-            > (state.current.android_major, state.current.build);
+        let newer = bundled.order() > state.current.order();
         if !newer
             || bundled.version == state.current.version
             || !is_plain_name(&bundled.version)
@@ -511,7 +510,7 @@ impl ImageStore {
         let broken = state.current.clone();
         let mut candidates: Vec<InstalledImage> = state.previous.iter().cloned().collect();
         let mut others = self.complete_images();
-        others.sort_by_key(|image| std::cmp::Reverse((image.android_major, image.build)));
+        others.sort_by_key(|image| std::cmp::Reverse(image.order()));
         candidates.extend(others);
         candidates.push(installed.clone());
         let usable = candidates.into_iter().find(|image| {
