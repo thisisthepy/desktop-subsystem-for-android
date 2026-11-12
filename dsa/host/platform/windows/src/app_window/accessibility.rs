@@ -45,6 +45,7 @@ use dsa_host_core::accessibility::{
     from_screen, to_screen, ActionRequest, Changes, ClientPresence, GuestAccessibility, Node,
     NodeAction, PresenceChange, Tree, TreeError,
 };
+use dsa_host_core::compositor::window_tasks::WindowTasks;
 use dsa_host_core::host_api::HostApiClient;
 use dsa_host_core::input::{InputEvent, WindowGeometry};
 use dsa_transport::Connector;
@@ -944,19 +945,25 @@ pub struct AccessibilityWindow {
     back: Option<ClientRect>,
     /// Where the back button's Back goes.
     input: Sender<InputEvent>,
+    /// The task the window shows, whose tree is watched: another than `task_id` once a task
+    /// took the window over after a GPU reset.
+    tasks: WindowTasks,
 }
 
 impl AccessibilityWindow {
     /// A window's tree, which watches nothing until a client asks for it. Without `connect`
     /// the window answers clients with an empty tree. The back button's Back goes to `input`.
+    /// The tree watched is that of the task `tasks` says the window shows.
     pub fn new(
         task_id: i32,
         task_size: (u32, u32),
         input: Sender<InputEvent>,
+        tasks: WindowTasks,
         connect: Option<ApiConnect>,
         logger: Option<Arc<CompositorLogger>>,
     ) -> AccessibilityWindow {
         AccessibilityWindow {
+            tasks,
             task_id,
             shared: None,
             root: None,
@@ -1080,7 +1087,9 @@ impl AccessibilityWindow {
         let (tx, actions) = mpsc::channel();
         shared.lock().actions = Some(tx);
         let stop = Arc::new(AtomicBool::new(false));
-        let task_id = self.task_id;
+        let window = self.task_id;
+        let task_id = self.tasks.task_of(window);
+        let tasks = self.tasks.clone();
         let thread_shared = Arc::clone(shared);
         let thread_stop = Arc::clone(&stop);
         let logger = self.logger.clone();
@@ -1092,7 +1101,8 @@ impl AccessibilityWindow {
             .name("dsa-app-window-accessibility".into())
             .spawn(move || {
                 watch(
-                    task_id,
+                    window,
+                    tasks,
                     connect,
                     thread_shared,
                     actions,
@@ -1434,10 +1444,13 @@ fn free_variant(mut variant: VARIANT) {
     }
 }
 
-/// The watch thread: watches the task's tree through the service until told to stop, and
-/// starts over when the connection ends or a tree cannot be taken.
+/// The watch thread: watches the tree of the task window `window` shows (as `tasks` says)
+/// through the service until told to stop, and starts over when the connection ends, a tree
+/// cannot be taken, or another task takes the window over after a GPU reset, whose tree is
+/// then the one watched and acted on.
 fn watch(
-    task_id: i32,
+    window: i32,
+    tasks: WindowTasks,
     connect: ApiConnect,
     shared: Arc<Shared>,
     actions: Receiver<ActionRequest>,
@@ -1466,6 +1479,7 @@ fn watch(
     };
     let mut failures = 0u32;
     while !stop.load(Ordering::Relaxed) {
+        let task_id = tasks.task_of(window);
         let mut connector = connect();
         let stream = HostApiClient::connect(&mut *connector, BUILD, CONNECT)
             .and_then(|client| client.watch_accessibility(task_id));
@@ -1487,6 +1501,21 @@ fn watch(
         loop {
             if stop.load(Ordering::Relaxed) {
                 return;
+            }
+            let shown = tasks.task_of(window);
+            if shown != task_id {
+                // The task that ended has no tree; the one that took the window over has.
+                // Actions asked on the old tree are for nodes the new one does not have.
+                note(
+                    logger.as_deref(),
+                    &format!(
+                        "task {shown} took the window of task {task_id} over; watching its \
+                         accessibility tree"
+                    ),
+                );
+                while actions.try_recv().is_ok() {}
+                reset(&shared);
+                break;
             }
             loop {
                 match actions.try_recv() {
@@ -1589,7 +1618,8 @@ mod tests {
             density_for_dpi, scale_between, to_window_size,
         };
         let (input, _) = mpsc::channel();
-        let mut window = AccessibilityWindow::new(6, (810, 1661), input, None, None);
+        let mut window =
+            AccessibilityWindow::new(6, (810, 1661), input, WindowTasks::new(), None, None);
         let scale = scale_between(density_for_dpi(120), density_for_dpi(96));
         // The scale the window manager says reaches a tree made before and after it.
         let before = window.shared(0);
@@ -1692,5 +1722,98 @@ mod tests {
     #[test]
     fn fr22_the_back_buttons_runtime_id_cannot_equal_a_nodes() {
         assert_ne!(BACK_RUNTIME_ID.len(), runtime_id(0, 0).len());
+    }
+
+    /// Connects to the in-memory local API as one user.
+    struct AsUser(dsa_transport::local::MemoryLocalConnector);
+
+    impl Connector for AsUser {
+        fn connect(
+            &mut self,
+            _: Duration,
+        ) -> Result<Box<dyn dsa_transport::Connection>, dsa_transport::TransportError> {
+            self.0.connect_as(dsa_transport::local::Peer {
+                user: "test-user".into(),
+                administrator: false,
+            })
+        }
+    }
+
+    fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !done() {
+            assert!(Instant::now() < deadline, "timed out waiting for {what}");
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn nfr5_a_window_taken_over_after_a_gpu_reset_watches_and_acts_on_the_new_tasks_tree() {
+        use dsa_host_core::compositor::window_hosts::ToHost;
+        use dsa_host_core::host_api::{UserAndroid, UserAndroids};
+        use dsa_host_core::host_api_conformance::{FakeAndroids, RunningService};
+        let (listener, connector) = dsa_transport::local::pair();
+        let androids = Arc::new(FakeAndroids::default());
+        let android = {
+            let _ = androids.android("test-user");
+            androids.of("test-user").expect("the user's Android")
+        };
+        android.start();
+        let _service = RunningService::start(Box::new(listener), androids.clone());
+        let connect: ApiConnect =
+            Arc::new(move || Box::new(AsUser(connector.clone())) as Box<dyn Connector>);
+
+        // Window 9 opened for task 9; a client reads it.
+        let tasks = WindowTasks::new();
+        let (input, _) = mpsc::channel();
+        let mut window = AccessibilityWindow::new(9, (400, 300), input, tasks.clone(), None, None);
+        let shared = window.shared(0);
+        let (actions_tx, actions) = mpsc::channel();
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread = {
+            let (tasks, shared, stop) = (tasks.clone(), Arc::clone(&shared), Arc::clone(&stop));
+            thread::spawn(move || watch(9, tasks, connect, shared, actions, stop, None))
+        };
+        let watches = Arc::clone(&android.accessibility_watches);
+        wait_until("task 9's tree to be watched", || {
+            watches.lock().unwrap().contains(&(9, true))
+        });
+
+        // After a GPU reset task 9 ended, and the app's new task 14 took the window over.
+        tasks.follow(&ToHost::ShownTask {
+            task_id: 9,
+            shown_task_id: 14,
+        });
+        wait_until("task 14's tree to be watched", || {
+            watches.lock().unwrap().contains(&(14, true))
+        });
+        wait_until("the watch of task 9 to end", || {
+            watches.lock().unwrap().contains(&(9, false))
+        });
+
+        // An action on the window's tree reaches task 14, not the task that ended.
+        actions_tx
+            .send(ActionRequest {
+                epoch: 1,
+                node_id: 3,
+                action: NodeAction::Click,
+                text: String::new(),
+                request_id: 77,
+            })
+            .unwrap();
+        wait_until("the action to reach Android", || {
+            !android.accessibility_actions.lock().unwrap().is_empty()
+        });
+        let done: Vec<(i32, u32)> = android
+            .accessibility_actions
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(task_id, action)| (*task_id, action.request_id))
+            .collect();
+        assert_eq!(done, vec![(14, 77)]);
+
+        stop.store(true, Ordering::Relaxed);
+        thread.join().unwrap();
     }
 }

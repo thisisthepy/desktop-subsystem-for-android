@@ -49,7 +49,8 @@ use crate::compositor::log::{
     input_trace, input_trace_on, note, trace_forget, trace_stage, CompositorLogger,
 };
 use crate::compositor::present::{Gpu, OpenedTexture};
-use crate::compositor::tasks::serve_input;
+use crate::compositor::tasks::serve_window_input;
+use dsa_host_core::compositor::window_tasks::WindowTasks;
 use dsa_host_core::resize_trace::millis;
 
 /// The build the window host names itself by to the window manager.
@@ -263,12 +264,15 @@ pub fn run(mut setup: HostSetup) -> Result<(), String> {
             .unwrap_or_else(|e| e.into_inner())
             .send(&frame);
     });
+    // The task each window shows, which what the windows send Android itself goes to.
+    let tasks = WindowTasks::new();
     let (input_tx, input_rx) = std::sync::mpsc::channel();
     let input_connector = std::mem::replace(&mut setup.input, Box::new(NoConnector));
     let input_logger = log.clone();
+    let input_tasks = tasks.clone();
     let input = std::thread::Builder::new()
         .name("dsa-app-window-input".into())
-        .spawn(move || serve_input(input_connector, input_rx, input_logger))
+        .spawn(move || serve_window_input(input_connector, input_rx, input_tasks, input_logger))
         .map_err(|e| format!("could not start the window input: {e}"))?;
     let presenters: Presenters = Arc::default();
     let ui = window::start(UiSetup {
@@ -279,6 +283,7 @@ pub fn run(mut setup: HostSetup) -> Result<(), String> {
         logger: log.clone(),
         listing: Arc::clone(&setup.listing),
         accessibility: setup.accessibility.clone(),
+        tasks: tasks.clone(),
         drops: setup.accessibility.clone().map(|api| {
             let log = log.clone();
             drop_target::handler(
@@ -289,7 +294,11 @@ pub fn run(mut setup: HostSetup) -> Result<(), String> {
         }),
         drags: setup.accessibility.clone().map(|api| {
             let log = log.clone();
-            drag_source::starter(api, Arc::new(move |line: &str| note(log.as_deref(), line)))
+            drag_source::starter(
+                api,
+                tasks.clone(),
+                Arc::new(move |line: &str| note(log.as_deref(), line)),
+            )
         }),
     })?;
 
@@ -336,6 +345,8 @@ pub fn run(mut setup: HostSetup) -> Result<(), String> {
             continue;
         };
         if let Some(command) = to_host_from_wire(&body) {
+            // Before the windows act on it, so what they send next goes where it now belongs.
+            tasks.follow(&command);
             match &command {
                 dsa_host_core::compositor::window_hosts::ToHost::Close { task_id } => {
                     textures.remove(task_id);
