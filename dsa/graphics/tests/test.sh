@@ -49,6 +49,11 @@ mkdir -p "$out"
     "$here/spare_pages_test.cpp" -o "$out/spare_pages_test"
 "$out/spare_pages_test"
 
+# When a render thread's Vulkan reply buffer goes back to its normal size (patch 0028).
+"$cxx" -std=c++17 -O2 -Wall -Wextra -Werror -I"$here/../include" \
+    "$here/reply_buffer_test.cpp" -o "$out/reply_buffer_test"
+"$out/reply_buffer_test"
+
 "$cxx" -std=c++17 -O2 -Wall -Wextra -Werror -I"$here/../host" \
     "$here/frame_crop_test.cpp" -o "$out/frame_crop_test"
 "$out/frame_crop_test"
