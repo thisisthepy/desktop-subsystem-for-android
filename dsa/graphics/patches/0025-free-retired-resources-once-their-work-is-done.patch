@@ -1,0 +1,57 @@
+diff --git a/host/vulkan/VkCommonOperations.cpp b/host/vulkan/VkCommonOperations.cpp
+index 0456451d7..7b7835e3d 100644
+--- a/host/vulkan/VkCommonOperations.cpp
++++ b/host/vulkan/VkCommonOperations.cpp
+@@ -3787,16 +3787,25 @@ void VkEmulation::freeRetiredLocked(bool wait) {
+             continue;
+         }
+         // Signaled, or the device is lost and nothing will use the resource again.
+         destroyRetiredLocked(&*it);
+         it = mRetired.erase(it);
+     }
+ }
+ 
++void VkEmulation::freeFinishedRetired() {
++    std::lock_guard<std::mutex> lock(mMutex);
++    // A device being made again has none: the lost one's were freed with it.
++    if (mDevice == VK_NULL_HANDLE || mRetired.empty()) {
++        return;
++    }
++    freeRetiredLocked(/*wait=*/false);
++}
++
+ void VkEmulation::destroyRetiredLocked(RetiredResource* resource) {
+     auto vk = mDvk;
+     if (resource->imageView != VK_NULL_HANDLE) {
+         vk->vkDestroyImageView(mDevice, resource->imageView, nullptr);
+     }
+     if (resource->ycbcrConversion != VK_NULL_HANDLE) {
+         vk->vkDestroySamplerYcbcrConversion(mDevice, resource->ycbcrConversion, nullptr);
+     }
+diff --git a/host/vulkan/VkCommonOperations.h b/host/vulkan/VkCommonOperations.h
+index f1071825d..27179c9ab 100644
+--- a/host/vulkan/VkCommonOperations.h
++++ b/host/vulkan/VkCommonOperations.h
+@@ -489,16 +489,22 @@ class VkEmulation {
+     // it. Code holding it must not call recoverIfLost().
+     std::shared_lock<std::shared_mutex> useDevice() {
+         return std::shared_lock<std::shared_mutex>(mDeviceUse);
+     }
+     // Makes the device's queue and fence calls fail with VK_ERROR_DEVICE_LOST, as they do
+     // after a GPU reset, so a test can see the emulation recover.
+     void loseDeviceForTesting();
+ 
++    // Frees the Vulkan objects of destroyed ColorBuffers and Buffers whose GPU work has
++    // finished, without waiting. They are otherwise freed only when the next ColorBuffer or
++    // Buffer is made or destroyed, so those a closed window left (each as large as the
++    // window) stayed until another window came. An embedder calls it now and then.
++    void freeFinishedRetired();
++
+    private:
+     VkEmulation() = default;
+ 
+     std::optional<RepresentativeColorBufferMemoryTypeInfo>
+     findRepresentativeColorBufferMemoryTypeIndexLocked() REQUIRES(mMutex);
+ 
+     struct ImageSupportInfo {
+         // Input parameters

@@ -91,7 +91,9 @@ public sealed record SettingsInfo(
     TouchGesturesState TouchGesturesState = TouchGesturesState.Unknown,
     string? TouchGesturesProblem = null,
     bool RootElevation = false,
-    bool ImageAutoRestart = true)
+    bool ImageAutoRestart = true,
+    bool HostCertificates = true,
+    IReadOnlyList<ImportedCertificate>? ImportedCertificates = null)
 {
     /// <summary>The Windows folders that can be shared with Android, in the order the service
     /// keeps them.</summary>
@@ -162,15 +164,36 @@ public enum NetworkMode
     Off,
 }
 
+/// <summary>Who answers Android's DNS queries.</summary>
+public enum DnsResolver
+{
+    /// <summary>The service did not say: Android is still starting, or the service is older.</summary>
+    Unknown,
+    /// <summary>This PC's resolver, so its hosts file, VPN and DNS filters apply.</summary>
+    Host,
+    /// <summary>This PC's resolver does not answer, so Android asks the network's DNS servers
+    /// itself.</summary>
+    Network,
+}
+
 /// <summary>Android's network as the service reports it: the mode, the addresses (IPv4
-/// first), the DNS servers, the gateway, and a problem when the network is not what the
-/// setting asks for.</summary>
+/// first), the DNS servers, the gateway, a problem when the network is not what the
+/// setting asks for, and who answers Android's DNS queries.</summary>
 public sealed record NetworkInfo(
     NetworkMode Mode,
     IReadOnlyList<string> Addresses,
     IReadOnlyList<string> DnsServers,
     string Gateway,
-    string? Problem);
+    string? Problem,
+    DnsResolver DnsResolver = DnsResolver.Unknown);
+
+/// <summary>A root certificate a user or an administrator added to this computer, as the service
+/// found it: who it is for and who signed it (distinguished names), the store it was found in
+/// (<c>machine</c>, <c>user</c>, <c>machine_group_policy</c> and so on), that store's registry
+/// path, its SHA-256 fingerprint in lower-case hexadecimal, and when it stops being valid, in
+/// seconds since the Unix epoch (0 when unknown).</summary>
+public sealed record ImportedCertificate(string Subject, string Issuer, string Source, string Location,
+    string Sha256, long NotAfter);
 
 /// <summary>An ARM translation package, as it describes itself.</summary>
 public sealed record ArmPackageInfo(string Name, string Version, string Library, string License);

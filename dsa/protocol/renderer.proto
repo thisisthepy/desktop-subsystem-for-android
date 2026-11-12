@@ -296,6 +296,16 @@ message Note {
 // Window manager to renderer: end now. The renderer closes the guest's streams and exits.
 message Stop {}
 
+// Renderer to window manager: the renderer found its Vulkan device lost (a GPU reset), or
+// made it again. Sent at once each time either count goes up, so the window manager learns of
+// a reset the moment the renderer does, not when its own Direct3D device fails later.
+message DeviceState {
+  // How many times the renderer found its device lost since it started.
+  uint64 losses = 1;
+  // How many times it made its device again since it started.
+  uint64 generation = 2;
+}
+
 // The one message type on the wire. Each frame carries exactly one.
 message Envelope {
   oneof body {
@@ -317,5 +327,6 @@ message Envelope {
     RendererLog renderer_log = 16;
     Note note = 17;
     Stop stop = 18;
+    DeviceState device_state = 19;
   }
 }

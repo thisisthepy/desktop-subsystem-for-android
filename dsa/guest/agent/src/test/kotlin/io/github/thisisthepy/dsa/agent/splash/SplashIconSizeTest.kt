@@ -50,7 +50,9 @@ class SplashIconSizeTest {
             // Loaded there, it is at least as large as the square it is drawn into.
             assertTrue(SplashIconSize.pixels(72, load) >= pixels)
         }
-        assertEquals(712, SplashIconSize.loadDensity(320, 144, 320))
+        // 320 x 319.5 / 143.5, rounded up: an icon of 143.5 px at 320 dpi, which rounds to 144,
+        // is still 320 px there.
+        assertEquals(713, SplashIconSize.loadDensity(320, 144, 320))
     }
 
     @Test

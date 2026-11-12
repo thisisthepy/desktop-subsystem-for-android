@@ -8,7 +8,7 @@ default is x86_64. The arm64 guest runs no 32-bit ARM code, because the target h
 
 | File | What it is |
 |---|---|
-| `inputs.json` | The pinned inputs: per Android version, the CI build number and the SHA-256 of its `target_files`, `otatools` and `dexpreopt_tools` |
+| `inputs.json` | The pinned inputs: per Android version, the CI build number and the SHA-256 of its `target_files`, `otatools` and `dexpreopt_tools`, and the URL and SHA-256 of `services.jar`'s ART profile at the build's own frameworks/base commit |
 | `fetch.sh` | Downloads one version's inputs for one architecture (`x86_64` by default, or `arm64`) into `.scratch/aosp-inputs/<build>-<arch>/` and checks them |
 | `make-keys.sh` | Makes a set of signing keys (CI makes a throwaway set each run) |
 | `pack-keys.sh`, `unpack-keys.sh` | Split the key set into repository secrets and put it back |
@@ -19,7 +19,9 @@ default is x86_64. The arm64 guest runs no 32-bit ARM code, because the target h
 | `unavailable-features.xml` | Hardware features the VM lacks, withdrawn from the system |
 | `dsa-channeld.rc` | The service that runs the control channel daemon, and the trigger that drops the guest's caches when it asks |
 | `dsa-keymint-key.rc` | Makes the tmpfs folder for KeyMint's root key and starts the daemon's mode that fetches it from the host, on init |
+| `dsa-cacerts.rc` | Binds tmpfs copies of Android's system certificate folders over the originals before the zygote starts, so the daemon can add the root certificates the host added beside Android's |
 | `dsa-memory.rc` | Turns on the zram swap and tunes the kernel for it |
+| `dsa-zram-backing.rc` | Makes the folder for zram's backing file on the data disk and removes the last boot's file |
 | `dsa-display.rc` | Starts SurfaceFlinger, and so every app, at the density the boot names (the user's main monitor's) |
 | `dsa-channel-manifest.xml` | The vendor manifest entry declaring the daemon's binder service |
 | `dsa-trace.rc` | Turns on main thread timing in every app when the input trace is on |
@@ -61,7 +63,12 @@ aapt2 from the Android SDK's build-tools for the system screen overlays.
   minimized), or most of its memory is cache, the control daemon sets
   `vendor.dsa.memory.reclaim`. Once boot has finished, init moves cold pages to zram, drops the
   clean caches and compacts memory, which free page reporting then hands back to Hyper-V.
-  While idle it does so again when memory has grown back. ART keeps less free heap
+  While idle it does so again when memory has grown back, and then has the kernel report
+  every free page to the host again (`page_reporting.rereport`). What stays cold in zram goes
+  on to a backing file on the data disk (`/data/per_boot/zram_swap`, 512 MiB, made again each
+  boot): once no app has been open for ten minutes, at most every ten minutes, the daemon has
+  init write zram's pages unused for half an hour, incompressible ones first, at most 32 MiB a
+  run and 512 MiB a day. ART keeps less free heap
   (`MEMORY_PROPS` in `make-image.py`). Only the daemon
   may set the property, and only init's vendor scripts may write those kernel settings.
 - The oemlock, UWB, Bluetooth and Thread HAL APEXes are removed. Their devices
@@ -106,6 +113,19 @@ aapt2 from the Android SDK's build-tools for the system screen overlays.
   again, with the filter, shared libraries and boot image the published build used.
   `check-image.py` fails an image where one of them lost a file, or has one made for another
   dex, another boot image or another filter.
+- The host window's title bar is Android's status bar. The agent gives each task status bar
+  and caption bar insets as high as the title bar, but stock Android hands a freeform window
+  only its caption bar and IME insets, so an app that pads its toolbar by its status bar inset
+  drew it under the title bar. `services.jar`'s dex is edited (`SERVICES_CODE`): the window
+  manager's `InsetsPolicy` keeps the system bars of a floating window, not only its caption
+  bar. The jar's stored dex files stay aligned, and the jar is compiled again with the
+  published build's filter, class loader context, app image and profile (`services/art-profile`
+  and `art-profile-extra` at the build's own frameworks/base commit, pinned in `inputs.json`).
+  The framework overlay below also sets Android's status bar height resources
+  (`status_bar_height`, `status_bar_height_default` and the rest) to the title bar's height at
+  each scale's density, for the apps that read those instead of their insets. `check-image.py`
+  fails an image without the edit, with `services.jar`'s dex unaligned, or with status bar
+  heights that are not the title bar's.
 - A static overlay (`/vendor/overlay/DsaFrameworkOverlay.apk`) sets the framework's tap
   timeout to 0. A view inside anything that scrolls, which includes every list row, waits that
   long before it shows that it is pressed, in case the touch becomes a scroll, so a mouse
@@ -326,6 +346,19 @@ aapt2 from the Android SDK's build-tools for the system screen overlays.
   folder `dsa_keymint_key_file`, which only that domain writes and only KeyMint
   (`hal_keymint_server`) reads; `check-image.py` refuses an image that lets any other domain
   read it.
+- The root certificates a user or administrator added to the host (an internet filter's or a
+  company proxy's) become system certificates, beside Android's own. Android reads its system
+  certificates from `/apex/com.android.conscrypt/cacerts` and `/system/etc/security/cacerts`,
+  which are read only. `dsa-cacerts.rc` makes the tmpfs folder `/dev/dsa_cacerts` at
+  post-fs-data, has `dsa-channeld --cacerts-setup` copy both folders into it, and binds each
+  copy over the original before the zygote starts, so every app's mount namespace has them.
+  The daemon then writes each root the host sends there, named as Android names its own
+  (`<subject hash>.<n>`), and takes away those the host no longer names, or all of them when
+  the user turns the setting off. It lists what it added in `/dev/dsa_cacerts/host-added`, so
+  Android's own files are never touched. Being one tmpfs, a change shows in every app at once,
+  and the agent then has the running apps forget the trust anchors they looked up.
+  `cacerts.cil` labels the folder `dsa_cacerts_file`, which only the daemon writes and every
+  domain reads; `check-image.py` refuses an image that lets any other domain write it.
 - The published kernel modules are dropped. They belong to Google's kernel; DSA boots its
   own kernel with the drivers built in.
 - `fstab.dsa` replaces the mount table. Every partition is found by its name

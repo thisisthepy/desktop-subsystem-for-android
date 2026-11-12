@@ -18,7 +18,8 @@ use std::time::{Duration, Instant};
 use dsa_host_core::compositor::GraphicsStreamKind;
 use dsa_host_core::memory::HeldMemory;
 use dsa_host_core::renderer::{
-    address_from, open_renderer, RendererProcessMemory, WindowManagerLink, TEXTURES_PER_DISPLAY,
+    address_from, follow_device_state, open_renderer, RendererProcessMemory, WindowManagerLink,
+    TEXTURES_PER_DISPLAY,
 };
 use dsa_host_unix::fd_frames::{stream_at, FdConnection};
 use dsa_protocol::renderer::types::{
@@ -293,6 +294,21 @@ pub fn run(args: &[String]) -> ! {
     };
     if dsa_protocol::renderer::send(&mut connection, Body::Started(started)).is_err() {
         end_now(5);
+    }
+    // A lost device reaches the window manager the moment the renderer finds it, so it is
+    // followed as a GPU reset (and the windows watched for frames that do not come back)
+    // while the renderer makes its device again.
+    if let Some(renderer) = &renderer {
+        let watched = Arc::clone(renderer);
+        if let Err(why) = follow_device_state(
+            Arc::clone(&link),
+            Box::new(move || (watched.device_losses(), watched.device_generation())),
+        ) {
+            link.note(&format!(
+                "the renderer's device state cannot be followed, so the window manager does \
+                 not learn of a GPU reset: {why}"
+            ));
+        }
     }
     let stop = Arc::new(AtomicBool::new(false));
     for (kind, socket) in [

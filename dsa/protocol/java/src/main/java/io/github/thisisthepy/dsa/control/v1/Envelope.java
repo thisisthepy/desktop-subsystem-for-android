@@ -212,6 +212,9 @@ public  final class Envelope extends
     LAUNCH_SHORTCUT(681),
     PIN_SHORTCUT_REQUEST(682),
     PIN_SHORTCUT_ANSWER(683),
+    HOST_CERTIFICATES(684),
+    DNS_QUERY(690),
+    DNS_ANSWER(691),
     BODY_NOT_SET(0);
     private final int value;
     private BodyCase(int value) {
@@ -419,6 +422,9 @@ public  final class Envelope extends
         case 681: return LAUNCH_SHORTCUT;
         case 682: return PIN_SHORTCUT_REQUEST;
         case 683: return PIN_SHORTCUT_ANSWER;
+        case 684: return HOST_CERTIFICATES;
+        case 690: return DNS_QUERY;
+        case 691: return DNS_ANSWER;
         case 0: return BODY_NOT_SET;
         default: return null;
       }
@@ -10040,6 +10046,156 @@ public  final class Envelope extends
     }
   }
 
+  public static final int HOST_CERTIFICATES_FIELD_NUMBER = 684;
+  /**
+   * <code>.dsa.control.v1.HostCertificates host_certificates = 684;</code>
+   */
+  @java.lang.Override
+  public boolean hasHostCertificates() {
+    return bodyCase_ == 684;
+  }
+  /**
+   * <code>.dsa.control.v1.HostCertificates host_certificates = 684;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.HostCertificates getHostCertificates() {
+    if (bodyCase_ == 684) {
+       return (io.github.thisisthepy.dsa.control.v1.HostCertificates) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.HostCertificates.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.HostCertificates host_certificates = 684;</code>
+   */
+  private void setHostCertificates(io.github.thisisthepy.dsa.control.v1.HostCertificates value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 684;
+  }
+  /**
+   * <code>.dsa.control.v1.HostCertificates host_certificates = 684;</code>
+   */
+  private void mergeHostCertificates(io.github.thisisthepy.dsa.control.v1.HostCertificates value) {
+    value.getClass();
+  if (bodyCase_ == 684 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.HostCertificates.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.HostCertificates.newBuilder((io.github.thisisthepy.dsa.control.v1.HostCertificates) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 684;
+  }
+  /**
+   * <code>.dsa.control.v1.HostCertificates host_certificates = 684;</code>
+   */
+  private void clearHostCertificates() {
+    if (bodyCase_ == 684) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int DNS_QUERY_FIELD_NUMBER = 690;
+  /**
+   * <code>.dsa.control.v1.DnsQuery dns_query = 690;</code>
+   */
+  @java.lang.Override
+  public boolean hasDnsQuery() {
+    return bodyCase_ == 690;
+  }
+  /**
+   * <code>.dsa.control.v1.DnsQuery dns_query = 690;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.DnsQuery getDnsQuery() {
+    if (bodyCase_ == 690) {
+       return (io.github.thisisthepy.dsa.control.v1.DnsQuery) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.DnsQuery.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.DnsQuery dns_query = 690;</code>
+   */
+  private void setDnsQuery(io.github.thisisthepy.dsa.control.v1.DnsQuery value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 690;
+  }
+  /**
+   * <code>.dsa.control.v1.DnsQuery dns_query = 690;</code>
+   */
+  private void mergeDnsQuery(io.github.thisisthepy.dsa.control.v1.DnsQuery value) {
+    value.getClass();
+  if (bodyCase_ == 690 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.DnsQuery.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.DnsQuery.newBuilder((io.github.thisisthepy.dsa.control.v1.DnsQuery) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 690;
+  }
+  /**
+   * <code>.dsa.control.v1.DnsQuery dns_query = 690;</code>
+   */
+  private void clearDnsQuery() {
+    if (bodyCase_ == 690) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int DNS_ANSWER_FIELD_NUMBER = 691;
+  /**
+   * <code>.dsa.control.v1.DnsAnswer dns_answer = 691;</code>
+   */
+  @java.lang.Override
+  public boolean hasDnsAnswer() {
+    return bodyCase_ == 691;
+  }
+  /**
+   * <code>.dsa.control.v1.DnsAnswer dns_answer = 691;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.DnsAnswer getDnsAnswer() {
+    if (bodyCase_ == 691) {
+       return (io.github.thisisthepy.dsa.control.v1.DnsAnswer) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.DnsAnswer.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.DnsAnswer dns_answer = 691;</code>
+   */
+  private void setDnsAnswer(io.github.thisisthepy.dsa.control.v1.DnsAnswer value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 691;
+  }
+  /**
+   * <code>.dsa.control.v1.DnsAnswer dns_answer = 691;</code>
+   */
+  private void mergeDnsAnswer(io.github.thisisthepy.dsa.control.v1.DnsAnswer value) {
+    value.getClass();
+  if (bodyCase_ == 691 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.DnsAnswer.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.DnsAnswer.newBuilder((io.github.thisisthepy.dsa.control.v1.DnsAnswer) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 691;
+  }
+  /**
+   * <code>.dsa.control.v1.DnsAnswer dns_answer = 691;</code>
+   */
+  private void clearDnsAnswer() {
+    if (bodyCase_ == 691) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
   public static io.github.thisisthepy.dsa.control.v1.Envelope parseFrom(
       java.nio.ByteBuffer data)
       throws com.google.protobuf.InvalidProtocolBufferException {
@@ -19367,6 +19523,150 @@ public  final class Envelope extends
       return this;
     }
 
+    /**
+     * <code>.dsa.control.v1.HostCertificates host_certificates = 684;</code>
+     */
+    @java.lang.Override
+    public boolean hasHostCertificates() {
+      return instance.hasHostCertificates();
+    }
+    /**
+     * <code>.dsa.control.v1.HostCertificates host_certificates = 684;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.HostCertificates getHostCertificates() {
+      return instance.getHostCertificates();
+    }
+    /**
+     * <code>.dsa.control.v1.HostCertificates host_certificates = 684;</code>
+     */
+    public Builder setHostCertificates(io.github.thisisthepy.dsa.control.v1.HostCertificates value) {
+      copyOnWrite();
+      instance.setHostCertificates(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.HostCertificates host_certificates = 684;</code>
+     */
+    public Builder setHostCertificates(
+        io.github.thisisthepy.dsa.control.v1.HostCertificates.Builder builderForValue) {
+      copyOnWrite();
+      instance.setHostCertificates(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.HostCertificates host_certificates = 684;</code>
+     */
+    public Builder mergeHostCertificates(io.github.thisisthepy.dsa.control.v1.HostCertificates value) {
+      copyOnWrite();
+      instance.mergeHostCertificates(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.HostCertificates host_certificates = 684;</code>
+     */
+    public Builder clearHostCertificates() {
+      copyOnWrite();
+      instance.clearHostCertificates();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.DnsQuery dns_query = 690;</code>
+     */
+    @java.lang.Override
+    public boolean hasDnsQuery() {
+      return instance.hasDnsQuery();
+    }
+    /**
+     * <code>.dsa.control.v1.DnsQuery dns_query = 690;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.DnsQuery getDnsQuery() {
+      return instance.getDnsQuery();
+    }
+    /**
+     * <code>.dsa.control.v1.DnsQuery dns_query = 690;</code>
+     */
+    public Builder setDnsQuery(io.github.thisisthepy.dsa.control.v1.DnsQuery value) {
+      copyOnWrite();
+      instance.setDnsQuery(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.DnsQuery dns_query = 690;</code>
+     */
+    public Builder setDnsQuery(
+        io.github.thisisthepy.dsa.control.v1.DnsQuery.Builder builderForValue) {
+      copyOnWrite();
+      instance.setDnsQuery(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.DnsQuery dns_query = 690;</code>
+     */
+    public Builder mergeDnsQuery(io.github.thisisthepy.dsa.control.v1.DnsQuery value) {
+      copyOnWrite();
+      instance.mergeDnsQuery(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.DnsQuery dns_query = 690;</code>
+     */
+    public Builder clearDnsQuery() {
+      copyOnWrite();
+      instance.clearDnsQuery();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.DnsAnswer dns_answer = 691;</code>
+     */
+    @java.lang.Override
+    public boolean hasDnsAnswer() {
+      return instance.hasDnsAnswer();
+    }
+    /**
+     * <code>.dsa.control.v1.DnsAnswer dns_answer = 691;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.DnsAnswer getDnsAnswer() {
+      return instance.getDnsAnswer();
+    }
+    /**
+     * <code>.dsa.control.v1.DnsAnswer dns_answer = 691;</code>
+     */
+    public Builder setDnsAnswer(io.github.thisisthepy.dsa.control.v1.DnsAnswer value) {
+      copyOnWrite();
+      instance.setDnsAnswer(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.DnsAnswer dns_answer = 691;</code>
+     */
+    public Builder setDnsAnswer(
+        io.github.thisisthepy.dsa.control.v1.DnsAnswer.Builder builderForValue) {
+      copyOnWrite();
+      instance.setDnsAnswer(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.DnsAnswer dns_answer = 691;</code>
+     */
+    public Builder mergeDnsAnswer(io.github.thisisthepy.dsa.control.v1.DnsAnswer value) {
+      copyOnWrite();
+      instance.mergeDnsAnswer(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.DnsAnswer dns_answer = 691;</code>
+     */
+    public Builder clearDnsAnswer() {
+      copyOnWrite();
+      instance.clearDnsAnswer();
+      return this;
+    }
+
     // @@protoc_insertion_point(builder_scope:dsa.control.v1.Envelope)
   }
   @java.lang.Override
@@ -19577,9 +19877,12 @@ public  final class Envelope extends
             io.github.thisisthepy.dsa.control.v1.LaunchShortcut.class,
             io.github.thisisthepy.dsa.control.v1.PinShortcutRequest.class,
             io.github.thisisthepy.dsa.control.v1.PinShortcutAnswer.class,
+            io.github.thisisthepy.dsa.control.v1.HostCertificates.class,
+            io.github.thisisthepy.dsa.control.v1.DnsQuery.class,
+            io.github.thisisthepy.dsa.control.v1.DnsAnswer.class,
           };
           java.lang.String info =
-              "\u0000\u00c0\u0001\u0000\u0001\u02ab\u00c0\u0000\u0000\u0000\u0001<\u0000\u0002<" +
+              "\u0000\u00c3\u0001\u0000\u0001\u02b3\u00c3\u0000\u0000\u0000\u0001<\u0000\u0002<" +
               "\u0000\u0003<\u0000\u0004<\u0000\u0005<\u0000\u0006<\u0000\u0007<\u0000\b<\u0000" +
               "\t<\u0000\n<\u0000\u000b<\u0000\f<\u0000\r<\u0000\u000f<\u0000\u0010<\u0000\u0011" +
               "<\u0000\u0012<\u0000\u0013<\u0000\u0014<\u0000\u0015<\u0000\u0016<\u0000\u0017<\u0000" +
@@ -19605,7 +19908,8 @@ public  final class Envelope extends
               "\u0276<\u0000\u0277<\u0000\u0280<\u0000\u0281<\u0000\u0282<\u0000\u0283<\u0000\u0284" +
               "<\u0000\u0285<\u0000\u0286<\u0000\u0287<\u0000\u0288<\u0000\u0289<\u0000\u028a<\u0000" +
               "\u028b<\u0000\u028c<\u0000\u028d<\u0000\u028e<\u0000\u028f<\u0000\u0290<\u0000\u0291" +
-              "<\u0000\u0292<\u0000\u02a8<\u0000\u02a9<\u0000\u02aa<\u0000\u02ab<\u0000";
+              "<\u0000\u0292<\u0000\u02a8<\u0000\u02a9<\u0000\u02aa<\u0000\u02ab<\u0000\u02ac<\u0000" +
+              "\u02b2<\u0000\u02b3<\u0000";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through

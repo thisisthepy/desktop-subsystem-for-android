@@ -50,6 +50,10 @@ import java.util.List;
  * multiple of 16 or 64 to buffers and to surfaces on screen, swapping surfaces as players and
  * feeds of short videos do, and checks the pictures' colours and that they keep reaching the
  * screen.
+ *
+ * The "https" check ({@link HttpsCheck}) opens the address the "url" argument names (at the
+ * "address" argument, when given) and says whether the platform's certificate check let it
+ * through, and what the app sees of the certificate file the "certificate" argument names.
  */
 public final class MediaProbe extends Instrumentation {
     static final String TAG = "DsaMediaProbe";
@@ -67,6 +71,12 @@ public final class MediaProbe extends Instrumentation {
     static final long DEQUEUE_US = 10_000;
 
     private String check = "audio";
+    /** The address the "https" check opens ({@link HttpsCheck}). */
+    private String url = "https://localhost:8443/";
+    /** Where the "https" check connects instead of looking the url's host up, if anywhere. */
+    private String address;
+    /** The certificate file the "https" check looks for in Android's folders, if any. */
+    private String certificate;
 
     /** One access unit an encoder produced. */
     static final class Unit {
@@ -91,6 +101,13 @@ public final class MediaProbe extends Instrumentation {
         if (arguments != null && arguments.getString("check") != null) {
             check = arguments.getString("check");
         }
+        if (arguments != null && arguments.getString("url") != null) {
+            url = arguments.getString("url");
+        }
+        if (arguments != null) {
+            address = arguments.getString("address");
+            certificate = arguments.getString("certificate");
+        }
         start();
     }
 
@@ -110,6 +127,8 @@ public final class MediaProbe extends Instrumentation {
                 rootVisible(results);
             } else if (check.equals("root_request")) {
                 rootRequest(results);
+            } else if (check.equals("https")) {
+                HttpsCheck.run(url, address, certificate, results);
             } else {
                 results.putString("error", "no check named " + check);
             }

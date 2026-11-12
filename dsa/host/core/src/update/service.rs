@@ -791,6 +791,9 @@ impl UserAndroid for UpdatingAndroid {
     fn adb_auto_connect_state(&self) -> crate::adb_discovery::AutoConnectState {
         UserAndroid::adb_auto_connect_state(&*self.session)
     }
+    fn dns_answered_by_host(&self) -> Option<bool> {
+        UserAndroid::dns_answered_by_host(&*self.session)
+    }
     fn watch_links(&self) -> Option<std::sync::mpsc::Receiver<String>> {
         UserAndroid::watch_links(&*self.session)
     }
@@ -799,6 +802,12 @@ impl UserAndroid for UpdatingAndroid {
     }
     fn share_folders(&self, on: bool, folders: Vec<String>) {
         UserAndroid::share_folders(&*self.session, on, folders)
+    }
+    fn trust_host_certificates(&self, on: bool) {
+        UserAndroid::trust_host_certificates(&*self.session, on)
+    }
+    fn host_certificates(&self) -> Vec<crate::host_certificates::ImportedCertificate> {
+        UserAndroid::host_certificates(&*self.session)
     }
     fn set_root_elevation_config(&self, on: bool, apps: Vec<crate::root_elevation::AppLevel>) {
         UserAndroid::set_root_elevation_config(&*self.session, on, apps)

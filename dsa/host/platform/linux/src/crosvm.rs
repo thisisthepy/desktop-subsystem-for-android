@@ -268,9 +268,14 @@ impl VmConfig {
     pub fn full_kernel_cmdline(&self) -> String {
         // SysRq on the console is how the host asks the guest to sync its disks and power
         // off when it stops the VM (see `SHUTDOWN_SEQUENCE`).
+        // The boot-time memory settings are the Windows host's, so the guest kernel sets aside
+        // as little here as there, and the CI's memory measurement on this host reads the same
+        // kernel costs a Windows user's guest has.
         let mut cmdline = format!(
-            "panic=-1 sysrq_always_enabled=1 page_reporting.page_reporting_order={} {}",
-            self.page_reporting_order, MEMORY_HOTPLUG_CMDLINE
+            "panic=-1 sysrq_always_enabled=1 page_reporting.page_reporting_order={} {} {}",
+            self.page_reporting_order,
+            MEMORY_HOTPLUG_CMDLINE,
+            dsa_host_core::memory::GUEST_BOOT_MEMORY_CMDLINE
         );
         if self.pstore_disk.is_some() {
             cmdline.push(' ');
@@ -498,7 +503,7 @@ mod tests {
             initrd: "/home/u/.local/share/dsa/tmp/boot.initrd".into(),
             kernel_cmdline:
                 "console=ttyS0 androidboot.boot_devices=vmbus androidboot.hardware=cutf_cvm".into(),
-            memory_mb: 3072,
+            memory_mb: 2048,
             memory_max_mb: None,
             processors: 4,
             system_image: Some("/var/lib/dsa/images/1/system.img".into()),
@@ -704,7 +709,7 @@ mod tests {
         for pinned in ["--hugepages", "--lock-guest-memory", "--no-balloon"] {
             assert!(!joined.contains(pinned), "{pinned} pins guest memory");
         }
-        assert_eq!(value_of(&args, "--mem"), ["size=3072"]);
+        assert_eq!(value_of(&args, "--mem"), ["size=2048"]);
         assert!(value_of(&args, "--init-mem").is_empty());
     }
 
@@ -713,10 +718,10 @@ mod tests {
         let mut config = config();
         config.memory_max_mb = Some(16384);
         let args = config.crosvm_args().unwrap();
-        // The guest kernel sees only the base at boot, so it keeps page structs for 3 GiB, not
+        // The guest kernel sees only the base at boot, so it keeps page structs for 2 GiB, not
         // for 16 GiB; the rest is plugged in as it is needed.
-        assert_eq!(value_of(&args, "--mem"), ["size=3072"]);
-        assert_eq!(value_of(&args, "--virtio-mem"), ["13312"]);
+        assert_eq!(value_of(&args, "--mem"), ["size=2048"]);
+        assert_eq!(value_of(&args, "--virtio-mem"), ["14336"]);
         assert!(value_of(&args, "--init-mem").is_empty());
         assert!(config
             .full_kernel_cmdline()
@@ -725,15 +730,31 @@ mod tests {
             .full_kernel_cmdline()
             .contains("memory_hotplug.online_policy=auto-movable"));
         // Whole memory blocks only.
-        config.memory_max_mb = Some(3072 + 1000);
-        assert_eq!(config.memory_layout(), (3072, Some(896)));
-        config.memory_max_mb = Some(3072 + 100);
-        assert_eq!(config.memory_layout(), (3072, None));
-        config.memory_max_mb = Some(2048);
-        assert_eq!(config.memory_layout(), (3072, None));
-        assert_eq!(virtio_mem_bytes(3072, 3072), 0);
-        assert_eq!(virtio_mem_bytes(3072, 16384), 13312 * 1024 * 1024);
-        assert_eq!(virtio_mem_bytes(3072, 2048), 0);
+        config.memory_max_mb = Some(2048 + 1000);
+        assert_eq!(config.memory_layout(), (2048, Some(896)));
+        config.memory_max_mb = Some(2048 + 100);
+        assert_eq!(config.memory_layout(), (2048, None));
+        config.memory_max_mb = Some(1024);
+        assert_eq!(config.memory_layout(), (2048, None));
+        assert_eq!(virtio_mem_bytes(2048, 2048), 0);
+        assert_eq!(virtio_mem_bytes(2048, 16384), 14336 * 1024 * 1024);
+        assert_eq!(virtio_mem_bytes(2048, 1024), 0);
+    }
+
+    #[test]
+    fn nfr1_the_guest_kernel_sets_aside_as_little_at_boot_as_on_windows() {
+        let cmdline = config().full_kernel_cmdline();
+        let words: Vec<&str> = cmdline.split_whitespace().collect();
+        for word in [
+            "swiotlb=2048",
+            "kfence.sample_interval=0",
+            "dhash_entries=65536",
+            "ihash_entries=32768",
+            "thash_entries=16384",
+            "uhash_entries=1024",
+        ] {
+            assert!(words.contains(&word), "{word} in {cmdline}");
+        }
     }
 
     #[test]

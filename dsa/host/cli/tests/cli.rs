@@ -5,7 +5,7 @@ use dsa_host_core::input::PointerEvent;
 use dsa_host_core::keys::KeyEvent;
 use dsa_host_core::tasks::TaskRequestError;
 use std::process::{Command, Output};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use dsa_cli::{parse, Command as Cmd};
@@ -1063,6 +1063,62 @@ fn fr5_touch_gestures_off_is_on_by_default_and_dsa_turns_it_off() {
 }
 
 #[test]
+fn fr28_host_certificates_are_on_by_default_and_dsa_turns_them_off() {
+    use dsa_cli::Change;
+    assert_eq!(
+        parse(&args("settings set host-certificates off"))
+            .unwrap()
+            .change,
+        Some(Change::HostCertificates(false))
+    );
+    assert!(parse(&args("settings set host-certificates maybe")).is_err());
+    let ((listener, _, _), endpoint) = local_pair();
+    let _service = settings_service(listener);
+    let settings = json_of(&dsa(&endpoint, "settings --json"));
+    assert_eq!(settings["host_certificates"], true);
+    assert_eq!(settings["imported_certificates"], serde_json::json!([]));
+    let changed = json_of(&dsa(&endpoint, "settings set host-certificates off --json"));
+    assert_eq!(changed["host_certificates"], false);
+}
+
+#[test]
+fn fr28_the_settings_list_the_root_certificates_found_and_where() {
+    use dsa_host_core::host_api::SettingsReport;
+    use dsa_host_core::host_certificates::ImportedCertificate;
+    let report = SettingsReport {
+        settings: dsa_host_core::settings::Settings::default(),
+        facts: Default::default(),
+        network: None,
+        adb_auto_connect_state: Default::default(),
+        touch_gestures: Default::default(),
+        adb_shell_root: String::new(),
+        imported_certificates: vec![ImportedCertificate {
+            subject: "CN=Filter Root, O=Example Filter".into(),
+            issuer: "CN=Filter Root, O=Example Filter".into(),
+            source: "machine_group_policy".into(),
+            location: "HKLM\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\Root".into(),
+            sha256: "ab".repeat(32),
+            not_after: 1_893_456_000,
+        }],
+    };
+    let json = dsa_cli::settings_json(&report);
+    let listed = &json["imported_certificates"][0];
+    assert_eq!(listed["subject"], "CN=Filter Root, O=Example Filter");
+    assert_eq!(listed["source"], "machine_group_policy");
+    assert_eq!(listed["not_after"], 1_893_456_000);
+    let text = dsa_cli::describe_settings(&report);
+    assert!(
+        text.contains("Trust the root certificates added to this computer: on (1 found)"),
+        "{text}"
+    );
+    assert!(
+        text.contains("Root certificate: CN=Filter Root, O=Example Filter")
+            && text.contains("this computer's group policy"),
+        "{text}"
+    );
+}
+
+#[test]
 fn fr5_the_touch_gestures_line_says_why_it_cannot_be_used_and_is_hidden_without_gestures() {
     use dsa_host_core::host_api::SettingsReport;
     use dsa_host_core::touch_gestures::TouchGesturesState;
@@ -1073,6 +1129,7 @@ fn fr5_the_touch_gestures_line_says_why_it_cannot_be_used_and_is_hidden_without_
         adb_auto_connect_state: Default::default(),
         touch_gestures: state,
         adb_shell_root: String::new(),
+        imported_certificates: Vec::new(),
     };
     let line = |report: &SettingsReport| {
         dsa_cli::describe_settings(report)
@@ -2231,18 +2288,23 @@ fn fr28_dsa_turns_advanced_networking_on_and_dsa_network_shows_the_address_and_d
         Cmd::Network
     );
     let ((listener, _, _), endpoint) = local_pair();
-    let network: NetworkSource = Arc::new(|_: &str, settings: &Settings| {
-        Some(NetworkStatus {
-            mode: if settings.advanced_networking {
-                NetworkStatus::ADVANCED.into()
-            } else {
-                NetworkStatus::NAT.into()
-            },
-            addresses: vec!["172.28.16.2".into(), "fd5a:d5a:0:1::2".into()],
-            dns_servers: vec!["172.28.16.1".into()],
-            gateway: "172.28.16.1".into(),
-            problem: None,
-        })
+    let resolver = Arc::new(Mutex::new(String::new()));
+    let network: NetworkSource = Arc::new({
+        let resolver = Arc::clone(&resolver);
+        move |_: &str, settings: &Settings| {
+            Some(NetworkStatus {
+                mode: if settings.advanced_networking {
+                    NetworkStatus::ADVANCED.into()
+                } else {
+                    NetworkStatus::NAT.into()
+                },
+                addresses: vec!["172.28.16.2".into(), "fd5a:d5a:0:1::2".into()],
+                dns_servers: vec!["172.28.16.1".into()],
+                gateway: "172.28.16.1".into(),
+                problem: None,
+                dns_resolver: resolver.lock().unwrap().clone(),
+            })
+        }
     });
     let service = HostApiService::new(Arc::new(FakeAndroids::default()), "test service")
         .with_settings(Arc::new(MemorySettings::default()), ServiceFacts::default())
@@ -2264,6 +2326,25 @@ fn fr28_dsa_turns_advanced_networking_on_and_dsa_network_shows_the_address_and_d
         "{text}"
     );
     assert!(text.contains("DNS servers: 172.28.16.1"), "{text}");
+
+    // Who answers Android's names: this computer's resolver, or the network's DNS servers
+    // when that does not answer.
+    *resolver.lock().unwrap() = NetworkStatus::DNS_HOST.into();
+    let status = json_of(&dsa(&endpoint, "network --json"));
+    assert_eq!(status["dns_resolver"], "host");
+    let text = stdout(&dsa(&endpoint, "network"));
+    assert!(
+        text.contains("DNS: answered by this computer's resolver"),
+        "{text}"
+    );
+    *resolver.lock().unwrap() = NetworkStatus::DNS_NETWORK.into();
+    let status = json_of(&dsa(&endpoint, "network --json"));
+    assert_eq!(status["dns_resolver"], "network");
+    let text = stdout(&dsa(&endpoint, "network"));
+    assert!(
+        text.contains("DNS: this computer's resolver does not answer, so Android asks 172.28.16.1"),
+        "{text}"
+    );
 
     let changed = json_of(&dsa(
         &endpoint,
@@ -2399,6 +2480,7 @@ fn fr12_widgets_watch_prints_one_json_line_per_change_with_the_app_name() {
             y: 64,
             width_dp: 180,
             height_dp: 110,
+            resized: false,
         },
     };
     let first: serde_json::Value = serde_json::from_str(&dsa_cli::widgets_now_line(
@@ -3303,6 +3385,7 @@ fn fr15_settings_say_where_program_updates_come_from() {
         adb_auto_connect_state: Default::default(),
         touch_gestures: Default::default(),
         adb_shell_root: String::new(),
+        imported_certificates: Vec::new(),
     };
     let text = dsa_cli::describe_settings(&report);
     let line = text
@@ -3389,6 +3472,34 @@ fn fr14_dsa_android_shows_the_version_and_moves_down_only_with_erase_data() {
     assert_eq!(parsed.android, Some(Channel::Latest));
     assert!(parse(&args("android use seventeen")).is_err());
     assert!(parse(&args("android use")).is_err());
+}
+
+#[test]
+fn fr14_dsa_android_install_image_takes_the_folder_and_refuses_one_without_a_list() {
+    let parsed = parse(&args("android install-image dev-build")).unwrap();
+    assert_eq!(parsed.command, Cmd::AndroidInstallImage);
+    assert_eq!(
+        parsed.file.as_deref(),
+        Some(std::path::Path::new("dev-build"))
+    );
+    let why = parse(&args("android install-image")).unwrap_err();
+    assert!(why.contains("folder"), "{why}");
+    assert!(parse(&args("android install-image --json")).is_err());
+
+    // A folder without a signed list is refused before anything runs, and no service is
+    // needed to say so.
+    let empty = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("install-image-empty-{}", std::process::id()));
+    std::fs::create_dir_all(&empty).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_dsa"))
+        .arg("android")
+        .arg("install-image")
+        .arg(&empty)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let said = String::from_utf8_lossy(&output.stderr);
+    assert!(said.contains("images.json"), "{said}");
 }
 
 #[test]
@@ -3773,6 +3884,7 @@ fn fr15_dsa_settings_chooses_whether_to_take_prereleases() {
         adb_auto_connect_state: Default::default(),
         touch_gestures: Default::default(),
         adb_shell_root: String::new(),
+        imported_certificates: Vec::new(),
     };
     let channel_line = |report: &SettingsReport| {
         dsa_cli::describe_settings(report)
@@ -3805,6 +3917,7 @@ fn fr35_the_settings_apps_read_root_elevation_and_each_apps_level() {
         adb_auto_connect_state: Default::default(),
         touch_gestures: Default::default(),
         adb_shell_root: String::new(),
+        imported_certificates: Vec::new(),
     };
     assert_eq!(dsa_cli::settings_json(&report)["root_elevation"], true);
     let line = dsa_cli::describe_settings(&report)

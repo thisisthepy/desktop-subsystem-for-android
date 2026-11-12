@@ -27,7 +27,7 @@ one. They are marked "(admin)" below.
 | **Widgets** | Widgets on your desktop, and **Add to desktop** | `dsa widgets` |
 | **Display & GPU** | **Render GPU**, **Restart the window manager**, **Turn off Windows touch gestures in DSA app windows** (Windows 11 only, on by default) | `render-gpu`, `dsa gpus`, `touch-gestures-off` |
 | **Device identity** | This computer first, read only: its name, maker and model, and **Device specifications** with **Copy**. Then the manufacturer, model and build fingerprint Android reports to apps | `dsa settings device`, `device.<field>` |
-| **Network** | How Android reaches the network, its address, DNS servers and gateway, **Advanced networking**, **Developer mode** (adb) | `dsa network`, `advanced-networking`, `developer-mode`, `adb-port`, `adb-auto-connect` |
+| **Network** | How Android reaches the network, its address, who answers its names (DNS) and its gateway, **Advanced networking**, **Developer mode** (adb) | `dsa network`, `advanced-networking`, `developer-mode`, `adb-port`, `adb-auto-connect` |
 | **Updates** | **Android**: the running version and build, the version it follows, the Android update with its progress and **Check now** (admin), **Update the Android image automatically** (admin), **Version to use** (admin). **DSA**: **Update DSA automatically** (admin), **Get pre-release versions** (admin), **Install now** | `dsa android version`, `dsa android use`, `image-updates`, `program-updates`, `prerelease-updates`, `dsa update` |
 | **Advanced** | Clipboard, files, web links, freeze when idle, reset, ARM apps, traces (admin), log folders | see below |
 | **Logs** | Android's live log, **Save diagnostics** | `dsa logcat`, `dsa logs collect` |
@@ -57,6 +57,21 @@ one. They are marked "(admin)" below.
   ARM** and the Android version: at the next start of Android. To restart Android, stop it
   on the **General** page, then open an app.
 - Everything else: at once.
+
+## How Android finds names
+
+Your computer answers every name Android's apps look up, with the same resolver Windows apps
+use (on Linux and macOS, the system's resolver). So your hosts file, your company's name rules,
+a VPN's own DNS servers and a DNS filter apply to Android's apps as they do to the computer's.
+Android does not ask a DNS server itself.
+
+- This is the same with **Advanced networking** on: your computer is on the same network and
+  knows its names, and a VPN or DNS filter on it still applies.
+- Android's own **Private DNS** is off by default, because it would ask a DNS server around your
+  computer. If you choose a private DNS server in Android's settings, Android uses it.
+- If DSA cannot answer for a while, Android asks the network's DNS servers until it can again.
+- The **DNS** row of the **Network** page, and `dsa network`, say which one answers now: your
+  computer's resolver, or the network's DNS servers, which they list.
 
 ## Values the command line takes
 

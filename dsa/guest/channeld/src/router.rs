@@ -34,6 +34,11 @@
 //!   on to the listeners too: the agent has the media scanner look at the folders. Its
 //!   `AndroidFiles` goes to the switch alone ([`Router::on_android_files`]), which has init
 //!   serve the shared storage to the host.
+//! - The host's `HostCertificates` goes to the platform's certificate installer
+//!   ([`Router::on_host_certificates`]), which adds the roots the host names to Android's
+//!   system certificates and takes away those it no longer names, and then on to the
+//!   listeners: the agent has the running apps forget the trust anchors they looked up, once
+//!   the folders already say what the host said.
 //! - The host's ARM translation and Google apps messages stop here as well, and so do its
 //!   reads of an add-on image an older host left on the user's disk: the daemon looks after
 //!   those images ([`Router::on_arm_translation`], [`Router::on_gapps`]) and answers each one.
@@ -55,7 +60,8 @@ use std::time::Duration;
 use dsa_protocol::control::envelope::Body;
 use dsa_protocol::control::{
     AddonImage, AddonImagePart, AddonImageRead, AndroidFiles, ArmTranslationState, Envelope,
-    FileSharing, GappsState, GuestBoot, LocationRequest, PowerHintKind, RootElevationConfig,
+    FileSharing, GappsState, GuestBoot, HostCertificates, LocationRequest, PowerHintKind,
+    RootElevationConfig,
 };
 
 use crate::arm_translation::ArmTranslation;
@@ -262,6 +268,8 @@ pub struct Router {
     file_sharing: Option<FileSharingSwitch>,
     /// Serves the shared storage to the host, as the host asks.
     android_files: Option<AndroidFilesSwitch>,
+    /// Adds the host's root certificates to Android's system certificates.
+    host_certificates: Option<HostCertificatesSwitch>,
     /// The ARM translation package on the user's disk, which the host installs and removes.
     arm_translation: Option<Arc<ArmTranslation>>,
     /// The Google apps' image on the user's disk, which the host installs and removes.
@@ -289,6 +297,9 @@ type FileSharingSwitch = Box<dyn Fn(&FileSharing) + Send + Sync>;
 /// Serves the shared storage to the host on the port, with the token, it names.
 type AndroidFilesSwitch = Box<dyn Fn(&AndroidFiles) + Send + Sync>;
 
+/// Makes Android's system certificates hold the host's root certificates it names.
+type HostCertificatesSwitch = Box<dyn Fn(&HostCertificates) + Send + Sync>;
+
 /// Drives the kernel's su guard for a root elevation config: which uids may see su, on or off.
 type RootElevationSwitch = Box<dyn Fn(&RootElevationConfig) + Send + Sync>;
 
@@ -309,6 +320,7 @@ impl Router {
             developer_mode: None,
             file_sharing: None,
             android_files: None,
+            host_certificates: None,
             arm_translation: None,
             gapps: None,
             gamepads: None,
@@ -384,6 +396,16 @@ impl Router {
         switch: impl Fn(&AndroidFiles) + Send + Sync + 'static,
     ) -> Router {
         self.android_files = Some(Box::new(switch));
+        self
+    }
+
+    /// Hands the host's root certificates to `switch`, which installs them, before the
+    /// listeners hear of them.
+    pub fn on_host_certificates(
+        mut self,
+        switch: impl Fn(&HostCertificates) + Send + Sync + 'static,
+    ) -> Router {
+        self.host_certificates = Some(Box::new(switch));
         self
     }
 
@@ -634,6 +656,13 @@ impl Router {
                 switch(sharing);
             }
         }
+        if let Some(Body::HostCertificates(certificates)) = &body {
+            // The daemon installs them first; the agent hears of it as well, and has the
+            // running apps look their trust anchors up again.
+            if let Some(switch) = &self.host_certificates {
+                switch(certificates);
+            }
+        }
         if let Some(Body::RootElevationConfig(config)) = &body {
             // For the daemon alone: it drives the kernel's su guard.
             if let Some(switch) = &self.root_elevation {
@@ -785,6 +814,12 @@ impl Router {
             Some(Body::KeymintRootKeyRequest(_) | Body::KeymintRootKey(_)) => {
                 return Err(SendError::NotAllowed(
                     "KeyMint's root key is asked for on a port of its own, by the daemon alone"
+                        .to_string(),
+                ))
+            }
+            Some(Body::DnsQuery(_) | Body::DnsAnswer(_)) => {
+                return Err(SendError::NotAllowed(
+                    "DNS queries go to the host on a port of their own, by the daemon alone"
                         .to_string(),
                 ))
             }

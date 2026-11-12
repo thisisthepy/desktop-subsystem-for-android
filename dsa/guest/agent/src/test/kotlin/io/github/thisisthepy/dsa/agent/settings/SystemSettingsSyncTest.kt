@@ -161,7 +161,9 @@ class SystemSettingsSyncTest {
         sync.handle(textSize(125))
         assertFalse(calls.any { it.startsWith("font scale") })
 
-        // Back to 100%: the guest's font scale is 1 again.
+        // Back to 100%: the guest's font scale is 1 again. The new connection applied the
+        // other settings in full above, so only what this step sets is looked at.
+        calls.clear()
         sync.handle(textSize(100))
         assertEquals(listOf("font scale 1.000"), calls)
     }

@@ -15,12 +15,16 @@
 //! the Google apps; [`image_store`] reads and removes the image of either that an older host
 //! left on the user's disk, which the host moves onto its add-on disk.
 //! [`gamepad`] makes the host's game controllers gamepad devices of the guest.
-//! [`reclaim`] decides when the guest drops its caches so the host gets the memory back, and
-//! [`pageout`] pages an idle app out to zram again soon after something woke it.
+//! [`reclaim`] decides when the guest drops its caches so the host gets the memory back,
+//! [`pageout`] pages an idle app out to zram again soon after something woke it, and
+//! [`writeback`] writes what stays cold in zram on to its backing file on the data disk.
 //! [`pressure`] tells the host how much memory the guest has, so the VM grows and shrinks.
 //! [`logbridge`] sends the guest's log on the log port, only while the host asks for it, and
 //! the guest's diagnostics; [`logd`] reads logd for it.
 //! [`keymint_key`] fetches KeyMint's root key from the host once each boot, for KeyMint alone.
+//! [`dns_stub`] answers the guest's DNS queries with the host's resolver, and
+//! [`dns_redirect`] sets the packet filter rules that send those queries to it.
+//! [`memory_report`] says what the guest kernel's own memory is made of, when the shell asks.
 //!
 //! The daemon answers the host's clock probes itself ([`clock_answer`]), from the thread that
 //! reads the connection, so the answer carries the guest's clock as close to the probe's
@@ -31,12 +35,16 @@ pub mod android_files;
 pub mod arm_translation;
 #[cfg(target_os = "android")]
 pub mod binder;
+pub mod cacerts;
+pub mod dns_redirect;
+pub mod dns_stub;
 pub mod gamepad;
 pub mod gapps;
 pub mod image_store;
 pub mod keymint_key;
 pub mod logbridge;
 pub mod logd;
+pub mod memory_report;
 pub mod pageout;
 pub mod pressure;
 pub mod reclaim;
@@ -52,6 +60,7 @@ pub mod su_process;
 pub mod su_relay;
 pub mod su_wire;
 pub mod webdav;
+pub mod writeback;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};

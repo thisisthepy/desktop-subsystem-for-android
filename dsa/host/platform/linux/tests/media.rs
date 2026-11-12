@@ -22,9 +22,26 @@
 //! clips at 426x240 and 360x640 with those and the guest's own decoders, to buffers and to
 //! surfaces on screen, and fails on green or wrong colours, on pictures that stop reaching the
 //! screen when a player or a feed of short videos changes surface, and on a sound that stops.
+//! The colours are checked twice: in the app's own copy of its surface, and in a capture of the
+//! display, where SurfaceFlinger composes the picture from what the composer copied up to the
+//! host. Only the second saw YouTube's green video: the composer had copied nothing up, while
+//! the app's own graphics driver copied the picture for the first.
 //!
-//! The test also reads the guest's log for a denial of a media service's shared memory, and
-//! for the codec HAL losing a picture because its surface gave it no buffer.
+//! The test also reads the guest's log for a denial of a media service's shared memory, for
+//! the codec HAL losing a picture because its surface gave it no buffer, and for the composer
+//! failing to copy a picture up to the host.
+//!
+//! The root certificate check makes a throwaway root and a server certificate for a test name
+//! of its own ([`CERTIFICATE_HOST`]) signed by it, serves HTTPS with it on the host
+//! (`openssl s_server`), and carries the guest's loopback port 8443 there with `adb reverse`.
+//! The probe's HTTPS check connects to that port and checks the server under the test's name,
+//! as an app does after a lookup: not under `localhost`, for which Android 17 trusts no
+//! certificate at all in an app without a network security config of its own. It is refused
+//! at first, then let through once the root is in the host's system store (added with
+//! sudo, as an administrator adds one), refused again with the host-certificates setting off,
+//! let through with it on, and refused once the root is taken away. Android's own system
+//! certificates stay as they were throughout. It needs passwordless sudo, which CI's runners
+//! have.
 //!
 //! Runs when CI gives it what it needs: `DSA_CROSVM` names the crosvm to run,
 //! `DSA_WIDGET_TEST_IMAGE` the image folder built from the commit under test,
@@ -92,6 +109,9 @@ const MEDIA_BUDGET: Duration = Duration::from_secs(900);
 /// The root check boots three times (as it starts, then with root elevation on and off), so
 /// it stays under twenty-one minutes.
 const ROOT_BUDGET: Duration = Duration::from_secs(1260);
+/// The root certificate check boots once and waits on five changes of the host's trust, so it
+/// stays under fifteen minutes.
+const CERTIFICATES_BUDGET: Duration = Duration::from_secs(900);
 /// How long past its budget a check may run before it stops everything it started and ends:
 /// inside its job step's limit (18 minutes for media, 23 for root), so the step never kills
 /// it with its VM still running.
@@ -815,6 +835,21 @@ fn codec_buffer_errors(log: &str) -> Vec<&str> {
         .collect()
 }
 
+/// The guest's composer logging that it could not copy what a CPU wrote into a buffer up to
+/// the host: a decoder's pictures then reach the screen as the ColorBuffer's untouched memory,
+/// which a YUV layer shows as green.
+fn copy_up_errors(log: &str) -> Vec<&str> {
+    log.lines()
+        .filter(|line| line.contains("dsa-hwcomposer"))
+        .filter(|line| line.contains("what the CPU wrote") || line.contains("what a CPU wrote"))
+        .filter(|line| {
+            line.contains("cannot import")
+                || line.contains("cannot read")
+                || line.contains("did not take")
+        })
+        .collect()
+}
+
 /// The first Codec 2.0 component name (`c2.<vendor>.<name>`) a log line mentions.
 fn component_in(line: &str) -> Option<&str> {
     let mut from = 0;
@@ -923,6 +958,21 @@ fn video_problems(results: &BTreeMap<String, String>) -> Vec<String> {
                         Err(format!("colours: {}", colour.unwrap_or("not reported"))),
                     );
                 }
+                // What the display shows, as SurfaceFlinger composes it. The copy of the
+                // surface above is read in the probe's own process, which copies the decoder's
+                // picture up to the host itself, so it stays right even when the composer's
+                // copy fails and the screen is green.
+                if way != "buffer" {
+                    let screen = results
+                        .get(&format!("{at}.{way}.screen"))
+                        .map(String::as_str);
+                    if screen != Some("ok") {
+                        check(
+                            way,
+                            Err(format!("on screen: {}", screen.unwrap_or("not reported"))),
+                        );
+                    }
+                }
             }
             let at_least = |key: &str, wanted: i64| -> Result<(), String> {
                 match number(results, key) {
@@ -1024,11 +1074,13 @@ fn video_results() -> BTreeMap<String, String> {
                 ("surface.presented", "30"),
                 ("surface.after_swap", "15"),
                 ("surface.colour", "ok"),
+                ("surface.screen", "ok"),
                 ("surface.audio", "48000"),
                 ("shorts.first", "30"),
                 ("shorts.second", "30"),
                 ("shorts.first_frame_ms", "40"),
                 ("shorts.colour", "ok"),
+                ("shorts.screen", "ok"),
             ] {
                 results.insert(format!("{at}.{k}"), v.to_string());
             }
@@ -1084,10 +1136,40 @@ fn fr26_green_pictures_and_a_stalled_surface_fail_the_video_check() {
     );
     assert_eq!(video_problems(&unlisted).len(), 1);
 
+    // What YouTube showed in issue 387: the picture is right in the app's own copy of its
+    // surface but green on the display, because the composer never copied it up.
+    let mut green_on_screen = good.clone();
+    green_on_screen.insert(
+        format!("{at}.surface.screen"),
+        "wrong colour on screen at 300,410: #008700, not #c1c1c1".into(),
+    );
+    green_on_screen.insert(
+        format!("{at}.shorts.screen"),
+        "wrong colour on screen at 300,410: #008700, not #c1c1c1".into(),
+    );
+    let problems = video_problems(&green_on_screen);
+    assert_eq!(problems.len(), 2, "{problems:?}");
+    assert!(problems.iter().all(|p| p.contains("on screen")));
+    let mut unreported = good.clone();
+    unreported.remove(&format!("{at}.surface.screen"));
+    assert_eq!(video_problems(&unreported).len(), 1);
+
     // The error the HAL logged on every picture.
     let log = "11-10 05:00:00.000  612  640 E dsa-codec2: c2.dsa.vp9.decoder: the surface gave no 426x240 buffer (1 in a row): Status(-8, EX_SERVICE_SPECIFIC): '14: '\n\
                11-10 05:00:00.010  612  640 I dsa-codec2: c2.dsa.vp9.decoder: decoding 426x240 on the host's GPU\n";
     assert_eq!(codec_buffer_errors(log).len(), 1);
+}
+
+#[test]
+fn fr26_a_composer_that_cannot_copy_a_picture_up_fails_the_media_check() {
+    let log = "11-12 06:03:13.682   536   541 E dsa-hwcomposer: cannot import gralloc buffer 72 to copy what the CPU wrote: -22\n\
+               11-12 06:03:13.700   536   541 E dsa-hwcomposer: cannot import gralloc buffer 73 (640x360, format 0x37393939) to copy what the CPU wrote: -22 (1 in a row); its layer shows what the host held before\n\
+               11-12 06:03:13.710   536   541 D dsa-hwcomposer: copied 4050 KiB that a CPU wrote up to the host in 12 uploads over 1003 ms\n\
+               11-12 06:03:13.720   536   541 I dsa-hwcomposer: the host renderer makes YUV ColorBuffers\n";
+    assert_eq!(copy_up_errors(log).len(), 2);
+    assert!(
+        copy_up_errors("11-12 06:03:13.710   536   541 E dsa-codec2: cannot import\n").is_empty()
+    );
 }
 
 #[test]
@@ -1292,15 +1374,423 @@ fn fr26_the_boot_check_finds_sound_turned_down_before_the_host() {
 
 #[test]
 fn pr4_an_app_plays_sound_and_decodes_h264_and_aac_with_selinux_enforcing() {
-    boot_check(true, false);
+    boot_check(true, false, false);
 }
 
 #[test]
 fn fr35_an_app_needs_approval_and_su_is_hidden_when_disabled() {
-    boot_check(false, true);
+    boot_check(false, true, false);
 }
 
-fn boot_check(check_media: bool, check_root: bool) {
+#[test]
+fn fr28_android_trusts_the_root_certificates_the_host_added() {
+    boot_check(false, false, true);
+}
+
+/// Where the certificate check adds its test root, as an administrator adds one: the folder
+/// of the certificates added to the system's store beside the distribution's bundle.
+const ADDED_ROOT: &str = "/usr/local/share/ca-certificates/dsa-fr28-test-root.crt";
+
+/// The port the probe reaches the test's HTTPS server at, on the guest's own loopback address
+/// (`adb reverse` carries it to the host's).
+const GUEST_HTTPS_PORT: u16 = 8443;
+
+/// The name the test's server certificate is for, and the host the probe checks it under. It
+/// is not `localhost`: from Android 17 the network security config of an app without one of
+/// its own gives `localhost` and every loopback address a config that trusts no certificate,
+/// so a server checked under such a name is refused whatever Android trusts. `.test` is
+/// reserved for testing (RFC 6761); the probe connects to the loopback address itself instead
+/// of looking the name up.
+const CERTIFICATE_HOST: &str = "certificate-check.dsa.test";
+
+/// How long a change on the host may take to reach the apps: the host notices the store
+/// changed, sends the guest the roots, and the daemon writes them.
+const TRUST_WAIT: Duration = Duration::from_secs(120);
+
+/// Runs a program the check needs and fails with what it said when it does not succeed.
+fn run_tool(command: &mut Command) -> Result<String, String> {
+    let shown = format!("{command:?}");
+    let out = run_bounded(command, Duration::from_secs(120), usize::MAX)?;
+    match out.status {
+        Some(status) if status.success() => Ok(String::from_utf8_lossy(&out.stdout).into_owned()),
+        _ => Err(format!(
+            "{shown} failed: {}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        )),
+    }
+}
+
+/// The test's root in the host's system store, put there with sudo as an administrator would
+/// and taken away when dropped, so a failed check leaves the runner's store as it found it.
+struct AddedRoot;
+
+impl AddedRoot {
+    fn add(root: &Path) -> Result<AddedRoot, String> {
+        run_tool(
+            Command::new("sudo")
+                .args(["-n", "install", "-m", "0644"])
+                .arg(root)
+                .arg(ADDED_ROOT),
+        )?;
+        run_tool(Command::new("sudo").args(["-n", "update-ca-certificates"]))?;
+        Ok(AddedRoot)
+    }
+
+    fn remove(&self) -> Result<(), String> {
+        run_tool(Command::new("sudo").args(["-n", "rm", "-f", ADDED_ROOT]))?;
+        run_tool(Command::new("sudo").args(["-n", "update-ca-certificates", "--fresh"]))?;
+        Ok(())
+    }
+}
+
+impl Drop for AddedRoot {
+    fn drop(&mut self) {
+        let _ = self.remove();
+    }
+}
+
+/// Makes a throwaway root and a server certificate for `localhost` signed by it, in `dir`.
+fn make_test_certificates(dir: &Path) -> Result<(), String> {
+    let openssl = || {
+        let mut command = Command::new("openssl");
+        command.current_dir(dir);
+        command
+    };
+    run_tool(openssl().args([
+        "req",
+        "-x509",
+        "-newkey",
+        "ec",
+        "-pkeyopt",
+        "ec_paramgen_curve:prime256v1",
+        "-nodes",
+        "-keyout",
+        "root.key",
+        "-out",
+        "root.crt",
+        "-days",
+        "2",
+        "-subj",
+        "/O=DSA Test/CN=DSA Host Certificates Test Root",
+        "-addext",
+        "basicConstraints=critical,CA:TRUE",
+        "-addext",
+        "keyUsage=critical,keyCertSign,cRLSign",
+    ]))?;
+    run_tool(openssl().args([
+        "req",
+        "-newkey",
+        "ec",
+        "-pkeyopt",
+        "ec_paramgen_curve:prime256v1",
+        "-nodes",
+        "-keyout",
+        "server.key",
+        "-out",
+        "server.csr",
+        "-subj",
+        &format!("/CN={CERTIFICATE_HOST}"),
+    ]))?;
+    std::fs::write(
+        dir.join("server.ext"),
+        format!(
+            "subjectAltName=DNS:{CERTIFICATE_HOST}\nbasicConstraints=CA:FALSE\n\
+             keyUsage=critical,digitalSignature\nextendedKeyUsage=serverAuth\n"
+        ),
+    )
+    .map_err(|e| e.to_string())?;
+    run_tool(openssl().args([
+        "x509",
+        "-req",
+        "-in",
+        "server.csr",
+        "-CA",
+        "root.crt",
+        "-CAkey",
+        "root.key",
+        "-CAcreateserial",
+        "-out",
+        "server.crt",
+        "-days",
+        "2",
+        "-extfile",
+        "server.ext",
+    ]))?;
+    Ok(())
+}
+
+impl Adb {
+    /// What the probe's HTTPS check found at the test's server ("connected", "untrusted",
+    /// "misnamed" or "unreachable"), and what the probe's process saw of Android's certificate
+    /// folders, of the file `certificate` among them, and of its mount table (its `certs.*`
+    /// results, one line each).
+    fn https(
+        &self,
+        dir: &Path,
+        attempt: usize,
+        certificate: &str,
+    ) -> Result<(String, String), String> {
+        let out = self.shell(&format!(
+            "am instrument -w -r -e check https \
+             -e url https://{CERTIFICATE_HOST}:{GUEST_HTTPS_PORT}/ -e address 127.0.0.1 \
+             -e certificate {certificate} {PROBE_RUNNER}"
+        ))?;
+        let _ = std::fs::write(dir.join(format!("probe-https-{attempt}.txt")), &out);
+        let results = instrumentation_results(&out)?;
+        let seen = results
+            .iter()
+            .filter(|(key, _)| key.starts_with("certs."))
+            .map(|(key, value)| format!("{key}={value}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let outcome = results
+            .get("outcome")
+            .cloned()
+            .ok_or_else(|| format!("the HTTPS check said no outcome: {results:?}"))?;
+        Ok((outcome, seen))
+    }
+}
+
+/// Asks the probe until its HTTPS check finds `wanted`, for [TRUST_WAIT] at most. `certificate`
+/// is the test root's file name in Android's folders, which the probe looks for in the app's
+/// own view of them.
+fn wait_for_https(
+    adb: &Adb,
+    dir: &Path,
+    attempt: &mut usize,
+    certificate: &str,
+    wanted: &str,
+    what: &str,
+) -> Result<(), String> {
+    let deadline = Instant::now() + TRUST_WAIT;
+    loop {
+        *attempt += 1;
+        let (outcome, seen) = adb.https(dir, *attempt, certificate)?;
+        eprintln!("HTTPS check {attempt} ({what}): {outcome}");
+        if outcome == wanted {
+            return Ok(());
+        }
+        if outcome == "unreachable" {
+            return Err(format!(
+                "{what}: the probe did not reach the test's server at all (probe-https-{attempt}.txt)"
+            ));
+        }
+        if outcome == "misnamed" {
+            return Err(format!(
+                "{what}: the test's server certificate does not name {CERTIFICATE_HOST} \
+                 (probe-https-{attempt}.txt)"
+            ));
+        }
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "{what}: the HTTPS check still found {outcome} after {} s, not {wanted}; the \
+                 probe's process saw (probe-https-{attempt}.txt):\n{seen}\nand adb's shell \
+                 mounts:\n{}",
+                TRUST_WAIT.as_secs(),
+                certificate_mounts(adb)
+            ));
+        }
+        std::thread::sleep(Duration::from_secs(5));
+    }
+}
+
+/// The lines of adb's shell's mount table that name a certificate folder, to set beside the
+/// probe's own when the HTTPS check does not find what it should.
+fn certificate_mounts(adb: &Adb) -> String {
+    match adb.shell("cat /proc/self/mountinfo") {
+        Ok(table) => {
+            let lines: Vec<&str> = table.lines().filter(|l| l.contains("cacerts")).collect();
+            if lines.is_empty() {
+                "none".to_string()
+            } else {
+                lines.join("\n")
+            }
+        }
+        Err(why) => format!("unreadable: {why}"),
+    }
+}
+
+/// The folder of Android's system certificates that apps read: the APEX's, which Android
+/// prefers to its own folder under /system whenever it holds any certificate. The image binds
+/// a copy over it that holds Android's certificates and the host's roots.
+const APPS_CERTIFICATES: &str = "/apex/com.android.conscrypt/cacerts";
+
+/// How many certificates the folder apps read holds, and whether `name` is among them.
+fn guest_certificates(adb: &Adb, name: &str) -> Result<(usize, bool), String> {
+    let listed = adb.shell(&format!("ls {APPS_CERTIFICATES}"))?;
+    let names: Vec<&str> = listed.split_whitespace().collect();
+    Ok((names.len(), names.contains(&name)))
+}
+
+/// The root certificate check: an app reaches a local HTTPS server signed by a root the host
+/// added, and is refused once the root is taken away or the setting is off; Android's own
+/// certificates stay as they were throughout, and a root the host did not add is not trusted.
+fn certificate_check(api: &mut HostApiClient, adb: &Adb, dir: &Path) -> Result<(), String> {
+    // The probe stands in for an app the user has open, but it shows no window, so DSA puts
+    // Android into Doze partway through the check, and Doze cuts an app off the network: its
+    // lookup of "localhost" then fails and the check reads as "unreachable". An app with a
+    // window keeps Android out of Doze; the probe is exempted from it instead.
+    adb.shell(&format!("cmd deviceidle whitelist +{PROBE_PACKAGE}"))
+        .map_err(|why| format!("exempting the probe from Doze: {why}"))?;
+    make_test_certificates(dir)?;
+    let hash = run_tool(Command::new("openssl").current_dir(dir).args([
+        "x509",
+        "-noout",
+        "-subject_hash_old",
+        "-in",
+        "root.crt",
+    ]))?;
+    let file = format!("{}.0", hash.trim());
+    let fingerprint = run_tool(Command::new("openssl").current_dir(dir).args([
+        "x509",
+        "-noout",
+        "-fingerprint",
+        "-sha256",
+        "-in",
+        "root.crt",
+    ]))?;
+    let fingerprint = fingerprint
+        .trim()
+        .rsplit('=')
+        .next()
+        .unwrap_or_default()
+        .replace(':', "")
+        .to_ascii_lowercase();
+
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .and_then(|listener| listener.local_addr())
+        .map_err(|e| e.to_string())?
+        .port();
+    let _server = Service::spawn(
+        Command::new("openssl").current_dir(dir).args([
+            "s_server",
+            "-accept",
+            &format!("127.0.0.1:{port}"),
+            "-cert",
+            "server.crt",
+            "-key",
+            "server.key",
+            "-www",
+        ]),
+        dir.join("https-server.log"),
+    );
+    // The server listens before the probe looks, so "unreachable" means the way to it is
+    // broken, not that it was still starting.
+    let listening = Instant::now() + Duration::from_secs(20);
+    while std::net::TcpStream::connect(("127.0.0.1", port)).is_err() {
+        if Instant::now() >= listening {
+            return Err("the test's HTTPS server did not start (https-server.log)".into());
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    adb.run(&[
+        "reverse",
+        &format!("tcp:{GUEST_HTTPS_PORT}"),
+        &format!("tcp:{port}"),
+    ])?;
+
+    let mut attempt = 0;
+    let (android_count, present) = guest_certificates(adb, &file)?;
+    if present {
+        return Err(format!(
+            "{file} is among Android's certificates before the root was added"
+        ));
+    }
+    eprintln!("Android has {android_count} system certificates of its own");
+    wait_for_https(
+        adb,
+        dir,
+        &mut attempt,
+        &file,
+        "untrusted",
+        "before the root is added",
+    )?;
+
+    let added = AddedRoot::add(&dir.join("root.crt"))?;
+    wait_for_https(
+        adb,
+        dir,
+        &mut attempt,
+        &file,
+        "connected",
+        "with the root added on the host",
+    )
+    .map_err(|why| match guest_certificates(adb, &file) {
+        Ok((count, present)) => format!(
+            "{why}; Android's folder holds {count} certificates (it had {android_count}), and \
+             {file} is {}there",
+            if present { "" } else { "not " }
+        ),
+        Err(listing) => format!("{why}; Android's folder could not be listed: {listing}"),
+    })?;
+    match guest_certificates(adb, &file)? {
+        (count, true) if count == android_count + 1 => {}
+        (count, present) => {
+            return Err(format!(
+                "with the root added, Android's folder holds {count} certificates (it had \
+                 {android_count}), and {file} is {}there",
+                if present { "" } else { "not " }
+            ))
+        }
+    }
+    let report = api.settings().map_err(|e| e.to_string())?;
+    if !report
+        .imported_certificates
+        .iter()
+        .any(|certificate| certificate.sha256 == fingerprint)
+    {
+        return Err(format!(
+            "the settings do not list the added root ({fingerprint}): {:?}",
+            report.imported_certificates
+        ));
+    }
+
+    // Off: the root goes, and Android's own stay.
+    let mut wanted = report.settings;
+    wanted.host_certificates = false;
+    api.set_settings(&wanted).map_err(|e| e.to_string())?;
+    wait_for_https(
+        adb,
+        dir,
+        &mut attempt,
+        &file,
+        "untrusted",
+        "with the setting off",
+    )?;
+    if guest_certificates(adb, &file)? != (android_count, false) {
+        return Err("with the setting off, Android's folder is not as it was".into());
+    }
+
+    // On again, then the root taken away on the host.
+    wanted.host_certificates = true;
+    api.set_settings(&wanted).map_err(|e| e.to_string())?;
+    wait_for_https(
+        adb,
+        dir,
+        &mut attempt,
+        &file,
+        "connected",
+        "with the setting on again",
+    )?;
+    added.remove()?;
+    drop(added);
+    wait_for_https(
+        adb,
+        dir,
+        &mut attempt,
+        &file,
+        "untrusted",
+        "with the root taken away on the host",
+    )?;
+    if guest_certificates(adb, &file)? != (android_count, false) {
+        return Err("with the root taken away, Android's folder is not as it was".into());
+    }
+    let _ = adb.run(&["reverse", "--remove-all"]);
+    Ok(())
+}
+
+fn boot_check(check_media: bool, check_root: bool, check_certificates: bool) {
     let (Some(crosvm), Some(image), Some(probe)) = (
         std::env::var_os("DSA_CROSVM").map(PathBuf::from),
         std::env::var_os("DSA_WIDGET_TEST_IMAGE").map(PathBuf::from),
@@ -1318,12 +1808,20 @@ fn boot_check(check_media: bool, check_root: bool) {
     let started = Instant::now();
     let (budget, what) = if check_root {
         (ROOT_BUDGET, "the root check")
+    } else if check_certificates {
+        (CERTIFICATES_BUDGET, "the root certificate check")
     } else {
         (MEDIA_BUDGET, "the media check")
     };
     let deadline = started + budget;
     let _watchdog = Watchdog::start(what, budget + OVERRUN);
-    let dir = scratch(if check_root { "root" } else { "media" });
+    let dir = scratch(if check_root {
+        "root"
+    } else if check_certificates {
+        "certs"
+    } else {
+        "media"
+    });
     let approver = dir.join("approver");
     std::fs::create_dir_all(&approver).unwrap();
     std::fs::set_permissions(&approver, std::fs::Permissions::from_mode(0o700)).unwrap();
@@ -1561,6 +2059,11 @@ fn boot_check(check_media: bool, check_root: bool) {
         for line in codec_buffer_errors(&guest_log) {
             problems.push(format!("the codec HAL lost a picture: {line}"));
         }
+        for line in copy_up_errors(&guest_log) {
+            problems.push(format!(
+                "the composer could not copy a picture up to the host: {line}"
+            ));
+        }
         for line in dsa_config_corrupted(&guest_log) {
             problems.push(format!(
                 "a DSA decoder's configure was refused as corrupted: {line}"
@@ -1570,6 +2073,20 @@ fn boot_check(check_media: bool, check_root: bool) {
     if check_root {
         if let Err(why) = root_approval_check(&mut api, &adb, &dir) {
             problems.push(format!("root elevation: {why}"));
+        }
+    }
+    if check_certificates {
+        if let Err(why) = certificate_check(&mut api, &adb, &dir) {
+            problems.push(format!("the host's root certificates: {why}"));
+        }
+        let guest_log = adb.shell("logcat -d -b all").unwrap_or_default();
+        let _ = std::fs::write(dir.join("logcat.txt"), &guest_log);
+        // The copies' own type, and Android's folders init binds them over.
+        for line in denials(
+            &guest_log,
+            &["dsa_cacerts_file", "system_security_cacerts_file"],
+        ) {
+            problems.push(format!("SELinux refused the host's certificates: {line}"));
         }
     }
 

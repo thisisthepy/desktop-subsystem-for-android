@@ -32,7 +32,7 @@ when VMBus is there and otherwise leaves the place to virtio's.
 
 The patches touch only architecture-neutral code (VMBus's ACPI probe, which Hyper-V uses on
 both architectures, the command-line partition parser, cgroup v1, wakeup sources, shmem,
-free page reporting, the persistent memory drivers), so the same set applies to both builds.
+free page reporting, ext4, the persistent memory drivers), so the same set applies to both builds.
 
 The host's direct-mapped mode (off by default) attaches the read-only disks as persistent
 memory: Hyper-V's virtual persistent memory, which the kernel finds through ACPI's NFIT, or
@@ -47,7 +47,24 @@ seconds before each pass, and again after each pass that used up its budget, so 
 free reached the host slice by slice over many seconds; `patches/page-reporting-no-delay.patch`
 starts every pass at once. The host chooses the smallest piece reported
 (`page_reporting.page_reporting_order` on the command line): 4 KiB where it backs memory in
-4 KiB pages, so a freed page need not wait for compaction to gather a whole block.
+4 KiB pages, so a freed page need not wait for compaction to gather a whole block. A host
+that faults memory in larger pieces (Hyper-V's 64 KiB fault clusters, a Linux host's huge
+pages) takes reported neighbours back in with a page the guest touches again, and the guest
+never offers those a second time. `patches/page-reporting-rereport.patch` adds
+`page_reporting.rereport`: writing 1 empties the per-CPU free lists and reports every free
+page again. The guest's idle reclaim writes it after it has compacted memory.
+
+zram writes pages that stay cold for long to a backing file on the guest's data disk
+(`CONFIG_ZRAM_WRITEBACK`), chosen by the time each page was last used
+(`CONFIG_ZRAM_TRACK_ENTRY_ACTIME`). Upstream clears that time when it compresses a page again,
+so every page zstd had compressed again looked unused since boot;
+`patches/zram-recompress-keeps-access-time.patch` keeps it.
+
+Android mounts each APEX package as a read-only ext4 image, about 75 of them with Google Play.
+Upstream ext4 gives every mount a workqueue for converting unwritten extents, and with it a
+rescuer thread (`ext4-rsv-conversion`) that stays for the life of the mount, though a read-only
+mount of a read-only device never writes. `patches/ext4-rsv-conversion-read-only.patch` makes
+the workqueue only for a mount that can write, or when a mount is remounted read-write.
 
 ## Why the WSL kernel
 

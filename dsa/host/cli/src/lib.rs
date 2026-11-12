@@ -269,6 +269,15 @@
 //! restarts Android into the waiting image now, whatever the setting, and `dsa android
 //! version` says when one waits (`restart_pending` in its JSON; `dsa android restart --json`
 //! prints `restarting`, the image or null, and `detail`).
+//! `dsa android install-image <folder>` installs the Android image in a folder on this
+//! computer, such as a development build's: its signed `images.json` and the files it names.
+//! It runs as administrator, and the image passes the same signature, rule and hash checks as
+//! a downloaded one, then boots on trial the same way.
+//! `host-certificates` (on by default) lets the user's Android trust, as system certificates,
+//! the root certificates a user or an administrator added to this computer, such as those an
+//! internet filter or a company proxy installs; the operating system's own are never given.
+//! It applies at once. `dsa settings` lists the ones found and where (`imported_certificates`
+//! in its JSON: `subject`, `issuer`, `source`, `location`, `sha256`, `not_after`).
 //! `root-elevation` (off by default, the computer's, so an administrator changes it) lets apps
 //! elevate to root through the computer's administrator approval, from the next start of
 //! Android; `dsa apps root <package>` then sets each app's level.
@@ -276,9 +285,11 @@
 //! the switches take `on` or `off`. `dsa memory` shows how much memory the user's Android
 //! takes, on the host and inside Android. `dsa network` shows how the user's Android reaches
 //! the network: NAT, advanced or none while it is not running, its addresses (a program on this
-//! computer reaches a server in Android at any of them), its DNS servers and its gateway. With
-//! `--json` it prints `mode`, `addresses`, `dns_servers`, `gateway` and `problem`. `dsa gpus` lists the GPUs of this machine, for
-//! choosing the render GPU.
+//! computer reaches a server in Android at any of them), who answers its DNS queries (this
+//! computer's resolver, or the DNS servers it shows when that does not answer) and its
+//! gateway. With `--json` it prints `mode`, `addresses`, `dns_servers`, `gateway`, `problem`
+//! and `dns_resolver` (`host`, `network`, or empty while nobody can say). `dsa gpus` lists the
+//! GPUs of this machine, for choosing the render GPU.
 //!
 //! `dsa arm-translation status` (or `dsa arm-translation`) says whether apps built only for
 //! 64-bit ARM (`arm64-v8a`) can be installed and run: which translator Android uses (the
@@ -414,7 +425,7 @@ pub const USAGE: &str = "usage: dsa <status [--no-start] | start | stop | freeze
      files [open] | gapps [status | install [--progress] | remove] | reset-data --yes | \
      backup [status | on | off [--delete-backups] | now | restore | key show | \
      key import <recovery key>] | \
-     android [version | use <major>|latest [--erase-data] | restart]> \
+     android [version | use <major>|latest [--erase-data] | restart | install-image <folder>]> \
      [--wait] [--timeout <seconds>] [--json] [--pipe <name> | --socket <path>]";
 
 pub mod desktop;
@@ -510,6 +521,8 @@ pub enum Command {
     AndroidUse,
     /// Restart Android now into the downloaded image that waits for it.
     AndroidRestart,
+    /// Install the Android image in the folder [`Invocation::file`] names.
+    AndroidInstallImage,
 }
 
 /// What `dsa app-window` does.
@@ -637,6 +650,7 @@ pub enum Change {
     AdvancedNetworking(bool),
     TouchGesturesOff(bool),
     ImageAutoRestart(bool),
+    HostCertificates(bool),
     RootElevation(bool),
 }
 
@@ -671,6 +685,7 @@ impl Change {
             "advanced-networking" => switch().map(Change::AdvancedNetworking),
             "touch-gestures-off" => switch().map(Change::TouchGesturesOff),
             "image-auto-restart" => switch().map(Change::ImageAutoRestart),
+            "host-certificates" => switch().map(Change::HostCertificates),
             "adb-port" => match value.parse::<u16>() {
                 Ok(port) if port > 0 => Ok(Change::AdbPort(port)),
                 _ => Err(format!(
@@ -682,7 +697,7 @@ impl Change {
                  clipboard, links-in-android, program-updates, prerelease-updates, \
                  image-updates, input-trace, resize-trace, root-elevation, memory-limit, developer-mode, adb-port, adb-auto-connect, \
                  arm-translation, stop-without-asking, file-sharing, shared-folders, \
-                 advanced-networking, touch-gestures-off, image-auto-restart and \
+                 advanced-networking, touch-gestures-off, image-auto-restart, host-certificates and \
                  device.<field>"
             )),
         }
@@ -1333,10 +1348,18 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
                         Command::AndroidUse
                     }
                     Some("restart") => Command::AndroidRestart,
+                    Some("install-image") => {
+                        let folder = args.next().filter(|f| !f.starts_with("--")).ok_or(
+                            "dsa android install-image needs the folder that holds the image: \
+                             its signed images.json and the files it names",
+                        )?;
+                        file = Some(std::path::PathBuf::from(folder));
+                        Command::AndroidInstallImage
+                    }
                     Some(other) => {
                         return Err(format!(
-                            "dsa android takes version, use <major> or restart, not \
-                             {other:?}\n{USAGE}"
+                            "dsa android takes version, use <major>, restart or install-image \
+                             <folder>, not {other:?}\n{USAGE}"
                         ))
                     }
                 });
@@ -2375,6 +2398,15 @@ pub fn settings_json(report: &SettingsReport) -> Value {
         "advanced_networking": report.settings.advanced_networking,
         "touch_gestures_off": report.settings.touch_gestures_off,
         "image_auto_restart": report.settings.image_auto_restart,
+        "host_certificates": report.settings.host_certificates,
+        "imported_certificates": report.imported_certificates.iter().map(|certificate| json!({
+            "subject": certificate.subject,
+            "issuer": certificate.issuer,
+            "source": certificate.source,
+            "location": certificate.location,
+            "sha256": certificate.sha256,
+            "not_after": certificate.not_after,
+        })).collect::<Vec<_>>(),
         "touch_gestures_state": report.touch_gestures.as_str(),
         "touch_gestures_problem": report.touch_gestures.problem(),
         "network": network_json(report.network.as_ref()),
@@ -2387,8 +2419,28 @@ pub fn settings_json(report: &SettingsReport) -> Value {
     })
 }
 
-/// The network as one JSON object (`mode`, `addresses`, `dns_servers`, `gateway`, `problem`),
-/// or null from a service that does not report it.
+/// Where a root certificate the service found was, in words.
+pub fn describe_certificate_source(source: &str, location: &str) -> String {
+    use dsa_host_core::host_certificates::source;
+    let store = match source {
+        source::MACHINE => "this computer's trusted root store",
+        source::MACHINE_GROUP_POLICY => "this computer's group policy",
+        source::MACHINE_ENTERPRISE => "this computer's enterprise roots",
+        source::USER => "your own trusted roots",
+        source::USER_GROUP_POLICY => "your group policy",
+        source::ADMIN => "the administrator's trust settings",
+        source::SYSTEM => "the system's certificate store",
+        other => other,
+    };
+    if location.is_empty() {
+        store.to_string()
+    } else {
+        format!("{store}, {location}")
+    }
+}
+
+/// The network as one JSON object (`mode`, `addresses`, `dns_servers`, `gateway`, `problem`,
+/// `dns_resolver`), or null from a service that does not report it.
 pub fn network_json(network: Option<&NetworkStatus>) -> Value {
     match network {
         Some(network) => json!({
@@ -2397,6 +2449,7 @@ pub fn network_json(network: Option<&NetworkStatus>) -> Value {
             "dns_servers": network.dns_servers,
             "gateway": network.gateway,
             "problem": network.problem,
+            "dns_resolver": network.dns_resolver,
         }),
         None => Value::Null,
     }
@@ -2427,7 +2480,14 @@ pub fn describe_network(report: &SettingsReport) -> String {
     let mut lines = vec![setting, format!("Network: {mode}")];
     if network.mode != NetworkStatus::OFF {
         lines.push(format!("Addresses: {}", list(&network.addresses)));
-        lines.push(format!("DNS servers: {}", list(&network.dns_servers)));
+        lines.push(match network.dns_resolver.as_str() {
+            NetworkStatus::DNS_HOST => "DNS: answered by this computer's resolver".to_string(),
+            NetworkStatus::DNS_NETWORK => format!(
+                "DNS: this computer's resolver does not answer, so Android asks {}",
+                list(&network.dns_servers)
+            ),
+            _ => format!("DNS servers: {}", list(&network.dns_servers)),
+        });
         if !network.gateway.is_empty() {
             lines.push(format!("Gateway: {}", network.gateway));
         }
@@ -2801,6 +2861,61 @@ fn android_restart(invocation: &Invocation, client: &mut HostApiClient) -> Resul
     })
 }
 
+/// `dsa android install-image <folder>`: installs the Android image in the folder (a signed
+/// `images.json` and the files it names, as a development build leaves them) into the image
+/// store the service boots from. The service program beside this one does it, reading the
+/// installed configuration: the list's signature is checked against the keys the service
+/// trusts, and the image goes through the update rules and hash checks. The image store is
+/// the machine's, so it needs an administrator.
+fn android_install_image(invocation: &Invocation) -> Result<String, String> {
+    let folder = invocation
+        .file
+        .as_deref()
+        .ok_or("dsa android install-image needs the folder that holds the image")?;
+    let folder = std::path::absolute(folder).map_err(|e| format!("{}: {e}", folder.display()))?;
+    if !folder.join("images.json").is_file() {
+        return Err(format!(
+            "{} has no images.json; name the folder that holds the image's signed list and \
+             its files",
+            folder.display()
+        ));
+    }
+    #[cfg(windows)]
+    {
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let service = exe.with_file_name("dsa-hostd.exe");
+        if !service.is_file() {
+            return Err(format!(
+                "{} is missing; dsa android install-image runs the service program installed \
+                 beside dsa",
+                service.display()
+            ));
+        }
+        let status = std::process::Command::new(&service)
+            .arg("install-image")
+            .arg(&folder)
+            .status()
+            .map_err(|e| format!("running {}: {e}", service.display()))?;
+        if status.success() {
+            Ok(String::new())
+        } else {
+            Err(format!(
+                "the image in {} was not installed (the reason is above); run dsa from a \
+                 prompt started as administrator, as the image is shared by every user",
+                folder.display()
+            ))
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        Err(format!(
+            "the image in {} was not installed: dsa android install-image installs the image \
+             of a Windows development build, and this host's service has no such command",
+            folder.display()
+        ))
+    }
+}
+
 /// `dsa android version` and `dsa android use`.
 fn android_version(invocation: &Invocation, client: &mut HostApiClient) -> Result<String, String> {
     let report = match (invocation.command, invocation.android) {
@@ -2932,6 +3047,11 @@ pub fn describe_settings(report: &SettingsReport) -> String {
             on_off(settings.advanced_networking)
         ),
         format!(
+            "Trust the root certificates added to this computer: {} ({} found)",
+            on_off(settings.host_certificates),
+            report.imported_certificates.len()
+        ),
+        format!(
             "Restart into a downloaded Android image by itself: {} (image-auto-restart)",
             on_off(settings.image_auto_restart)
         ),
@@ -2948,6 +3068,14 @@ pub fn describe_settings(report: &SettingsReport) -> String {
             "Touch gestures off in DSA app windows: {} ({})",
             on_off(settings.touch_gestures_off),
             describe_touch_gestures(&report.touch_gestures)
+        ));
+    }
+    for certificate in &report.imported_certificates {
+        lines.push(format!(
+            "  Root certificate: {} (issued by {}; from {})",
+            certificate.subject,
+            certificate.issuer,
+            describe_certificate_source(&certificate.source, &certificate.location)
         ));
     }
     lines.push(format!("Service version: {}", facts.version));
@@ -3202,6 +3330,7 @@ fn settings(invocation: &Invocation, client: &mut HostApiClient) -> Result<Strin
             Change::AdvancedNetworking(on) => wanted.advanced_networking = *on,
             Change::TouchGesturesOff(on) => wanted.touch_gestures_off = *on,
             Change::ImageAutoRestart(on) => wanted.image_auto_restart = *on,
+            Change::HostCertificates(on) => wanted.host_certificates = *on,
             Change::RootElevation(on) => wanted.root_elevation = *on,
         }
         report = client.set_settings(&wanted).map_err(|e| e.to_string())?;
@@ -4365,7 +4494,11 @@ fn read_install_file(path: &std::path::Path) -> Result<(ApkInfo, Option<Bundle>)
         .and_then(|name| name.to_str())
         .is_some_and(|name| dsa_host_core::apk::check_name(name).is_ok());
     if named_apk {
-        return Ok((ApkInfo::read(path)?, None));
+        let info = ApkInfo::read(path)?;
+        // An app whose native code the guest cannot run is refused as `dsa install` refuses it.
+        dsa_host_core::apk_bundle::check_native_code(path)
+            .map_err(|refusal| describe_file_refusal(path, &refusal))?;
+        return Ok((info, None));
     }
     let file = InstallFile::open(path, &user_tmp()?);
     match file.map_err(|refusal| describe_file_refusal(path, &refusal))? {
@@ -4723,6 +4856,9 @@ pub fn run_with_starter(
     if invocation.command == Command::ApkInfo {
         return apk_info(invocation, connector);
     }
+    if invocation.command == Command::AndroidInstallImage {
+        return android_install_image(invocation);
+    }
     if invocation.command == Command::Gpus {
         let gpus = gpus_json();
         return Ok(if invocation.json {
@@ -4843,7 +4979,9 @@ pub fn run_with_starter(
             let path = invocation.output.clone().unwrap_or_default();
             return logs::collect(client, &path);
         }
-        Command::Gpus | Command::ApkInfo => unreachable!("answered before connecting"),
+        Command::Gpus | Command::ApkInfo | Command::AndroidInstallImage => {
+            unreachable!("answered before connecting")
+        }
     }
     .map_err(|e| e.to_string())?;
     if invocation.command == Command::Status {

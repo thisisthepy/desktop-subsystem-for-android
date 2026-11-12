@@ -3086,6 +3086,20 @@ struct BackupSettingDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 BackupSettingDefaultTypeInternal _BackupSetting_default_instance_;
+PROTOBUF_CONSTEXPR HostCertificates::HostCertificates(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.certificates_)*/{}
+  , /*decltype(_impl_.enabled_)*/false
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct HostCertificatesDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR HostCertificatesDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~HostCertificatesDefaultTypeInternal() {}
+  union {
+    HostCertificates _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 HostCertificatesDefaultTypeInternal _HostCertificates_default_instance_;
 PROTOBUF_CONSTEXPR PasskeyRequest::PasskeyRequest(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_.signer_sha256_)*/{}
@@ -3148,6 +3162,35 @@ struct KeyMintRootKeyDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 KeyMintRootKeyDefaultTypeInternal _KeyMintRootKey_default_instance_;
+PROTOBUF_CONSTEXPR DnsQuery::DnsQuery(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.message_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.id_)*/0u
+  , /*decltype(_impl_.tcp_)*/false
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct DnsQueryDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR DnsQueryDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~DnsQueryDefaultTypeInternal() {}
+  union {
+    DnsQuery _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 DnsQueryDefaultTypeInternal _DnsQuery_default_instance_;
+PROTOBUF_CONSTEXPR DnsAnswer::DnsAnswer(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_.message_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.id_)*/0u
+  , /*decltype(_impl_._cached_size_)*/{}} {}
+struct DnsAnswerDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR DnsAnswerDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~DnsAnswerDefaultTypeInternal() {}
+  union {
+    DnsAnswer _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 DnsAnswerDefaultTypeInternal _DnsAnswer_default_instance_;
 PROTOBUF_CONSTEXPR ListSpeechVoices::ListSpeechVoices(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_._cached_size_)*/{}} {}
@@ -60600,6 +60643,220 @@ std::string BackupSetting::GetTypeName() const {
 
 // ===================================================================
 
+class HostCertificates::_Internal {
+ public:
+};
+
+HostCertificates::HostCertificates(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.HostCertificates)
+}
+HostCertificates::HostCertificates(const HostCertificates& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  HostCertificates* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.certificates_){from._impl_.certificates_}
+    , decltype(_impl_.enabled_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _this->_impl_.enabled_ = from._impl_.enabled_;
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.HostCertificates)
+}
+
+inline void HostCertificates::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.certificates_){arena}
+    , decltype(_impl_.enabled_){false}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+}
+
+HostCertificates::~HostCertificates() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.HostCertificates)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void HostCertificates::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.certificates_.~RepeatedPtrField();
+}
+
+void HostCertificates::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void HostCertificates::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.HostCertificates)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.certificates_.Clear();
+  _impl_.enabled_ = false;
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* HostCertificates::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // bool enabled = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.enabled_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // repeated bytes certificates = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
+          ptr -= 1;
+          do {
+            ptr += 1;
+            auto str = _internal_add_certificates();
+            ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+            CHK_(ptr);
+            if (!ctx->DataAvailable(ptr)) break;
+          } while (::PROTOBUF_NAMESPACE_ID::internal::ExpectTag<18>(ptr));
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* HostCertificates::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.HostCertificates)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // bool enabled = 1;
+  if (this->_internal_enabled() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(1, this->_internal_enabled(), target);
+  }
+
+  // repeated bytes certificates = 2;
+  for (int i = 0, n = this->_internal_certificates_size(); i < n; i++) {
+    const auto& s = this->_internal_certificates(i);
+    target = stream->WriteBytes(2, s, target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.HostCertificates)
+  return target;
+}
+
+size_t HostCertificates::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.HostCertificates)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // repeated bytes certificates = 2;
+  total_size += 1 *
+      ::PROTOBUF_NAMESPACE_ID::internal::FromIntSize(_impl_.certificates_.size());
+  for (int i = 0, n = _impl_.certificates_.size(); i < n; i++) {
+    total_size += ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+      _impl_.certificates_.Get(i));
+  }
+
+  // bool enabled = 1;
+  if (this->_internal_enabled() != 0) {
+    total_size += 1 + 1;
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void HostCertificates::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const HostCertificates*>(
+      &from));
+}
+
+void HostCertificates::MergeFrom(const HostCertificates& from) {
+  HostCertificates* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.HostCertificates)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  _this->_impl_.certificates_.MergeFrom(from._impl_.certificates_);
+  if (from._internal_enabled() != 0) {
+    _this->_internal_set_enabled(from._internal_enabled());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void HostCertificates::CopyFrom(const HostCertificates& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.HostCertificates)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool HostCertificates::IsInitialized() const {
+  return true;
+}
+
+void HostCertificates::InternalSwap(HostCertificates* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  _impl_.certificates_.InternalSwap(&other->_impl_.certificates_);
+  swap(_impl_.enabled_, other->_impl_.enabled_);
+}
+
+std::string HostCertificates::GetTypeName() const {
+  return "dsa.control.v1.HostCertificates";
+}
+
+
+// ===================================================================
+
 class PasskeyRequest::_Internal {
  public:
 };
@@ -61808,6 +62065,493 @@ void KeyMintRootKey::InternalSwap(KeyMintRootKey* other) {
 
 std::string KeyMintRootKey::GetTypeName() const {
   return "dsa.control.v1.KeyMintRootKey";
+}
+
+
+// ===================================================================
+
+class DnsQuery::_Internal {
+ public:
+};
+
+DnsQuery::DnsQuery(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.DnsQuery)
+}
+DnsQuery::DnsQuery(const DnsQuery& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  DnsQuery* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.message_){}
+    , decltype(_impl_.id_){}
+    , decltype(_impl_.tcp_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _impl_.message_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.message_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_message().empty()) {
+    _this->_impl_.message_.Set(from._internal_message(), 
+      _this->GetArenaForAllocation());
+  }
+  ::memcpy(&_impl_.id_, &from._impl_.id_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.tcp_) -
+    reinterpret_cast<char*>(&_impl_.id_)) + sizeof(_impl_.tcp_));
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.DnsQuery)
+}
+
+inline void DnsQuery::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.message_){}
+    , decltype(_impl_.id_){0u}
+    , decltype(_impl_.tcp_){false}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+  _impl_.message_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.message_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+}
+
+DnsQuery::~DnsQuery() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.DnsQuery)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void DnsQuery::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.message_.Destroy();
+}
+
+void DnsQuery::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void DnsQuery::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.DnsQuery)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.message_.ClearToEmpty();
+  ::memset(&_impl_.id_, 0, static_cast<size_t>(
+      reinterpret_cast<char*>(&_impl_.tcp_) -
+      reinterpret_cast<char*>(&_impl_.id_)) + sizeof(_impl_.tcp_));
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* DnsQuery::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // uint32 id = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // bytes message = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
+          auto str = _internal_mutable_message();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // bool tcp = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 24)) {
+          _impl_.tcp_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* DnsQuery::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.DnsQuery)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // uint32 id = 1;
+  if (this->_internal_id() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(1, this->_internal_id(), target);
+  }
+
+  // bytes message = 2;
+  if (!this->_internal_message().empty()) {
+    target = stream->WriteBytesMaybeAliased(
+        2, this->_internal_message(), target);
+  }
+
+  // bool tcp = 3;
+  if (this->_internal_tcp() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(3, this->_internal_tcp(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.DnsQuery)
+  return target;
+}
+
+size_t DnsQuery::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.DnsQuery)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // bytes message = 2;
+  if (!this->_internal_message().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_message());
+  }
+
+  // uint32 id = 1;
+  if (this->_internal_id() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_id());
+  }
+
+  // bool tcp = 3;
+  if (this->_internal_tcp() != 0) {
+    total_size += 1 + 1;
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void DnsQuery::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const DnsQuery*>(
+      &from));
+}
+
+void DnsQuery::MergeFrom(const DnsQuery& from) {
+  DnsQuery* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.DnsQuery)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (!from._internal_message().empty()) {
+    _this->_internal_set_message(from._internal_message());
+  }
+  if (from._internal_id() != 0) {
+    _this->_internal_set_id(from._internal_id());
+  }
+  if (from._internal_tcp() != 0) {
+    _this->_internal_set_tcp(from._internal_tcp());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void DnsQuery::CopyFrom(const DnsQuery& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.DnsQuery)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool DnsQuery::IsInitialized() const {
+  return true;
+}
+
+void DnsQuery::InternalSwap(DnsQuery* other) {
+  using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.message_, lhs_arena,
+      &other->_impl_.message_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(DnsQuery, _impl_.tcp_)
+      + sizeof(DnsQuery::_impl_.tcp_)
+      - PROTOBUF_FIELD_OFFSET(DnsQuery, _impl_.id_)>(
+          reinterpret_cast<char*>(&_impl_.id_),
+          reinterpret_cast<char*>(&other->_impl_.id_));
+}
+
+std::string DnsQuery::GetTypeName() const {
+  return "dsa.control.v1.DnsQuery";
+}
+
+
+// ===================================================================
+
+class DnsAnswer::_Internal {
+ public:
+};
+
+DnsAnswer::DnsAnswer(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:dsa.control.v1.DnsAnswer)
+}
+DnsAnswer::DnsAnswer(const DnsAnswer& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  DnsAnswer* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_.message_){}
+    , decltype(_impl_.id_){}
+    , /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _impl_.message_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.message_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_message().empty()) {
+    _this->_impl_.message_.Set(from._internal_message(), 
+      _this->GetArenaForAllocation());
+  }
+  _this->_impl_.id_ = from._impl_.id_;
+  // @@protoc_insertion_point(copy_constructor:dsa.control.v1.DnsAnswer)
+}
+
+inline void DnsAnswer::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_.message_){}
+    , decltype(_impl_.id_){0u}
+    , /*decltype(_impl_._cached_size_)*/{}
+  };
+  _impl_.message_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.message_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+}
+
+DnsAnswer::~DnsAnswer() {
+  // @@protoc_insertion_point(destructor:dsa.control.v1.DnsAnswer)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void DnsAnswer::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.message_.Destroy();
+}
+
+void DnsAnswer::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void DnsAnswer::Clear() {
+// @@protoc_insertion_point(message_clear_start:dsa.control.v1.DnsAnswer)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.message_.ClearToEmpty();
+  _impl_.id_ = 0u;
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* DnsAnswer::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // uint32 id = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _impl_.id_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // bytes message = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
+          auto str = _internal_mutable_message();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* DnsAnswer::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:dsa.control.v1.DnsAnswer)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // uint32 id = 1;
+  if (this->_internal_id() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(1, this->_internal_id(), target);
+  }
+
+  // bytes message = 2;
+  if (!this->_internal_message().empty()) {
+    target = stream->WriteBytesMaybeAliased(
+        2, this->_internal_message(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:dsa.control.v1.DnsAnswer)
+  return target;
+}
+
+size_t DnsAnswer::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:dsa.control.v1.DnsAnswer)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // bytes message = 2;
+  if (!this->_internal_message().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_message());
+  }
+
+  // uint32 id = 1;
+  if (this->_internal_id() != 0) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_id());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void DnsAnswer::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const DnsAnswer*>(
+      &from));
+}
+
+void DnsAnswer::MergeFrom(const DnsAnswer& from) {
+  DnsAnswer* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:dsa.control.v1.DnsAnswer)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (!from._internal_message().empty()) {
+    _this->_internal_set_message(from._internal_message());
+  }
+  if (from._internal_id() != 0) {
+    _this->_internal_set_id(from._internal_id());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void DnsAnswer::CopyFrom(const DnsAnswer& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:dsa.control.v1.DnsAnswer)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool DnsAnswer::IsInitialized() const {
+  return true;
+}
+
+void DnsAnswer::InternalSwap(DnsAnswer* other) {
+  using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.message_, lhs_arena,
+      &other->_impl_.message_, rhs_arena
+  );
+  swap(_impl_.id_, other->_impl_.id_);
+}
+
+std::string DnsAnswer::GetTypeName() const {
+  return "dsa.control.v1.DnsAnswer";
 }
 
 
@@ -65985,6 +66729,9 @@ class Envelope::_Internal {
   static const ::dsa::control::v1::LaunchShortcut& launch_shortcut(const Envelope* msg);
   static const ::dsa::control::v1::PinShortcutRequest& pin_shortcut_request(const Envelope* msg);
   static const ::dsa::control::v1::PinShortcutAnswer& pin_shortcut_answer(const Envelope* msg);
+  static const ::dsa::control::v1::HostCertificates& host_certificates(const Envelope* msg);
+  static const ::dsa::control::v1::DnsQuery& dns_query(const Envelope* msg);
+  static const ::dsa::control::v1::DnsAnswer& dns_answer(const Envelope* msg);
 };
 
 const ::dsa::control::v1::Hello&
@@ -66754,6 +67501,18 @@ Envelope::_Internal::pin_shortcut_request(const Envelope* msg) {
 const ::dsa::control::v1::PinShortcutAnswer&
 Envelope::_Internal::pin_shortcut_answer(const Envelope* msg) {
   return *msg->_impl_.body_.pin_shortcut_answer_;
+}
+const ::dsa::control::v1::HostCertificates&
+Envelope::_Internal::host_certificates(const Envelope* msg) {
+  return *msg->_impl_.body_.host_certificates_;
+}
+const ::dsa::control::v1::DnsQuery&
+Envelope::_Internal::dns_query(const Envelope* msg) {
+  return *msg->_impl_.body_.dns_query_;
+}
+const ::dsa::control::v1::DnsAnswer&
+Envelope::_Internal::dns_answer(const Envelope* msg) {
+  return *msg->_impl_.body_.dns_answer_;
 }
 void Envelope::set_allocated_hello(::dsa::control::v1::Hello* hello) {
   ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
@@ -69635,6 +70394,51 @@ void Envelope::set_allocated_pin_shortcut_answer(::dsa::control::v1::PinShortcut
   }
   // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.pin_shortcut_answer)
 }
+void Envelope::set_allocated_host_certificates(::dsa::control::v1::HostCertificates* host_certificates) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (host_certificates) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(host_certificates);
+    if (message_arena != submessage_arena) {
+      host_certificates = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, host_certificates, submessage_arena);
+    }
+    set_has_host_certificates();
+    _impl_.body_.host_certificates_ = host_certificates;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.host_certificates)
+}
+void Envelope::set_allocated_dns_query(::dsa::control::v1::DnsQuery* dns_query) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (dns_query) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(dns_query);
+    if (message_arena != submessage_arena) {
+      dns_query = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, dns_query, submessage_arena);
+    }
+    set_has_dns_query();
+    _impl_.body_.dns_query_ = dns_query;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.dns_query)
+}
+void Envelope::set_allocated_dns_answer(::dsa::control::v1::DnsAnswer* dns_answer) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  clear_body();
+  if (dns_answer) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+      ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(dns_answer);
+    if (message_arena != submessage_arena) {
+      dns_answer = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, dns_answer, submessage_arena);
+    }
+    set_has_dns_answer();
+    _impl_.body_.dns_answer_ = dns_answer;
+  }
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.Envelope.dns_answer)
+}
 Envelope::Envelope(::PROTOBUF_NAMESPACE_ID::Arena* arena,
                          bool is_message_owned)
   : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
@@ -70610,6 +71414,21 @@ Envelope::Envelope(const Envelope& from)
     case kPinShortcutAnswer: {
       _this->_internal_mutable_pin_shortcut_answer()->::dsa::control::v1::PinShortcutAnswer::MergeFrom(
           from._internal_pin_shortcut_answer());
+      break;
+    }
+    case kHostCertificates: {
+      _this->_internal_mutable_host_certificates()->::dsa::control::v1::HostCertificates::MergeFrom(
+          from._internal_host_certificates());
+      break;
+    }
+    case kDnsQuery: {
+      _this->_internal_mutable_dns_query()->::dsa::control::v1::DnsQuery::MergeFrom(
+          from._internal_dns_query());
+      break;
+    }
+    case kDnsAnswer: {
+      _this->_internal_mutable_dns_answer()->::dsa::control::v1::DnsAnswer::MergeFrom(
+          from._internal_dns_answer());
       break;
     }
     case BODY_NOT_SET: {
@@ -71803,6 +72622,24 @@ void Envelope::clear_body() {
     case kPinShortcutAnswer: {
       if (GetArenaForAllocation() == nullptr) {
         delete _impl_.body_.pin_shortcut_answer_;
+      }
+      break;
+    }
+    case kHostCertificates: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.host_certificates_;
+      }
+      break;
+    }
+    case kDnsQuery: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.dns_query_;
+      }
+      break;
+    }
+    case kDnsAnswer: {
+      if (GetArenaForAllocation() == nullptr) {
+        delete _impl_.body_.dns_answer_;
       }
       break;
     }
@@ -73366,6 +74203,30 @@ const char* Envelope::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx)
         } else
           goto handle_unusual;
         continue;
+      // .dsa.control.v1.HostCertificates host_certificates = 684;
+      case 684:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 98)) {
+          ptr = ctx->ParseMessage(_internal_mutable_host_certificates(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.DnsQuery dns_query = 690;
+      case 690:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 146)) {
+          ptr = ctx->ParseMessage(_internal_mutable_dns_query(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // .dsa.control.v1.DnsAnswer dns_answer = 691;
+      case 691:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 154)) {
+          ptr = ctx->ParseMessage(_internal_mutable_dns_answer(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
       default:
         goto handle_unusual;
     }  // switch
@@ -74739,6 +75600,27 @@ uint8_t* Envelope::_InternalSerialize(
         _Internal::pin_shortcut_answer(this).GetCachedSize(), target, stream);
   }
 
+  // .dsa.control.v1.HostCertificates host_certificates = 684;
+  if (_internal_has_host_certificates()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(684, _Internal::host_certificates(this),
+        _Internal::host_certificates(this).GetCachedSize(), target, stream);
+  }
+
+  // .dsa.control.v1.DnsQuery dns_query = 690;
+  if (_internal_has_dns_query()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(690, _Internal::dns_query(this),
+        _Internal::dns_query(this).GetCachedSize(), target, stream);
+  }
+
+  // .dsa.control.v1.DnsAnswer dns_answer = 691;
+  if (_internal_has_dns_answer()) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(691, _Internal::dns_answer(this),
+        _Internal::dns_answer(this).GetCachedSize(), target, stream);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -76100,6 +76982,27 @@ size_t Envelope::ByteSizeLong() const {
           *_impl_.body_.pin_shortcut_answer_);
       break;
     }
+    // .dsa.control.v1.HostCertificates host_certificates = 684;
+    case kHostCertificates: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.host_certificates_);
+      break;
+    }
+    // .dsa.control.v1.DnsQuery dns_query = 690;
+    case kDnsQuery: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.dns_query_);
+      break;
+    }
+    // .dsa.control.v1.DnsAnswer dns_answer = 691;
+    case kDnsAnswer: {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.body_.dns_answer_);
+      break;
+    }
     case BODY_NOT_SET: {
       break;
     }
@@ -77086,6 +77989,21 @@ void Envelope::MergeFrom(const Envelope& from) {
           from._internal_pin_shortcut_answer());
       break;
     }
+    case kHostCertificates: {
+      _this->_internal_mutable_host_certificates()->::dsa::control::v1::HostCertificates::MergeFrom(
+          from._internal_host_certificates());
+      break;
+    }
+    case kDnsQuery: {
+      _this->_internal_mutable_dns_query()->::dsa::control::v1::DnsQuery::MergeFrom(
+          from._internal_dns_query());
+      break;
+    }
+    case kDnsAnswer: {
+      _this->_internal_mutable_dns_answer()->::dsa::control::v1::DnsAnswer::MergeFrom(
+          from._internal_dns_answer());
+      break;
+    }
     case BODY_NOT_SET: {
       break;
     }
@@ -77901,6 +78819,10 @@ template<> PROTOBUF_NOINLINE ::dsa::control::v1::BackupSetting*
 Arena::CreateMaybeMessage< ::dsa::control::v1::BackupSetting >(Arena* arena) {
   return Arena::CreateMessageInternal< ::dsa::control::v1::BackupSetting >(arena);
 }
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::HostCertificates*
+Arena::CreateMaybeMessage< ::dsa::control::v1::HostCertificates >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::HostCertificates >(arena);
+}
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::PasskeyRequest*
 Arena::CreateMaybeMessage< ::dsa::control::v1::PasskeyRequest >(Arena* arena) {
   return Arena::CreateMessageInternal< ::dsa::control::v1::PasskeyRequest >(arena);
@@ -77916,6 +78838,14 @@ Arena::CreateMaybeMessage< ::dsa::control::v1::KeyMintRootKeyRequest >(Arena* ar
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::KeyMintRootKey*
 Arena::CreateMaybeMessage< ::dsa::control::v1::KeyMintRootKey >(Arena* arena) {
   return Arena::CreateMessageInternal< ::dsa::control::v1::KeyMintRootKey >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::DnsQuery*
+Arena::CreateMaybeMessage< ::dsa::control::v1::DnsQuery >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::DnsQuery >(arena);
+}
+template<> PROTOBUF_NOINLINE ::dsa::control::v1::DnsAnswer*
+Arena::CreateMaybeMessage< ::dsa::control::v1::DnsAnswer >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::dsa::control::v1::DnsAnswer >(arena);
 }
 template<> PROTOBUF_NOINLINE ::dsa::control::v1::ListSpeechVoices*
 Arena::CreateMaybeMessage< ::dsa::control::v1::ListSpeechVoices >(Arena* arena) {

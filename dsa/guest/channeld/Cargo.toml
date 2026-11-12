@@ -29,3 +29,5 @@ libc = "0.2"
 
 [dev-dependencies]
 dsa-protocol-schema.workspace = true
+# The host's DNS service, which the guest's DNS stub is tested against.
+dsa-host-core.workspace = true

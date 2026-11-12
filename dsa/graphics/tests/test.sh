@@ -45,6 +45,10 @@ mkdir -p "$out"
     "$here/cpu_upload_test.cpp" -o "$out/cpu_upload_test"
 "$out/cpu_upload_test"
 
+"$cxx" -std=c++17 -O2 -Wall -Wextra -Werror -I"$here/../include" \
+    "$here/spare_pages_test.cpp" -o "$out/spare_pages_test"
+"$out/spare_pages_test"
+
 "$cxx" -std=c++17 -O2 -Wall -Wextra -Werror -I"$here/../host" \
     "$here/frame_crop_test.cpp" -o "$out/frame_crop_test"
 "$out/frame_crop_test"
@@ -52,6 +56,14 @@ mkdir -p "$out"
 "$cxx" -std=c++17 -O2 -Wall -Wextra -Werror -I"$here/../host" \
     "$here/copy_wait_test.cpp" -o "$out/copy_wait_test"
 "$out/copy_wait_test"
+
+"$cxx" -std=c++17 -O2 -Wall -Wextra -Werror -I"$here/../include" \
+    "$here/copy_bands_test.cpp" -o "$out/copy_bands_test"
+"$out/copy_bands_test"
+
+"$cxx" -std=c++17 -O2 -Wall -Wextra -Werror -I"$here/../include" \
+    "$here/device_remake_test.cpp" -o "$out/device_remake_test"
+"$out/device_remake_test"
 
 # The upstream headers are not ours to warn about.
 upstream=(
@@ -61,7 +73,7 @@ upstream=(
     -isystem "$scratch/system_logging/liblog/include"
 )
 
-"$cxx" -std=c++17 "${upstream[@]}" -c \
+"$cxx" -std=c++17 "${upstream[@]}" -I"$here/../include" -c \
     "$scratch/gfxstream/guest/OpenglSystemCommon/HvSocketStream.cpp" -o "$out/HvSocketStream.o"
 "$cxx" -std=c++17 -Wall -Wextra -Werror "${upstream[@]}" \
     "$here/hvsocket_stream_test.cpp" "$out/HvSocketStream.o" -o "$out/hvsocket_stream_test"

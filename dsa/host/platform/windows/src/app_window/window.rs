@@ -36,7 +36,8 @@
 //! still takes the sizes Android gives it.
 //!
 //! Each window's system menu carries the Android window menu after Windows' own items
-//! ([`super::system_menu`]). Its Screenshot is taken here ([`super::screenshot`]); every other
+//! ([`super::system_menu`]), and is shown as a Windows 11 menu rather than the classic one
+//! ([`super::window_menu`]). Its Screenshot is taken here ([`super::screenshot`]); every other
 //! item is reported to the window manager, which carries it out.
 
 use std::cell::{Cell, RefCell};
@@ -50,8 +51,9 @@ use dsa_host_core::compositor::task_windows::fit_within;
 use dsa_host_core::compositor::window_hosts::{FromHost, ToHost};
 use dsa_host_core::compositor::window_mode::{picture_in_picture_place, ModeState, WindowMode};
 use dsa_host_core::compositor::window_sizing::{
-    maximized_position, min_client_size, rescaled_rect, to_task_size,
+    maximized_outer, maximized_position, min_client_size, rescaled_rect, to_task_size,
 };
+use dsa_host_core::compositor::window_tasks::WindowTasks;
 use dsa_host_core::input::InputEvent;
 use windows_sys::Win32::Foundation::{
     GetLastError, ERROR_CLASS_ALREADY_EXISTS, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM,
@@ -100,6 +102,8 @@ use super::keys::KeyWindow;
 use super::pointer::PointerWindow;
 use super::system_menu::{self, SystemMenuItem};
 use super::tsf;
+use super::window_menu::{self, MenuMessage};
+use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, SendMessageW, SC_CLOSE};
 
 /// A task window that is open, as tests and logs see it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -232,6 +236,8 @@ pub struct UiSetup {
     /// Dials the service's local API to watch a task's accessibility tree, while a UI
     /// Automation client reads its window. `None` answers clients with an empty tree.
     pub accessibility: Option<ApiConnect>,
+    /// The task each window shows, which a window's accessibility tree is watched for.
+    pub tasks: WindowTasks,
     /// What happens to files dropped on a task window. `None` takes no drops.
     pub drops: Option<DropHandler>,
     /// Asks whether an app drags out of a task window a press has left. `None` starts no
@@ -625,6 +631,22 @@ unsafe extern "system" fn task_window_proc(
         // fills its monitor has none.
         let presenter = data.presenter.borrow().clone();
         if data.shown_mode.get() != WindowMode::Fullscreen {
+            // The window menu: a click on the icon, a right click on the title bar, Alt+Space.
+            let hit = |x: i32, y: i32| {
+                let at = ((y as u16 as LPARAM) << 16) | (x as u16 as LPARAM);
+                SendMessageW(hwnd, WM_NCHITTEST, 0, at) as u32
+            };
+            if let Some(what) = window_menu::menu_message(message, wparam, lparam, &hit) {
+                match what {
+                    MenuMessage::Open(opening) => open_window_menu(hwnd, data, opening),
+                    // Posted, as Windows posts it for a double click on a window's icon.
+                    MenuMessage::Close => {
+                        PostMessageW(hwnd, WM_SYSCOMMAND, SC_CLOSE as WPARAM, 0);
+                    }
+                    MenuMessage::Swallow => {}
+                }
+                return 0;
+            }
             if let Some(result) =
                 data.caption
                     .handle(hwnd, message, wparam, lparam, presenter.as_deref())
@@ -756,11 +778,29 @@ unsafe extern "system" fn task_window_proc(
                     x: width.min(info.ptMaxTrackSize.x),
                     y: height.min(info.ptMaxTrackSize.y),
                 };
-                // A maximized window keeps a top border off the screen as well.
-                let (width, height) = outer_size(max, dpi, true);
+                // A maximized window keeps a top border off the screen as well. Windows
+                // proposes the maximised size of the primary monitor and adjusts it to this
+                // window's monitor only while it is at least that large, so the guest's
+                // smaller largest size is kept to this monitor's own work area here, or on a
+                // monitor smaller than the primary one the window would maximise past its
+                // screen's edge (maximized_outer).
+                let guest = outer_size(max, dpi, true);
+                let (width, height) = match window_work_area(hwnd) {
+                    Some(work) => {
+                        let (frame_width, frame_height) = outer_size((0, 0), dpi, true);
+                        maximized_outer(
+                            guest,
+                            (
+                                work.right - work.left + frame_width,
+                                work.bottom - work.top + frame_height,
+                            ),
+                        )
+                    }
+                    None => (guest.0.min(info.ptMaxSize.x), guest.1.min(info.ptMaxSize.y)),
+                };
                 info.ptMaxSize = POINT {
-                    x: width.min(info.ptMaxSize.x),
-                    y: height.min(info.ptMaxSize.y),
+                    x: width,
+                    y: height,
                 };
             }
             // Never smaller than Android gives this task, which its app may declare: the guest
@@ -793,7 +833,10 @@ unsafe extern "system" fn task_window_proc(
             }
             // A maximised window takes the most Android can draw (WM_GETMINMAXINFO above),
             // shown 1:1. On a monitor larger than that it is centred on the work area rather
-            // than left in its top left corner.
+            // than left in its top left corner. One that fills the work area has its client
+            // area at the work area's corner, whatever position was proposed: the window
+            // keeps its smaller frame's size, centred, until the guest draws the larger one,
+            // and the position it takes that frame at is that centred one.
             if IsZoomed(hwnd) != 0 && pos.flags & (SWP_NOMOVE | SWP_NOSIZE) == 0 {
                 let proposed = RECT {
                     left: pos.x,
@@ -802,8 +845,9 @@ unsafe extern "system" fn task_window_proc(
                     bottom: pos.y + pos.cy,
                 };
                 if let Some(work) = work_area(&proposed) {
-                    pos.x = maximized_position(pos.x, work.left, work.right - work.left, pos.cx);
-                    pos.y = maximized_position(pos.y, work.top, work.bottom - work.top, pos.cy);
+                    let (left, top) = maximized_border(hwnd);
+                    pos.x = maximized_position(work.left, work.right - work.left, pos.cx, left);
+                    pos.y = maximized_position(work.top, work.bottom - work.top, pos.cy, top);
                 }
             }
             result
@@ -918,6 +962,13 @@ unsafe extern "system" fn task_window_proc(
             DefWindowProcW(hwnd, message, wparam, lparam)
         }
         WM_ACTIVATE => {
+            // The window menu takes the foreground while it is open; the window stays the
+            // user's, and the app keeps its focus, as under Windows' own menu.
+            let menu_took_it = (wparam & 0xffff) as u32 == WA_INACTIVE
+                && window_data(hwnd).is_some_and(|data| data.caption.menu_open());
+            if menu_took_it {
+                return DefWindowProcW(hwnd, message, wparam, lparam);
+            }
             if let Some(data) = window_data(hwnd) {
                 if titled(data) {
                     data.caption.activated(
@@ -985,6 +1036,26 @@ unsafe extern "system" fn task_window_proc(
             DefWindowProcW(hwnd, message, wparam, lparam)
         }
         _ => DefWindowProcW(hwnd, message, wparam, lparam),
+    }
+}
+
+/// Shows `hwnd`'s window menu for `opening` ([`window_menu::show`]), under the icon's cell
+/// for a click on the icon or Alt+Space. Once it closes, the title bar and the app's focus
+/// follow whichever window has the foreground then.
+unsafe fn open_window_menu(hwnd: HWND, data: &WindowData, opening: window_menu::Opening) {
+    let layout = data.caption.layout(hwnd);
+    let cell = layout.icon_cell().unwrap_or((0, 0, 0, layout.height));
+    data.caption.set_menu_open(true);
+    window_menu::show(hwnd, opening, cell, data.resizable.get());
+    data.caption.set_menu_open(false);
+    let active = GetForegroundWindow() == hwnd;
+    let presenter = data.presenter.borrow().clone();
+    data.caption.activated(hwnd, active, presenter.as_deref());
+    if !active {
+        (data.report)(FromHost::Focus {
+            task_id: data.task_id,
+            focused: false,
+        });
     }
 }
 
@@ -1116,6 +1187,17 @@ unsafe fn take_kept_frame(hwnd: HWND, data: &WindowData) {
         if let Some(monitor) = monitor_rect(hwnd) {
             (x, y) = centred(&monitor, (width as u32, height as u32));
         }
+    } else if IsZoomed(hwnd) != 0 {
+        // A maximised window goes where a maximised window of the frame's size belongs on
+        // its own monitor, not where its last frame was: that one was smaller and centred,
+        // so a frame the size of the work area would start at its corner and run off the
+        // screen. WM_WINDOWPOSCHANGING places it the same way; this keeps the rectangle
+        // it measures on the window's own monitor.
+        if let Some(work) = window_work_area(hwnd) {
+            let (left, top) = maximized_border(hwnd);
+            x = maximized_position(work.left, work.right - work.left, width, left);
+            y = maximized_position(work.top, work.bottom - work.top, height, top);
+        }
     }
     data.following.set(true);
     SetWindowPos(
@@ -1155,19 +1237,20 @@ unsafe fn window_outer(hwnd: HWND, client: (u32, u32), dpi: u32) -> (i32, i32) {
 fn centred(monitor: &RECT, size: (u32, u32)) -> (i32, i32) {
     let (width, height) = (size.0 as i32, size.1 as i32);
     (
-        maximized_position(
-            monitor.left,
-            monitor.left,
-            monitor.right - monitor.left,
-            width,
-        ),
-        maximized_position(
-            monitor.top,
-            monitor.top,
-            monitor.bottom - monitor.top,
-            height,
-        ),
+        maximized_position(monitor.left, monitor.right - monitor.left, width, 0),
+        maximized_position(monitor.top, monitor.bottom - monitor.top, height, 0),
     )
+}
+
+/// The borders (left, top) a maximised `hwnd` hangs off its work area's edges: those of its
+/// frame at its scale, and none while it fills its monitor without a frame.
+unsafe fn maximized_border(hwnd: HWND) -> (i32, i32) {
+    if window_data(hwnd).is_some_and(|data| !titled(data)) {
+        return (0, 0);
+    }
+    let dpi = GetDpiForWindow(hwnd).max(96);
+    let (left, top, _, _) = task_frame(TASK_STYLE, TASK_EX_STYLE, dpi, true);
+    (left, top)
 }
 
 /// Whether the window has its title bar: not while it fills its monitor.
@@ -1480,8 +1563,13 @@ impl Ui {
                             self.open.get(&task_id).and_then(|hwnd| window_data(*hwnd))
                         {
                             data.pointer.task_resized((width, height));
+                            // A point in the window is a task pixel at the window's scale.
+                            data.pointer.set_scale(scale);
+                            // So is a node's place on the screen, and a screen point in a hit
+                            // test.
                             if let Ok(mut tree) = data.accessibility.try_borrow_mut() {
                                 tree.task_resized((width, height));
+                                tree.set_scale(scale);
                             }
                             data.max_client.set(max);
                             data.min_client.set(min);
@@ -1556,6 +1644,9 @@ impl Ui {
                             }
                         }
                     }
+                    // The window host's `WindowTasks` takes it, before it reaches this thread;
+                    // the window itself shows the same.
+                    ToHost::ShownTask { .. } => {}
                     ToHost::AppMenu { new_window } => {
                         // Every window of the app has the same menu, and the next ones too.
                         self.new_window = new_window;
@@ -1669,6 +1760,7 @@ impl Ui {
                 task_id,
                 size,
                 self.setup.input.clone(),
+                self.setup.tasks.clone(),
                 self.setup.accessibility.clone(),
                 self.setup.logger.clone(),
             )),

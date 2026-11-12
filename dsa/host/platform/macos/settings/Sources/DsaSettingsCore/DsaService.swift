@@ -98,7 +98,16 @@ public final class DsaService {
         s.adbAutoConnectState = AdbAutoConnectState.read(json.optionalString("adb_auto_connect_state"))
         s.rootElevation = json.bool("root_elevation")
         s.imageAutoRestart = json.bool("image_auto_restart", missing: true)
+        s.hostCertificates = json.bool("host_certificates", missing: true)
+        s.importedCertificates = json["imported_certificates"].items.filter(\.isObject).map(readImportedCertificate)
         return s
+    }
+
+    /// One root certificate as the settings list the ones the service found.
+    static func readImportedCertificate(_ json: Json) -> ImportedCertificate {
+        ImportedCertificate(
+            subject: json.string("subject"), issuer: json.string("issuer"), source: json.string("source"),
+            location: json.string("location"), sha256: json.string("sha256"), notAfter: json.int64("not_after"))
     }
 
     /// The network as `dsa network --json` and the settings print it.
@@ -111,9 +120,15 @@ public final class DsaService {
         default: mode = .unknown
         }
         let problem = json.string("problem")
+        let dnsResolver: DnsResolver
+        switch json.optionalString("dns_resolver") {
+        case "host": dnsResolver = .host
+        case "network": dnsResolver = .network
+        default: dnsResolver = .unknown
+        }
         return NetworkInfo(
             mode: mode, addresses: json.strings("addresses"), dnsServers: json.strings("dns_servers"),
-            gateway: json.string("gateway"), problem: problem.isEmpty ? nil : problem)
+            gateway: json.string("gateway"), problem: problem.isEmpty ? nil : problem, dnsResolver: dnsResolver)
     }
 
     public func settings() async throws -> SettingsInfo { DsaService.readSettings(try await runJson(["settings"])) }
@@ -126,6 +141,9 @@ public final class DsaService {
 
     public func network() async throws -> NetworkInfo { DsaService.readNetwork(try await runJson(["network"])) }
     public func setAdvancedNetworking(_ on: Bool) async throws -> SettingsInfo { try await set("advanced-networking", onOff(on)) }
+    /// Whether Android trusts the root certificates a user or an administrator added to this
+    /// Mac. It applies at once, without restarting Android.
+    public func setHostCertificates(_ on: Bool) async throws -> SettingsInfo { try await set("host-certificates", onOff(on)) }
     public func setRenderGpu(_ value: String) async throws -> SettingsInfo { try await set("render-gpu", value) }
     public func setFreeze(_ on: Bool) async throws -> SettingsInfo { try await set("freeze", onOff(on)) }
     public func setLinksInAndroid(_ on: Bool) async throws -> SettingsInfo { try await set("links-in-android", onOff(on)) }

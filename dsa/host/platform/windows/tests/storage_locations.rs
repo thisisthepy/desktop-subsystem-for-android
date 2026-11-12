@@ -27,6 +27,14 @@ const FORBIDDEN: &[&str] = &[
 ];
 
 /// The files allowed to name those folders: the paths modules themselves.
+/// The host API conformance kit lives in the core's `src` so every platform's tests can run
+/// it, but only tests call it, and its scratch folders are a test's own.
+fn is_test_kit(path: &Path) -> bool {
+    path.to_string_lossy()
+        .replace('\\', "/")
+        .ends_with("core/src/host_api_conformance.rs")
+}
+
 fn is_paths_module(path: &Path) -> bool {
     let text = path.to_string_lossy().replace('\\', "/");
     text.ends_with("platform/windows/src/paths.rs")
@@ -83,7 +91,10 @@ fn fr19_production_code_builds_runtime_paths_only_in_the_paths_module() {
         host.display()
     );
     let mut found = Vec::new();
-    for file in files.iter().filter(|f| !is_paths_module(f)) {
+    for file in files
+        .iter()
+        .filter(|f| !is_paths_module(f) && !is_test_kit(f))
+    {
         let Ok(text) = std::fs::read_to_string(file) else {
             continue;
         };

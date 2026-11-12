@@ -11,7 +11,9 @@
 //! reading the task ([`ClientPresence`]).
 //!
 //! Each node gets the control type of its role, its name, its bounds on the screen (the
-//! window's client area, where the task is shown 1:1, plus the node's place in the task),
+//! window's client area plus where the window shows the node: its place in the task at the
+//! scale the window shows the task at, 1:1 unless the task keeps its density on a monitor of
+//! another scale),
 //! and the patterns it supports: Invoke, Value, Toggle,
 //! SelectionItem and Scroll ([`crate::ui_automation`]). A pattern call becomes the node's
 //! accessibility action in Android, so Invoke presses a list row without moving the cursor.
@@ -43,8 +45,9 @@ use dsa_host_core::accessibility::{
     from_screen, to_screen, ActionRequest, Changes, ClientPresence, GuestAccessibility, Node,
     NodeAction, PresenceChange, Tree, TreeError,
 };
+use dsa_host_core::compositor::window_tasks::WindowTasks;
 use dsa_host_core::host_api::HostApiClient;
-use dsa_host_core::input::InputEvent;
+use dsa_host_core::input::{InputEvent, WindowGeometry};
 use dsa_transport::Connector;
 use windows::core::{
     implement, Error, IUnknown, IUnknownImpl, Interface, BOOL, BSTR, HRESULT, PCWSTR,
@@ -160,11 +163,24 @@ const MAX_PROPERTY_EVENTS: usize = 64;
 /// The window message that tells a task window to raise the events of the changes that came.
 pub const WM_APP_ACCESSIBILITY: u32 = windows_sys::Win32::UI::WindowsAndMessaging::WM_APP + 3;
 
+impl State {
+    /// What node bounds and points are converted with, for a client area of `client`.
+    fn geometry(&self, client: (u32, u32)) -> WindowGeometry {
+        WindowGeometry {
+            client,
+            task: self.task_size,
+            scale: self.scale,
+        }
+    }
+}
+
 /// What the window's providers share with its watch thread.
 struct State {
     tree: Tree,
     /// The task's size in Android, which node bounds are measured in.
     task_size: (u32, u32),
+    /// How large the window shows each task pixel (window pixels per task pixels).
+    scale: (u32, u32),
     /// Where actions go while the watch runs.
     actions: Option<Sender<ActionRequest>>,
     next_request: u32,
@@ -509,7 +525,7 @@ impl IRawElementProviderFragmentRoot_Impl for RootProvider_Impl {
         let Some(epoch) = state.tree.epoch() else {
             return none();
         };
-        let (tx, ty) = from_screen((x, y), state.task_size, client, origin);
+        let (tx, ty) = from_screen((x, y), state.geometry(client), origin);
         match state.tree.hit(tx, ty) {
             Some(id) => Ok(node_of(&self.shared, epoch, id)),
             None => none(),
@@ -649,9 +665,9 @@ impl IRawElementProviderFragment_Impl for NodeProvider_Impl {
 
     fn BoundingRectangle(&self) -> windows::core::Result<UiaRect> {
         let (origin, client) = self.shared.client();
-        let task_size = self.shared.lock().task_size;
+        let geometry = self.shared.lock().geometry(client);
         let bounds = self.with_node(|_, node| node.bounds)?;
-        let rect = to_screen(bounds, task_size, client, origin);
+        let rect = to_screen(bounds, geometry, origin);
         Ok(UiaRect {
             left: rect.left,
             top: rect.top,
@@ -923,23 +939,31 @@ pub struct AccessibilityWindow {
     connect: Option<ApiConnect>,
     logger: Option<Arc<CompositorLogger>>,
     task_size: (u32, u32),
+    /// How large the window shows each task pixel (window pixels per task pixels).
+    scale: (u32, u32),
     /// The icon's cell while the title bar shows the back arrow in it.
     back: Option<ClientRect>,
     /// Where the back button's Back goes.
     input: Sender<InputEvent>,
+    /// The task the window shows, whose tree is watched: another than `task_id` once a task
+    /// took the window over after a GPU reset.
+    tasks: WindowTasks,
 }
 
 impl AccessibilityWindow {
     /// A window's tree, which watches nothing until a client asks for it. Without `connect`
     /// the window answers clients with an empty tree. The back button's Back goes to `input`.
+    /// The tree watched is that of the task `tasks` says the window shows.
     pub fn new(
         task_id: i32,
         task_size: (u32, u32),
         input: Sender<InputEvent>,
+        tasks: WindowTasks,
         connect: Option<ApiConnect>,
         logger: Option<Arc<CompositorLogger>>,
     ) -> AccessibilityWindow {
         AccessibilityWindow {
+            tasks,
             task_id,
             shared: None,
             root: None,
@@ -948,6 +972,7 @@ impl AccessibilityWindow {
             connect,
             logger,
             task_size,
+            scale: (1, 1),
             back: None,
             input,
         }
@@ -981,6 +1006,15 @@ impl AccessibilityWindow {
         }
     }
 
+    /// The window shows the task's frames at `scale` (window pixels per task pixels) from now
+    /// on, so a node's bounds on the screen are its bounds in the task at that scale.
+    pub fn set_scale(&mut self, scale: (u32, u32)) {
+        self.scale = scale;
+        if let Some(shared) = &self.shared {
+            shared.lock().scale = scale;
+        }
+    }
+
     fn shared(&mut self, hwnd: isize) -> Arc<Shared> {
         if let Some(shared) = &self.shared {
             return Arc::clone(shared);
@@ -992,6 +1026,7 @@ impl AccessibilityWindow {
             state: Mutex::new(State {
                 tree: Tree::new(),
                 task_size,
+                scale: self.scale,
                 actions: None,
                 next_request: 0,
                 pending: Vec::new(),
@@ -1052,7 +1087,9 @@ impl AccessibilityWindow {
         let (tx, actions) = mpsc::channel();
         shared.lock().actions = Some(tx);
         let stop = Arc::new(AtomicBool::new(false));
-        let task_id = self.task_id;
+        let window = self.task_id;
+        let task_id = self.tasks.task_of(window);
+        let tasks = self.tasks.clone();
         let thread_shared = Arc::clone(shared);
         let thread_stop = Arc::clone(&stop);
         let logger = self.logger.clone();
@@ -1064,7 +1101,8 @@ impl AccessibilityWindow {
             .name("dsa-app-window-accessibility".into())
             .spawn(move || {
                 watch(
-                    task_id,
+                    window,
+                    tasks,
                     connect,
                     thread_shared,
                     actions,
@@ -1406,10 +1444,13 @@ fn free_variant(mut variant: VARIANT) {
     }
 }
 
-/// The watch thread: watches the task's tree through the service until told to stop, and
-/// starts over when the connection ends or a tree cannot be taken.
+/// The watch thread: watches the tree of the task window `window` shows (as `tasks` says)
+/// through the service until told to stop, and starts over when the connection ends, a tree
+/// cannot be taken, or another task takes the window over after a GPU reset, whose tree is
+/// then the one watched and acted on.
 fn watch(
-    task_id: i32,
+    window: i32,
+    tasks: WindowTasks,
     connect: ApiConnect,
     shared: Arc<Shared>,
     actions: Receiver<ActionRequest>,
@@ -1438,6 +1479,7 @@ fn watch(
     };
     let mut failures = 0u32;
     while !stop.load(Ordering::Relaxed) {
+        let task_id = tasks.task_of(window);
         let mut connector = connect();
         let stream = HostApiClient::connect(&mut *connector, BUILD, CONNECT)
             .and_then(|client| client.watch_accessibility(task_id));
@@ -1459,6 +1501,21 @@ fn watch(
         loop {
             if stop.load(Ordering::Relaxed) {
                 return;
+            }
+            let shown = tasks.task_of(window);
+            if shown != task_id {
+                // The task that ended has no tree; the one that took the window over has.
+                // Actions asked on the old tree are for nodes the new one does not have.
+                note(
+                    logger.as_deref(),
+                    &format!(
+                        "task {shown} took the window of task {task_id} over; watching its \
+                         accessibility tree"
+                    ),
+                );
+                while actions.try_recv().is_ok() {}
+                reset(&shared);
+                break;
             }
             loop {
                 match actions.try_recv() {
@@ -1553,6 +1610,46 @@ mod tests {
         assert_eq!(ScrollAmount_SmallDecrement.0, 1);
     }
 
+    /// A task kept at the density of a main monitor at 100% (130 dpi), on a monitor at 125%
+    /// (164 dpi) left of and above the main one.
+    #[test]
+    fn fr18_on_a_monitor_of_another_scale_ui_automation_sees_a_node_where_the_window_shows_it() {
+        use dsa_host_core::compositor::window_sizing::{
+            density_for_dpi, scale_between, to_window_size,
+        };
+        let (input, _) = mpsc::channel();
+        let mut window =
+            AccessibilityWindow::new(6, (810, 1661), input, WindowTasks::new(), None, None);
+        let scale = scale_between(density_for_dpi(120), density_for_dpi(96));
+        // The scale the window manager says reaches a tree made before and after it.
+        let before = window.shared(0);
+        window.set_scale(scale);
+        let after = {
+            window.shared = None;
+            window.shared(0)
+        };
+        let client = to_window_size((810, 1661), scale);
+        let origin = (-2900, -880);
+        for shared in [before, after] {
+            let geometry = shared.lock().geometry(client);
+            assert_eq!(geometry.scale, (82, 65));
+            let button = dsa_host_core::tasks::Bounds {
+                left: 650,
+                top: 1300,
+                right: 780,
+                bottom: 1365,
+            };
+            let rect = to_screen(button, geometry, origin);
+            assert_eq!(
+                (rect.left, rect.top, rect.width, rect.height),
+                (-2900.0 + 820.0, -880.0 + 1640.0, 164.0, 82.0)
+            );
+            // Voice Access clicks the middle of what it highlights: the button's middle.
+            let middle = (rect.left + rect.width / 2.0, rect.top + rect.height / 2.0);
+            assert_eq!(from_screen(middle, geometry, origin), (715, 1332));
+        }
+    }
+
     #[test]
     fn fr22_the_back_arrow_is_a_button_named_back_for_ui_automation() {
         assert_eq!(back_name(true), "뒤로");
@@ -1625,5 +1722,98 @@ mod tests {
     #[test]
     fn fr22_the_back_buttons_runtime_id_cannot_equal_a_nodes() {
         assert_ne!(BACK_RUNTIME_ID.len(), runtime_id(0, 0).len());
+    }
+
+    /// Connects to the in-memory local API as one user.
+    struct AsUser(dsa_transport::local::MemoryLocalConnector);
+
+    impl Connector for AsUser {
+        fn connect(
+            &mut self,
+            _: Duration,
+        ) -> Result<Box<dyn dsa_transport::Connection>, dsa_transport::TransportError> {
+            self.0.connect_as(dsa_transport::local::Peer {
+                user: "test-user".into(),
+                administrator: false,
+            })
+        }
+    }
+
+    fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !done() {
+            assert!(Instant::now() < deadline, "timed out waiting for {what}");
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn nfr5_a_window_taken_over_after_a_gpu_reset_watches_and_acts_on_the_new_tasks_tree() {
+        use dsa_host_core::compositor::window_hosts::ToHost;
+        use dsa_host_core::host_api::{UserAndroid, UserAndroids};
+        use dsa_host_core::host_api_conformance::{FakeAndroids, RunningService};
+        let (listener, connector) = dsa_transport::local::pair();
+        let androids = Arc::new(FakeAndroids::default());
+        let android = {
+            let _ = androids.android("test-user");
+            androids.of("test-user").expect("the user's Android")
+        };
+        android.start();
+        let _service = RunningService::start(Box::new(listener), androids.clone());
+        let connect: ApiConnect =
+            Arc::new(move || Box::new(AsUser(connector.clone())) as Box<dyn Connector>);
+
+        // Window 9 opened for task 9; a client reads it.
+        let tasks = WindowTasks::new();
+        let (input, _) = mpsc::channel();
+        let mut window = AccessibilityWindow::new(9, (400, 300), input, tasks.clone(), None, None);
+        let shared = window.shared(0);
+        let (actions_tx, actions) = mpsc::channel();
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread = {
+            let (tasks, shared, stop) = (tasks.clone(), Arc::clone(&shared), Arc::clone(&stop));
+            thread::spawn(move || watch(9, tasks, connect, shared, actions, stop, None))
+        };
+        let watches = Arc::clone(&android.accessibility_watches);
+        wait_until("task 9's tree to be watched", || {
+            watches.lock().unwrap().contains(&(9, true))
+        });
+
+        // After a GPU reset task 9 ended, and the app's new task 14 took the window over.
+        tasks.follow(&ToHost::ShownTask {
+            task_id: 9,
+            shown_task_id: 14,
+        });
+        wait_until("task 14's tree to be watched", || {
+            watches.lock().unwrap().contains(&(14, true))
+        });
+        wait_until("the watch of task 9 to end", || {
+            watches.lock().unwrap().contains(&(9, false))
+        });
+
+        // An action on the window's tree reaches task 14, not the task that ended.
+        actions_tx
+            .send(ActionRequest {
+                epoch: 1,
+                node_id: 3,
+                action: NodeAction::Click,
+                text: String::new(),
+                request_id: 77,
+            })
+            .unwrap();
+        wait_until("the action to reach Android", || {
+            !android.accessibility_actions.lock().unwrap().is_empty()
+        });
+        let done: Vec<(i32, u32)> = android
+            .accessibility_actions
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(task_id, action)| (*task_id, action.request_id))
+            .collect();
+        assert_eq!(done, vec![(14, 77)]);
+
+        stop.store(true, Ordering::Relaxed);
+        thread.join().unwrap();
     }
 }

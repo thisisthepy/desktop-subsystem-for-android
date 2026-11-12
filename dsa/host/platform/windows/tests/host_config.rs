@@ -26,9 +26,9 @@ fn fr2_a_minimal_configuration_gets_working_defaults() {
     assert_eq!(session.stop_timeout, Duration::from_secs(30));
     let vm = config.vm_config(Some("S-1-5-21-1-2-3-1001")).unwrap();
     assert_eq!(vm.kernel, PathBuf::from(r"C:\Program Files\DSA\vm\bzImage"));
-    // Without memory_mb and without a user limit, the VM keeps its 3 GiB default.
+    // Without memory_mb and without a user limit, the VM starts at its 2 GiB default.
     assert_eq!(vm.memory_mb, host_sized_memory_mb(0));
-    assert_eq!(vm.memory_mb, 3072);
+    assert_eq!(vm.memory_mb, 2048);
     assert!([0, 9].contains(&vm.page_reporting_order));
     assert_eq!(vm.socket_sids, ["S-1-5-21-1-2-3-1001"]);
     vm.to_hcs_document_for(GuestArch::X86_64)
@@ -358,12 +358,14 @@ fn fr14_an_image_made_from_aosp_boots_from_one_disk_made_from_its_template() {
     vm.kernel_cmdline = files.kernel_cmdline;
     let document = vm.to_hcs_document_for(GuestArch::X86_64).unwrap();
     let attachments = &document["VirtualMachine"]["Devices"]["Scsi"]["0"]["Attachments"];
-    // The user's disk, then the pstore disk every user VM keeps beside it.
+    // The user's disk, then the pstore disk and the read-only add-on disk every user VM
+    // keeps beside it.
     assert_eq!(
         attachments.as_object().unwrap().len(),
-        2,
-        "only the user's disk and its pstore disk"
+        3,
+        "only the user's disk, its pstore disk and its add-on disk"
     );
+    assert_eq!(attachments["2"]["ReadOnly"], true);
     assert_eq!(attachments["0"]["ReadOnly"], false);
     assert_eq!(
         attachments["1"]["Path"].as_str().map(PathBuf::from),
@@ -576,12 +578,14 @@ fn fr14_an_image_with_two_disks_attaches_system_image_and_data_disk() {
     vm.kernel_cmdline = files.kernel_cmdline;
     let document = vm.to_hcs_document_for(GuestArch::X86_64).unwrap();
     let attachments = &document["VirtualMachine"]["Devices"]["Scsi"]["0"]["Attachments"];
-    // The system and data disks, then the pstore disk every user VM keeps.
+    // The system and data disks, then the pstore disk and the read-only add-on disk every
+    // user VM keeps.
     assert_eq!(
         attachments.as_object().unwrap().len(),
-        3,
-        "both system and data disks, and the pstore disk"
+        4,
+        "both system and data disks, the pstore disk and the add-on disk"
     );
+    assert_eq!(attachments["3"]["ReadOnly"], true);
     assert_eq!(attachments["0"]["ReadOnly"], true);
     assert_eq!(attachments["1"]["ReadOnly"], false);
     assert_eq!(

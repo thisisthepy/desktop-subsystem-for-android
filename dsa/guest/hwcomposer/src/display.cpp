@@ -295,7 +295,7 @@ Frame Display::takeFrame() {
         out.transform = layer.transform;
         frame.layers.push_back(std::move(out));
     }
-    mClientSlots.collect(&frame.liveBuffers);
+    mClientSlots.collect(&frame.clientBuffers);
     frame.clientTarget = mClientTarget;
     frame.clientTargetFence = std::move(mClientTargetFence);
     return frame;

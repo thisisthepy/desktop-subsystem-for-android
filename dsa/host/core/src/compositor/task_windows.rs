@@ -65,7 +65,8 @@ pub enum WindowChange {
         scale: Scale,
     },
     /// The cursor of the editor focused in the task is here, in the window's client pixels:
-    /// the window puts its input method's windows beside it.
+    /// the window puts its input method's windows beside it. Comes again when the window
+    /// shows its task at a new scale.
     ImeCursor {
         task_id: i32,
         cursor: crate::ime::ImeCursor,
@@ -89,8 +90,8 @@ pub enum WindowChange {
         resizable: bool,
     },
     /// Whether the app draws its own title bar, and where its controls are in the band, in
-    /// the window's client pixels (which are the task's). Comes with a window that opens for
-    /// an app that draws its own, and with every change.
+    /// the window's client pixels (the task's at the window's scale). Comes with a window that
+    /// opens for an app that draws its own, with every change, and with a new scale.
     CaptionMode {
         task_id: i32,
         app_drawn: bool,
@@ -100,6 +101,11 @@ pub enum WindowChange {
     /// the place of the app's icon. Comes with a window that opens past its first screen, and
     /// with every change.
     CaptionBack { task_id: i32, back: bool },
+    /// The window opened for task `task_id` shows task `shown_task_id` from now on: a task
+    /// that took the window over after a GPU reset (see [`super::gpu_reset`]). The window keeps
+    /// its ID; what it sends Android itself goes to the task it shows. The task rules never make
+    /// it; it comes from [`super::gpu_reset::GpuResetWindows`], by window ID.
+    ShownTask { task_id: i32, shown_task_id: i32 },
 }
 
 /// The title of a task's window: its label, else its package, else its ID.
@@ -268,6 +274,53 @@ pub struct TaskWindows {
     pending: BTreeMap<i32, PendingOpen>,
     /// The mode and resizability each window was last told.
     told_modes: BTreeMap<i32, (WindowMode, bool)>,
+    /// Where the guest last said the cursor of each task's focused editor is, in the task's
+    /// pixels: shown again at a window's new scale, since the window has it in its own.
+    cursors: BTreeMap<i32, crate::ime::ImeCursor>,
+    /// The title bar band each window last reported, in its pixels, with the scale its
+    /// caption inset was given to the task at: given again at a window's new scale, since the
+    /// task has it in its own pixels.
+    bands: BTreeMap<i32, (CaptionBand, Scale)>,
+    /// What the window manager logs, until it takes it ([`TaskWindows::take_notes`]).
+    notes: Vec<String>,
+}
+
+/// `size` as `WxH`, or "none" when there is no limit.
+fn describe_size(size: Option<(u32, u32)>) -> String {
+    size.map_or_else(
+        || "none".to_string(),
+        |(width, height)| format!("{width}x{height}"),
+    )
+}
+
+/// `cursor`, in a task's pixels, where its window shows it at `scale`.
+fn shown_cursor(cursor: crate::ime::ImeCursor, scale: Scale) -> crate::ime::ImeCursor {
+    let shown = to_window_rect(
+        Bounds {
+            left: cursor.left,
+            top: cursor.top,
+            right: cursor.right,
+            bottom: cursor.bottom,
+        },
+        scale,
+    );
+    crate::ime::ImeCursor {
+        left: shown.left,
+        top: shown.top,
+        right: shown.right,
+        bottom: shown.bottom,
+    }
+}
+
+/// The caption inset of a task whose window draws `band` (window pixels) and shows the task
+/// at `scale`: the same band in the task's pixels.
+fn caption_request(task_id: i32, band: CaptionBand, scale: Scale) -> TaskRequest {
+    TaskRequest::SetCaption {
+        task_id,
+        height: to_task_length(band.height, scale),
+        start_width: to_task_length(band.start_width, scale),
+        end_width: to_task_length(band.end_width, scale),
+    }
 }
 
 impl TaskWindows {
@@ -275,11 +328,38 @@ impl TaskWindows {
         TaskWindows::default()
     }
 
+    /// The lines the window manager logs about what the tasks did, once each: a size the
+    /// guest gave a task in place of the one its window asked for.
+    pub fn take_notes(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.notes)
+    }
+
     /// Whether the task has a window now.
     pub fn has_window(&self, task_id: i32) -> bool {
         self.tasks.contains_key(&task_id)
             && !self.closing.contains(&task_id)
             && !self.pending.contains_key(&task_id)
+    }
+
+    /// The package of the task's root activity, while the task is known.
+    pub fn package_of(&self, task_id: i32) -> Option<&str> {
+        self.tasks
+            .get(&task_id)
+            .map(|task| task.package_name.as_str())
+    }
+
+    /// The packages of the tasks that have a window, each once, in task ID order of their
+    /// first window: the apps to open again once Android has started again.
+    pub fn window_packages(&self) -> Vec<String> {
+        let mut packages: Vec<String> = Vec::new();
+        for task_id in self.windows() {
+            if let Some(package) = self.package_of(task_id) {
+                if !packages.iter().any(|known| known == package) {
+                    packages.push(package.to_string());
+                }
+            }
+        }
+        packages
     }
 
     /// The tasks that have a window, in task ID order.
@@ -430,7 +510,22 @@ impl TaskWindows {
                     Some(sizing) if previous.is_some() => {
                         // Another activity on top may say otherwise about a change of density.
                         sizing.set_mode(scaling);
-                        sizing.guest_updated(task)
+                        let follow = sizing.guest_updated(task);
+                        if let Some((asked, given)) = sizing.take_clamped() {
+                            self.notes.push(format!(
+                                "task {} took {}x{}, not the {}x{} its window asked for: \
+                                 Android keeps it within its smallest size ({}) and its largest \
+                                 ({}); the window takes the task's size",
+                                task.task_id,
+                                given.0,
+                                given.1,
+                                asked.0,
+                                asked.1,
+                                describe_size(task.min_size()),
+                                describe_size(task.max_size()),
+                            ));
+                        }
+                        follow
                     }
                     _ => {
                         let sizing = self.sizing_for(task);
@@ -490,6 +585,8 @@ impl TaskWindows {
                 self.sizes.remove(task_id);
                 self.told_sizes.remove(task_id);
                 self.told_modes.remove(task_id);
+                self.cursors.remove(task_id);
+                self.bands.remove(task_id);
                 if self.pending.remove(task_id).is_some() {
                     self.closing.remove(task_id);
                     self.tasks.remove(task_id);
@@ -523,21 +620,10 @@ impl TaskWindows {
                 if !self.has_window(*task_id) {
                     return Vec::new();
                 }
-                let rect = Bounds {
-                    left: cursor.left,
-                    top: cursor.top,
-                    right: cursor.right,
-                    bottom: cursor.bottom,
-                };
-                let shown = to_window_rect(rect, self.scale_of(*task_id));
+                self.cursors.insert(*task_id, *cursor);
                 vec![WindowChange::ImeCursor {
                     task_id: *task_id,
-                    cursor: crate::ime::ImeCursor {
-                        left: shown.left,
-                        top: shown.top,
-                        right: shown.right,
-                        bottom: shown.bottom,
-                    },
+                    cursor: shown_cursor(*cursor, self.scale_of(*task_id)),
                 }]
             }
             TaskEvent::ImeEditor { task_id, editor } => {
@@ -593,6 +679,16 @@ impl TaskWindows {
         Some(TaskRequest::Close { task_id })
     }
 
+    /// The task's window went away without the user closing it (its window program crashed),
+    /// and the task goes on: its window opens again, as it first opened, with everything the
+    /// new window has to be told. Nothing for a task that has no window.
+    pub fn reopen(&mut self, task_id: i32) -> Vec<WindowChange> {
+        if !self.has_window(task_id) {
+            return Vec::new();
+        }
+        self.open_window(task_id)
+    }
+
     /// The request to end a task the user closed did not reach the guest, so the task is
     /// still there: its window opens again.
     pub fn close_failed(&mut self, task_id: i32) -> Vec<WindowChange> {
@@ -644,6 +740,14 @@ impl TaskWindows {
             if let Some(task) = self.tasks.get(&task_id).filter(|t| t.transparent_caption) {
                 changes.push(caption_mode_change(task, scale));
             }
+            // The editor's cursor is where the window now shows it, so the input method's
+            // windows stay beside it.
+            if let Some(cursor) = self.cursors.get(&task_id) {
+                changes.push(WindowChange::ImeCursor {
+                    task_id,
+                    cursor: shown_cursor(*cursor, scale),
+                });
+            }
         }
         changes
     }
@@ -687,25 +791,24 @@ impl TaskWindows {
             self.retell_size(task_id);
         }
         changes.extend(self.task_size_change(task_id));
-        (changes, request.into_iter().collect())
+        let mut requests: Vec<TaskRequest> = request.into_iter().collect();
+        requests.extend(self.recaption(task_id));
+        (changes, requests)
     }
 
     /// The task's window draws its title bar over its top `band.height` pixels, with its icon
     /// and its caption buttons reaching `band.start_width` and `band.end_width` in from the
     /// ends. Returns the request that gives the task a top inset of that height, and tells an
-    /// app that draws its own title bar where to keep clear.
+    /// app that draws its own title bar where to keep clear. The band is in the window's
+    /// pixels and the inset in the task's, so a window that shows its task at another scale
+    /// later gives it the inset again ([`Self::reconfigures`]).
     pub fn window_caption(&mut self, task_id: i32, band: CaptionBand) -> Vec<TaskRequest> {
         if !self.has_window(task_id) {
             return Vec::new();
         }
-        // The band is in the window's pixels, the inset in the task's.
         let scale = self.scale_of(task_id);
-        vec![TaskRequest::SetCaption {
-            task_id,
-            height: to_task_length(band.height, scale),
-            start_width: to_task_length(band.start_width, scale),
-            end_width: to_task_length(band.end_width, scale),
-        }]
+        self.bands.insert(task_id, (band, scale));
+        vec![caption_request(task_id, band, scale)]
     }
 
     /// The task's window opened on a monitor of `dpi`. Returns the client size it takes, the
@@ -720,7 +823,9 @@ impl TaskWindows {
         // The window takes the size as it would a Resize.
         self.retell_size(task_id);
         let changes = self.task_size_change(task_id);
-        Some((size, request.into_iter().collect(), changes))
+        let mut requests: Vec<TaskRequest> = request.into_iter().collect();
+        requests.extend(self.recaption(task_id));
+        Some((size, requests, changes))
     }
 
     /// The task's window has a client area of `view` pixels now. Returns the request that
@@ -752,13 +857,15 @@ impl TaskWindows {
         if !self.has_window(task_id) {
             return (Vec::new(), Vec::new());
         }
-        let requests = self
+        let mut requests: Vec<TaskRequest> = self
             .sizes
             .get_mut(&task_id)
             .and_then(|sizing| sizing.dpi_changed(dpi))
             .into_iter()
             .collect();
-        (self.task_size_change(task_id), requests)
+        let changes = self.task_size_change(task_id);
+        requests.extend(self.recaption(task_id));
+        (changes, requests)
     }
 
     /// The user started or finished dragging the task's window. The sizes the window asks
@@ -836,9 +943,36 @@ impl TaskWindows {
     }
 
     /// The requests that reconfigure each task for a size its window gave it live outside a
-    /// drag (a maximise, a snap), now that the task has taken it. Asked after every change
-    /// to the tasks and at every tick.
+    /// drag (a maximise, a snap), now that the task has taken it, and that give the caption
+    /// inset again, in the task's pixels, to a task whose window shows it at another scale
+    /// than when its band was last given. Asked after every change to the tasks and at every
+    /// tick.
     pub fn reconfigures(&mut self, now: Instant) -> Vec<TaskRequest> {
+        let banded: Vec<i32> = self.bands.keys().copied().collect();
+        let mut requests: Vec<TaskRequest> = banded
+            .into_iter()
+            .filter_map(|task_id| self.recaption(task_id))
+            .collect();
+        requests.extend(self.size_reconfigures(now));
+        requests
+    }
+
+    /// The caption inset again, when `task_id`'s window shows its task at another scale than
+    /// the one its band was last given at.
+    fn recaption(&mut self, task_id: i32) -> Option<TaskRequest> {
+        if !self.has_window(task_id) {
+            return None;
+        }
+        let scale = self.scale_of(task_id);
+        let (band, given) = self.bands.get_mut(&task_id)?;
+        if *given == scale {
+            return None;
+        }
+        *given = scale;
+        Some(caption_request(task_id, *band, scale))
+    }
+
+    fn size_reconfigures(&mut self, now: Instant) -> Vec<TaskRequest> {
         let mut requests = Vec::new();
         for (task_id, pending) in &mut self.pending {
             if pending.asked.is_none() && !self.closing.contains(task_id) {
@@ -874,6 +1008,8 @@ impl TaskWindows {
         self.told_sizes.clear();
         self.pending.clear();
         self.told_modes.clear();
+        self.cursors.clear();
+        self.bands.clear();
         changes
     }
 
@@ -902,6 +1038,8 @@ impl TaskWindows {
         self.pending.retain(|task_id, _| present.contains(task_id));
         self.told_modes
             .retain(|task_id, _| present.contains(task_id));
+        self.cursors.retain(|task_id, _| present.contains(task_id));
+        self.bands.retain(|task_id, _| present.contains(task_id));
         self.displays.clear();
         for event in current {
             changes.extend(self.apply(event));
@@ -1103,6 +1241,41 @@ mod tests {
     }
 
     #[test]
+    fn fr22_the_status_bar_inset_is_the_title_bar_in_the_tasks_own_pixels() {
+        // The title bar is Android's status bar: the task's status bar inset is the title
+        // bar's height in the task's pixels. A 200% monitor's title bar is 58 pixels.
+        let band = CaptionBand {
+            height: 58,
+            start_width: 0,
+            end_width: 0,
+        };
+        let inset = |task_id, height| {
+            vec![TaskRequest::SetCaption {
+                task_id,
+                height,
+                start_width: 0,
+                end_width: 0,
+            }]
+        };
+        // An app that takes the monitor's density (262 dpi) draws one pixel per window pixel:
+        // 58 pixels, 35.4 dp.
+        let mut windows = TaskWindows::new();
+        let mut clock = task(1, "Clock", 400, 300);
+        clock.density_dpi = 262;
+        clock.handles_density_change = true;
+        windows.apply(&TaskEvent::Updated(clock));
+        windows.window_dpi(1, 192);
+        assert_eq!(windows.scale(1), (1, 1));
+        assert_eq!(windows.window_caption(1, band), inset(1, 58));
+        // An app that keeps its density (130 dpi) is scaled by 262/130: the same band is 29 of
+        // its pixels, 35.7 dp, within one of its pixels of the title bar.
+        let (mut windows, _) = notes_at_100(false);
+        windows.window_dpi(1, 192);
+        assert_eq!(windows.scale(1), (131, 65));
+        assert_eq!(windows.window_caption(1, band), inset(1, 29));
+    }
+
+    #[test]
     fn fr6_the_cursor_of_a_tasks_editor_goes_to_its_window_unchanged() {
         let mut windows = TaskWindows::new();
         let cursor = crate::ime::ImeCursor {
@@ -1241,6 +1414,22 @@ mod tests {
         );
         assert!(windows.has_window(1));
         assert!(windows.close_failed(1).is_empty());
+    }
+
+    #[test]
+    fn nfr5_a_window_whose_program_crashed_opens_again_for_the_same_task() {
+        let mut windows = TaskWindows::new();
+        windows.apply(&updated(1, "Clock"));
+        windows.apply(&frames(1, 3));
+        // The new window program is told everything the first one was, and the task, its
+        // display and its frames stay.
+        assert_eq!(windows.reopen(1), vec![opened(1, "Clock"), dark_glyphs(1)]);
+        assert!(windows.has_window(1));
+        assert_eq!(windows.task_for_display(3), Some(1));
+        // A task without a window, or one the user is closing, opens nothing.
+        assert!(windows.reopen(2).is_empty());
+        windows.user_closed(1);
+        assert!(windows.reopen(1).is_empty());
     }
 
     #[test]
@@ -1442,6 +1631,43 @@ mod tests {
     }
 
     #[test]
+    fn fr4_a_size_the_guest_keeps_within_the_tasks_minimum_answers_the_window_and_is_logged() {
+        let mut windows = TaskWindows::new();
+        let mut clock = task(1, "Clock", 800, 600);
+        clock.min_width = 700;
+        clock.min_height = 500;
+        windows.apply(&TaskEvent::Updated(clock.clone()));
+        assert_eq!(
+            windows.window_resized(1, (690, 600), Instant::now()),
+            vec![TaskRequest::Resize {
+                task_id: 1,
+                width: 690,
+                height: 600,
+                live: true,
+            }]
+        );
+        assert!(windows.take_notes().is_empty());
+        // The guest gives the task its smallest width: the window takes it at once.
+        clock.bounds.right = clock.bounds.left + 700;
+        let changes = windows.apply(&TaskEvent::Updated(clock));
+        assert!(
+            changes.contains(&WindowChange::Resize {
+                task_id: 1,
+                width: 700,
+                height: 600,
+            }),
+            "{changes:?}"
+        );
+        let notes = windows.take_notes();
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(
+            notes[0].contains("task 1 took 700x600, not the 690x600"),
+            "{notes:?}"
+        );
+        assert!(windows.take_notes().is_empty());
+    }
+
+    #[test]
     fn fr4_the_first_scale_a_window_reports_sizes_it_for_its_monitor() {
         let mut windows = TaskWindows::new();
         let mut clock = task(1, "Clock", 400, 300);
@@ -1610,6 +1836,119 @@ mod tests {
         let (_, requests) = windows.window_dpi(1, 192);
         assert!(!asks_for_density(&requests));
         assert_eq!(windows.scale(1), (131, 65));
+    }
+
+    #[test]
+    fn fr6_on_a_monitor_of_another_scale_the_editors_cursor_is_where_the_window_shows_it() {
+        // Notes keeps 130 dpi, the density of a monitor at 100%.
+        let (mut windows, notes) = notes_at_100(false);
+        let cursor = crate::ime::ImeCursor {
+            left: 100,
+            top: 200,
+            right: 102,
+            bottom: 240,
+        };
+        // At 100% the window shows the task 1:1, and the cursor where the task has it.
+        assert_eq!(
+            windows.apply(&TaskEvent::ImeCursor { task_id: 1, cursor }),
+            vec![WindowChange::ImeCursor { task_id: 1, cursor }]
+        );
+        // The window moves to a monitor at 125% (164 dpi). The guest does not move the cursor,
+        // but the window now shows it 164 window pixels per 130: the candidate window must
+        // follow without waiting for the next keystroke.
+        let (changes, _) = windows.window_dpi(1, 120);
+        assert_eq!(windows.scale(1), (82, 65));
+        assert!(
+            changes.contains(&WindowChange::ImeCursor {
+                task_id: 1,
+                cursor: crate::ime::ImeCursor {
+                    left: 126,
+                    top: 252,
+                    right: 128,
+                    bottom: 302,
+                },
+            }),
+            "{changes:?}"
+        );
+        // Back at 100%, it is where the task has it again.
+        let (changes, _) = windows.window_dpi(1, 96);
+        assert!(
+            changes.contains(&WindowChange::ImeCursor { task_id: 1, cursor }),
+            "{changes:?}"
+        );
+        // A window that closes forgets it: the task's next window hears of no cursor until the
+        // guest reports one.
+        windows.apply(&TaskEvent::Removed { task_id: 1 });
+        windows.apply(&TaskEvent::Updated(notes));
+        windows.window_dpi(1, 96);
+        let (changes, _) = windows.window_dpi(1, 120);
+        assert!(
+            !changes
+                .iter()
+                .any(|change| matches!(change, WindowChange::ImeCursor { .. })),
+            "{changes:?}"
+        );
+    }
+
+    #[test]
+    fn fr22_a_window_at_a_new_scale_gives_its_task_the_caption_inset_in_the_tasks_pixels() {
+        let (mut windows, notes) = notes_at_100(false);
+        let now = Instant::now();
+        // The window reports the title bar of a monitor at 125% before the move itself reaches
+        // the window manager: the inset is converted at the old scale, 1:1.
+        let band = CaptionBand {
+            height: 50,
+            start_width: 60,
+            end_width: 172,
+        };
+        assert_eq!(
+            windows.window_caption(1, band),
+            vec![TaskRequest::SetCaption {
+                task_id: 1,
+                height: 50,
+                start_width: 60,
+                end_width: 172,
+            }]
+        );
+        assert_eq!(windows.reconfigures(now), vec![]);
+        // Then the move: the window shows the task at 164 per 130, and the same band is fewer
+        // of the task's pixels. The inset is given again without the band changing.
+        let (_, requests) = windows.window_dpi(1, 120);
+        assert_eq!(windows.scale(1), (82, 65));
+        assert_eq!(
+            requests,
+            vec![TaskRequest::SetCaption {
+                task_id: 1,
+                height: 40,
+                start_width: 48,
+                end_width: 136,
+            }]
+        );
+        // Once.
+        assert_eq!(windows.reconfigures(now), vec![]);
+        // A band reported at the new scale is converted at it, and not given again.
+        assert_eq!(
+            windows.window_caption(1, band),
+            vec![TaskRequest::SetCaption {
+                task_id: 1,
+                height: 40,
+                start_width: 48,
+                end_width: 136,
+            }]
+        );
+        assert_eq!(windows.reconfigures(now), vec![]);
+        // A closed window's band is forgotten: the task's next window has its own.
+        windows.apply(&TaskEvent::Removed { task_id: 1 });
+        windows.apply(&TaskEvent::Updated(notes));
+        windows.window_dpi(1, 96);
+        let (_, requests) = windows.window_dpi(1, 120);
+        assert!(
+            !requests
+                .iter()
+                .any(|request| matches!(request, TaskRequest::SetCaption { .. })),
+            "{requests:?}"
+        );
+        assert_eq!(windows.reconfigures(now), vec![]);
     }
 
     #[test]

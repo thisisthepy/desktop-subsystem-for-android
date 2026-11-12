@@ -2119,5 +2119,38 @@ public interface EnvelopeOrBuilder extends
    */
   io.github.thisisthepy.dsa.control.v1.PinShortcutAnswer getPinShortcutAnswer();
 
+  /**
+   * <code>.dsa.control.v1.HostCertificates host_certificates = 684;</code>
+   * @return Whether the hostCertificates field is set.
+   */
+  boolean hasHostCertificates();
+  /**
+   * <code>.dsa.control.v1.HostCertificates host_certificates = 684;</code>
+   * @return The hostCertificates.
+   */
+  io.github.thisisthepy.dsa.control.v1.HostCertificates getHostCertificates();
+
+  /**
+   * <code>.dsa.control.v1.DnsQuery dns_query = 690;</code>
+   * @return Whether the dnsQuery field is set.
+   */
+  boolean hasDnsQuery();
+  /**
+   * <code>.dsa.control.v1.DnsQuery dns_query = 690;</code>
+   * @return The dnsQuery.
+   */
+  io.github.thisisthepy.dsa.control.v1.DnsQuery getDnsQuery();
+
+  /**
+   * <code>.dsa.control.v1.DnsAnswer dns_answer = 691;</code>
+   * @return Whether the dnsAnswer field is set.
+   */
+  boolean hasDnsAnswer();
+  /**
+   * <code>.dsa.control.v1.DnsAnswer dns_answer = 691;</code>
+   * @return The dnsAnswer.
+   */
+  io.github.thisisthepy.dsa.control.v1.DnsAnswer getDnsAnswer();
+
   public io.github.thisisthepy.dsa.control.v1.Envelope.BodyCase getBodyCase();
 }

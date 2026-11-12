@@ -109,7 +109,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::io::Read;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
@@ -168,6 +168,7 @@ use crate::widgets::{
     self, Placement, Widget, WidgetEvent, WidgetFrame, WidgetProvider, WidgetSize,
 };
 
+mod dns_port;
 mod host_services;
 pub use host_services::{KeyMintKeyState, RestoreOutcome};
 
@@ -653,6 +654,9 @@ struct Shared {
     sender: Mutex<Option<Box<dyn FrameSender>>>,
     /// The guest's last memory report, and when it arrived. Cleared when the guest stops.
     guest_memory: Mutex<Option<(GuestMemory, Instant)>>,
+    /// The VM's memory as the host last set it, in MiB, while the platform resizes it (see
+    /// [`MemoryGrowth`]); `None` when it does not, and while the guest is stopped.
+    vm_memory_mb: Mutex<Option<u64>>,
     /// What keeps the guest from being ready, while something does.
     problem: Mutex<Option<BootProblem>>,
     /// Who opens the web links the guest sends.
@@ -749,6 +753,11 @@ struct Shared {
     boot_secret: Mutex<Option<BootSecret>>,
     /// Set when the session ends, so the log port's threads end with it.
     log_port_stop: Arc<AtomicBool>,
+    /// The guest's connections on the DNS port that passed the handshake and are still open:
+    /// while there is one, the host's resolver answers the guest's names.
+    dns_connections: AtomicUsize,
+    /// Whether the platform serves the DNS port, so the guest's names can be answered here.
+    dns_port_served: AtomicBool,
     /// Which of the user's host folders their Android shows, which each agent that connects
     /// is told.
     file_sharing: SharingNow,
@@ -900,6 +909,9 @@ enum InstallEvent {
 struct AccessibilityHub {
     next_watch: u64,
     watchers: HashMap<i32, Vec<(u64, Sender<GuestAccessibility>)>>,
+    /// The tasks whose first tree since their newest watch began the service's log has
+    /// named, so a watch that never gets one shows by the missing line.
+    announced: HashSet<i32>,
 }
 
 /// The guest's tasks and who is watching them, under one lock, so a new watcher's starting
@@ -995,6 +1007,14 @@ impl Shared {
         *self.vm_id.lock().unwrap_or_else(|e| e.into_inner()) = vm_id;
     }
 
+    /// Forgets why an earlier boot stopped, once a newer one is up and well. Shown beside a
+    /// healthy Android, the old cause reads as a current fault: a refusal from the boot before
+    /// an update went on reading "was built from a different protocol definition" after the
+    /// updated guest had connected.
+    fn forget_last_reason(&self) {
+        self.status.lock().unwrap_or_else(|e| e.into_inner()).1 = None;
+    }
+
     fn set_problem(&self, problem: Option<BootProblem>) {
         *self.problem.lock().unwrap_or_else(|e| e.into_inner()) = problem;
     }
@@ -1008,6 +1028,10 @@ impl Shared {
 
     fn set_guest_memory(&self, memory: Option<(GuestMemory, Instant)>) {
         *self.guest_memory.lock().unwrap_or_else(|e| e.into_inner()) = memory;
+    }
+
+    fn set_vm_memory_mb(&self, mb: Option<u64>) {
+        *self.vm_memory_mb.lock().unwrap_or_else(|e| e.into_inner()) = mb;
     }
 
     /// Records a task message and hands it to the watchers, unless it changes nothing.
@@ -1181,6 +1205,14 @@ impl Shared {
     /// Hands what the guest sent about a task's accessibility to the task's watchers.
     fn publish_accessibility(&self, task_id: i32, message: GuestAccessibility) {
         let mut hub = self.accessibility.lock().unwrap_or_else(|e| e.into_inner());
+        if let GuestAccessibility::Tree(tree) = &message {
+            if hub.watchers.contains_key(&task_id) && hub.announced.insert(task_id) {
+                eprintln!(
+                    "accessibility: Android sent task {task_id}'s tree ({} nodes)",
+                    tree.nodes.len()
+                );
+            }
+        }
         match hub.watchers.get_mut(&task_id) {
             Some(watchers) => watchers.retain(|(_, w)| w.send(message.clone()).is_ok()),
             None => eprintln!(
@@ -1358,6 +1390,7 @@ impl Session {
             tasks: Mutex::new(TaskHub::default()),
             sender: Mutex::new(None),
             guest_memory: Mutex::new(None),
+            vm_memory_mb: Mutex::new(None),
             problem: Mutex::new(None),
             link_watchers: Mutex::new(Vec::new()),
             transfers: Mutex::new(HashMap::new()),
@@ -1404,6 +1437,8 @@ impl Session {
             logs: Mutex::new(LogHub::default()),
             boot_secret: Mutex::new(None),
             log_port_stop: Arc::new(AtomicBool::new(false)),
+            dns_connections: AtomicUsize::new(0),
+            dns_port_served: AtomicBool::new(false),
             file_sharing: Arc::new(Mutex::new(Sharing::default())),
             share_server: Mutex::new(None),
             android_files_token: Mutex::new(None),
@@ -1954,14 +1989,26 @@ impl Session {
 
     /// The guest's last memory report and how old it is. `None` until the agent has sent one
     /// since the guest started.
+    ///
+    /// The memory the guest was given is the VM's size as the host last set it, when the
+    /// platform resizes the VM. The guest counts its online memory blocks, and memory that was
+    /// hot-added and then ballooned back to the host stays online in the guest, so its count
+    /// alone takes that memory for the kernel's own: on the owner's PC, a VM grown to 3840 MiB
+    /// and shrunk back to 2560 MiB showed 1357 MiB "reserved by the kernel at boot", where the
+    /// kernel had kept 77 MiB and the host had the other 1280 MiB back.
     pub fn guest_memory(&self) -> Option<GuestMemoryReport> {
+        let vm_mb = *self
+            .shared
+            .vm_memory_mb
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         self.shared
             .guest_memory
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .as_ref()
             .map(|(memory, at)| GuestMemoryReport {
-                memory: memory.clone(),
+                memory: memory.given(vm_mb),
                 age: at.elapsed(),
             })
     }
@@ -2838,6 +2885,7 @@ impl Session {
             hub.next_watch += 1;
             let id = hub.next_watch;
             hub.watchers.entry(task_id).or_default().push((id, tx));
+            hub.announced.remove(&task_id);
             id
         };
         eprintln!(
@@ -4553,18 +4601,24 @@ impl Worker {
             &app.native_libraries,
             crash.arm64_supported,
         );
-        if switch.on {
-            eprintln!("apps: {package} runs as ARM already; nothing is offered");
+        if switch.available() && !switch.on {
+            self.post_notice(native_abi::Notice::Offer.notification(&app));
             return;
         }
-        if let Some(why) = switch.unavailable {
+        if switch.on {
+            eprintln!("apps: {package} runs as ARM already; nothing is offered");
+        } else if let Some(why) = switch.unavailable {
             eprintln!(
                 "apps: {package} cannot run as ARM ({}); nothing is offered",
                 why.code()
             );
-            return;
         }
-        self.post_notice(native_abi::Notice::Offer.notification(&app));
+        // A build made to run as 32-bit code, which the 64-bit-only guest does not run: the
+        // user is told to install its 64-bit build.
+        if native_abi::needs_64_bit_build(&app.native_libraries, switch, &detail) {
+            eprintln!("apps: {package} holds 32-bit code, which Android here does not run");
+            self.post_notice(native_abi::Notice::Needs64Bit.notification(&app));
+        }
     }
 
     /// What the user did with one of the host's notifications about running an app as ARM.
@@ -4608,7 +4662,9 @@ impl Worker {
                     new_window: false,
                 }));
             }
-            native_abi::Notice::NeedsErase | native_abi::Notice::Failed => {}
+            native_abi::Notice::NeedsErase
+            | native_abi::Notice::Failed
+            | native_abi::Notice::Needs64Bit => {}
         }
         Ok(())
     }
@@ -5226,6 +5282,9 @@ impl Worker {
             self.replay_system_settings();
             self.replay_gamepads();
         }
+        // A change to the host's root certificates while the guest was frozen was not heard.
+        let body = self.shared.host_certificates_body();
+        self.send_body(body);
         true
     }
 
@@ -5494,6 +5553,7 @@ impl Worker {
         match result {
             Ok(()) => {
                 growth.applied();
+                self.shared.set_vm_memory_mb(Some(mb));
                 eprintln!(
                     "memory: Android's memory {} from {before} to {mb} MiB ({} MiB available, \
                      {:.1}% stalled)",
@@ -5618,6 +5678,11 @@ impl Worker {
             // A new agent keeps Android's backup manager from backing up to the host until it
             // hears that the user turned backup on.
             let body = self.shared.backup_setting_body();
+            self.send_body(body);
+            // The root certificates added on the host again: a change the daemon could not
+            // hear while Android was starting reaches it now, and the new agent has the apps
+            // that started before it forget the anchors they looked up.
+            let body = self.shared.host_certificates_body();
             self.send_body(body);
         } else {
             self.agent_lost_at = Some(now);
@@ -5749,6 +5814,7 @@ impl Worker {
         match self.state() {
             SessionState::Starting | SessionState::Stalled if ready => {
                 self.shared.set_problem(None);
+                self.shared.forget_last_reason();
                 // The doze delay counts from here when no window is shown.
                 self.hidden_since = now;
                 let doze = self.stall_doze.take();
@@ -5855,6 +5921,8 @@ impl Worker {
             eprintln!("memory: Android starts with {base} MiB and may grow to {max} MiB");
             MemoryGrowth::new(base, max)
         });
+        self.shared
+            .set_vm_memory_mb(self.memory_growth.as_ref().map(MemoryGrowth::current_mb));
         let started = Instant::now();
         self.started_at = started;
         // A new boot of Android: the root policy is read again and no app keeps a grace.
@@ -5929,6 +5997,10 @@ impl Worker {
                             // A new boot's control daemon has no controller yet.
                             self.system_pending = false;
                             self.replay_gamepads();
+                            // A boot trusts none of the root certificates added on the host
+                            // until its daemon is told them, before any app reaches the network.
+                            let body = self.shared.host_certificates_body();
+                            self.send_body(body);
                             return;
                         }
                         Err(Refusal::NotTheGuest(why)) => {
@@ -6486,6 +6558,9 @@ impl Worker {
                      on the KeyMint port"
                 );
             }
+            Some(Body::DnsQuery(_) | Body::DnsAnswer(_)) => {
+                eprintln!("control channel: dropping a DNS message, which belongs on the DNS port");
+            }
             Some(
                 body @ (Body::ListSpeechVoices(_)
                 | Body::SpeakText(_)
@@ -6604,6 +6679,7 @@ impl Worker {
             | Some(Body::PasskeyResponse(_))
             | Some(Body::KeymintRootKey(_))
             | Some(Body::BackupSetting(_))
+            | Some(Body::HostCertificates(_))
             | Some(Body::SetAppVolume(_)) => {
                 eprintln!("control channel: dropping a request only the host sends");
             }
@@ -6695,6 +6771,7 @@ impl Worker {
         // And what it asked of the host's speech and spelling.
         self.shared.language().guest_gone();
         self.shared.set_guest_memory(None);
+        self.shared.set_vm_memory_mb(None);
         // A dump or diagnostics under way gets no more from this guest.
         self.shared
             .logs

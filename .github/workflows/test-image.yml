@@ -41,7 +41,11 @@ on:
       - "dsa/host/platform/linux/tests/media.rs"
       - "dsa/host/platform/linux/tests/system_screens.rs"
       - "dsa/host/platform/linux/tests/graphics.rs"
+      - "dsa/host/platform/linux/tests/resize.rs"
       - "dsa/host/platform/linux/tests/overlays.rs"
+      - "dsa/host/platform/linux/tests/dns.rs"
+      - "dsa/host/core/src/dns/**"
+      - "dsa/host/platform/unix/src/dns_resolver.rs"
       - "dsa/host/platform/linux/tests/boot_check/**"
       - "dsa/host/platform/linux/tests/idle_reclaim/**"
       - "dsa/host/platform/linux/tests/memory_check/**"
@@ -575,7 +579,7 @@ jobs:
       - name: Build the widget boot check
         working-directory: dsa
         run: |
-          cargo test -p dsa-host-linux --test widgets --test system_screens --test media --test graphics --test overlays --no-run \
+          cargo test -p dsa-host-linux --test widgets --test system_screens --test media --test graphics --test resize --test dns --test overlays --no-run \
             --message-format=json-render-diagnostics > "$RUNNER_TEMP/boot-checks.json"
           cargo build -p dsa-host-linux --bin dsa-compositor --message-format=json-render-diagnostics >> "$RUNNER_TEMP/boot-checks.json"
           out="$GITHUB_WORKSPACE/.scratch/boot-checks"
@@ -590,7 +594,7 @@ jobs:
           while IFS=$'\t' read -r name executable; do
             cp "$executable" "$out/bin/$name"
           done < "$out/bin/programs.tsv"
-          for check in widgets system_screens media graphics overlays; do
+          for check in widgets system_screens media graphics resize overlays dns; do
             test -x "$out/tests/$check" || { echo "cargo built no $check boot check"; exit 1; }
           done
           for program in dsa-linux-hostd dsa-compositor dsa-devices dsa-gfx; do
@@ -1159,8 +1163,8 @@ jobs:
             timeout: 18
             keep: Keep the media check's logs
             artifact: media-check-logs
-            # The root check boots on a runner of its own, below.
-            filter: --skip fr35_an_app_needs_approval_and_su_is_hidden_when_disabled
+            # The root check and the root certificate check boot on runners of their own, below.
+            filter: --skip fr35_an_app_needs_approval_and_su_is_hidden_when_disabled --skip fr28_
             logs: |
               .scratch/media-*/*.log
               .scratch/media-*/*.txt
@@ -1174,6 +1178,24 @@ jobs:
               .scratch/root-*/*.log
               .scratch/root-*/*.txt
               ~/.local/share/dsa/logs/android-console.log*
+          - check: Trust a root certificate the host added in an app on the booted image
+            test: media
+            timeout: 18
+            keep: Keep the root certificate check's logs
+            artifact: root-certificate-check-logs
+            filter: fr28_
+            logs: |
+              .scratch/certs-*/*.log
+              .scratch/certs-*/*.txt
+              ~/.local/share/dsa/logs/android-console.log*
+          - check: Resolve a name only the host knows on the booted image
+            test: dns
+            timeout: 14
+            keep: Keep the DNS check's logs
+            artifact: dns-check-logs
+            logs: |
+              /tmp/dns-test-*/*.log
+              ~/.local/share/dsa/logs/android-console.log*
           - check: Run the Vulkan CTS subset and the graphics test apps on the booted image
             test: graphics
             timeout: 28
@@ -1183,6 +1205,18 @@ jobs:
               /tmp/graphics-test-*/cts/
               /tmp/graphics-test-*/*.png
               /tmp/graphics-test-*/*.log
+          # Settings resized at sizes across Android's size classes while a host accessibility
+          # client watches it, as on a desktop: each new size must reach the agent at once and
+          # its frame must come within the runner's budget.
+          - check: Resize a real app's window on the booted image
+            test: resize
+            timeout: 18
+            keep: Keep the resize check's measurement
+            artifact: resize-check-measurement
+            summary: /tmp/resize-test-*/resize.md
+            logs: |
+              /tmp/resize-test-*/*.log
+              /tmp/resize-test-*/resize.md
           - check: Lay the ARM translator and Google Play over the booted system
             test: overlays
             timeout: 18
@@ -1208,7 +1242,7 @@ jobs:
           # only on a large regression against the recorded baseline.
           - check: Measure the memory with Google Play and one app window on the booted image
             test: overlays
-            timeout: 25
+            timeout: 34
             keep: Keep the memory measurement
             artifact: memory-measurement
             filter: nfr1_the_memory_with_google_play_and_one_app_window_is_measured
@@ -1418,7 +1452,7 @@ jobs:
             export DSA_ARM_PROBE="$GITHUB_WORKSPACE/.scratch/arm-probe/dsa-arm-probe.apk"
             export DSA_GMS_PROBE="$GITHUB_WORKSPACE/.scratch/gms-probe/dsa-gms-probe.apk"
           fi
-          if [[ "${{ matrix.test }}" == graphics ]]; then
+          if [[ "${{ matrix.test }}" == graphics || "${{ matrix.test }}" == resize ]]; then
             # Lavapipe is the only Vulkan driver on the runner; naming it keeps it so.
             icd="$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -n 1)"
             export VK_ICD_FILENAMES="$icd" VK_DRIVER_FILES="$icd"

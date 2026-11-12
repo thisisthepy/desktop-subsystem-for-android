@@ -1,5 +1,7 @@
 //! Session start and stop, through the session's public API, over the in-memory transport.
 
+mod common;
+
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -271,7 +273,7 @@ fn connect_daemon(connector: &mut MemoryConnector, launcher: &FakeLauncher) -> B
         WAIT,
     )
     .expect("the host accepts the agent");
-    agent
+    Box::new(common::PastConnectSettings(agent))
 }
 
 #[test]
@@ -783,6 +785,34 @@ fn fr2_an_agent_from_a_different_protocol_definition_is_refused_and_the_guest_st
 }
 
 #[test]
+fn fr2_a_newer_boot_that_is_up_forgets_why_the_one_before_it_stopped() {
+    // The boot before an update is refused for its old protocol definition...
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.start();
+    let mut agent = connector.connect(WAIT).expect("the agent connects");
+    let mut hello = local_hello(Role::Guest, "dsa-guestd old");
+    hello.schema_hash = vec![0x5a; 32];
+    let _ = guest_connect(agent.as_mut(), &hello, &launcher.secret(), WAIT);
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    assert!(matches!(
+        session.last_reason(),
+        Some(StopReason::HandshakeRejected(_))
+    ));
+
+    // ...and the updated guest boots and connects. Its status shows no stop that is over.
+    session.start();
+    let _updated = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    assert_eq!(session.last_reason(), None);
+
+    // A stop of this boot is reported as before.
+    session.stop();
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    assert_eq!(session.last_reason(), Some(StopReason::Requested));
+}
+
+#[test]
 fn fr2_stop_while_starting_stops_the_guest() {
     let launcher = FakeLauncher::default();
     let (session, _connector) = session_with(launcher.clone(), WAIT);
@@ -1199,8 +1229,52 @@ fn nfr2_the_guest_memory_grows_when_its_daemon_says_it_is_short() {
         }),
     );
     wait_until("the memory is grown", || {
-        launcher.0.lock().unwrap().memory_sizes == vec![4608]
+        launcher.0.lock().unwrap().memory_sizes == vec![3712]
     });
+}
+
+#[test]
+fn nfr2_memory_ballooned_back_to_the_host_is_not_counted_as_reserved_by_the_kernel() {
+    let launcher = FakeLauncher::default();
+    launcher.0.lock().unwrap().memory_range = Some((2048, 16384));
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.start();
+    let mut agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    let pressure = |total_mb: u64, available_mb: u64| {
+        Body::GuestMemoryPressure(dsa_protocol::control::GuestMemoryPressure {
+            mem_total_kb: total_mb * 1024,
+            mem_available_kb: available_mb * 1024,
+            stall_centipercent: 0,
+        })
+    };
+    // Short: the VM grows by hot-add, to what the guest uses plus 768 MiB of headroom.
+    send_body(&mut agent, pressure(1950, 300));
+    wait_until("the memory is grown", || {
+        launcher.0.lock().unwrap().memory_sizes == vec![2560]
+    });
+    // Calm again after the cooldown: it is ballooned back to the base.
+    thread::sleep(Duration::from_millis(5100));
+    send_body(&mut agent, pressure(2600, 2200));
+    wait_until("the memory is given back", || {
+        launcher.0.lock().unwrap().memory_sizes == vec![2560, 2048]
+    });
+    // The hot-added blocks stay online in the guest, which counts 2560 MiB; the kernel kept
+    // 98 MiB of the 2048 MiB the VM has now, and the host has the rest back.
+    send_body(
+        &mut agent,
+        Body::GuestMemory(dsa_protocol::control::GuestMemory {
+            mem_total_kb: 1950 * 1024,
+            mem_free_kb: 1000 * 1024,
+            mem_available_kb: 1500 * 1024,
+            mem_online_kb: 2560 * 1024,
+            ..Default::default()
+        }),
+    );
+    wait_until("the report arrives", || session.guest_memory().is_some());
+    let memory = session.guest_memory().unwrap().memory;
+    assert_eq!(memory.kernel.mem_online_kb, 2048 * 1024);
+    assert_eq!(memory.reserved_at_boot_kb(), Some(98 * 1024));
 }
 
 #[test]
@@ -1209,7 +1283,7 @@ fn nfr2_a_resize_that_times_out_is_tried_again_smaller_and_later_resizes_still_h
     {
         let mut guest = launcher.0.lock().unwrap();
         guest.memory_range = Some((3072, 16384));
-        guest.refuse_memory = vec![4608];
+        guest.refuse_memory = vec![3712];
     }
     let (session, mut connector) = session_with(launcher.clone(), WAIT);
     session.start();
@@ -1224,17 +1298,17 @@ fn nfr2_a_resize_that_times_out_is_tried_again_smaller_and_later_resizes_still_h
     };
     send_body(&mut agent, short());
     wait_until("the growth is asked for", || {
-        launcher.0.lock().unwrap().memory_sizes == vec![4608]
+        launcher.0.lock().unwrap().memory_sizes == vec![3712]
     });
     // Within the retry wait nothing more is asked.
     send_body(&mut agent, short());
     thread::sleep(Duration::from_millis(200));
-    assert_eq!(launcher.0.lock().unwrap().memory_sizes, vec![4608]);
+    assert_eq!(launcher.0.lock().unwrap().memory_sizes, vec![3712]);
     // After it, the growth is tried again in a step half the size of the one that failed.
     thread::sleep(Duration::from_millis(5100));
     send_body(&mut agent, short());
     wait_until("the growth is tried again, smaller", || {
-        launcher.0.lock().unwrap().memory_sizes == vec![4608, 3840]
+        launcher.0.lock().unwrap().memory_sizes == vec![3712, 3456]
     });
     // The failure never told the launcher to stop growing.
     assert_eq!(launcher.0.lock().unwrap().growth_failed, 0);
@@ -1288,10 +1362,10 @@ fn nfr2_a_slow_resize_runs_beside_the_session_which_keeps_serving_and_asks_for_n
         changed.notify_all();
     }
     wait_until("the resize lands", || {
-        launcher.0.lock().unwrap().memory_sizes == vec![4608]
+        launcher.0.lock().unwrap().memory_sizes == vec![3712]
     });
     thread::sleep(Duration::from_millis(200));
-    assert_eq!(launcher.0.lock().unwrap().memory_sizes, vec![4608]);
+    assert_eq!(launcher.0.lock().unwrap().memory_sizes, vec![3712]);
     assert_eq!(launcher.0.lock().unwrap().growth_failed, 0);
 }
 
@@ -1819,6 +1893,7 @@ fn fr5_pointer_input_does_not_wait_for_the_session_to_stop_reading_the_channel()
         WAIT,
     )
     .expect("the host accepts the agent");
+    let mut agent: Box<dyn Connection> = Box::new(common::PastConnectSettings(agent));
     report_boot(&mut agent, true, true);
     assert!(session.wait_for(SessionState::Active, WAIT));
 
@@ -3924,6 +3999,73 @@ fn fr25_an_app_that_runs_as_arm_or_has_no_arm_code_is_offered_nothing() {
     }
     send_body(&mut agent, game_crash(true));
     nothing_for_the_watcher(&watch);
+}
+
+#[test]
+fn fr25_a_32_bit_build_that_ends_at_start_is_told_to_get_its_64_bit_build() {
+    use dsa_host_core::native_abi::Notice;
+    let (session, mut agent, _launcher) = active_session();
+    let watch = session.watch_notifications();
+    let tasks = session.watch_tasks();
+    // Chrome's build made to run as 32-bit code, as Google Play delivers it to a device
+    // without 32-bit code: the same library under x86 and x86_64, and no ARM code.
+    send_body(
+        &mut agent,
+        Body::InstalledApp(dsa_protocol::control::InstalledApp {
+            package_name: "com.android.chrome".into(),
+            label: "Chrome".into(),
+            primary_abi: "x86_64".into(),
+            version_code: 495106126,
+            native_libraries: vec![
+                game_libraries("x86", &["libmonochrome.so"]),
+                game_libraries("x86_64", &["libmonochrome.so"]),
+            ],
+            ..Default::default()
+        }),
+    );
+    send_body(
+        &mut agent,
+        Body::InstalledApps(dsa_protocol::control::InstalledApps {
+            package_names: vec!["com.android.chrome".into()],
+        }),
+    );
+    loop {
+        if let TaskEvent::Installed(apps) = tasks.events.recv_timeout(WAIT).expect("the apps") {
+            if apps
+                .iter()
+                .any(|app| app.package_name == "com.android.chrome")
+            {
+                break;
+            }
+        }
+    }
+    send_body(
+        &mut agent,
+        Body::NativeLibraryCrash(dsa_protocol::control::NativeLibraryCrash {
+            package_name: "com.android.chrome".into(),
+            detail: "java.lang.RuntimeException: Starting in 64-bit mode requires the 64-bit \
+                     native library."
+                .into(),
+            arm64_supported: true,
+        }),
+    );
+    let notice = match watch.recv_timeout(WAIT).unwrap() {
+        NotificationEvent::Posted(notice) => notice,
+        other => panic!("expected the notice, not {other:?}"),
+    };
+    assert_eq!(notice.key, Notice::Needs64Bit.key("com.android.chrome"));
+    assert_eq!(notice.app_label, "Chrome");
+    assert!(notice.text.contains("x86_64 build"), "{}", notice.text);
+    // A click removes it and installs nothing.
+    session
+        .notification_action(NotificationAction::Open {
+            key: notice.key.clone(),
+        })
+        .expect("taken");
+    assert_eq!(
+        watch.recv_timeout(WAIT).unwrap(),
+        NotificationEvent::Removed { key: notice.key }
+    );
 }
 
 #[test]

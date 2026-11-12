@@ -17,6 +17,7 @@ import io.github.thisisthepy.dsa.agent.tasks.TaskOrientation
 import io.github.thisisthepy.dsa.agent.tasks.asksForFullScreen
 import io.github.thisisthepy.dsa.agent.tasks.TaskSnapshot
 import io.github.thisisthepy.dsa.agent.tasks.TaskSource
+import io.github.thisisthepy.dsa.agent.tasks.TaskStack
 import io.github.thisisthepy.dsa.agent.tasks.WidgetSetupTasks
 import io.github.thisisthepy.dsa.agent.tasks.handlesDensityChange
 import io.github.thisisthepy.dsa.agent.tasks.handlesFontScaleChange
@@ -100,10 +101,19 @@ class AndroidTaskSource(
             ),
             pictureInPicture = fields.windowingMode(info) == WINDOWING_MODE_PINNED,
             transparentCaption = fields.transparentCaption(info),
-            // The task's first activity is at the bottom of its stack; past it, Back has
-            // somewhere to go.
-            // A setup's own first screen is above the agent's: Back there cancels the setup.
-            canGoBack = !setup && info.numActivities > 1,
+            // Whether Back lands on a screen the user saw is the agent's to tell, from the
+            // stack as it changes (BackStacks). A setup's own first screen is above the
+            // agent's: Back there cancels the setup, so a setup never offers it.
+            stack = if (setup) {
+                null
+            } else {
+                TaskStack(
+                    activities = info.numActivities,
+                    top = info.topActivity?.flattenToShortString(),
+                    topShows = !themes.drawsNothing(top),
+                    visible = fields.visible(info),
+                )
+            },
             // Whether its manifest says it handles a change of density itself
             // (ActivityInfo.configChanges includes density): Android relaunches any other
             // activity whose density changes. False when the package manager does not know it.
@@ -182,6 +192,7 @@ private class TaskFields(private val log: Log) {
     // later; not in the SDK).
     private val requestedVisibleTypes = optional { taskInfo.getField("requestedVisibleTypes") }
     private val isFocused = field { taskInfo.getField("isFocused") }
+    private val isVisible = optional { taskInfo.getField("isVisible") }
     private val minWidth = field { taskInfo.getField("minWidth") }
     private val minHeight = field { taskInfo.getField("minHeight") }
     private val defaultMinSize = field { taskInfo.getField("defaultMinSize") }
@@ -289,6 +300,12 @@ private class TaskFields(private val log: Log) {
 
     fun focused(info: ActivityManager.RunningTaskInfo): Boolean =
         read("focus") { isFocused!!.getBoolean(info) } ?: false
+
+    /** Whether the task is visible (TaskInfo.isVisible); true when the framework does not say. */
+    fun visible(info: ActivityManager.RunningTaskInfo): Boolean {
+        val field = isVisible ?: return true
+        return read("visibility") { field.getBoolean(info) } ?: true
+    }
 
     private fun windowConfiguration(info: ActivityManager.RunningTaskInfo): Any =
         windowConfiguration!!.get(configuration!!.get(info))!!

@@ -18,9 +18,37 @@
 # what stays in zram again during the idle reclaim (dsa-channeld.rc), about a fifth smaller. It
 # must be named before swapon_all sizes the device; a kernel without multi-compression refuses
 # the write, and zram then keeps LZ4 alone.
+#
+# What stays cold in zram for long goes on to its backing file on the data disk (fstab.dsa),
+# which costs the host disk space instead of memory. Writing wears the user's disk, so zram
+# writes nothing until dsa-channeld hands it a budget: with the limit on and no budget, a
+# writeback writes nothing. The daemon writes back only while no app is open, only pages no one
+# has used for vendor.dsa.memory.writeback_age seconds, and within a daily budget
+# (dsa-channeld.rc). The boot can set both times (androidboot.dsa.zram_writeback_after and
+# androidboot.dsa.zram_writeback_age), for a check that cannot wait for the defaults.
+#
+# The kernel's caches of file names and inodes (dentries and inodes, in slab) are weighed
+# against page cache when memory is reclaimed. At 200, twice the default, each reclaim, the
+# working set trim's included, takes them back twice as readily: a desktop guest walks its
+# APEX packages and app folders at boot and seldom again, and a name looked up again is read
+# from the page cache or the disk in microseconds. The idle reclaim drops them all anyway.
+#
+# Each CPU keeps lists of free pages of its own, to hand out without taking the zone's lock.
+# Pages on them count as neither free nor used (/proc/meminfo leaves them out of MemFree), free
+# page reporting never offers them to the host, and by default the kernel lets the lists grow
+# from each zone's low watermark up to an eighth of its memory, shared by the CPUs. Android
+# raises that watermark for the display (extra_free_kbytes, about 95 MiB for a 2880x2880 one),
+# so the lists of a 2.5 GiB guest may hold 100 to 300 MiB of free memory that stays with the
+# VM. A fraction this large keeps each list at its least, four batches (about 1 MiB a CPU and
+# zone); a desktop guest's few CPUs rarely contend for the zone's lock.
 on boot
     write /sys/devices/virtual/block/zram0/recomp_algorithm "algo=zstd priority=1"
     swapon_all /vendor/etc/fstab.dsa
+    write /sys/devices/virtual/block/zram0/writeback_limit_enable 1
+    setprop vendor.dsa.memory.writeback_after ${ro.boot.dsa.zram_writeback_after:-600}
+    setprop vendor.dsa.memory.writeback_age ${ro.boot.dsa.zram_writeback_age:-1800}
     write /proc/sys/vm/swappiness 100
     write /proc/sys/vm/page-cluster 0
     write /proc/sys/vm/compaction_proactiveness 40
+    write /proc/sys/vm/vfs_cache_pressure 200
+    write /proc/sys/vm/percpu_pagelist_high_fraction 1048576

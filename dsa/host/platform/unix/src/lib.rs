@@ -17,10 +17,15 @@
 //! [`https_get`] is the HTTPS fetch, through `curl`, that the passkey check reads a website's
 //! Digital Asset Links with: certificate checked, no redirect followed. [`backup_folder`]
 //! keeps the user's backup folder to its owner alone.
+//!
+//! [`dns_resolver`] is the system's resolver (`getaddrinfo` and `res_query`), which answers
+//! the guest's DNS queries.
 
 pub mod backup_folder;
 #[cfg(unix)]
 pub mod device_socket;
+#[cfg(unix)]
+pub mod dns_resolver;
 #[cfg(unix)]
 pub mod fd_frames;
 pub mod https_get;

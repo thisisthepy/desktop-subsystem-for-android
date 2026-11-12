@@ -557,6 +557,16 @@ fn create_android(shared: &Shared, name: &str) -> Result<Arc<dyn UserAndroid>, S
         &config.settings_dir(&shared.user),
         name,
     );
+    // The guest's DNS queries, answered by the Mac's resolver.
+    let dns = VsockListener::new(
+        channels.receiver(dsa_host_core::dns::DNS_PORT),
+        Framing::Framed,
+    );
+    session.serve_dns_port(
+        Box::new(dns),
+        Arc::new(dsa_host_unix::dns_resolver::SystemResolver),
+        &shared.build,
+    );
     let dial = |port: u32| {
         let slot = slot.clone();
         Arc::new(move |_vm_id: &str| {
@@ -637,6 +647,7 @@ fn apply_settings(
     android.share_clipboard(settings.as_ref().is_none_or(|s| s.clipboard));
     android.links_in_android(settings.as_ref().is_some_and(|s| s.links_in_android));
     android.image_auto_restart(settings.as_ref().is_none_or(|s| s.image_auto_restart));
+    android.trust_host_certificates(settings.as_ref().is_none_or(|s| s.host_certificates));
     android.share_folders(
         settings.as_ref().is_none_or(|s| s.file_sharing),
         settings

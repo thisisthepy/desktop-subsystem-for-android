@@ -56,7 +56,7 @@ class ReadBackPatchTests(unittest.TestCase):
         for script in (HERE / "host/fetch.ps1", HERE / "host/fetch.sh"):
             self.assertIn("0020", script.read_text(encoding="utf-8"))
         cmake = (HERE / "host/CMakeLists.txt").read_text(encoding="utf-8")
-        self.assertIn('target_include_directories(gfxstream-vulkan-server PRIVATE\n'
+        self.assertIn('target_include_directories(gfxstream-vulkan-server PUBLIC\n'
                       '        "${CMAKE_CURRENT_SOURCE_DIR}/../include")', cmake)
         self.assertTrue((HERE / "include/dsa_shadow_record.h").is_file())
 

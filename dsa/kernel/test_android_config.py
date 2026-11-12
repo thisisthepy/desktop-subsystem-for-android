@@ -35,6 +35,13 @@ class AndroidKernelConfigTests(unittest.TestCase):
         self.assertIn(".unlocked_ioctl\t= shmem_file_ioctl,", patch)
         self.assertIn("config MEMFD_ASHMEM_SHIM", patch)
 
+    def test_fr28_both_families_can_redirect_dns_queries_to_the_guests_stub(self):
+        # dsa-channeld --dns-redirect fills a nat OUTPUT chain for IPv4 and IPv6 that sends
+        # port 53 to the daemon's stub, which hands each query to the host's resolver.
+        config = CONFIG.read_text()
+        for option in ["CONFIG_IP_NF_NAT=y", "CONFIG_IP6_NF_NAT=y", "CONFIG_NETFILTER_XT_TARGET_REDIRECT=y"]:
+            self.assertIn(option, config)
+
     def test_fr35_the_su_guard_is_built_in_and_hides_su_by_inode(self):
         # su exists only for the uids the host allows; the guard returns -ENOENT for any
         # other task, so an app that may not ask never finds su (INTENT D28).
@@ -133,6 +140,55 @@ class AndroidKernelConfigTests(unittest.TestCase):
         config = CONFIG.read_text()
         self.assertIn("CONFIG_LRU_GEN=y", config)
         self.assertIn("CONFIG_LRU_GEN_ENABLED=y", config)
+
+    def test_nfr1_the_slab_caches_can_be_read_one_by_one(self):
+        # Without SLUB's debugging support there is no /proc/slabinfo, and the guest's
+        # unreclaimable slab is one sum the memory measurement cannot break down. The support
+        # stays idle: nothing turns its checks on.
+        lines = fragment_lines(CONFIG)
+        self.assertIn("CONFIG_SLUB_DEBUG=y", lines)
+        self.assertIn("# CONFIG_SLUB_DEBUG_ON is not set", lines)
+
+    def test_nfr1_a_read_only_ext4_mount_keeps_no_conversion_thread(self):
+        # Android mounts every APEX package as a read-only ext4 image (about 75 with Google
+        # Play), and each mount kept a rescuer thread for a conversion workqueue it can never
+        # use. The patch makes the workqueue only for a mount that can write, or when one is
+        # remounted read-write, and guards every other use of it.
+        patch = (PATCHES / "ext4-rsv-conversion-read-only.patch").read_text()
+        self.assertIn("+++ b/fs/ext4/super.c", patch)
+        self.assertIn("+++ b/fs/ext4/page-io.c", patch)
+        self.assertIn("+\tif (!sb_rdonly(sb) || !bdev_read_only(sb->s_bdev)) {", patch)
+        self.assertIn("+static int ext4_alloc_rsv_conversion_wq(struct super_block *sb)", patch)
+        # Remounting read-write makes it before the file system may write.
+        self.assertIn("+\t\t\tif (!sbi->rsv_conversion_wq) {", patch)
+        # Unmounting, syncing and a write's completion each cope with a mount without one.
+        self.assertIn("+\tif (sbi->rsv_conversion_wq)\n+\t\tdestroy_workqueue(sbi->rsv_conversion_wq);", patch)
+        self.assertIn("+\tif (sbi->rsv_conversion_wq)\n+\t\tflush_workqueue(sbi->rsv_conversion_wq);", patch)
+        self.assertIn("+\tif (WARN_ON_ONCE(!wq))\n+\t\twq = system_unbound_wq;", patch)
+
+    def test_nfr1_the_ext4_patch_hunks_count_their_lines(self):
+        # git apply refuses a hunk whose header miscounts its lines.
+        header = re.compile(r"^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@")
+        old_left = new_left = 0
+        current = None
+        for line in (PATCHES / "ext4-rsv-conversion-read-only.patch").read_text().splitlines():
+            match = header.match(line)
+            if match:
+                self.assertEqual((old_left, new_left), (0, 0), current)
+                current = line
+                old_left = int(match.group(1) or 1)
+                new_left = int(match.group(2) or 1)
+                continue
+            if old_left == 0 and new_left == 0:
+                continue
+            if line.startswith("+"):
+                new_left -= 1
+            elif line.startswith("-"):
+                old_left -= 1
+            else:
+                old_left -= 1
+                new_left -= 1
+        self.assertEqual((old_left, new_left), (0, 0), current)
 
     def test_pr6_the_kernel_reads_the_bootconfig_that_carries_the_boot_secret(self):
         # Without it the kernel ignores the bootconfig the host appends to the initrd, the
@@ -320,6 +376,38 @@ class AndroidKernelConfigTests(unittest.TestCase):
         self.assertIn("+++ b/mm/page_reporting.c", patch)
         self.assertIn("-#define PAGE_REPORTING_DELAY	(2 * HZ)", patch)
         self.assertIn("+#define PAGE_REPORTING_DELAY	0", patch)
+
+    def test_nfr2_every_free_page_can_be_reported_to_the_host_again(self):
+        # A host that faults guest memory in clusters takes reported free neighbours back in
+        # with a page the guest touches again; the guest marks them reported and never offers
+        # them again. The parameter empties the per-CPU lists, forgets the marks and starts a
+        # pass. It applies after the patch that removes the reporting delay.
+        patch = (PATCHES / "page-reporting-rereport.patch").read_text()
+        self.assertIn("+++ b/mm/page_reporting.c", patch)
+        self.assertIn("+module_param_cb(rereport, &page_reporting_rereport_ops, NULL, 0200);", patch)
+        self.assertIn("+\t\tdrain_all_pages(NULL);", patch)
+        self.assertIn("+\t\t\t\t__ClearPageReported(page);", patch)
+        self.assertIn("+\t\t__page_reporting_request(prdev);", patch)
+        names = sorted(p.name for p in PATCHES.glob("*.patch"))
+        self.assertLess(names.index("page-reporting-no-delay.patch"),
+                        names.index("page-reporting-rereport.patch"))
+
+    def test_nfr1_cold_zram_pages_can_be_written_to_a_backing_file_by_age(self):
+        # Writeback by age needs the access time; compressing a page again with zstd must not
+        # reset it, or every recompressed page would look unused since boot.
+        config = CONFIG.read_text()
+        for option in ["CONFIG_ZRAM_WRITEBACK=y", "CONFIG_ZRAM_TRACK_ENTRY_ACTIME=y",
+                       "CONFIG_ZRAM_MULTI_COMP=y", "CONFIG_BLK_DEV_LOOP=y"]:
+            self.assertIn(option, config)
+        patch = (PATCHES / "zram-recompress-keeps-access-time.patch").read_text()
+        self.assertIn("+++ b/drivers/block/zram/zram_drv.c", patch)
+        self.assertIn("+\tac_time = zram->table[index].ac_time;", patch)
+        self.assertIn("+\tzram->table[index].ac_time = ac_time;", patch)
+        keep = patch.index("+\tac_time = zram->table[index].ac_time;")
+        restore = patch.index("+\tzram->table[index].ac_time = ac_time;")
+        free = patch.index(" \tzram_free_page(zram, index);")
+        self.assertLess(keep, free)
+        self.assertLess(free, restore)
 
     def test_nfr1_the_guest_can_swap_to_zram(self):
         config = CONFIG.read_text()

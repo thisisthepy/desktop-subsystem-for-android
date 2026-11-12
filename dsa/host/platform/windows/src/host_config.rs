@@ -7,11 +7,11 @@
 //! {
 //!   "kernel": "C:\\Program Files\\DSA\\vm\\bzImage",
 //!   "system_image": "C:\\Program Files\\DSA\\vm\\system.vhdx",
-//!   "memory_mb": 3072
+//!   "memory_mb": 2048
 //! }
 //! ```
 //!
-//! Without `memory_mb`, which an installation leaves out, the VM starts at 3 GiB and grows to the
+//! Without `memory_mb`, which an installation leaves out, the VM starts at 2 GiB and grows to the
 //! limit the user set (`dsa settings set memory-limit <MiB>`), or with none to the computer's
 //! memory less what Windows keeps. It holds only what Android uses.
 //!

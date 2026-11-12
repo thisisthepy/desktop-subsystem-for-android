@@ -1,0 +1,86 @@
+# Builds the Windows x64 installer (dsa/host/platform/windows/installer/build.ps1): the DSA
+# package and setup.exe, into dsa\target\installer\setup-<version>.exe. The image release
+# (release-image.yml) publishes what it builds; the Development build builds the same thing
+# through this action and keeps it as a workflow artifact, so the two cannot drift apart.
+#
+# It takes the guest kernel from this run's guest-kernel artifact and the host graphics
+# library from the newest passing Graphics test run, as the release always has. It needs
+# Rust, .NET and PowerShell, which windows-latest has, and GH_TOKEN in the job's environment
+# for the graphics download.
+name: Build the Windows installer
+description: Builds setup.exe for Windows x64 from this run's guest kernel
+inputs:
+  version:
+    description: "The installer's version: a release's (0.2.4) or a development build's (0.2.4-dev.7)"
+    required: true
+  release-tag:
+    description: The GitHub release the installer is published as (v<version>), which its licence bundle points at; empty for none
+    required: false
+    default: ""
+  list-url:
+    description: The signed image list the installed service reads
+    required: true
+  trusted-key:
+    description: The public key that signs the lists
+    required: true
+  android-major:
+    description: The newest Android major the list supports, which setup's first screen names
+    required: true
+  program-list-url:
+    description: The stable channel's signed program list
+    required: true
+  prerelease-program-list-url:
+    description: The pre-release channel's signed program list
+    required: true
+  channel:
+    description: The installer's release channel, stable or prerelease
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Keep the Rust build between runs
+      uses: Swatinem/rust-cache@v2.9.3
+      with:
+        workspaces: dsa -> target
+        key: release-installer
+        save-if: ${{ github.ref == 'refs/heads/develop' }}
+
+    - uses: actions/download-artifact@v4
+      with:
+        name: guest-kernel
+        path: .scratch/kernel-out
+
+    # The host graphics renderer is built by the graphics workflow; the newest build that
+    # passed is the one shipped.
+    - name: Take the graphics library from the newest graphics build
+      shell: pwsh
+      run: |
+        $run = gh run list --repo ${{ github.repository }} --workflow test-graphics.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId'
+        if (-not $run) { throw "no graphics build has succeeded, so there is no gfxstream_backend.dll to ship" }
+        gh run download $run --repo ${{ github.repository }} --name host-gfxstream-windows --dir .scratch\host-gfxstream
+        if ($LASTEXITCODE -ne 0) { throw "downloading host-gfxstream-windows from run $run failed" }
+        $dll = Get-ChildItem -Recurse -File .scratch\host-gfxstream -Filter gfxstream_backend.dll | Select-Object -First 1
+        if (-not $dll -or $dll.Length -eq 0) { throw "run $run has no usable gfxstream_backend.dll" }
+        "GFXSTREAM_DLL=$($dll.FullName)" >> $env:GITHUB_ENV
+
+    - name: Install WiX 5
+      shell: pwsh
+      run: dotnet tool install --global wix --version 5.0.2
+
+    # No image inside: the service downloads the newest supported one from the list.
+    - name: Build the package and setup.exe
+      shell: pwsh
+      env:
+        VERSION: ${{ inputs.version }}
+        RELEASE_TAG: ${{ inputs.release-tag }}
+      run: |
+        $tag = @()
+        if ($env:RELEASE_TAG) { $tag = @('-ReleaseTag', $env:RELEASE_TAG) }
+        dsa/host/platform/windows/installer/build.ps1 -Version $env:VERSION @tag `
+          -Kernel .scratch/kernel-out/bzImage -GfxstreamBackend $env:GFXSTREAM_DLL `
+          -ListUrl '${{ inputs.list-url }}' `
+          -TrustedKey '${{ inputs.trusted-key }}' `
+          -AndroidMajor ${{ inputs.android-major }} `
+          -ProgramListUrl '${{ inputs.program-list-url }}' `
+          -PrereleaseProgramListUrl '${{ inputs.prerelease-program-list-url }}' `
+          -Channel '${{ inputs.channel }}'

@@ -144,6 +144,41 @@ bool leavesLastFrameUndrawn(const std::vector<LayerFill>& layers, bool hasFrame)
 // its own copy of the last frame.
 bool releaseDue(int64_t withoutLayersSinceMs, int64_t nowMs, int64_t delayMs);
 
+// Whether this process keeps its hold on the client target's host ColorBuffers at `nowMs`,
+// when SurfaceFlinger last composed something itself at `lastClientFrameMs` (steady clock; 0
+// for not since they were let go). The client target is as large as the display (two buffers
+// of 2880x2880 are 63 MiB), and SurfaceFlinger composes into it only while some layer needs it
+// (a video's YUV pictures), so it is kept for `delayMs` after the last such frame and let go
+// after that. SurfaceFlinger lets go of its own buffers on the frame that follows.
+bool clientTargetHeld(int64_t lastClientFrameMs, int64_t nowMs, int64_t delayMs);
+
+// When SurfaceFlinger last composed into the client target, and when the frame that lets go of
+// it is due. SurfaceFlinger frees its own buffers only on a frame without client composition
+// that comes a while after the last one with it, and it presents nothing while the screen is
+// still, so a frame is asked for once `delayMs` is up.
+class ClientTargetUse {
+   public:
+    explicit ClientTargetUse(int64_t delayMs) : mDelayMs(delayMs) {}
+
+    // Every frame SurfaceFlinger presents, whether or not it reaches the host: one composed
+    // while the host was away holds SurfaceFlinger's buffers all the same, and the frame asked
+    // for after the delay is what frees them.
+    void presented(bool clientLayer, int64_t nowMs);
+    // Whether the client target's host ColorBuffers are kept at `nowMs` (clientTargetHeld).
+    bool held(int64_t nowMs) const { return clientTargetHeld(mLastMs, nowMs, mDelayMs); }
+    // When the frame that lets go of the client target is due (steady clock milliseconds), if
+    // it is still held.
+    std::optional<int64_t> refreshAt() const;
+    // At the first frame once the delay is up: how long it has been since the last client
+    // frame, and the client target counts as let go from then on. Nothing otherwise.
+    std::optional<int64_t> letGo(int64_t nowMs);
+
+   private:
+    int64_t mDelayMs;
+    // The last frame with a client layer; 0 for none since the client target was let go.
+    int64_t mLastMs = 0;
+};
+
 // Whether a task's frame goes to the host, after the task's size changed.
 //
 // When a task's bounds take a new size, its app has not redrawn yet: its surface keeps the

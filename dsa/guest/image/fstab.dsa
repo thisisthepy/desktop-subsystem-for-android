@@ -36,4 +36,9 @@ odm_dlkm /odm_dlkm ext4 noatime,ro,errors=panic wait,logical,first_stage_mount,s
 # that file is missing. The guest's kernel no longer has it (zram keeps a stream per CPU), so
 # -1 is what lets fs_mgr go on to size the device, mkswap and swapon. The compressor is the
 # kernel's default, LZ4.
-/dev/block/zram0 none swap defaults zramsize=50%,max_comp_streams=-1
+# zram_backingdev_size: before it sizes the device, fs_mgr makes /data/per_boot/zram_swap of
+# this size (fallocate, so nothing is written yet), attaches it to a loop device with direct
+# I/O and names that zram's backing device. The idle reclaim writes zram's coldest pages there
+# within a daily budget (dsa-channeld.rc). Without the folder or the space, fs_mgr logs it and
+# the swap starts without a backing device.
+/dev/block/zram0 none swap defaults zramsize=50%,max_comp_streams=-1,zram_backingdev_size=512M

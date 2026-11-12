@@ -300,6 +300,10 @@ fn serve_host_services(
         }
         Err(why) => eprintln!("{sid}: backup: the user's backups cannot be kept: {why}"),
     }
+    // The root certificates added to the computer's and the user's trust stores.
+    session.serve_host_certificates(Arc::new(
+        crate::host_certificates::WindowsRootStore::for_user(sid),
+    ));
     session.serve_passkeys(Arc::new(PasskeyService::new(Arc::new(
         crate::https::WinHttpsGet::default(),
     ))));
@@ -506,6 +510,16 @@ pub fn create_user_android(
             HvSocketListener::bind(vm_id, keymint_service).map(|l| Box::new(l) as Box<dyn Listener>)
         }),
     );
+    // The port the guest's control daemon hands its DNS queries to, which Windows' DNS client
+    // answers, so the hosts file, the NRPT, a VPN's split DNS and DNS filters apply to
+    // Android's apps. It serves the NAT network and advanced networking alike.
+    let dns_service = Guid::vsock_service(dsa_host_core::dns::DNS_PORT);
+    let dns_listener = VmBoundListener::new(
+        launcher.vm_id_slot(),
+        Box::new(move |vm_id| {
+            HvSocketListener::bind(vm_id, dns_service).map(|l| Box::new(l) as Box<dyn Listener>)
+        }),
+    );
     let session_config = config.session_config();
     let handshake = ControlHandshake::new(build, session_config.connect_timeout);
     let session = Session::new(launcher, Box::new(listener), handshake, session_config);
@@ -571,6 +585,11 @@ pub fn create_user_android(
         build,
         keymint_listener,
         &config.settings_dir(),
+    );
+    session.serve_dns_port(
+        Box::new(dns_listener),
+        Arc::new(crate::dns_resolver::WindowsResolver),
+        build,
     );
     let session = Arc::new(session);
     {
@@ -1077,6 +1096,10 @@ where
                 // So is restarting into a downloaded Android image by itself; on unless they
                 // turned it off.
                 android.image_auto_restart(settings.as_ref().is_none_or(|s| s.image_auto_restart));
+                // So is trusting the root certificates added to the computer; on unless they
+                // turned it off.
+                android
+                    .trust_host_certificates(settings.as_ref().is_none_or(|s| s.host_certificates));
                 // So is file sharing, on with every folder unless they chose otherwise.
                 android.share_folders(
                     settings.as_ref().is_none_or(|s| s.file_sharing),

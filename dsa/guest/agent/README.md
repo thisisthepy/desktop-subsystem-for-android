@@ -106,8 +106,18 @@ nothing. Its one activity is the guest's home, which draws nothing (see "The hom
   times a second, and at most once a second while the guest dozes. That drawing does not use
   the guest's display, so it goes on while the screen is off. A clock is drawn again at each
   minute (or second) even when nothing asks. A size from the host (`ResizeWidget`) redraws
-  the widget at that size and tells its app the size in dp
-  (`AppWidgetHostView.updateAppWidgetSize`). Pointer input (`WidgetPointer`) goes to the
+  the widget at that size and tells its app the size in dp through the widget's options
+  (`OPTION_APPWIDGET_MIN`/`MAX_WIDTH`/`HEIGHT` and `OPTION_APPWIDGET_SIZES`), exactly the
+  window's size: the widget's view has no padding, so the 8 dp a side that
+  `AppWidgetHostView.updateAppWidgetSize` takes off for a launcher's padding is not taken. A
+  widget is described with a default size in whole launcher cells, as a launcher places it:
+  the cells its app asks for (`targetCellWidth`/`Height`), else the fewest that hold its
+  minimum (n cells hold 70n - 30 dp), each 74 dp with 16 dp between them, at most 5. When a
+  widget's views still reach past its size on any side, as when its text is larger than its
+  app planned for (Android centres a widget's content, so it overflows at the top as much as
+  at the bottom), the agent never sends an image that cuts them off: it draws the widget shrunk just
+  enough to show whole, and describes it again with a default that holds its content (kept
+  across restarts, and only ever grown), so a window the user has not sized grows to it. Pointer input (`WidgetPointer`) goes to the
   widget's view; a click opens its app on the guest's display. The widget IDs outlive the
   agent and the guest, and the size each was drawn at is kept in the agent's preferences.
   Each connection hears of every placed widget (`WidgetUpdated`, then `WidgetList`).
@@ -163,6 +173,14 @@ nothing. Its one activity is the guest's home, which draws nothing (see "The hom
   service is not available. The host answers a position from administrative boundary data it
   keeps (country, province, city, district and neighbourhood, with no street or house number)
   and an address with no positions; nothing goes to a server.
+- **The host's root certificates.** The control daemon adds the root certificates a user or
+  administrator added to the host to Android's system certificates, and takes away those the
+  host no longer names, before the agent hears of it (`HostCertificates`). An app that starts
+  afterwards reads them as it reads Android's own, but a running process keeps every trust
+  anchor it has looked up, so the agent (`network/HostCertificates.kt`) sends
+  `KeyChain.ACTION_TRUST_STORE_CHANGED`. The activity manager then has every process reset its
+  network security config and TrustManager, and a root the host took away stops being trusted
+  at once. It is a protected broadcast, which the agent may send as a persistent app.
 - **Host sleep.** When the host wakes from sleep it sends `HostSleep` with its wall clock, and
   the agent sets the guest's time to it with `AlarmManager.setTime` (the privileged
   `SET_TIME` permission), since the guest's clock stood still or drifted while the host slept.

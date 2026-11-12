@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::manifest::{ImageEntry, Manifest};
-use super::versions::{target_major, Channel};
+use super::versions::{image_order, target_major, Channel};
 
 /// The image a user runs now.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -21,6 +21,16 @@ impl InstalledImage {
             build: entry.build,
         }
     }
+
+    /// Where the image stands among others, newest last ([`image_order`]).
+    pub fn order(&self) -> (u32, u64, u64) {
+        image_order(self.android_major, self.build, &self.version)
+    }
+}
+
+/// Where `entry` stands among other images, newest last ([`image_order`]).
+fn order_of(entry: &ImageEntry) -> (u32, u64, u64) {
+    image_order(entry.android_major, entry.build, &entry.version)
 }
 
 /// What to do after reading the release list.
@@ -70,7 +80,7 @@ pub fn check_for(
             image.version, image.android_major, installed.android_major
         ));
     }
-    if !older && (image.android_major, image.build) <= (installed.android_major, installed.build) {
+    if !older && order_of(image) <= installed.order() {
         return Err(format!(
             "{} is not newer than the installed {}",
             image.version, installed.version
@@ -120,7 +130,7 @@ pub fn decide_for(
             Channel::Major(_) => Some(image.android_major) == target,
         })
         .filter(|image| check_for(installed, image, manifest, failed, older_allowed).is_ok())
-        .max_by_key(|image| (image.android_major, image.build));
+        .max_by_key(|image| order_of(image));
     match newest {
         Some(image) => Decision::Apply(image.clone()),
         None if !manifest.supported_majors.contains(&installed.android_major) => {

@@ -1,14 +1,16 @@
-# Builds SurfaceFlinger, libhwui and libEGL with DSA's GPU device loss recovery (the patches in
-# dsa/guest/framework/patches) for each Android version in dsa/guest/framework/framework-lock.json
+# Builds SurfaceFlinger, libhwui and libEGL with DSA's GPU device loss recovery, and DSA's
+# KeyMint, whose root key of key blobs comes from the DSA host (the patches in
+# dsa/guest/framework/patches), for each Android version in dsa/guest/framework/framework-lock.json
 # and each guest architecture, and keeps them as the artifacts the image release lays over the
 # published build (make-image.py --framework).
 #
-# The image takes these three files in place of the published build's, beside that build's own
-# libraries, so each is built from the exact source of the build the image is made from: the
-# lock pins every project to the commit the build's manifest names, and its release
-# configuration, Clang and Rust. It runs on GitHub's standard runners: like the translator
-# build, it fetches only the projects the lock lists (each at its pinned commit, the large ones
-# in part) and builds only the three install paths.
+# The image takes the three framework files in place of the published build's, and the KeyMint
+# in place of its KeyMint APEX, beside that build's own libraries, so each is built from the
+# exact source of the build the image is made from: the lock pins every project to the commit
+# the build's manifest names, and its release configuration, Clang and Rust. It runs on GitHub's
+# standard runners: like the translator build, it fetches only the projects the lock lists (each
+# at its pinned commit, the large ones in part) and builds only the install paths the image
+# takes (framework_lock.py outputs).
 #
 # It runs by hand, and when the lock or the patches change on develop. Each build's compiler
 # cache is kept between runs, also when a run fails or times out, so a run that stops partway
@@ -149,7 +151,7 @@ jobs:
           du -sh "$DSA_TRANSLATOR_WORK"/aosp/prebuilts/* 2>/dev/null | sort -h | tail -5
           df -h / /mnt
 
-      - name: Build SurfaceFlinger, libhwui and libEGL
+      - name: Build SurfaceFlinger, libhwui, libEGL and the KeyMint
         id: build
         timeout-minutes: 300
         run: |

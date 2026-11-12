@@ -168,7 +168,7 @@ fn fr2_the_published_image_boots_under_crosvm_until_its_daemon_connects() {
     let cid = test_cid(1);
     let hub = VsockHub::bind(VMADDR_CID_ANY, CONTROL_PORT).expect("binding the control port");
     let mut daemon = hub.listener(cid, true);
-    let mut launcher = launcher(&dir, crosvm, cid, files, (3072, 4096));
+    let mut launcher = launcher(&dir, crosvm, cid, files, (2048, 4096));
     let secret = BootSecret::generate().unwrap();
     let started = Instant::now();
     launcher

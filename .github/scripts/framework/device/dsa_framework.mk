@@ -1,4 +1,5 @@
-# A minimal product for building SurfaceFlinger, libhwui and libEGL with DSA's patches. It
+# A minimal product for building SurfaceFlinger, libhwui, libEGL and DSA's KeyMint (dsa-keymint
+# and the libssl it needs) with DSA's patches. It
 # starts from the product AOSP uses to build modules on their own (module_common.mk, a Soong
 # only build) instead of Cuttlefish's phone, so product configuration reads no device, vendor
 # or app makefiles, none of which the sparse checkout has. None of the Cuttlefish product's

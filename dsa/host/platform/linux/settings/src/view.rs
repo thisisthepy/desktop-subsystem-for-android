@@ -7,9 +7,9 @@ use crate::api::{Failure, Problem};
 use crate::i18n::{tr, trf};
 use crate::model::{
     AdbAutoConnectState, AndroidVersion, App, AppWindow, ArmTranslation, Backup, BackupJob,
-    DpiScaling, Gapps, GappsState, GuestMemory, HostRole, KeyProtection, KeyProtectionShown,
-    Memory, MemoryShare, Network, NetworkMode, Outcome, ProgramUpdateAnswer, ProgramUpdatePhase,
-    State, Status, ALL_FOLDERS,
+    DnsResolver, DpiScaling, Gapps, GappsState, GuestMemory, HostRole, ImportedCertificate,
+    KeyProtection, KeyProtectionShown, Memory, MemoryShare, Network, NetworkMode, Outcome,
+    ProgramUpdateAnswer, ProgramUpdatePhase, State, Status, ALL_FOLDERS,
 };
 
 /// The dsa commands the Advanced page's command line group shows, each on its own row with a
@@ -709,6 +709,7 @@ pub fn install_reason(status: &str) -> String {
         "encrypted-bundle" => "the bundle is encrypted, so its APKs cannot be read. Get the app as an APK, or as a newer bundle.",
         "split-signature-mismatch" => "a split APK of the bundle is signed with another key than its base APK, so Android would refuse it.",
         "invalid-bundle" => "the bundle is not one app that Android can install.",
+        "unsupported-abi" => "the app's native code is none that DSA's Android runs, which runs 64-bit code only: x86_64, and arm64-v8a through ARM translation. Get the app's x86_64 or arm64-v8a build.",
         _ => "Android did not install the app.",
     })
 }
@@ -1009,6 +1010,26 @@ pub fn network_mode_text(network: Option<&Network>) -> String {
     })
 }
 
+/// Who answers Android's DNS queries: this computer's resolver, or, when that does not answer,
+/// the network's DNS servers. A service that does not say shows the servers.
+pub fn network_dns_text(network: Option<&Network>) -> String {
+    let servers = list_or_none(
+        network
+            .map(|n| n.dns_servers.as_slice())
+            .unwrap_or_default(),
+    );
+    match network.map(|n| n.dns_resolver) {
+        Some(DnsResolver::Host) => tr(
+            "Answered by this computer's resolver, so its hosts file, VPN and DNS filters apply to Android apps.",
+        ),
+        Some(DnsResolver::Network) => trf(
+            "This computer's resolver does not answer, so Android asks the network's DNS servers: {0}",
+            &[servers.as_str()],
+        ),
+        _ => servers,
+    }
+}
+
 /// A list of addresses, or "None".
 pub fn list_or_none(items: &[String]) -> String {
     if items.is_empty() {
@@ -1026,6 +1047,54 @@ pub fn network_restart_needed(advanced_setting: bool, network: Option<&Network>)
         Some(NetworkMode::Advanced) => !advanced_setting,
         _ => false,
     }
+}
+
+/// Where an added root certificate was found, in the user's language. A source this app does
+/// not know, from a newer service, is shown as the service names it.
+pub fn certificate_source_label(source: &str) -> String {
+    match source {
+        "machine" => tr("This computer's trusted root certificates"),
+        "machine_group_policy" => tr("This computer's group policy"),
+        "machine_enterprise" => tr("This computer's enterprise certificates"),
+        "user" => tr("Your trusted root certificates"),
+        "user_group_policy" => tr("Your group policy"),
+        "admin" => tr("This computer's administrator trust settings"),
+        "system" => tr("Added to the system's certificate store"),
+        other => other.to_string(),
+    }
+}
+
+/// The title of an added root certificate's row: who it is for, or its fingerprint when the
+/// service could not read a name.
+pub fn certificate_title(certificate: &ImportedCertificate) -> String {
+    if !certificate.subject.is_empty() {
+        certificate.subject.clone()
+    } else if !certificate.sha256.is_empty() {
+        trf("SHA-256 {0}", &[&certificate.sha256])
+    } else {
+        tr("A certificate without a name")
+    }
+}
+
+/// What an added root certificate's row says under its title: who signed it, where it was
+/// found, and the file or store, each on its own line.
+pub fn certificate_detail(certificate: &ImportedCertificate) -> String {
+    let mut lines = Vec::new();
+    if !certificate.issuer.is_empty() {
+        lines.push(trf("Issued by {0}", &[&certificate.issuer]));
+    }
+    if !certificate.source.is_empty() {
+        lines.push(certificate_source_label(&certificate.source));
+    }
+    if !certificate.location.is_empty() {
+        lines.push(certificate.location.clone());
+    }
+    lines.join("\n")
+}
+
+/// What the list of added root certificates says when it has none.
+pub fn certificates_empty_text() -> String {
+    tr("No added root certificates were found on this computer.")
 }
 
 /// The fingerprint Android reports from its next start, from the values on the page: the

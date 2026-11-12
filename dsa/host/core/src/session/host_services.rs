@@ -1,6 +1,7 @@
 //! The host's system services a session serves its guest: app data backups
-//! ([`crate::backup`]), passkeys ([`crate::passkeys`]) and the KeyMint root key
-//! ([`crate::keymint_root`]).
+//! ([`crate::backup`]), passkeys ([`crate::passkeys`]), the KeyMint root key
+//! ([`crate::keymint_root`]) and the root certificates added on the host
+//! ([`crate::host_certificates`]).
 //!
 //! Each is given to the session by the platform, which supplies what names a host API: the
 //! credential store, the HTTPS fetch, the desktop session that runs the passkey prompt.
@@ -23,6 +24,7 @@ use crate::backup::{
     refusal, BackupReport, BackupService, BACKUP_OFF, BACKUP_RUN_WAIT, PACKAGE_MANAGER,
     RESTORE_WAIT,
 };
+use crate::host_certificates::{self, FoundCertificate, HostRootStore, ImportedCertificate};
 use crate::host_keys::{HostKeyStore, KeyProtection, KeyPurpose};
 use crate::keymint_root::{self, KEYMINT_WAIT};
 use crate::passkeys::{CeremonyResult, PasskeyEvent, PasskeyService};
@@ -40,6 +42,10 @@ pub(super) struct HostServices {
     keymint_given: bool,
     /// Why the latest boot that asked got no root key; `None` when it got one.
     keymint_problem: Option<String>,
+    /// The root certificates added on the host, as the platform's stores last held them.
+    host_certificates: Vec<FoundCertificate>,
+    /// Whether the user turned off Android's trust in them. On unless they did.
+    host_certificates_off: bool,
 }
 
 /// How the KeyMint root key is protected, and why the latest start of Android got none.
@@ -72,6 +78,37 @@ impl Shared {
         Body::BackupSetting(control::BackupSetting {
             enabled: backup.is_some_and(|backup| backup.enabled()),
         })
+    }
+
+    /// What the guest's control daemon is told of the root certificates added on the host: each
+    /// of them while the user lets Android trust them, and none (so it takes away those it
+    /// added) while they do not.
+    pub(super) fn host_certificates_body(&self) -> Body {
+        let services = self.services();
+        let enabled = !services.host_certificates_off;
+        Body::HostCertificates(control::HostCertificates {
+            enabled,
+            certificates: if enabled {
+                services
+                    .host_certificates
+                    .iter()
+                    .map(|certificate| certificate.der.clone())
+                    .collect()
+            } else {
+                Vec::new()
+            },
+        })
+    }
+
+    /// Tells a running guest the root certificates added on the host now. A guest that cannot
+    /// hear it now is told when its daemon or its agent connects, or when it is resumed.
+    fn send_host_certificates(&self) {
+        let frame = dsa_protocol::encode(&control::Envelope {
+            body: Some(self.host_certificates_body()),
+        });
+        if let Some(Err(error)) = self.send_direct(&frame) {
+            eprintln!("host certificates: the guest was not told: {error}");
+        }
     }
 
     /// Android stopped: the backup and the passkeys let go of what is under way, and the next
@@ -156,6 +193,60 @@ impl Session {
     pub fn serve_passkeys(&self, service: Arc<PasskeyService>) {
         service.attach(reply_of(&self.shared, &self.commands));
         self.shared.services().passkeys = Some(service);
+    }
+
+    /// Has Android trust, as system certificates, the root certificates a user or an
+    /// administrator added to `store`, the platform's trust stores. The store is read now and
+    /// followed from then on: each change reaches a running guest at once.
+    pub fn serve_host_certificates(&self, store: Arc<dyn HostRootStore>) {
+        host_certificates::watch(
+            store,
+            Arc::downgrade(&self.shared),
+            |shared: &Shared, found| {
+                let changed = {
+                    let mut services = shared.services();
+                    let changed = services.host_certificates != found;
+                    services.host_certificates = found;
+                    changed && !services.host_certificates_off
+                };
+                if changed {
+                    shared.send_host_certificates();
+                }
+            },
+        );
+    }
+
+    /// Lets Android trust the root certificates added on the host (`on`, the default), or
+    /// takes them away from it, as the user's setting says. A running guest follows at once.
+    pub fn trust_host_certificates(&self, on: bool) {
+        let changed = {
+            let mut services = self.shared.services();
+            let changed = services.host_certificates_off == on;
+            services.host_certificates_off = !on;
+            changed
+        };
+        if changed {
+            eprintln!(
+                "host certificates: Android {} the root certificates added on this computer",
+                if on { "trusts" } else { "no longer trusts" }
+            );
+            send_quietly(
+                &self.shared,
+                &self.commands,
+                self.shared.host_certificates_body(),
+            );
+        }
+    }
+
+    /// The root certificates added on the host that the platform found, whether or not the
+    /// user lets Android trust them.
+    pub fn host_certificates(&self) -> Vec<ImportedCertificate> {
+        self.shared
+            .services()
+            .host_certificates
+            .iter()
+            .map(host_certificates::imported)
+            .collect()
     }
 
     /// Keeps the root key of the guest's KeyMint in `store`, made there on first use.

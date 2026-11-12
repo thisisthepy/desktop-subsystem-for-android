@@ -93,6 +93,12 @@
 (allow dsa_channeld init (unix_stream_socket (connectto)))
 (allow dsa_channeld dsa_memory_prop (property_service (set)))
 (allow dsa_channeld dsa_memory_prop (file (read open getattr map)))
+;
+; The zram writeback reads zram's backing device and statistics (backing_dev, mm_stat,
+; bd_stat), to skip a guest whose zram has no backing file and to log and count what each run
+; wrote against the day's budget. It writes nothing there: init does.
+(allow dsa_channeld sysfs_zram (dir (search)))
+(allow dsa_channeld sysfs_zram (file (read open getattr)))
 
 ; The gradual trim skips a guest under memory pressure, which the daemon reads from the
 ; kernel's pressure stall information.
@@ -182,3 +188,82 @@
 (allow hal_keymint_server device (dir (search)))
 (allow hal_keymint_server dsa_keymint_key_file (dir (search getattr)))
 (allow hal_keymint_server dsa_keymint_key_file (file (read open getattr)))
+
+; The guest's DNS, answered by the host's resolver. The daemon listens on the loopback
+; addresses (port 5553, UDP and TCP), where the packet filter sends every DNS query a program
+; makes while the host answers, and hands each query to the host on the DNS port, which the
+; vsock rules above already cover. The address and the port carry no label of their own.
+(allow dsa_channeld self (udp_socket (create bind read write getattr setattr getopt setopt shutdown)))
+(allow dsa_channeld self (tcp_socket (create bind listen accept read write getattr setattr getopt setopt shutdown)))
+(allow dsa_channeld node (udp_socket (node_bind)))
+(allow dsa_channeld node (tcp_socket (node_bind)))
+(allow dsa_channeld port (udp_socket (name_bind)))
+(allow dsa_channeld port (tcp_socket (name_bind)))
+
+; vendor.dsa.dns (vendor_property_contexts): the daemon sets it to "on" while the host answers
+; DNS queries and to "off" when it stays unreachable. Nothing else may set it.
+(type dsa_dns_prop)
+(roletype object_r dsa_dns_prop)
+(typeattributeset property_type (dsa_dns_prop))
+(typeattributeset vendor_property_type (dsa_dns_prop))
+(allow dsa_channeld dsa_dns_prop (property_service (set)))
+(allow dsa_channeld dsa_dns_prop (file (read open getattr map)))
+(allow vendor_init dsa_dns_prop (file (read open getattr map)))
+; adb's shell reads it too, so `getprop vendor.dsa.dns` says whether the host answers rather
+; than an empty value for a refused read.
+(allow shell dsa_dns_prop (file (read open getattr map)))
+
+; The DNS redirect: init runs dsa-channeld --dns-redirect as root in this domain when
+; vendor.dsa.dns changes (dsa-channeld.rc). It reads the property and runs iptables and
+; ip6tables (system files) to fill or empty its own nat chain, dsa_dns. Those programs change
+; the packet filter through a raw socket, which needs net_admin and net_raw, and wait on the
+; packet filter's lock file (/system/etc/xtables.lock) so they never race netd. Nothing else
+; is granted: the domain touches no file but those it runs and that lock.
+(type dsa_dns_redirect)
+(roletype object_r dsa_dns_redirect)
+(typeattributeset domain (dsa_dns_redirect))
+(allow init dsa_dns_redirect (process (transition siginh rlimitinh)))
+(dontaudit init dsa_dns_redirect (process (noatsecure)))
+(allow dsa_dns_redirect dsa_channeld_exec (file (entrypoint read getattr map execute open)))
+(allow dsa_dns_redirect init (fd (use)))
+(allow dsa_dns_redirect kmsg_device (chr_file (write append getattr)))
+(allow dsa_dns_redirect kmsg_debug_device (chr_file (write append getattr)))
+(allow dsa_dns_redirect dsa_dns_prop (file (read open getattr map)))
+(allow dsa_dns_redirect system_file (dir (search getattr)))
+(allow dsa_dns_redirect system_file (file (read open getattr map execute execute_no_trans lock)))
+(allow dsa_dns_redirect system_lib_file (dir (search getattr)))
+(allow dsa_dns_redirect system_lib_file (file (read open getattr map execute)))
+(allow dsa_dns_redirect system_linker_exec (file (read open getattr map execute)))
+(allow dsa_dns_redirect self (capability (net_admin net_raw)))
+(allow dsa_dns_redirect self (rawip_socket (create getopt setopt read write)))
+; The programs' standard streams are pipes the helper reads their errors from.
+(allow dsa_dns_redirect self (fifo_file (read write getattr ioctl)))
+; iptables asks the kernel to load a table's module first, which this kernel has built in.
+(dontaudit dsa_dns_redirect self (capability (sys_module)))
+(dontaudit dsa_dns_redirect kernel (system (module_request)))
+; The memory report: dsa-channeld --memory-report, which init runs as root while developer
+; mode is on and the shell asks (dsa-channeld.rc). It reads what the guest kernel's memory is
+; made of and writes it to the kernel log; nothing it may touch can be written. root and these
+; reads are what /proc/slabinfo and /proc/vmallocinfo need. Every process's status and command
+; line under /proc (each labelled with the process's own domain, at the app's own MLS level for
+; an app, hence mlstrustedsubject), the root cgroup's statistics, and dm-bufio's cache size.
+(type dsa_memory_report)
+(roletype object_r dsa_memory_report)
+(typeattributeset domain (dsa_memory_report))
+(typeattributeset mlstrustedsubject (dsa_memory_report))
+(allow init dsa_memory_report (process (transition siginh rlimitinh)))
+(dontaudit init dsa_memory_report (process (noatsecure)))
+(allow dsa_memory_report dsa_channeld_exec (file (entrypoint read getattr map execute open)))
+(allow dsa_memory_report init (fd (use)))
+(allow dsa_memory_report kmsg_device (chr_file (write append getattr)))
+(allow dsa_memory_report kmsg_debug_device (chr_file (write append getattr)))
+(allow dsa_memory_report proc_meminfo (file (read open getattr)))
+(allow dsa_memory_report proc_slabinfo (file (read open getattr)))
+(allow dsa_memory_report proc_vmallocinfo (file (read open getattr)))
+(allow dsa_memory_report proc (dir (search read open getattr)))
+(allow dsa_memory_report domain (dir (search getattr)))
+(allow dsa_memory_report domain (file (read open getattr)))
+(allow dsa_memory_report cgroup_v2 (dir (search)))
+(allow dsa_memory_report cgroup_v2 (file (read open getattr)))
+(allow dsa_memory_report sysfs (dir (search)))
+(allow dsa_memory_report sysfs (file (read open getattr)))

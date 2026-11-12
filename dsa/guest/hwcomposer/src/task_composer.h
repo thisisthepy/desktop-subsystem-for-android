@@ -66,8 +66,11 @@ struct Frame {
     std::vector<FrameLayer> layers;
     BufferRef clientTarget;
     UniqueFd clientTargetFence;
-    // Every gralloc buffer SurfaceFlinger may still show again: the ones in the slots.
+    // Every gralloc buffer SurfaceFlinger may still show again: the ones in the layers' slots.
     std::set<uint32_t> liveBuffers;
+    // The buffers in the client target's slots, held only while SurfaceFlinger composes into
+    // them (clientTargetHeld).
+    std::set<uint32_t> clientBuffers;
 };
 
 class TaskComposer {
@@ -134,6 +137,10 @@ class TaskComposer {
     // a minimized window kept two frames of its size on the host for nothing. A layer gone
     // for a moment (an activity being replaced) keeps them.
     static constexpr int64_t kReleaseWithoutLayersMs = 2000;
+    // How long after SurfaceFlinger last composed something itself the client target's
+    // ColorBuffers are kept. A frame is asked for when it is up, on which SurfaceFlinger lets
+    // go of its own buffers too.
+    static constexpr int64_t kReleaseClientTargetMs = 2000;
 
    private:
     // Lets go of the ColorBuffers of tasks without a layer for kReleaseWithoutLayersMs, and
@@ -165,6 +172,9 @@ class TaskComposer {
     // Buffers copied up for a frame not yet composed: a frame still being composed does not
     // know them, and must not let go of their ColorBuffers.
     std::set<uint32_t> mUploadedAhead;
+    // When SurfaceFlinger last composed into the client target, and when the frame that lets
+    // go of it is due.
+    ClientTargetUse mClientTarget{kReleaseClientTargetMs};
     CpuUploads mUploads;
     bool mWarnedNoDisplay = false;
 

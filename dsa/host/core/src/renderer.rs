@@ -29,8 +29,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use dsa_protocol::renderer::types::{
-    envelope::Body, MemoryReport, Note, RendererLog, Role, Start, Started, Stop, Target,
-    TargetRequest,
+    envelope::Body, DeviceState, MemoryReport, Note, RendererLog, Role, Start, Started, Stop,
+    Target, TargetRequest,
 };
 use dsa_protocol::renderer::{
     decode_body, local_hello, renderer_connect, send_on, window_manager_accept,
@@ -760,6 +760,7 @@ impl<H: PartialEq + Copy> TextureBook<H> {
 pub struct HeldTargets<H> {
     held: HashMap<u32, Vec<(u64, H)>>,
     last: HashMap<u32, u64>,
+    keep: usize,
 }
 
 impl<H> Default for HeldTargets<H> {
@@ -767,6 +768,7 @@ impl<H> Default for HeldTargets<H> {
         HeldTargets {
             held: HashMap::new(),
             last: HashMap::new(),
+            keep: TEXTURES_PER_DISPLAY,
         }
     }
 }
@@ -774,6 +776,17 @@ impl<H> Default for HeldTargets<H> {
 impl<H: Copy> HeldTargets<H> {
     pub fn new() -> HeldTargets<H> {
         HeldTargets::default()
+    }
+
+    /// Holds at most `keep` textures per display (at least one). A window manager that gives
+    /// each display one texture at a time, and a new one only when the display outgrows it,
+    /// has the renderer keep one: an older texture it holds would stay alive in the renderer
+    /// with nothing to use it, a whole buffer of the window's last size for every resize.
+    pub fn keeping(keep: usize) -> HeldTargets<H> {
+        HeldTargets {
+            keep: keep.max(1),
+            ..HeldTargets::default()
+        }
     }
 
     /// The IDs of the textures held for `display_id`, for the next request.
@@ -808,7 +821,7 @@ impl<H: Copy> HeldTargets<H> {
         };
         list.push((target.texture_id, opened));
         let mut released = Vec::new();
-        while list.len() > TEXTURES_PER_DISPLAY {
+        while list.len() > self.keep {
             released.push(list.remove(0).1);
         }
         self.last.insert(display_id, target.texture_id);
@@ -941,6 +954,137 @@ impl WindowManagerLink {
     }
 }
 
+/// How often the renderer process looks whether its Vulkan device was lost or made again.
+/// Reading the two counts costs two atomic loads, and the window manager hears of a GPU reset
+/// within this of the renderer finding it.
+pub const DEVICE_STATE_POLL: Duration = Duration::from_millis(50);
+
+/// Which guest VM a renderer serves, and whether it should end because that VM is gone.
+///
+/// A renderer that served a VM keeps what that VM's guests left behind after they are gone:
+/// on the owner's PC (Intel Arc) its private memory read 336 and then 456 MiB with no guest
+/// connected, where a fresh renderer starts at 199 MiB, and one renderer served two Android
+/// boots in a row. When the window manager says the VM is gone (no VM, or another one), the
+/// renderer ends and the window manager starts a fresh one, which the next VM's guests
+/// connect to as they do after a renderer crash.
+#[derive(Debug, Default)]
+pub struct ServedVm {
+    served: Option<String>,
+}
+
+impl ServedVm {
+    pub fn new() -> ServedVm {
+        ServedVm::default()
+    }
+
+    /// The window manager says the guest VM is now `vm` (`None`: there is none). True when
+    /// the VM this renderer served is gone, so it should end. A renderer that has not served
+    /// a VM yet takes this one.
+    pub fn told(&mut self, vm: Option<&str>) -> bool {
+        match (&self.served, vm) {
+            (None, Some(id)) => {
+                self.served = Some(id.to_string());
+                false
+            }
+            (None, None) => false,
+            (Some(served), Some(id)) => served != id,
+            (Some(_), None) => true,
+        }
+    }
+}
+
+/// What the window manager was last told of the renderer's device, so a change is sent once.
+///
+/// A GPU reset lost the renderer's device 13 s before the window manager's own Direct3D
+/// device failed on the owner's PC: the window manager read the renderer's count only when
+/// both ran in one process. The counts now cross to the window manager the moment the
+/// renderer finds the loss.
+#[derive(Debug, Default)]
+pub struct DeviceWatch {
+    told: (u64, u64),
+}
+
+impl DeviceWatch {
+    pub fn new() -> DeviceWatch {
+        DeviceWatch::default()
+    }
+
+    /// The renderer found its device lost `losses` times and made it again `generation`
+    /// times: what to send, or `None` when the window manager knows it already. Nothing is
+    /// sent for a renderer that never lost its device.
+    pub fn look(&mut self, losses: u64, generation: u64) -> Option<DeviceState> {
+        let now = (losses, generation);
+        let before = std::mem::replace(&mut self.told, now);
+        (now != before).then_some(DeviceState { losses, generation })
+    }
+}
+
+/// The window manager's line for a renderer's DeviceState.
+pub fn describe_device_state(state: &DeviceState) -> String {
+    if state.losses > state.generation {
+        format!(
+            "the graphics renderer found its GPU device lost (loss {}); task windows are kept \
+             while it makes a new one, and the guest's calls on the lost one fail at once",
+            state.losses
+        )
+    } else {
+        format!(
+            "the graphics renderer made its GPU device again (number {} since it started)",
+            state.generation
+        )
+    }
+}
+
+/// What a window manager keeps of its renderer's DeviceState messages: a count that changes
+/// with each one, which the window manager follows as a GPU reset. It is kept across renderer
+/// restarts, whose own counts start from zero again, so it never goes back to a value already
+/// seen.
+#[derive(Debug, Default)]
+pub struct DeviceChanges(std::sync::atomic::AtomicU64);
+
+impl DeviceChanges {
+    pub fn new() -> DeviceChanges {
+        DeviceChanges::default()
+    }
+
+    /// The renderer sent `state`: the count changes, and the line for the log is returned.
+    pub fn told(&self, state: &DeviceState) -> String {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        describe_device_state(state)
+    }
+
+    /// The count: any change since the last look is a GPU reset.
+    pub fn count(&self) -> u64 {
+        self.0.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+/// One number for the renderer's device that goes up the moment the renderer finds it lost
+/// and again when it has made it again: the window manager takes any change as a GPU reset.
+pub fn device_resets(state: &DeviceState) -> u64 {
+    state.losses.saturating_add(state.generation)
+}
+
+/// Tells the window manager on `link` of the renderer's device, as `read` gives its counts
+/// (losses, then generation), every [`DEVICE_STATE_POLL`] until the window manager is gone.
+pub fn follow_device_state(
+    link: Arc<WindowManagerLink>,
+    read: Box<dyn Fn() -> (u64, u64) + Send>,
+) -> std::io::Result<thread::JoinHandle<()>> {
+    thread::Builder::new()
+        .name("dsa-gfx-device-state".into())
+        .spawn(move || {
+            let mut watch = DeviceWatch::new();
+            while !link.is_gone() {
+                let (losses, generation) = read();
+                if let Some(state) = watch.look(losses, generation) {
+                    link.send(Body::DeviceState(state));
+                }
+                thread::sleep(DEVICE_STATE_POLL);
+            }
+        })
+}
+
 /// The renderer's side of the handshake: says hello on `connection` as `build`, and waits for
 /// the window manager's `Start`.
 pub fn open_renderer(connection: &mut dyn Connection, build: &str) -> Result<Start, String> {
@@ -986,6 +1130,60 @@ mod tests {
         }
         assert_eq!(backoff.ended(t), RestartBackoff::LONGEST);
         assert_eq!(backoff.restarts(), 24);
+    }
+
+    #[test]
+    fn nfr5_the_window_manager_is_told_of_a_lost_device_at_once_and_once() {
+        let mut watch = DeviceWatch::new();
+        // A renderer that never lost its device says nothing.
+        assert_eq!(watch.look(0, 0), None);
+        assert_eq!(watch.look(0, 0), None);
+        // The loss is told the moment the renderer finds it, before the device is made again.
+        let lost = watch.look(1, 0).expect("the loss is told");
+        assert_eq!((lost.losses, lost.generation), (1, 0));
+        assert_eq!(watch.look(1, 0), None);
+        // And the new device once it is made.
+        let made = watch.look(1, 1).expect("the new device is told");
+        assert_eq!((made.losses, made.generation), (1, 1));
+        assert_eq!(watch.look(1, 1), None);
+    }
+
+    #[test]
+    fn nfr5_each_loss_and_each_new_device_changes_what_the_window_manager_follows() {
+        let counts = [(0, 0), (1, 0), (1, 1), (2, 1), (2, 2)];
+        let resets: Vec<u64> = counts
+            .iter()
+            .map(|&(losses, generation)| device_resets(&DeviceState { losses, generation }))
+            .collect();
+        assert!(resets.windows(2).all(|pair| pair[1] > pair[0]));
+    }
+
+    #[test]
+    fn nfr5_every_device_state_a_renderer_sends_is_a_change_the_window_manager_follows() {
+        let changes = DeviceChanges::new();
+        let mut seen = vec![changes.count()];
+        // A loss, the new device, then a restarted renderer that counts from zero again.
+        for (losses, generation) in [(1, 0), (1, 1), (1, 0), (1, 1)] {
+            let line = changes.told(&DeviceState { losses, generation });
+            assert!(line.starts_with("the graphics renderer "), "{line}");
+            seen.push(changes.count());
+        }
+        assert!(seen.windows(2).all(|pair| pair[1] > pair[0]));
+        let lost = describe_device_state(&DeviceState {
+            losses: 3,
+            generation: 2,
+        });
+        assert!(
+            lost.contains("lost (loss 3); task windows are kept while"),
+            "{lost}"
+        );
+    }
+
+    #[test]
+    fn nfr5_the_device_state_is_looked_at_well_within_androids_input_timeout() {
+        // Android ends an app whose input goes unanswered for five seconds; the window
+        // manager must know of the reset long before.
+        assert!(DEVICE_STATE_POLL <= Duration::from_millis(100));
     }
 
     #[test]

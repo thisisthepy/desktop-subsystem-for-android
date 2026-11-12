@@ -54,6 +54,14 @@ pub fn app_content(pixels: &[u8], stride: usize, content: (u32, u32), band: u32)
     })
 }
 
+/// The rows of a task's frame that a band of `band` client pixels covers in a window that
+/// shows the frame at `frame_scale` (window pixels per task pixels). The frame read back is
+/// the task's, in its own pixels, so a task that keeps its density on a display of another
+/// scale has fewer or more rows under the band than the band has pixels.
+pub fn band_rows(band: u32, frame_scale: (u32, u32)) -> u32 {
+    dsa_host_core::compositor::window_sizing::to_task_length(band, frame_scale)
+}
+
 /// A local date and time, to the second.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LocalTime {
@@ -352,6 +360,28 @@ mod tests {
         // Nothing under the band, or too few pixels.
         assert_eq!(app_content(&pixels, stride, (2, 3), 3), None);
         assert_eq!(app_content(&pixels[..20], stride, (2, 3), 0), None);
+    }
+
+    #[test]
+    fn fr22_a_screenshot_of_a_window_at_another_scale_leaves_out_the_bands_rows_of_the_frame() {
+        use dsa_host_core::compositor::window_sizing::{density_for_dpi, scale_between};
+        // 1:1, the band's pixels are the frame's rows.
+        assert_eq!(band_rows(40, (1, 1)), 40);
+        // A task kept at 130 dpi (100%) shown at 164 dpi (125%): 40 client pixels of band are
+        // 32 rows of the frame.
+        let kept = scale_between(density_for_dpi(120), density_for_dpi(96));
+        assert_eq!(kept, (82, 65));
+        assert_eq!(band_rows(40, kept), 32);
+        // A task kept at a Retina display's density shown on a display at 1x: 28 client
+        // pixels are 56 rows.
+        let retina_on_1x = scale_between(density_for_dpi(96), density_for_dpi(192));
+        assert_eq!(band_rows(28, retina_on_1x), 56);
+        // And the screenshot cuts those rows: a 2x6 frame with a band of 4 pixels at 2 window
+        // pixels per task pixel keeps its bottom 4 rows.
+        let stride = 8;
+        let pixels = vec![0u8; stride * 6];
+        let shot = app_content(&pixels, stride, (2, 6), band_rows(4, (2, 1))).unwrap();
+        assert_eq!(shot.height, 4);
     }
 
     #[test]

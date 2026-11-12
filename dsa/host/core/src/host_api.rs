@@ -272,6 +272,12 @@ pub trait UserAndroid: Send + Sync {
     fn adb_auto_connect_state(&self) -> AutoConnectState {
         AutoConnectState::Off
     }
+    /// Whether this host's resolver answers this Android's DNS queries now: `Some(false)` when
+    /// Android runs but asks its network's DNS servers itself, `None` when it cannot be said
+    /// (Android is not running, or this host does not answer DNS queries at all).
+    fn dns_answered_by_host(&self) -> Option<bool> {
+        None
+    }
     /// Sends a file to this Android, which asks the user which app opens or takes it.
     fn open_file(&self, file: &FileTransfer) -> Result<(), TaskRequestError> {
         let _ = file;
@@ -283,6 +289,16 @@ pub trait UserAndroid: Send + Sync {
     /// while `on`, as the user's file sharing setting says.
     fn share_folders(&self, on: bool, folders: Vec<String>) {
         let _ = (on, folders);
+    }
+    /// Lets this Android trust the root certificates a user or an administrator added to the
+    /// computer (`on`), or takes them away, as the user's setting says.
+    fn trust_host_certificates(&self, on: bool) {
+        let _ = on;
+    }
+    /// The root certificates added to the computer that this Android is given while the user's
+    /// setting is on. Empty when this Android reads no trust store.
+    fn host_certificates(&self) -> Vec<crate::host_certificates::ImportedCertificate> {
+        Vec::new()
     }
     /// Sets the user's root elevation settings: the computer's switch and the apps with a
     /// level other than off. The running Android is told at once (see
@@ -935,6 +951,9 @@ impl UserAndroid for Session {
     fn adb_auto_connect_state(&self) -> AutoConnectState {
         Session::adb_auto_connect_state(self)
     }
+    fn dns_answered_by_host(&self) -> Option<bool> {
+        Session::dns_answered_by_host(self)
+    }
     fn watch_links(&self) -> Option<Receiver<String>> {
         Some(Session::watch_links(self))
     }
@@ -943,6 +962,12 @@ impl UserAndroid for Session {
     }
     fn share_folders(&self, on: bool, folders: Vec<String>) {
         Session::share_folders(self, on, folders)
+    }
+    fn trust_host_certificates(&self, on: bool) {
+        Session::trust_host_certificates(self, on)
+    }
+    fn host_certificates(&self) -> Vec<crate::host_certificates::ImportedCertificate> {
+        Session::host_certificates(self)
     }
     fn set_root_elevation_config(&self, on: bool, apps: Vec<crate::root_elevation::AppLevel>) {
         Session::set_root_elevation_config(self, on, apps)
@@ -1942,6 +1967,9 @@ pub struct SettingsReport {
     /// mode is on, "unavailable" while root elevation is off, and empty while developer mode is
     /// off (adb is closed) or from a service that does not report it.
     pub adb_shell_root: String,
+    /// The root certificates added to the computer that the caller's Android is given while
+    /// `settings.host_certificates` is on. Empty from a service that does not report them.
+    pub imported_certificates: Vec<crate::host_certificates::ImportedCertificate>,
 }
 
 /// How a user's Android reaches the network.
@@ -1955,6 +1983,9 @@ pub struct NetworkStatus {
     pub gateway: String,
     /// Why the network is not what the settings ask for, if it is not.
     pub problem: Option<String>,
+    /// Who answers the guest's DNS queries: [`NetworkStatus::DNS_HOST`],
+    /// [`NetworkStatus::DNS_NETWORK`], or empty when nobody can say yet.
+    pub dns_resolver: String,
 }
 
 impl NetworkStatus {
@@ -1964,6 +1995,11 @@ impl NetworkStatus {
     pub const ADVANCED: &'static str = "advanced";
     /// No network, because Android is not running.
     pub const OFF: &'static str = "off";
+    /// The host's resolver answers the guest's names, so the host's hosts file, VPN and DNS
+    /// filters apply to Android's apps.
+    pub const DNS_HOST: &'static str = "host";
+    /// The host's resolver does not answer, so Android asks `dns_servers` itself.
+    pub const DNS_NETWORK: &'static str = "network";
 
     pub fn off() -> NetworkStatus {
         NetworkStatus {
@@ -1979,6 +2015,7 @@ impl NetworkStatus {
             dns_servers: self.dns_servers.clone(),
             gateway: self.gateway.clone(),
             problem: self.problem.clone().unwrap_or_default(),
+            dns_resolver: self.dns_resolver.clone(),
         }
     }
 
@@ -1989,6 +2026,7 @@ impl NetworkStatus {
             dns_servers: status.dns_servers,
             gateway: status.gateway,
             problem: Some(status.problem).filter(|p| !p.is_empty()),
+            dns_resolver: status.dns_resolver,
         }
     }
 }
@@ -3824,7 +3862,9 @@ impl HostApiService {
         })
     }
 
-    /// The widget with its placement: the one kept for it, else a new one, which is kept.
+    /// The widget with its placement: the one kept for it, brought up to date with what the
+    /// widget allows and needs now ([`widgets::refreshed_placement`]), else a new one. Either
+    /// is kept.
     fn placed(
         &self,
         user: &str,
@@ -3833,7 +3873,25 @@ impl HostApiService {
         kept: &mut std::collections::BTreeMap<i32, Placement>,
     ) -> Widget {
         let placement = match kept.get(&widget_id) {
-            Some(placement) => *placement,
+            Some(placement) => {
+                let refreshed = widgets::refreshed_placement(&provider, *placement);
+                if refreshed != *placement {
+                    eprintln!(
+                        "widgets: widget {widget_id} ({}) goes from {}x{} dp to {}x{} dp, as \
+                         it allows and needs now",
+                        provider.provider,
+                        placement.width_dp,
+                        placement.height_dp,
+                        refreshed.width_dp,
+                        refreshed.height_dp
+                    );
+                    if let Err(why) = self.placements.set(user, widget_id, refreshed) {
+                        eprintln!("widgets: the size of widget {widget_id} is not kept: {why}");
+                    }
+                    kept.insert(widget_id, refreshed);
+                }
+                refreshed
+            }
             None => {
                 let others: Vec<Placement> = kept.values().copied().collect();
                 let placement = widgets::default_placement(&provider, &others);
@@ -4407,12 +4465,20 @@ impl HostApiService {
         };
         let asked = place.placement.unwrap_or_default();
         let (width_dp, height_dp) = widgets::clamp_size(&provider, asked.width_dp, asked.height_dp);
-        let placement = Placement {
-            x: asked.x,
-            y: asked.y,
-            width_dp,
-            height_dp,
-        };
+        let kept = self
+            .placements_of(&peer.user)
+            .get(&place.widget_id)
+            .copied();
+        let placement = widgets::reported_placement(
+            kept,
+            Placement {
+                x: asked.x,
+                y: asked.y,
+                width_dp,
+                height_dp,
+                resized: false,
+            },
+        );
         if let Err(why) = self.placements.set(&peer.user, place.widget_id, placement) {
             eprintln!(
                 "widgets: the place of widget {} is not kept: {why}",
@@ -4503,8 +4569,11 @@ impl HostApiService {
             }
         };
         // An update alert is the host's alone: its desktop opens the update settings on a
-        // click, and Android has nothing to open or dismiss.
-        if update_alerts::is_update_key(action.key()) {
+        // click, and Android has nothing to open or dismiss. So is a notice that Android was
+        // restarted to recover its graphics.
+        if update_alerts::is_update_key(action.key())
+            || crate::compositor::frame_stall::is_recovery_key(action.key())
+        {
             return response::Body::Done(types::Done {});
         }
         let android = match self.androids.android(&peer.user) {
@@ -5202,13 +5271,18 @@ impl HostApiService {
     fn trace_resize(&self, resize: &types::ResizeTask, started: Instant) {
         let now = Instant::now();
         let size = (resize.width, resize.height);
-        let detail = format!(
+        let mut detail = format!(
             "live={} took={}",
             resize.live,
             resize_trace::millis(now.saturating_duration_since(started))
         );
         let wall = resize_trace::wall_now();
         let mut trace = self.resize_trace.lock().unwrap_or_else(|e| e.into_inner());
+        if resize.live {
+            trace.live_sent(resize.task_id, size, now);
+        } else if let Some(since) = trace.since_live(resize.task_id, size, now) {
+            detail.push_str(&format!(" since_live={}", resize_trace::millis(since)));
+        }
         let line = if trace.detailed() {
             trace.stage(
                 resize.task_id,
@@ -6201,10 +6275,30 @@ impl HostApiService {
                 wire.adb_auto_connect_state = self.adb_auto_connect_now(&peer.user);
                 wire.adb_shell_root = self.adb_shell_root_now(&peer.user, &settings);
                 self.touch_gestures_now(&peer.user, &mut wire);
+                wire.imported_certificates = self.host_certificates_now(&peer.user);
                 response::Body::Settings(wire)
             }
             Err(why) => error(ErrorCode::Unavailable, why),
         }
+    }
+
+    /// The root certificates added to the computer that the caller's Android is given, as its
+    /// session last read them; none when it has no Android.
+    fn host_certificates_now(&self, user: &str) -> Vec<types::ImportedCertificate> {
+        self.androids
+            .android(user)
+            .map(|android| android.host_certificates())
+            .unwrap_or_default()
+            .into_iter()
+            .map(|certificate| types::ImportedCertificate {
+                subject: certificate.subject,
+                issuer: certificate.issuer,
+                source: certificate.source,
+                location: certificate.location,
+                sha256: certificate.sha256,
+                not_after: certificate.not_after,
+            })
+            .collect()
     }
 
     /// What the caller's window manager last said about the host's touch gestures, into
@@ -6265,10 +6359,22 @@ impl HostApiService {
     }
 
     /// The caller's network as the platform reports it, or "off" when it cannot say (no
-    /// Android is running, so there is no network yet).
+    /// Android is running, so there is no network yet), with who answers its DNS queries.
     fn network_now(&self, user: &str, settings: &Settings) -> Option<types::NetworkStatus> {
         let source = self.network.as_ref()?;
-        let status = source(user, settings).unwrap_or_else(NetworkStatus::off);
+        let mut status = source(user, settings).unwrap_or_else(NetworkStatus::off);
+        if status.mode != NetworkStatus::OFF && status.dns_resolver.is_empty() {
+            let answered = self
+                .androids
+                .android(user)
+                .ok()
+                .and_then(|android| android.dns_answered_by_host());
+            status.dns_resolver = match answered {
+                Some(true) => NetworkStatus::DNS_HOST.into(),
+                Some(false) => NetworkStatus::DNS_NETWORK.into(),
+                None => String::new(),
+            };
+        }
         Some(status.to_wire())
     }
 
@@ -6303,6 +6409,7 @@ impl HostApiService {
             advanced_networking: wanted.advanced_networking,
             touch_gestures_off: wanted.touch_gestures_off,
             image_auto_restart: wanted.image_auto_restart,
+            host_certificates: wanted.host_certificates,
             adb_port: match u16::try_from(wanted.adb_port) {
                 Ok(port) => port,
                 Err(_) => {
@@ -6363,6 +6470,7 @@ impl HostApiService {
                     android.share_folders(settings.file_sharing, settings.shared_folders.clone());
                     android.adb_auto_connect(settings.adb_auto_connect);
                     android.image_auto_restart(settings.image_auto_restart);
+                    android.trust_host_certificates(settings.host_certificates);
                     crate::root_elevation::apply(android.as_ref(), store.as_ref(), &peer.user);
                     if let Err(why) =
                         android.developer_mode(settings.developer_mode, settings.adb_port)
@@ -6383,7 +6491,7 @@ impl HostApiService {
                      {}, links in Android {}, program updates {} ({} channel), image updates \
                      {}, input trace {}, resize trace {}, developer mode {} (adb port {}, \
                      auto-connect {}), file sharing {} ({}), advanced networking {}, touch \
-                     gestures off in task windows {}, image auto-restart {}",
+                     gestures off in task windows {}, image auto-restart {}, host certificates {}",
                     peer.user,
                     settings.render_gpu,
                     on_off(settings.freeze),
@@ -6403,7 +6511,8 @@ impl HostApiService {
                     settings.shared_folders.join(", "),
                     on_off(settings.advanced_networking),
                     on_off(settings.touch_gestures_off),
-                    on_off(settings.image_auto_restart)
+                    on_off(settings.image_auto_restart),
+                    on_off(settings.host_certificates)
                 );
                 if settings.root_elevation != machine.root_elevation {
                     // The switch is the computer's, so every user's Android follows it. The
@@ -6435,6 +6544,7 @@ impl HostApiService {
                 wire.adb_auto_connect_state = self.adb_auto_connect_now(&peer.user);
                 wire.adb_shell_root = self.adb_shell_root_now(&peer.user, &settings);
                 self.touch_gestures_now(&peer.user, &mut wire);
+                wire.imported_certificates = self.host_certificates_now(&peer.user);
                 response::Body::Settings(wire)
             }
             Err(why) => error(ErrorCode::InvalidSetting, why),
@@ -6485,6 +6595,8 @@ fn settings_to_wire(settings: &Settings, facts: &ServiceFacts) -> types::Setting
         advanced_networking: settings.advanced_networking,
         touch_gestures_off: settings.touch_gestures_off,
         image_auto_restart: settings.image_auto_restart,
+        host_certificates: settings.host_certificates,
+        imported_certificates: Vec::new(),
         touch_gestures_state: String::new(),
         touch_gestures_problem: String::new(),
         adb_shell_root: String::new(),
@@ -6524,6 +6636,7 @@ fn settings_from_wire(settings: types::Settings) -> SettingsReport {
             advanced_networking: settings.advanced_networking,
             touch_gestures_off: settings.touch_gestures_off,
             image_auto_restart: settings.image_auto_restart,
+            host_certificates: settings.host_certificates,
         },
         facts: ServiceFacts {
             version: settings.version,
@@ -6540,6 +6653,20 @@ fn settings_from_wire(settings: types::Settings) -> SettingsReport {
             &settings.touch_gestures_problem,
         ),
         adb_shell_root: settings.adb_shell_root,
+        imported_certificates: settings
+            .imported_certificates
+            .into_iter()
+            .map(
+                |certificate| crate::host_certificates::ImportedCertificate {
+                    subject: certificate.subject,
+                    issuer: certificate.issuer,
+                    source: certificate.source,
+                    location: certificate.location,
+                    sha256: certificate.sha256,
+                    not_after: certificate.not_after,
+                },
+            )
+            .collect(),
     }
 }
 
@@ -8807,6 +8934,7 @@ fn widget_from_wire(widget: types::Widget) -> Widget {
             y: placement.y,
             width_dp: placement.width_dp,
             height_dp: placement.height_dp,
+            resized: false,
         },
     }
 }

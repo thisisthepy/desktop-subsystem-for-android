@@ -861,6 +861,8 @@ pub fn serve(config: HostConfig, build: &str, stop: Arc<AtomicBool>) -> Result<(
                 android.share_clipboard(settings.as_ref().is_none_or(|s| s.clipboard));
                 android.links_in_android(settings.as_ref().is_some_and(|s| s.links_in_android));
                 android.image_auto_restart(settings.as_ref().is_none_or(|s| s.image_auto_restart));
+                android
+                    .trust_host_certificates(settings.as_ref().is_none_or(|s| s.host_certificates));
                 android.share_folders(
                     settings.as_ref().is_none_or(|s| s.file_sharing),
                     settings

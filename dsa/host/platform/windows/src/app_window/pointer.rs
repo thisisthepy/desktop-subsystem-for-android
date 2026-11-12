@@ -293,6 +293,9 @@ pub struct PointerWindow {
     mapper: RefCell<PointerMapper>,
     /// The size of the task the window shows, in guest pixels.
     task_size: Cell<(u32, u32)>,
+    /// Window pixels per task pixels, as the window shows the task's frames: 1:1 unless the
+    /// task keeps its density on a monitor of another scale.
+    scale: Cell<(u32, u32)>,
     /// Whether Windows will say when the mouse leaves the window.
     tracking_leave: Cell<bool>,
     events: Sender<InputEvent>,
@@ -313,6 +316,7 @@ impl PointerWindow {
             task_id,
             mapper: RefCell::new(PointerMapper::new(task_id)),
             task_size: Cell::new(task_size),
+            scale: Cell::new((1, 1)),
             tracking_leave: Cell::new(false),
             events,
             leave: RefCell::new(LeaveWatch::default()),
@@ -329,11 +333,7 @@ impl PointerWindow {
         let Some(inside) = self.leave.borrow_mut().moved(position, client) else {
             return;
         };
-        let geometry = WindowGeometry {
-            client,
-            task: self.task_size.get(),
-        };
-        let (x, y) = geometry.to_guest(inside);
+        let (x, y) = self.geometry(client).to_guest(inside);
         drags(
             hwnd as isize,
             DragOut {
@@ -349,6 +349,21 @@ impl PointerWindow {
     /// The guest resized the task the window shows.
     pub fn task_resized(&self, task_size: (u32, u32)) {
         self.task_size.set(task_size);
+    }
+
+    /// The window shows the task's frames at `scale` (window pixels per task pixels) from now
+    /// on, so a point in the window is that point over the scale in the task.
+    pub fn set_scale(&self, scale: (u32, u32)) {
+        self.scale.set(scale);
+    }
+
+    /// What the window's points are converted with, for a client area of `client`.
+    fn geometry(&self, client: (u32, u32)) -> WindowGeometry {
+        WindowGeometry {
+            client,
+            task: self.task_size.get(),
+            scale: self.scale.get(),
+        }
     }
 
     /// Handles a mouse, touch or pen message. `None` for any other message, or one that
@@ -503,10 +518,7 @@ impl PointerWindow {
     }
 
     unsafe fn deliver(&self, hwnd: HWND, input: WindowInput) {
-        let geometry = WindowGeometry {
-            client: client_size(hwnd),
-            task: self.task_size.get(),
-        };
+        let geometry = self.geometry(client_size(hwnd));
         let mapped = match self.mapper.try_borrow_mut() {
             Ok(mut mapper) => mapper.handle(input, geometry),
             // Reached from inside its own handling (a capture change that SetCapture or

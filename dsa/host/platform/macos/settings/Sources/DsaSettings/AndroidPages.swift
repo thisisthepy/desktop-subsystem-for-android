@@ -382,8 +382,30 @@ struct DeviceIdentityPage: View {
     }
 }
 
-/// Network: how Android reaches the network now, the advanced networking switch, and developer
-/// mode, through which adb on this Mac reaches Android.
+/// One root certificate the service found added to this Mac: who it is for, who signed it,
+/// where it was found and the store it is in. VoiceOver reads the row as one item.
+struct ImportedCertificateRow: View {
+    let certificate: ImportedCertificate
+    let issuer: String
+    let source: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(certificate.subject).textSelection(.enabled)
+            Text(issuer).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
+            Text(source).font(.callout).foregroundStyle(.secondary)
+            if !certificate.location.isEmpty {
+                Text(certificate.location).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Network: how Android reaches the network now, the advanced networking switch, the root
+/// certificates Android trusts from this Mac, and developer mode, through which adb on this
+/// Mac reaches Android.
 struct NetworkPage: View {
     @ObservedObject var vm: SettingsViewModel
     @State private var adbPort = ""
@@ -411,6 +433,21 @@ struct NetworkPage: View {
                           isOn: vm.advancedNetworking, enabled: vm.canChange, set: { await vm.setAdvancedNetworking($0) })
                 if vm.networkRestartNeeded {
                     Banner(kind: .info, title: T("NetworkRestartBar.Title"), message: T("NetworkRestartBar.Message"))
+                }
+            }
+            Section(T("HostCertificatesHeader.Text")) {
+                SwitchRow(title: T("HostCertificatesCard.Header"), detail: T("HostCertificatesCard.Description"),
+                          isOn: vm.hostCertificates, enabled: vm.canChange, set: { await vm.setHostCertificates($0) })
+                if vm.hasNoImportedCertificates {
+                    Text(T("HostCertificatesEmpty.Text")).font(.callout).foregroundStyle(.secondary)
+                } else {
+                    if !vm.hostCertificates {
+                        Text(T("HostCertificatesOff.Text")).font(.callout).foregroundStyle(.secondary)
+                    }
+                    ForEach(Array(vm.importedCertificates.enumerated()), id: \.offset) { item in
+                        ImportedCertificateRow(certificate: item.element, issuer: vm.certificateIssuerText(item.element),
+                                               source: vm.certificateSourceText(item.element.source))
+                    }
                 }
             }
             Section(T("DeveloperHeader.Text")) {

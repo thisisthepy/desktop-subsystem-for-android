@@ -2,13 +2,22 @@
 //!
 //!     dsa-channeld [--port <port>] [--log-port <port>] [--bootconfig <path>] [--cid <cid>]
 //!     dsa-channeld --keymint-key
+//!     dsa-channeld --cacerts-setup
+//!     dsa-channeld --dns-redirect
+//!     dsa-channeld --memory-report
 //!
 //! It reads the boot's secret from the kernel's bootconfig, connects to the host over
 //! vsock, and keeps the connection, connecting again whenever it is lost. While the host
 //! asks for Android's log, it reads logd and sends the records on the log port, a vsock port
 //! of its own. It exits only
 //! when it cannot work at all: no secret, or a host that refuses this guest for good.
-//! With `--keymint-key` it only fetches KeyMint's root key from the host and exits.
+//! With `--keymint-key` it only fetches KeyMint's root key from the host and exits. With
+//! `--cacerts-setup` it only copies Android's system certificates into the folders init binds
+//! over them, so the host's roots can be added beside them later, and exits. With
+//! `--dns-redirect` (as root) it only makes the packet filter rules that send the guest's DNS
+//! queries to its DNS stub match `vendor.dsa.dns`, and exits.
+//! With `--memory-report` it only writes what the guest kernel's memory is made of (as root,
+//! when the shell asks) and exits.
 //! Messages go to standard error, which init sends to the kernel log.
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -335,6 +344,34 @@ mod daemon {
     #[cfg(not(target_os = "android"))]
     fn switch_android_files(_files: &dsa_protocol::control::AndroidFiles) {}
 
+    /// Makes Android's system certificates hold the root certificates the host added, and no
+    /// other of the host's: in the tmpfs folders `dsa-cacerts.rc` binds over Android's, so
+    /// every app sees the change at once.
+    #[cfg(target_os = "android")]
+    fn install_host_certificates(certificates: &dsa_protocol::control::HostCertificates) {
+        use dsa_guest_channeld::cacerts::Installer;
+        let wanted = if certificates.enabled {
+            certificates.certificates.clone()
+        } else {
+            Vec::new()
+        };
+        let report = Installer::of_system().install(&wanted);
+        say!(
+            "the host's root certificates: {} added, {} kept, {} taken away, {} already trusted",
+            report.added.len(),
+            report.kept.len(),
+            report.removed.len(),
+            report.already_trusted
+        );
+        for problem in &report.problems {
+            say!("the host's root certificates: {problem}");
+        }
+    }
+
+    /// Off Android there are no system certificate folders to add to.
+    #[cfg(not(target_os = "android"))]
+    fn install_host_certificates(_certificates: &dsa_protocol::control::HostCertificates) {}
+
     /// Hands idle memory back to the host: every so often, decides whether the guest should
     /// reclaim now (see `reclaim`), and has init do it. Only init may write the
     /// kernel's memory controls; the daemon only asks.
@@ -558,6 +595,122 @@ mod daemon {
     #[cfg(not(target_os = "android"))]
     fn page_out_after_wakes(_router: Arc<Router>) {}
 
+    /// Writes what stays cold in zram on to its backing file while no app is in use (see
+    /// `writeback`): every so often decides whether a run is due, gives init the run's budget,
+    /// has init run it, and logs and counts what it wrote. Only init may write zram's files;
+    /// the daemon only asks and reads. Stops for good when zram has no backing file.
+    #[cfg(target_os = "android")]
+    fn write_back_cold_zram(router: Arc<Router>) {
+        use dsa_guest_channeld::writeback::{
+            day_of, has_backing_device, BackingStat, Day, Run, Writeback, WritebackPolicy,
+            ZramStat, CHECK_INTERVAL, RUN_WAIT_LIMIT, WRITEBACK_AFTER_PROPERTY,
+            WRITEBACK_AGE_PROPERTY, WRITEBACK_DAY_PROPERTY, WRITEBACK_PAGES_PROPERTY,
+            WRITEBACK_PROPERTY, ZRAM,
+        };
+        fn today() -> u64 {
+            day_of(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_secs()),
+            )
+        }
+        fn zram_stat() -> Option<ZramStat> {
+            ZramStat::parse(&std::fs::read_to_string(format!("{ZRAM}/mm_stat")).ok()?)
+        }
+        fn backing_stat() -> Option<BackingStat> {
+            BackingStat::parse(&std::fs::read_to_string(format!("{ZRAM}/bd_stat")).ok()?)
+        }
+        while read_property("vendor.dsa.boot_completed") != "1" {
+            thread::sleep(CHECK_INTERVAL);
+        }
+        match std::fs::read_to_string(format!("{ZRAM}/backing_dev")) {
+            Ok(name) if has_backing_device(&name) => {}
+            Ok(_) => {
+                say!(
+                    "zram has no backing file, so what stays cold in it stays in memory: fs_mgr \
+                     could not make /data/per_boot/zram_swap (look for \"zram backing device\" \
+                     in the log of init)"
+                );
+                return;
+            }
+            Err(error) => {
+                say!(
+                    "cannot read zram's backing device ({error}), so what stays cold in zram \
+                     stays in memory"
+                );
+                return;
+            }
+        }
+        let policy = WritebackPolicy::with_times(
+            &read_property(WRITEBACK_AFTER_PROPERTY),
+            &read_property(WRITEBACK_AGE_PROPERTY),
+        );
+        let start = std::time::Instant::now();
+        let mut writeback = Writeback::new(
+            policy,
+            today(),
+            Day::parse(&read_property(WRITEBACK_DAY_PROPERTY)),
+        );
+        say!(
+            "zram writes what no one has used for {} s to its backing file once no app has been \
+             in use for {} s, at most {} MiB a run and {} MiB a day ({} MiB left today)",
+            policy.age.as_secs(),
+            policy.idle_after.as_secs(),
+            policy.run_pages * 4 / 1024,
+            policy.daily_pages * 4 / 1024,
+            writeback.left_pages() * 4 / 1024
+        );
+        loop {
+            thread::sleep(CHECK_INTERVAL);
+            let Some(before) = zram_stat() else {
+                continue;
+            };
+            let Some(pages) =
+                writeback.decide(start.elapsed(), today(), router.tasks_in_use(), &before)
+            else {
+                continue;
+            };
+            let backing_before = backing_stat().unwrap_or_default();
+            if let Err(why) = set_property(WRITEBACK_PAGES_PROPERTY, &pages.to_string()) {
+                say!("could not give the zram writeback its budget: {why}");
+                continue;
+            }
+            let began = std::time::Instant::now();
+            if let Err(why) = set_property(WRITEBACK_PROPERTY, "1") {
+                say!("could not ask init for the zram writeback: {why}");
+                continue;
+            }
+            while read_property(WRITEBACK_PROPERTY) == "1" && began.elapsed() < RUN_WAIT_LIMIT {
+                thread::sleep(std::time::Duration::from_millis(100));
+            }
+            let run = Run {
+                before,
+                after: zram_stat().unwrap_or(before),
+                backing_before,
+                backing_after: backing_stat().unwrap_or(backing_before),
+                took: began.elapsed(),
+                left_pages: 0,
+                daily_pages: policy.daily_pages,
+            };
+            let day = writeback.wrote(run.written_pages());
+            if let Err(why) = set_property(WRITEBACK_DAY_PROPERTY, &day.to_property()) {
+                say!("could not keep what the zram writeback wrote today: {why}");
+            }
+            say!(
+                "{}",
+                Run {
+                    left_pages: writeback.left_pages(),
+                    ..run
+                }
+                .line()
+            );
+        }
+    }
+
+    /// Off Android there is no zram backing file.
+    #[cfg(not(target_os = "android"))]
+    fn write_back_cold_zram(_router: Arc<Router>) {}
+
     /// Tells the host how much memory the guest has, so it can add memory before the guest
     /// runs out and take it back once the guest no longer needs it.
     fn report_memory_pressure(router: Arc<Router>) {
@@ -601,6 +754,91 @@ mod daemon {
         )
     }
 
+    /// Switches the packet filter rules that send the guest's DNS queries to the stub: init
+    /// runs `dsa-channeld --dns-redirect` when the property changes (`dsa-channeld.rc`).
+    #[cfg(target_os = "android")]
+    fn switch_dns(on: bool) {
+        use dsa_guest_channeld::dns_stub::PROPERTY;
+        if let Err(why) = set_property(PROPERTY, if on { "on" } else { "off" }) {
+            say!("could not switch the guest's DNS to the host's resolver: {why}");
+        }
+    }
+
+    /// Off Android there is no init to set the packet filter.
+    #[cfg(not(target_os = "android"))]
+    fn switch_dns(_on: bool) {}
+
+    /// The guest's DNS, answered by the host's resolver: the stub on the loopback addresses,
+    /// and the connection to the host's DNS port it hands each query to, past the same
+    /// handshake as the control channel. The redirect to the stub is on only while the host
+    /// answers, so the guest keeps its network's DNS servers otherwise.
+    fn serve_dns(credentials: &Credentials, cid: u32) {
+        use dsa_guest_channeld::dns_stub::{self, Stub, Tunnel};
+        let stub = match Stub::bind(dns_stub::STUB_PORT) {
+            Ok(stub) => stub,
+            Err(why) => {
+                say!(
+                    "the DNS stub cannot listen ({why}); the guest asks its network's DNS \
+                     servers"
+                );
+                switch_dns(false);
+                return;
+            }
+        };
+        let credentials = credentials.clone();
+        let connect: Box<dns_stub::DnsConnector> = Box::new(move || {
+            let mut connection = VsockConnector {
+                cid,
+                port: dns_stub::PORT,
+            }
+            .connect(std::time::Duration::from_secs(5))
+            .map_err(|e| e.to_string())?;
+            guest_connect(
+                connection.as_mut(),
+                &credentials.hello,
+                &credentials.secret,
+                std::time::Duration::from_secs(10),
+            )
+            .map_err(|e| e.to_string())?;
+            Ok(connection)
+        });
+        let tunnel = Arc::new(Tunnel::new(connect, Box::new(switch_dns)));
+        stub.serve(Arc::clone(&tunnel), Arc::new(|line: &str| say!("{line}")));
+        let spawned = thread::Builder::new()
+            .name("dsa-dns-host".into())
+            .spawn(move || {
+                let stop = AtomicBool::new(false);
+                tunnel.run(&stop, &|line| say!("{line}"));
+            });
+        if let Err(why) = spawned {
+            say!(
+                "the guest's DNS cannot reach the host ({why}); it asks its network's DNS servers"
+            );
+            switch_dns(false);
+        }
+    }
+
+    /// `--dns-redirect`: makes the packet filter send the guest's DNS queries to the stub, or
+    /// stop sending them, as `vendor.dsa.dns` says. init runs it as root.
+    fn dns_redirect() -> i32 {
+        let run = |program: &str, args: &[String]| -> Result<(), String> {
+            let output = std::process::Command::new(program)
+                .args(args)
+                .output()
+                .map_err(|e| e.to_string())?;
+            if output.status.success() {
+                return Ok(());
+            }
+            let said = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            Err(if said.is_empty() {
+                format!("it ended with {}", output.status)
+            } else {
+                said
+            })
+        };
+        dsa_guest_channeld::dns_redirect::run(&read_property, &run, &|line| say!("{line}"))
+    }
+
     pub fn run() -> i32 {
         // The two jobs init runs this program for besides the daemon: mounting the host's
         // folders (as root), and serving the shared storage to the host (as media_rw).
@@ -622,6 +860,22 @@ mod daemon {
         }
         if std::env::args().nth(1).as_deref() == Some("--keymint-key") {
             return keymint_key();
+        }
+        if std::env::args().nth(1).as_deref() == Some("--dns-redirect") {
+            return dns_redirect();
+        }
+        if std::env::args().nth(1).as_deref() == Some("--cacerts-setup") {
+            use dsa_guest_channeld::cacerts::{setup, FOLDERS, ROOT};
+            let problems = setup(std::path::Path::new(ROOT), &FOLDERS);
+            for problem in &problems {
+                say!("Android's system certificates: {problem}");
+            }
+            // A folder that could not be copied is not there, so init's bind of it fails and
+            // Android's own folder stays in use.
+            return 0;
+        }
+        if std::env::args().nth(1).as_deref() == Some("--memory-report") {
+            return dsa_guest_channeld::memory_report::run(&say_line);
         }
         let options = match options() {
             Ok(options) => options,
@@ -680,6 +934,7 @@ mod daemon {
                 .on_developer_mode(switch_adb)
                 .on_file_sharing(switch_shares)
                 .on_android_files(switch_android_files)
+                .on_host_certificates(install_host_certificates)
                 .on_arm_translation(Arc::new(ArmTranslation::new(
                     arm_translation::DIR,
                     BootFacts::of_system(|| read_property("ro.product.cpu.abilist")),
@@ -733,6 +988,7 @@ mod daemon {
             });
         }
         serve_clients(&router);
+        serve_dns(&credentials, options.cid);
         {
             let router = Arc::clone(&router);
             thread::spawn(move || reclaim_idle_memory(router));
@@ -740,6 +996,10 @@ mod daemon {
         {
             let router = Arc::clone(&router);
             thread::spawn(move || page_out_after_wakes(router));
+        }
+        {
+            let router = Arc::clone(&router);
+            thread::spawn(move || write_back_cold_zram(router));
         }
         {
             let router = Arc::clone(&router);

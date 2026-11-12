@@ -43,6 +43,15 @@ fn fr19_automatic_memory_is_the_default_size() {
 }
 
 #[test]
+fn nfr2_the_vm_boots_at_two_gib_and_grows_from_there() {
+    // The page records the guest kernel keeps for its boot memory stay resident while the VM
+    // runs, so the VM boots small and grows instead.
+    assert_eq!(DEFAULT_MEMORY_MB, 2048);
+    assert_eq!(sized_memory_mb(0, Some(32768)), 2048);
+    assert_eq!(sized_memory_mb(0, None), 2048);
+}
+
+#[test]
 fn fr19_installer_locations_are_filled_in() {
     let text = expand_locations(
         r#"{"a":"{data}\\images","b":"{program}"}"#,

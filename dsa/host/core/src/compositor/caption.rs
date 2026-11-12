@@ -137,7 +137,7 @@ pub fn shown_tone(
 }
 
 /// The luminance of an 0xAARRGGBB color, from 0 (black) to 1 (white), with the sRGB weights.
-fn relative_luminance(argb: u32) -> f64 {
+pub(crate) fn relative_luminance(argb: u32) -> f64 {
     let channel = |shift: u32| {
         let value = f64::from((argb >> shift) & 0xff) / 255.0;
         if value <= 0.040_45 {
@@ -334,7 +334,7 @@ fn drawn_bounds(pixels: &[u8], width: u32, height: u32) -> Option<(u32, u32, u32
 /// image, where it is transparent) of `pixels` fitted into a square `side` pixels across, less
 /// `padding` on every side, centred and keeping its proportions. Each pixel is the average of
 /// the source area it covers.
-fn fit_square(
+pub(crate) fn fit_square(
     pixels: &[u8],
     width: u32,
     height: u32,

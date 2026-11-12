@@ -37,6 +37,10 @@ on property:sys.boot_completed=1
 # own compaction then frees the memory the old copies left in its pages. Then the
 # clean page cache and the reclaimable kernel caches are dropped, and compaction leaves whole
 # blocks free, which free page reporting hands back to Hyper-V. Nothing is lost: what left is read back when needed.
+# Last, every free page is reported to the host again (page_reporting.rereport, DSA's kernel):
+# Hyper-V backs a VM's memory in 64 KiB clusters, so a page the guest touches again brings its
+# reported free neighbours back with it, and the guest, which marked them reported, would never
+# offer them again; the per-CPU lists' free pages go to the free lists first.
 # It waits for boot to finish, so a boot still under way does not swap out what it is using;
 # a request made before then stays set, and runs when boot completes.
 on property:vendor.dsa.memory.reclaim=1 && property:sys.boot_completed=1
@@ -49,7 +53,30 @@ on property:vendor.dsa.memory.reclaim=1 && property:sys.boot_completed=1
     write /sys/devices/virtual/block/zram0/compact 1
     write /proc/sys/vm/drop_caches 3
     write /proc/sys/vm/compact_memory 1
+    write /sys/module/page_reporting/parameters/rereport 1
     setprop vendor.dsa.memory.reclaim 0
+
+# zram writeback: what stays cold in zram goes to its backing file on the data disk
+# (fstab.dsa), so the host keeps disk space for it instead of memory. dsa-channeld sets this
+# only after no app has been open for vendor.dsa.memory.writeback_after seconds, at most every
+# ten minutes, and gives it vendor.dsa.memory.writeback_pages, the 4 KiB pages this run may
+# write: what is left of the day's budget, and at most 32 MiB, so init is busy for a fraction
+# of a second. zram counts the budget down as it writes and stops at zero, and it is set back
+# to zero afterwards, so nothing else writes. Only pages untouched for
+# vendor.dsa.memory.writeback_age seconds are marked idle (zram keeps when each page was last
+# read or written, and compressing one again with zstd is not a use). Incompressible pages go
+# first: each one written frees a whole 4 KiB page, a compressed one only its share of one.
+# A page read back leaves the file. Then zram's pages are compacted, and the memory they
+# freed is reported to the host again as after the idle reclaim.
+on property:vendor.dsa.memory.writeback=1 && property:sys.boot_completed=1
+    write /sys/devices/virtual/block/zram0/writeback_limit ${vendor.dsa.memory.writeback_pages}
+    write /sys/devices/virtual/block/zram0/idle ${vendor.dsa.memory.writeback_age}
+    write /sys/devices/virtual/block/zram0/writeback huge_idle
+    write /sys/devices/virtual/block/zram0/writeback idle
+    write /sys/devices/virtual/block/zram0/writeback_limit 0
+    write /sys/devices/virtual/block/zram0/compact 1
+    write /sys/module/page_reporting/parameters/rereport 1
+    setprop vendor.dsa.memory.writeback 0
 
 # The working set trim: dsa-channeld sets this on the first look that finds page cache grown
 # past the guest's working set (an app closed, or files were read), while the guest is not
@@ -135,6 +162,28 @@ on property:vendor.dsa.root_elevation=1
 on property:vendor.dsa.root_elevation=0
     stop dsa_su
 
+# The guest's DNS, answered by the host's resolver. dsa-channeld listens on the loopback
+# addresses (port 5553, UDP and TCP) and hands each query to the host on the DNS port; it sets
+# vendor.dsa.dns to "on" while the host answers and to "off" when the host stays unreachable.
+# dsa-channeld --dns-redirect then makes the packet filter send every DNS query a program sends
+# to port 53 to that port, or stop doing so, in a nat chain of its own (dsa_dns), so the
+# guest's queries reach the host's resolver rather than the network's DNS servers. It runs as
+# root, which changing the packet filter needs, in a domain of its own (channeld.cil). It starts
+# on the property alone: a vendor script may not trigger on init.svc.netd (init drops the whole
+# action as an "unexported property trigger"), and it needs no wait for netd, which never
+# flushes nat OUTPUT, where the jump to the chain goes; -w waits out netd's lock instead.
+service dsa_dns_redirect /vendor/bin/dsa-channeld --dns-redirect
+    user root
+    group root
+    capabilities NET_ADMIN NET_RAW
+    seclabel u:r:dsa_dns_redirect:s0
+    oneshot
+    disabled
+    stdio_to_kmsg
+
+on property:vendor.dsa.dns=*
+    start dsa_dns_redirect
+
 # KeyMint's root key, which the host keeps sealed by the user's credential store and gives
 # once each boot. dsa-channeld --keymint-key asks for it on the host's KeyMint port and writes
 # it to /dev/dsa_keymint/root_key, a tmpfs file only KeyMint's domain may read
@@ -150,3 +199,33 @@ service dsa_keymint_key /vendor/bin/dsa-channeld --keymint-key
     oneshot
     disabled
     stdio_to_kmsg
+
+# Android's system certificates, copied into the tmpfs folders dsa-cacerts.rc binds over
+# Android's own, so the daemon can add the root certificates a user or administrator added to
+# the host beside them. dsa-cacerts.rc runs it once, at post-fs-data, before the zygote starts.
+# It runs as the system user, which the daemon runs as and which owns the folders, in the
+# daemon's domain (sepolicy/cacerts.cil).
+service dsa_cacerts_setup /vendor/bin/dsa-channeld --cacerts-setup
+    user system
+    group system
+    oneshot
+    disabled
+    stdio_to_kmsg
+
+# What the guest kernel's own memory is made of: the largest slab caches, vmalloc users and
+# threads, which only root may read. dsa-channeld --memory-report reads them, writes them to
+# the kernel log ("memory report:" lines, which `logcat -b kernel` shows) and exits. It runs as
+# root, which /proc/slabinfo and /proc/vmallocinfo need, in a domain of its own that may only
+# read (channeld.cil), and in the readproc group, which lets it see every process under /proc.
+# Only while developer mode is on, when the shell asks: `setprop debug.dsa.memory_report 1`
+# (0 and then 1 again for another report). The memory measurement in CI asks for one.
+service dsa_memory_report /vendor/bin/dsa-channeld --memory-report
+    user root
+    group root readproc
+    seclabel u:r:dsa_memory_report:s0
+    oneshot
+    disabled
+    stdio_to_kmsg
+
+on property:debug.dsa.memory_report=1 && property:vendor.dsa.adb=1
+    start dsa_memory_report

@@ -7,11 +7,17 @@ import io.github.thisisthepy.dsa.agent.tasks.TaskBounds
 /**
  * Gives each task a top inset as high as the title bar its host window draws over it.
  *
- * The host's window has no title bar above the app: the app's frames fill the window from
- * its top edge, and the window draws its caption buttons over them. The host says how high
- * that band is ([setHeight]); the task gets an inset source of that height along its top,
- * which its app receives as its status bar, system bar and caption bar inset. The app then
- * keeps its toolbar below the buttons and draws its status bar background behind them.
+ * The host window's title bar is Android's status bar. The window has no title bar above the
+ * app: the app's frames fill the window from its top edge, and the window draws its caption
+ * over them, where a phone draws its status bar. The host says how high that band is
+ * ([setHeight]); the task gets status bar and caption bar inset sources of that height along
+ * its top, which its app receives as its status bar, system bar and caption bar inset (the
+ * image's window manager passes a freeform window its status bar inset, which stock Android
+ * drops). An app that draws edge to edge then keeps its toolbar below the band, as below a
+ * phone's status bar, and draws its own status bar background under the caption, whose
+ * glyphs follow what it draws there. An app that does not draw edge to edge gets the status
+ * bar background Android draws for it there, in its status bar colour. Nothing an app does
+ * not choose to draw under the band is covered by it.
  *
  * The framework takes the inset's frame in display pixels, so it is given again whenever the
  * task's top edge moves ([update]). The frame reaches far past the task on both sides: only

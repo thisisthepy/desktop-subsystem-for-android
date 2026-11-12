@@ -2976,6 +2976,25 @@ pub struct BackupSetting {
     #[prost(bool, tag = "1")]
     pub enabled: bool,
 }
+/// Host to guest, to the control daemon: the root certificates a user or an administrator added
+/// to the host's trust store (the host leaves out those its operating system ships), which
+/// Android trusts as system certificates beside its own. Internet filters and company proxies
+/// that inspect HTTPS install such a root on the computer, and apps reach the internet there only
+/// if Android trusts it too. The daemon adds them to Android's system certificate folders without
+/// a restart and takes away those it added before that are no longer named; Android's own
+/// certificates are never touched. With `enabled` false it takes away every one it added. The
+/// agent hears it too, once the folders are in step, and has every running app forget the trust
+/// anchors it has looked up, so a root taken away stops being trusted at once. The host sends
+/// it each time the daemon connects, again when the agent connects, and whenever the host's
+/// store or the user's setting changes. A guest boots trusting none of them.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct HostCertificates {
+    #[prost(bool, tag = "1")]
+    pub enabled: bool,
+    /// Each certificate, DER-encoded X.509. Empty while `enabled` is false.
+    #[prost(bytes = "vec", repeated, tag = "2")]
+    pub certificates: ::prost::alloc::vec::Vec<::prost::alloc::vec::Vec<u8>>,
+}
 /// Guest to host, from the agent's credential provider: an app asks to make or use a passkey.
 /// What names the app comes from Android's credential manager (CallingAppInfo), never from the
 /// app itself. Answered with PasskeyResponse.
@@ -3038,6 +3057,37 @@ pub struct KeyMintRootKey {
     /// Why it is empty.
     #[prost(string, tag = "2")]
     pub message: ::prost::alloc::string::String,
+}
+/// Guest to host, on the DNS port, from the control daemon after the handshake: one DNS query
+/// that a program in the guest made, as a whole DNS message (RFC 1035) with one question. The
+/// host answers it with its operating system's resolver, so the host's hosts file, its name
+/// resolution policy, a VPN's split DNS and a DNS filter apply to Android's apps as they do to
+/// the host's own programs. Answered with the DnsAnswer that carries the same id; the queries
+/// on one connection are answered in any order.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DnsQuery {
+    /// The daemon's number for this query, unique among its unanswered queries.
+    #[prost(uint32, tag = "1")]
+    pub id: u32,
+    /// The DNS message as the program sent it.
+    #[prost(bytes = "vec", tag = "2")]
+    pub message: ::prost::alloc::vec::Vec<u8>,
+    /// Whether the program asked over TCP, so the answer may be as large as a DNS message can
+    /// be. Over UDP, an answer larger than the program's buffer comes truncated (TC set), and the
+    /// program asks again over TCP.
+    #[prost(bool, tag = "3")]
+    pub tcp: bool,
+}
+/// Host to guest, on the DNS port: the answer to the DnsQuery with the same id, a whole DNS
+/// message with the query's ID and question. When the host's resolver fails or takes too long
+/// the answer says SERVFAIL, so a program in the guest never waits for an answer that does not
+/// come.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DnsAnswer {
+    #[prost(uint32, tag = "1")]
+    pub id: u32,
+    #[prost(bytes = "vec", tag = "2")]
+    pub message: ::prost::alloc::vec::Vec<u8>,
 }
 /// Guest to host: asks for the host's voices. The host answers with SpeechVoices.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
@@ -3236,7 +3286,7 @@ pub struct SpellingResult {
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 377, 19, 408, 409, 410, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 40, 41, 407, 110, 140, 152, 153, 154, 402, 403, 404, 405, 406, 411, 412, 413, 414, 415, 42, 43, 44, 45, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 30, 50, 51, 52, 53, 54, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 80, 81, 82, 83, 100, 101, 102, 103, 104, 105, 106, 107, 120, 121, 122, 123, 124, 125, 126, 127, 130, 131, 132, 133, 134, 135, 136, 220, 221, 222, 223, 141, 200, 201, 202, 240, 241, 242, 260, 261, 262, 263, 264, 265, 266, 267, 155, 340, 383, 341, 342, 343, 344, 290, 291, 350, 351, 352, 353, 354, 380, 381, 382, 620, 621, 622, 623, 624, 625, 626, 627, 628, 629, 630, 631, 470, 471, 472, 473, 640, 641, 642, 643, 644, 645, 646, 647, 648, 649, 650, 651, 652, 653, 654, 655, 656, 657, 658, 680, 681, 682, 683"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 377, 19, 408, 409, 410, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 40, 41, 407, 110, 140, 152, 153, 154, 402, 403, 404, 405, 406, 411, 412, 413, 414, 415, 42, 43, 44, 45, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 30, 50, 51, 52, 53, 54, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 80, 81, 82, 83, 100, 101, 102, 103, 104, 105, 106, 107, 120, 121, 122, 123, 124, 125, 126, 127, 130, 131, 132, 133, 134, 135, 136, 220, 221, 222, 223, 141, 200, 201, 202, 240, 241, 242, 260, 261, 262, 263, 264, 265, 266, 267, 155, 340, 383, 341, 342, 343, 344, 290, 291, 350, 351, 352, 353, 354, 380, 381, 382, 620, 621, 622, 623, 624, 625, 626, 627, 628, 629, 630, 631, 470, 471, 472, 473, 640, 641, 642, 643, 644, 645, 646, 647, 648, 649, 650, 651, 652, 653, 654, 655, 656, 657, 658, 680, 681, 682, 683, 684, 690, 691"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -3628,6 +3678,12 @@ pub mod envelope {
         PinShortcutRequest(super::PinShortcutRequest),
         #[prost(message, tag = "683")]
         PinShortcutAnswer(super::PinShortcutAnswer),
+        #[prost(message, tag = "684")]
+        HostCertificates(super::HostCertificates),
+        #[prost(message, tag = "690")]
+        DnsQuery(super::DnsQuery),
+        #[prost(message, tag = "691")]
+        DnsAnswer(super::DnsAnswer),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.

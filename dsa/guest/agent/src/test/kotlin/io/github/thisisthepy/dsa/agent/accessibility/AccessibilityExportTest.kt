@@ -52,6 +52,16 @@ class FakeAccessibility : AccessibilitySource {
     val windows = mutableMapOf<Int, List<FakeNode>>()
     var reads = 0
 
+    /** Whether Android has bound the service once it is on; a slow boot binds it late. */
+    var bound = true
+
+    override val connected: Boolean
+        get() = on && bound
+
+    override fun reconnect() {
+        calls += "reconnect"
+    }
+
     override fun enable(onChange: () -> Unit) {
         on = true
         calls += "enable"
@@ -65,7 +75,7 @@ class FakeAccessibility : AccessibilitySource {
     }
 
     override fun roots(taskId: Int): List<NodeHandle>? {
-        if (!on) return null
+        if (!on || !bound) return null
         reads++
         return windows[taskId].orEmpty()
     }
@@ -237,6 +247,34 @@ class AccessibilityExportTest {
     }
 
     @Test
+    fun fr18_a_watched_task_gets_its_tree_when_the_service_comes_up_late_without_an_event() {
+        // On the booted image the host watched the task while the user was still being
+        // unlocked: the service was turned on but not bound within the first two seconds, and
+        // no event of the service came afterwards. The tree never went out, and a screen
+        // reader would have found the window empty for as long as it watched.
+        started()
+        service.bound = false
+        watch(3, true)
+        scheduler.advance(5_000)
+        assertTrue(trees().isEmpty())
+        assertTrue(log.lines.any { it.startsWith("warn: task 3 is watched, but its accessibility tree could not be read") })
+        // The agent asks Android to bind the service again, once it has had time to do so.
+        assertFalse("reconnect" in service.calls)
+        scheduler.advance(AccessibilityExport.RECONNECT_MILLIS)
+        assertEquals(1, service.calls.count { it == "reconnect" })
+        // Android binds it, with no event: the tree goes out at the next try all the same.
+        service.bound = true
+        scheduler.advance(AccessibilityExport.SLOW_RETRY_MILLIS)
+        val tree = trees().single()
+        assertTrue(tree.full)
+        assertEquals(3, tree.taskId)
+        assertTrue(log.lines.any { it.startsWith("info: sent task 3's accessibility tree to the host") })
+        // Once connected, it is not asked to bind again.
+        scheduler.advance(3 * AccessibilityExport.RECONNECT_MILLIS)
+        assertEquals(1, service.calls.count { it == "reconnect" })
+    }
+
+    @Test
     fun fr18_a_tree_is_capped_at_the_most_nodes_one_frame_holds() {
         started()
         val many = (0 until AccessibilityExport.MAX_NODES + 50).map { FakeNode("n$it", NodeInfo(className = "android.widget.TextView", text = "item $it")) }
@@ -248,6 +286,82 @@ class AccessibilityExportTest {
         val ids = tree.nodesList.map { it.id }.toSet()
         tree.nodesList.forEach { node -> assertTrue(node.childIdsList.all { it in ids }) }
         assertTrue(tree.serializedSize < 1_000_000)
+    }
+
+    @Test
+    fun fr4_a_resized_tasks_tree_is_read_only_once_its_app_has_had_time_to_draw() {
+        started()
+        watch(3, true)
+        scheduler.advance(10)
+        assertEquals(1, service.reads)
+        assertEquals(1, trees().size)
+
+        fun resize(width: Int) = deliver(
+            Envelope.newBuilder()
+                .setResizeTask(io.github.thisisthepy.dsa.control.v1.ResizeTask.newBuilder().setTaskId(3).setWidth(width).setHeight(700).setLive(true))
+                .build(),
+        )
+        // The app lays itself out again at each size of a drag; its tree changes meanwhile.
+        resize(500)
+        title.info = title.info.copy(text = "Wi-Fi")
+        service.onChange!!.invoke()
+        scheduler.advance(400)
+        assertEquals("no read while the app draws its new size", 1, service.reads)
+        resize(520)
+        service.onChange!!.invoke()
+        scheduler.advance(AccessibilityExport.RESIZE_QUIET_MILLIS - 10)
+        assertEquals("each new size waits again", 1, service.reads)
+        // Once the drag has been still for long enough, the new layout is read once.
+        scheduler.advance(20)
+        assertEquals(2, service.reads)
+        assertEquals(2, trees().size)
+        assertEquals("Wi-Fi", trees().last().nodesList.single().text)
+    }
+
+    @Test
+    fun fr4_a_slow_tree_read_holds_up_no_resize_and_a_change_during_it_is_read_after() {
+        // The reader's thread, which this test runs only when it says so: reading an app's tree
+        // waits on the app, which is busy laying itself out right after a resize.
+        val reader = FakeScheduler()
+        val actions = FakeActions()
+        locator.up = daemon
+        tasks.running = listOf(appTask(3, bounds = TaskBounds(30, 20, 430, 620)))
+        val agent = Agent(
+            AGENT, tasks, actions, locator, FakeWindowing(), FakeInjector(), scheduler, log,
+            accessibility = service,
+            accessibilityReader = reader,
+            clock = { scheduler.now },
+        )
+        agent.start()
+        scheduler.runDue()
+        service.windows[3] = listOf(list)
+        watch(3, true)
+        scheduler.advance(10)
+        // The read is under way on the reader's thread and has not come back.
+        assertTrue(trees().isEmpty())
+
+        daemon.deliver(
+            Envelope.newBuilder()
+                .setResizeTask(io.github.thisisthepy.dsa.control.v1.ResizeTask.newBuilder().setTaskId(3).setWidth(500).setHeight(700))
+                .build().toByteArray(),
+        )
+        scheduler.runDue()
+        assertEquals(TaskBounds(30, 20, 530, 720), actions.resized.single().second)
+
+        // The tree changes while it is read: no second read starts beside the first, the read
+        // in hand is sent, and the tree is read again once it is done.
+        service.onChange!!.invoke()
+        scheduler.advance(300)
+        reader.runDue()
+        assertEquals(1, service.reads)
+        scheduler.runDue()
+        assertEquals(1, trees().size)
+        title.info = title.info.copy(text = "Wi-Fi")
+        scheduler.advance(300)
+        reader.runDue()
+        scheduler.runDue()
+        assertEquals(2, service.reads)
+        assertEquals("Wi-Fi", trees().last().nodesList.single().text)
     }
 
     @Test

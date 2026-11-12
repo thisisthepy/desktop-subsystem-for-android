@@ -11,6 +11,8 @@
 use dsa_protocol::control;
 use dsa_protocol::host_api::types as wire;
 
+use crate::compositor::window_sizing::{to_task_position, to_window_position, Scale};
+
 /// The buttons held down, as bits of [`PointerEvent::buttons`]. The values are the guest's
 /// own, so they pass through unchanged.
 pub mod buttons {
@@ -228,6 +230,50 @@ pub enum InputEvent {
     Ime(crate::ime::ImeEvent),
 }
 
+impl InputEvent {
+    /// The task the event is for.
+    pub fn task_id(&self) -> i32 {
+        match self {
+            InputEvent::Pointer(event) => event.task_id,
+            InputEvent::Key(event) => event.task_id,
+            InputEvent::Ime(event) => event.task_id(),
+        }
+    }
+
+    /// The same event for task `task_id`: a window that a task took over after a GPU reset
+    /// knows only the task it opened for.
+    pub fn for_task(self, task_id: i32) -> InputEvent {
+        use crate::ime::ImeEvent;
+        match self {
+            InputEvent::Pointer(event) => InputEvent::Pointer(PointerEvent { task_id, ..event }),
+            InputEvent::Key(event) => InputEvent::Key(crate::keys::KeyEvent { task_id, ..event }),
+            InputEvent::Ime(event) => InputEvent::Ime(match event {
+                ImeEvent::Composition { text, cursor, .. } => ImeEvent::Composition {
+                    task_id,
+                    text,
+                    cursor,
+                },
+                ImeEvent::Commit { text, .. } => ImeEvent::Commit { task_id, text },
+                ImeEvent::DeleteSurrounding { before, after, .. } => ImeEvent::DeleteSurrounding {
+                    task_id,
+                    before,
+                    after,
+                },
+                ImeEvent::SetSelection { start, end, .. } => ImeEvent::SetSelection {
+                    task_id,
+                    start,
+                    end,
+                },
+                ImeEvent::SetComposingRegion { start, end, .. } => ImeEvent::SetComposingRegion {
+                    task_id,
+                    start,
+                    end,
+                },
+            }),
+        }
+    }
+}
+
 impl From<crate::ime::ImeEvent> for InputEvent {
     fn from(event: crate::ime::ImeEvent) -> InputEvent {
         InputEvent::Ime(event)
@@ -247,37 +293,83 @@ impl From<crate::keys::KeyEvent> for InputEvent {
 }
 
 /// The sizes a window's input is converted between: its client area, in the window
-/// system's pixels, and the task it shows, in guest display pixels.
+/// system's pixels, and the task it shows, in guest display pixels, with the scale the window
+/// shows the task's frames at.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WindowGeometry {
     pub client: (u32, u32),
     pub task: (u32, u32),
+    /// Window pixels per task pixels (`.0` per `.1`), as the window shows the task's frames:
+    /// `(1, 1)` for a task drawn at its window's density, and the window's density over the
+    /// task's for a task that keeps its density on a monitor of another scale.
+    pub scale: Scale,
 }
 
 impl WindowGeometry {
+    /// A window that shows its task's frames 1:1.
+    pub fn one_to_one(client: (u32, u32), task: (u32, u32)) -> WindowGeometry {
+        WindowGeometry {
+            client,
+            task,
+            scale: (1, 1),
+        }
+    }
+
     /// Converts a point in the client area to the task's guest pixels.
     ///
-    /// The window shows the task's frames 1:1 and takes the size of the frame it shows, so a
-    /// point is the same pixel of the task. The task's size can lead the frame for a moment
-    /// (the guest has taken a new size and not drawn it yet), so a point inside the client
-    /// area is kept inside the task, and a click on the window's edge never reaches the task
-    /// beside it on the guest display. A point outside (the mouse dragged out of the window
-    /// while a button is down) keeps going, as it would on a phone's screen edge.
+    /// The window shows the task's frames from its client area's top left corner at
+    /// [`Self::scale`], so a point is the task pixel shown under it: its position over the
+    /// scale. At 1:1 that is the same pixel. A task that keeps 130 dpi on a monitor at 125%
+    /// (164 dpi) is shown at 164 window pixels per 130 task pixels, and a click 1640 pixels
+    /// into the window is 1300 pixels into the task. The task's size can lead the frame for a
+    /// moment (the guest has taken a new size and not drawn it yet), so a point inside the
+    /// client area is kept inside the task, and a click on the window's edge never reaches
+    /// the task beside it on the guest display. A point outside (the mouse dragged out of the
+    /// window while a button is down) keeps going, as it would on a phone's screen edge.
     pub fn to_guest(&self, (x, y): (f64, f64)) -> (f32, f32) {
         let axis = |position: f64, client: u32, task: u32| -> f32 {
+            let landed = to_task_position(position, self.scale);
             if client == 0 || task == 0 {
-                return position as f32;
+                return landed as f32;
             }
             if (0.0..f64::from(client)).contains(&position) {
-                position.clamp(0.0, f64::from(task - 1)) as f32
+                landed.clamp(0.0, f64::from(task - 1)) as f32
             } else {
-                position as f32
+                landed as f32
             }
         };
         (
             axis(x, self.client.0, self.task.0),
             axis(y, self.client.1, self.task.1),
         )
+    }
+
+    /// The task pixel shown at `point` of the client area (window pixels from its top left),
+    /// in task pixels from the task's top left, unrounded and not kept inside the task: what
+    /// a hit test of the task's own layout asks about.
+    pub fn to_task_point(&self, (x, y): (f64, f64)) -> (f64, f64) {
+        (
+            to_task_position(x, self.scale),
+            to_task_position(y, self.scale),
+        )
+    }
+
+    /// Where the window shows the task's `point` (task pixels from its top left): window
+    /// pixels from the client area's top left, unrounded. The inverse of
+    /// [`Self::to_task_point`].
+    pub fn to_window_point(&self, (x, y): (f64, f64)) -> (f64, f64) {
+        (
+            to_window_position(x, self.scale),
+            to_window_position(y, self.scale),
+        )
+    }
+
+    /// Where the window shows the task's rectangle `rect` (task pixels), in window pixels
+    /// from the client area's top left: left, top, right and bottom, unrounded.
+    pub fn to_window_bounds(&self, rect: crate::tasks::Bounds) -> (f64, f64, f64, f64) {
+        let (left, top) = self.to_window_point((f64::from(rect.left), f64::from(rect.top)));
+        let (right, bottom) = self.to_window_point((f64::from(rect.right), f64::from(rect.bottom)));
+        (left, top, right, bottom)
     }
 }
 
@@ -554,12 +646,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn nfr5_input_in_a_window_a_task_took_over_after_a_gpu_reset_reaches_that_task() {
+        use crate::ime::ImeEvent;
+        let commit = InputEvent::Ime(ImeEvent::Commit {
+            task_id: 7,
+            text: "안녕".into(),
+        });
+        assert_eq!(commit.task_id(), 7);
+        assert_eq!(
+            commit.for_task(9),
+            InputEvent::Ime(ImeEvent::Commit {
+                task_id: 9,
+                text: "안녕".into(),
+            })
+        );
+        let selection = InputEvent::Ime(ImeEvent::SetSelection {
+            task_id: 7,
+            start: 1,
+            end: 3,
+        });
+        assert_eq!(selection.for_task(9).task_id(), 9);
+    }
+
+    #[test]
     fn fr5_a_point_lands_on_the_same_pixel_of_the_task() {
         // The guest reports a task smaller than the window for a moment.
-        let grown = WindowGeometry {
-            client: (1300, 900),
-            task: (900, 700),
-        };
+        let grown = WindowGeometry::one_to_one((1300, 900), (900, 700));
         for point in [(0.0, 0.0), (87.0, 54.0), (450.0, 350.0), (899.0, 699.0)] {
             assert_eq!(grown.to_guest(point), (point.0 as f32, point.1 as f32));
         }
@@ -567,20 +679,14 @@ mod tests {
         assert_eq!(grown.to_guest((1200.0, 100.0)), (899.0, 100.0));
         assert_eq!(grown.to_guest((1299.0, 899.0)), (899.0, 699.0));
         // A task larger than the window for a moment: points still land 1:1.
-        let shrunk = WindowGeometry {
-            client: (600, 500),
-            task: (900, 700),
-        };
+        let shrunk = WindowGeometry::one_to_one((600, 500), (900, 700));
         assert_eq!(shrunk.to_guest((599.0, 499.0)), (599.0, 499.0));
         assert_eq!(shrunk.to_guest((300.0, 20.0)), (300.0, 20.0));
     }
 
     #[test]
     fn fr5_a_point_is_relative_to_the_task_window() {
-        let geometry = WindowGeometry {
-            client: (400, 300),
-            task: (400, 300),
-        };
+        let geometry = WindowGeometry::one_to_one((400, 300), (400, 300));
         assert_eq!(geometry.to_guest((10.0, 20.0)), (10.0, 20.0));
         assert_eq!(geometry.to_guest((399.0, 299.0)), (399.0, 299.0));
     }
@@ -592,10 +698,7 @@ mod tests {
     /// is answered by the window's hit test before any point reaches the mapping. The task is the client area's size,
     /// one guest pixel per window pixel, in sizes that are not whole dp at 320 dpi.
     fn settings_at_200_percent() -> WindowGeometry {
-        WindowGeometry {
-            client: (869, 1031),
-            task: (869, 1031),
-        }
+        WindowGeometry::one_to_one((869, 1031), (869, 1031))
     }
 
     #[test]
@@ -664,19 +767,130 @@ mod tests {
 
     #[test]
     fn fr5_a_drag_out_of_the_window_keeps_its_position() {
-        let geometry = WindowGeometry {
-            client: (800, 600),
-            task: (400, 300),
-        };
+        let geometry = WindowGeometry::one_to_one((800, 600), (400, 300));
         assert_eq!(geometry.to_guest((-20.0, 700.0)), (-20.0, 700.0));
+    }
+
+    /// The Play Store window the offset was reported on: its task (2286 by 1376) keeps the
+    /// density of the main monitor at 100% and is shown on a monitor at 125% (window DPI 120),
+    /// so the window shows each task pixel at the monitor's density over the task's.
+    fn play_store_at_125_percent() -> WindowGeometry {
+        use crate::compositor::window_sizing::{density_for_dpi, scale_between, to_window_size};
+        let scale = scale_between(density_for_dpi(120), density_for_dpi(96));
+        let task = (2286, 1376);
+        WindowGeometry {
+            client: to_window_size(task, scale),
+            task,
+            scale,
+        }
+    }
+
+    #[test]
+    fn fr4_a_click_on_a_window_at_another_scale_lands_on_the_task_pixel_shown_under_it() {
+        let geometry = play_store_at_125_percent();
+        // 131 dpi per unit of scale, rounded to an even density: 164 at 125%, 130 at 100%.
+        assert_eq!(geometry.scale, (82, 65));
+        assert_eq!(geometry.client, (2884, 1736));
+        // A click 1640 window pixels across is 1300 task pixels across, not 1640: the window
+        // shows the task's pixel 1300 there.
+        assert_eq!(geometry.to_guest((1640.0, 820.0)), (1300.0, 650.0));
+        assert_eq!(geometry.to_guest((0.0, 0.0)), (0.0, 0.0));
+        let (width, height) = geometry.client;
+        for y in (0..height).step_by(7) {
+            for x in (0..width).step_by(7) {
+                let (gx, gy) = geometry.to_guest((f64::from(x), f64::from(y)));
+                // Shown back at the window's scale, the task pixel is where the click was.
+                let shown = |guest: f32| f64::from(guest) * 82.0 / 65.0;
+                assert!(
+                    (shown(gx) - f64::from(x)).abs() < 1.0
+                        && (shown(gy) - f64::from(y)).abs() < 1.0,
+                    "client pixel ({x}, {y}) landed on task pixel ({gx}, {gy})"
+                );
+            }
+        }
+        // The far corner is the task's far corner, inside the task.
+        let corner = geometry.to_guest((f64::from(width - 1), f64::from(height - 1)));
+        assert!(corner.0 <= 2285.0 && corner.0 > 2284.0, "{corner:?}");
+        assert!(corner.1 <= 1375.0 && corner.1 > 1374.0, "{corner:?}");
+    }
+
+    #[test]
+    fn fr4_at_another_scale_a_hover_and_a_click_land_on_the_same_task_pixel() {
+        let geometry = play_store_at_125_percent();
+        let at = (2000.0, 1000.0);
+        let mut mapper = PointerMapper::new(5);
+        let hover = mapper.handle(WindowInput::MouseMove { position: at }, geometry);
+        let press = mapper.handle(button(MouseButton::Left, true, at), geometry);
+        let release = mapper.handle(button(MouseButton::Left, false, at), geometry);
+        let expected = (2000.0 * 65.0 / 82.0, 1000.0 * 65.0 / 82.0);
+        for event in hover
+            .events
+            .iter()
+            .chain(&press.events)
+            .chain(&release.events)
+        {
+            assert!(
+                (f64::from(event.x) - expected.0).abs() < 0.01
+                    && (f64::from(event.y) - expected.1).abs() < 0.01,
+                "{:?} at ({}, {}), expected {expected:?}",
+                event.action,
+                event.x,
+                event.y
+            );
+        }
+    }
+
+    #[test]
+    fn fr22_at_another_scale_the_point_below_the_title_bar_is_below_the_status_bar_inset() {
+        use crate::compositor::caption::{CaptionHit, CaptionLayout};
+        use crate::compositor::window_sizing::to_task_length;
+        // The title bar is drawn in window pixels, 40 high at 120 dpi; the task's status bar
+        // inset is the same band in task pixels, as the window tells the guest.
+        let geometry = play_store_at_125_percent();
+        let band = 40;
+        let inset = to_task_length(band, geometry.scale);
+        let layout = CaptionLayout::new(geometry.client.0, band, 120, 8);
+        let x = geometry.client.0 / 2;
+        assert_ne!(layout.hit(x as i32, band as i32 - 1), CaptionHit::Client);
+        assert_eq!(layout.hit(x as i32, band as i32), CaptionHit::Client);
+        // The first window row below the band reaches the app's first row below its inset,
+        // where its toolbar is drawn, not a row a band's height further down.
+        let (_, y) = geometry.to_guest((f64::from(x), f64::from(band)));
+        assert!(
+            (f64::from(y) - f64::from(inset)).abs() <= 1.0,
+            "the row below the band landed on task row {y}, the inset ends at {inset}"
+        );
+        // The bottom row of the window is the bottom row of the task.
+        let (_, bottom) = geometry.to_guest((f64::from(x), f64::from(geometry.client.1 - 1)));
+        assert!(bottom > 1374.0 && bottom <= 1375.0, "{bottom}");
+    }
+
+    #[test]
+    fn fr4_a_window_whose_frame_has_another_size_maps_at_its_scale_and_keeps_inside_the_task() {
+        let scaled = play_store_at_125_percent();
+        // The guest took a smaller size and has not drawn it yet: the window still shows the
+        // old frame at its full size. A point is still the task pixel under it at the scale,
+        // kept inside the new task.
+        let smaller = WindowGeometry {
+            task: (1600, 1000),
+            ..scaled
+        };
+        assert_eq!(smaller.to_guest((820.0, 410.0)), (650.0, 325.0));
+        assert_eq!(smaller.to_guest((2800.0, 1700.0)), (1599.0, 999.0));
+        // The guest took a larger size first: points inside the window still land at the
+        // scale, never 1:1.
+        let larger = WindowGeometry {
+            task: (3000, 2000),
+            ..scaled
+        };
+        assert_eq!(larger.to_guest((1640.0, 820.0)), (1300.0, 650.0));
+        // A drag that leaves the window keeps going at the same scale.
+        assert_eq!(scaled.to_guest((-82.0, 2050.0)), (-65.0, 1625.0));
     }
 
     /// A window larger than the task it shows for a moment: points land 1:1.
     fn geometry() -> WindowGeometry {
-        WindowGeometry {
-            client: (800, 600),
-            task: (400, 300),
-        }
+        WindowGeometry::one_to_one((800, 600), (400, 300))
     }
 
     fn button(button: MouseButton, down: bool, at: (f64, f64)) -> WindowInput {

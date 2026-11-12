@@ -1,9 +1,11 @@
 """Reads and checks framework-lock.json, the pins the patched framework build is made from.
 
-The build makes SurfaceFlinger, libhwui and libEGL with DSA's GPU device loss recovery (the
-patches in patches/<project>/<android>/) and the image takes them in place of the published
-build's own (make-image.py --framework). Their neighbours in the image stay the published ones,
-so each must be built from the exact source of the build the image is made from.
+The build makes SurfaceFlinger, libhwui and libEGL with DSA's GPU device loss recovery, and DSA's
+KeyMint, whose root key of key blobs comes from the DSA host (the patches in
+patches/<project>/<android>/). The image takes the first three in place of the published build's
+own, and installs the KeyMint in place of the build's KeyMint APEX (make-image.py --framework).
+Their neighbours in the image stay the published ones, so each must be built from the exact
+source of the build the image is made from.
 
 The lock holds one entry per Android version DSA ships an image of (android16, android17). Each
 entry names that published build (build_id and target, the ones dsa/guest/image/inputs.json
@@ -22,7 +24,8 @@ a project fetched in part) and fetched by .github/scripts/translator/fetch-sourc
                                                    fails unless every pinned commit is the one
                                                    the build's manifest names
     framework_lock.py outputs                      where the build installs the files the image
-                                                   takes, one per line
+                                                   takes (the framework's, then the KeyMint's),
+                                                   one per line
 """
 
 import hashlib
@@ -80,11 +83,15 @@ KEYMINT_FILES = list(KEYMINT_OUTPUTS) + list(KEYMINT_SOURCES)
 
 # Projects every version fetches: the build system, and the projects the patches change.
 REQUIRED = ["build/make", "build/soong", "build/release", "build/blueprint",
-            "frameworks/native", "frameworks/base"]
+            "frameworks/native", "frameworks/base", "hardware/interfaces", "system/keymint",
+            "external/rust/crates/openssl", "external/boringssl"]
 # The folders of a project fetched in part that the patches and the targets need.
 REQUIRED_FOLDERS = {
-    "frameworks/native": ["libs/renderengine", "services/surfaceflinger", "opengl"],
+    "frameworks/native": ["libs/renderengine", "services/surfaceflinger", "opengl", "libs/binder/rust"],
     "frameworks/base": ["libs/hwui"],
+    "hardware/interfaces": ["security/keymint/aidl", "security/rkp/aidl", "security/secureclock/aidl",
+                            "security/sharedsecret/aidl"],
+    "external/boringssl": ["src/rust/bssl-sys"],
 }
 
 BUILD_ID = re.compile(r"^[0-9]+$")
@@ -246,7 +253,7 @@ def main(argv):
     elif len(argv) == 3 and argv[1] == "version":
         print(build_version(version_entry(lock, argv[2])))
     elif argv[1:] == ["outputs"]:
-        print("\n".join(OUTPUTS.values()))
+        print("\n".join(list(OUTPUTS.values()) + list(KEYMINT_OUTPUTS.values())))
     elif len(argv) == 4 and argv[1] == "check-manifest":
         problems = manifest_problems(version_entry(lock, argv[2]), Path(argv[3]).read_bytes())
         for problem in problems:

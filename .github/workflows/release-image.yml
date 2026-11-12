@@ -43,6 +43,16 @@
 # device loss (described in its image.json under "framework"): the files the newest passing
 # "Framework build" run on develop made for that Android version and architecture from the
 # pinned lock and patches. Run that workflow first when dsa/guest/framework changes.
+#
+# The Development build (dev-build.yml) calls this workflow with dev_build set, so a build for
+# testing is made by exactly these jobs and steps: the kernel, the image of the newest Android
+# for x86_64 and the Windows x64 installer, signed with the same keys. Then it publishes
+# nothing (no release, tag, image list, program list or channel) and keeps what it made as
+# workflow artifacts for three days: development-image and development-image-list (the image's
+# files, and the signed image list that names them), and development-installer (setup.exe).
+# Its image's version ends in -dev.<run number> and its installer's version is
+# <next release>-dev.<run number>, so neither is taken for a release.
+# scripts/install-dev-build.ps1 installs them on a computer.
 
 name: Image release
 
@@ -81,9 +91,38 @@ on:
         type: boolean
         required: false
         default: true
+  # The Development build (dev-build.yml): the same jobs, for Windows x64 and the newest
+  # Android only, kept as artifacts and never published.
+  workflow_call:
+    inputs:
+      dev_build:
+        description: "Build for testing: Windows x64 and the newest Android only, kept as workflow artifacts, nothing published"
+        type: boolean
+        required: true
+      installer_version:
+        description: "Also build the installer as this version; empty for the image only"
+        type: string
+        required: false
+        default: ""
+      rebuild_images:
+        description: "Build the kernel and the image; off for the installer only"
+        type: boolean
+        required: false
+        default: true
+      arm_translation:
+        description: "Take the default ARM translator into the image, as a release does"
+        type: boolean
+        required: false
+        default: true
+      framework:
+        description: "Lay the patched framework over the image, as a release does"
+        type: boolean
+        required: false
+        default: true
 
+# Development builds queue among themselves, never behind a release.
 concurrency:
-  group: release-image
+  group: ${{ inputs.dev_build && 'development-build' || 'release-image' }}
   cancel-in-progress: false
 
 permissions:
@@ -101,6 +140,8 @@ jobs:
     timeout-minutes: 5
     outputs:
       channel: ${{ steps.channel.outputs.channel }}
+      programs_exclude: ${{ steps.matrix.outputs.programs_exclude }}
+      images_exclude: ${{ steps.matrix.outputs.images_exclude }}
     steps:
       - uses: actions/checkout@v4
       - id: channel
@@ -108,7 +149,21 @@ jobs:
           REF: ${{ github.ref }}
           VERSION: ${{ inputs.installer_version }}
           REQUESTED: ${{ inputs.channel || 'prerelease' }}
+          DEV_BUILD: ${{ inputs.dev_build }}
         run: |
+          # A development build publishes nothing, and is made from develop only, where the
+          # work is integrated. Its installer goes on the pre-release channel, as every build
+          # from develop does.
+          if [[ "$DEV_BUILD" == true ]]; then
+            branch="$(.github/scripts/release/release-branch-channel.sh "$REF")"
+            if [[ "$branch" != develop ]]; then
+              echo "::error::A Development build is made from develop only, not from $branch." >&2
+              exit 1
+            fi
+            echo "A Development build of develop${VERSION:+ with the installer $VERSION}; nothing is published"
+            echo "channel=prerelease" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [[ -z "$VERSION" ]]; then
             branch="$(.github/scripts/release/release-branch-channel.sh "$REF")"
             echo "The images are released from $branch"
@@ -117,6 +172,24 @@ jobs:
           channel="$(.github/scripts/release/release-branch-channel.sh "$REF" "$VERSION" "$REQUESTED")"
           echo "DSA $VERSION is released from ${REF#refs/heads/} on the $channel channel"
           echo "channel=$channel" >> "$GITHUB_OUTPUT"
+
+      # A release builds every architecture and every supported Android. A development build
+      # is for one Windows x64 computer: x86_64 only, and the newest supported Android only.
+      - name: Choose the architectures and Android versions to build
+        id: matrix
+        env:
+          DEV_BUILD: ${{ inputs.dev_build }}
+        run: |
+          if [[ "$DEV_BUILD" == true ]]; then
+            echo 'programs_exclude=[{"arch":"arm64"}]' >> "$GITHUB_OUTPUT"
+            echo "images_exclude=$(jq -c '(.supported_majors | max) as $newest
+              | [.supported_majors[] | select(. != $newest) | {android: .}] + [{arch: "arm64"}]' \
+              dsa/android-versions.json)" >> "$GITHUB_OUTPUT"
+          else
+            echo 'programs_exclude=[]' >> "$GITHUB_OUTPUT"
+            echo 'images_exclude=[]' >> "$GITHUB_OUTPUT"
+          fi
+          cat "$GITHUB_OUTPUT"
 
   # The guest's own programs for one architecture, built one after another on one runner:
   # the graphics transport, the control daemon, the hwcomposer and the HALs. One job instead
@@ -134,6 +207,7 @@ jobs:
       fail-fast: false
       matrix:
         arch: [x86_64, arm64]
+        exclude: ${{ fromJSON(needs.channel.outputs.programs_exclude) }}
     permissions:
       contents: read
       # Deletes the compiler cache a new one replaces.
@@ -428,7 +502,7 @@ jobs:
   kernel-arm64:
     name: Build the guest kernel (arm64)
     needs: channel
-    if: inputs.rebuild_images
+    if: inputs.rebuild_images && !inputs.dev_build
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 120
     permissions:
@@ -561,10 +635,10 @@ jobs:
           exit 1
 
   image:
-    name: Make and publish the guest image (ubuntu-latest, Android ${{ matrix.android }}, ${{ matrix.arch }})
-    needs: [kernel, kernel-arm64, guest-programs, agent, prebuilt]
+    name: ${{ inputs.dev_build && 'Make' || 'Make and publish' }} the guest image (ubuntu-latest, Android ${{ matrix.android }}, ${{ matrix.arch }})
+    needs: [channel, kernel, kernel-arm64, guest-programs, agent, prebuilt]
     # The prebuilt job is skipped when the release carries neither a default translator nor
-    # a patched framework.
+    # a patched framework, and the arm64 kernel for a development build.
     if: inputs.rebuild_images && !cancelled() && !failure()
     runs-on: ubuntu-latest
     timeout-minutes: 180
@@ -577,6 +651,8 @@ jobs:
         android: [17, 16]
         # ARM64 Windows hosts boot the arm64 image, which is 64-bit only.
         arch: [x86_64, arm64]
+        # A development build makes the newest Android's x86_64 image only.
+        exclude: ${{ fromJSON(needs.channel.outputs.images_exclude) }}
     env:
       GH_TOKEN: ${{ github.token }}
       # The kernel file of the image's architecture: bzImage on x86_64, Image on arm64.
@@ -793,12 +869,14 @@ jobs:
           --aapt2 .scratch/build-tools/aapt2
           ${{ steps.translator.outputs.args }}
           ${{ steps.framework.outputs.args }}
+          ${{ inputs.dev_build && format('--dev-build {0}', github.run_number) || '' }}
 
       - name: Check the image
         run: uv run dsa/guest/image/check-image.py dsa/target/image/*/ .scratch/image-keys
 
       - name: Publish the image
         id: publish
+        if: ${{ !inputs.dev_build }}
         run: |
           dir="$(echo dsa/target/image/*/)"
           version="$(jq -r .version "$dir/image.json")"
@@ -833,12 +911,53 @@ jobs:
           echo "dir=$dir" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
+      # A development build keeps the image as an artifact instead: the files its image.json
+      # names, image.json itself and the kernel's source, uncompressed, since the disks
+      # compress little and the upload is what takes the time. Hard links, so the disk the
+      # runner has left is not halved.
+      - name: Keep the image for the Development build
+        id: keep
+        if: ${{ inputs.dev_build }}
+        run: |
+          dir="$(echo dsa/target/image/*/)"
+          dir="${dir%/}"
+          keep=.scratch/development-image
+          rm -rf "$keep"
+          mkdir -p "$keep"
+          for name in image.json $(jq -r '.files | keys[]' "$dir/image.json"); do
+            ln "$dir/$name" "$keep/$name"
+          done
+          ln .scratch/kernel-out/kernel-source.tar.gz "$keep/kernel-source.tar.gz"
+          ls -l "$keep"
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+          # Where the list says the files are: this run. The install script reads them from
+          # the downloaded artifact by name; nothing serves them at this address.
+          echo "base=https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the image for the Development build
+        if: ${{ inputs.dev_build }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: development-image
+          path: .scratch/development-image
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
+
       - name: Describe the image for the list
         working-directory: dsa
+        env:
+          TAG: ${{ steps.publish.outputs.tag }}
+          DIR: ${{ steps.publish.outputs.dir || steps.keep.outputs.dir }}
+          DEV_BASE: ${{ steps.keep.outputs.base }}
         run: |
           cargo build -q --release -p dsa-host-core --bin dsa-release
-          base="https://github.com/${{ github.repository }}/releases/download/${{ steps.publish.outputs.tag }}"
-          target/release/dsa-release image-entry "$base" "../${{ steps.publish.outputs.dir }}" > ../entry-${{ matrix.android }}-${{ matrix.arch }}.json
+          if [[ -n "$TAG" ]]; then
+            base="https://github.com/${{ github.repository }}/releases/download/$TAG"
+          else
+            base="$DEV_BASE"
+          fi
+          target/release/dsa-release image-entry "$base" "../$DIR" > ../entry-${{ matrix.android }}-${{ matrix.arch }}.json
           cat ../entry-${{ matrix.android }}-${{ matrix.arch }}.json
 
       - uses: actions/upload-artifact@v4
@@ -848,7 +967,7 @@ jobs:
           if-no-files-found: error
 
   list:
-    name: Sign and publish the release list
+    name: Sign and ${{ inputs.dev_build && 'keep' || 'publish' }} the release list
     needs: image
     if: inputs.rebuild_images
     runs-on: ubuntu-latest
@@ -884,10 +1003,13 @@ jobs:
       # images.json (x86_64, the list existing hosts read) and images-arm64.json.
       - name: Write the lists
         id: write
+        env:
+          # A development build made the x86_64 image only.
+          ARCHES: ${{ inputs.dev_build && 'x86_64' || 'x86_64 arm64' }}
         run: |
           # The supported versions are written once, in dsa/android-versions.json; an image
           # of another version is a mistake in the inputs, not a version to offer.
-          for arch in x86_64 arm64; do
+          for arch in $ARCHES; do
             list=images.json
             [[ "$arch" == arm64 ]] && list=images-arm64.json
             jq -n --slurpfile versions dsa/android-versions.json \
@@ -918,16 +1040,34 @@ jobs:
           umask 077
           key="$RUNNER_TEMP/release.key"
           printf '%s\n' "$SIGNING_KEY" > "$key"
-          target/release/dsa-release sign "$key" ../images.json
-          target/release/dsa-release sign "$key" ../images-arm64.json
+          lists=(../images.json)
+          [[ -f ../images-arm64.json ]] && lists+=(../images-arm64.json)
+          for list in "${lists[@]}"; do
+            target/release/dsa-release sign "$key" "$list"
+          done
           public="$(target/release/dsa-release public-key "$key")"
           rm -f "$key"
-          target/release/dsa-release verify "$public" ../images.json
-          target/release/dsa-release verify "$public" ../images-arm64.json
+          for list in "${lists[@]}"; do
+            target/release/dsa-release verify "$public" "$list"
+          done
           echo "The service trusts these lists with the public key $public"
           echo "public_key=$public" >> "$GITHUB_OUTPUT"
 
+      # The signed list is what the install script hands the service with the image, which
+      # checks its signature and every file's hash against it as it does a downloaded update.
+      - name: Upload the list for the Development build
+        if: ${{ inputs.dev_build }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: development-image-list
+          path: |
+            images.json
+            images.json.sig
+          if-no-files-found: error
+          retention-days: 3
+
       - name: Publish the lists
+        if: ${{ !inputs.dev_build }}
         run: |
           lists=(images.json images.json.sig images-arm64.json images-arm64.json.sig)
           if gh release view images >/dev/null 2>&1; then
@@ -939,10 +1079,13 @@ jobs:
           fi
 
   # Instead of kernel, image and list: what the installer needs, from the published release.
+  # A development build's installer takes the trust key from here even when the image is
+  # rebuilt, so it builds beside the image instead of after it; its kernel then comes from
+  # this run's kernel job.
   published:
     name: Take the kernel and the trust key from the published images
     needs: channel
-    if: ${{ !inputs.rebuild_images }}
+    if: ${{ !inputs.rebuild_images || (inputs.dev_build && inputs.installer_version != '') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -986,6 +1129,7 @@ jobs:
       # Every image carries the same kernel; the newest image's is taken and checked
       # against the hash the signed list gives.
       - name: Take the kernel
+        if: ${{ !inputs.rebuild_images }}
         run: |
           read -r url sha < <(jq -r '.images | max_by([.android_major, .build])
             | .files[] | select(.name == "bzImage") | "\(.url) \(.sha256)"' images.json)
@@ -1003,6 +1147,7 @@ jobs:
           fi
 
       - uses: actions/upload-artifact@v4
+        if: ${{ !inputs.rebuild_images }}
         with:
           name: guest-kernel
           path: |
@@ -1014,7 +1159,7 @@ jobs:
     name: Build and publish the installer (windows-latest)
     # After the list, or after published when the images are not rebuilt.
     if: >-
-      ${{ !cancelled() && inputs.installer_version != '' && needs.channel.result == 'success' &&
+      ${{ !cancelled() && !inputs.dev_build && inputs.installer_version != '' && needs.channel.result == 'success' &&
           (needs.list.result == 'success' || needs.published.result == 'success') }}
     needs: [kernel, list, published, channel]
     runs-on: windows-latest
@@ -1033,44 +1178,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Keep the Rust build between runs
-        uses: Swatinem/rust-cache@v2.9.3
-        with:
-          workspaces: dsa -> target
-          key: release-installer
-          save-if: ${{ github.ref == 'refs/heads/develop' }}
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: guest-kernel
-          path: .scratch/kernel-out
-
-      # The host graphics renderer is built by the graphics workflow; the newest build that
-      # passed is the one shipped.
-      - name: Take the graphics library from the newest graphics build
-        run: |
-          $run = gh run list --repo ${{ github.repository }} --workflow test-graphics.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId'
-          if (-not $run) { throw "no graphics build has succeeded, so there is no gfxstream_backend.dll to ship" }
-          gh run download $run --repo ${{ github.repository }} --name host-gfxstream-windows --dir .scratch\host-gfxstream
-          if ($LASTEXITCODE -ne 0) { throw "downloading host-gfxstream-windows from run $run failed" }
-          $dll = Get-ChildItem -Recurse -File .scratch\host-gfxstream -Filter gfxstream_backend.dll | Select-Object -First 1
-          if (-not $dll -or $dll.Length -eq 0) { throw "run $run has no usable gfxstream_backend.dll" }
-          "GFXSTREAM_DLL=$($dll.FullName)" >> $env:GITHUB_ENV
-
-      - name: Install WiX 5
-        run: dotnet tool install --global wix --version 5.0.2
-
-      # No image inside: the service downloads the newest supported one from the list.
+      # The kernel from this run's guest-kernel artifact; no image inside: the service
+      # downloads the newest supported one from the list. The Development build builds
+      # through the same action.
       - name: Build the package and setup.exe
-        run: >
-          dsa/host/platform/windows/installer/build.ps1 -Version ${{ inputs.installer_version }} -ReleaseTag v${{ inputs.installer_version }}
-          -Kernel .scratch/kernel-out/bzImage -GfxstreamBackend $env:GFXSTREAM_DLL
-          -ListUrl https://github.com/${{ github.repository }}/releases/download/images/images.json
-          -TrustedKey ${{ needs.list.outputs.public_key || needs.published.outputs.public_key }}
-          -AndroidMajor ${{ needs.list.outputs.newest_major || needs.published.outputs.newest_major }}
-          -ProgramListUrl https://github.com/${{ github.repository }}/releases/download/images/program-stable.json
-          -PrereleaseProgramListUrl https://github.com/${{ github.repository }}/releases/download/images/program-prerelease.json
-          -Channel $env:CHANNEL
+        uses: ./.github/actions/windows-installer
+        with:
+          version: ${{ inputs.installer_version }}
+          release-tag: v${{ inputs.installer_version }}
+          list-url: https://github.com/${{ github.repository }}/releases/download/images/images.json
+          trusted-key: ${{ needs.list.outputs.public_key || needs.published.outputs.public_key }}
+          android-major: ${{ needs.list.outputs.newest_major || needs.published.outputs.newest_major }}
+          program-list-url: https://github.com/${{ github.repository }}/releases/download/images/program-stable.json
+          prerelease-program-list-url: https://github.com/${{ github.repository }}/releases/download/images/program-prerelease.json
+          channel: ${{ needs.channel.outputs.channel }}
 
       - name: Publish the installer
         run: |
@@ -1155,6 +1276,100 @@ jobs:
       - name: Publish the program list
         shell: bash
         run: .github/scripts/release/publish-program-list.sh "$CHANNEL" x64 .scratch/program-list
+
+  # A development build's installer: built by the same action as the release's, beside the
+  # image rather than after it (the trust key comes from the published job), and kept as an
+  # artifact. It reads the published lists like any installed DSA, so the computer it is
+  # installed on takes the release it leads up to, which is newer, as an update.
+  dev-installer:
+    name: Build the installer for the Development build (windows-latest)
+    needs: [channel, kernel, published]
+    if: >-
+      ${{ !cancelled() && inputs.dev_build && inputs.installer_version != '' &&
+          needs.channel.result == 'success' && needs.published.result == 'success' &&
+          (needs.kernel.result == 'success' || needs.kernel.result == 'skipped') }}
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the package and setup.exe
+        uses: ./.github/actions/windows-installer
+        with:
+          version: ${{ inputs.installer_version }}
+          list-url: https://github.com/${{ github.repository }}/releases/download/images/images.json
+          trusted-key: ${{ needs.published.outputs.public_key }}
+          android-major: ${{ needs.published.outputs.newest_major }}
+          program-list-url: https://github.com/${{ github.repository }}/releases/download/images/program-stable.json
+          prerelease-program-list-url: https://github.com/${{ github.repository }}/releases/download/images/program-prerelease.json
+          channel: ${{ needs.channel.outputs.channel }}
+
+      # Named as a release names its setup file, with the kernel's source beside it, since
+      # setup.exe carries the kernel.
+      - name: Keep the installer for the Development build
+        run: |
+          $version = '${{ inputs.installer_version }}'
+          $asset = "DSA-v$version-win-x64-setup.exe"
+          $out = (New-Item -ItemType Directory -Force .scratch\development-installer).FullName
+          Copy-Item "dsa/target/installer/setup-$version.exe" (Join-Path $out $asset)
+          $hash = (Get-FileHash (Join-Path $out $asset) -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content -NoNewline -Encoding ascii (Join-Path $out SHA256SUMS.txt) "$hash  $asset`n"
+          $kernelSource = '.scratch/kernel-out/kernel-source.tar.gz'
+          if (-not (Test-Path $kernelSource)) { throw "the kernel source bundle is missing; a build that ships the kernel ships its source" }
+          Copy-Item $kernelSource $out
+          Get-ChildItem $out
+
+      # The program list a release would publish for this setup file, signed with the same
+      # key, kept beside it and never published: the install script checks the setup file
+      # against it with the installed service's trusted keys before it runs it.
+      - name: Write, sign and check the program list for the Development build
+        env:
+          SIGNING_KEY: ${{ secrets.DSA_RELEASE_SIGNING_KEY }}
+        run: |
+          if (-not $env:SIGNING_KEY) { throw "The DSA_RELEASE_SIGNING_KEY secret is not set; see the top of this workflow." }
+          $version = '${{ inputs.installer_version }}'
+          $asset = "DSA-v$version-win-x64-setup.exe"
+          $out = (Resolve-Path .scratch\development-installer).Path
+          # Where the setup file is: this run's artifact. The install script reads it from the
+          # downloaded artifact by name.
+          $url = "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/$asset"
+          Push-Location dsa
+          cargo build -q --release -p dsa-host-core --bin dsa-release
+          if ($LASTEXITCODE -ne 0) { throw "building dsa-release failed" }
+          Pop-Location
+          $tool = "dsa\target\release\dsa-release.exe"
+          $list = & $tool program $version $url (Join-Path $out $asset)
+          if ($LASTEXITCODE -ne 0) { throw "writing the program list failed" }
+          $file = Join-Path $out program.json
+          ($list -join "`n") + "`n" | Set-Content -NoNewline -Encoding utf8NoBOM $file
+          $key = Join-Path $env:RUNNER_TEMP "release.key"
+          Set-Content -NoNewline -Encoding ascii -Path $key -Value $env:SIGNING_KEY
+          try {
+            & $tool sign $key $file
+            if ($LASTEXITCODE -ne 0) { throw "signing the program list failed" }
+            $public = & $tool public-key $key
+          } finally { Remove-Item -Force $key }
+          if ($public -ne '${{ needs.published.outputs.public_key }}') { throw "the key that signed the program list is not the one the installer trusts" }
+          & $tool verify-program $public $file
+          if ($LASTEXITCODE -ne 0) { throw "the program list does not verify" }
+          Get-Content $file
+
+      - name: Upload the installer for the Development build
+        uses: actions/upload-artifact@v4
+        with:
+          name: development-installer
+          path: .scratch/development-installer
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
 
   # The ARM64 installer, built natively on an ARM64 runner after the x64 one has made the
   # release v<version>: its setup.exe joins that release, its hash joins SHA256SUMS.txt, and

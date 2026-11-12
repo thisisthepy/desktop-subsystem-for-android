@@ -8,7 +8,9 @@ app is not signed with one of the keys in the key folder, when a system screen o
 missing or was built against another framework-res or another build of the app it overlays,
 when Settings' pages would open with their large title folded, when the trace script is missing, when the agent is missing or not signed with the platform key, when
 Settings still has the preferences or code that crash it without Bluetooth, when a list in
-Settings or Files that sets its own padding keeps no room below its last row, when a system
+Settings or Files that sets its own padding keeps no room below its last row, when the window
+manager would not give a freeform window its status bar inset or services.jar stores its dex
+unaligned, when the framework overlay's status bar heights are not the window title bar's, when a system
 app users open is not compiled for the guest's boot image and its own dex, when an app the
 published build shipped compiled lost its odex, vdex or app image, or has one made for
 other dex, another boot image or another compiler filter, when the files
@@ -225,6 +227,22 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
             if left:
                 problems.append(f"{name} still has {'; '.join(left)}, so its pages open with the large "
                                 "title folded in every window")
+    # The window manager hands a freeform window its status bar inset, so an app that pads its
+    # toolbar by that inset keeps it below the window's title bar. services.jar keeps its dex
+    # aligned, or system_server copies 20 MiB of it into memory; its odex is checked with the
+    # apps the published build compiled, below.
+    if make_image.SERVICES_JAR not in names:
+        problems.append(f"{make_image.SERVICES_JAR} is missing")
+    else:
+        services = z.read(make_image.SERVICES_JAR)
+        left = make_image.apk_edits_left(services, code=make_image.SERVICES_CODE)
+        if left:
+            problems.append(f"{make_image.SERVICES_JAR} still has {'; '.join(left)}, so a freeform window "
+                            "gets no status bar inset and an app that pads by it draws under the title bar")
+        misaligned = make_image.zip_misaligned(services)
+        if misaligned:
+            problems.append(f"{make_image.SERVICES_JAR} stores {', '.join(misaligned)} unaligned, so "
+                            "system_server copies them into memory")
     # The system apps users open, compiled when the image was made: each odex must be there,
     # made for the APK's own (edited, signed) dex and the guest's boot image, or ART drops it
     # and the app runs interpreted again.
@@ -234,6 +252,15 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
     problems += make_image.prebuilt_oat_problems(z)
     if "VENDOR/etc/fstab.dsa" not in names:
         problems.append("the Hyper-V mount table is missing")
+    elif b"zram_backingdev_size=" not in z.read("VENDOR/etc/fstab.dsa"):
+        problems.append("the mount table gives zram no backing file, so its cold pages stay in memory")
+    # fs_mgr makes zram's backing file only in a folder that exists, which this script makes.
+    if make_image.ZRAM_BACKING_RC not in names:
+        problems.append(f"{make_image.ZRAM_BACKING_RC} is missing, so zram starts without its backing file")
+    plat_contexts = "SYSTEM/etc/selinux/plat_file_contexts"
+    if plat_contexts in names and make_image.ZRAM_BACKING_CONTEXT not in z.read(plat_contexts).decode().splitlines():
+        problems.append("plat_file_contexts does not label zram's backing folder, so the loop driver "
+                        "may not read or write the file")
     problems += make_image.direct_mapped_problems(names, z.read, manifest.get("direct_mapped"))
     if "SYSTEM/etc/selinux/plat_sepolicy.cil" not in names:
         problems.append("plat_sepolicy.cil is missing from the image")
@@ -312,6 +339,10 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
         problems += make_image.root_elevation_problems(names, z.read)
         # KeyMint's root key from the host, which only KeyMint may read.
         problems += make_image.keymint_key_problems(names, z.read)
+        # The host's root certificates among Android's system certificates.
+        problems += make_image.cacerts_problems(names, z.read)
+        # The guest's DNS, answered by the host's resolver through the daemon's stub.
+        problems += make_image.dns_problems(names, z.read)
 
     # The binder service the agent and the hwcomposer reach the daemon through.
     # servicemanager refuses it unless the vendor manifest declares it, and checks who may

@@ -278,9 +278,11 @@ class AndroidTaskActions(
      * controller.
      */
     private fun commit(transactionClass: Class<*>, transaction: Any): Boolean {
-        val controller = Class.forName("android.app.IActivityTaskManager")
-            .getMethod("getWindowOrganizerController")
-            .invoke(ActivityTaskManager.getService())
+        val controller = organizer
+            ?: Class.forName("android.app.IActivityTaskManager")
+                .getMethod("getWindowOrganizerController")
+                .invoke(ActivityTaskManager.getService())
+                ?.also { organizer = it }
             ?: return false
         Class.forName("android.window.IWindowOrganizerController")
             .getMethod("applyTransaction", transactionClass)
@@ -294,10 +296,14 @@ class AndroidTaskActions(
      * (WindowContainerTransaction.addInsetsSource and removeInsetsSource). This is how the
      * framework's own desktop windowing gives a freeform task the inset of the caption it draws
      * over the task: the frame is in display pixels, and the task's windows receive the part
-     * that overlaps them. The status bar type is given too because the guest has no status bar
-     * of its own, and apps lay out their top edge by the status bar inset. The sources do not
-     * force their insets to be consumed, so an app drawing edge to edge draws its status bar
-     * background under the band.
+     * that overlaps them. The status bar type is given too because the host window's title bar
+     * is Android's status bar: the guest has no status bar of its own, and most apps lay out
+     * their top edge by the status bar inset, as on a phone. Stock Android hands a freeform
+     * window only its caption bar and IME insets; the image's window manager keeps the status
+     * bar inset too (make-image.py's SERVICES_CODE), so an app that pads by it keeps its
+     * toolbar below the title bar. The sources do not force their insets to be consumed, so an
+     * app drawing edge to edge draws its status bar background under the band, and Android
+     * draws the status bar colour of an app that does not there.
      *
      * The caption bar source carries [boundingRects], relative to [frame], as Android's own
      * desktop windows give an app that draws its own title bar the places their caption draws
@@ -383,15 +389,36 @@ class AndroidTaskActions(
         log.warn("could not give a task an inset through a window container transaction", error)
     }
 
-    /** The task's window container token (TaskInfo.token, not in the SDK). */
+    /**
+     * The task's window container token (TaskInfo.token, not in the SDK). A task keeps its
+     * token for as long as it lives, and a task ID is not given to another task while the
+     * guest runs, so the tokens are kept: a resize then asks the framework for nothing before
+     * its transaction. Reading the running tasks is a binder call that waits for the window
+     * manager's lock and builds every task's description; on a busy guest it is one more wait
+     * between a new size and the window manager, on the thread the size waits on. The tasks are
+     * read again only for a task not seen yet, and the tokens of tasks that ended go then.
+     */
     private fun taskToken(taskId: Int): Any? {
+        tokens[taskId]?.let { return it }
         @Suppress("DEPRECATION")
-        val info = context.getSystemService(ActivityManager::class.java)
-            .getRunningTasks(MAX_TASKS)
-            .firstOrNull { it.taskId == taskId }
-            ?: return null
-        return Class.forName("android.app.TaskInfo").getField("token").get(info)
+        val running = context.getSystemService(ActivityManager::class.java).getRunningTasks(MAX_TASKS)
+        val field = Class.forName("android.app.TaskInfo").getField("token")
+        val read = HashMap<Int, Any>()
+        for (info in running) field.get(info)?.let { read[info.taskId] = it }
+        tokens = read
+        return read[taskId]
     }
+
+    /** Each running task's window container token, as [taskToken] last read them. */
+    @Volatile
+    private var tokens: Map<Int, Any> = emptyMap()
+
+    /**
+     * The window organizer controller, read once: it is the window manager's, which lives as
+     * long as the guest does.
+     */
+    @Volatile
+    private var organizer: Any? = null
 
     private fun warnNoDensity(error: Throwable) {
         if (warnedNoDensity) return

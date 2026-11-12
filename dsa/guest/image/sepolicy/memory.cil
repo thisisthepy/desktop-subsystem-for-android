@@ -4,10 +4,10 @@
 ; the cache drop and compaction that let free page reporting hand idle memory back to the
 ; host, and how readily the kernel swaps to zram.
 
-; /proc/sys/vm/compact_memory, /proc/sys/vm/swappiness and
-; /proc/sys/vm/compaction_proactiveness have no label of their own, so they would be plain
-; proc, which vendor_init may not write. A type of their own opens these three and nothing
-; else.
+; /proc/sys/vm/compact_memory, /proc/sys/vm/swappiness, /proc/sys/vm/compaction_proactiveness,
+; /proc/sys/vm/vfs_cache_pressure and /proc/sys/vm/percpu_pagelist_high_fraction have no label
+; of their own, so they would be plain proc, which vendor_init may not write. A type of their
+; own opens these five and nothing else.
 (type dsa_proc_vm_tunable)
 (roletype object_r dsa_proc_vm_tunable)
 (typeattributeset fs_type (dsa_proc_vm_tunable))
@@ -15,6 +15,8 @@
 (genfscon proc "/sys/vm/compact_memory" (u object_r dsa_proc_vm_tunable ((s0) (s0))))
 (genfscon proc "/sys/vm/swappiness" (u object_r dsa_proc_vm_tunable ((s0) (s0))))
 (genfscon proc "/sys/vm/compaction_proactiveness" (u object_r dsa_proc_vm_tunable ((s0) (s0))))
+(genfscon proc "/sys/vm/vfs_cache_pressure" (u object_r dsa_proc_vm_tunable ((s0) (s0))))
+(genfscon proc "/sys/vm/percpu_pagelist_high_fraction" (u object_r dsa_proc_vm_tunable ((s0) (s0))))
 (allow vendor_init dsa_proc_vm_tunable (file (write open getattr)))
 (allow init dsa_proc_vm_tunable (file (read write open getattr)))
 (allow vendor_init proc_drop_caches (file (write open getattr)))
@@ -37,6 +39,35 @@
 ; reclaim marks what zram holds idle, compresses it again and compacts zram (dsa-channeld.rc).
 (allow vendor_init sysfs_zram (dir (search)))
 (allow vendor_init sysfs_zram (file (write open getattr)))
+
+; zram's backing file, /data/per_boot/zram_swap (fstab.dsa, dsa-zram-backing.rc). init makes
+; the folder and, through fs_mgr in swapon_all, the file, attaches it to a loop device and
+; names that zram's backing device. The loop driver reads and writes the file from the kernel's
+; own threads. Nothing else may open it: what is in it is apps' memory.
+(type dsa_zram_backing_file)
+(roletype object_r dsa_zram_backing_file)
+(typeattributeset file_type (dsa_zram_backing_file))
+(typeattributeset data_file_type (dsa_zram_backing_file))
+(typeattributeset core_data_file_type (dsa_zram_backing_file))
+(allow init dsa_zram_backing_file (dir (create search getattr setattr open read write add_name remove_name relabelto)))
+(allow init dsa_zram_backing_file (file (create open read write getattr setattr unlink relabelto)))
+(allow kernel dsa_zram_backing_file (file (read write getattr)))
+; dsa-zram-backing.rc and Android's init.rc remove the last boot's folder with toolbox's rm,
+; which may only empty it: list it, unlink the file and remove the folder, never open the file.
+; A folder left behind with the last boot's key would make init.rc's mkdir ask for a wipe.
+(allow toolbox dsa_zram_backing_file (dir (getattr open read search write remove_name rmdir)))
+(allow toolbox dsa_zram_backing_file (file (getattr unlink)))
+
+; The idle reclaim and the zram writeback ask the kernel to report every free page to the host
+; again (page_reporting.rereport, a parameter DSA's kernel adds): free pages a host that backs
+; memory in clusters took in again, and those the per-CPU lists held. The parameter is plain
+; sysfs otherwise, which vendor_init may not write; a type of its own opens this one file.
+(type dsa_sysfs_page_reporting)
+(roletype object_r dsa_sysfs_page_reporting)
+(typeattributeset fs_type (dsa_sysfs_page_reporting))
+(typeattributeset sysfs_type (dsa_sysfs_page_reporting))
+(genfscon sysfs "/module/page_reporting/parameters/rereport" (u object_r dsa_sysfs_page_reporting ((s0) (s0))))
+(allow vendor_init dsa_sysfs_page_reporting (file (write open getattr)))
 
 ; The agent reports how much compressed swap holds (zram's mm_stat) with the rest of the
 ; guest's memory.

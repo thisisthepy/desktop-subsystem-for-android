@@ -565,7 +565,9 @@ impl State {
         let Some(window) = self.windows.get(&task_id) else {
             return;
         };
-        let band = window.model.caption_height();
+        // The frame is the task's, in its pixels: the band covers fewer or more of its rows
+        // when the window shows it at another scale.
+        let band = window.model.caption_rows_in_frame();
         // A GPU frame is read back from under the band only; a frame in memory has it all.
         let last_gpu = window.last_gpu;
         let frame = match last_gpu {

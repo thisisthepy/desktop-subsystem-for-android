@@ -6,7 +6,8 @@
 //! New window (only for an app that supports several windows), Screenshot, Aspect ratio, Open
 //! by default and App info. They sit where a Windows user looks for what a window can do, and
 //! they take no room in the title bar. The default title bar and one the app draws itself
-//! share the same menu, since Windows opens it from the same window.
+//! share the same menu, since Windows opens it from the same window. The window shows it as a
+//! Windows 11 menu ([`super::window_menu`]), whose Android part is these items.
 //!
 //! The window host takes the screenshot itself ([`super::screenshot`]), since it has the
 //! window's frames. Every other item goes to the window manager as `FromHost::MenuChosen`.

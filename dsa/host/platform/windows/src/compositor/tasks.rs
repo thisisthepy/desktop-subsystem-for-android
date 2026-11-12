@@ -11,6 +11,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use dsa_host_core::compositor::resize_pacing::ResizePacer;
+use dsa_host_core::compositor::window_tasks::WindowTasks;
 use dsa_host_core::host_api::{HostApiClient, InputStream};
 use dsa_host_core::input::InputEvent;
 use dsa_host_core::tasks::{coalesce, TaskRequest};
@@ -241,8 +242,20 @@ pub fn serve_requests(
 /// the service cannot be reached, the events are dropped and the connection is tried again
 /// after a short wait; a connection that breaks is made again at once, for the same event.
 pub fn serve_input(
+    connector: Box<dyn Connector>,
+    events: Receiver<InputEvent>,
+    logger: Option<Arc<CompositorLogger>>,
+) {
+    serve_window_input(connector, events, WindowTasks::new(), logger)
+}
+
+/// [`serve_input`] for a window host's windows, which name the task each window opened for:
+/// each event goes to the task its window shows now, as `tasks` says, which is another task
+/// once one took the window over after a GPU reset.
+pub fn serve_window_input(
     mut connector: Box<dyn Connector>,
     events: Receiver<InputEvent>,
+    tasks: WindowTasks,
     logger: Option<Arc<CompositorLogger>>,
 ) {
     crate::scheduling::raise_this_thread();
@@ -250,6 +263,7 @@ pub fn serve_input(
     let mut retry_at: Option<Instant> = None;
     let mut last_error = String::new();
     while let Ok(event) = events.recv() {
+        let event = tasks.input(event);
         for _ in 0..2 {
             if stream.is_none() {
                 if retry_at.is_some_and(|at| Instant::now() < at) {

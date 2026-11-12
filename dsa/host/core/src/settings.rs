@@ -7,7 +7,8 @@
 //! port is attached to their adb server by itself, file sharing
 //! (which of their host folders their Android shows in its shared storage), and whether the
 //! host's own touch gestures are off while one of their task windows is in front, and whether
-//! their Android restarts by itself into an Android image the service downloaded. The others are the
+//! their Android restarts by itself into an Android image the service downloaded, and whether their
+//! Android trusts the root certificates added to the computer. The others are the
 //! machine's, shared by every user: whether the service updates DSA itself, whether it takes
 //! pre-releases of DSA as well as stable releases, whether it downloads new Android images,
 //! and whether DSA's processes write the input trace and the per-stage resize trace to their
@@ -29,7 +30,8 @@
 //!                              "shared_folders": ["Documents", "Pictures"],
 //!                              "advanced_networking": false,
 //!                              "touch_gestures_off": true,
-//!                              "image_auto_restart": true}
+//!                              "image_auto_restart": true,
+//!                              "host_certificates": true}
 //! <dir>/users/<user>.app-windows.json
 //!                             the user's window settings for each app
 //! <dir>/users/<user>.arm-translation.json
@@ -129,6 +131,9 @@ pub struct Settings {
     /// downloaded: at once while no app window is open, else after asking, or once every
     /// window is closed. On by default; off, a downloaded image waits for the next start.
     pub image_auto_restart: bool,
+    /// Whether the user's Android trusts, as system certificates, the root certificates a user
+    /// or an administrator added to the computer. On by default; it applies at once.
+    pub host_certificates: bool,
     /// Whether apps may elevate to root through the host's administrator approval. The
     /// machine's, shared by every user; off by default. It takes effect from the next start
     /// of Android.
@@ -158,6 +163,7 @@ impl Default for Settings {
             shared_folders: file_share::all_folders(),
             touch_gestures_off: true,
             image_auto_restart: true,
+            host_certificates: true,
             root_elevation: false,
         }
     }
@@ -259,6 +265,8 @@ pub struct UserSettings {
     pub touch_gestures_off: bool,
     #[serde(default = "yes")]
     pub image_auto_restart: bool,
+    #[serde(default = "yes")]
+    pub host_certificates: bool,
 }
 
 impl Default for UserSettings {
@@ -279,6 +287,7 @@ impl Default for UserSettings {
             advanced_networking: false,
             touch_gestures_off: true,
             image_auto_restart: true,
+            host_certificates: true,
         }
     }
 }
@@ -307,6 +316,7 @@ impl UserSettings {
             advanced_networking: settings.advanced_networking,
             touch_gestures_off: settings.touch_gestures_off,
             image_auto_restart: settings.image_auto_restart,
+            host_certificates: settings.host_certificates,
         }
     }
 }
@@ -607,6 +617,7 @@ fn combine(mine: UserSettings, machine: MachineSettings) -> Settings {
             .unwrap_or_else(|_| file_share::known_folders(&mine.shared_folders)),
         touch_gestures_off: mine.touch_gestures_off,
         image_auto_restart: mine.image_auto_restart,
+        host_certificates: mine.host_certificates,
     }
 }
 
@@ -1012,6 +1023,7 @@ mod tests {
                     shared_folders: vec!["Pictures".into()],
                     touch_gestures_off: false,
                     image_auto_restart: true,
+                    host_certificates: true,
                     root_elevation: false,
                 },
             )
@@ -1312,6 +1324,33 @@ mod tests {
             again.get("uid:1001").unwrap().image_auto_restart,
             "the user's own"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fr28_host_certificates_are_trusted_by_default_and_kept_per_user() {
+        let dir = scratch("host-certificates");
+        let store = FileSettings::new(&dir);
+        assert!(store.get("uid:1000").unwrap().host_certificates);
+        let saved = store
+            .set(
+                "uid:1000",
+                &Settings {
+                    host_certificates: false,
+                    ..Settings::default()
+                },
+            )
+            .unwrap();
+        assert!(!saved.host_certificates);
+        let again = FileSettings::new(&dir);
+        assert!(!again.get("uid:1000").unwrap().host_certificates);
+        assert!(
+            again.get("uid:1001").unwrap().host_certificates,
+            "the user's own"
+        );
+        // A file kept by a release without the setting reads as on.
+        std::fs::write(dir.join("users").join("uid_1002.json"), "{}").unwrap();
+        assert!(again.get("uid:1002").unwrap().host_certificates);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

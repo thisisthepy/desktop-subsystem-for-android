@@ -210,6 +210,18 @@ pub enum NetworkMode {
     Off,
 }
 
+/// Who answers Android's DNS queries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DnsResolver {
+    /// The service did not say: Android is still starting, or the service is older.
+    Unknown,
+    /// This computer's resolver, so its hosts file, VPN and DNS filters apply.
+    Host,
+    /// This computer's resolver does not answer, so Android asks the network's DNS servers
+    /// itself.
+    Network,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Network {
     pub mode: NetworkMode,
@@ -217,6 +229,7 @@ pub struct Network {
     pub dns_servers: Vec<String>,
     pub gateway: String,
     pub problem: Option<String>,
+    pub dns_resolver: DnsResolver,
 }
 
 impl Network {
@@ -232,6 +245,11 @@ impl Network {
             dns_servers: texts(json, "dns_servers"),
             gateway: text(json, "gateway"),
             problem: optional_text(json, "problem"),
+            dns_resolver: match json["dns_resolver"].as_str() {
+                Some("host") => DnsResolver::Host,
+                Some("network") => DnsResolver::Network,
+                _ => DnsResolver::Unknown,
+            },
         }
     }
 }
@@ -288,6 +306,43 @@ pub struct Settings {
     /// Whether apps in Android may ask for root through an administrator's approval. The
     /// machine's, off by default; it applies from the next start of Android.
     pub root_elevation: bool,
+    /// Whether Android trusts the root certificates a user or an administrator added to this
+    /// computer. On by default; it applies at once.
+    pub host_certificates: bool,
+    /// The root certificates the service found added to this computer, whether or not
+    /// [`Settings::host_certificates`] is on. Those the system ships are left out.
+    pub imported_certificates: Vec<ImportedCertificate>,
+}
+
+/// A root certificate the service found added to this computer's trust stores.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportedCertificate {
+    /// Who it is for, as a distinguished name ("CN=Example Root, O=Example").
+    pub subject: String,
+    /// Who signed it, the same way.
+    pub issuer: String,
+    /// Where it was found: "system" on Linux (added to the system's certificate store beside
+    /// the distribution's bundle); the other hosts name their own stores.
+    pub source: String,
+    /// The file or store it was found in.
+    pub location: String,
+    /// Its SHA-256 fingerprint, in lower-case hexadecimal.
+    pub sha256: String,
+    /// When it stops being valid, in seconds since 1970; 0 when unknown.
+    pub not_after: i64,
+}
+
+impl ImportedCertificate {
+    pub fn read(json: &Value) -> ImportedCertificate {
+        ImportedCertificate {
+            subject: text(json, "subject"),
+            issuer: text(json, "issuer"),
+            source: text(json, "source"),
+            location: text(json, "location"),
+            sha256: text(json, "sha256"),
+            not_after: signed(json, "not_after"),
+        }
+    }
 }
 
 /// Where attaching developer mode's port to the user's adb server stands.
@@ -366,6 +421,12 @@ impl Settings {
             prerelease_updates: flag(json, "prerelease_updates", false),
             update_channel_available: flag(json, "update_channel_available", false),
             root_elevation: flag(json, "root_elevation", false),
+            host_certificates: flag(json, "host_certificates", true),
+            imported_certificates: items(json, "imported_certificates")
+                .iter()
+                .filter(|c| c.is_object())
+                .map(ImportedCertificate::read)
+                .collect(),
         }
     }
 
@@ -1648,6 +1709,12 @@ impl Client {
             name,
             on_off(on),
         ])?))
+    }
+
+    /// Whether Android trusts the root certificates a user or an administrator added to this
+    /// computer. The user's own setting; it applies at once.
+    pub fn set_host_certificates(&self, on: bool) -> Result<Settings, Failure> {
+        self.switch("host-certificates", on)
     }
 
     /// The most memory Android may grow to, in MiB; 0 is automatic.

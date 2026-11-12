@@ -73,6 +73,53 @@ data class WidgetInfo(
          */
         fun canSetUpAgain(hasConfigureActivity: Boolean, widgetFeatures: Int): Boolean =
             hasConfigureActivity && (widgetFeatures and FEATURE_RECONFIGURABLE) != 0
+
+        /** A launcher cell, in dp, as on a phone: [n] cells span `n * CELL_DP - GAP_DP`. */
+        const val CELL_DP = 74
+
+        /** The room between two launcher cells, in dp. */
+        const val GAP_DP = 16
+
+        /** The most cells a launcher's row or column gives a widget, as a phone's 5 by 5 grid. */
+        const val GRID_CELLS = 5
+
+        /**
+         * The cells a launcher gives a widget of at least [minDp] along a side: Android's rule
+         * for widget sizes is that n cells hold `70n - 30` dp, so a widget gets the fewest
+         * cells that hold its minimum, and at least one.
+         */
+        fun cellsFor(minDp: Int): Int = ((minDp.coerceAtLeast(0) + 30 + 69) / 70).coerceAtLeast(1)
+
+        /**
+         * The side a widget is placed at, as a launcher places it: whole cells, the
+         * [targetCells] its app asks for when it asks, and never fewer than hold its minimum
+         * [minDp] or more than [GRID_CELLS]. A launcher's cells are larger than the minimum
+         * they hold, and an app lays its widget out for that room, so a widget placed at its
+         * bare minimum has its last row cut off once its text is a little larger. The side is
+         * never below [minDp], and never above [maxDp] when that is set (0 for no limit).
+         */
+        fun launcherSide(minDp: Int, targetCells: Int, maxDp: Int = 0): Int {
+            val min = minDp.coerceAtLeast(0)
+            val cells = maxOf(targetCells, cellsFor(min)).coerceAtMost(GRID_CELLS)
+            val side = maxOf(cells * CELL_DP - GAP_DP, min)
+            return if (maxDp in 1 until side) maxOf(maxDp, min) else side
+        }
+    }
+
+    /**
+     * This widget as the host is told of it once its content was seen to need [widthDp] by
+     * [heightDp]: its default size grows to hold the content, within its maximum, so a window
+     * the user has not sized grows until nothing of the widget is cut off.
+     */
+    fun holding(widthDp: Int, heightDp: Int): WidgetInfo {
+        fun side(default: Int, need: Int, max: Int): Int {
+            val grown = maxOf(default, need).coerceIn(0, WidgetManager.MAX_SIDE)
+            return if (max > 0) minOf(grown, maxOf(max, default)) else grown
+        }
+        return copy(
+            defaultWidthDp = side(defaultWidthDp, widthDp, maxWidthDp),
+            defaultHeightDp = side(defaultHeightDp, heightDp, maxHeightDp),
+        )
     }
 
     fun toProto(): WidgetProvider = WidgetProvider.newBuilder()
@@ -125,6 +172,75 @@ data class WidgetSize(val width: Int, val height: Int, val densityDpi: Int, val 
             return WidgetSize(width, height, 160, width, height)
         }
     }
+}
+
+/**
+ * How a widget's content fits the window it is drawn in. An app lays its widget out for the
+ * size it is told, but its views can need more, as when its text is larger than it planned
+ * for: a view laid out past the window's edge is cut off. The widget is then drawn shrunk just
+ * enough that all of it shows ([scale]), and the host is told the size its content needs, so a
+ * window the user has not sized grows to it and the widget is drawn at full size again.
+ */
+object WidgetFit {
+    /** The most a widget's drawing is shrunk: content that reaches further is taken as no content. */
+    const val MIN_SCALE = 0.5f
+
+    /**
+     * The scale, from [MIN_SCALE] to 1, at which content that reaches [reachWidth] by
+     * [reachHeight] pixels from a widget's corner shows whole in [width] by [height] pixels.
+     */
+    fun scale(width: Int, height: Int, reachWidth: Int, reachHeight: Int): Float {
+        if (width <= 0 || height <= 0) return 1f
+        val across = if (reachWidth > width) width.toFloat() / reachWidth else 1f
+        val down = if (reachHeight > height) height.toFloat() / reachHeight else 1f
+        return minOf(across, down).coerceIn(MIN_SCALE, 1f)
+    }
+
+    /**
+     * The pixels a widget drawn at [scale] in a window of [windowPixels] lays its views out in:
+     * the window's, made larger by as much as the drawing is shrunk.
+     */
+    fun layoutSide(windowPixels: Int, scale: Float): Int =
+        if (scale >= 1f) windowPixels else kotlin.math.ceil(windowPixels / scale.toDouble()).toInt()
+
+    /** [px] pixels at [densityDpi], in dp, rounded up so the content is held whole. */
+    fun dpOf(px: Int, densityDpi: Int): Int =
+        if (densityDpi <= 0) px else kotlin.math.ceil(px * 160.0 / densityDpi - 0.001).toInt().coerceAtLeast(0)
+
+    /**
+     * The pixels a widget's views take along a side of [room] pixels when they span from
+     * [start] to [end] pixels from its edge: the room, grown by as far as they reach past
+     * either end. Android centres a widget's content in its view, so content larger than the
+     * room reaches past both ends, the first as far as the last; counting only the far end
+     * took half of it, and the window grew by halves without ever holding it.
+     */
+    fun span(room: Int, start: Int, end: Int): Int = maxOf(end, room) - minOf(start, 0)
+
+    /**
+     * Where a parent that cuts off its children at [edge] leaves the limit of what shows,
+     * [current] before it, along a side whose own edge is [roomEdge]: the start of the room
+     * when [low], its end otherwise. An edge inside the room is the app's own, and what it cuts
+     * off is drawn as the app means it. An edge at or past the room's is where the widget's
+     * window ends, and what reaches past it is cut off by the window, so it does not count as
+     * a limit.
+     */
+    fun clipEdge(current: Int, edge: Int, roomEdge: Int, low: Boolean): Int = when {
+        low && edge > roomEdge -> maxOf(current, edge)
+        !low && edge < roomEdge -> minOf(current, edge)
+        else -> current
+    }
+
+    /**
+     * What a widget's app is told its size is, in dp: the size of its window, which is the
+     * room its view is laid out in. Android's `updateAppWidgetSize` takes 8 dp off each side
+     * for padding a launcher puts around a widget, but the agent's widget view has none: the
+     * app was told 16 dp less each way than it had, laid its content out that much shorter,
+     * and the window showed it with an empty band along its bottom.
+     */
+    fun told(widthDp: Int, heightDp: Int): Told = Told(widthDp.coerceAtLeast(1), heightDp.coerceAtLeast(1))
+
+    /** A widget's size as its app is told it, in dp: the least and the most are both this size. */
+    data class Told(val widthDp: Int, val heightDp: Int)
 }
 
 /** The guest's widget framework, as the agent drives it. Every method runs on the agent's thread. */
@@ -194,6 +310,13 @@ interface WidgetPlatform {
      */
     fun whenReady(ready: () -> Unit) = ready()
 
+    /**
+     * Calls [needs], on any thread, when a widget's views reach past the size it is drawn at:
+     * its content needs [widthDp] by [heightDp] to show whole. Until its window is that large
+     * the platform draws the widget shrunk to fit ([WidgetFit]), never cut off.
+     */
+    fun fitting(needs: (widgetId: Int, widthDp: Int, heightDp: Int) -> Unit) = Unit
+
     companion object {
         val NONE = object : WidgetPlatform {
             override fun providers() = emptyList<WidgetInfo>()
@@ -212,7 +335,10 @@ interface WidgetPlatform {
     }
 }
 
-/** Where the agent keeps the size each widget was last drawn at, across its restarts. */
+/**
+ * Where the agent keeps the size each widget was last drawn at, and the size in dp its content
+ * was seen to need, across its restarts. [remove] forgets both.
+ */
 interface WidgetStore {
     fun sizes(): Map<Int, WidgetSize>
 
@@ -220,10 +346,20 @@ interface WidgetStore {
 
     fun remove(widgetId: Int)
 
+    /**
+     * The width and height in dp each widget's content needs, so the host hears a widget
+     * described at the size that holds it from the start, and its window does not shrink and
+     * grow again each time Android starts.
+     */
+    fun needs(): Map<Int, Pair<Int, Int>> = emptyMap()
+
+    fun saveNeed(widgetId: Int, widthDp: Int, heightDp: Int) = Unit
+
     companion object {
         /** Keeps them in memory only. */
         fun memory(): WidgetStore = object : WidgetStore {
             private val kept = mutableMapOf<Int, WidgetSize>()
+            private val needed = mutableMapOf<Int, Pair<Int, Int>>()
             override fun sizes() = kept.toMap()
             override fun save(widgetId: Int, size: WidgetSize) {
                 kept[widgetId] = size
@@ -231,6 +367,13 @@ interface WidgetStore {
 
             override fun remove(widgetId: Int) {
                 kept.remove(widgetId)
+                needed.remove(widgetId)
+            }
+
+            override fun needs() = needed.toMap()
+
+            override fun saveNeed(widgetId: Int, widthDp: Int, heightDp: Int) {
+                needed[widgetId] = widthDp to heightDp
             }
         }
     }
@@ -323,6 +466,13 @@ class WidgetManager(
 
     private class Drawn(val width: Int, val height: Int, val png: ByteArray)
 
+    /**
+     * The size in dp each widget's content was seen to need, the largest since the agent
+     * started; the host hears each widget described with its default grown to it
+     * ([WidgetInfo.holding]).
+     */
+    private val needs = mutableMapOf<Int, Pair<Int, Int>>()
+
     /** Whether the host has heard which widgets are placed since the agent started. */
     private var listed = false
 
@@ -370,6 +520,7 @@ class WidgetManager(
     private fun begin() {
         if (started) return
         try {
+            platform.fitting { id, width, height -> post { contentNeeds(id, width, height) } }
             platform.start(
                 frame = { id, width, height, png -> post { frame(id, width, height, png) } },
                 changed = { post { if (isConnected()) announce() else prune() } },
@@ -391,6 +542,11 @@ class WidgetManager(
         }
         started = true
         if (waiting) log.info("the widget host started")
+        try {
+            needs.putAll(store.needs())
+        } catch (e: Exception) {
+            log.warn("reading what the widgets' content needs failed; each is measured again", e)
+        }
         prune()
         val sizes = store.sizes()
         for (id in placed()) {
@@ -458,6 +614,43 @@ class WidgetManager(
         shown.remove(id)
         lastFrame.remove(id)
         drawn.remove(id)
+        needs.remove(id)
+    }
+
+    /**
+     * Widget [id]'s views reach past its size: its content needs [widthDp] by [heightDp]. When
+     * that grows what the host was told of the widget, the host hears it described again with
+     * a default that holds the content, and grows the widget's window to it unless the user
+     * chose its size. A need only ever grows, and is kept across the agent's restarts, so a
+     * widget whose content changes size from one update to the next, or whose Android
+     * restarts, never makes its window jump back and forth.
+     */
+    private fun contentNeeds(id: Int, widthDp: Int, heightDp: Int) {
+        if (id !in shown) return
+        val before = needs[id]
+        val width = maxOf(before?.first ?: 0, widthDp.coerceIn(0, MAX_SIDE))
+        val height = maxOf(before?.second ?: 0, heightDp.coerceIn(0, MAX_SIDE))
+        if (before == (width to height)) return
+        needs[id] = width to height
+        try {
+            store.saveNeed(id, width, height)
+        } catch (e: Exception) {
+            log.warn("keeping what widget $id's content needs failed", e)
+        }
+        val info = try {
+            platform.info(id)
+        } catch (e: Exception) {
+            log.warn("reading widget $id failed", e)
+            null
+        } ?: return
+        val told = before?.let { info.holding(it.first, it.second) } ?: info
+        val now = info.holding(width, height)
+        if (now == told) return
+        log.info(
+            "widget $id: its content needs ${width}x$height dp, more than " +
+                "${told.defaultWidthDp}x${told.defaultHeightDp}; describing it at ${now.defaultWidthDp}x${now.defaultHeightDp}",
+        )
+        if (isConnected()) send(updated(id, info))
     }
 
     /** The host connected: it hears of every placed widget and what each shows now. */
@@ -484,9 +677,13 @@ class WidgetManager(
         if (alive.isNotEmpty() || before > 0 || listed) sendList()
     }
 
-    private fun updated(id: Int, info: WidgetInfo) = Envelope.newBuilder()
-        .setWidgetUpdated(WidgetUpdated.newBuilder().setWidgetId(id).setProvider(info.toProto()))
-        .build().toByteArray()
+    /** The widget [id] of [info] as the host is told of it: with a default that holds its content. */
+    private fun updated(id: Int, info: WidgetInfo): ByteArray {
+        val described = needs[id]?.let { (width, height) -> info.holding(width, height) } ?: info
+        return Envelope.newBuilder()
+            .setWidgetUpdated(WidgetUpdated.newBuilder().setWidgetId(id).setProvider(described.toProto()))
+            .build().toByteArray()
+    }
 
     private fun sendList() {
         listed = true

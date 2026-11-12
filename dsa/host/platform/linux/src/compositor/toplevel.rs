@@ -9,7 +9,7 @@
 
 use dsa_host_core::compositor::caption::{scaled, CaptionBand, CaptionLayout};
 use dsa_host_core::compositor::window_mode::{ModeState, WindowMode};
-use dsa_host_core::compositor::window_sizing::BASE_DPI;
+use dsa_host_core::compositor::window_sizing::{to_task_length, window_size_of, BASE_DPI};
 use dsa_host_core::input::WindowGeometry;
 
 /// The title bar's height at 100%, in pixels: the height of a caption with its top border
@@ -117,6 +117,7 @@ impl Toplevel {
         WindowGeometry {
             client: self.shown,
             task: self.task,
+            scale: self.frame_scale,
         }
     }
 
@@ -133,6 +134,13 @@ impl Toplevel {
         } else {
             0
         }
+    }
+
+    /// The rows of the task's frame the title bar covers: [`Self::caption_height`] in the
+    /// task's pixels, as the window shows the frame at its frame scale. A frame read back
+    /// (a screenshot, the band's sample) is in the task's pixels, not the window's.
+    pub fn caption_rows_in_frame(&self) -> u32 {
+        to_task_length(self.caption_height(), self.frame_scale)
     }
 
     /// The title bar's layout over the frame shown now. A maximized or full screen window,
@@ -215,6 +223,15 @@ impl Toplevel {
     pub fn frame_shown(&mut self, size: (u32, u32)) {
         self.shown = size;
     }
+
+    /// The pixels a frame of `frame` task pixels fills at the window's frame scale. A frame
+    /// of the task size the window's size, or the size the desktop last proposed, was turned
+    /// into is that size exactly, though rounding it back at the scale can land a pixel off.
+    pub fn frame_in_window(&self, frame: (u32, u32)) -> (u32, u32) {
+        let mut views = vec![self.shown];
+        views.extend(self.proposed);
+        window_size_of(frame, self.frame_scale, &views)
+    }
 }
 
 #[cfg(test)]
@@ -223,6 +240,25 @@ mod tests {
 
     fn window() -> Toplevel {
         Toplevel::new(7, "com.example", "Example", (400, 600))
+    }
+
+    #[test]
+    fn fr4_a_scaled_frame_of_the_proposed_size_fills_exactly_that_size() {
+        use dsa_host_core::compositor::window_sizing::{to_task_size, to_window_size};
+        let mut window = window();
+        // A task kept at 130 dpi on a 200% output: 262 window pixels per 130 task pixels.
+        window.frame_scale = (131, 65);
+        let states = States::default();
+        window.configure((1009, 700), states);
+        let asked = to_task_size((1009, 700), window.frame_scale);
+        assert_eq!(asked, (501, 347));
+        assert_eq!(to_window_size(asked, window.frame_scale), (1010, 699));
+        // The frame drawn at the size asked for fills the size proposed, not a pixel off it.
+        assert_eq!(window.frame_in_window(asked), (1009, 700));
+        window.frame_shown(window.frame_in_window(asked));
+        assert_eq!(window.shown, (1009, 700));
+        // Another frame fills its own size at the scale.
+        assert_eq!(window.frame_in_window((500, 347)), (1008, 699));
     }
 
     #[test]
@@ -330,6 +366,25 @@ mod tests {
         window.mode.toggle_fullscreen();
         assert_eq!(window.caption_height(), 0);
         assert_eq!(window.caption_change(), Some(CaptionBand::default()));
+    }
+
+    #[test]
+    fn fr22_a_screenshot_of_a_window_at_another_scale_leaves_out_the_bands_rows_of_the_frame() {
+        use dsa_host_core::compositor::window_sizing::{density_for_dpi, scale_between};
+        let mut window = window();
+        assert_eq!(window.caption_rows_in_frame(), 32);
+        // A task kept at 100% (130 dpi) shown at 125% (164 dpi): the 32 window pixels of the
+        // band cover 25 rows of the task's frame, not 32.
+        window.frame_scale = scale_between(density_for_dpi(120), density_for_dpi(96));
+        assert_eq!(window.frame_scale, (82, 65));
+        assert_eq!(window.caption_height(), 32);
+        assert_eq!(window.caption_rows_in_frame(), 25);
+        // At 200% a task kept at 100% is shown at 262 per 130: 64 window pixels, 32 rows.
+        window.rescale(2);
+        window.frame_scale = scale_between(density_for_dpi(192), density_for_dpi(96));
+        assert_eq!(window.caption_rows_in_frame(), 32);
+        window.mode.toggle_fullscreen();
+        assert_eq!(window.caption_rows_in_frame(), 0);
     }
 
     #[test]

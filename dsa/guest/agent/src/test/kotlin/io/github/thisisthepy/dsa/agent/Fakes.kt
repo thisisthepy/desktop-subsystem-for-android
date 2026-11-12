@@ -53,6 +53,11 @@ class FakeScheduler : Scheduler {
         queue += Item(now + delayMillis, order++, work)
     }
 
+    /** Ahead of everything waiting, in the order such work was posted. */
+    override fun postFirst(work: () -> Unit) {
+        queue += Item(Long.MIN_VALUE, order++, work)
+    }
+
     /** Runs everything that is due, including what that work posts. */
     fun runDue() {
         while (true) {

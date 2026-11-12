@@ -78,6 +78,21 @@ pub fn to_task_size((width, height): (u32, u32), scale: Scale) -> (u32, u32) {
     )
 }
 
+/// The client size a frame (or task) of `size` task pixels fills at `scale`, given the client
+/// sizes the window has or asked for (`views`). A window size goes to the guest rounded to
+/// whole task pixels, and that task size rounded back can land a pixel off the window size it
+/// came from (at 131:65 a 1009 pixel window asks for 501, and 501 is 1010 again). So a frame
+/// of the size a view was turned into is that view, not the size rounded back: otherwise the
+/// window would take a size a pixel off the one the user dragged to, and the frame it asked
+/// for would never count as its size. Any other frame is its size at `scale`.
+pub fn window_size_of(size: (u32, u32), scale: Scale, views: &[(u32, u32)]) -> (u32, u32) {
+    views
+        .iter()
+        .copied()
+        .find(|view| view.0 != 0 && view.1 != 0 && to_task_size(*view, scale) == size)
+        .unwrap_or_else(|| to_window_size(size, scale))
+}
+
 /// A rectangle in task pixels in window pixels at `scale`.
 pub fn to_window_rect(rect: Bounds, (numerator, denominator): Scale) -> Bounds {
     let at = |v: i32| -> i32 {
@@ -93,6 +108,24 @@ pub fn to_window_rect(rect: Bounds, (numerator, denominator): Scale) -> Bounds {
         right: at(rect.right),
         bottom: at(rect.bottom),
     }
+}
+
+/// A position `position` task pixels from the task's top left, in window pixels from the
+/// client area's top left at `scale`, unrounded: where the window shows that task pixel. A
+/// scale with a 0 in it is 1:1.
+pub fn to_window_position(position: f64, (numerator, denominator): Scale) -> f64 {
+    if numerator == denominator || numerator == 0 || denominator == 0 {
+        position
+    } else {
+        position * f64::from(numerator) / f64::from(denominator)
+    }
+}
+
+/// A position `position` window pixels from the client area's top left, in task pixels from
+/// the task's top left at `scale`, unrounded: the task pixel the window shows there. The
+/// inverse of [`to_window_position`].
+pub fn to_task_position(position: f64, (numerator, denominator): Scale) -> f64 {
+    to_window_position(position, (denominator, numerator))
 }
 
 /// A monitor's dots per inch at a scale of 100%: a host device-independent pixel (DIP) is
@@ -190,17 +223,50 @@ pub fn clamp_size(size: (u32, u32), max: Option<(u32, u32)>) -> (u32, u32) {
     }
 }
 
+/// The size the guest gives a task asked to take `asked`: no less than its smallest size
+/// `min` and no more than its largest `max` in each direction, the largest winning where the
+/// two cross, as the agent sizes a task.
+pub fn guest_choice(
+    asked: (u32, u32),
+    min: Option<(u32, u32)>,
+    max: Option<(u32, u32)>,
+) -> (u32, u32) {
+    let fit = |length: u32, min: Option<u32>, max: Option<u32>| {
+        let max = max.map_or(u32::MAX, |max| max.max(1));
+        let min = min.unwrap_or(1).clamp(1, max);
+        length.clamp(min, max)
+    };
+    (
+        fit(asked.0, min.map(|m| m.0), max.map(|m| m.0)),
+        fit(asked.1, min.map(|m| m.1), max.map(|m| m.1)),
+    )
+}
+
 /// Where a maximised window of `outer` pixels goes, along one direction, on a work area
-/// that starts at `start` and is `area` pixels long, when the window manager proposed
-/// `proposed`. A window is never larger than the guest can draw, so on a monitor larger
-/// than that it maximises to the guest's largest size, shown 1:1, and is centred on the work
-/// area rather than left in its corner. A window that fills the work area stays where the
-/// window manager put it.
-pub fn maximized_position(proposed: i32, start: i32, area: i32, outer: i32) -> i32 {
+/// that starts at `start` and is `area` pixels long, when the window's border on that side
+/// is `border` pixels thick. A window is never larger than the guest can draw, so on a
+/// monitor larger than that it maximises to the guest's largest size, shown 1:1, and is
+/// centred on the work area rather than left in its corner. A window that fills the work
+/// area hangs its border off the work area's edge, so its client area starts exactly at
+/// `start`. That holds wherever the window was before: a maximised window that takes a
+/// frame of the work area's size while it still stands where its smaller frame was centred
+/// goes to the work area's edge, rather than staying put and running off the screen.
+pub fn maximized_position(start: i32, area: i32, outer: i32, border: i32) -> i32 {
     if outer >= area {
-        return proposed;
+        return start - border;
     }
     start + (area - outer) / 2
+}
+
+/// The outer size a maximised task window takes: the most the guest can draw (`guest`, with
+/// the borders of a maximised window) and no more than the work area of the window's own
+/// monitor with those borders, which Windows hangs off its edges (`work`). Windows proposes a
+/// maximised size measured on the primary monitor, and adjusts it to the monitor the window
+/// maximises on only while it is at least the primary monitor's size; a smaller one, such as
+/// the guest's largest size, it takes as it is. So on a monitor smaller than the primary one
+/// a window would maximise past the bottom of its own screen unless its work area limits it.
+pub fn maximized_outer(guest: (i32, i32), work: (i32, i32)) -> (i32, i32) {
+    (guest.0.min(work.0).max(1), guest.1.min(work.1).max(1))
 }
 
 /// Where a window goes and how large it is (left, top, width, height, all of its outer
@@ -282,6 +348,9 @@ pub struct WindowSizing {
     /// while it follows its monitor. Fixed while the window is scaled, so a report of the task
     /// in between cannot change the scale under the window.
     kept_density: u32,
+    /// A size asked of the guest and the other size the guest gave the task for it, until the
+    /// window manager takes it to log ([`take_clamped`](Self::take_clamped)).
+    clamped: Option<((u32, u32), (u32, u32))>,
 }
 
 impl WindowSizing {
@@ -314,6 +383,7 @@ impl WindowSizing {
                 ScalingMode::App => 0,
                 ScalingMode::System => task.density_dpi,
             },
+            clamped: None,
         }
     }
 
@@ -557,11 +627,25 @@ impl WindowSizing {
             self.min = Some(min);
         }
         let previous = std::mem::replace(&mut self.guest, size);
-        let shown = to_window_size(size, self.scale());
+        let shown = window_size_of(size, self.scale(), &[self.view]);
         match self.asked {
             Some((asked, _)) if asked == size => {
                 self.asked = None;
                 None
+            }
+            // The guest gave the task the size it gives for the one asked: never less than the
+            // task's smallest size, never more than its largest. That is its answer, and no
+            // report of the size asked will ever come, so the window takes the task's size now
+            // rather than show its frames out of shape until `SETTLE` runs out.
+            Some((asked, _)) if guest_choice(asked, self.min, self.max) == size => {
+                self.asked = None;
+                self.clamped = Some((asked, size));
+                if shown != self.view && !self.dragging {
+                    self.view = shown;
+                    Some(shown)
+                } else {
+                    None
+                }
             }
             // Still on its way to the size last asked for.
             Some(_) => None,
@@ -573,6 +657,13 @@ impl WindowSizing {
         }
     }
 
+    /// The size last asked of the guest and the other size the guest gave the task for it,
+    /// once, when the guest's report answered a request with a size kept within the task's
+    /// limits ([`guest_updated`](Self::guest_updated)). The window manager logs it.
+    pub fn take_clamped(&mut self) -> Option<((u32, u32), (u32, u32))> {
+        self.clamped.take()
+    }
+
     /// Time has passed. Returns the client size the window must take when the guest has not
     /// taken the size the host asked for within [`SETTLE`]: the window then shows the task
     /// at the size it has, 1:1, rather than wait for a size that never comes.
@@ -582,7 +673,7 @@ impl WindowSizing {
             return None;
         }
         self.asked = None;
-        let shown = to_window_size(self.guest, self.scale());
+        let shown = window_size_of(self.guest, self.scale(), &[self.view]);
         if shown == self.view {
             return None;
         }
@@ -713,6 +804,39 @@ mod tests {
     }
 
     #[test]
+    fn fr4_a_size_the_guest_keeps_within_the_tasks_limits_is_taken_as_its_answer() {
+        let mut declared = task(800, 600, 130);
+        declared.min_width = 700;
+        declared.min_height = 500;
+        let mut sizing = WindowSizing::new(&declared);
+        let now = Instant::now();
+        // A window one pixel narrower than the task's smallest size, as rounding at another
+        // scale can make it.
+        assert_eq!(sizing.view_resized((699, 650), now), live_resize(699, 650));
+        // An earlier report, of the size the task had, is no answer.
+        assert_eq!(sizing.guest_updated(&declared), None);
+        assert!(sizing.waiting());
+        assert_eq!(sizing.take_clamped(), None);
+        // The guest gives the task its smallest width instead: that is the answer, at once.
+        let mut given = declared.clone();
+        given.bounds.right = given.bounds.left + 700;
+        given.bounds.bottom = given.bounds.top + 650;
+        assert_eq!(sizing.guest_updated(&given), Some((700, 650)));
+        assert!(!sizing.waiting());
+        assert_eq!(sizing.take_clamped(), Some(((699, 650), (700, 650))));
+        assert_eq!(sizing.take_clamped(), None, "said once");
+        // The task is reconfigured for its size without waiting for `SETTLE`.
+        assert_eq!(sizing.reconfigure(now), resize(700, 650));
+        assert_eq!(sizing.tick(now + SETTLE * 2), None);
+        // Past the largest size the guest draws goes the same way.
+        assert_eq!(
+            guest_choice((2000, 400), Some((700, 500)), Some((1920, 1080))),
+            (1920, 500)
+        );
+        assert_eq!(guest_choice((300, 200), None, None), (300, 200));
+    }
+
+    #[test]
     fn fr4_a_drag_that_starts_before_a_maximise_is_reconfigured_reconfigures_it_once() {
         let mut sizing = WindowSizing::new(&task(608, 1080, 320));
         let now = Instant::now();
@@ -727,15 +851,39 @@ mod tests {
     }
 
     #[test]
+    fn fr4_a_window_maximised_on_a_monitor_smaller_than_the_primary_stays_on_its_screen() {
+        // The guest draws 2880x2880, 1803x1800 at the window's scale: 1819x1816 outer with a
+        // maximised window's borders at 100%. On a 2048x1152 monitor whose work area is
+        // 2048x1104, the window fills the work area (2064x1120 with the borders) in height.
+        assert_eq!(maximized_outer((1819, 1816), (2064, 1120)), (1819, 1120));
+        // On a 4K monitor the guest's size is the smaller, and the window is centred instead.
+        assert_eq!(maximized_outer((1819, 1816), (3856, 2128)), (1819, 1816));
+        // A guest larger than every monitor fills the work area.
+        assert_eq!(maximized_outer((8016, 8016), (2064, 1120)), (2064, 1120));
+    }
+
+    #[test]
     fn fr4_a_window_maximised_smaller_than_the_work_area_is_centred_on_it() {
         // A 1920x1080 client (1936x1119 outer at 100%) on a 3840x2100 work area at (0, 0).
-        assert_eq!(maximized_position(-8, 0, 3840, 1936), 952);
-        assert_eq!(maximized_position(-8, 0, 2100, 1119), 490);
+        assert_eq!(maximized_position(0, 3840, 1936, 8), 952);
+        assert_eq!(maximized_position(0, 2100, 1119, 8), 490);
         // On a second monitor, from its own corner.
-        assert_eq!(maximized_position(2552, 2560, 3840, 1936), 2560 + 952);
-        // A window as large as the work area, borders and all, stays where it was put.
-        assert_eq!(maximized_position(-8, 0, 1920, 1936), -8);
-        assert_eq!(maximized_position(-8, 0, 1920, 1920), -8);
+        assert_eq!(maximized_position(2560, 3840, 1936, 8), 2560 + 952);
+        // A window as large as the work area, borders and all, hangs its border off the edge.
+        assert_eq!(maximized_position(0, 1920, 1936, 8), -8);
+        assert_eq!(maximized_position(0, 1920, 1920, 0), 0);
+    }
+
+    #[test]
+    fn fr4_a_window_that_fills_the_work_area_starts_at_its_edge_wherever_it_was() {
+        // A maximised window took the work area's frame (1040x736 outer at 100%, a 1024x720
+        // client) while it still stood where its smaller frame was centred, at (304, 202).
+        // Its client area starts at the work area's corner all the same.
+        assert_eq!(maximized_position(0, 1024, 1040, 8), -8);
+        assert_eq!(maximized_position(0, 720, 736, 8), -8);
+        // On a second monitor to the right of the primary, and on one above it.
+        assert_eq!(maximized_position(1920, 2048, 2064, 8), 1912);
+        assert_eq!(maximized_position(-1152, 1104, 1120, 8), -1160);
     }
 
     #[test]
@@ -857,6 +1005,52 @@ mod tests {
     }
 
     #[test]
+    fn fr4_a_scaled_frame_of_the_asked_size_fills_exactly_the_size_dragged_to() {
+        use crate::compositor::frame_follow::{Arrival, FrameFollow};
+        use crate::compositor::resize_latency::ResizeLatency;
+        // A 200% monitor showing a task drawn at 130 dpi: 1009x700 window pixels go to the
+        // guest as 501x347, and 501x347 rounded back is 1010x699.
+        let scale = scale_between(262, 130);
+        assert_eq!(to_task_size((1009, 700), scale), (501, 347));
+        assert_eq!(to_window_size((501, 347), scale), (1010, 699));
+        // The frame of the size asked for is the size asked for.
+        assert_eq!(
+            window_size_of((501, 347), scale, &[(1009, 700)]),
+            (1009, 700)
+        );
+        // Any other frame is its own size at the scale, and an empty size names nothing.
+        assert_eq!(
+            window_size_of((500, 347), scale, &[(1009, 700)]),
+            (1008, 699)
+        );
+        assert_eq!(window_size_of((1, 1), scale, &[(0, 0)]), (2, 2));
+        // 1:1 is the frame's size, as before.
+        assert_eq!(
+            window_size_of((800, 600), (1, 1), &[(801, 600)]),
+            (800, 600)
+        );
+
+        // The window shows a 1009x700 frame and the user drags to 1009x700 from 900x700:
+        // the frame of 501x347 is shown at once, not kept for a window a pixel off the drag.
+        let mut follow = FrameFollow::new((900, 700));
+        let mut latency = ResizeLatency::new();
+        let now = Instant::now();
+        let first = window_size_of((447, 347), scale, &[follow.view()]);
+        assert_eq!(follow.frame_arrived(first), Arrival::Show);
+        latency.frame_shown(first, now);
+        follow.view_taken((1009, 700));
+        latency.view_changed((1009, 700), now);
+        let frame = window_size_of((501, 347), scale, &[follow.view(), (1009, 700)]);
+        assert_eq!(follow.frame_arrived(frame), Arrival::Show);
+        // And the wait for it ends with it, so it is neither lost from the summary nor
+        // reported as a window stuck at its old size.
+        assert!(latency
+            .frame_shown(frame, now + Duration::from_millis(80))
+            .is_some());
+        assert_eq!(latency.stuck(now + Duration::from_secs(3)), None);
+    }
+
+    #[test]
     fn fr4_a_task_that_keeps_its_density_is_shown_at_the_same_physical_size() {
         assert_eq!(scale_between(262, 130), (131, 65));
         assert_eq!(scale_between(196, 130), (98, 65));
@@ -927,12 +1121,18 @@ mod tests {
             assert_eq!(dp_to_px(100, density), px_100_dp, "{percent}%");
             assert_eq!(px_to_dp(px_100_dp, density), 100, "{percent}%");
             assert_eq!(min_client_size(dpi, None, None).0, px_220_dp, "{percent}%");
-            // 100 dp is 81.9 DIP, which is 81.9 x the scale in the monitor's pixels; rounding
-            // the density to an even number moves it by less than 1%.
+            // 100 dp is 81.9 DIP, which is 81.9 x the scale in the monitor's pixels. Rounding
+            // the density to an even number moves it by less than 1%, and the pixel count
+            // then rounds to a whole pixel, which at 100% is itself more than 1% of 81 pixels.
             let dip = 100.0 * 96.0 * (10.4 / 25.4) * (160.0 / 48.0) / 160.0;
             let wanted = dip * f64::from(percent) / 100.0;
+            let exact_density = wanted * 160.0 / 100.0;
             assert!(
-                (f64::from(px_100_dp) - wanted).abs() / wanted < 0.01,
+                (f64::from(density) - exact_density).abs() / exact_density < 0.01,
+                "{percent}%: density {density} for {exact_density}"
+            );
+            assert!(
+                (f64::from(px_100_dp) - wanted).abs() <= wanted * 0.01 + 0.5,
                 "{percent}%: {px_100_dp} pixels for {wanted}"
             );
             assert_eq!(dip_to_px(100, dpi), percent, "{percent}%");

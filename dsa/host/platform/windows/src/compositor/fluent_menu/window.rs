@@ -48,8 +48,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 use super::automation::{self, Action, View, ViewLevel, ViewRow};
 use super::{
-    key_of, layout, metrics, place, render, Anchor, Look, Mask, MenuEntry, MenuLayout, MenuState,
-    Outcome, Rect, RowArt,
+    key_of, layout_with_shortcuts, metrics, place, render, Anchor, Look, Mask, MenuEntry,
+    MenuLayout, MenuState, Outcome, Rect, RowArt,
 };
 use crate::compositor::fluent::text::{self, Align, ICON_FACES, TEXT_FACES};
 use crate::compositor::fluent::{glyph, menu_palette, read_theme, Backdrop, MenuPalette, Theme};
@@ -396,7 +396,17 @@ fn open_level(level: usize) -> Option<()> {
             None => 0,
         })
         .collect();
-    let laid = layout(&entries, &widths, dpi);
+    let shortcut_em = px_of_dip(metrics::SHORTCUT_TEXT_SIZE, dpi);
+    let shortcut_widths: Vec<i32> = entries
+        .iter()
+        .map(
+            |entry| match entry.item().and_then(|item| item.shortcut.as_deref()) {
+                Some(shortcut) => text::measure(shortcut, &TEXT_FACES, shortcut_em),
+                None => 0,
+            },
+        )
+        .collect();
+    let laid = layout_with_shortcuts(&entries, &widths, &shortcut_widths, dpi);
     let art = row_art(&entries, &laid);
     let gap = px_of_dip(metrics::ANCHOR_GAP, dpi);
     let (left, top) = place(anchor, (laid.width, laid.height), area, gap);
@@ -545,7 +555,22 @@ pub fn row_art(entries: &[MenuEntry], laid: &MenuLayout) -> Vec<RowArt> {
             let label = text::mask(&item.label, &TEXT_FACES, em, (width, height), Align::Left);
             let check = (item.checked == Some(true)).then_some(glyph::CHECK);
             let chevron = item.opens_submenu().then_some(glyph::CHEVRON_RIGHT);
+            let shortcut = item
+                .shortcut
+                .as_deref()
+                .zip(row.shortcut)
+                .and_then(|(text, at)| {
+                    let (width, height) = (at.w.max(0) as usize, at.h.max(0) as usize);
+                    let em = px(metrics::SHORTCUT_TEXT_SIZE);
+                    let cover = text::mask(text, &TEXT_FACES, em, (width, height), Align::Left)?;
+                    Some(Mask {
+                        width,
+                        height,
+                        cover,
+                    })
+                });
             RowArt {
+                shortcut,
                 label: label.map(|cover| Mask {
                     width,
                     height,
@@ -797,6 +822,7 @@ fn sync_view() {
                             submenu: item.is_some_and(|i| i.opens_submenu()),
                             expanded: open == Some(row.entry),
                             access_key: item.and_then(|i| i.access_key),
+                            shortcut: item.and_then(|i| i.shortcut.clone()),
                             bounds: (window.origin.0 + at.x, window.origin.1 + at.y, at.w, at.h),
                         }
                     })

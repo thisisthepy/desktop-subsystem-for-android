@@ -1,0 +1,639 @@
+diff --git a/host/vulkan/VkCommonOperations.cpp b/host/vulkan/VkCommonOperations.cpp
+index 20767f1..6acce55 100644
+--- a/host/vulkan/VkCommonOperations.cpp
++++ b/host/vulkan/VkCommonOperations.cpp
+@@ -20,9 +20,11 @@
+ #include <string.h>
+ #include <vulkan/vk_enum_string_helper.h>
+ 
++#include <chrono>
+ #include <iomanip>
+ #include <ostream>
+ #include <sstream>
++#include <thread>
+ #include <unordered_set>
+ 
+ #include "VkDecoderGlobalState.h"
+@@ -1917,6 +1919,14 @@ void VkEmulation::initFeatures(Features features) {
+ }
+ 
+ VkEmulation::~VkEmulation() {
++    // A device being made again is given up first: its thread uses the emulation.
++    mEnding.store(true);
++    {
++        std::lock_guard<std::mutex> remakerLock(mRemakerMutex);
++        if (mRemaker.joinable()) {
++            mRemaker.join();
++        }
++    }
+     std::lock_guard<std::mutex> lock(mMutex);
+ 
+     // create() returns early when the host has no usable Vulkan driver, and the half-built
+@@ -2173,47 +2183,103 @@ void VkEmulation::noteDeviceFailure(VkResult result, const char* call, const cha
+                                     int line) {
+     ERR("%s failed with %s in %s (line %d).", call, string_VkResult(result), function, line);
+     if (result == VK_ERROR_DEVICE_LOST) {
+-        mDeviceLost.store(true);
++        noteDeviceLost();
+     }
+ }
+ 
+-void VkEmulation::noteDeviceLost() { mDeviceLost.store(true); }
++void VkEmulation::noteDeviceLost() {
++    if (mRemake.lost()) {
++        ERR("The renderer's Vulkan device was lost (loss %llu since the start); what needs it "
++            "fails at once until it is made again.",
++            static_cast<unsigned long long>(mRemake.losses()));
++    } else if (mRemake.remaking()) {
++        // The device being made was lost too: the remaking thread starts over.
++        mLostAgain.store(true);
++    }
++    startRemake();
++}
+ 
+ void VkEmulation::suspectDeviceLost() { mDeviceSuspect.store(true); }
+ 
+ bool VkEmulation::deviceLostLocked() {
+-    if (mDeviceLost.load()) {
++    if (mRemake.isLost()) {
+         return true;
+     }
+     if (!mDeviceSuspect.exchange(false) || mDevice == VK_NULL_HANDLE) {
+         return false;
+     }
+-    VkResult result;
+-    {
+-        android::base::AutoLock queueLock(*mQueueLock);
+-        result = mDvk->vkQueueWaitIdle(mQueue);
++    // An empty submission's fence signals once the queue's earlier work is done, and a lost
++    // device fails it. It is waited for kSuspectProbeNs at most: waiting for the queue to go
++    // idle held mMutex, and every guest call behind it, for as long as a hung GPU took to be
++    // reset.
++    auto vk = mDvk;
++    VkFenceCreateInfo fenceCi = {};
++    fenceCi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
++    VkFence probe = VK_NULL_HANDLE;
++    VkResult result = vk->vkCreateFence(mDevice, &fenceCi, nullptr, &probe);
++    if (result == VK_SUCCESS) {
++        {
++            android::base::AutoLock queueLock(*mQueueLock);
++            result = vk->vkQueueSubmit(mQueue, 0, nullptr, probe);
++        }
++        if (result == VK_SUCCESS) {
++            result = vk->vkWaitForFences(mDevice, 1, &probe, VK_TRUE, dsa::kSuspectProbeNs);
++        }
++    }
++    if (result == VK_TIMEOUT && probe != VK_NULL_HANDLE) {
++        // Busy or hung: the fence stays with the queue until it signals, and the device is
++        // checked again at the next operation.
++        RetiredResource pending;
++        pending.fence = probe;
++        mRetired.push_back(std::move(pending));
++        mDeviceSuspect.store(true);
++        return false;
++    }
++    if (probe != VK_NULL_HANDLE) {
++        vk->vkDestroyFence(mDevice, probe, nullptr);
+     }
+     if (result == VK_ERROR_DEVICE_LOST) {
+-        mDeviceLost.store(true);
++        mRemake.lost();
++        ERR("The renderer's Vulkan device was lost with the guest's (loss %llu since the start).",
++            static_cast<unsigned long long>(mRemake.losses()));
+         return true;
+     }
+     return false;
+ }
+ 
+ bool VkEmulation::recoverIfLost() {
+-    if (!mDeviceLost.load() && !mDeviceSuspect.load()) {
++    // While the device is made again, nothing waits for it: the caller fails its operation,
++    // and the guest gets VK_ERROR_DEVICE_LOST or a failed ColorBuffer call at once.
++    if (mRemake.remaking()) {
++        return false;
++    }
++    if (!mRemake.isLost() && !mDeviceSuspect.load()) {
+         return true;
+     }
+-    std::unique_lock<std::shared_mutex> use(mDeviceUse);
+-    std::lock_guard<std::mutex> lock(mMutex);
+-    if (!deviceLostLocked()) {
+-        return mDevice != VK_NULL_HANDLE;
++    {
++        std::lock_guard<std::mutex> lock(mMutex);
++        if (!deviceLostLocked()) {
++            return mDevice != VK_NULL_HANDLE;
++        }
+     }
+-    if (!remakeDeviceLocked()) {
+-        return false;
++    startRemake();
++    return false;
++}
++
++void VkEmulation::startRemake() {
++    if (mEnding.load() || !mRemake.claim()) {
++        return;
+     }
+-    mDeviceLost.store(false);
+-    return true;
++    std::lock_guard<std::mutex> lock(mRemakerMutex);
++    if (mEnding.load()) {
++        mRemake.finished(false);
++        return;
++    }
++    // The thread before this one has finished its work: it let go of its claim last.
++    if (mRemaker.joinable()) {
++        mRemaker.join();
++    }
++    mRemaker = std::thread([this] { remakeDevice(); });
+ }
+ 
+ void VkEmulation::loseDeviceForTesting() {
+@@ -2223,6 +2289,41 @@ void VkEmulation::loseDeviceForTesting() {
+     mDeviceSuspect.store(true);
+ }
+ 
++VkResult VkEmulation::waitForFenceBounded(VulkanDispatch* vk, VkFence fence, const char* what) {
++    VkResult last = VK_TIMEOUT;
++    const dsa::GpuWait waited = dsa::wait_bounded(
++        [&](uint64_t timeoutNs) {
++            last = vk->vkWaitForFences(mDevice, 1, &fence, VK_TRUE, timeoutNs);
++            switch (last) {
++                case VK_SUCCESS:
++                    return dsa::GpuWait::Signaled;
++                case VK_TIMEOUT:
++                    return dsa::GpuWait::Timeout;
++                case VK_ERROR_DEVICE_LOST:
++                    return dsa::GpuWait::DeviceLost;
++                default:
++                    return dsa::GpuWait::Failed;
++            }
++        },
++        [this] { return mRemake.isLost(); });
++    switch (waited) {
++        case dsa::GpuWait::Signaled:
++            return VK_SUCCESS;
++        case dsa::GpuWait::DeviceLost:
++        case dsa::GpuWait::GivenUp:
++            return VK_ERROR_DEVICE_LOST;
++        case dsa::GpuWait::Timeout:
++            ERR("%s did not finish on the GPU in %llu ms; it is given up and the device is "
++                "checked before the next operation.",
++                what, static_cast<unsigned long long>(dsa::kGpuWaitBudgetNs / 1000000ull));
++            suspectDeviceLost();
++            return VK_TIMEOUT;
++        case dsa::GpuWait::Failed:
++            break;
++    }
++    return last;
++}
++
+ bool VkEmulation::makeDeviceObjectsLocked() {
+     init_vulkan_dispatch_from_device(mIvk, mDevice, mDvk);
+     auto dvk = mDvk;
+@@ -2296,9 +2397,7 @@ bool VkEmulation::makeDeviceObjectsLocked() {
+     return true;
+ }
+ 
+-bool VkEmulation::remakeDeviceLocked() {
+-    ERR("The renderer's Vulkan device on %s was lost (the GPU was reset); making a new one.",
+-        mDeviceInfo.physdevProps.deviceName);
++VkDevice VkEmulation::releaseLostDeviceLocked(bool* hadCompositor) {
+     auto vk = mDvk;
+ 
+     if (mDevice != VK_NULL_HANDLE) {
+@@ -2315,22 +2414,15 @@ bool VkEmulation::remakeDeviceLocked() {
+     }
+ 
+     // The ColorBuffers are made again at their sizes and formats, under the same handles,
+-    // so the guest's buffers keep naming them. What was drawn in them is gone.
+-    struct Remade {
+-        uint32_t handle;
+-        uint32_t width;
+-        uint32_t height;
+-        GLenum internalFormat;
+-        int frameworkFormat;
+-        bool vulkanOnly;
+-        uint32_t memoryProperty;
+-    };
+-    std::vector<Remade> colorBuffers;
++    // so the guest's buffers keep naming them. What was drawn in them is gone. Those a
++    // try before this one could not make again are still in the list.
+     for (auto& [handle, info] : mColorBuffers) {
+-        colorBuffers.push_back(Remade{handle, info.width, info.height, info.internalFormat,
+-                                      info.frameworkFormat,
+-                                      info.vulkanMode == VulkanMode::VulkanOnly,
+-                                      info.memoryProperty});
++        mLostColorBuffers[handle] = LostColorBuffer{info.width,
++                                                    info.height,
++                                                    info.internalFormat,
++                                                    info.frameworkFormat,
++                                                    info.vulkanMode == VulkanMode::VulkanOnly,
++                                                    info.memoryProperty};
+         if (mDevice != VK_NULL_HANDLE && info.initialized) {
+             if (info.imageView != VK_NULL_HANDLE) {
+                 vk->vkDestroyImageView(mDevice, info.imageView, nullptr);
+@@ -2358,10 +2450,11 @@ bool VkEmulation::remakeDeviceLocked() {
+     // The compositor was made on the lost device. Compositions stop going to it, and it is
+     // left rather than destroyed: its destructor waits on the lost queue and would end the
+     // process.
+-    const bool hadCompositor = mCompositorVk != nullptr;
++    *hadCompositor = *hadCompositor || mCompositorVk != nullptr;
+     mCompositor.use(nullptr);
+     (void)mCompositorVk.release();
+ 
++    VkDevice lost = mDevice;
+     if (mDevice != VK_NULL_HANDLE) {
+         if (mStaging.buffer != VK_NULL_HANDLE) {
+             vk->vkDestroyBuffer(mDevice, mStaging.buffer, nullptr);
+@@ -2377,54 +2470,146 @@ bool VkEmulation::remakeDeviceLocked() {
+             mCommandPool = VK_NULL_HANDLE;
+         }
+         mCommandBuffer = VK_NULL_HANDLE;
+-        mIvk->vkDestroyDevice(mDevice, nullptr);
+         mDevice = VK_NULL_HANDLE;
+     }
+     mQueue = VK_NULL_HANDLE;
++    return lost;
++}
+ 
+-    if (!mMakeDevice) {
+-        ERR("The renderer cannot make a new Vulkan device.");
+-        return false;
+-    }
+-    const VkResult made = mMakeDevice(&mDevice);
+-    if (made != VK_SUCCESS) {
+-        ERR("Making a new Vulkan device failed with %s; it is tried again at the next "
+-            "operation.",
+-            string_VkResult(made));
+-        mDevice = VK_NULL_HANDLE;
+-        return false;
+-    }
+-    if (!makeDeviceObjectsLocked()) {
+-        ERR("The new Vulkan device could not be set up; it is made again at the next "
+-            "operation.");
+-        mDeviceLost.store(true);
+-        return false;
+-    }
+-
+-    if (hadCompositor) {
+-        mCompositorVk = CompositorVk::create(*mIvk, mDevice, mPhysicalDevice, mQueue, mQueueLock,
+-                                             mQueueFamilyIndex, 3, mDebugUtilsHelper);
+-        mCompositor.use(mCompositorVk.get());
+-    }
++// The steps that need no lock (destroying the lost device, making the new one, which waits
++// for the GPU to be back from its reset) run without one, and each ColorBuffer is made again
++// under the lock on its own, so a guest call waits for one short step at most. Until the
++// end, recoverIfLost() answers false at once, and what looks a ColorBuffer up finds only
++// those made again so far.
++void VkEmulation::remakeDevice() {
++    using Clock = std::chrono::steady_clock;
++    const auto started = Clock::now();
++    const auto ms = [&started] {
++        return static_cast<long long>(
++            std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - started)
++                .count());
++    };
++    ERR("The renderer's Vulkan device on %s was lost (the GPU was reset); making a new one. "
++        "Until it is made, the guest's calls that need it fail at once.",
++        mDeviceInfo.physdevProps.deviceName);
+ 
++    bool hadCompositor = false;
++    long long freedMs = 0;
++    long long destroyedMs = 0;
++    long long madeMs = 0;
++    uint32_t tries = 0;
+     size_t remade = 0;
+-    for (const auto& colorBuffer : colorBuffers) {
+-        if (createVkColorBufferLocked(colorBuffer.width, colorBuffer.height,
+-                                      colorBuffer.internalFormat,
+-                                      static_cast<FrameworkFormat>(colorBuffer.frameworkFormat),
+-                                      colorBuffer.handle, colorBuffer.vulkanOnly,
+-                                      colorBuffer.memoryProperty)) {
+-            ++remade;
+-        } else {
+-            ERR("ColorBuffer %u could not be made again on the new Vulkan device.",
+-                colorBuffer.handle);
++    size_t notRemade = 0;
++    size_t asked = 0;
++    for (;;) {
++        VkDevice lost;
++        {
++            std::unique_lock<std::shared_mutex> use(mDeviceUse);
++            std::lock_guard<std::mutex> lock(mMutex);
++            mLostAgain.store(false);
++            lost = releaseLostDeviceLocked(&hadCompositor);
+         }
+-    }
+-    mDeviceGeneration.fetch_add(1);
+-    ERR("Made a new Vulkan device (number %llu since the start); %zu of %zu ColorBuffers made "
+-        "again.",
+-        static_cast<unsigned long long>(mDeviceGeneration.load()), remade, colorBuffers.size());
+-    return true;
++        freedMs = ms();
++        if (lost != VK_NULL_HANDLE) {
++            mIvk->vkDestroyDevice(lost, nullptr);
++        }
++        destroyedMs = ms();
++
++        // A device cannot be made while the GPU is still being reset: tried again soon, and
++        // never less than once a second, until it can.
++        VkDevice device = VK_NULL_HANDLE;
++        uint32_t failures = 0;
++        for (;;) {
++            if (mEnding.load()) {
++                mRemake.finished(false);
++                return;
++            }
++            if (!mMakeDevice) {
++                ERR("The renderer cannot make a new Vulkan device.");
++                mRemake.finished(false);
++                return;
++            }
++            ++tries;
++            const VkResult made = mMakeDevice(&device);
++            if (made == VK_SUCCESS) {
++                break;
++            }
++            device = VK_NULL_HANDLE;
++            if (failures % 20 == 0) {
++                ERR("Making a new Vulkan device failed with %s after %lld ms; it is tried "
++                    "again.",
++                    string_VkResult(made), ms());
++            }
++            std::this_thread::sleep_for(dsa::remake_retry_delay(failures++));
++        }
++        madeMs = ms();
++
++        bool ready;
++        {
++            std::unique_lock<std::shared_mutex> use(mDeviceUse);
++            std::lock_guard<std::mutex> lock(mMutex);
++            mDevice = device;
++            ready = makeDeviceObjectsLocked();
++            if (ready && hadCompositor) {
++                mCompositorVk =
++                    CompositorVk::create(*mIvk, mDevice, mPhysicalDevice, mQueue, mQueueLock,
++                                         mQueueFamilyIndex, 3, mDebugUtilsHelper);
++                mCompositor.use(mCompositorVk.get());
++            }
++            asked = mLostColorBuffers.size();
++        }
++        if (!ready) {
++            ERR("The new Vulkan device could not be set up; it is made again.");
++            std::this_thread::sleep_for(dsa::remake_retry_delay(failures));
++            continue;
++        }
++
++        // One ColorBuffer at a time, each under the lock on its own. One the guest destroys
++        // meanwhile has left the list.
++        remade = 0;
++        notRemade = 0;
++        for (;;) {
++            if (mEnding.load()) {
++                mRemake.finished(false);
++                return;
++            }
++            std::lock_guard<std::mutex> lock(mMutex);
++            if (mLostColorBuffers.empty() || mLostAgain.load()) {
++                break;
++            }
++            const auto it = mLostColorBuffers.begin();
++            const uint32_t handle = it->first;
++            const LostColorBuffer colorBuffer = it->second;
++            mLostColorBuffers.erase(it);
++            if (createVkColorBufferLocked(colorBuffer.width, colorBuffer.height,
++                                          colorBuffer.internalFormat,
++                                          static_cast<FrameworkFormat>(colorBuffer.frameworkFormat),
++                                          handle, colorBuffer.vulkanOnly,
++                                          colorBuffer.memoryProperty)) {
++                ++remade;
++            } else {
++                ++notRemade;
++                ERR("ColorBuffer %u could not be made again on the new Vulkan device.", handle);
++            }
++        }
++
++        {
++            std::unique_lock<std::shared_mutex> use(mDeviceUse);
++            std::lock_guard<std::mutex> lock(mMutex);
++            if (!mLostAgain.exchange(false)) {
++                mDeviceSuspect.store(false);
++                mRemake.finished(true);
++                break;
++            }
++        }
++        ERR("The new Vulkan device was lost too, after %lld ms; it is made again.", ms());
++    }
++    ERR("Made a new Vulkan device (number %llu since the start) in %lld ms: the lost device's "
++        "objects were freed after %lld ms and it was destroyed after %lld ms, the new one was "
++        "made after %lld ms (%u tries), and %zu of %zu ColorBuffers were made again (%zu "
++        "could not be). The guest's calls no longer fail.",
++        static_cast<unsigned long long>(mRemake.generation()), ms(), freedMs, destroyedMs, madeMs,
++        tries, remade, asked, notRemade);
+ }
+ 
+ std::unique_ptr<gfxstream::DisplaySurface> VkEmulation::createDisplaySurface(
+@@ -3482,6 +3667,11 @@ std::optional<VkEmulation::VkColorBufferMemoryExport> VkEmulation::exportColorBu
+ bool VkEmulation::teardownVkColorBufferLocked(uint32_t colorBufferHandle) {
+     auto vk = mDvk;
+ 
++    // One the guest destroys while the device is made again is not made again.
++    if (mLostColorBuffers.erase(colorBufferHandle) > 0) {
++        return true;
++    }
++
+     auto infoPtr = android::base::find(mColorBuffers, colorBufferHandle);
+ 
+     if (!infoPtr) return false;
+@@ -3517,12 +3707,16 @@ void VkEmulation::retireLocked(RetiredResource resource) {
+         result = vk->vkQueueSubmit(mQueue, 0, nullptr, resource.fence);
+     }
+     if (result != VK_SUCCESS) {
+-        // Without a fence the only safe point is an idle queue.
++        // Without a fence the only safe point is an idle queue. A lost device runs nothing
++        // more, so nothing is waited for: the queue of a hung GPU would hold mMutex until
++        // the GPU was reset.
+         if (resource.fence != VK_NULL_HANDLE) {
+             vk->vkDestroyFence(mDevice, resource.fence, nullptr);
+             resource.fence = VK_NULL_HANDLE;
+         }
+-        {
++        if (result == VK_ERROR_DEVICE_LOST) {
++            noteDeviceLost();
++        } else {
+             android::base::AutoLock queueLock(*mQueueLock);
+             VK_EMU_LOG(vk->vkQueueWaitIdle(mQueue));
+         }
+@@ -3799,17 +3993,10 @@ bool VkEmulation::readColorBufferToBytesLocked(uint32_t colorBufferHandle, uint3
+         VK_EMU_TRY(vk->vkQueueSubmit(mQueue, 1, &submitInfo, mCommandBufferFence), false);
+     }
+ 
+-    static constexpr uint64_t ANB_MAX_WAIT_NS = 5ULL * 1000ULL * 1000ULL * 1000ULL;
++    // Bounded: a wait of 5 s and then 10 s more held mMutex, and every guest call behind it,
++    // while the GPU hung.
+     VkResult waitRes =
+-        vk->vkWaitForFences(mDevice, 1, &mCommandBufferFence, VK_TRUE, ANB_MAX_WAIT_NS);
+-    if (waitRes == VK_TIMEOUT) {
+-        // Give a warning and try once more on a timeout error
+-        ERR("readColorBufferToBytesLocked vkWaitForFences failed with timeout error "
+-            "(cb:%d, x:%d, y:%d, w:%d, h:%d, bufferCopySize:%llu), retrying...",
+-            colorBufferHandle, x, y, w, h, bufferCopySize);
+-        waitRes =
+-            vk->vkWaitForFences(mDevice, 1, &mCommandBufferFence, VK_TRUE, ANB_MAX_WAIT_NS * 2);
+-    }
++        waitForFenceBounded(vk, mCommandBufferFence, "Reading a ColorBuffer back");
+ 
+     VK_EMU_TRY(waitRes, false);
+ 
+@@ -4059,8 +4246,7 @@ bool VkEmulation::updateColorBufferFromBytesLocked(uint32_t colorBufferHandle, u
+         VK_EMU_TRY(vk->vkQueueSubmit(mQueue, 1, &submitInfo, mCommandBufferFence), false);
+     }
+ 
+-    static constexpr uint64_t ANB_MAX_WAIT_NS = 5ULL * 1000ULL * 1000ULL * 1000ULL;
+-    VK_EMU_TRY(vk->vkWaitForFences(mDevice, 1, &mCommandBufferFence, VK_TRUE, ANB_MAX_WAIT_NS), false);
++    VK_EMU_TRY(waitForFenceBounded(vk, mCommandBufferFence, "Writing a ColorBuffer"), false);
+ 
+     VK_EMU_TRY(vk->vkResetFences(mDevice, 1, &mCommandBufferFence), false);
+ 
+@@ -4465,9 +4651,7 @@ bool VkEmulation::readBufferToBytes(uint32_t bufferHandle, uint64_t offset, uint
+         VK_EMU_TRY(vk->vkQueueSubmit(mQueue, 1, &submitInfo, mCommandBufferFence), false);
+     }
+ 
+-    static constexpr uint64_t ANB_MAX_WAIT_NS = 5ULL * 1000ULL * 1000ULL * 1000ULL;
+-
+-    VK_EMU_TRY(vk->vkWaitForFences(mDevice, 1, &mCommandBufferFence, VK_TRUE, ANB_MAX_WAIT_NS), false);
++    VK_EMU_TRY(waitForFenceBounded(vk, mCommandBufferFence, "Reading a buffer back"), false);
+ 
+     VK_EMU_TRY(vk->vkResetFences(mDevice, 1, &mCommandBufferFence), false);
+ 
+@@ -4562,8 +4746,7 @@ bool VkEmulation::updateBufferFromBytes(uint32_t bufferHandle, uint64_t offset,
+         VK_EMU_TRY(vk->vkQueueSubmit(mQueue, 1, &submitInfo, mCommandBufferFence), false);
+     }
+ 
+-    static constexpr uint64_t ANB_MAX_WAIT_NS = 5ULL * 1000ULL * 1000ULL * 1000ULL;
+-    VK_EMU_TRY(vk->vkWaitForFences(mDevice, 1, &mCommandBufferFence, VK_TRUE, ANB_MAX_WAIT_NS), false);
++    VK_EMU_TRY(waitForFenceBounded(vk, mCommandBufferFence, "Writing a buffer"), false);
+ 
+     VK_EMU_TRY(vk->vkResetFences(mDevice, 1, &mCommandBufferFence), false);
+ 
+@@ -4857,8 +5040,7 @@ void VkEmulation::releaseColorBufferForGuestUse(uint32_t colorBufferHandle) {
+         VK_EMU_TRY(vk->vkQueueSubmit(mQueue, 1, &submitInfo, fence), );
+     }
+ 
+-    static constexpr uint64_t ANB_MAX_WAIT_NS = 5ULL * 1000ULL * 1000ULL * 1000ULL;
+-    VK_EMU_TRY(vk->vkWaitForFences(mDevice, 1, &fence, VK_TRUE, ANB_MAX_WAIT_NS), );
++    VK_EMU_TRY(waitForFenceBounded(vk, fence, "Releasing a ColorBuffer to the guest"), );
+ }
+ 
+ std::unique_ptr<BorrowedImageInfoVk> VkEmulation::borrowColorBufferForComposition(
+diff --git a/host/vulkan/VkCommonOperations.h b/host/vulkan/VkCommonOperations.h
+index 3553987..f107182 100644
+--- a/host/vulkan/VkCommonOperations.h
++++ b/host/vulkan/VkCommonOperations.h
+@@ -19,10 +19,12 @@
+ #include <atomic>
+ #include <cstdint>
+ #include <functional>
++#include <map>
+ #include <memory>
+ #include <mutex>
+ #include <shared_mutex>
+ #include <string>
++#include <thread>
+ #include <unordered_map>
+ #include <unordered_set>
+ #include <vector>
+@@ -34,6 +36,7 @@
+ #include "DisplayVk.h"
+ #include "ExternalObjectManager.h"
+ #include "FrameworkFormats.h"
++#include "dsa_device_remake.h"
+ #include "aemu/base/Optional.h"
+ #include "aemu/base/ThreadAnnotations.h"
+ #include "gfxstream/host/BackendCallbacks.h"
+@@ -465,17 +468,22 @@ class VkEmulation {
+ 
+     // A GPU reset loses the device. The emulation then makes a new device on the same GPU,
+     // and every ColorBuffer again at its size (its contents are gone; the guest draws them
+-    // again), at the start of its next operation, instead of ending the process.
++    // again), on a thread of its own, instead of ending the process. Until the device is
++    // back, every operation that needs it fails at once: none waits for the GPU to come back.
+     //
+-    // Someone saw VK_ERROR_DEVICE_LOST from the emulation's device.
++    // Someone saw VK_ERROR_DEVICE_LOST from the emulation's device: making it again starts.
+     void noteDeviceLost();
+     // Some device was lost: the emulation checks its own at its next operation.
+     void suspectDeviceLost();
+-    // Makes a new device if the device is lost. Takes the device lock and mMutex, so the
+-    // caller holds neither. Returns whether the device is usable.
++    // Whether the device is usable now. A lost device starts being made again, and false
++    // comes back at once; the caller fails its operation. Takes the device lock and mMutex
++    // only for a short check, so the caller holds neither.
+     bool recoverIfLost();
+-    // How many times the device has been made again.
+-    uint64_t deviceGeneration() const { return mDeviceGeneration.load(); }
++    // Whether the device is usable now, without checking a suspect one or starting anything.
++    bool deviceUsable() const { return mRemake.usable(); }
++    // How many times the device has been made again, and how many times it was found lost.
++    uint64_t deviceGeneration() const { return mRemake.generation(); }
++    uint64_t deviceLosses() const { return mRemake.losses(); }
+     // Held by code that uses the device, the queue or their objects without mMutex (an
+     // embedder copying color buffers into its windows), so a new device is not made under
+     // it. Code holding it must not call recoverIfLost().
+@@ -775,20 +783,48 @@ class VkEmulation {
+ 
+     // Logs a failed call on the device, and notes a lost device.
+     void noteDeviceFailure(VkResult result, const char* call, const char* function, int line);
+-    // Whether the device is lost: noted, or found when a loss elsewhere made it suspect.
++    // Whether the device is lost: noted, or found when a loss elsewhere made it suspect. The
++    // check waits for the GPU kSuspectProbeNs at most.
+     bool deviceLostLocked() REQUIRES(mMutex);
+-    // Frees everything made on the lost device and makes it all again on a new one.
+-    bool remakeDeviceLocked() REQUIRES(mMutex);
++    // Starts the thread that makes the device again, unless one runs already.
++    void startRemake();
++    // That thread: frees what was made on the lost device, makes a new device until one can
++    // be made, and makes each ColorBuffer again, taking mMutex only for each short step.
++    void remakeDevice();
++    // Frees everything made on the lost device and lets go of it: the device is returned
++    // for the caller to destroy without the locks. `hadCompositor` is set when a compositor
++    // was made on it, to be made again on the new device.
++    VkDevice releaseLostDeviceLocked(bool* hadCompositor) REQUIRES(mMutex);
++    // Waits for `fence` on the device, never past dsa::kGpuWaitBudgetNs, and gives up at once
++    // when the device is found lost meanwhile. A fence that did not signal suspects the
++    // device. Returns VK_TIMEOUT or VK_ERROR_DEVICE_LOST when it gave up.
++    VkResult waitForFenceBounded(VulkanDispatch* vk, VkFence fence, const char* what);
+     // Makes the device, its queue and command objects and the staging buffer; create() and
+-    // remakeDeviceLocked() both use it.
++    // remakeDevice() both use it.
+     bool makeDeviceObjectsLocked() REQUIRES(mMutex);
+ 
+     // Creates a device as create() first did, with the same queue, extensions and features.
+     std::function<VkResult(VkDevice*)> mMakeDevice;
+-    std::atomic<bool> mDeviceLost{false};
++    dsa::DeviceRemake mRemake;
+     std::atomic<bool> mDeviceSuspect{false};
+-    std::atomic<uint64_t> mDeviceGeneration{0};
+     std::shared_mutex mDeviceUse;
++    // The thread that makes the device again, and whether the emulation is ending.
++    std::mutex mRemakerMutex;
++    std::thread mRemaker;
++    std::atomic<bool> mEnding{false};
++    // The device being made again was lost too: the remaking thread starts over.
++    std::atomic<bool> mLostAgain{false};
++    // The ColorBuffers of the lost device not made again yet, by handle: the guest's buffers
++    // keep naming them. One the guest destroys meanwhile is not made again.
++    struct LostColorBuffer {
++        uint32_t width;
++        uint32_t height;
++        GLenum internalFormat;
++        int frameworkFormat;
++        bool vulkanOnly;
++        uint32_t memoryProperty;
++    };
++    std::map<uint32_t, LostColorBuffer> mLostColorBuffers GUARDED_BY(mMutex);
+ 
+     // The implementation for Vulkan native swapchain. Only initialized in initVkEmulationFeatures
+     // if useVulkanNativeSwapchain is set.

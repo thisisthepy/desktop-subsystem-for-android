@@ -60,8 +60,16 @@ data class TaskSnapshot(
      * background), as apps do on Android's own desktop windows.
      */
     val transparentCaption: Boolean = false,
-    /** Whether the task is past its first activity, so Back has somewhere to go. */
+    /**
+     * Whether Back in the task lands on a screen the user saw, so the host draws the back
+     * arrow: filled in by the agent from [stack] ([BackStacks]).
+     */
     val canGoBack: Boolean = false,
+    /**
+     * The task's activities as far as Back is concerned; null for a task whose Back the agent
+     * never offers (a widget's setup), which keeps [canGoBack] as it is.
+     */
+    val stack: TaskStack? = null,
     /**
      * Whether the task's top activity says it handles a change of density itself (its
      * manifest's configChanges include density), so Android redraws it at a new density

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Builds the patched SurfaceFlinger, libhwui and libEGL in a tree fetch-source.py made from
-# dsa/guest/framework/framework-lock.json.
+# Builds the patched SurfaceFlinger, libhwui and libEGL, and DSA's KeyMint (dsa-keymint, whose
+# root key of key blobs comes from the DSA host, with the libssl it needs), in a tree
+# fetch-source.py made from dsa/guest/framework/framework-lock.json.
 #
 #   build.sh <tree> <android16|android17> <x86_64|arm64>
 #

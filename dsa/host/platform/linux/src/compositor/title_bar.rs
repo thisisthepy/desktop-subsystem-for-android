@@ -11,8 +11,9 @@
 //! An app may draw its own title bar (a transparent caption bar background, as on Android's
 //! desktop windows). The window then draws no name and no fill, only the icon's cell and the
 //! buttons over the app, and the points of the band on the app's controls go to the app. The
-//! window's pixels are the task's pixels, so the controls' rectangles the guest gives (in
-//! task pixels) are used as they come.
+//! guest gives the controls' rectangles in the task's pixels, and the window manager turns
+//! them into the window's (the task's at the window's frame scale) before they come here, so
+//! they are used as they come.
 
 use dsa_host_core::compositor::caption::{
     band_sample, caption_icon, caption_tone, paint_title_bar, title_bar_hit, BackButton,

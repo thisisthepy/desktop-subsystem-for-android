@@ -233,8 +233,9 @@ after two minutes. `"keep_window_manager": false` turns this off.
   frames, decoded with WIC, with what the widget leaves clear see-through. Until the first
   frame comes, or when a frame has nothing in it, it shows a mostly opaque dark card with
   rounded corners, so a widget is never an invisible hole on the desktop. While the pointer
-  is over a widget, a small round "More" button fades in at its top right corner, inside
-  its rounded corners. Clicking it, or right-clicking the widget, opens the widget's menu:
+  is over a widget, a small "More" button fades in at its top right corner, inside its
+  rounded corners: a 24 px rounded square of dark grey at 85% with three light dots, the
+  same in light and dark themes, which takes presses in a 32 px square for touch. Clicking it, or right-clicking the widget, opens the widget's menu:
   Widget settings, for a widget whose app lets it be set up again, Resize, with the sizes
   the widget allows, and Remove (in Korean when that is the display language). The menu is
   a Windows 11 menu drawn by the window manager, with rounded corners, the acrylic backdrop
@@ -252,7 +253,8 @@ after two minutes. `"keep_window_manager": false` turns this off.
   moves the widget, and dragging its edges resizes it. When the user lets go, the service
   remembers the placement (per user, beside the user's settings, as
   `users/<user>.widgets.json`) and tells Android the window's size, which the widget draws
-  at. Presses, moves and releases inside the widget go to Android. The widgets come from the
+  at. Until the user resizes a widget, its window follows the widget's default size as
+  Android grows it to hold the widget's content; once they do, it keeps their size. Presses, moves and releases inside the widget go to Android. The widgets come from the
   settings app's Widgets page, which shows changes made elsewhere through
   `dsa widgets watch`, or `dsa widgets list|add <provider>|settings <id>|remove <id>`. The
   window manager starts at sign-in and starts Android then, so the first app opened after

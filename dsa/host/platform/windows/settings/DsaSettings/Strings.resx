@@ -1654,11 +1654,17 @@
   <data name="Network_None" xml:space="preserve">
     <value>None</value>
   </data>
+  <data name="Network_DnsHost" xml:space="preserve">
+    <value>Answered by this PC's resolver, so its hosts file, VPN and DNS filters apply to Android apps.</value>
+  </data>
+  <data name="Network_DnsFallback" xml:space="preserve">
+    <value>This PC's resolver does not answer, so Android asks the network's DNS servers: {0}</value>
+  </data>
   <data name="NetworkAddressLabel.Text" xml:space="preserve">
     <value>Address</value>
   </data>
   <data name="NetworkDnsLabel.Text" xml:space="preserve">
-    <value>DNS servers</value>
+    <value>DNS</value>
   </data>
   <data name="NetworkGatewayLabel.Text" xml:space="preserve">
     <value>Gateway</value>
@@ -1680,6 +1686,42 @@
   </data>
   <data name="NetworkRestartBar.Message" xml:space="preserve">
     <value>The change applies the next time Android starts. Stop Android on the General page, then open an app.</value>
+  </data>
+  <data name="NetworkCertificatesHeader.Text" xml:space="preserve">
+    <value>Trusted certificates</value>
+  </data>
+  <data name="HostCertificatesCard.Header" xml:space="preserve">
+    <value>Use this PC's added root certificates</value>
+  </data>
+  <data name="HostCertificatesCard.Description" xml:space="preserve">
+    <value>On by default. Android apps trust the root certificates that you or an administrator added to this PC, such as your company's or a security program's, so sites that need them open in Android too. The root certificates that come with Windows are not listed. The change applies at once.</value>
+  </data>
+  <data name="CertificatesNone.Text" xml:space="preserve">
+    <value>No added root certificates were found on this PC.</value>
+  </data>
+  <data name="Certificate_IssuedBy" xml:space="preserve">
+    <value>Issued by {0}</value>
+  </data>
+  <data name="Certificate_SourceMachine" xml:space="preserve">
+    <value>This PC's Trusted Root Certification Authorities</value>
+  </data>
+  <data name="Certificate_SourceMachineGroupPolicy" xml:space="preserve">
+    <value>This PC's Trusted Root Certification Authorities, set by Group Policy</value>
+  </data>
+  <data name="Certificate_SourceMachineEnterprise" xml:space="preserve">
+    <value>This PC's Trusted Root Certification Authorities, set by your organization</value>
+  </data>
+  <data name="Certificate_SourceUser" xml:space="preserve">
+    <value>Your Trusted Root Certification Authorities</value>
+  </data>
+  <data name="Certificate_SourceUserGroupPolicy" xml:space="preserve">
+    <value>Your Trusted Root Certification Authorities, set by Group Policy</value>
+  </data>
+  <data name="Certificate_SourceAdmin" xml:space="preserve">
+    <value>Added by an administrator of this PC</value>
+  </data>
+  <data name="Certificate_SourceSystem" xml:space="preserve">
+    <value>Added to the system's certificate store</value>
   </data>
   <data name="BackupHeader.Text" xml:space="preserve">
     <value>Backup</value>

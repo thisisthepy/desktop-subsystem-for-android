@@ -17,7 +17,8 @@ It takes the pinned target_files, otatools and dexpreopt_tools (fetch.sh downloa
 5. compiles the system apps users open (COMPILED_APPS) with the build's own dex2oat
    (dexpreopt_tools.zip), against the guest's boot image, so they do not run interpreted, and
    compiles again, with its own filter, any app the published build shipped compiled whose
-   dex no longer matches its odex (PREBUILT_OAT_RECORD);
+   dex no longer matches its odex (PREBUILT_OAT_RECORD), and services.jar, whose window
+   manager it edits so a freeform window gets its status bar inset (SERVICES_CODE);
 6. builds the images, and lays them out on the template of a user's Android disk.
 
 The results go to dsa/target/image/<version>/:
@@ -75,11 +76,11 @@ SHELL_APPS = ["Launcher3QuickStep", "SystemUI", "LatinIME"]
 # Kept on purpose, because apps rely on them: WebView, every content provider (contacts,
 # calendar, media, downloads, settings, telephony's database), PackageInstaller,
 # PermissionController, DocumentsUI, the print spooler, the sound picker, Settings, Provision
-# (it marks the device set up), Telecom and TeleService (system_server binds them at boot),
-# CarrierConfig, the browser, the camera and the clock. The browser stays although web links
-# go to the host's browser by default (the agent holds the browser role then): an app may
-# start it by name, the user can choose to keep links in Android, which gives the role back
-# to it, and a link that cannot reach the host opens in it.
+# (it marks the device set up), Telecom (system_server binds it at boot, and calling apps place
+# their own calls through it), CarrierConfig, the browser, the camera and the clock. The browser
+# stays although web links go to the host's browser by default (the agent holds the browser
+# role then): an app may start it by name, the user can choose to keep links in Android, which
+# gives the role back to it, and a link that cannot reach the host opens in it.
 UNNEEDED_APPS = [
     # Telephony without a modem (the radio HAL is removed): calls, SMS, the SIM toolkit, MMS,
     # emergency information, IMS entitlement and the carrier's captive portal app.
@@ -90,6 +91,21 @@ UNNEEDED_APPS = [
     "EmergencyInfo",
     "ImsServiceEntitlement",
     "CarrierDefaultApp",
+    # TeleService, the com.android.phone process: persistent, so the activity manager starts it
+    # at boot and again whenever it ends, and it held about 8.5 MiB. Without the telephony
+    # feature (unavailable-features.xml) it sets nothing up (PhoneGlobals returns at once), so
+    # it publishes none of the phone, subscription or carrier config services and system_server
+    # already runs without them, as an Android TV build, which has no TeleService, does.
+    # Telecom stays for apps that place their own calls. The telephony provider, which runs
+    # under the same name, stays and starts only when an app asks it something.
+    "TeleService",
+    # The opportunistic network service (com.android.ons) chooses between the SIMs of a
+    # modem, which this VM does not have. It goes with TeleService: it shares the phone's
+    # user ID and process, is persistent and starts at boot, and the network permissions it
+    # uses are declared only by TeleService. Left alone it crashes on its first network
+    # callback, the activity manager restarts it at once, and after a few crashes the rescue
+    # party reboots Android within a minute of every boot.
+    "ONS",
     # Screen savers and wallpapers: the host draws the desktop, and the guest's display is
     # never seen, so there is no screen to save or wallpaper to show (SystemUI, which draws
     # it, is removed above).
@@ -405,6 +421,47 @@ DOCUMENTSUI_CODE = {
     }),
 }
 
+# The host window's title bar is Android's status bar. A task's window draws its caption over
+# the task's top band, and the agent gives the task status bar and caption bar inset sources
+# as high as that band. An app that draws edge to edge then lays out below the band as it lays
+# out below a phone's status bar, and draws its own status bar background under the caption;
+# an app that does not gets the status bar background Android draws for it there.
+#
+# Android hands a window in a floating windowing mode (freeform, as every DSA task is, or
+# picture-in-picture) only its caption bar and IME insets: InsetsPolicy's
+# enforceInsetsPolicyForTarget keeps WindowInsets.Type.captionBar() (and the IME) and drops
+# the rest. The status bar source the agent gives the task never reached its app, so an app
+# that pads its toolbar by its status bar inset, as most edge-to-edge apps do (FLO's player
+# screen, for one), got 0 and drew its toolbar under the caption, its buttons under the
+# window's close button. The call that names the kept types names systemBars() instead
+# (status bars, navigation bars and the caption bar), so the app receives the status bar
+# source too, and with it the inset a phone gives it. The guest has no navigation bar and no
+# system UI of its own, so the only system bar sources are the ones the agent gives tasks.
+# Only the first call after isFloating changes: Android 16 and 17 have no other caption bar
+# call before it, and a later Android that tests a source's type against captionBar() before
+# it keeps that test.
+#
+# services.jar is compiled ahead of time (services.odex, .vdex and .art beside it), for its
+# dex: the edited jar is compiled again with the published build's filter, class loader
+# context and profile (SERVICES_PROFILE), as compile_apps compiles an edited app.
+SERVICES_JAR = "SYSTEM/framework/services.jar"
+SERVICES_CODE = {
+    "Lcom/android/server/wm/InsetsPolicy;->enforceInsetsPolicyForTarget": ("replace call", {
+        "after": "Landroid/app/WindowConfiguration;->isFloating",
+        "old": "Landroid/view/WindowInsets$Type;->captionBar",
+        "new": "Landroid/view/WindowInsets$Type;->systemBars",
+    }),
+}
+# The jars whose dex make-image.py edits, compiled again after the edit like EDITED_APPS.
+EDITED_JARS = [SERVICES_JAR]
+# The profile services.jar was compiled with: frameworks/base's services/art-profile and
+# art-profile-extra, one after the other (the build's art-profile-combined), at the commit the
+# published build was made from. inputs.json names them for each build (services_profile and
+# services_profile_extra), and fetch.sh downloads them beside the build's other inputs.
+# profman turns them into the binary profile dex2oat reads; should it fail, services.jar is
+# compiled with speed, which compiles all of what speed-profile compiles.
+SERVICES_PROFILE_INPUT = "services_profile"
+
 # Cuttlefish's logger writes to a virtio console Hyper-V does not have, so it exits as soon as
 # it starts. init starts it again every five seconds, and each exit runs flags_health_check.
 # Nothing takes its place: Android's log stays in logd's memory, and the control daemon sends
@@ -488,11 +545,16 @@ DROPPED_PROPS = {"persist.adb.tcp.port", "service.adb.tcp.port"}
 # guest thrash through a full zram. Thrashing past 30% of the time reclaiming counts as
 # pressure too, as on Android Go devices, which have the same small-memory, zram-backed shape.
 #
-# ART keeps less free space in each process's heap, with the values of a 1 GiB phone: the
-# heap is 75% full rather than 60% after a collection, with at most 8 MiB free. Cuttlefish's
-# values are for a 4 GiB phone that has nothing else to do with its memory. The cost is more
-# frequent collections in apps that allocate a lot. The limits on how far a heap may grow stay
-# as they are, so no app has less memory to work with.
+# ART keeps less free space in each process's heap: the heap is 75% full rather than 60%
+# after a collection, as on a 1 GiB phone, with at most 4 MiB free, half a 1 GiB phone's 8 and
+# twice a 512 MiB Android Go phone's 2. Cuttlefish's values are for a 4 GiB phone that has
+# nothing else to do with its memory. The free space matters in the processes with the largest
+# heaps, which are the ones that stay: system_server (its heap holds the state of every
+# service), Google Play services and the app on screen each grow by up to that much between
+# two collections, and none of them is in the background, where ART would trim it. The cost
+# is a collection twice as often in those, which ART does concurrently with pauses well under
+# a millisecond, on a desktop's processor. The limits on how far a heap may grow stay as they
+# are, so no app has less memory to work with.
 #
 # ro.config.low_ram is not set, whatever it would save: it turns off multi-window, and every
 # task here is a freeform window.
@@ -505,7 +567,7 @@ MEMORY_PROPS = {
     "ro.lmk.thrashing_limit": "30",
     "dalvik.vm.heaptargetutilization": "0.75",
     "dalvik.vm.heapminfree": "512k",
-    "dalvik.vm.heapmaxfree": "8m",
+    "dalvik.vm.heapmaxfree": "4m",
 }
 
 # The density of the freeform display every task window lives on, by default: a 100% monitor's.
@@ -1175,6 +1237,7 @@ def framework_overlay_sources(dest, record=None):
         f"res/layout/{DIALOG_BUTTON_BAR_LAYOUT}.xml": dialog_button_bar(),
         f"res/layout/{TOAST_LAYOUT}.xml": toast_layout(),
         f"res/drawable/{TOAST_FRAME}.xml": toast_frame(),
+        **status_bar_overlay_files(),
     })
     write_overlay_record(dest, record)
 
@@ -1185,6 +1248,7 @@ def framework_overlaid():
     return ([f"integer/{name}" for name in FRAMEWORK_OVERLAY_INTEGERS]
             + [f"bool/{name}" for name in FRAMEWORK_OVERLAY_BOOLEANS]
             + [f"string/{name}" for name in FRAMEWORK_OVERLAY_STRINGS]
+            + [f"dimen/{name}" for name in STATUS_BAR_DIMENS]
             + FRAMEWORK_DESIGN_OVERLAID)
 
 
@@ -1611,6 +1675,75 @@ def _arsc_entry_offsets(table, at, flags, count):
     return [(index, offset) for index, offset in enumerate(offsets) if offset != ARSC_NO_ENTRY]
 
 
+ARSC_TYPE_DIMENSION = 0x05
+ARSC_UNIT_DIP = 1
+BASE_DENSITY = 160  # the density at which a dp is one pixel
+ARSC_CONFIG_DENSITY = 14  # where the density sits in a type chunk's configuration
+
+
+def complex_dimension(data):
+    """The value and unit of a compiled dimension (Android's complex value format): a signed
+    24-bit mantissa, a radix and a unit."""
+    mantissa = struct.unpack("<i", struct.pack("<I", data & 0xFFFFFF00))[0] / 256
+    return mantissa / (1 << (0, 7, 15, 23)[(data >> 4) & 3]), data & 0xF
+
+
+def arsc_dimensions(table):
+    """{(name, density): (value, unit)} of each dimension a compiled resource table defines,
+    by the density of its configuration (0 where it has none)."""
+    chunk_type, header_size, _ = struct.unpack_from("<HHI", table, 0)
+    if chunk_type != ARSC_TABLE:
+        raise ValueError("not a compiled resource table")
+    found = {}
+    offset = header_size
+    while offset < len(table):
+        chunk_type, header_size, size = struct.unpack_from("<HHI", table, offset)
+        if chunk_type == ARSC_PACKAGE:
+            type_strings, _, key_strings = struct.unpack_from("<III", table, offset + 8 + 4 + 256)
+            types = xml_strings(table, offset + type_strings)
+            keys = xml_strings(table, offset + key_strings)
+            child = offset + header_size
+            while child < offset + size:
+                kind, child_header, child_size = struct.unpack_from("<HHI", table, child)
+                if kind == ARSC_TYPE:
+                    type_id, flags, _, count, entries_start = struct.unpack_from("<BBHII", table, child + 8)
+                    density = struct.unpack_from("<H", table, child + 20 + ARSC_CONFIG_DENSITY)[0]
+                    if types[type_id - 1] == "dimen":
+                        for _, entry in _arsc_entry_offsets(table, child + child_header, flags, count):
+                            at = child + entries_start + entry
+                            first, entry_flags = struct.unpack_from("<HH", table, at)
+                            if entry_flags & ARSC_ENTRY_COMPACT:
+                                key, data_type, data = first, entry_flags >> 8, struct.unpack_from("<I", table, at + 4)[0]
+                            else:
+                                key = struct.unpack_from("<I", table, at + 4)[0]
+                                data_type, data = struct.unpack_from("<BI", table, at + first + 3)
+                            if data_type == ARSC_TYPE_DIMENSION:
+                                found[(keys[key], density)] = complex_dimension(data)
+                child += child_size
+        offset += size
+    return found
+
+
+def status_bar_overlay_problems(table):
+    """What is wrong with the status bar heights of the framework overlay's resource table:
+    each STATUS_BAR_DIMENS value must be there for every density status_bar_heights names and
+    come to the title bar's pixels there, as getDimensionPixelSize rounds them, and the value
+    without a density must be the highest of them."""
+    found = arsc_dimensions(table)
+    heights = status_bar_heights()
+    problems = []
+    for name in STATUS_BAR_DIMENS:
+        for density, dp in sorted(heights.items()) + [(0, max(heights.values()))]:
+            value = found.get((name, density))
+            wanted = int(dp * (density or BASE_DENSITY) / BASE_DENSITY + 0.5)
+            if value is None:
+                problems.append(f"{name} has no value for {density or 'any'} dpi")
+            elif value[1] != ARSC_UNIT_DIP or int(value[0] * (density or BASE_DENSITY) / BASE_DENSITY + 0.5) != wanted:
+                problems.append(f"{name} is {value[0]:g} (unit {value[1]}) at {density or 'any'} dpi, not "
+                                f"the title bar's {wanted} px there")
+    return problems
+
+
 def arsc_resource_names(table):
     """The resources a compiled resource table defines in any configuration, as "type/name"."""
     return set(arsc_resources(table))
@@ -1835,6 +1968,16 @@ def system_overlay_problems(names, read):
         if target is not None and record.get("target_resources") != table_digest(read(target)):
             problems.append(f"{path} was built for another build of {overlay['target']} than {target}, so "
                             "what it replaces may not be there")
+        if path == FRAMEWORK_OVERLAY_APK:
+            with zipfile.ZipFile(io.BytesIO(read(path))) as apk:
+                table = apk.read("resources.arsc") if "resources.arsc" in apk.namelist() else None
+            try:
+                found = status_bar_overlay_problems(table) if table is not None else ["it has no resource table"]
+            except (ValueError, IndexError, struct.error):
+                found = ["its resource table cannot be read"]
+            if found:
+                problems.append(f"{path}: {'; '.join(found)}, so an app that pads by the status bar's height "
+                                "does not line up with the window's title bar")
     return problems
 
 
@@ -2263,6 +2406,14 @@ def assemble_dex(lines, dex):
     return struct.pack(f"<{len(code)}H", *code), outs
 
 
+def _method_index(refs, name):
+    """The index of the method "Lclass;->name" a dex file refers to exactly once."""
+    found = [i for i, ref in enumerate(refs) if ref == name]
+    if len(found) != 1:
+        raise ValueError(f"the dex file refers to {name} {len(found)} times, not once")
+    return found[0]
+
+
 def edit_dex(dex, edits):
     """Applies {"Lclass;->method": edit, or a list of edits} to a dex file. An edit is
     ("return false", None) or ("return true", None), which makes a method that returns a
@@ -2270,8 +2421,11 @@ def edit_dex(dex, edits):
     that method, whose result is not used, into no-ops; or ("replace code", {"registers": n,
     "old": [...], "new": [...]}), which replaces a method whose code is exactly `old` with
     `new` (Dalvik assembly, see assemble_dex) in n registers, padded with no-ops to the same
-    size. Returns the new file and the methods it changed. A method already edited, or not in
-    this file, is not changed; one whose code is neither `old` nor `new` is refused."""
+    size; or ("replace call", {"after": a, "old": o, "new": n}), which makes the first call to
+    the static method o after the first call to a a call to n, which takes and returns the same
+    types (only the method the instruction names changes). Returns the new file and the
+    methods it changed. A method already edited, or not in this file, is not changed; one
+    whose code is neither `old` nor `new` is refused."""
     defined, refs = dex_methods(dex)
     out = bytearray(dex)
     changed = []
@@ -2328,6 +2482,27 @@ def edit_dex(dex, edits):
                     raise ValueError(f"{method} takes {ins} registers of arguments")
                 struct.pack_into("<HHH", out, code_off, target["registers"], ins, max(outs, new_outs))
                 out[insns:insns + 2 * count] = new
+                changed.append(method)
+            elif kind == "replace call":
+                old_index, new_index = (_method_index(refs, target[k]) for k in ("old", "new"))
+                method_shorty = dex_ids(dex)[1]
+                if method_shorty[old_index] != method_shorty[new_index]:
+                    raise ValueError(f"{target['new']} takes or returns other types than {target['old']}")
+                calls = [(at, refs[struct.unpack_from("<H", dex, at + 2)[0]])
+                         for at, op in dex_instructions(dex, code_off) if op in DEX_INVOKES]
+                after = next((i for i, (_, ref) in enumerate(calls) if ref == target["after"]), None)
+                found = next(((at, ref) for at, ref in calls[after + 1:]
+                              if ref in (target["old"], target["new"])), None) if after is not None else None
+                if found is None:
+                    raise ValueError(f"{method} calls neither {target['old']} nor {target['new']} after "
+                                     f"{target['after']}: it was built from other sources, and the edit "
+                                     "must be written for them")
+                at, ref = found
+                if ref == target["new"]:
+                    continue
+                if out[at] != 0x71:
+                    raise ValueError(f"{method} calls {target['old']} other than as a static method")
+                struct.pack_into("<H", out, at + 2, new_index)
                 changed.append(method)
             else:
                 raise ValueError(f"unknown dex edit {kind}")
@@ -2400,6 +2575,52 @@ def edit_settings_apk(data, name):
     return edit_apk(data, name, code={**SETTINGS_CODE_WITHOUT_BLUETOOTH, **SETTINGS_CODE_LIST_MARGIN},
                     controllers=SETTINGS_CONTROLLERS_WITHOUT_BLUETOOTH, dimensions=SETTINGS_LIST_DIMENSIONS,
                     theme_attributes=SETTINGS_TITLE_EXPANDED)
+
+
+ZIP_ALIGNMENT_EXTRA = 0xD935  # zipalign's alignment extra field: a 16-bit alignment, then padding
+
+
+def aligned_zip(data, alignment=4):
+    """The zip `data` with the data of each stored member starting at a multiple of
+    `alignment` bytes, as zipalign leaves it. ART maps a jar's stored dex files straight from
+    the file only when they are aligned, and otherwise copies them into memory: 20 MiB of
+    system_server's for services.jar. Members keep their order, names, dates and compression."""
+    out = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(data)) as source, zipfile.ZipFile(out, "w") as aligned:
+        for info in source.infolist():
+            member = zipfile.ZipInfo(info.filename, info.date_time)
+            member.compress_type = info.compress_type
+            member.external_attr = info.external_attr
+            member.create_system = info.create_system
+            if info.compress_type == zipfile.ZIP_STORED:
+                # The local header is 30 bytes, then the name and the extra field.
+                start = out.tell() + 30 + len(info.filename.encode("utf-8")) + 6
+                padding = -start % alignment
+                member.extra = struct.pack("<HHH", ZIP_ALIGNMENT_EXTRA, 2 + padding, alignment) + bytes(padding)
+            aligned.writestr(member, source.read(info))
+    return out.getvalue()
+
+
+def zip_misaligned(data, alignment=4):
+    """The stored dex files (classes*.dex) of the zip `data` whose data does not start at a
+    multiple of `alignment` bytes."""
+    found = []
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
+        for info in z.infolist():
+            if info.compress_type != zipfile.ZIP_STORED or not re.fullmatch(r"classes\d*\.dex", info.filename):
+                continue
+            name_length, extra_length = struct.unpack_from("<HH", data, info.header_offset + 26)
+            if (info.header_offset + 30 + name_length + extra_length) % alignment:
+                found.append(info.filename)
+    return found
+
+
+def edit_services_jar(data, name):
+    """services.jar with InsetsPolicy giving a freeform window its status bar inset
+    (SERVICES_CODE), its stored dex files aligned again. Returns the jar as it was when it
+    already has the edit."""
+    edited = edit_apk(data, name, code=SERVICES_CODE)
+    return data if edited is data else aligned_zip(edited)
 
 
 def edit_documentsui_apk(data, name):
@@ -2607,8 +2828,10 @@ def edit_props(text, codec2=False, vendor=False, build_tag=None, product=False, 
 # unmetered Wi-Fi network that NetworkMonitor validates, and ConnectivityManager reports it
 # and each change of it. The address, the route and the DNS servers come by DHCP from the
 # host (Android's IpClient asks), so nothing here is static: a host network change reaches
-# the guest through its next lease, and the NAT gateway's DNS proxy follows the host's own
-# DNS and VPN. Cuttlefish's rename_eth0 would hand eth0 to the radio as rmnet0, and DSA has no
+# the guest through its next lease. While the host answers DNS, the daemon's stub takes every
+# query sent to those servers and the host's own resolver answers it (dns_problems), so the
+# host's hosts file, VPN and DNS filters apply; the DHCP servers are the fallback while it does
+# not. Cuttlefish's rename_eth0 would hand eth0 to the radio as rmnet0, and DSA has no
 # modem, so it is turned off. setup_wifi derives wlan0's MAC address from the boot property
 # wifi_mac_prefix, a number it fails without (see kernel_cmdline).
 NETWORK_PROPS_FILE = "VENDOR/build.prop"
@@ -2999,10 +3222,14 @@ TRACE_RC = "SYSTEM/etc/init/dsa-trace.rc"
 # a panic. A system script, because only init itself may write the kernel's printk levels.
 CONSOLE_RC = "SYSTEM/etc/init/dsa-console.rc"
 SU_GUARD_RC = "SYSTEM/etc/init/dsa-su-guard.rc"
+# Makes the folder for zram's backing file (fstab.dsa) and removes the last boot's file. A
+# system script, because only init itself may make a folder at the top of /data.
+ZRAM_BACKING_RC = "SYSTEM/etc/init/dsa-zram-backing.rc"
 SYSTEM_FS_CONFIG = "META/filesystem_config.txt"
 TRACE_FS_CONFIG = [
     "system/etc/init/dsa-trace.rc 0 0 644 capabilities=0x0",
     "system/etc/init/dsa-console.rc 0 0 644 capabilities=0x0",
+    "system/etc/init/dsa-zram-backing.rc 0 0 644 capabilities=0x0",
 ]
 # ARM app translation. The host puts androidboot.dsa.arm_translation=on in the boot's
 # bootconfig while the user has a translation package installed (`dsa arm-translation
@@ -3758,6 +3985,23 @@ TRIM_PROPERTY_CONTEXT = f"{TRIM_PROPERTY} u:object_r:dsa_memory_prop:s0 exact bo
 # How many MiB the next gradual trim takes; the daemon sets it before the trim property.
 TRIM_SIZE_PROPERTY = "vendor.dsa.memory.trim_size"
 TRIM_SIZE_PROPERTY_CONTEXT = f"{TRIM_SIZE_PROPERTY} u:object_r:dsa_memory_prop:s0 exact int"
+# The zram writeback (dsa-channeld.rc): the daemon sets the budget of the run, in 4 KiB pages,
+# and then the property init acts on. init sets how long no app must be open before a
+# writeback and how long a page must go unused before it is written (dsa-memory.rc), from the
+# boot's androidboot values or the defaults, and the daemon reads them. The daemon keeps what it
+# wrote today in the persistent property, so a restart of Android does not start a new day's
+# budget.
+WRITEBACK_PROPERTY_CONTEXTS = {
+    "vendor.dsa.memory.writeback": "vendor.dsa.memory.writeback u:object_r:dsa_memory_prop:s0 exact bool",
+    "vendor.dsa.memory.writeback_pages":
+        "vendor.dsa.memory.writeback_pages u:object_r:dsa_memory_prop:s0 exact int",
+    "vendor.dsa.memory.writeback_after":
+        "vendor.dsa.memory.writeback_after u:object_r:dsa_memory_prop:s0 exact int",
+    "vendor.dsa.memory.writeback_age":
+        "vendor.dsa.memory.writeback_age u:object_r:dsa_memory_prop:s0 exact int",
+    "persist.vendor.dsa.memory.writeback_day":
+        "persist.vendor.dsa.memory.writeback_day u:object_r:dsa_memory_prop:s0 exact string",
+}
 # init sets this when Android has finished booting, and the daemon tells the host.
 BOOT_PROPERTY = "vendor.dsa.boot_completed"
 BOOT_PROPERTY_CONTEXT = f"{BOOT_PROPERTY} u:object_r:dsa_boot_prop:s0 exact bool"
@@ -3776,6 +4020,13 @@ FILES_PROPERTY_CONTEXT = f"{FILES_PROPERTY} u:object_r:dsa_files_prop:s0 exact s
 # to 0 when it is off; dsa-channeld.rc starts and stops the elevation helper to match (su.cil).
 ROOT_ELEVATION_PROPERTY = "vendor.dsa.root_elevation"
 ROOT_ELEVATION_PROPERTY_CONTEXT = f"{ROOT_ELEVATION_PROPERTY} u:object_r:dsa_root_elevation_prop:s0 exact bool"
+# dsa-channeld sets this to "on" while the host answers the guest's DNS queries and to "off"
+# when it stays unreachable; dsa-channeld.rc has dsa-channeld --dns-redirect send every DNS
+# query to the daemon's stub, or stop doing so, to match (channeld.cil).
+DNS_PROPERTY = "vendor.dsa.dns"
+DNS_PROPERTY_CONTEXT = f"{DNS_PROPERTY} u:object_r:dsa_dns_prop:s0 exact enum on off"
+DNS_REDIRECT_SERVICE = "service dsa_dns_redirect /vendor/bin/dsa-channeld --dns-redirect"
+DNS_REDIRECT_TRIGGER = f"on property:{DNS_PROPERTY}=*"
 # Root elevation's su client. It is a system file, where an app's PATH and the kernel's su
 # guard look for su, labelled with a type of its own so the policy lets apps run that file
 # alone (su.cil). The label goes in only with the daemon, whose policy declares the type.
@@ -3783,6 +4034,11 @@ PLAT_FILE_CONTEXTS = "SYSTEM/etc/selinux/plat_file_contexts"
 SU_CLIENT_BINARY = "SYSTEM/bin/su"
 SU_CLIENT_PATH = "/system/bin/su"
 SU_CLIENT_CONTEXT = f"{SU_CLIENT_PATH} u:object_r:dsa_su_exec:s0"
+# zram's backing file, /data/per_boot/zram_swap (fstab.dsa), and its folder, which
+# dsa-zram-backing.rc makes. A type of its own (memory.cil), so the loop driver may read and
+# write it and nothing else may open it. memory.cil is in every image, so the label is too.
+ZRAM_BACKING_PATH = "/data/per_boot(/.*)?"
+ZRAM_BACKING_CONTEXT = f"{ZRAM_BACKING_PATH} u:object_r:dsa_zram_backing_file:s0"
 # The userdebug target_files build ships AOSP's own setuid su at /system/xbin/su (mode 04750,
 # root:shell). Even when the kernel's su guard hides its inode in LSM hooks, generic VFS
 # permission checks run DAC (generic_permission) before security_inode_permission, so an
@@ -3821,6 +4077,23 @@ KEYMINT_KEY_RC = "SYSTEM/etc/init/dsa-keymint-key.rc"
 KEYMINT_KEY_SERVICE = "service dsa_keymint_key /vendor/bin/dsa-channeld --keymint-key"
 KEYMINT_KEY_DIR = "/dev/dsa_keymint"
 KEYMINT_KEY_CONTEXT = f"{KEYMINT_KEY_DIR}(/.*)? u:object_r:dsa_keymint_key_file:s0"
+# The root certificates a user or administrator added to the host, among Android's system
+# certificates: a system script (as init, which alone may mount over a system folder) makes a
+# tmpfs folder, runs dsa-channeld --cacerts-setup (dsa-channeld.rc) to copy Android's two
+# certificate folders into it, and binds each copy over the original before the zygote starts.
+# The daemon then adds the host's roots there. The folder's label lets the daemon write in it
+# and every domain read it (cacerts.cil).
+CACERTS_RC = "SYSTEM/etc/init/dsa-cacerts.rc"
+CACERTS_SERVICE = "service dsa_cacerts_setup /vendor/bin/dsa-channeld --cacerts-setup"
+CACERTS_DIR = "/dev/dsa_cacerts"
+CACERTS_CONTEXT = f"{CACERTS_DIR}(/.*)? u:object_r:dsa_cacerts_file:s0"
+CACERTS_SCRIPT = [
+    "on post-fs-data",
+    f"    mkdir {CACERTS_DIR} 0755 system system",
+    "    exec_start dsa_cacerts_setup",
+    f"    mount none {CACERTS_DIR}/conscrypt /apex/com.android.conscrypt/cacerts bind",
+    f"    mount none {CACERTS_DIR}/system /system/etc/security/cacerts bind",
+]
 # The agent: a privileged app in system_ext, signed with the platform key, which reports
 # each app task to the host and starts and ends tasks for it. The framework refuses to boot
 # when a privileged app requests a privileged permission its allowlist does not grant.
@@ -3906,6 +4179,55 @@ GAPPS_FRAMEWORK_OVERLAY = {
     "bool/config_enableGeocoderOverlay": False,
     "string/config_geocoderProviderPackageName": GAPPS_GEOCODER_PACKAGE,
 }
+# The host window's title bar is Android's status bar (see SERVICES_CODE): many apps take the
+# status bar's height from the framework's resources (getIdentifier("status_bar_height",
+# "dimen", "android"), or SystemBarUtils' status_bar_height_default) rather than from their
+# window's insets, and pad their own status bar background and toolbar by it, as they would on
+# a phone. These resources are the title bar's height, so such an app also stays clear of it.
+#
+# The host draws the title bar at the height a standard window's caption and top border have
+# at the monitor's DPI (STATUS_BAR_TITLE_HEIGHTS, read from AdjustWindowRectExForDpi on the
+# Windows host with the default theme), and Android draws at 131 times the monitor's scale,
+# rounded and made even (status_bar_density, as the host's density_for_dpi). The title bar is
+# then 34.0 to 38.2 dp high depending on the scale (35.4 dp at 200%), so each density Android draws at on a
+# monitor scale gets its own value, which getDimensionPixelSize rounds to the title bar's
+# pixels exactly. Android picks the nearest density for a task that draws at another one (an
+# app that keeps its density on a monitor of another scale), which differs from the title bar
+# by at most a few dp. The values without a density are the highest, at a scale of 100%, so
+# an app never pads less than the title bar.
+STATUS_BAR_TITLE_HEIGHTS = {96: 31, 120: 38, 144: 45, 168: 52, 192: 58, 216: 65, 240: 72, 264: 79,
+                            288: 85, 336: 99, 384: 112, 432: 126, 480: 139}
+STATUS_BAR_DIMENS = ["status_bar_height", "status_bar_height_default", "status_bar_height_portrait",
+                     "status_bar_height_landscape"]
+
+
+def status_bar_density(dpi):
+    """The density Android draws at on a monitor of `dpi`: 131 x the scale, rounded to the
+    nearest dpi and then down to an even number."""
+    return ((dpi * 131 + 48) // 96) & ~1
+
+
+def status_bar_heights():
+    """{density: dp}: the status bar height for each density Android draws at on a monitor
+    scale, the title bar's height there in dp."""
+    return {status_bar_density(dpi): px * BASE_DENSITY / status_bar_density(dpi)
+            for dpi, px in STATUS_BAR_TITLE_HEIGHTS.items()}
+
+
+def status_bar_overlay_files():
+    """The framework overlay's status bar height values: {path: XML}, one values folder per
+    density and the default one."""
+    heights = status_bar_heights()
+
+    def values(dp):
+        return resources_xml([f'<dimen name="{name}">{dp:.4f}dp</dimen>' for name in STATUS_BAR_DIMENS])
+
+    files = {"res/values/dsa_status_bar.xml": values(max(heights.values()))}
+    for density, dp in sorted(heights.items()):
+        files[f"res/values-{density}dpi/dsa_status_bar.xml"] = values(dp)
+    return files
+
+
 FRAMEWORK_OVERLAY_APKCERTS = (
     'name="DsaFrameworkOverlay.apk" certificate="build/make/target/product/security/platform.x509.pem" '
     'private_key="build/make/target/product/security/platform.pk8" partition="vendor"'
@@ -4252,6 +4574,8 @@ def update_vendor_file_contexts(fc_text, channeld=False, hwcomposer=False, power
         entries += SU_SOCKET_CONTEXTS
         # KeyMint's root key, readable only by KeyMint.
         entries.append((f"{KEYMINT_KEY_DIR}(", KEYMINT_KEY_CONTEXT))
+        # The host's root certificates, which the daemon writes and every domain reads.
+        entries.append((f"{CACERTS_DIR}(", CACERTS_CONTEXT))
     if hwcomposer:
         entries.append((r"/vendor/bin/hw/dsa-hwcomposer", HWCOMPOSER_CONTEXT))
     if power:
@@ -4300,6 +4624,9 @@ def update_vendor_property_contexts(text):
         lines.append(TRIM_PROPERTY_CONTEXT)
     if not any(line.split()[:1] == [TRIM_SIZE_PROPERTY] for line in lines):
         lines.append(TRIM_SIZE_PROPERTY_CONTEXT)
+    for name, context in WRITEBACK_PROPERTY_CONTEXTS.items():
+        if not any(line.split()[:1] == [name] for line in lines):
+            lines.append(context)
     if not any(line.split()[:1] == [BOOT_PROPERTY] for line in lines):
         lines.append(BOOT_PROPERTY_CONTEXT)
     if not any(line.split()[:1] == [ADB_PROPERTY] for line in lines):
@@ -4310,9 +4637,19 @@ def update_vendor_property_contexts(text):
         lines.append(FILES_PROPERTY_CONTEXT)
     if not any(line.split()[:1] == [ROOT_ELEVATION_PROPERTY] for line in lines):
         lines.append(ROOT_ELEVATION_PROPERTY_CONTEXT)
+    if not any(line.split()[:1] == [DNS_PROPERTY] for line in lines):
+        lines.append(DNS_PROPERTY_CONTEXT)
     for name, context in GAPPS_COMPILE_PROPERTY_CONTEXTS.items():
         if not any(line.split()[:1] == [name] for line in lines):
             lines.append(context)
+    return "\n".join(lines) + "\n"
+
+
+def with_zram_backing_context(fc_text):
+    """Labels zram's backing folder (ZRAM_BACKING_CONTEXT) in plat_file_contexts. A line the
+    build already has for the same path goes: a second specification for it would conflict."""
+    lines = [line for line in fc_text.splitlines() if line.split()[:1] != [ZRAM_BACKING_PATH]]
+    lines.append(ZRAM_BACKING_CONTEXT)
     return "\n".join(lines) + "\n"
 
 
@@ -4436,6 +4773,7 @@ GAPPS_POLICY = HERE / "sepolicy/gapps.cil"
 ADDONS_POLICY = HERE / "sepolicy/addons.cil"
 GPU_RESET_POLICY = HERE / "sepolicy/gpu-reset.cil"
 SU_POLICY = HERE / "sepolicy/su.cil"
+CACERTS_POLICY = HERE / "sepolicy/cacerts.cil"
 
 # What root elevation needs of the policy, each with what goes wrong without it.
 ROOT_ELEVATION_RULES = {
@@ -4548,6 +4886,33 @@ def root_elevation_problems(names, read):
     return problems
 
 
+def dns_problems(names, read):
+    """Returns what an image with the daemon lacks for the guest's DNS to be answered by the
+    host's resolver: the redirect service that sends DNS queries to the daemon's stub, as root
+    in its own domain and started whenever the daemon switches it, and the type of the property
+    that switches it. A trigger of the vendor script on a service's state (init.svc.*) is named
+    too: vendor_init may not read those properties, so init drops the whole action at boot."""
+    problems = []
+    rc = read(CHANNELD_RC).decode().splitlines() if CHANNELD_RC in names else []
+    for line, why in [
+        (DNS_REDIRECT_SERVICE, "the guest's DNS queries never reach the host's resolver"),
+        ("    user root", "the packet filter cannot be changed"),
+        ("    seclabel u:r:dsa_dns_redirect:s0", "the redirect runs outside its own domain"),
+        (DNS_REDIRECT_TRIGGER, "nothing starts the redirect when the daemon switches it"),
+    ]:
+        if line not in rc:
+            problems.append(f"{CHANNELD_RC} lacks \"{line.strip()}\", so {why}")
+    for line in rc:
+        if line.startswith("on ") and "property:init.svc." in line:
+            problems.append(f"{CHANNELD_RC} has \"{line}\", which init drops as an unexported property "
+                            "trigger, so nothing it lists ever runs")
+    if VENDOR_PROPERTY_CONTEXTS in names and DNS_PROPERTY_CONTEXT not in read(
+            VENDOR_PROPERTY_CONTEXTS).decode().splitlines():
+        problems.append(f"vendor_property_contexts does not give {DNS_PROPERTY} its type, so the daemon "
+                        "cannot switch the guest's DNS to the host's resolver")
+    return problems
+
+
 def keymint_key_problems(names, read):
     """Returns what an image with the daemon lacks for KeyMint's root key from the host: the
     service that fetches it, in its own domain as KeyMint's user, the system script that makes
@@ -4590,6 +4955,64 @@ def keymint_key_problems(names, read):
         if others:
             problems.append(f"the SELinux policy lets {', '.join(others)} read KeyMint's root key")
     return problems
+
+
+def cacerts_problems(names, read):
+    """Returns what an image with the daemon lacks for the host's root certificates among
+    Android's system certificates: the setup service, the system script that makes the tmpfs
+    folder, runs the setup and binds the copies over Android's folders, the folder's label, and
+    the policy that lets the daemon write there and every domain read it."""
+    problems = []
+    rc = read(CHANNELD_RC).decode() if CHANNELD_RC in names else ""
+    service = rc[rc.find(CACERTS_SERVICE):].split("\n\n", 1)[0].splitlines() if CACERTS_SERVICE in rc else []
+    if not service:
+        problems.append(f"{CHANNELD_RC} lacks \"{CACERTS_SERVICE}\", so nothing copies Android's certificates "
+                        "into the folders the host's roots go in")
+    for line, why in [
+        ("    user system", "the daemon, which runs as system, cannot write the copies"),
+        ("    oneshot", "init would copy the certificates again whenever the setup exits"),
+    ]:
+        if service and line not in service:
+            problems.append(f"{CHANNELD_RC} lacks \"{line.strip()}\" for the setup, so {why}")
+    if CACERTS_RC not in names:
+        problems.append(f"{CACERTS_RC} is missing, so Android never trusts the root certificates the host added")
+    else:
+        script = read(CACERTS_RC).decode().splitlines()
+        for line in CACERTS_SCRIPT:
+            if line not in script:
+                problems.append(f"{CACERTS_RC} lacks \"{line.strip()}\", so the host's root certificates do not "
+                                "reach Android's system certificates before the zygote starts")
+    contexts = (read("VENDOR/etc/selinux/vendor_file_contexts").decode().splitlines()
+                if "VENDOR/etc/selinux/vendor_file_contexts" in names else [])
+    if CACERTS_CONTEXT not in contexts:
+        problems.append(f"vendor_file_contexts lacks \"{CACERTS_CONTEXT}\", so the certificate folders have a "
+                        "label apps may not read and the daemon may not write")
+    if "SYSTEM/etc/selinux/plat_sepolicy.cil" in names:
+        policy = read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+        for rule, why in CACERTS_RULES.items():
+            if rule not in policy:
+                problems.append(f"the SELinux policy lacks {rule}, so {why}")
+        rules = re.findall(r"\(allow\s+(\S+)\s+dsa_cacerts_file\s+\(\s*file\s+\(([^)]*)\)", policy)
+        others = sorted({who for who, perms in rules
+                         if {"write", "create", "append"} & set(perms.split()) and who != "dsa_channeld"})
+        if others:
+            problems.append(f"the SELinux policy lets {', '.join(others)} write Android's system certificates")
+    return problems
+
+
+# What the host's root certificates need of the policy, each with what goes wrong without it.
+CACERTS_RULES = {
+    "(allow dsa_channeld dsa_cacerts_file (file (create read write open getattr setattr rename unlink)))":
+        "the daemon cannot add or take away the host's root certificates",
+    "(allow domain dsa_cacerts_file (file (read open getattr map)))":
+        "apps cannot read Android's system certificates once the copies are bound over them",
+    "(allow domain dsa_cacerts_file (dir (search getattr read open)))":
+        "apps cannot look a certificate up in the bound folders",
+    "(allow init dsa_cacerts_file (dir (create search getattr setattr open read write add_name relabelto mounton)))":
+        "init cannot make the folder or bind it",
+    "(allow init system_security_cacerts_file (dir (mounton)))":
+        "init cannot bind the copies over Android's certificate folders",
+}
 
 
 # Shared memory is a memfd in the guest (memory.cil), labelled with the tmpfs type of the
@@ -4966,6 +5389,8 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                 # Root elevation: the su client, and the elevation helper, which is the
                 # daemon's program in a mode of its own, with its sockets.
                 plat_patched += "\n" + SU_POLICY.read_text()
+                # The host's root certificates among Android's system certificates.
+                plat_patched += "\n" + CACERTS_POLICY.read_text()
             if has_power:
                 # The power and health HALs reach the daemon.
                 plat_patched += "\n" + POWER_POLICY.read_text()
@@ -5019,6 +5444,8 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
         file_contexts = []
         for name in PARTITION_FILE_CONTEXTS:
             text = zin.read(name).decode() if name in names else ""
+            if name == PLAT_FILE_CONTEXTS:
+                text = with_zram_backing_context(text)
             if name == PLAT_FILE_CONTEXTS and channeld_payload is not None:
                 text = update_plat_file_contexts(text)
             if name == "VENDOR/etc/selinux/vendor_file_contexts":
@@ -5102,6 +5529,8 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                     data = edit_settings_apk(data, name)
                 elif name.endswith(DOCUMENTSUI_APK):
                     data = edit_documentsui_apk(data, name)
+                elif name == SERVICES_JAR:
+                    data = edit_services_jar(data, name)
                 elif name in PERMISSION_APEXES:
                     data = edit_permission_apex(data, name, otatools, Path(dest).parent)
                 elif name.endswith("lib/modules/modules.load") or name.endswith("lib/modules/modules.dep"):
@@ -5142,6 +5571,7 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                                                  + GAPPS_FS_CONFIG + ADDONS_FS_CONFIG
                                                  + (["system/etc/init/dsa-su-guard.rc 0 0 644 capabilities=0x0",
                                                      "system/etc/init/dsa-keymint-key.rc 0 0 644 capabilities=0x0",
+                                                     "system/etc/init/dsa-cacerts.rc 0 0 644 capabilities=0x0",
                                                      "system/xbin 0 2000 755 capabilities=0x0"]
                                                     if channeld_payload is not None else [])
                                                  + (["system/bin/su 0 0 755 capabilities=0x0"]
@@ -5176,8 +5606,11 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                     data = text.encode()
                 elif name == MISC_INFO and uncompressed_erofs:
                     data = uncompressed_erofs_misc_info(data.decode()).encode()
-                elif name == PLAT_FILE_CONTEXTS and channeld_payload is not None:
-                    data = update_plat_file_contexts(data.decode()).encode()
+                elif name == PLAT_FILE_CONTEXTS:
+                    text = with_zram_backing_context(data.decode())
+                    if channeld_payload is not None:
+                        text = update_plat_file_contexts(text)
+                    data = text.encode()
                 elif name in ("VENDOR/etc/selinux/vendor_file_contexts", "META/vendor_file_contexts"):
                     data = update_vendor_file_contexts(data.decode(), channeld_payload is not None,
                                                        has_hwcomposer, has_power, codec2=has_codec2,
@@ -5201,6 +5634,7 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
         zout.writestr(DISPLAY_RC, (HERE / "dsa-display.rc").read_bytes())
         zout.writestr(TRACE_RC, (HERE / "dsa-trace.rc").read_bytes())
         zout.writestr(CONSOLE_RC, (HERE / "dsa-console.rc").read_bytes())
+        zout.writestr(ZRAM_BACKING_RC, (HERE / "dsa-zram-backing.rc").read_bytes())
         zout.writestr(ARM_TRANSLATION_RC, (HERE / "dsa-arm-translation.rc").read_bytes())
         for target, source_file in ARM_TRANSLATION_PROPS.items():
             zout.writestr(target, source_file.read_bytes())
@@ -5237,6 +5671,7 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
             zout.writestr(CHANNELD_RC, (HERE / "dsa-channeld.rc").read_bytes())
             zout.writestr(SU_GUARD_RC, (HERE / "dsa-su-guard.rc").read_bytes())
             zout.writestr(KEYMINT_KEY_RC, (HERE / "dsa-keymint-key.rc").read_bytes())
+            zout.writestr(CACERTS_RC, (HERE / "dsa-cacerts.rc").read_bytes())
             zout.writestr(CHANNEL_MANIFEST, (HERE / "dsa-channel-manifest.xml").read_bytes())
         if su_payload is not None:
             zout.writestr(SU_CLIENT_BINARY, su_payload)
@@ -5466,6 +5901,17 @@ def revised(spec, revision):
     return dict(spec, revision=revision, version=version_of(spec, revision))
 
 
+def as_development_build(spec, number):
+    """The inputs.json entry `spec` as development build `number`: its version ends in
+    -dev.<number>, and its build number stays the revision's. The Development build workflow
+    makes such an image for testing on one computer and never publishes it; the host orders it
+    after the release before it and before the release of its own revision, and a newer
+    development build of the same revision after an older one."""
+    if not isinstance(number, int) or isinstance(number, bool) or number < 1:
+        raise ValueError(f"a development build number is a whole number from 1, not {number!r}")
+    return dict(spec, version=f"{spec['version']}-dev.{number}")
+
+
 def next_revision(spec, tags):
     """The revision a new image of `spec` gets, given the release tags already published: one
     past the highest published image of the same build and architecture, and never below
@@ -5556,9 +6002,9 @@ def device_path(name):
 
 
 def oat_files(apk):
-    """The odex and vdex target_files members ART looks for beside an APK."""
+    """The odex and vdex target_files members ART looks for beside an APK or a jar."""
     folder, file = apk.rsplit("/", 1)
-    stem = file[:-len(".apk")]
+    stem = file.rsplit(".", 1)[0]
     return (f"{folder}/oat/{COMPILED_ISA}/{stem}.odex", f"{folder}/oat/{COMPILED_ISA}/{stem}.vdex")
 
 
@@ -5713,16 +6159,22 @@ PREBUILT_OAT_PARTITIONS = "|".join(PARTITION_DIRS)
 
 def prebuilt_oat(names, read):
     """{apk: {"files": [odex, vdex, art...], "filter": f, "classpath": c}} for each APK in a
-    target_files whose member names are `names` that has its odex in its own partition, for
-    the guest's instruction set. `read` reads a member."""
+    target_files whose member names are `names` that has its odex in its own partition, and
+    for each jar make-image.py edits (EDITED_JARS) that has its odex beside it, for the guest's
+    instruction set. `read` reads a member."""
     names = set(names)
     found = {}
     for odex in sorted(names):
         m = re.fullmatch(rf"((?:{PREBUILT_OAT_PARTITIONS})/.+)/oat/{COMPILED_ISA}/([^/]+)\.odex", odex)
-        if not m or f"{m.group(1)}/{m.group(2)}.apk" not in names:
+        if not m:
+            continue
+        source = next((f"{m.group(1)}/{m.group(2)}{ext}" for ext in (".apk", ".jar")
+                       if f"{m.group(1)}/{m.group(2)}{ext}" in names
+                       and (ext == ".apk" or f"{m.group(1)}/{m.group(2)}{ext}" in EDITED_JARS)), None)
+        if source is None:
             continue
         keys = oat_key_values(read(odex))
-        found[f"{m.group(1)}/{m.group(2)}.apk"] = {
+        found[source] = {
             "files": [odex] + [odex[:-len(".odex")] + ext for ext in (".vdex", ".art")
                                if odex[:-len(".odex")] + ext in names],
             "filter": keys.get("compiler-filter"),
@@ -5957,9 +6409,28 @@ def permission_controller_problems(signed, otatools, work, env):
     return problems
 
 
-def compile_apps(signed, tools_zip, otatools, work, env):
-    """Compiles COMPILED_APPS in the signed target_files and adds their odex and vdex files
-    and filesystem rules to it. Returns the bytes each app's compiled files take."""
+def services_profiles(spec, inputs):
+    """{SERVICES_JAR: [art-profile, art-profile-extra]}: the text profiles the inputs.json
+    entry `spec` pins for services.jar, in the folder `inputs` fetch.sh put them in, in the
+    order the published build concatenated them (its art-profile-combined)."""
+    paths = []
+    for key in (SERVICES_PROFILE_INPUT, SERVICES_PROFILE_INPUT + "_extra"):
+        if key not in spec["files"]:
+            raise ValueError(f"inputs.json names no {key} for build {spec['build_id']}, so the edited "
+                             "services.jar could not be compiled with the published build's profile")
+        path = inputs / spec["files"][key]["name"]
+        if not path.exists():
+            raise ValueError(f"{path} is missing: run dsa/guest/image/fetch.sh first")
+        paths.append(path)
+    return {SERVICES_JAR: paths}
+
+
+def compile_apps(signed, tools_zip, otatools, work, env, profiles=None):
+    """Compiles COMPILED_APPS in the signed target_files, and again each app or edited jar
+    whose dex no longer matches the odex the published build shipped (compile_jobs), and adds
+    their odex and vdex files and filesystem rules to it. `profiles` maps a jar to the text
+    profiles (frameworks/base's art-profile format) the published build compiled it with.
+    Returns the bytes each app's compiled files take."""
     tools = work / "dexpreopt-tools"
     with zipfile.ZipFile(tools_zip) as z:
         z.extractall(tools)
@@ -6021,6 +6492,17 @@ def compile_apps(signed, tools_zip, otatools, work, env):
                         print(f"{apk}: profman could not read its profile, so it is compiled with speed",
                               flush=True)
                         profile = None
+            if profile is None and filter == "speed-profile" and apk in (profiles or {}):
+                listing = host_apk.with_suffix(".profile.txt")
+                listing.write_bytes(b"".join(Path(p).read_bytes() for p in profiles[apk]))
+                profile = host_apk.with_suffix(".prof")
+                try:
+                    run(profman, f"--create-profile-from={listing}", f"--apk={host_apk}",
+                        f"--dex-location={location}", f"--reference-profile-file={profile}", env=env)
+                except subprocess.CalledProcessError:
+                    print(f"{apk}: profman could not read the published build's profile, so it is "
+                          "compiled with speed", flush=True)
+                    profile = None
             if filter is None:
                 filter = compiler_filter(apk, profile is not None)
             elif filter == "speed-profile" and profile is None:
@@ -6269,6 +6751,9 @@ def main():
                         help="print the revision the next image of --major and --arch gets, given "
                              "the release tags already published, one per line on standard input, "
                              "and make nothing")
+    parser.add_argument("--dev-build", type=int, metavar="N",
+                        help="make development build N: the version ends in -dev.N. The Development "
+                             "build workflow passes its run number; such an image is never published")
     parser.add_argument("--inputs", type=Path, default=REPO / ".scratch/aosp-inputs")
     parser.add_argument("--out", type=Path, default=REPO / "dsa/target/image")
     parser.add_argument("--arch", choices=sorted(ARCHES), default=DEFAULT_ARCH,
@@ -6339,6 +6824,8 @@ def main():
         parser.error("--keys is required to make an image")
     if args.revision is not None:
         spec = revised(spec, args.revision)
+    if args.dev_build is not None:
+        spec = as_development_build(spec, args.dev_build)
     use_arch(args.arch)
     framework_payloads = framework_description = None
     if args.framework:
@@ -6412,7 +6899,8 @@ def main():
     problems = permission_controller_problems(signed, otatools, work, env)
     if problems:
         raise ValueError("; ".join(problems))
-    compile_apps(signed, inputs / spec["files"]["dexpreopt_tools"]["name"], otatools, work, env)
+    compile_apps(signed, inputs / spec["files"]["dexpreopt_tools"]["name"], otatools, work, env,
+                 profiles=services_profiles(spec, inputs))
     run(otatools / "bin/add_img_to_target_files", "-p", otatools, "-a", signed, env=env)
 
     images = work / "images"

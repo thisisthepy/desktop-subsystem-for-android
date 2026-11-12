@@ -1,12 +1,14 @@
 package io.github.thisisthepy.dsa.agent.platform
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.ComponentName
 import android.content.Context
 import android.graphics.Rect
 import android.os.Bundle
 import android.provider.Settings
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityManager
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import io.github.thisisthepy.dsa.agent.Log
@@ -28,6 +30,7 @@ import io.github.thisisthepy.dsa.control.v1.NodeAction
 class HostAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         instance = this
+        AndroidLog.info("Android bound the agent's accessibility service")
         onChange?.invoke()
     }
 
@@ -65,14 +68,59 @@ class AndroidAccessibilitySource(private val context: Context, private val log: 
 
     override fun enable(onChange: () -> Unit) {
         HostAccessibilityService.onChange = onChange
+        turnOn()
+    }
+
+    private fun turnOn() {
+        val resolver = context.contentResolver
+        val enabled = Settings.Secure.getString(resolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
+        val named = Settings.Secure.putString(
+            resolver,
+            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+            AccessibilityExport.withService(enabled, component),
+        )
+        val on = Settings.Secure.putInt(resolver, Settings.Secure.ACCESSIBILITY_ENABLED, 1)
+        if (!named || !on) {
+            log.warn("Android did not take the settings that turn the agent's accessibility service on (${describe()})")
+        }
+    }
+
+    override val connected: Boolean
+        get() = HostAccessibilityService.instance != null
+
+    /**
+     * Whether the service is bound, whether Android lists it as installed and as enabled, and
+     * the settings that turn it on: what is needed to tell why Android did not bind it.
+     */
+    override fun describe(): String {
+        val resolver = context.contentResolver
+        val manager = context.getSystemService(AccessibilityManager::class.java)
+        // A service's ID is its component in the short form; the setting has the long one.
+        val own = ComponentName.unflattenFromString(component)
+        val isOwn = { info: AccessibilityServiceInfo -> ComponentName.unflattenFromString(info.id) == own }
+        val installed = manager?.installedAccessibilityServiceList.orEmpty().any(isOwn)
+        val running = manager?.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK).orEmpty().any(isOwn)
+        val services = Settings.Secure.getString(resolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty()
+        val on = Settings.Secure.getInt(resolver, Settings.Secure.ACCESSIBILITY_ENABLED, 0)
+        return "bound in the agent: ${if (connected) "yes" else "no"}; " +
+            "Android lists it as installed: ${if (installed) "yes" else "no"}, as enabled: ${if (running) "yes" else "no"}; " +
+            "accessibility ${if (manager?.isEnabled == true) "on" else "off"}; " +
+            "enabled_accessibility_services=\"$services\", accessibility_enabled=$on"
+    }
+
+    /**
+     * Android binds a service when the setting that names it changes. Writing the same value
+     * again changes nothing, so the service is taken out of the setting and put back.
+     */
+    override fun reconnect() {
         val resolver = context.contentResolver
         val enabled = Settings.Secure.getString(resolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
         Settings.Secure.putString(
             resolver,
             Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
-            AccessibilityExport.withService(enabled, component),
+            AccessibilityExport.withoutService(enabled, component),
         )
-        Settings.Secure.putInt(resolver, Settings.Secure.ACCESSIBILITY_ENABLED, 1)
+        turnOn()
     }
 
     override fun disable() {

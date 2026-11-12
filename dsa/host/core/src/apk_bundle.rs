@@ -41,7 +41,7 @@ use crate::apk_info::zip::{Archive, Entry};
 use crate::apk_info::{attr, axml, signing, ApkInfo};
 use crate::arm_translation::google::inflate;
 use crate::host_api::ArmTranslationStatus;
-use crate::native_abi::{self, NativeLibraries};
+use crate::native_abi::{self, NativeCode, NativeLibraries, WontRun};
 pub use crate::native_abi::{ARM64, X86_64};
 
 /// The largest manifest read from a split.
@@ -109,6 +109,8 @@ pub enum Refusal {
     Invalid(String),
     /// The file is no APK or bundle that can be read at all, as a sentence.
     NotAnApp(String),
+    /// The app's native code is none the guest runs.
+    UnsupportedAbi(WontRun),
 }
 
 impl Refusal {
@@ -121,6 +123,7 @@ impl Refusal {
             Refusal::SignatureMismatch { .. } => "split-signature-mismatch",
             Refusal::Invalid(_) => "invalid-bundle",
             Refusal::NotAnApp(_) => "not-an-apk",
+            Refusal::UnsupportedAbi(why) => why.code(),
         }
     }
 }
@@ -145,6 +148,7 @@ impl fmt::Display for Refusal {
                  was changed after it was made; Android would refuse it"
             ),
             Refusal::Invalid(why) | Refusal::NotAnApp(why) => f.write_str(why),
+            Refusal::UnsupportedAbi(why) => write!(f, "{why}"),
         }
     }
 }
@@ -356,6 +360,8 @@ pub struct BundleApk {
     pub signer: Option<Vec<u8>>,
     /// Its native libraries, by ABI.
     pub libraries: NativeLibraries,
+    /// Its native code, as far as whether the guest can run it at all.
+    code: NativeCode,
     source: Source,
 }
 
@@ -838,6 +844,7 @@ impl Bundle {
         };
         let manifest = split_manifest(&mut archive).map_err(invalid)?;
         let libraries = libraries_of(&archive.entries);
+        let code = NativeCode::of_archive(&mut archive);
         let signer = signing::signer(&mut archive).map(|signer| signer.sha256());
         Ok(BundleApk {
             entry: entry.to_string(),
@@ -848,6 +855,7 @@ impl Bundle {
             version_code: manifest.version_code,
             signer,
             libraries,
+            code,
             source,
         })
     }
@@ -907,6 +915,11 @@ impl Bundle {
         let libraries = NativeLibraries::merged(self.apks.iter().map(|apk| &apk.libraries));
         base_info.abis = libraries.abis().map(str::to_string).collect();
         self.base = base_info;
+        // Every ABI split counts: a bundle without any 64-bit code the guest runs is refused,
+        // whichever splits a device would take.
+        if let Some(why) = NativeCode::merged(self.apks.iter().map(|apk| &apk.code)).wont_run() {
+            return Err(Refusal::UnsupportedAbi(why));
+        }
         Ok(())
     }
 
@@ -1022,6 +1035,7 @@ impl InstallFile {
     /// extension, or an APK named as a bundle, installs too. An App Bundle, an encrypted
     /// bundle and a bundle whose splits disagree are refused with their reasons, and a file
     /// that is none of these with [`Refusal::NotAnApp`], before Android is started for it.
+    /// So is an app whose native code is none the guest runs ([`Refusal::UnsupportedAbi`]).
     /// A bundle's compressed APKs are unpacked into `tmp`.
     pub fn open(path: &Path, tmp: &Path) -> Result<InstallFile, Refusal> {
         let name = path
@@ -1029,9 +1043,9 @@ impl InstallFile {
             .and_then(|name| name.to_str())
             .ok_or_else(|| Refusal::NotAnApp(format!("{} names no file", path.display())))?;
         if apk::check_name(name).is_ok() {
-            return ApkFile::open(path)
-                .map(InstallFile::Apk)
-                .map_err(Refusal::NotAnApp);
+            let apk = ApkFile::open(path).map_err(Refusal::NotAnApp)?;
+            check_native_code(path)?;
+            return Ok(InstallFile::Apk(apk));
         }
         match detect(path).map_err(Refusal::NotAnApp)? {
             FileKind::Apk => {
@@ -1039,9 +1053,10 @@ impl InstallFile {
                     .file_stem()
                     .and_then(|stem| stem.to_str())
                     .unwrap_or("app");
-                ApkFile::open_as(path, &format!("{stem}.apk"))
-                    .map(InstallFile::Apk)
-                    .map_err(Refusal::NotAnApp)
+                let apk =
+                    ApkFile::open_as(path, &format!("{stem}.apk")).map_err(Refusal::NotAnApp)?;
+                check_native_code(path)?;
+                Ok(InstallFile::Apk(apk))
             }
             FileKind::Bundle(_) => {
                 Bundle::open(path, tmp).map(|bundle| InstallFile::Bundle(Box::new(bundle)))
@@ -1049,6 +1064,19 @@ impl InstallFile {
             FileKind::AppBundle => Err(Refusal::AppBundle),
             FileKind::EncryptedBundle => Err(Refusal::Encrypted),
         }
+    }
+}
+
+/// Refuses the APK at `path` when its native code is none the guest runs
+/// ([`NativeCode::wont_run`]). A file that cannot be read as an APK passes: Android judges it,
+/// or reading it for the install says why.
+pub fn check_native_code(path: &Path) -> Result<(), Refusal> {
+    let Ok(file) = File::open(path) else {
+        return Ok(());
+    };
+    match NativeCode::read(BufReader::new(file)).map(|code| code.wont_run()) {
+        Ok(Some(why)) => Err(Refusal::UnsupportedAbi(why)),
+        _ => Ok(()),
     }
 }
 
@@ -1592,6 +1620,153 @@ mod tests {
             Err(other) => panic!("expected the file to be no APK, got {other}"),
             Ok(_) => panic!("a file that is no APK was taken"),
         }
+    }
+
+    #[test]
+    fn fr11_an_app_with_only_32_bit_code_is_refused_before_android_sees_it() {
+        let test = "no-64-bit";
+        // One APK whose code is for x86 only.
+        let x86 = apk(None, &["lib/x86/libnotes.so"], KEY);
+        match InstallFile::open(&file(test, "notes.apk", &x86), &std::env::temp_dir()) {
+            Err(Refusal::UnsupportedAbi(why)) => {
+                assert_eq!(
+                    why,
+                    WontRun::ThirtyTwoBitOnly {
+                        abis: vec!["x86".into()]
+                    }
+                );
+                let text = why.to_string();
+                assert!(text.contains("32-bit only (x86)"), "{text}");
+                assert!(text.contains("x86_64 or arm64-v8a build"), "{text}");
+            }
+            Err(other) => panic!("expected the 32-bit app to be refused for it, got {other}"),
+            Ok(_) => panic!("an app with 32-bit code only was taken"),
+        }
+        // A bundle whose ABI splits are 32-bit only, whichever a device would take.
+        let base = base();
+        let arm32 = split("config.armeabi_v7a", &["lib/armeabi-v7a/libnotes.so"]);
+        let x86 = split("config.x86", &["lib/x86/libnotes.so"]);
+        let bundle = bundle_of(&[
+            stored("base.apk", &base),
+            stored("split_config.armeabi_v7a.apk", &arm32),
+            stored("split_config.x86.apk", &x86),
+        ]);
+        let refusal = InstallFile::open(&file(test, "notes.apks", &bundle), &std::env::temp_dir())
+            .err()
+            .expect("refused");
+        assert_eq!(refusal.code(), "unsupported-abi");
+        assert!(
+            refusal.to_string().contains("armeabi-v7a, x86"),
+            "{refusal}"
+        );
+        // With a 64-bit split beside them it installs, as before.
+        let wide = split("config.x86_64", &["lib/x86_64/libnotes.so"]);
+        let bundle = bundle_of(&[
+            stored("base.apk", &base),
+            stored("split_config.x86.apk", &x86),
+            stored("split_config.x86_64.apk", &wide),
+        ]);
+        assert!(matches!(
+            InstallFile::open(&file(test, "both.apks", &bundle), &std::env::temp_dir()),
+            Ok(InstallFile::Bundle(_))
+        ));
+    }
+
+    /// A base APK shaped as Chrome's Trichrome builds are: it uses the Trichrome library, asks
+    /// to run as 32-bit code when `prefers_32_bit`, and holds `files`, each with content or
+    /// empty.
+    fn trichrome_base(prefers_32_bit: bool, files: &[(&str, bool)]) -> Vec<u8> {
+        let mut application = Vec::new();
+        if prefers_32_bit {
+            application.push(Attr::Typed(
+                "use32bitAbi",
+                0x0101_0515,
+                crate::apk_info::axml::TYPE_INT_BOOLEAN,
+                u32::MAX,
+            ));
+        }
+        let manifest = document(&[
+            El(
+                "manifest",
+                vec![
+                    Attr::Typed("versionCode", attr::VERSION_CODE, TYPE_INT_DEC, 42),
+                    Attr::Str("package", 0, "com.example.notes"),
+                ],
+                false,
+            ),
+            El("application", application, false),
+            El(
+                "uses-static-library",
+                vec![Attr::Str(
+                    "name",
+                    attr::NAME,
+                    "com.google.android.trichromelibrary",
+                )],
+                true,
+            ),
+        ]);
+        let mut entries = vec![stored("AndroidManifest.xml", &manifest)];
+        for (name, content) in files {
+            let data: &[u8] = if *content { b"\x7fELF" } else { b"" };
+            entries.push(stored(name, data));
+        }
+        let block = signing_block(&[(0x7109_871a, &v2_value(KEY)[..])]);
+        zip(&entries, 0, &block)
+    }
+
+    #[test]
+    fn fr11_a_build_made_to_run_as_32_bit_code_is_refused_and_a_64_bit_one_is_not() {
+        let test = "trichrome";
+        // Chrome's 32-bit build: its own code under the 32-bit ABI, an empty placeholder under
+        // the 64-bit one, and use32bitAbi.
+        let thirty_two = trichrome_base(
+            true,
+            &[
+                ("lib/armeabi-v7a/libchrome.so", true),
+                ("lib/arm64-v8a/libplaceholder.so", false),
+            ],
+        );
+        let thirty_two = bundle_of(&[stored("com.android.chrome.apk", &thirty_two)]);
+        let refusal = InstallFile::open(
+            &file(test, "chrome.xapk", &thirty_two),
+            &std::env::temp_dir(),
+        )
+        .err()
+        .expect("refused");
+        assert_eq!(
+            refusal,
+            Refusal::UnsupportedAbi(WontRun::ThirtyTwoBitOnly {
+                abis: vec!["armeabi-v7a".into()]
+            })
+        );
+        // Its 64-bit build: the code under x86_64, a placeholder under x86. It installs.
+        let sixty_four = trichrome_base(
+            false,
+            &[
+                ("lib/x86/libplaceholder.so", false),
+                ("lib/x86_64/libchrome.so", true),
+            ],
+        );
+        assert!(matches!(
+            InstallFile::open(
+                &file(test, "chrome.apk", &sixty_four),
+                &std::env::temp_dir()
+            ),
+            Ok(InstallFile::Apk(_))
+        ));
+        // Trichrome WebView: 32-bit code of its own, its 64-bit code in the library it uses,
+        // a placeholder under x86_64, and no use32bitAbi. It installs too.
+        let webview = trichrome_base(
+            false,
+            &[
+                ("lib/x86/libwebview.so", true),
+                ("lib/x86_64/libplaceholder.so", false),
+            ],
+        );
+        assert!(matches!(
+            InstallFile::open(&file(test, "webview.apk", &webview), &std::env::temp_dir()),
+            Ok(InstallFile::Apk(_))
+        ));
     }
 
     #[test]

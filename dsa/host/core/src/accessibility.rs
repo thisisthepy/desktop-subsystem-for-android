@@ -22,6 +22,7 @@ use std::time::{Duration, Instant};
 use dsa_protocol::control;
 use dsa_protocol::host_api::types as wire;
 
+use crate::input::WindowGeometry;
 use crate::tasks::Bounds;
 
 /// The most nodes one task's tree may have. Settings' longest screens have a few hundred; a
@@ -949,49 +950,52 @@ pub struct ScreenRect {
     pub height: f64,
 }
 
-/// A node's `bounds`, in pixels of the task, on the host's screen: the window shows the task
-/// (`task_size`, in guest pixels) 1:1 from the top left of its client area (`client_size`, in
-/// host pixels, which is the task's size but for a moment while the guest catches up),
-/// whose top left is at `client_origin` on the screen. Frames are never scaled to the window,
-/// so neither are the bounds. The result is cut to the client area, since nothing outside it
-/// is seen.
+/// A node's `bounds`, in pixels of the task, on the host's screen. The window shows the task
+/// from the top left of its client area, whose top left is at `client_origin` on the screen,
+/// at the window's scale (`geometry.scale`): 1:1 for a task drawn at its window's density,
+/// and larger or smaller for a task that keeps its density on a monitor of another scale, so
+/// the bounds are where the window shows the node, not where the task has it. Frames are
+/// never stretched to a client area of another size (`geometry.client` leads or trails the
+/// task for a moment while the guest catches up). The result is cut to the client area, since
+/// nothing outside it is seen.
 pub fn to_screen(
     bounds: Bounds,
-    _task_size: (u32, u32),
-    client_size: (u32, u32),
+    geometry: WindowGeometry,
     client_origin: (i32, i32),
 ) -> ScreenRect {
     let clamp = |value: f64, limit: u32| {
         if limit == 0 {
             value.max(0.0)
         } else {
-            value.clamp(0.0, limit as f64)
+            value.clamp(0.0, f64::from(limit))
         }
     };
-    let left = clamp(bounds.left as f64, client_size.0);
-    let top = clamp(bounds.top as f64, client_size.1);
-    let right = clamp(bounds.right as f64, client_size.0);
-    let bottom = clamp(bounds.bottom as f64, client_size.1);
+    let (left, top, right, bottom) = geometry.to_window_bounds(bounds);
+    let left = clamp(left, geometry.client.0);
+    let top = clamp(top, geometry.client.1);
+    let right = clamp(right, geometry.client.0);
+    let bottom = clamp(bottom, geometry.client.1);
     ScreenRect {
-        left: client_origin.0 as f64 + left,
-        top: client_origin.1 as f64 + top,
+        left: f64::from(client_origin.0) + left,
+        top: f64::from(client_origin.1) + top,
         width: (right - left).max(0.0),
         height: (bottom - top).max(0.0),
     }
 }
 
-/// A point on the host's screen in pixels of the task, the inverse of [`to_screen`]: one
-/// window pixel is one task pixel.
+/// A point on the host's screen in pixels of the task, the inverse of [`to_screen`]: the
+/// task pixel the window shows there, at the window's scale. A point on a monitor left of or
+/// above the main one has negative coordinates, and so may the client area's origin.
 pub fn from_screen(
     point: (f64, f64),
-    _task_size: (u32, u32),
-    _client_size: (u32, u32),
+    geometry: WindowGeometry,
     client_origin: (i32, i32),
 ) -> (i32, i32) {
-    (
-        (point.0 - client_origin.0 as f64).floor() as i32,
-        (point.1 - client_origin.1 as f64).floor() as i32,
-    )
+    let (x, y) = geometry.to_task_point((
+        point.0 - f64::from(client_origin.0),
+        point.1 - f64::from(client_origin.1),
+    ));
+    (x.floor() as i32, y.floor() as i32)
 }
 
 /// What a window should do about the guest's reading of its tree.

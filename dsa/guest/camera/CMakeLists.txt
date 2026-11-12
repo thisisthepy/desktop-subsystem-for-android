@@ -98,7 +98,7 @@ add_executable(dsa-camera
     ${PROTOCOL_CPP}/control.pb.cc
 )
 
-target_include_directories(dsa-camera PRIVATE src)
+target_include_directories(dsa-camera PRIVATE src ${REPO_DIR}/dsa/graphics/include)
 # The shims go first, so they stand in for the platform's headers.
 target_include_directories(dsa-camera SYSTEM BEFORE PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/shim)
 target_include_directories(dsa-camera SYSTEM PRIVATE

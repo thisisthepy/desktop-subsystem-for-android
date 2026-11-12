@@ -192,6 +192,32 @@ bool releaseDue(int64_t withoutLayersSinceMs, int64_t nowMs, int64_t delayMs) {
     return withoutLayersSinceMs > 0 && nowMs - withoutLayersSinceMs >= delayMs;
 }
 
+bool clientTargetHeld(int64_t lastClientFrameMs, int64_t nowMs, int64_t delayMs) {
+    return lastClientFrameMs > 0 && !releaseDue(lastClientFrameMs, nowMs, delayMs);
+}
+
+void ClientTargetUse::presented(bool clientLayer, int64_t nowMs) {
+    if (clientLayer) {
+        mLastMs = std::max<int64_t>(nowMs, 1);
+    }
+}
+
+std::optional<int64_t> ClientTargetUse::refreshAt() const {
+    if (mLastMs == 0) {
+        return std::nullopt;
+    }
+    return mLastMs + mDelayMs;
+}
+
+std::optional<int64_t> ClientTargetUse::letGo(int64_t nowMs) {
+    if (mLastMs == 0 || held(nowMs)) {
+        return std::nullopt;
+    }
+    const int64_t since = nowMs - mLastMs;
+    mLastMs = 0;
+    return since;
+}
+
 ResizeGate::Decision ResizeGate::decide(int32_t task, int64_t postedWidth, int64_t postedHeight,
                                         const Rect& bounds, bool drawn, int64_t nowMs,
                                         uint64_t geometry) {

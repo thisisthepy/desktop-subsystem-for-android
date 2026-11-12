@@ -20,7 +20,8 @@ use std::time::Duration;
 
 use dsa_host_core::compositor::{GraphicsRenderer, GraphicsStreamKind};
 use dsa_host_core::memory::RendererMemory;
-use dsa_host_core::renderer::RendererProcessMemory;
+use dsa_host_core::renderer::{device_resets, RendererProcessMemory};
+use dsa_protocol::renderer::types::DeviceState;
 use dsa_transport::{Connection, FrameSender};
 
 use crate::render_gpu::{GpuRequest, Luid, RendererGpu};
@@ -153,8 +154,9 @@ pub trait DisplayPresenter: Send + Sync {
         let _ = display_id;
     }
 
-    /// How many times the renderer has made its Vulkan device again after a GPU reset; 0 when
-    /// it cannot say.
+    /// A count that goes up the moment the renderer finds its Vulkan device lost (a GPU
+    /// reset) and again once it has made it again; 0 when it cannot say. A change is a GPU
+    /// reset.
     fn device_generation(&self) -> u64 {
         0
     }
@@ -291,6 +293,12 @@ pub trait GfxBackend: Send + Sync {
     fn device_generation(&self) -> u64 {
         0
     }
+
+    /// How many times the renderer found its own Vulkan device lost: it counts up the moment
+    /// it does, before the device is made again.
+    fn device_losses(&self) -> u64 {
+        0
+    }
 }
 
 /// The renderer's log callback: `dsa_gfx_log_fn`.
@@ -339,6 +347,8 @@ pub struct NativeBackend {
     /// Absent from a backend built before it survived a GPU reset.
     fn_simulate_device_loss: Option<unsafe extern "C" fn() -> c_int>,
     fn_device_generation: Option<unsafe extern "C" fn() -> u64>,
+    /// Absent from a backend built before it made a lost device again on a thread of its own.
+    fn_device_losses: Option<unsafe extern "C" fn() -> u64>,
 }
 
 // SAFETY: HMODULE is owned and accessed across threads safely through the loaded function pointers.
@@ -391,6 +401,7 @@ impl NativeBackend {
                 Self::get_symbol(handle, b"dsa_gfx_simulate_device_loss\0").ok();
             let fn_device_generation =
                 Self::get_symbol(handle, b"dsa_gfx_device_generation\0").ok();
+            let fn_device_losses = Self::get_symbol(handle, b"dsa_gfx_device_losses\0").ok();
 
             // Before the start, so what the start says reaches the log too.
             let set_log: Option<unsafe extern "C" fn(Option<LogFn>, *mut c_void)> =
@@ -423,6 +434,7 @@ impl NativeBackend {
                     fn_get_memory_stats,
                     fn_simulate_device_loss,
                     fn_device_generation,
+                    fn_device_losses,
                 },
                 note,
             ))
@@ -597,6 +609,12 @@ impl GfxBackend for NativeBackend {
         // SAFETY: takes nothing.
         self.fn_device_generation
             .map_or(0, |generation| unsafe { generation() })
+    }
+
+    fn device_losses(&self) -> u64 {
+        // SAFETY: takes nothing.
+        self.fn_device_losses
+            .map_or(0, |losses| unsafe { losses() })
     }
 }
 
@@ -795,6 +813,13 @@ impl GfxstreamAdapter {
             .map_or(0, |backend| backend.device_generation())
     }
 
+    /// How many times the renderer found its own Vulkan device lost.
+    pub fn device_losses(&self) -> u64 {
+        self.backend
+            .as_ref()
+            .map_or(0, |backend| backend.device_losses())
+    }
+
     /// What the renderer holds in memory, as it counts it; `None` when it cannot say.
     pub fn counted_memory(&self) -> Option<RendererMemory> {
         self.backend.as_ref().and_then(|backend| backend.memory())
@@ -863,7 +888,11 @@ impl DisplayPresenter for GfxstreamAdapter {
     }
 
     fn device_generation(&self) -> u64 {
-        GfxstreamAdapter::device_generation(self)
+        // The loss counts at once, the new device again once it is made.
+        device_resets(&DeviceState {
+            losses: self.device_losses(),
+            generation: GfxstreamAdapter::device_generation(self),
+        })
     }
 
     fn memory(&self) -> Option<RendererProcessMemory> {

@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use dsa_host_core::renderer::{
     describe_exit_code, describe_signal, open_renderer, restart_line, spawn_supervisor, Given,
     HeldTargets, Launched, Pending, RendererChild, RendererHandler, RendererLauncher, RendererLink,
-    TextureBook, WindowManagerLink,
+    ServedVm, TextureBook, WindowManagerLink,
 };
 use dsa_protocol::renderer::types::{envelope::Body, FrameDone, Start, Started, Target};
 use dsa_protocol::renderer::{decode_body, send};
@@ -345,6 +345,34 @@ fn nfr5_the_renderer_lets_go_of_a_texture_only_after_it_has_the_next() {
 }
 
 #[test]
+fn nfr1_a_renderer_keeping_one_texture_closes_the_last_size_once_the_next_is_open() {
+    let mut held: HeldTargets<isize> = HeldTargets::keeping(1);
+    let target = |texture_id, handle| Target {
+        texture_id,
+        handle,
+        ..Target::default()
+    };
+    let open = |t: &Target| (t.handle != 0).then_some(t.handle as isize);
+    assert_eq!(held.take(3, &target(1, 0x40), open), (Some(0x40), vec![]));
+    // The window outgrew its texture: the new one is opened, and only then the old one goes.
+    assert_eq!(
+        held.take(3, &target(2, 0x41), open),
+        (Some(0x41), vec![0x40])
+    );
+    assert_eq!(held.held(3), vec![2]);
+    // A texture that could not be opened takes nothing away.
+    assert_eq!(held.take(3, &target(3, 0), open), (None, vec![]));
+    assert_eq!(held.held(3), vec![2]);
+    // Another display keeps its own.
+    assert_eq!(held.take(4, &target(4, 0x50), open), (Some(0x50), vec![]));
+    assert_eq!(held.held(3), vec![2]);
+    // Asking for none still keeps the one being written.
+    let mut least: HeldTargets<isize> = HeldTargets::keeping(0);
+    least.take(3, &target(1, 0x40), open);
+    assert_eq!(least.held(3), vec![1]);
+}
+
+#[test]
 fn nfr5_the_log_says_why_the_renderer_ended_and_when_it_starts_again() {
     assert_eq!(
         describe_exit_code(0xC000_0005),
@@ -363,4 +391,23 @@ fn nfr5_the_log_says_why_the_renderer_ended_and_when_it_starts_again() {
          and keep their last frame; starting it again in 0.5 s (restart 3)"
     );
     assert!(restart_line(77, "x", Duration::ZERO, 1).contains("starting it again now"));
+}
+
+#[test]
+fn nfr2_a_renderer_ends_once_the_vm_it_served_is_gone() {
+    let mut served = ServedVm::new();
+    // Before any VM, and while the first one runs, it keeps serving.
+    assert!(!served.told(None), "no VM yet");
+    assert!(!served.told(Some("vm-a")), "the first VM is taken");
+    assert!(!served.told(Some("vm-a")), "the same VM again");
+    // The VM stops: the renderer ends, so the next VM gets a fresh one.
+    assert!(served.told(None), "the VM it served stopped");
+
+    // A VM that is replaced at once by another ends it too.
+    let mut served = ServedVm::new();
+    assert!(!served.told(Some("vm-a")));
+    assert!(
+        served.told(Some("vm-b")),
+        "another VM took the place of the one it served"
+    );
 }

@@ -97,6 +97,11 @@ pub struct Placement {
     pub y: i32,
     pub width_dp: u32,
     pub height_dp: u32,
+    /// Whether the user chose the window's size. Until they do, the window follows its
+    /// widget's default size as it grows ([`refreshed_placement`]); after, it keeps theirs.
+    /// The service keeps it; the local API does not carry it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub resized: bool,
 }
 
 /// One widget placed on the desktop.
@@ -378,6 +383,65 @@ pub fn default_placement(provider: &WidgetProvider, placed: &[Placement]) -> Pla
         y,
         width_dp,
         height_dp,
+        resized: false,
+    }
+}
+
+/// How far, in dp, a size a window reports may be from the one it was given and still be that
+/// size: a size in dp comes back from the window's whole pixels rounded, at most 1 dp off.
+pub const SIZE_SLACK_DP: u32 = 1;
+
+/// The placement `kept` becomes when its widget is described, as `provider`: within what the
+/// widget allows now and, until the user chose its size, grown to the widget's default size.
+/// Android describes a widget again with a larger default when the widget's content needs more
+/// room than it was given, so its window grows until nothing of it is cut off. A window is
+/// never shrunk to a smaller default, so it does not jump back and forth as Android restarts,
+/// and a size the user chose is kept.
+pub fn refreshed_placement(provider: &WidgetProvider, kept: Placement) -> Placement {
+    let (width, height) = if kept.resized {
+        (kept.width_dp, kept.height_dp)
+    } else {
+        (
+            kept.width_dp.max(default_side(
+                provider.default_width_dp,
+                provider.min_width_dp,
+            )),
+            kept.height_dp.max(default_side(
+                provider.default_height_dp,
+                provider.min_height_dp,
+            )),
+        )
+    };
+    let (width_dp, height_dp) = clamp_size(provider, width, height);
+    Placement {
+        width_dp,
+        height_dp,
+        ..kept
+    }
+}
+
+/// The placement a window reports, `asked` (already kept within what its widget allows), as
+/// the service keeps it after `kept`: marked as sized by the user once its size is not the one
+/// it was given, so the window keeps that size from then on.
+pub fn reported_placement(kept: Option<Placement>, asked: Placement) -> Placement {
+    let resized = match kept {
+        Some(kept) => {
+            kept.resized
+                || kept.width_dp.abs_diff(asked.width_dp) > SIZE_SLACK_DP
+                || kept.height_dp.abs_diff(asked.height_dp) > SIZE_SLACK_DP
+        }
+        None => false,
+    };
+    let (width_dp, height_dp) = match kept {
+        // The window's own rounding of the size it was given changes nothing.
+        Some(kept) if !resized => (kept.width_dp, kept.height_dp),
+        _ => (asked.width_dp, asked.height_dp),
+    };
+    Placement {
+        width_dp,
+        height_dp,
+        resized,
+        ..asked
     }
 }
 
@@ -667,11 +731,114 @@ mod tests {
                 x: 64,
                 y: 64,
                 width_dp: 180,
-                height_dp: 110
+                height_dp: 110,
+                resized: false,
             }
         );
         let second = default_placement(&provider, &[first]);
         assert_eq!((second.x, second.y), (112, 112));
+    }
+
+    /// A 5 by 2 music widget whose app says it is 369 by 110 dp at least, resized only across.
+    fn music(default_height_dp: u32) -> WidgetProvider {
+        checked_provider(control::WidgetProvider {
+            provider: "com.example.music/.Widget5x2".into(),
+            min_width_dp: 369,
+            min_height_dp: 110,
+            default_width_dp: 369,
+            default_height_dp,
+            resize_mode: RESIZE_HORIZONTAL,
+            ..clock()
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn fr12_a_widget_whose_content_needs_more_than_its_minimum_gets_a_window_that_fits() {
+        // Placed at the bare minimum, as before: its last row was cut off.
+        let kept = Placement {
+            x: 40,
+            y: 50,
+            width_dp: 369,
+            height_dp: 110,
+            resized: false,
+        };
+        // Android describes it again with a default that holds its content.
+        let grown = refreshed_placement(&music(168), kept);
+        assert_eq!((grown.width_dp, grown.height_dp), (369, 168));
+        assert_eq!((grown.x, grown.y), (40, 50), "it stays where it is");
+        assert!(!grown.resized);
+        // Along a side the user may resize, a smaller default later never shrinks it back;
+        // along one they may not, it is the widget's default, which Android keeps.
+        let resizable = WidgetProvider {
+            resize_mode: RESIZE_HORIZONTAL | RESIZE_VERTICAL,
+            ..music(132)
+        };
+        assert_eq!(refreshed_placement(&resizable, grown), grown);
+        assert_eq!(refreshed_placement(&music(168), grown), grown);
+        // The window reports the size it was given, a dp off from its rounding: still the
+        // widget's own size, which keeps following the widget.
+        let reported = reported_placement(
+            Some(grown),
+            Placement {
+                height_dp: 167,
+                x: 70,
+                ..grown
+            },
+        );
+        assert_eq!(
+            (reported.width_dp, reported.height_dp, reported.x),
+            (369, 168, 70)
+        );
+        assert!(!reported.resized);
+    }
+
+    #[test]
+    fn fr12_a_widget_window_keeps_the_size_the_user_chose() {
+        let provider = WidgetProvider {
+            resize_mode: RESIZE_HORIZONTAL | RESIZE_VERTICAL,
+            ..music(132)
+        };
+        let kept = Placement {
+            x: 0,
+            y: 0,
+            width_dp: 369,
+            height_dp: 132,
+            resized: false,
+        };
+        // The user makes it wider and shorter.
+        let chosen = reported_placement(
+            Some(kept),
+            Placement {
+                width_dp: 420,
+                height_dp: 120,
+                ..kept
+            },
+        );
+        assert!(chosen.resized);
+        assert_eq!((chosen.width_dp, chosen.height_dp), (420, 120));
+        // Android's larger default no longer moves it, and it stays sized by the user.
+        let described = WidgetProvider {
+            default_height_dp: 168,
+            ..provider.clone()
+        };
+        assert_eq!(refreshed_placement(&described, chosen), chosen);
+        let moved = reported_placement(Some(chosen), Placement { x: 9, ..chosen });
+        assert!(moved.resized);
+        // Still kept within what the widget allows.
+        let narrow = WidgetProvider {
+            min_width_dp: 450,
+            ..described
+        };
+        assert_eq!(refreshed_placement(&narrow, chosen).width_dp, 450);
+        // The flag is the service's own: a placement without it reads as not sized.
+        let read: Placement =
+            serde_json::from_str(r#"{"x":1,"y":2,"width_dp":3,"height_dp":4}"#).unwrap();
+        assert!(!read.resized);
+        assert!(!serde_json::to_string(&kept).unwrap().contains("resized"));
+        assert!(serde_json::to_string(&chosen)
+            .unwrap()
+            .contains("\"resized\":true"));
     }
 
     fn scratch(name: &str) -> PathBuf {
@@ -689,6 +856,7 @@ mod tests {
             y: 40,
             width_dp: 200,
             height_dp: 120,
+            resized: false,
         };
         store.set("uid:1000", 12, here).unwrap();
         store.set("uid:1000", 15, Placement::default()).unwrap();

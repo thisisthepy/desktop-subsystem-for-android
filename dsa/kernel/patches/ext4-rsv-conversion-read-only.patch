@@ -1,0 +1,105 @@
+diff --git a/fs/ext4/page-io.c b/fs/ext4/page-io.c
+--- a/fs/ext4/page-io.c
++++ b/fs/ext4/page-io.c
+@@ -261,7 +261,14 @@
+ 	WARN_ON(!io_end->bio);
+ 
+ 	spin_lock_irqsave(&ei->i_completed_io_lock, flags);
++	/*
++	 * A read-only mount of a read-only device has no workqueue of its own
++	 * (__ext4_fill_super) and writes nothing that would come here; should
++	 * anything, the system's unbound workqueue converts it.
++	 */
+ 	wq = sbi->rsv_conversion_wq;
++	if (WARN_ON_ONCE(!wq))
++		wq = system_unbound_wq;
+ 	if (list_empty(&ei->i_rsv_conversion_list))
+ 		queue_work(wq, &ei->i_rsv_conversion_work);
+ 	list_add_tail(&io_end->list, &ei->i_rsv_conversion_list);
+diff --git a/fs/ext4/super.c b/fs/ext4/super.c
+--- a/fs/ext4/super.c
++++ b/fs/ext4/super.c
+@@ -1294,7 +1294,8 @@
+ 	ext4_unregister_li_request(sb);
+ 	ext4_quotas_off(sb, EXT4_MAXQUOTAS);
+ 
+-	destroy_workqueue(sbi->rsv_conversion_wq);
++	if (sbi->rsv_conversion_wq)
++		destroy_workqueue(sbi->rsv_conversion_wq);
+ 	ext4_release_orphan_info(sb);
+ 
+ 	if (sbi->s_journal) {
+@@ -5257,6 +5258,24 @@
+ 		stripe % sbi->s_cluster_ratio != 0);
+ }
+ 
++/*
++ * The workqueue that converts unwritten extents once their writes complete.
++ * The maximum number of concurrent works can be high and concurrency isn't
++ * really necessary.  Limit it to 1.
++ */
++static int ext4_alloc_rsv_conversion_wq(struct super_block *sb)
++{
++	struct workqueue_struct *wq;
++
++	wq = alloc_workqueue("ext4-rsv-conversion", WQ_MEM_RECLAIM | WQ_UNBOUND, 1);
++	if (!wq) {
++		printk(KERN_ERR "EXT4-fs: failed to create workqueue\n");
++		return -ENOMEM;
++	}
++	EXT4_SB(sb)->rsv_conversion_wq = wq;
++	return 0;
++}
++
+ static int __ext4_fill_super(struct fs_context *fc, struct super_block *sb)
+ {
+ 	struct ext4_super_block *es = NULL;
+@@ -5499,15 +5518,17 @@
+ 	}
+ 
+ 	/*
+-	 * The maximum number of concurrent works can be high and
+-	 * concurrency isn't really necessary.  Limit it to 1.
++	 * A read-only mount of a read-only device writes nothing, not even an
++	 * orphan cleanup, so it has no extents to convert. Its workqueue, and
++	 * the rescuer thread every reclaim-safe workqueue keeps, is made only
++	 * if it is ever remounted read-write: a system with many read-only
++	 * images mounted (Android's APEX packages) otherwise keeps one idle
++	 * thread for each.
+ 	 */
+-	EXT4_SB(sb)->rsv_conversion_wq =
+-		alloc_workqueue("ext4-rsv-conversion", WQ_MEM_RECLAIM | WQ_UNBOUND, 1);
+-	if (!EXT4_SB(sb)->rsv_conversion_wq) {
+-		printk(KERN_ERR "EXT4-fs: failed to create workqueue\n");
+-		err = -ENOMEM;
+-		goto failed_mount4;
++	if (!sb_rdonly(sb) || !bdev_read_only(sb->s_bdev)) {
++		err = ext4_alloc_rsv_conversion_wq(sb);
++		if (err)
++			goto failed_mount4;
+ 	}
+ 
+ 	/*
+@@ -6356,7 +6377,8 @@
+ 		return ret;
+ 
+ 	trace_ext4_sync_fs(sb, wait);
+-	flush_workqueue(sbi->rsv_conversion_wq);
++	if (sbi->rsv_conversion_wq)
++		flush_workqueue(sbi->rsv_conversion_wq);
+ 	/*
+ 	 * Writeback quota in non-journalled quota case - journalled quota has
+ 	 * no dirty dquots
+@@ -6665,6 +6687,12 @@
+ 				goto restore_opts;
+ 			}
+ 
++			if (!sbi->rsv_conversion_wq) {
++				err = ext4_alloc_rsv_conversion_wq(sb);
++				if (err)
++					goto restore_opts;
++			}
++
+ 			/*
+ 			 * Mounting a RDONLY partition read-write, so reread
+ 			 * and store the current valid flag.  (It may have

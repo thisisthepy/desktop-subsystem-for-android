@@ -69,6 +69,41 @@
                             Severity="Informational" IsClosable="False"
                             IsOpen="{Binding NetworkRestartNeeded, Mode=OneWay}" Margin="0,0,0,4" />
 
+                <!-- The root certificates a user or an administrator added to this PC, which
+                     Android trusts while the switch is on. The change applies at once. -->
+                <TextBlock Text="{l:Text NetworkCertificatesHeader.Text}" Style="{StaticResource SectionHeader}" />
+                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon ShieldCheckmark24}">
+                    <ui:CardControl.Header>
+                        <StackPanel>
+                            <TextBlock Text="{l:Text HostCertificatesCard.Header}" Style="{StaticResource CardTitle}" />
+                            <TextBlock Text="{l:Text HostCertificatesCard.Description}" Style="{StaticResource CardDescription}" />
+                        </StackPanel>
+                    </ui:CardControl.Header>
+                    <ui:ToggleSwitch x:Name="HostCertificatesSwitch" IsChecked="{Binding HostCertificates, Mode=OneWay}"
+                                     IsEnabled="{Binding CanChange, Mode=OneWay}" Click="OnHostCertificatesToggled"
+                                     AutomationProperties.Name="{l:Text HostCertificatesCard.Header}" />
+                </ui:CardControl>
+                <TextBlock Text="{l:Text CertificatesNone.Text}" Style="{StaticResource Note}"
+                           Visibility="{Binding HasNoImportedCertificates, Converter={StaticResource Visible}}" />
+                <l:RowList ItemsSource="{Binding ImportedCertificates, Mode=OneWay}">
+                    <l:RowList.ItemTemplate>
+                        <DataTemplate>
+                            <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Certificate24}"
+                                            ToolTip="{Binding Location, TargetNullValue={x:Null}}"
+                                            AutomationProperties.Name="{Binding Subject}"
+                                            AutomationProperties.HelpText="{Binding SourceText}">
+                                <ui:CardControl.Header>
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding Subject}" Style="{StaticResource CardTitle}" />
+                                        <TextBlock Text="{Binding IssuedByText}" Style="{StaticResource CardDescription}" />
+                                        <TextBlock Text="{Binding SourceText}" Style="{StaticResource CardDescription}" />
+                                    </StackPanel>
+                                </ui:CardControl.Header>
+                            </ui:CardControl>
+                        </DataTemplate>
+                    </l:RowList.ItemTemplate>
+                </l:RowList>
+
                 <TextBlock Text="{l:Text DeveloperHeader.Text}" Style="{StaticResource SectionHeader}" />
                 <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon DeveloperBoard24}">
                     <ui:CardControl.Header>

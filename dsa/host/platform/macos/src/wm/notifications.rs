@@ -18,9 +18,10 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+use dsa_host_core::compositor::frame_stall::is_recovery_key;
 use dsa_host_core::host_api::HostApiClient;
 use dsa_host_core::native_abi::in_user_language;
-use dsa_host_core::notifications::{NotificationAction, NotificationEvent};
+use dsa_host_core::notifications::{Notification, NotificationAction, NotificationEvent};
 use dsa_host_core::tasks::PinShortcutRequest;
 use dsa_host_core::update::alerts::is_update_key;
 use dsa_host_unix::socket::UnixLocalConnector;
@@ -134,6 +135,10 @@ fn act(
             }
             continue;
         }
+        // A notice about a recovery says what DSA did; Android has nothing to open.
+        if is_recovery_key(action.key()) {
+            continue;
+        }
         let result = connect(&host_api).and_then(|mut client| {
             client
                 .act_on_notification(&action)
@@ -156,6 +161,7 @@ pub fn show(
     icons: PathBuf,
     stop: Arc<AtomicBool>,
     pin_requests: Receiver<PinShortcutRequest>,
+    news: Receiver<Notification>,
     launcher: Arc<AppLauncher>,
 ) {
     let _ = thread::Builder::new()
@@ -182,7 +188,14 @@ pub fn show(
                     .spawn(move || act(host_api, acted, pins, launcher));
             }
             // Asks about each pin request as it comes, and declines the ones left too long.
+            // DSA's own news that the window manager raises (that Android restarts because
+            // its graphics did not recover) is posted as it comes too; it needs no service.
             let ask_pins = |center: &NotificationCenter| {
+                while let Ok(notice) = news.try_recv() {
+                    if let Err(why) = center.post(&notice) {
+                        log(&format!("DSA's notice was not shown: {why}"));
+                    }
+                }
                 while let Ok(request) = pin_requests.try_recv() {
                     match center.ask_pin(&request, korean()) {
                         Ok(()) => pins

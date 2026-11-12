@@ -715,6 +715,227 @@
         }
       }
     },
+    "HostCertificatesHeader.Text": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Trusted certificates"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "신뢰할 수 있는 인증서"
+          }
+        }
+      }
+    },
+    "HostCertificatesCard.Header": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Trust certificates added to this Mac"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 Mac에 추가한 인증서 신뢰"
+          }
+        }
+      }
+    },
+    "HostCertificatesCard.Description": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "On by default. When on, Android trusts the root certificates a user or an administrator added to this Mac, such as those an internet filter or a company proxy installs to check HTTPS. Android's own list stays as it is. A change applies at once, without restarting Android."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "기본값은 켜짐입니다. 켜면 사용자나 관리자가 이 Mac에 추가한 루트 인증서를 Android가 신뢰합니다. 인터넷 필터나 회사 프록시가 HTTPS를 검사하려고 설치한 인증서가 그 예입니다. Android의 기본 목록은 그대로 둡니다. 바꾸면 Android를 다시 시작하지 않고 바로 적용됩니다."
+          }
+        }
+      }
+    },
+    "HostCertificatesEmpty.Text": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No added root certificates were found on this Mac."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 Mac에서 추가된 루트 인증서를 찾지 못했습니다."
+          }
+        }
+      }
+    },
+    "HostCertificatesOff.Text": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "While the switch is off, Android does not trust these certificates."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "스위치가 꺼져 있는 동안 Android는 이 인증서를 신뢰하지 않습니다."
+          }
+        }
+      }
+    },
+    "HostCertificatesIssuer.Text": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Issued by {0}"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "발급자: {0}"
+          }
+        }
+      }
+    },
+    "HostCertificatesSource_machine": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This computer's trusted root store"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 컴퓨터의 신뢰할 수 있는 루트 저장소"
+          }
+        }
+      }
+    },
+    "HostCertificatesSource_machine_group_policy": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Group policy for this computer"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 컴퓨터의 그룹 정책"
+          }
+        }
+      }
+    },
+    "HostCertificatesSource_machine_enterprise": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This computer's enterprise store"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 컴퓨터의 엔터프라이즈 저장소"
+          }
+        }
+      }
+    },
+    "HostCertificatesSource_user": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your trust settings"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "사용자 신뢰 설정"
+          }
+        }
+      }
+    },
+    "HostCertificatesSource_user_group_policy": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Group policy for you"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "사용자 그룹 정책"
+          }
+        }
+      }
+    },
+    "HostCertificatesSource_admin": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Administrator trust settings"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "관리자 신뢰 설정"
+          }
+        }
+      }
+    },
+    "HostCertificatesSource_system": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "System certificate store"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "시스템 인증서 저장소"
+          }
+        }
+      }
+    },
     "AdvancedTitle.Text": {
       "extractionState": "manual",
       "localizations": {
@@ -7181,6 +7402,40 @@
         }
       }
     },
+    "Network_DnsFallback": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This Mac's resolver does not answer, so Android asks the network's DNS servers: {0}"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 Mac의 해석기가 응답하지 않아 Android가 네트워크의 DNS 서버에 직접 묻습니다: {0}"
+          }
+        }
+      }
+    },
+    "Network_DnsHost": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Answered by this Mac's resolver, so its hosts file, VPN and DNS filters apply to Android apps."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 Mac의 해석기가 응답합니다. 이 Mac의 hosts 파일, VPN, DNS 필터가 Android 앱에도 적용됩니다."
+          }
+        }
+      }
+    },
     "Network_ModeAdvanced": {
       "extractionState": "manual",
       "localizations": {
@@ -7306,13 +7561,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "DNS servers"
+            "value": "DNS"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "DNS 서버"
+            "value": "DNS"
           }
         }
       }

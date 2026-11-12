@@ -7,15 +7,21 @@
 //! buttons over the app's top right corner in a visual of their own
 //! ([`WindowPresenter::show_caption`]).
 //!
-//! The title bar keeps the height Windows gives a caption at the window's DPI. The window
-//! reports it (`FromHost::Caption`) when it opens and whenever it changes, and Android gives
-//! the task a top inset of that height, so the app's own toolbar sits below the buttons.
+//! The title bar is Android's status bar. It keeps the height Windows gives a caption at the
+//! window's DPI. The window reports it (`FromHost::Caption`) when it opens and whenever it
+//! changes, and Android gives the task a status bar inset of exactly that height, in the
+//! task's pixels, as a phone gives an app the height of its status bar. An app that draws
+//! edge to edge keeps its toolbar below the band and draws its own status bar background
+//! under it; an app that does not gets the status bar background Android draws in its status
+//! bar colour there. Either way only what the app chooses to draw under the band is covered.
+//! The guest image also sets Android's status bar height resources to this height at each
+//! scale's density, for the apps that read those instead of their insets.
 //!
 //! The band belongs to Windows, as the platform-neutral [`CaptionLayout`] decides:
 //! `WM_NCHITTEST` answers a caption button's code over the buttons (the maximize button's
 //! code is what shows the Windows 11 snap layouts), the top resize edge's codes along the
-//! top, and `HTCAPTION` everywhere else in the band, so dragging moves the window, a double
-//! click maximizes it and a right click opens the system menu, all done by Windows. The
+//! top, and `HTCAPTION` everywhere else in the band, so dragging moves the window and a double
+//! click maximizes it, both done by Windows; a right click opens the window menu. The
 //! buttons themselves are pressed here, on the non-client mouse messages, so Windows never
 //! draws its classic buttons over them.
 //!
@@ -30,8 +36,14 @@
 //! taskbar shows too, read at the small icon size of the window's DPI so it stays sharp) and
 //! the app's name (the window's title, in Segoe UI Variable at the caption text size, cut
 //! with an ellipsis before the buttons), both in the glyphs' color and fainter while the
-//! window is inactive. A press on the icon is `HTSYSMENU`, which opens the system menu as
-//! a standard caption icon does.
+//! window is inactive. The icon is `HTSYSMENU`, the code of a standard caption icon; a click
+//! on it opens the window menu, the Windows 11 menu that replaces the classic system menu, and
+//! a double click closes the window, as Windows' own icon does ([`super::window_menu`]).
+//!
+//! An icon drawn without its plate can vanish into a band of its own colour, as a white logo
+//! on a white title bar. The window measures the logo's contrast against the band each time
+//! it draws, and when too little of it stands out it draws the whole icon with the app's
+//! background, or the logo on a neutral plate ([`caption_icon::choose`]).
 //!
 //! An app that draws nothing behind the band (an old theme draws no system bar background)
 //! would leave it black. The presenter samples the band and the row under it from the app's
@@ -45,7 +57,9 @@
 //! icon, which the taskbar and Alt+Tab show too, has its plate and is drawn as it is. While the task can go back (`ToHost::CaptionBack`), the icon's cell
 //! shows a back arrow instead, a button of the caption buttons' look whose click sends the task
 //! Back; its hit test code is `HTHELP`, which a window without a help button never otherwise
-//! answers, so Windows leaves the press to this window.
+//! answers, so Windows leaves the press to this window. After a Back the arrow waits for the
+//! task's state to be told again ([`BACK_SETTLE_MS`] at most) before it sends another, so a
+//! quick second click never sends Back past the first screen, which would close the app.
 //!
 //! An app that draws its own title bar (`ToHost::CaptionMode`) fills the band with its own
 //! content. The window then draws only the icon's cell and the buttons over it, and the points
@@ -61,6 +75,7 @@ use dsa_host_core::compositor::caption::{
     CaptionButton, CaptionHit, CaptionLayout, CaptionPalette, CaptionState, CaptionTone,
     TitleBarContent, TitleBarHit, TitleBarMode, TITLE_TEXT_AT_100,
 };
+use dsa_host_core::compositor::caption_icon::{self, IconLook};
 use dsa_host_core::compositor::window_hosts::FromHost;
 use dsa_host_core::input::InputEvent;
 use dsa_host_core::keys::{keycode, KeyAction, KeyEvent as GuestKey};
@@ -198,7 +213,7 @@ fn code_of(hit: CaptionHit) -> u32 {
 
 /// The hit test code of the back arrow in the icon's cell. A window without a help button
 /// never answers it otherwise, and this window presses it itself, as it does its buttons.
-const HT_BACK: u32 = HTHELP;
+pub const HT_BACK: u32 = HTHELP;
 
 /// The hit test code of the client point (`x`, `y`) of a window laid out as `layout`, its
 /// title bar showing `mode`. The app's icon is `HTSYSMENU`, so a press on it opens the system
@@ -226,6 +241,12 @@ pub fn back_keys(task_id: i32, time_ms: u32) -> [GuestKey; 2] {
     };
     [key(KeyAction::Down), key(KeyAction::Up)]
 }
+
+/// How long after a Back the arrow sends no other, unless the task's state is told again
+/// first, in milliseconds. Android tells the new state once the screen has gone, which takes
+/// about as long as its transition; until then the arrow's state is stale, and a second Back
+/// on what is by then the first screen would close the app.
+pub const BACK_SETTLE_MS: u32 = 700;
 
 /// The faces the app's name is written in, the first one installed winning: Segoe UI
 /// Variable at its optical size for caption text, then at its text size, then Segoe UI,
@@ -352,7 +373,7 @@ unsafe fn title_mask(title: &str, size: (u32, u32), dpi: u32) -> Option<Vec<u8>>
 
 /// What a title bar was drawn from, so a message that changes nothing draws nothing: the
 /// layout, the buttons' state, the colors, the DPI, the name, the fill, whether the app draws
-/// its own title bar, and the back arrow.
+/// its own title bar, the back arrow, and how the icon is drawn.
 type Drawn = (
     CaptionLayout,
     CaptionState,
@@ -362,7 +383,17 @@ type Drawn = (
     Option<u32>,
     bool,
     Option<BackButton>,
+    Option<IconLook>,
 );
+
+/// The title bar's icon at one side, read once for each side: the adaptive icon's logo alone
+/// (`None` for an app without one), and the whole icon with its background.
+#[derive(Default)]
+struct IconPixels {
+    side: u32,
+    logo: Option<Vec<u8>>,
+    whole: Option<Vec<u8>>,
+}
 
 /// A task window's title bar: the tone and state of its buttons, the app's icon and name,
 /// and the height it last reported.
@@ -382,8 +413,10 @@ pub struct CaptionWindow {
     sample: Cell<BandSample>,
     /// The tone the glyphs, the name and the frame are drawn in now ([`shown_tone`]).
     shown: Cell<CaptionTone>,
-    /// The icon as last read, and the side it was read at.
-    icon: RefCell<Option<(u32, Option<Vec<u8>>)>>,
+    /// The icon as last read, at the side it was read at.
+    icon: RefCell<Option<IconPixels>>,
+    /// How the icon was last drawn: bare, or on a plate over a band it would vanish into.
+    icon_look: Cell<Option<IconLook>>,
     /// The name as last laid out, and what it was laid out for: text, box and DPI.
     text: RefCell<Option<(TitleKey, Option<Vec<u8>>)>>,
     tone: Cell<CaptionTone>,
@@ -400,6 +433,12 @@ pub struct CaptionWindow {
     back: Cell<bool>,
     back_hovered: Cell<bool>,
     back_pressed: Cell<bool>,
+    /// When (the message clock, in milliseconds) the arrow last sent Back, until the task's
+    /// state is told again.
+    back_sent: Cell<Option<u32>>,
+    /// Whether the window menu is open over this window, which keeps the title bar drawn as
+    /// active while the menu has the foreground.
+    menu_open: Cell<bool>,
     /// Where the back arrow's Back goes: the window host's input for the guest.
     input: Sender<InputEvent>,
     /// Whether Windows will say when the pointer leaves the non-client area.
@@ -425,6 +464,7 @@ impl CaptionWindow {
             sample: Cell::new(BandSample::default()),
             shown: Cell::new(CaptionTone::default()),
             icon: RefCell::new(None),
+            icon_look: Cell::new(None),
             text: RefCell::new(None),
             tone: Cell::new(CaptionTone::default()),
             hovered: Cell::new(None),
@@ -436,6 +476,8 @@ impl CaptionWindow {
             back: Cell::new(false),
             back_hovered: Cell::new(false),
             back_pressed: Cell::new(false),
+            back_sent: Cell::new(None),
+            menu_open: Cell::new(false),
             input,
             tracking: Cell::new(false),
             drawn: RefCell::new(None),
@@ -471,6 +513,8 @@ impl CaptionWindow {
             self.back_hovered.set(false);
             self.back_pressed.set(false);
         }
+        // The task's state is fresh again: the arrow may send the next Back.
+        self.back_sent.set(None);
         self.paint(hwnd, presenter);
     }
 
@@ -479,14 +523,40 @@ impl CaptionWindow {
         self.back.get()
     }
 
-    /// Sends the task Back, as a click on the back arrow does.
-    pub fn go_back(&self) {
-        // SAFETY: GetMessageTime only reads this thread's message state.
-        let time = unsafe { GetMessageTime() } as u32;
-        for key in back_keys(self.task_id, time) {
+    /// The pointer pressed the back arrow.
+    pub fn press_back(&self) {
+        self.back_pressed.set(true);
+    }
+
+    /// The pointer let go of the back arrow at `time_ms` of the message clock: the task is sent
+    /// Back when the arrow was pressed, the task can go back, and its state has been told since
+    /// the last Back (or that Back is [`BACK_SETTLE_MS`] old). Returns whether Back was sent.
+    pub fn release_back(&self, time_ms: u32) -> bool {
+        let pressed = self.back_pressed.replace(false);
+        if !pressed || !self.back.get() {
+            return false;
+        }
+        if let Some(sent) = self.back_sent.get() {
+            if time_ms.wrapping_sub(sent) < BACK_SETTLE_MS {
+                return false;
+            }
+        }
+        self.back_sent.set(Some(time_ms));
+        for key in back_keys(self.task_id, time_ms) {
             // The sender ends only when the window host stops; Back then has nowhere to go.
             let _ = self.input.send(InputEvent::Key(key));
         }
+        true
+    }
+
+    /// The window menu opened over this window, or closed. While it is open the title bar
+    /// stays drawn as active, as it does under Windows' own system menu.
+    pub fn set_menu_open(&self, open: bool) {
+        self.menu_open.set(open);
+    }
+
+    pub fn menu_open(&self) -> bool {
+        self.menu_open.get()
     }
 
     /// What the title bar shows besides its layout, for its hit test.
@@ -617,24 +687,61 @@ impl CaptionWindow {
         }
     }
 
-    /// The title bar's icon `side` pixels square, read once for each side: the adaptive icon's
-    /// foreground the program carries for it, else the program's own icon.
-    fn icon_pixels(&self, side: u32) -> Option<Vec<u8>> {
+    /// The title bar's icon `side` pixels square, as it is drawn over the band now, and how:
+    /// the adaptive icon's logo alone (enlarged to the size of a whole icon) while it stands
+    /// out against the band, else the whole icon or the logo on a plate
+    /// ([`caption_icon::choose`]). The icons are read once for each side.
+    fn icon_pixels(&self, side: u32, palette: &CaptionPalette) -> Option<(IconLook, Vec<u8>)> {
         let mut cache = self.icon.borrow_mut();
-        if cache.as_ref().map(|(at, _)| *at) != Some(side) {
-            // The icon the window manager sent since the program started comes first.
-            let live = super::live_icon::current()
-                .and_then(|icon| super::live_icon::premultiplied(icon.caption_png(), side));
-            let pixels = live
-                .or_else(|| super::splash::caption_icon_pixels(side))
-                .or_else(|| {
-                    super::splash::icon_pixels(self.icon_id, side)
-                        .filter(|(_, size)| *size == (side, side))
-                        .map(|(pixels, _)| pixels)
-                });
-            *cache = Some((side, pixels));
+        if cache.as_ref().map(|icon| icon.side) != Some(side) {
+            *cache = Some(self.read_icon(side));
         }
-        cache.as_ref().and_then(|(_, pixels)| pixels.clone())
+        let icon = cache.as_ref()?;
+        // Under high contrast the band is the theme's color.
+        let background = if palette.rest >> 24 != 0 && !self.app_drawn.get() {
+            let fill = BandSample {
+                fill: Some(palette.rest),
+                luminance: None,
+            };
+            caption_icon::background_luminance(fill, false, self.shown.get())
+        } else {
+            caption_icon::background_luminance(
+                self.sample.get(),
+                self.app_drawn.get(),
+                self.shown.get(),
+            )
+        };
+        let chosen = caption_icon::choose(
+            icon.logo.as_deref(),
+            icon.whole.as_deref(),
+            side,
+            background,
+            self.icon_look.get(),
+        );
+        self.icon_look.set(chosen.as_ref().map(|(look, _)| *look));
+        chosen
+    }
+
+    /// The app's logo and whole icon `side` pixels square: the ones the window manager sent
+    /// since the program started, else the adaptive icon's foreground the program carries and
+    /// the program's own icon.
+    fn read_icon(&self, side: u32) -> IconPixels {
+        if let Some(live) = super::live_icon::current() {
+            let whole = super::live_icon::premultiplied(&live.icon_png, side);
+            let logo = (!live.caption_icon_png.is_empty())
+                .then(|| super::live_icon::caption_logo(&live.caption_icon_png, side))
+                .flatten();
+            if logo.is_some() || whole.is_some() {
+                return IconPixels { side, logo, whole };
+            }
+        }
+        IconPixels {
+            side,
+            logo: super::splash::caption_icon_pixels(side),
+            whole: super::splash::icon_pixels(self.icon_id, side)
+                .filter(|(_, size)| *size == (side, side))
+                .map(|(pixels, _)| pixels),
+        }
     }
 
     /// The app's name laid out for a box of `size` at `dpi`, laid out again only when one of
@@ -698,6 +805,8 @@ impl CaptionWindow {
             active: self.active.get(),
         };
         let palette = palette(self.shown.get());
+        // The icon is chosen again each time the band may have changed under it.
+        let icon = self.icon_pixels(layout.icon, &palette);
         let now = Some((
             layout,
             state,
@@ -707,17 +816,17 @@ impl CaptionWindow {
             self.fill(),
             self.app_drawn.get(),
             self.back_button(),
+            icon.as_ref().map(|(look, _)| *look),
         ));
         if *self.drawn.borrow() == now {
             return;
         }
-        let icon = self.icon_pixels(layout.icon);
         let title = layout
             .title_rect()
             .and_then(|(_, _, width, height)| self.title_pixels((width, height), dpi));
         let content = TitleBarContent {
             fill: self.fill(),
-            icon: icon.as_deref(),
+            icon: icon.as_ref().map(|(_, pixels)| pixels.as_slice()),
             title: title.as_deref(),
             app_drawn: self.app_drawn.get(),
             back: self.back_button(),
@@ -843,16 +952,13 @@ impl CaptionWindow {
                 Some(DefWindowProcW(hwnd, message, wparam, lparam))
             }
             WM_NCLBUTTONDOWN | WM_NCLBUTTONDBLCLK if wparam as u32 == HT_BACK => {
-                self.back_pressed.set(true);
+                self.press_back();
                 self.paint(hwnd, presenter);
                 Some(0)
             }
             WM_NCLBUTTONUP if wparam as u32 == HT_BACK => {
-                let pressed = self.back_pressed.replace(false);
+                self.release_back(GetMessageTime() as u32);
                 self.paint(hwnd, presenter);
-                if pressed && self.back.get() {
-                    self.go_back();
-                }
                 Some(0)
             }
             WM_NCLBUTTONDOWN | WM_NCLBUTTONDBLCLK => match button_of(wparam as u32) {
@@ -889,9 +995,11 @@ impl CaptionWindow {
             },
             WM_NCACTIVATE => {
                 // Windows would paint its caption; there is none. -1 keeps it from painting
-                // the frame, which DWM draws.
-                self.activated(hwnd, wparam != 0, presenter);
-                Some(DefWindowProcW(hwnd, message, wparam, -1))
+                // the frame, which DWM draws. The window menu taking the foreground leaves the
+                // title bar active, as Windows' own menu does.
+                let active = wparam != 0 || self.menu_open.get();
+                self.activated(hwnd, active, presenter);
+                Some(DefWindowProcW(hwnd, message, WPARAM::from(active), -1))
             }
             _ => None,
         }
@@ -967,6 +1075,54 @@ mod tests {
         assert_eq!(up.action, KeyAction::Up);
         assert_eq!((up.key_code, up.event_time_ms), (4, 1234));
         assert!(!down.canceled && !up.canceled);
+    }
+
+    #[test]
+    fn fr22_the_back_arrow_sends_back_only_while_the_task_can_go_back() {
+        let (input, guest) = std::sync::mpsc::channel();
+        let caption = CaptionWindow::new(7, WS_OVERLAPPEDWINDOW, 0, 1, input);
+        let sent = || {
+            let keys: Vec<InputEvent> = guest.try_iter().collect();
+            keys.len()
+        };
+        let none = std::ptr::null_mut();
+        // On the first screen the cell is the icon: a click there opens the window menu and
+        // sends Android nothing, even a release over the cell.
+        caption.press_back();
+        assert!(!caption.release_back(1000));
+        assert_eq!(sent(), 0);
+        // SAFETY: with no presenter the window is never drawn, so no window is needed.
+        unsafe { caption.set_back(none, true, None) };
+        caption.press_back();
+        assert!(caption.release_back(2000));
+        assert_eq!(sent(), 2, "Back pressed and released");
+        // A second click before Android has told the task's new state sends nothing: that
+        // state is stale, and a Back on what may be the first screen by now closes the app.
+        caption.press_back();
+        assert!(!caption.release_back(2000 + BACK_SETTLE_MS - 1));
+        assert_eq!(sent(), 0);
+        // Told again (still past the first screen), the arrow works again at once.
+        // SAFETY: as above.
+        unsafe { caption.set_back(none, true, None) };
+        caption.press_back();
+        assert!(caption.release_back(2100));
+        assert_eq!(sent(), 2);
+        // A state that never comes (the task stayed past its first screen) holds it no
+        // longer than the settle time.
+        caption.press_back();
+        assert!(caption.release_back(2100 + BACK_SETTLE_MS));
+        assert_eq!(sent(), 2);
+        // Back on the first screen: the cell is the icon again and sends nothing.
+        // SAFETY: as above.
+        unsafe { caption.set_back(none, false, None) };
+        caption.press_back();
+        assert!(!caption.release_back(9000));
+        assert_eq!(sent(), 0);
+        // A release with no press on the arrow (the press began elsewhere) sends nothing.
+        // SAFETY: as above.
+        unsafe { caption.set_back(none, true, None) };
+        assert!(!caption.release_back(9500));
+        assert_eq!(sent(), 0);
     }
 
     #[test]

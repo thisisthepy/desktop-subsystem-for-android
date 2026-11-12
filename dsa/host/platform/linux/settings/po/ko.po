@@ -207,6 +207,9 @@ msgstr "묶음의 분할 APK가 기본 APK와 다른 키로 서명되어 있어 
 msgid "the bundle is not one app that Android can install."
 msgstr "Android가 설치할 수 있는 하나의 앱으로 된 묶음이 아닙니다."
 
+msgid "the app's native code is none that DSA's Android runs, which runs 64-bit code only: x86_64, and arm64-v8a through ARM translation. Get the app's x86_64 or arm64-v8a build."
+msgstr "DSA의 Android가 실행할 수 있는 네이티브 코드가 앱에 없습니다. DSA의 Android는 64비트 코드만 실행합니다(x86_64, 그리고 ARM 번역을 거친 arm64-v8a). 앱의 x86_64판이나 arm64-v8a판을 받으세요."
+
 msgid "the app does not run on this Android: it needs another processor type, a newer Android version or a feature this device does not have."
 msgstr "이 Android에서 실행되지 않는 앱입니다. 다른 프로세서 종류, 더 새로운 Android 버전 또는 이 기기에 없는 기능이 필요합니다."
 
@@ -939,8 +942,14 @@ msgstr "연결"
 msgid "Address"
 msgstr "주소"
 
-msgid "DNS servers"
-msgstr "DNS 서버"
+msgid "DNS"
+msgstr "DNS"
+
+msgid "Answered by this computer's resolver, so its hosts file, VPN and DNS filters apply to Android apps."
+msgstr "이 컴퓨터의 해석기가 응답합니다. 이 컴퓨터의 hosts 파일, VPN, DNS 필터가 Android 앱에도 적용됩니다."
+
+msgid "This computer's resolver does not answer, so Android asks the network's DNS servers: {0}"
+msgstr "이 컴퓨터의 해석기가 응답하지 않아 Android가 네트워크의 DNS 서버에 직접 묻습니다: {0}"
 
 msgid "Gateway"
 msgstr "게이트웨이"
@@ -959,6 +968,51 @@ msgstr "고급 네트워킹"
 
 msgid "Off by default. When on, Android joins this computer's network as a device of its own: other devices on the network can reach Android apps, and Android apps can reach them directly. Programs on this computer can always reach a server in Android at the address above."
 msgstr "기본값은 꺼짐입니다. 켜면 Android가 이 컴퓨터의 네트워크에 독립된 기기로 들어갑니다. 네트워크의 다른 기기가 Android 앱에 닿고, Android 앱도 그 기기에 바로 닿습니다. 이 컴퓨터의 프로그램은 언제나 위의 주소로 Android의 서버에 닿을 수 있습니다."
+
+msgid "Trusted certificates"
+msgstr "신뢰할 수 있는 인증서"
+
+msgid "Root certificates that you or an administrator added to this computer, such as a company's or a security program's. The certificates that come with the system are not listed; Android has its own."
+msgstr "직접 또는 관리자가 이 컴퓨터에 추가한 루트 인증서입니다. 회사나 보안 프로그램의 인증서가 그 예입니다. 시스템에 처음부터 들어 있는 인증서는 목록에 나오지 않습니다. Android에는 자체 인증서가 있습니다."
+
+msgid "Trust certificates added to this computer"
+msgstr "이 컴퓨터에 추가한 인증서 신뢰"
+
+msgid "On by default. When on, Android apps trust the root certificates listed below as they trust Android's own, so sites and servers that this computer trusts open in Android too. The change applies at once."
+msgstr "기본값은 켜짐입니다. 켜면 Android 앱이 아래 목록의 루트 인증서를 Android 자체 인증서처럼 신뢰하므로, 이 컴퓨터가 신뢰하는 사이트와 서버가 Android에서도 열립니다. 바뀐 설정은 바로 적용됩니다."
+
+msgid "This computer's trusted root certificates"
+msgstr "이 컴퓨터의 신뢰할 수 있는 루트 인증서"
+
+msgid "This computer's group policy"
+msgstr "이 컴퓨터의 그룹 정책"
+
+msgid "This computer's enterprise certificates"
+msgstr "이 컴퓨터의 엔터프라이즈 인증서"
+
+msgid "Your trusted root certificates"
+msgstr "내 신뢰할 수 있는 루트 인증서"
+
+msgid "Your group policy"
+msgstr "내 그룹 정책"
+
+msgid "This computer's administrator trust settings"
+msgstr "이 컴퓨터의 관리자 신뢰 설정"
+
+msgid "Added to the system's certificate store"
+msgstr "시스템 인증서 저장소에 추가됨"
+
+msgid "SHA-256 {0}"
+msgstr "SHA-256 {0}"
+
+msgid "A certificate without a name"
+msgstr "이름이 없는 인증서"
+
+msgid "Issued by {0}"
+msgstr "발급자: {0}"
+
+msgid "No added root certificates were found on this computer."
+msgstr "이 컴퓨터에 추가된 루트 인증서를 찾지 못했습니다."
 
 msgid "Files"
 msgstr "파일"

@@ -226,6 +226,65 @@ class LockTests(unittest.TestCase):
                            ("frameworks/base", "libs/hwui")]:
                 self.assertIn(wanted, changed, android)
 
+    def test_nfr1_both_versions_free_the_client_target_when_nothing_is_composed_into_it(self):
+        # The client target is the display's size (63 MiB at 2880x2880). FramebufferSurface
+        # gives its buffers back after a while without client composition, and RenderSurface
+        # drops its textures of them, or the memory would stay held.
+        for android in ("android16", "android17"):
+            added = {}
+            for project, patch in framework_lock.patch_files(android):
+                if project != "frameworks/native":
+                    continue
+                path = None
+                for line in patch.read_text().splitlines():
+                    if line.startswith("+++ b/"):
+                        path = line[len("+++ b/"):]
+                    elif line.startswith("+") and path:
+                        added.setdefault(path, []).append(line[1:])
+            def adds(path, text):
+                return any(text in line for line in added.get(path, []))
+            fbs = "services/surfaceflinger/DisplayHardware/FramebufferSurface.cpp"
+            self.assertTrue(adds("services/surfaceflinger/CompositionEngine/include/compositionengine/"
+                                 "DisplaySurface.h", "virtual bool takeBuffersReleased()"), android)
+            self.assertTrue(adds("services/surfaceflinger/CompositionEngine/src/RenderSurface.cpp",
+                                 "mTextureCache.clear();"), android)
+            self.assertTrue(adds(fbs, "discardFreeBuffers("), android)
+            self.assertTrue(adds(fbs, "kReleaseIdleBuffersAfter"), android)
+            self.assertTrue(adds("services/surfaceflinger/DisplayHardware/FramebufferSurface.h",
+                                 "kReleaseIdleBuffersAfter = 1'000'000'000"), android)
+
+    def test_nfr1_android17_frees_the_client_target_whichever_framebuffer_surface_it_picks(self):
+        # Android 17 picks FramebufferSurface or LegacyFramebufferSurface by the
+        # wb_framebuffersurface2 flag, and the build DSA ships takes the legacy one. A release
+        # only in FramebufferSurface never ran there: the client target stayed held, and its
+        # "buffers are freed" line never appeared.
+        added = {}
+        for project, patch in framework_lock.patch_files("android17"):
+            if project != "frameworks/native":
+                continue
+            path = None
+            for line in patch.read_text().splitlines():
+                if line.startswith("+++ b/"):
+                    path = line[len("+++ b/"):]
+                elif line.startswith("+") and path:
+                    added.setdefault(path, []).append(line[1:])
+
+        def adds(path, text):
+            return any(text in line for line in added.get(path, []))
+
+        for name in ("FramebufferSurface", "LegacyFramebufferSurface"):
+            source = f"services/surfaceflinger/DisplayHardware/{name}.cpp"
+            header = f"services/surfaceflinger/DisplayHardware/{name}.h"
+            self.assertTrue(adds(header, "bool takeBuffersReleased() override;"), name)
+            self.assertTrue(adds(header, "kReleaseIdleBuffersAfter = 1'000'000'000"), name)
+            self.assertTrue(adds(source, f"bool {name}::takeBuffersReleased()"), name)
+            self.assertTrue(adds(source, "discardFreeBuffers("), name)
+            self.assertTrue(adds(source, "its buffers are freed"), name)
+        # The legacy class tells HWC about each slot's buffer only once; after the discard the
+        # slots hold new buffers, which must go to HWC whole.
+        self.assertTrue(adds("services/surfaceflinger/DisplayHardware/LegacyFramebufferSurface.cpp",
+                             "id = UINT64_MAX;"))
+
     def test_nfr5_each_patch_adds_the_tested_recovery_policy_unchanged(self):
         # The policy the renderers follow is the one test_device_loss_recovery.cpp tests.
         canonical = (HERE / "recovery/DeviceLossRecovery.h").read_text()
@@ -521,23 +580,30 @@ class CollectTests(unittest.TestCase):
 
     def _product(self, root, machine):
         product = root / "product"
-        for installed in framework_lock.OUTPUTS.values():
+        for installed in {**framework_lock.OUTPUTS, **framework_lock.KEYMINT_OUTPUTS}.values():
             (product / installed).parent.mkdir(parents=True, exist_ok=True)
             (product / installed).write_bytes(self._elf(machine, installed.encode()))
         return product
+
+    def _tree(self, root):
+        top = root / "tree"
+        for path in framework_lock.KEYMINT_SOURCES.values():
+            (top / path).parent.mkdir(parents=True, exist_ok=True)
+            (top / path).write_text(f"<manifest>{path}</manifest>\n")
+        return top
 
     def test_nfr5_collect_takes_the_three_files_and_describes_them_for_the_image(self):
         version = framework_lock.version_entry(framework_lock.load(), "android17")
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             out = root / "out"
-            description = collect.collect(version, "arm64", self._product(root, 183), out)
+            description = collect.collect(version, "arm64", self._product(root, 183), out, top=self._tree(root))
             written = json.loads((out / "framework.json").read_text())
             self.assertEqual(written, description)
             self.assertEqual(written["build_id"], "16373615")
             self.assertEqual(written["arch"], "arm64")
             self.assertEqual(written["version"], framework_lock.build_version(version))
-            self.assertEqual(sorted(written["files"]), sorted(framework_lock.OUTPUTS))
+            self.assertEqual(sorted(written["files"]), sorted(list(framework_lock.OUTPUTS) + framework_lock.KEYMINT_FILES))
             for name, entry in written["files"].items():
                 data = (out / name).read_bytes()
                 self.assertEqual(entry, {"size": len(data), "sha256": hashlib.sha256(data).hexdigest()})
@@ -547,7 +613,110 @@ class CollectTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             with self.assertRaisesRegex(SystemExit, "not x86_64"):
-                collect.collect(version, "x86_64", self._product(root, 183), root / "out")
+                collect.collect(version, "x86_64", self._product(root, 183), root / "out", top=self._tree(root))
+
+    def test_fr36_collect_takes_the_keymint_from_the_build_and_its_fragments_from_the_tree(self):
+        version = framework_lock.version_entry(framework_lock.load(), "android16")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            out = root / "out"
+            top = self._tree(root)
+            description = collect.collect(version, "x86_64", self._product(root, 62), out, top=top)
+            for name, path in framework_lock.KEYMINT_SOURCES.items():
+                self.assertEqual((out / name).read_bytes(), (top / path).read_bytes())
+            self.assertIn(framework_lock.KEYMINT_BINARY, description["files"])
+            self.assertIn("VENDOR/lib64/libssl.so", description["files"])
+            # Without the tree there are no fragments, and without them no image can declare it.
+            with self.assertRaisesRegex(SystemExit, "give --top"):
+                collect.collect(version, "x86_64", self._product(root, 62), root / "out2")
+            (top / framework_lock.KEYMINT_SOURCES[
+                "VENDOR/etc/vintf/manifest/android.hardware.security.secureclock-service.xml"]).unlink()
+            with self.assertRaisesRegex(SystemExit, "secureclock-service.xml"):
+                collect.collect(version, "x86_64", self._product(root, 62), root / "out3", top=top)
+            # A build that did not make the KeyMint is not collected.
+            (root / "product" / framework_lock.KEYMINT_OUTPUTS[framework_lock.KEYMINT_BINARY]).unlink()
+            with self.assertRaisesRegex(SystemExit, "did not make vendor/bin/hw/dsa-keymint"):
+                collect.collect(version, "x86_64", root / "product", root / "out4", top=self._tree(root))
+
+
+class KeyMintLockTests(unittest.TestCase):
+    """What the Framework build needs to build DSA's KeyMint, and the patches that make it take
+    the root key of key blobs from the host."""
+
+    HOST_KEY = "security/keymint/aidl/default/ta/host_key.rs"
+
+    def _patch(self, project, android):
+        found = [patch for p, patch in framework_lock.patch_files(android) if p == project]
+        self.assertEqual(len(found), 1, f"{android} {project}")
+        return found[0].read_text()
+
+    def test_fr36_the_build_makes_the_keymint_the_image_takes(self):
+        outputs = subprocess.run([sys.executable, "-I", str(HERE / "framework_lock.py"), "outputs"],
+                                 capture_output=True, text=True, check=True).stdout.split()
+        self.assertEqual(outputs, list(framework_lock.OUTPUTS.values()) + list(framework_lock.KEYMINT_OUTPUTS.values()))
+        self.assertIn("vendor/bin/hw/dsa-keymint", outputs)
+        # The image's vendor partition has no libssl, which the Rust openssl crate links.
+        self.assertIn("vendor/lib64/libssl.so", outputs)
+        for board in ("x86_64", "arm64"):
+            config = (REPO / ".github/scripts/framework/device" / board / "BoardConfig.mk").read_text()
+            self.assertRegex(config, r"(?m)^TARGET_COPY_OUT_VENDOR := vendor$", board)
+
+    def test_fr36_the_lock_fetches_what_the_keymint_is_built_from(self):
+        crates = ["ciborium", "ciborium-io", "ciborium-ll", "coset", "der", "der_derive", "const-oid", "spki",
+                  "pkcs1", "pkcs8", "sec1", "x509-cert", "flagset", "zeroize", "zeroize_derive", "enumn", "hex",
+                  "half", "foreign-types", "foreign-types-shared", "openssl-macros", "android_logger", "log",
+                  "libc", "nix", "regex", "zerocopy", "downcast-rs", "thiserror",
+                  # The AIDL Rust backend gives every generated interface crate libasync_trait,
+                  # for its async traits. Without it the first KeyMint Framework build stopped on
+                  # the KeyMint, RKP, secure clock and shared secret interface crates.
+                  "async-trait"]
+        for version in framework_lock.load()["versions"]:
+            projects = {p["path"]: p for p in version["projects"]}
+            for whole in ("system/keymint", "external/rust/crates/openssl"):
+                self.assertNotIn("cone", projects[whole], f"{version['android']} {whole}")
+                self.assertNotIn("patterns", projects[whole], f"{version['android']} {whole}")
+            for folder in ("security/keymint/aidl", "security/rkp/aidl", "security/secureclock/aidl",
+                           "security/sharedsecret/aidl"):
+                self.assertIn(folder, projects["hardware/interfaces"]["cone"], version["android"])
+            self.assertIn("src/rust/bssl-sys", projects["external/boringssl"]["cone"], version["android"])
+            self.assertIn("libs/binder", projects["frameworks/native"]["cone"], version["android"])
+            for crate in crates:
+                self.assertIn("crates/" + crate, projects["external/rust/android-crates-io"]["cone"],
+                              f"{version['android']} {crate}")
+
+    def test_fr36_both_versions_take_the_root_key_from_the_host(self):
+        sources = set()
+        for android in ("android16", "android17"):
+            patch = self._patch("hardware/interfaces", android)
+            match = re.search(r"^\+\+\+ b/" + re.escape(self.HOST_KEY) + r"\n@@ [^\n]+\n((?:\+[^\n]*\n)+)", patch, re.M)
+            self.assertIsNotNone(match, android)
+            source = "".join(line[1:] + "\n" for line in match.group(1).splitlines())
+            sources.add(source)
+            self.assertIn('pub const HOST_KEY_FILE: &str = "/dev/dsa_keymint/root_key";', source)
+            self.assertIn('pub const HOST_KEK_CONTEXT: &[u8] = b"dsa-host-root-key-v1";', source)
+            self.assertIn("Duration::from_secs(30)", source)
+            self.assertIn("fn kek_context_is_outdated", source)
+            # The TA is built with it, and the image's binary is built on its own, with its Rust
+            # crates linked in; the APEX the tree cannot build goes.
+            self.assertIn("+        Box::new(host_key::HostKeys::new());", patch)
+            self.assertRegex(patch, r'\+rust_binary \{\n\+    name: "dsa-keymint",\n\+    relative_install_path: "hw",'
+                                    r'\n\+    vendor: true,')
+            binary = patch[patch.index('+    name: "dsa-keymint",'):]
+            self.assertIn("+    prefer_rlib: true,", binary[:binary.index("+}")])
+            self.assertIn('-    name: "com.android.hardware.keymint.rust_nonsecure",', patch)
+        # One implementation for both versions.
+        self.assertEqual(len(sources), 1)
+
+    def test_fr36_android16_gets_the_ta_hook_android17_has(self):
+        # Android 17's system/keymint asks the device whether a blob's KEK context is outdated
+        # and answers KEY_REQUIRES_UPGRADE for it; Android 16's does not, so DSA's patch brings
+        # the same code there.
+        patch = self._patch("system/keymint", "android16")
+        for text in ("+    fn kek_context_is_outdated(&self, _kek_context: &[u8]) -> Result<bool, Error> {",
+                     '+            return Err(km_err!(KeyRequiresUpgrade, "KEK context outdated, request upgrade"));',
+                     "+                Ok(result) => (result.keyblob, result.kek_context_is_outdated),"):
+            self.assertIn(text, patch)
+        self.assertFalse([p for p, _ in framework_lock.patch_files("android17") if p == "system/keymint"])
 
 
 if __name__ == "__main__":

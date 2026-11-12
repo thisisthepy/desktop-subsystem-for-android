@@ -327,7 +327,8 @@ pub fn identity(ctx: &Shared) -> gtk::Widget {
     page.root.clone().upcast()
 }
 
-/// Android's network, and advanced networking.
+/// Android's network, advanced networking, and the root certificates added to this computer
+/// that Android trusts.
 pub fn network(ctx: &Shared) -> gtk::Widget {
     let page = Rc::new(Page::new());
     let status = group(&tr("Android's network"), None);
@@ -344,7 +345,7 @@ pub fn network(ctx: &Shared) -> gtk::Widget {
         (row, label)
     };
     let (_, dns) = {
-        let (row, label) = value_row(&tr("DNS servers"), "");
+        let (row, label) = value_row(&tr("DNS"), "");
         status.add(&row);
         (row, label)
     };
@@ -365,21 +366,40 @@ pub fn network(ctx: &Shared) -> gtk::Widget {
         &tr("The change applies the next time Android starts. Stop Android on the General page, then open an app."),
     );
     restart.set_visible(false);
+    // The added root certificates: the switch first, then one row for each certificate, which
+    // `certificates` replaces each time the service answers.
+    let certificates = Rows::new(group(
+        &tr("Trusted certificates"),
+        Some(&tr("Root certificates that you or an administrator added to this computer, such as a company's or a security program's. The certificates that come with the system are not listed; Android has its own.")),
+    ));
+    let certificate_switch: Rc<RefCell<Option<Switch>>> = Rc::default();
     let show: Rc<dyn Fn(Result<Settings, crate::api::Failure>)> = Rc::new({
         let (page, restart) = (page.clone(), restart.clone());
+        let (certificates, certificate_switch) = (certificates.clone(), certificate_switch.clone());
         move |r: Result<Settings, crate::api::Failure>| {
             page.show_failure(&tr("The setting was not changed"), r.as_ref().err());
             let Ok(settings) = r else { return };
+            if let Some(s) = certificate_switch.borrow().as_ref() {
+                s.set(settings.host_certificates);
+            }
+            certificates.clear();
+            if settings.imported_certificates.is_empty() {
+                certificates.note(&view::certificates_empty_text());
+            }
+            for certificate in &settings.imported_certificates {
+                let row = action_row(
+                    &view::certificate_title(certificate),
+                    &view::certificate_detail(certificate),
+                );
+                row.set_subtitle_selectable(true);
+                certificates.add(&row);
+            }
             let network = settings.network.as_ref();
             mode.set_subtitle(&view::network_mode_text(network));
             address.set_label(&view::list_or_none(
                 network.map(|n| n.addresses.as_slice()).unwrap_or_default(),
             ));
-            dns.set_label(&view::list_or_none(
-                network
-                    .map(|n| n.dns_servers.as_slice())
-                    .unwrap_or_default(),
-            ));
+            dns.set_label(&view::network_dns_text(network));
             gateway.set_label(&network.map(|n| n.gateway.clone()).unwrap_or_default());
             let why = network.and_then(|n| n.problem.clone());
             problem.set_visible(why.is_some());
@@ -411,6 +431,28 @@ pub fn network(ctx: &Shared) -> gtk::Widget {
     advanced.add(&restart);
     *switch.borrow_mut() = Some(advanced_switch);
     page.add(&advanced);
+
+    let trust = {
+        let (ctx, show, slot) = (ctx.clone(), show.clone(), certificate_switch.clone());
+        Switch::new(
+            &tr("Trust certificates added to this computer"),
+            &tr("On by default. When on, Android apps trust the root certificates listed below as they trust Android's own, so sites and servers that this computer trusts open in Android too. The change applies at once."),
+            move |on| {
+                let (show, slot) = (show.clone(), slot.clone());
+                request(&ctx, move |c| c.set_host_certificates(on), move |r| {
+                    // Not changed: the switch goes back to what the service keeps.
+                    if let (Err(_), Some(s)) = (r.as_ref(), slot.borrow().as_ref()) {
+                        s.set(!on);
+                    }
+                    show(r);
+                });
+            },
+        )
+    };
+    trust.set(true);
+    certificates.group.add(&trust.row);
+    *certificate_switch.borrow_mut() = Some(trust);
+    page.add(&certificates.group);
     page.add(&developer(ctx, &page));
 
     let reload = {

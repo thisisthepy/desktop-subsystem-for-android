@@ -1,0 +1,125 @@
+Subject: KeyMint TA: ask the device whether a key blob's KEK context is outdated
+
+A key blob records the context its key encryption key was derived from (kek_context), and the
+TA hands that context back to the device's RetrieveKeyMaterial::root_kek when it opens the
+blob. Nothing asked whether that context is still the one new blobs get, so a device that moves
+its keys to another root key had no way to have the old blobs wrapped again.
+
+RetrieveKeyMaterial gains kek_context_is_outdated, false by default. When it says a blob's
+context is outdated, the TA answers KEY_REQUIRES_UPGRADE for the blob, as for an old patch
+level, and upgradeKey wraps it again under the current context and root key. Keystore and vold
+upgrade every blob they use on that answer, so no key is lost on the way.
+
+This is the hook system/keymint has from Android 17 (the same code at cfeefc94bf8c, the commit
+Android 17 build 16373615 is made from), brought to Android 16. DSA's KeyMint uses it to move
+the blobs made under the built-in root key to the root key the DSA host gives.
+
+Applies to system/keymint at 748182e106e68bb3661f733be3383a1b548fa51b (Android 16).
+---
+diff --git a/ta/src/device.rs b/ta/src/device.rs
+index d25aa3d7..cc3e23e4 100644
+--- a/ta/src/device.rs
++++ b/ta/src/device.rs
+@@ -101,6 +101,16 @@ pub trait RetrieveKeyMaterial {
+     fn timestamp_token_mac_input(&self, token: &TimeStampToken) -> Result<Vec<u8>, Error> {
+         crate::clock::timestamp_token_mac_input(token)
+     }
++
++    /// Checks if a KEK context is outdated.
++    ///
++    /// This method inspects the provided `kek_context` to determine if the security
++    /// material it represents (e.g., a DICE policy) is older than the device's current
++    /// security state. If so, this method should return `true`, signaling that the key
++    /// needs to be re-wrapped with a new Key Encryption Key (KEK).
++    fn kek_context_is_outdated(&self, _kek_context: &[u8]) -> Result<bool, Error> {
++        Ok(false)
++    }
+ }
+ 
+ /// Device HMAC calculation.
+diff --git a/ta/src/keys.rs b/ta/src/keys.rs
+index b683c406..6872e731 100644
+--- a/ta/src/keys.rs
++++ b/ta/src/keys.rs
+@@ -698,7 +698,7 @@ impl crate::KeyMintTa {
+     ) -> Result<Vec<u8>, Error> {
+         let (mut keyblob, mut modified) =
+             match self.keyblob_parse_decrypt_backlevel(keyblob_to_upgrade, &upgrade_params) {
+-                Ok(v) => (v.0, false),
++                Ok(result) => (result.keyblob, result.kek_context_is_outdated),
+                 Err(e) => match e.kind() {
+                     ErrorKind::Hal(ErrorCode::KeyRequiresUpgrade, _) => {
+                         // Because `keyblob_parse_decrypt_backlevel` explicitly allows back-level
+@@ -796,9 +796,9 @@ impl crate::KeyMintTa {
+             return Ok(Vec::new());
+         }
+ 
+-        // Now re-build the keyblob. Use a potentially fresh key encryption key, and potentially a
+-        // new secure deletion secret slot. (The old slot will be released when Keystore performs
+-        // the corresponding `deleteKey` operation on the old keyblob.
++        // Now re-build the keyblob. Use a potentially fresh key encryption key and context, and
++        // potentially a new secure deletion secret slot. (The old slot will be released when
++        // Keystore performs the corresponding `deleteKey` operation on the old keyblob.)
+         let kek_context = self.dev.keys.kek_context()?;
+         let root_kek = self.root_kek(&kek_context)?;
+         let hidden = tag::hidden(&upgrade_params, self.root_of_trust()?)?;
+diff --git a/ta/src/lib.rs b/ta/src/lib.rs
+index 933a9d8a..170cb5c9 100644
+--- a/ta/src/lib.rs
++++ b/ta/src/lib.rs
+@@ -305,6 +305,12 @@ pub struct HalInfo {
+ #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+ struct KeyId([u8; 32]);
+ 
++struct KeyBlobDecryptionResult {
++    keyblob: keyblob::PlaintextKeyBlob,
++    slot: Option<SecureDeletionSlot>,
++    kek_context_is_outdated: bool,
++}
++
+ impl KeyMintTa {
+     /// Create a new [`KeyMintTa`] instance.
+     pub fn new(
+@@ -393,7 +399,7 @@ impl KeyMintTa {
+         &self,
+         key_blob: &[u8],
+         params: &[KeyParam],
+-    ) -> Result<(keyblob::PlaintextKeyBlob, Option<SecureDeletionSlot>), Error> {
++    ) -> Result<KeyBlobDecryptionResult, Error> {
+         let encrypted_keyblob = match keyblob::EncryptedKeyBlob::new(key_blob) {
+             Ok(k) => k,
+             Err(e) => {
+@@ -409,8 +415,10 @@ impl KeyMintTa {
+                 return Err(e);
+             }
+         };
++        let kek_context_is_outdated =
++            self.dev.keys.kek_context_is_outdated(encrypted_keyblob.kek_context())?;
+         let hidden = tag::hidden(params, self.root_of_trust()?)?;
+-        let sdd_slot = encrypted_keyblob.secure_deletion_slot();
++        let slot = encrypted_keyblob.secure_deletion_slot();
+         let root_kek = self.root_kek(encrypted_keyblob.kek_context())?;
+         let keyblob = keyblob::decrypt(
+             match &self.dev.sdd_mgr {
+@@ -423,7 +431,7 @@ impl KeyMintTa {
+             encrypted_keyblob,
+             hidden,
+         )?;
+-        Ok((keyblob, sdd_slot))
++        Ok(KeyBlobDecryptionResult { keyblob, slot, kek_context_is_outdated })
+     }
+ 
+     /// Parse and decrypt an encrypted key blob, detecting keys that require upgrade.
+@@ -432,7 +440,11 @@ impl KeyMintTa {
+         key_blob: &[u8],
+         params: &[KeyParam],
+     ) -> Result<(keyblob::PlaintextKeyBlob, Option<SecureDeletionSlot>), Error> {
+-        let (keyblob, slot) = self.keyblob_parse_decrypt_backlevel(key_blob, params)?;
++        let KeyBlobDecryptionResult { keyblob, slot, kek_context_is_outdated } =
++            self.keyblob_parse_decrypt_backlevel(key_blob, params)?;
++        if kek_context_is_outdated {
++            return Err(km_err!(KeyRequiresUpgrade, "KEK context outdated, request upgrade"));
++        }
+ 
+         // Check all of the patchlevels and versions to see if key upgrade is required.
+         fn check(v: &u32, curr: u32, name: &str) -> Result<(), Error> {

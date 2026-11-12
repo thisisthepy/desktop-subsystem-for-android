@@ -17,8 +17,8 @@ use std::time::Duration;
 
 use dsa_host_core::compositor::{GraphicsRenderer, GraphicsStreamKind};
 use dsa_host_core::renderer::{
-    address_from, open_renderer, HeldTargets, RendererProcessMemory, WindowManagerLink,
-    WINDOW_MANAGER_ARGUMENT,
+    address_from, follow_device_state, open_renderer, HeldTargets, RendererProcessMemory, ServedVm,
+    WindowManagerLink, WINDOW_MANAGER_ARGUMENT,
 };
 use dsa_protocol::renderer::types::{envelope::Body, FrameDone, FramePath, Started};
 use dsa_protocol::renderer::{decode_body, send};
@@ -69,7 +69,10 @@ impl RemoteSink {
     pub fn new(link: Arc<WindowManagerLink>) -> RemoteSink {
         RemoteSink {
             link,
-            held: Mutex::new(HeldTargets::new()),
+            // The window manager gives each display one texture, and a new one only when the
+            // window outgrows it (`RemoteWindow::texture`), so the one it replaced is closed
+            // here as soon as the new one is open rather than kept with nothing to use it.
+            held: Mutex::new(HeldTargets::keeping(1)),
         }
     }
 
@@ -312,8 +315,21 @@ pub fn run(args: &[String]) -> ! {
     if send(&mut *connection, Body::Started(started)).is_err() {
         end_now(6);
     }
+    // A lost device reaches the window manager the moment the renderer finds it, not when the
+    // window manager's own Direct3D device fails, which on the owner's PC was 13 s later.
+    let watched = Arc::clone(&adapter);
+    if let Err(why) = follow_device_state(
+        Arc::clone(&link),
+        Box::new(move || (watched.device_losses(), watched.device_generation())),
+    ) {
+        link.note(&format!(
+            "the renderer's device state cannot be followed, so the window manager learns of \
+             a GPU reset only from its own device: {why}"
+        ));
+    }
 
     let vm: VmIdSlot = Arc::default();
+    let mut served = ServedVm::new();
     for (kind, port) in [
         (GraphicsStreamKind::Command, start.command_port),
         (GraphicsStreamKind::ProcessPipe, start.process_pipe_port),
@@ -342,6 +358,19 @@ pub fn run(args: &[String]) -> ! {
         };
         match body {
             Body::GuestVm(guest) => {
+                // The VM this renderer served is gone: a fresh renderer, which the window
+                // manager starts at once, serves the next one without what this one kept.
+                let told = (!guest.vm_id.is_empty()).then_some(guest.vm_id.as_str());
+                if served.told(told) {
+                    let (_, private_kb) = own_memory_kb();
+                    link.note(&format!(
+                        "the VM this renderer served is gone; it ends so that the window \
+                         manager starts a fresh one for the next VM, without the {} MiB of \
+                         private memory this one holds",
+                        private_kb.map_or("?".to_string(), |kb| (kb / 1024).to_string())
+                    ));
+                    break;
+                }
                 let id = if guest.vm_id.is_empty() {
                     None
                 } else {
