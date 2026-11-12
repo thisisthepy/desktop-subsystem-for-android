@@ -887,6 +887,54 @@ pub fn gapps_device_id(gapps: &Gapps) -> String {
     }
 }
 
+/// What the protected content item says of the module and whether Android uses it.
+pub fn widevine_status(widevine: &crate::model::Widevine) -> String {
+    use crate::model::WidevineState;
+    let package = match &widevine.package {
+        Some(p) => trf(
+            "Google's image {0} for Android {1} ({2})",
+            &[&p.version, &p.android_major.to_string(), &p.abi],
+        ),
+        None => String::new(),
+    };
+    match widevine.state() {
+        WidevineState::RestartPending if widevine.package.is_some() => trf(
+            "Installed: {0}. Restart Android to start using it.",
+            &[&package],
+        ),
+        WidevineState::RestartPending => {
+            tr("Removed. Widevine stays in Android until it restarts.")
+        }
+        WidevineState::Installed if widevine.package.is_some() => {
+            trf("Installed: {0}.", &[&package])
+        }
+        _ => tr("Not installed."),
+    }
+}
+
+/// What the confirmation says before Google's image is downloaded for Widevine: where it comes
+/// from, and the terms the user accepts.
+pub fn widevine_notice() -> String {
+    trf(
+        "DSA downloads the Android emulator image for this Android version from Google's SDK repository ({0}) and takes out only its Widevine module, unchanged. Widevine is Google's software, offered under the Android SDK License ({1}); by downloading it you accept those terms. DSA does not ship or pass it on. The image is about 2 GB and is deleted afterwards. Widevine works from the next start of Android.",
+        &[
+            crate::model::WIDEVINE_SOURCE,
+            crate::model::WIDEVINE_TERMS_URL,
+        ],
+    )
+}
+
+/// What the protected content item always says: L3 is standard definition at most, and where
+/// to watch in high definition.
+pub fn widevine_quality() -> String {
+    tr("Widevine here is security level L3, so streaming services send standard definition (SD) at most. To watch in high definition, use this computer's own browser or app.")
+}
+
+/// What the protected content item says while the module is taken from Google's image.
+pub fn widevine_busy_text() -> String {
+    tr("Downloading about 2 GB from Google and taking out Widevine. It takes minutes.")
+}
+
 /// When something last happened to the backup, in local time through `local` (which takes
 /// milliseconds since 1970), or "Never".
 pub fn backup_when(unix_ms: Option<i64>, local: impl Fn(i64) -> String) -> String {
