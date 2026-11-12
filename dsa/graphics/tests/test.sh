@@ -33,6 +33,12 @@ mkdir -p "$out"
     "$here/shadow_memory_test.cpp" -o "$out/shadow_memory_test"
 "$out/shadow_memory_test"
 
+# The memory types the guest reports without shared memory, and which of them are read back
+# when the app's work finishes (guest/mesa 0012).
+"$cxx" -std=c++17 -O2 -Wall -Wextra -Werror -I"$here/../include" \
+    "$here/memory_types_test.cpp" -o "$out/memory_types_test"
+"$out/memory_types_test"
+
 "$cxx" -std=c++17 -O2 -Wall -Wextra -Werror -I"$here/../include" \
     "$here/lost_stream_test.cpp" -o "$out/lost_stream_test"
 "$out/lost_stream_test"
