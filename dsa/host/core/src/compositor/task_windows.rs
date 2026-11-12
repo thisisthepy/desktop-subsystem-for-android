@@ -101,6 +101,11 @@ pub enum WindowChange {
     /// the place of the app's icon. Comes with a window that opens past its first screen, and
     /// with every change.
     CaptionBack { task_id: i32, back: bool },
+    /// The window opened for task `task_id` shows task `shown_task_id` from now on: a task
+    /// that took the window over after a GPU reset (see [`super::gpu_reset`]). The window keeps
+    /// its ID; what it sends Android itself goes to the task it shows. The task rules never make
+    /// it; it comes from [`super::gpu_reset::GpuResetWindows`], by window ID.
+    ShownTask { task_id: i32, shown_task_id: i32 },
 }
 
 /// The title of a task's window: its label, else its package, else its ID.

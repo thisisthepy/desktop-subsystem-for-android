@@ -893,6 +893,15 @@ mod tests {
             ManagerEvent::Task(Box::new(TaskEvent::Updated(task(9)))),
             now,
         );
+        // The window host is told, so the window's own input goes to the new task.
+        assert!(manager.platform().sent.iter().any(|(host, message)| {
+            *host == HOST
+                && *message
+                    == ToHost::ShownTask {
+                        task_id: 7,
+                        shown_task_id: 9,
+                    }
+        }));
         let frames = TaskEvent::Frames {
             task_id: 9,
             display_id: 5,

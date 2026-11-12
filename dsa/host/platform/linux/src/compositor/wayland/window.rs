@@ -339,6 +339,9 @@ impl State {
                 }
                 self.redraw(*task_id);
             }
+            // The compositor's session sends each window's input to the task it shows (its
+            // `GpuResetWindows`); the window itself has nothing to change.
+            WindowChange::ShownTask { .. } => {}
         }
     }
 

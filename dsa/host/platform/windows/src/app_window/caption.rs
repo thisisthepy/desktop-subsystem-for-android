@@ -213,7 +213,7 @@ fn code_of(hit: CaptionHit) -> u32 {
 
 /// The hit test code of the back arrow in the icon's cell. A window without a help button
 /// never answers it otherwise, and this window presses it itself, as it does its buttons.
-const HT_BACK: u32 = HTHELP;
+pub const HT_BACK: u32 = HTHELP;
 
 /// The hit test code of the client point (`x`, `y`) of a window laid out as `layout`, its
 /// title bar showing `mode`. The app's icon is `HTSYSMENU`, so a press on it opens the system
