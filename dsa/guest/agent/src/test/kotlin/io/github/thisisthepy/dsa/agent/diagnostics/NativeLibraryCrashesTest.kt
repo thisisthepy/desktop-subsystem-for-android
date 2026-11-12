@@ -117,6 +117,23 @@ class NativeLibraryCrashesTest {
     }
 
     @Test
+    fun fr25_a_chromium_build_made_to_run_as_32_bit_code_is_reported() {
+        started()
+
+        // Chrome's 32-bit build, which a 64-bit-only Android starts as its WebView-only
+        // 64-bit code, ends at start with this.
+        val cause = "java.lang.RuntimeException: Unable to start activity ComponentInfo{com.android.chrome/" +
+            "org.chromium.chrome.browser.firstrun.FirstRunActivity}: java.lang.RuntimeException: Starting in " +
+            "64-bit mode requires the 64-bit native library. If the device is 64-bit only, see alternatives " +
+            "here: https://crbug.com/1303857#c7."
+        write("data_app_crash", javaCrash("com.android.chrome", cause))
+
+        val crash = reported().single()
+        assertEquals("com.android.chrome", crash.packageName)
+        assertTrue(crash.detail.contains("64-bit native library"))
+    }
+
+    @Test
     fun fr25_a_record_that_names_no_package_is_dropped() {
         assertNull(NativeLibraryCrashes.parse("data_app_crash", MISSING_LIBRARY))
         assertNull(NativeLibraryCrashes.parse("data_app_crash", "Package: not a package\n$MISSING_LIBRARY"))

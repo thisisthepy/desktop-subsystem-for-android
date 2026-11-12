@@ -15,6 +15,9 @@ public enum UnsupportedKind
     EncryptedBundle,
     /// <summary>A bundle with a split signed with another certificate than its base APK.</summary>
     SplitSignatureMismatch,
+    /// <summary>An app whose native code is none DSA's Android runs, which is 64-bit only: it
+    /// has 32-bit code only, or is a build made to run as 32-bit code.</summary>
+    UnsupportedAbi,
     /// <summary>Anything else that is not an APK.</summary>
     NotApk,
 }
@@ -58,6 +61,7 @@ public static class UnsupportedFile
             "encrypted-bundle" => UnsupportedKind.EncryptedBundle,
             "split-signature-mismatch" => UnsupportedKind.SplitSignatureMismatch,
             "invalid-bundle" => UnsupportedKind.SplitBundle,
+            "unsupported-abi" => UnsupportedKind.UnsupportedAbi,
             _ => null,
         };
         return kind is { } known ? (known, match.Groups[2].Value.Trim()) : null;
@@ -100,6 +104,10 @@ public static class UnsupportedFile
             $"{fileName} is an encrypted bundle, so its APKs cannot be read. Some older .apkm files are, and only the app that made them opens them. Get the app as an APK, or as a newer bundle.",
         UnsupportedKind.SplitSignatureMismatch =>
             $"{fileName} holds a split APK signed with another certificate than its base APK, so the bundle was changed after it was made. Android would refuse it.",
+        UnsupportedKind.UnsupportedAbi when !string.IsNullOrWhiteSpace(detail) =>
+            $"{fileName} cannot run in DSA: {detail.TrimEnd('.')}.",
+        UnsupportedKind.UnsupportedAbi =>
+            $"{fileName} cannot run in DSA: its native code is none that DSA's Android runs, which runs 64-bit code only. Get the app's x86_64 or arm64-v8a build.",
         _ => $"{fileName} is not a valid APK file.",
     };
 }
