@@ -40,7 +40,9 @@ virtio-pmem under KVM. erofs then maps their files with DAX instead of caching t
 `patches/pmem-dax.patch` gives Hyper-V's raw persistent memory page structs, which DAX needs
 (virtio-pmem has them already), and puts each persistent memory bus below a platform device of
 its own (`nfit`, `virtio-pmem`): Android makes `/dev/block/by-name` links only for disks below
-a boot device, and the host names those two in such a boot.
+a boot device, and the host names those two in such a boot. It also makes every persistent
+memory region read only (`ND_REGION_READONLY`), so its disk refuses writes, as the read-only
+SCSI disk does outside the mode: each one is a disk image the host maps read only.
 
 Memory the guest frees goes back to the host at once. Upstream free page reporting waits two
 seconds before each pass, and again after each pass that used up its budget, so a large

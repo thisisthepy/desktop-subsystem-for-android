@@ -294,6 +294,17 @@ class AndroidKernelConfigTests(unittest.TestCase):
         self.assertIn('platform_device_register_simple("virtio-pmem",', patch)
         self.assertIn("nvdimm_bus_register(virtio_pmem_bus_parent(vdev),", patch)
 
+    def test_nfr1_persistent_memory_disks_are_read_only_in_the_guest(self):
+        # Every persistent memory device in the guest is a disk image the host maps read only,
+        # so its region is read only and the pmem driver marks its disk read only: a write
+        # fails in the guest rather than reaching the host's mapping, as on the read-only SCSI
+        # disk outside the direct-mapped mode.
+        patch = (PATCHES / "pmem-dax.patch").read_text().replace("\r\n", "\n")
+        self.assertIn("+\tND_REGION_READONLY = 5,", patch)
+        self.assertIn("+\tif (test_bit(ND_REGION_READONLY, &ndr_desc->flags))\n+\t\tro = 1;", patch)
+        self.assertIn("+\t\tset_bit(ND_REGION_READONLY, &ndr_desc->flags);", patch)
+        self.assertIn("+\tset_bit(ND_REGION_READONLY, &ndr_desc.flags);", patch)
+
     def test_nfr1_the_pmem_patch_hunks_count_their_lines(self):
         text = (PATCHES / "pmem-dax.patch").read_text().replace("\r\n", "\n")
         hunks = re.split(r"(?m)^(@@ -\d+,(\d+) \+\d+,(\d+) @@.*)$", text)

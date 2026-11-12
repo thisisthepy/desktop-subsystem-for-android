@@ -9,7 +9,7 @@ diff --git a/drivers/acpi/nfit/core.c b/drivers/acpi/nfit/core.c
  #include <linux/mutex.h>
  #include <linux/ndctl.h>
  #include <linux/sysfs.h>
-@@ -2658,6 +2659,16 @@
+@@ -2658,6 +2659,21 @@
  	else if (acpi_desc->platform_cap & ACPI_NFIT_CAPABILITY_MEM_FLUSH)
  		set_bit(ND_REGION_PERSIST_MEMCTRL, &ndr_desc->flags);
  
@@ -19,14 +19,19 @@ diff --git a/drivers/acpi/nfit/core.c b/drivers/acpi/nfit/core.c
 +	 * DAX would need a pfn info block written into the namespace, which a read-only
 +	 * device shared by several machines cannot take. The page structs live in system
 +	 * memory (the namespace is never told to keep them itself).
++	 *
++	 * The region is read only too: in this guest every persistent memory device is a disk
++	 * image the host maps read only, so a write to its disk fails rather than reaching it.
 +	 */
-+	if (nfit_spa_type(spa) == NFIT_SPA_PM)
++	if (nfit_spa_type(spa) == NFIT_SPA_PM) {
 +		set_bit(ND_REGION_PAGEMAP, &ndr_desc->flags);
++		set_bit(ND_REGION_READONLY, &ndr_desc->flags);
++	}
 +
  	list_for_each_entry(nfit_memdev, &acpi_desc->memdevs, list) {
  		struct acpi_nfit_memory_map *memdev = nfit_memdev->memdev;
  		struct nd_mapping_desc *mapping;
-@@ -3073,6 +3084,32 @@
+@@ -3073,6 +3089,32 @@
  	acpi_desc->nvdimm_bus = NULL;
  }
  
@@ -59,7 +64,7 @@ diff --git a/drivers/acpi/nfit/core.c b/drivers/acpi/nfit/core.c
  int acpi_nfit_init(struct acpi_nfit_desc *acpi_desc, void *data, acpi_size sz)
  {
  	struct device *dev = acpi_desc->dev;
-@@ -3083,7 +3120,7 @@
+@@ -3083,7 +3125,7 @@
  	if (!acpi_desc->nvdimm_bus) {
  		acpi_nfit_init_dsms(acpi_desc);
  
@@ -127,3 +132,42 @@ diff --git a/drivers/nvdimm/virtio_pmem.c b/drivers/nvdimm/virtio_pmem.c
  						&vpmem->nd_desc);
  	if (!vpmem->nvdimm_bus) {
  		dev_err(&vdev->dev, "failed to register device with nvdimm_bus\n");
+@@ -120,6 +153,11 @@
+ 	ndr_desc.provider_data = vdev;
+ 	set_bit(ND_REGION_PAGEMAP, &ndr_desc.flags);
+ 	set_bit(ND_REGION_ASYNC, &ndr_desc.flags);
++	/*
++	 * Read only: the host maps each virtio-pmem device from a disk image it opened read
++	 * only, so a write to its disk fails rather than reaching it.
++	 */
++	set_bit(ND_REGION_READONLY, &ndr_desc.flags);
+ 	/*
+ 	 * The NVDIMM region could be available before the
+ 	 * virtio_device_ready() that is called by
+diff --git a/drivers/nvdimm/region_devs.c b/drivers/nvdimm/region_devs.c
+--- a/drivers/nvdimm/region_devs.c
++++ b/drivers/nvdimm/region_devs.c
+@@ -983,6 +983,10 @@
+ 			ro = 1;
+ 
+ 	}
++
++	/* A region its provider made read only: its disks refuse writes. */
++	if (test_bit(ND_REGION_READONLY, &ndr_desc->flags))
++		ro = 1;
+ 
+ 	nd_region =
+ 		kzalloc(struct_size(nd_region, mapping, ndr_desc->num_mappings),
+diff --git a/include/linux/libnvdimm.h b/include/linux/libnvdimm.h
+--- a/include/linux/libnvdimm.h
++++ b/include/linux/libnvdimm.h
+@@ -69,6 +69,9 @@
+ 
+ 	/* Region was created by CXL subsystem */
+ 	ND_REGION_CXL = 4,
++
++	/* Region its provider maps read only: its disks are read only too */
++	ND_REGION_READONLY = 5,
+ 
+ 	/* mark newly adjusted resources as requiring a label update */
+ 	DPA_RESOURCE_ADJUSTED = 1 << 0,
