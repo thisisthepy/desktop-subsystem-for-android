@@ -210,6 +210,9 @@ msgstr "Android가 설치할 수 있는 하나의 앱으로 된 묶음이 아닙
 msgid "the app's native code is none that DSA's Android runs, which runs 64-bit code only: x86_64, and arm64-v8a through ARM translation. Get the app's x86_64 or arm64-v8a build."
 msgstr "DSA의 Android가 실행할 수 있는 네이티브 코드가 앱에 없습니다. DSA의 Android는 64비트 코드만 실행합니다(x86_64, 그리고 ARM 번역을 거친 arm64-v8a). 앱의 x86_64판이나 arm64-v8a판을 받으세요."
 
+msgid "the app runs only as ARM code (arm64-v8a), and ARM translation is not on. Turn it on under ARM apps, restart Android, and install the app again."
+msgstr "ARM 코드(arm64-v8a)로만 실행되는 앱인데 ARM 번역이 꺼져 있습니다. ARM 앱에서 ARM 번역을 켜고 Android를 다시 시작한 뒤 앱을 다시 설치하세요."
+
 msgid "the app does not run on this Android: it needs another processor type, a newer Android version or a feature this device does not have."
 msgstr "이 Android에서 실행되지 않는 앱입니다. 다른 프로세서 종류, 더 새로운 Android 버전 또는 이 기기에 없는 기능이 필요합니다."
 

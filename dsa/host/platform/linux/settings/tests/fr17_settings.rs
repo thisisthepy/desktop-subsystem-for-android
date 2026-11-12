@@ -820,6 +820,7 @@ fn fr11_a_bundle_refused_before_android_sees_it_says_its_reason() {
         "split-signature-mismatch",
         "invalid-bundle",
         "unsupported-abi",
+        "translation-off",
     ] {
         assert_ne!(view::install_reason(code), fallback, "{code}");
     }

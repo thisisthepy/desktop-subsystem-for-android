@@ -104,7 +104,9 @@
 //! `Android/obb/<package>/`. An Android App Bundle (`.aab`), an encrypted bundle and a bundle
 //! whose splits are signed with other keys are refused before Android is started, with
 //! `not installed (app-bundle):`, `(encrypted-bundle):`, `(split-signature-mismatch):` or
-//! `(invalid-bundle):` and the reason. With `--json` it prints `installed`, `status` (`installed`, or the reason:
+//! `(invalid-bundle):` and the reason. An app whose 64-bit code is for arm64-v8a only is
+//! refused with `not installed (translation-off):` while the running Android does not
+//! translate ARM code, before anything is sent. With `--json` it prints `installed`, `status` (`installed`, or the reason:
 //! `incompatible`, `conflicting-signature`, `invalid-apk`, `insufficient-storage`, `downgrade`,
 //! `blocked` or `other`), `package` and `message`. A refusal's line on standard error starts
 //! with `not installed (<reason>):`. With `--progress` it first prints a line for each step,
@@ -3673,6 +3675,11 @@ fn install(
     client
         .ensure_running(invocation.timeout, Duration::from_millis(250), |_| {})
         .map_err(|e| format!("Android did not start: {e}"))?;
+    // An app whose 64-bit code is for arm64-v8a only needs the running Android to translate
+    // ARM code. While it does not, the app is refused with that reason before anything is
+    // sent, judged by every APK of a bundle, whichever splits it would send.
+    file.check_translation(client.arm_translation().ok().as_ref())
+        .map_err(|refusal| describe_file_refusal(path, &refusal))?;
     let (name, outcome) = match file {
         InstallFile::Apk(mut apk) => {
             drop(client);

@@ -1307,6 +1307,10 @@ macro_rules! host_api_conformance {
             $crate::host_api_conformance::install_abi_follows_the_libraries(&mut || $make);
         }
         #[test]
+        fn fr25_an_apk_with_arm64_code_only_is_refused_with_its_reason_without_translation() {
+            $crate::host_api_conformance::arm64_only_install_needs_translation(&mut || $make);
+        }
+        #[test]
         fn fr25_run_as_arm_reaches_the_callers_android_and_asks_before_erasing_data() {
             $crate::host_api_conformance::run_as_arm_reaches_the_caller(&mut || $make);
         }
@@ -2453,6 +2457,46 @@ pub fn install_abi_follows_the_libraries(make: MakeLocal<'_>) {
             Some("x86_64".to_string()),
             None,
         ]
+    );
+}
+
+pub fn arm64_only_install_needs_translation(make: MakeLocal<'_>) {
+    use crate::native_abi::NativeLibraries;
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    connect(&mut *connector).start().unwrap();
+    let content = sample_apk();
+    let mut arm = NativeLibraries::new();
+    arm.add("arm64-v8a", "libmain.so");
+    // Without a translator it is refused with the reason, before anything is sent: the reader
+    // fails the test if it is read.
+    let mut never = Unread;
+    match connect(&mut *connector).install_apk_with_libraries(
+        "game.apk",
+        content.len() as u64,
+        &arm,
+        &mut never,
+    ) {
+        Err(ClientError::Service { code, detail }) => {
+            assert_eq!(code, ErrorCode::InstallRefused, "{detail}");
+            assert!(detail.contains("ARM translation is not on"), "{detail}");
+            assert!(detail.contains("Turn it on under ARM apps"), "{detail}");
+        }
+        other => panic!("expected an arm64-only APK to be refused, got {other:?}"),
+    }
+    let android = androids.of(&user).unwrap();
+    assert!(android.install_abis.lock().unwrap().is_empty());
+    assert!(android.installs.lock().unwrap().is_empty());
+    // With one it is installed as arm64-v8a.
+    *android.translating.lock().unwrap() = true;
+    let outcome = connect(&mut *connector)
+        .install_apk_with_libraries("game.apk", content.len() as u64, &arm, &mut &content[..])
+        .expect("installing");
+    assert_eq!(outcome.status, InstallStatus::Installed);
+    assert_eq!(
+        *android.install_abis.lock().unwrap(),
+        vec![Some("arm64-v8a".to_string())]
     );
 }
 
