@@ -758,14 +758,7 @@ impl SettingsStore for FileSettings {
         let file = self.root_apps_file(user)?;
         let _held = self.lock.lock().unwrap_or_else(|e| e.into_inner());
         let mut apps = read_json::<Vec<RootApp>>(&file)?.unwrap_or_default();
-        apps.retain(|app| app.package != package);
-        if level != crate::root_elevation::default_level(package).code() {
-            apps.push(RootApp {
-                package: package.to_string(),
-                level: level.to_string(),
-            });
-        }
-        apps.sort_by(|a, b| a.package.cmp(&b.package));
+        update_root_apps(&mut apps, package, level);
         if apps.is_empty() {
             match std::fs::remove_file(&file) {
                 Ok(()) => Ok(()),
@@ -776,6 +769,23 @@ impl SettingsStore for FileSettings {
             write_json(&file, &apps)
         }
     }
+}
+
+/// Sets `package`'s level among `apps`. The adb shell item is kept only while it differs from
+/// its default (ask). An app's level is kept even when it is off: apps that share an Android
+/// user ID are one group, and one of them set to off keeps the whole group off, which an app
+/// merely left at the default does not.
+fn update_root_apps(apps: &mut Vec<RootApp>, package: &str, level: &str) {
+    apps.retain(|app| app.package != package);
+    if !crate::root_elevation::is_adb_shell(package)
+        || level != crate::root_elevation::default_level(package).code()
+    {
+        apps.push(RootApp {
+            package: package.to_string(),
+            level: level.to_string(),
+        });
+    }
+    apps.sort_by(|a, b| a.package.cmp(&b.package));
 }
 
 /// Settings kept in memory, for tests and for a service that keeps no folder.
@@ -922,14 +932,7 @@ impl SettingsStore for MemorySettings {
     fn set_root_app(&self, user: &str, package: &str, level: &str) -> Result<(), String> {
         let mut all = self.root_apps.lock().unwrap_or_else(|e| e.into_inner());
         let apps = all.entry(user.to_string()).or_default();
-        apps.retain(|app| app.package != package);
-        if level != crate::root_elevation::default_level(package).code() {
-            apps.push(RootApp {
-                package: package.to_string(),
-                level: level.to_string(),
-            });
-        }
-        apps.sort_by(|a, b| a.package.cmp(&b.package));
+        update_root_apps(apps, package, level);
         Ok(())
     }
 }

@@ -165,6 +165,32 @@ public class RootElevationViewModelTests
     }
 
     [Fact]
+    public async Task Fr35_apps_sharing_a_user_id_are_approved_as_one_group()
+    {
+        const string shared =
+            "{\"apps\":[" +
+            "{\"package\":\"com.example.zeta\",\"label\":\"Zeta\",\"root\":\"ask\",\"shared_user_id\":\"com.example.shared\"}," +
+            "{\"package\":\"com.example.middle\",\"label\":\"Middle\",\"root\":\"off\"}," +
+            "{\"package\":\"com.example.alpha\",\"label\":\"Alpha\",\"root\":\"ask\",\"shared_user_id\":\"com.example.shared\"}]}";
+        var (vm, _) = MakeApps(new FakeCli().Answer("apps list --json", shared));
+        await vm.RefreshAsync();
+        Assert.False(vm.HasError, vm.Error);
+
+        // The group is listed together, in the place of its first app by name.
+        Assert.Equal(new[] { "Alpha", "Zeta", "Middle" }, vm.Rows.Select(r => r.Label));
+        // Each app of the group names the others and says root is one setting for them.
+        var zeta = vm.Rows.Single(r => r.Package == "com.example.zeta");
+        Assert.True(zeta.HasRootGroupNote);
+        Assert.Contains("Alpha", zeta.RootGroupNote);
+        Assert.StartsWith("Apps_RootGroup", zeta.RootGroupNote);
+        Assert.False(vm.Rows.Single(r => r.Package == "com.example.middle").HasRootGroupNote);
+
+        // A search that finds one app of the group shows the whole group.
+        vm.Search = "zeta";
+        Assert.Equal(new[] { "Alpha", "Zeta" }, vm.Rows.Select(r => r.Label));
+    }
+
+    [Fact]
     public async Task Fr35_choosing_a_level_goes_through_dsa_apps_root()
     {
         var after = Apps.Replace("\"label\":\"Notes\",\"root\":\"off\"", "\"label\":\"Notes\",\"root\":\"ask\"");

@@ -315,6 +315,12 @@ pub struct InstalledApp {
     /// ABI, in ABI order. Empty for an app without native code.
     #[prost(message, repeated, tag = "13")]
     pub native_libraries: ::prost::alloc::vec::Vec<NativeLibraries>,
+    /// The user ID the app shares with other apps (its manifest's `android:sharedUserId`), such
+    /// as "com.example.shared". Apps with the same value run under one Android uid, so the host
+    /// treats them as one group wherever only the uid tells them apart, as root elevation does.
+    /// Empty for an app with a user ID of its own.
+    #[prost(string, tag = "14")]
+    pub shared_user_id: ::prost::alloc::string::String,
 }
 /// The native libraries of one ABI: the file names under `lib/<abi>/` of an APK, or of an APK
 /// and its splits together.

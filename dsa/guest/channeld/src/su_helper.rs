@@ -41,6 +41,28 @@ struct State {
     config: Option<RootElevationConfig>,
     generation: u64,
     daemon: Option<Arc<Packet>>,
+    next_session: u64,
+    running: Vec<(u64, u32, UnixStream)>,
+}
+
+impl State {
+    fn terminate_disallowed(&mut self) {
+        let allowed: std::collections::HashSet<u32> = self
+            .config
+            .as_ref()
+            .map(crate::su_relay::allowed_uids)
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+        self.running.retain(|(_, uid, stream)| {
+            if allowed.contains(uid) {
+                true
+            } else {
+                let _ = stream.shutdown(std::net::Shutdown::Both);
+                false
+            }
+        });
+    }
 }
 
 fn guard(config: &RootElevationConfig) -> io::Result<()> {
@@ -146,14 +168,17 @@ pub fn run() -> io::Result<()> {
         while let Ok(bytes) = daemon.recv() {
             match dsa_protocol::decode(&bytes).ok().and_then(|e| e.body) {
                 Some(Body::RootElevationConfig(config)) => {
+                    relay.apply_config(&config);
                     let mut state = state.lock().unwrap_or_else(|e| e.into_inner());
                     state.config = None;
                     state.generation = state.generation.wrapping_add(1);
                     if let Err(error) = guard(&config) {
+                        state.terminate_disallowed();
                         eprintln!("su helper: could not update the guard: {error}");
                         break;
                     }
                     state.config = Some(config.clone());
+                    state.terminate_disallowed();
                     if daemon
                         .send(&dsa_protocol::encode(&Envelope {
                             body: Some(Body::RootElevationConfig(config)),
@@ -174,6 +199,7 @@ pub fn run() -> io::Result<()> {
             state.config = None;
             state.daemon = None;
             state.generation = state.generation.wrapping_add(1);
+            state.terminate_disallowed();
             if let Err(error) = guard(&RootElevationConfig::default()) {
                 eprintln!("su helper: could not clear the guard: {error}");
             }
@@ -208,7 +234,7 @@ fn call_with(
     if start.kind != su_wire::START
         || start.payload.len() < 6
         || start.payload[0] > 1
-        || start.payload[1] > 1
+        || start.payload[1] > 2
     {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -218,13 +244,25 @@ fn call_with(
     let interactive = start.payload[0] == 1;
     let rows = u16::from_be_bytes([start.payload[2], start.payload[3]]);
     let cols = u16::from_be_bytes([start.payload[4], start.payload[5]]);
-    let command = match start.payload[1] {
-        0 if start.payload.len() == 6 => None,
-        1 => Some(
-            std::str::from_utf8(&start.payload[6..])
+    // What the host is asked about, and what the shell runs: the same text in each case, so
+    // nothing runs that the approval did not name.
+    let (report_command, exec_command) = match start.payload[1] {
+        0 if start.payload.len() == 6 => (None, None),
+        1 => {
+            let cmd = std::str::from_utf8(&start.payload[6..])
                 .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "command is not UTF-8"))?
-                .to_owned(),
-        ),
+                .to_owned();
+            (Some(cmd.clone()), Some(cmd))
+        }
+        2 if start.payload.len() > 6 => {
+            // The whole of the app's standard input, which had ended: its commands are named
+            // one after another, and the shell runs that text as its script, taking no more
+            // input from the app.
+            let script = std::str::from_utf8(&start.payload[6..])
+                .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "command is not UTF-8"))?
+                .to_owned();
+            (Some(script.clone()), Some(script))
+        }
         _ => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -253,7 +291,10 @@ fn call_with(
     let (id, frame, wait) = relay.begin(
         &package,
         uid,
-        command.clone().into_iter().collect(),
+        report_command
+            .as_deref()
+            .map(crate::su_args::command_words)
+            .unwrap_or_default(),
         interactive,
     );
     if let Err(error) = daemon.send(&frame) {
@@ -271,15 +312,24 @@ fn call_with(
         Outcome::Approved => None,
         Outcome::Refused(reason) => Some(reason),
     };
-    let still_allowed = {
-        let state = state.lock().unwrap_or_else(|e| e.into_inner());
-        state.generation == generation
+    let session_stream = stream.try_clone()?;
+    let (still_allowed, session_id) = {
+        let mut state = state.lock().unwrap_or_else(|e| e.into_inner());
+        let allowed = state.generation == generation
             && state
                 .config
                 .as_ref()
                 .and_then(|config| package_for_uid(config, uid))
                 .as_deref()
-                == Some(package.as_str())
+                == Some(package.as_str());
+        if reason.is_none() && allowed {
+            state.next_session = state.next_session.wrapping_add(1);
+            let sid = state.next_session;
+            state.running.push((sid, uid, session_stream));
+            (true, Some(sid))
+        } else {
+            (false, None)
+        }
     };
     if reason.is_some() || !still_allowed {
         let reason = reason.unwrap_or_else(|| "the app's root permission changed".into());
@@ -292,7 +342,12 @@ fn call_with(
     }
     stream.set_read_timeout(None)?;
     let mut error_socket = stream.try_clone()?;
-    if let Err(error) = execute(stream, command, interactive, rows, cols) {
+    let run_res = execute(stream, exec_command, interactive, rows, cols);
+    if let Some(sid) = session_id {
+        let mut state = state.lock().unwrap_or_else(|e| e.into_inner());
+        state.running.retain(|(id, _, _)| *id != sid);
+    }
+    if let Err(error) = run_res {
         reply(
             &mut error_socket,
             su_wire::STDERR,
@@ -343,6 +398,7 @@ mod tests {
             }),
             generation: 1,
             daemon: Some(Arc::new(helper)),
+            ..Default::default()
         }));
         let (mut client, server) = UnixStream::pair().unwrap();
         let worker_relay = Arc::clone(&relay);
@@ -411,6 +467,7 @@ mod tests {
             }),
             generation: 1,
             daemon: Some(Arc::new(helper)),
+            ..Default::default()
         }));
         let (mut client, server) = UnixStream::pair().unwrap();
         let worker_relay = Arc::clone(&relay);
@@ -472,6 +529,7 @@ mod tests {
             }),
             generation: 1,
             daemon: Some(Arc::new(helper)),
+            ..Default::default()
         }));
         let relay = Arc::new(SuRelay::new());
         let (mut client, server) = UnixStream::pair().unwrap();
@@ -507,6 +565,96 @@ mod tests {
         assert_eq!(
             su_wire::read_frame(&mut client).unwrap().payload,
             1i32.to_be_bytes()
+        );
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn fr35_commands_on_standard_input_are_asked_for_and_run_as_approved() {
+        use dsa_protocol::control::{RootApp, RootLevel, SuDecision};
+        let mut fd = [-1; 2];
+        // SAFETY: fd points to two writable descriptors.
+        assert_eq!(
+            unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_SEQPACKET, 0, fd.as_mut_ptr()) },
+            0
+        );
+        // SAFETY: socketpair returned distinct owned descriptors.
+        let (helper, host) = unsafe { (Packet::from_raw_fd(fd[0]), Packet::from_raw_fd(fd[1])) };
+        let relay = Arc::new(SuRelay::new());
+        // SAFETY: geteuid takes no pointers and always succeeds.
+        let uid = unsafe { libc::geteuid() };
+        let state = Arc::new(Mutex::new(State {
+            config: Some(RootElevationConfig {
+                enabled: true,
+                apps: vec![RootApp {
+                    package: "com.example.ask".into(),
+                    uid,
+                    level: RootLevel::Ask.into(),
+                }],
+            }),
+            generation: 1,
+            daemon: Some(Arc::new(helper)),
+            ..Default::default()
+        }));
+        let (mut client, server) = UnixStream::pair().unwrap();
+        let worker_relay = Arc::clone(&relay);
+        let worker = std::thread::spawn(move || {
+            call_with(
+                server,
+                state,
+                worker_relay,
+                |mut stream, command, _, _, _| {
+                    // Exactly the text the host was asked about, and nothing more.
+                    assert_eq!(
+                        command.as_deref(),
+                        Some(
+                            "id -u
+echo done
+"
+                        )
+                    );
+                    reply(&mut stream, su_wire::STDOUT, b"uid=0")?;
+                    reply(&mut stream, su_wire::EXIT, &0i32.to_be_bytes())
+                },
+            )
+            .unwrap()
+        });
+        su_wire::write_frame(
+            &mut client,
+            &Frame {
+                kind: su_wire::START,
+                payload: [
+                    vec![0, 2, 0, 0, 0, 0],
+                    b"id -u
+echo done
+"
+                    .to_vec(),
+                ]
+                .concat(),
+            },
+        )
+        .unwrap();
+        let request = dsa_protocol::decode(&host.recv().unwrap()).unwrap();
+        let Some(Body::SuRequest(request)) = request.body else {
+            panic!("expected a root request")
+        };
+        assert_eq!(
+            request.command,
+            vec![
+                "sh".to_string(),
+                "-c".to_string(),
+                "id -u; echo done".to_string()
+            ]
+        );
+        relay.decide(&SuDecision {
+            request_id: request.request_id,
+            approved: true,
+            reason: String::new(),
+        });
+        assert_eq!(su_wire::read_frame(&mut client).unwrap().payload, b"uid=0");
+        assert_eq!(
+            su_wire::read_frame(&mut client).unwrap().payload,
+            0i32.to_be_bytes()
         );
         worker.join().unwrap();
     }

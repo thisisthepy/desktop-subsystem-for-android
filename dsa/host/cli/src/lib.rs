@@ -194,8 +194,11 @@
 //! (su does not exist for it), `ask` (each su call waits for the computer's administrator
 //! approval) or `remember` (approved without asking, within a 15 minute grace). It needs
 //! `dsa settings set root-elevation on` first, and moving an app to `remember` needs an
-//! administrator. With `--json` it prints `package` and `level`. The level applies to su's
-//! visibility from the next start of Android.
+//! administrator. With `--json` it prints `package` and `level`. The running Android follows
+//! the new level at once. Apps that share an Android user ID (`android:sharedUserId`) are one
+//! group: the level is set for all of them, and one of them set to `off` keeps the whole group
+//! from root. Each app of `list` and `info` says its `root` level (its group's) and its
+//! `shared_user_id`, empty for an app with a user ID of its own.
 //! Use `adb` in place of the package to set the adb shell level while developer mode is on.
 //!
 //! Each app of `list` and `info` also lists its launcher `shortcuts`, each with `id`, `label`,
@@ -1820,6 +1823,7 @@ pub fn app_json(app: &AppInfo, icon: bool) -> Value {
         "primary_abi": app.primary_abi,
         "native_abis": app.native_libraries.abis().collect::<Vec<_>>(),
         "root": app.root,
+        "shared_user_id": app.shared_user_id,
         "shortcuts": app
             .shortcuts
             .iter()

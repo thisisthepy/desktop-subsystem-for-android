@@ -127,6 +127,40 @@ fn fr35_no_app_level_can_be_chosen_while_root_elevation_is_off_for_the_computer(
 }
 
 #[test]
+fn fr35_apps_sharing_a_user_id_are_approved_as_one_group() {
+    let shared = |package: &str, label: &str| {
+        App::read(&json!({
+            "package": package,
+            "label": label,
+            "root": "ask",
+            "shared_user_id": "com.example.shared",
+        }))
+    };
+    let apps = vec![
+        shared("com.example.zeta", "Zeta"),
+        App::read(&json!({ "package": "com.example.middle", "label": "Middle", "root": "off" })),
+        shared("com.example.alpha", "Alpha"),
+    ];
+    // The group is listed together, in the place of its first app by name.
+    let order: Vec<&str> = view::filter_apps(&apps, "")
+        .iter()
+        .map(|app| app.label.as_str())
+        .collect();
+    assert_eq!(order, ["Alpha", "Zeta", "Middle"]);
+    // A search that finds one app of the group shows the whole group.
+    let found: Vec<&str> = view::filter_apps(&apps, "zeta")
+        .iter()
+        .map(|app| app.label.as_str())
+        .collect();
+    assert_eq!(found, ["Alpha", "Zeta"]);
+    // Each app of the group names the others and says the level is one for all of them.
+    let note = view::root_group_note(&apps[0], &apps).unwrap();
+    assert!(note.contains("Alpha"), "{note}");
+    assert!(note.contains("user ID"), "{note}");
+    assert!(view::root_group_note(&apps[1], &apps).is_none());
+}
+
+#[test]
 fn fr35_choosing_a_level_goes_through_dsa_apps_root_as_the_user() {
     let user = Fake::new(&[(
         "apps root com.example.backup ask --json",

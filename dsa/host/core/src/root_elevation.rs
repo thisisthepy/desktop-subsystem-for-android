@@ -298,8 +298,10 @@ impl Default for Policy {
     }
 }
 
-/// The computer's switch and `user`'s app levels as `store` keeps them. A level the store
-/// cannot read is left out (off), and a store that cannot list the apps gives none. While
+/// The computer's switch and `user`'s app levels as `store` keeps them, an app set to off
+/// included: off is what keeps a whole shared user ID group from root, which only the guest
+/// can group by uid. A level the store cannot read is left out (off), and a store that cannot
+/// list the apps gives none. While
 /// `user`'s developer mode is on, the adb shell item is among them at its stored level (ask
 /// unless set); with developer mode off adb is closed, so the item is left out.
 pub fn stored(store: &dyn SettingsStore, user: &str) -> (bool, Vec<AppLevel>) {
@@ -325,7 +327,6 @@ pub fn stored(store: &dyn SettingsStore, user: &str) -> (bool, Vec<AppLevel>) {
                 package: app.package.clone(),
             })
         })
-        .filter(|app| app.level != Level::Off)
         .collect();
     if let Some(saved) = saved.as_ref().filter(|_| developer_mode) {
         let level = adb_shell_level(saved);
@@ -346,6 +347,59 @@ pub fn adb_shell_level(saved: &[crate::settings::RootApp]) -> Level {
         .find(|app| is_adb_shell(&app.package))
         .and_then(|app| Level::from_code(&app.level))
         .unwrap_or(default_level(ADB_SHELL_PACKAGE))
+}
+
+/// The packages that share `package`'s Android user ID among `installed` (the guest's list
+/// of installed apps), `package` first and the others in package order. Just `package` for an
+/// app with a user ID of its own, or one the list does not name.
+pub fn shared_user_group(installed: &[crate::tasks::AppInfo], package: &str) -> Vec<String> {
+    let shared_user_id = installed
+        .iter()
+        .find(|app| app.package_name == package)
+        .map(|app| app.shared_user_id.as_str())
+        .unwrap_or_default();
+    let mut group = vec![package.to_string()];
+    if shared_user_id.is_empty() {
+        return group;
+    }
+    let mut others: Vec<String> = installed
+        .iter()
+        .filter(|app| app.shared_user_id == shared_user_id && app.package_name != package)
+        .map(|app| app.package_name.clone())
+        .collect();
+    others.sort();
+    others.dedup();
+    group.extend(others);
+    group
+}
+
+/// The level of a group of apps that share an Android user ID, from the levels in `saved`:
+/// off when any app of the group was set to off (the kernel tells the apps apart only by
+/// their uid, so one app kept from root keeps the whole group from it), otherwise the
+/// highest level set for any of them, and the first app's default when none was set. For a
+/// group of one, the app's own level.
+pub fn group_level(saved: &[crate::settings::RootApp], group: &[String]) -> Level {
+    let levels: Vec<Level> = group
+        .iter()
+        .filter_map(|member| {
+            saved
+                .iter()
+                .find(|app| app.package == *member)
+                .and_then(|app| Level::from_code(&app.level))
+        })
+        .collect();
+    if levels.contains(&Level::Off) {
+        Level::Off
+    } else if levels.contains(&Level::Remember) {
+        Level::Remember
+    } else if levels.contains(&Level::Ask) {
+        Level::Ask
+    } else {
+        group
+            .first()
+            .map(|package| default_level(package))
+            .unwrap_or_default()
+    }
 }
 
 /// Gives `user`'s Android their root elevation settings as `store` keeps them: when the
@@ -562,6 +616,76 @@ mod tests {
         assert_eq!(package_for_name("adb"), ADB_SHELL_PACKAGE);
         assert_eq!(package_for_name("com.example"), "com.example");
         assert_eq!(default_level("com.example"), Level::Off);
+    }
+
+    #[test]
+    fn fr35_apps_sharing_a_user_id_are_approved_as_one_group() {
+        let app = |package: &str, shared: &str| crate::tasks::AppInfo {
+            package_name: package.into(),
+            shared_user_id: shared.into(),
+            ..Default::default()
+        };
+        let installed = [
+            app("com.shared.two", "com.shared"),
+            app("com.alone", ""),
+            app("com.shared.one", "com.shared"),
+        ];
+        assert_eq!(
+            shared_user_group(&installed, "com.shared.two"),
+            vec!["com.shared.two".to_string(), "com.shared.one".to_string()]
+        );
+        assert_eq!(
+            shared_user_group(&installed, "com.alone"),
+            vec!["com.alone".to_string()]
+        );
+        assert_eq!(
+            shared_user_group(&installed, "com.unknown"),
+            vec!["com.unknown".to_string()]
+        );
+
+        let saved = |levels: &[(&str, &str)]| {
+            levels
+                .iter()
+                .map(|(package, level)| crate::settings::RootApp {
+                    package: (*package).into(),
+                    level: (*level).into(),
+                })
+                .collect::<Vec<_>>()
+        };
+        let group = vec!["com.shared.one".to_string(), "com.shared.two".to_string()];
+        // One app set to ask: the group asks.
+        assert_eq!(
+            group_level(&saved(&[("com.shared.one", "ask")]), &group),
+            Level::Ask
+        );
+        // The highest level set wins, unless any app of the group is off.
+        assert_eq!(
+            group_level(
+                &saved(&[("com.shared.one", "ask"), ("com.shared.two", "remember")]),
+                &group
+            ),
+            Level::Remember
+        );
+        assert_eq!(
+            group_level(
+                &saved(&[("com.shared.one", "remember"), ("com.shared.two", "off")]),
+                &group
+            ),
+            Level::Off
+        );
+        assert_eq!(group_level(&[], &group), Level::Off);
+
+        // An app set to off is handed on, so the guest can keep its whole group from root.
+        let store = crate::settings::MemorySettings::default();
+        store.set_root_app("u", "com.shared.two", "off").unwrap();
+        let (_, apps) = stored(&store, "u");
+        assert_eq!(
+            apps,
+            vec![AppLevel {
+                package: "com.shared.two".into(),
+                level: Level::Off,
+            }]
+        );
     }
 
     #[test]

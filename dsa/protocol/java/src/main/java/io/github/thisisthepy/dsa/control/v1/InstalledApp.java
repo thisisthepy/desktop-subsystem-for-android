@@ -27,6 +27,7 @@ public  final class InstalledApp extends
     versionName_ = "";
     primaryAbi_ = "";
     nativeLibraries_ = emptyProtobufList();
+    sharedUserId_ = "";
   }
   public static final int PACKAGE_NAME_FIELD_NUMBER = 1;
   private java.lang.String packageName_;
@@ -691,6 +692,88 @@ public  final class InstalledApp extends
   private void removeNativeLibraries(int index) {
     ensureNativeLibrariesIsMutable();
     nativeLibraries_.remove(index);
+  }
+
+  public static final int SHARED_USER_ID_FIELD_NUMBER = 14;
+  private java.lang.String sharedUserId_;
+  /**
+   * <pre>
+   * The user ID the app shares with other apps (its manifest's `android:sharedUserId`), such
+   * as "com.example.shared". Apps with the same value run under one Android uid, so the host
+   * treats them as one group wherever only the uid tells them apart, as root elevation does.
+   * Empty for an app with a user ID of its own.
+   * </pre>
+   *
+   * <code>string shared_user_id = 14;</code>
+   * @return The sharedUserId.
+   */
+  @java.lang.Override
+  public java.lang.String getSharedUserId() {
+    return sharedUserId_;
+  }
+  /**
+   * <pre>
+   * The user ID the app shares with other apps (its manifest's `android:sharedUserId`), such
+   * as "com.example.shared". Apps with the same value run under one Android uid, so the host
+   * treats them as one group wherever only the uid tells them apart, as root elevation does.
+   * Empty for an app with a user ID of its own.
+   * </pre>
+   *
+   * <code>string shared_user_id = 14;</code>
+   * @return The bytes for sharedUserId.
+   */
+  @java.lang.Override
+  public com.google.protobuf.ByteString
+      getSharedUserIdBytes() {
+    return com.google.protobuf.ByteString.copyFromUtf8(sharedUserId_);
+  }
+  /**
+   * <pre>
+   * The user ID the app shares with other apps (its manifest's `android:sharedUserId`), such
+   * as "com.example.shared". Apps with the same value run under one Android uid, so the host
+   * treats them as one group wherever only the uid tells them apart, as root elevation does.
+   * Empty for an app with a user ID of its own.
+   * </pre>
+   *
+   * <code>string shared_user_id = 14;</code>
+   * @param value The sharedUserId to set.
+   */
+  private void setSharedUserId(
+      java.lang.String value) {
+    java.lang.Class<?> valueClass = value.getClass();
+  
+    sharedUserId_ = value;
+  }
+  /**
+   * <pre>
+   * The user ID the app shares with other apps (its manifest's `android:sharedUserId`), such
+   * as "com.example.shared". Apps with the same value run under one Android uid, so the host
+   * treats them as one group wherever only the uid tells them apart, as root elevation does.
+   * Empty for an app with a user ID of its own.
+   * </pre>
+   *
+   * <code>string shared_user_id = 14;</code>
+   */
+  private void clearSharedUserId() {
+    
+    sharedUserId_ = getDefaultInstance().getSharedUserId();
+  }
+  /**
+   * <pre>
+   * The user ID the app shares with other apps (its manifest's `android:sharedUserId`), such
+   * as "com.example.shared". Apps with the same value run under one Android uid, so the host
+   * treats them as one group wherever only the uid tells them apart, as root elevation does.
+   * Empty for an app with a user ID of its own.
+   * </pre>
+   *
+   * <code>string shared_user_id = 14;</code>
+   * @param value The bytes for sharedUserId to set.
+   */
+  private void setSharedUserIdBytes(
+      com.google.protobuf.ByteString value) {
+    checkByteStringIsUtf8(value);
+    sharedUserId_ = value.toStringUtf8();
+    
   }
 
   public static io.github.thisisthepy.dsa.control.v1.InstalledApp parseFrom(
@@ -1498,6 +1581,90 @@ public  final class InstalledApp extends
       return this;
     }
 
+    /**
+     * <pre>
+     * The user ID the app shares with other apps (its manifest's `android:sharedUserId`), such
+     * as "com.example.shared". Apps with the same value run under one Android uid, so the host
+     * treats them as one group wherever only the uid tells them apart, as root elevation does.
+     * Empty for an app with a user ID of its own.
+     * </pre>
+     *
+     * <code>string shared_user_id = 14;</code>
+     * @return The sharedUserId.
+     */
+    @java.lang.Override
+    public java.lang.String getSharedUserId() {
+      return instance.getSharedUserId();
+    }
+    /**
+     * <pre>
+     * The user ID the app shares with other apps (its manifest's `android:sharedUserId`), such
+     * as "com.example.shared". Apps with the same value run under one Android uid, so the host
+     * treats them as one group wherever only the uid tells them apart, as root elevation does.
+     * Empty for an app with a user ID of its own.
+     * </pre>
+     *
+     * <code>string shared_user_id = 14;</code>
+     * @return The bytes for sharedUserId.
+     */
+    @java.lang.Override
+    public com.google.protobuf.ByteString
+        getSharedUserIdBytes() {
+      return instance.getSharedUserIdBytes();
+    }
+    /**
+     * <pre>
+     * The user ID the app shares with other apps (its manifest's `android:sharedUserId`), such
+     * as "com.example.shared". Apps with the same value run under one Android uid, so the host
+     * treats them as one group wherever only the uid tells them apart, as root elevation does.
+     * Empty for an app with a user ID of its own.
+     * </pre>
+     *
+     * <code>string shared_user_id = 14;</code>
+     * @param value The sharedUserId to set.
+     * @return This builder for chaining.
+     */
+    public Builder setSharedUserId(
+        java.lang.String value) {
+      copyOnWrite();
+      instance.setSharedUserId(value);
+      return this;
+    }
+    /**
+     * <pre>
+     * The user ID the app shares with other apps (its manifest's `android:sharedUserId`), such
+     * as "com.example.shared". Apps with the same value run under one Android uid, so the host
+     * treats them as one group wherever only the uid tells them apart, as root elevation does.
+     * Empty for an app with a user ID of its own.
+     * </pre>
+     *
+     * <code>string shared_user_id = 14;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearSharedUserId() {
+      copyOnWrite();
+      instance.clearSharedUserId();
+      return this;
+    }
+    /**
+     * <pre>
+     * The user ID the app shares with other apps (its manifest's `android:sharedUserId`), such
+     * as "com.example.shared". Apps with the same value run under one Android uid, so the host
+     * treats them as one group wherever only the uid tells them apart, as root elevation does.
+     * Empty for an app with a user ID of its own.
+     * </pre>
+     *
+     * <code>string shared_user_id = 14;</code>
+     * @param value The bytes for sharedUserId to set.
+     * @return This builder for chaining.
+     */
+    public Builder setSharedUserIdBytes(
+        com.google.protobuf.ByteString value) {
+      copyOnWrite();
+      instance.setSharedUserIdBytes(value);
+      return this;
+    }
+
     // @@protoc_insertion_point(builder_scope:dsa.control.v1.InstalledApp)
   }
   @java.lang.Override
@@ -1528,11 +1695,12 @@ public  final class InstalledApp extends
             "primaryAbi_",
             "nativeLibraries_",
             io.github.thisisthepy.dsa.control.v1.NativeLibraries.class,
+            "sharedUserId_",
           };
           java.lang.String info =
-              "\u0000\r\u0000\u0000\u0001\r\r\u0000\u0001\u0000\u0001\u0208\u0002\u0208\u0003\n" +
-              "\u0004\u0208\u0005\u0002\u0006\u0003\u0007\u0003\b\u0007\t\u0003\n\u0003\u000b\u0003" +
-              "\f\u0208\r\u001b";
+              "\u0000\u000e\u0000\u0000\u0001\u000e\u000e\u0000\u0001\u0000\u0001\u0208\u0002\u0208" +
+              "\u0003\n\u0004\u0208\u0005\u0002\u0006\u0003\u0007\u0003\b\u0007\t\u0003\n\u0003" +
+              "\u000b\u0003\f\u0208\r\u001b\u000e\u0208";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through

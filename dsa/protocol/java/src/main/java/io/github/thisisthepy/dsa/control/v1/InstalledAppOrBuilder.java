@@ -175,4 +175,30 @@ public interface InstalledAppOrBuilder extends
    * <code>repeated .dsa.control.v1.NativeLibraries native_libraries = 13;</code>
    */
   int getNativeLibrariesCount();
+
+  /**
+   * <pre>
+   * The user ID the app shares with other apps (its manifest's `android:sharedUserId`), such
+   * as "com.example.shared". Apps with the same value run under one Android uid, so the host
+   * treats them as one group wherever only the uid tells them apart, as root elevation does.
+   * Empty for an app with a user ID of its own.
+   * </pre>
+   *
+   * <code>string shared_user_id = 14;</code>
+   * @return The sharedUserId.
+   */
+  java.lang.String getSharedUserId();
+  /**
+   * <pre>
+   * The user ID the app shares with other apps (its manifest's `android:sharedUserId`), such
+   * as "com.example.shared". Apps with the same value run under one Android uid, so the host
+   * treats them as one group wherever only the uid tells them apart, as root elevation does.
+   * Empty for an app with a user ID of its own.
+   * </pre>
+   *
+   * <code>string shared_user_id = 14;</code>
+   * @return The bytes for sharedUserId.
+   */
+  com.google.protobuf.ByteString
+      getSharedUserIdBytes();
 }
