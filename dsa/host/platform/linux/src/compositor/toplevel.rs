@@ -9,7 +9,7 @@
 
 use dsa_host_core::compositor::caption::{scaled, CaptionBand, CaptionLayout};
 use dsa_host_core::compositor::window_mode::{ModeState, WindowMode};
-use dsa_host_core::compositor::window_sizing::{to_task_length, BASE_DPI};
+use dsa_host_core::compositor::window_sizing::{to_task_length, window_size_of, BASE_DPI};
 use dsa_host_core::input::WindowGeometry;
 
 /// The title bar's height at 100%, in pixels: the height of a caption with its top border
@@ -223,6 +223,15 @@ impl Toplevel {
     pub fn frame_shown(&mut self, size: (u32, u32)) {
         self.shown = size;
     }
+
+    /// The pixels a frame of `frame` task pixels fills at the window's frame scale. A frame
+    /// of the task size the window's size, or the size the desktop last proposed, was turned
+    /// into is that size exactly, though rounding it back at the scale can land a pixel off.
+    pub fn frame_in_window(&self, frame: (u32, u32)) -> (u32, u32) {
+        let mut views = vec![self.shown];
+        views.extend(self.proposed);
+        window_size_of(frame, self.frame_scale, &views)
+    }
 }
 
 #[cfg(test)]
@@ -231,6 +240,25 @@ mod tests {
 
     fn window() -> Toplevel {
         Toplevel::new(7, "com.example", "Example", (400, 600))
+    }
+
+    #[test]
+    fn fr4_a_scaled_frame_of_the_proposed_size_fills_exactly_that_size() {
+        use dsa_host_core::compositor::window_sizing::{to_task_size, to_window_size};
+        let mut window = window();
+        // A task kept at 130 dpi on a 200% output: 262 window pixels per 130 task pixels.
+        window.frame_scale = (131, 65);
+        let states = States::default();
+        window.configure((1009, 700), states);
+        let asked = to_task_size((1009, 700), window.frame_scale);
+        assert_eq!(asked, (501, 347));
+        assert_eq!(to_window_size(asked, window.frame_scale), (1010, 699));
+        // The frame drawn at the size asked for fills the size proposed, not a pixel off it.
+        assert_eq!(window.frame_in_window(asked), (1009, 700));
+        window.frame_shown(window.frame_in_window(asked));
+        assert_eq!(window.shown, (1009, 700));
+        // Another frame fills its own size at the scale.
+        assert_eq!(window.frame_in_window((500, 347)), (1008, 699));
     }
 
     #[test]
