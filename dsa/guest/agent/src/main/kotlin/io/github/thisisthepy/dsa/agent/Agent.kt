@@ -762,10 +762,12 @@ class Agent(
             is RequestResult.Resize -> {
                 trace.received(result.taskId, result.size, result.live, queuedMillis)
                 arranger.resize(result.taskId, result.size, result.live)
+                accessibilityExport.resizing(result.taskId)
             }
             is RequestResult.Density -> {
                 log.info("task ${result.taskId} draws at ${result.densityDpi} dpi")
                 arranger.setDensity(result.taskId, result.densityDpi)
+                accessibilityExport.resizing(result.taskId)
             }
             is RequestResult.Caption -> {
                 log.info("task ${result.taskId} is under a title bar ${result.height} pixels high")
@@ -1071,6 +1073,7 @@ class Agent(
         settingsSync.tasksRunning(restartedByFontScale(running))
         val arranging = System.nanoTime()
         val bounds = arranger.arrange(running.filter(reporter::reportable))
+        for ((taskId, to) in arranger.resizedTo) trace.asked(taskId, to.right - to.left, to.bottom - to.top)
         trace.applied((System.nanoTime() - arranging) / 1_000_000.0)
         if (arranger.waiting) checkMoves()
         if (!channel.connected) return

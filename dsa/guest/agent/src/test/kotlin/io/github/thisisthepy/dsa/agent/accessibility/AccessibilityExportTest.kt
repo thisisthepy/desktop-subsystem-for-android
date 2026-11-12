@@ -289,6 +289,36 @@ class AccessibilityExportTest {
     }
 
     @Test
+    fun fr4_a_resized_tasks_tree_is_read_only_once_its_app_has_had_time_to_draw() {
+        started()
+        watch(3, true)
+        scheduler.advance(10)
+        assertEquals(1, service.reads)
+        assertEquals(1, trees().size)
+
+        fun resize(width: Int) = deliver(
+            Envelope.newBuilder()
+                .setResizeTask(io.github.thisisthepy.dsa.control.v1.ResizeTask.newBuilder().setTaskId(3).setWidth(width).setHeight(700).setLive(true))
+                .build(),
+        )
+        // The app lays itself out again at each size of a drag; its tree changes meanwhile.
+        resize(500)
+        title.info = title.info.copy(text = "Wi-Fi")
+        service.onChange!!.invoke()
+        scheduler.advance(400)
+        assertEquals("no read while the app draws its new size", 1, service.reads)
+        resize(520)
+        service.onChange!!.invoke()
+        scheduler.advance(AccessibilityExport.RESIZE_QUIET_MILLIS - 10)
+        assertEquals("each new size waits again", 1, service.reads)
+        // Once the drag has been still for long enough, the new layout is read once.
+        scheduler.advance(20)
+        assertEquals(2, service.reads)
+        assertEquals(2, trees().size)
+        assertEquals("Wi-Fi", trees().last().nodesList.single().text)
+    }
+
+    @Test
     fun fr4_a_slow_tree_read_holds_up_no_resize_and_a_change_during_it_is_read_after() {
         // The reader's thread, which this test runs only when it says so: reading an app's tree
         // waits on the app, which is busy laying itself out right after a resize.
