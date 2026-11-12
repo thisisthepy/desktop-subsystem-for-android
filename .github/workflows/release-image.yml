@@ -871,6 +871,22 @@ jobs:
           ${{ steps.framework.outputs.args }}
           ${{ inputs.dev_build && format('--dev-build {0}', github.run_number) || '' }}
 
+      # The host makes the direct-mapped mode's uncompressed system disk from system.vhdx
+      # itself, so the download stays the size it is (GitHub takes 2 GiB a file). image.json
+      # records the hash the host checks that disk against, made here exactly as the host makes
+      # it, and the hash of the disk as it is, which hosts that attach raw disks check their copy
+      # against; the signed list covers both through image.json's own hash. An image this
+      # cannot describe boots without the mode, so a failure here warns and does not stop it.
+      - name: Record the hashes of the system disk the host makes
+        working-directory: dsa
+        run: |
+          cargo build -q --release -p dsa-host-core --bin dsa-release
+          dir="$(echo target/image/*/)"
+          if ! target/release/dsa-release direct-mapped "$dir"; then
+            echo "::warning::the direct-mapped system disk could not be described; the image boots without the direct-mapped mode"
+          fi
+          jq '{direct_mapped, system_disk_raw}' "$dir/image.json"
+
       - name: Check the image
         run: uv run dsa/guest/image/check-image.py dsa/target/image/*/ .scratch/image-keys
 

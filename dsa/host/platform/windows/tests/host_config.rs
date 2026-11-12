@@ -43,6 +43,18 @@ fn fr10_android_dozes_after_half_a_minute_without_a_window_and_never_freezes_by_
 }
 
 #[test]
+fn nfr1_the_direct_mapped_mode_is_a_host_setting_that_is_off_by_default() {
+    let config = HostConfig::parse(MINIMAL).unwrap();
+    assert!(!config.direct_mapped_images);
+    // A VM configured from the file attaches its disks as SCSI disks; the launcher maps them
+    // at each boot only with the setting on.
+    let vm = config.vm_config(Some("S-1-5-21-1-2-3-1001")).unwrap();
+    assert_eq!(vm.direct_mapped, None);
+    let json = MINIMAL.replace("\n}", ",\n  \"direct_mapped_images\": true\n}");
+    assert!(HostConfig::parse(&json).unwrap().direct_mapped_images);
+}
+
+#[test]
 fn fr10_freezing_after_a_time_in_doze_is_a_setting() {
     let json = MINIMAL.replace(
         "\n}",

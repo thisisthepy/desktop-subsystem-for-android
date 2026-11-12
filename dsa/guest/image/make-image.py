@@ -3006,6 +3006,161 @@ FSTAB_DIRS = {
     "VENDOR_BOOT/RAMDISK/first_stage_ramdisk/system/etc/": "META/vendor_boot_filesystem_config.txt",
 }
 
+# The host's direct-mapped mode (off by default): the host attaches the system disk and the
+# add-on disk as persistent memory, Hyper-V's virtual persistent memory or virtio-pmem, and the
+# guest mounts the read-only partitions with DAX, so each file is read straight from the host's
+# mapping of the image and the guest keeps no page cache of it. The host names this table
+# (androidboot.fstab_suffix) and the persistent memory's platform devices as boot devices on
+# such a boot only. It differs from fstab.dsa in the logical partitions alone: they mount with
+# dax=always, and without dm-verity, which cannot pass DAX through (device-mapper's linear
+# target can, and maps them as before). They are verified on the host instead: the disk is the
+# host's uncompressed copy of the published one, which it checks against the hash image.json
+# gives (direct_mapped.system_disk, which dsa-release direct-mapped records), attached read
+# only. The partitions in DIRECT_MAPPED_VERIFIED keep their entries as they are, dm-verity
+# included, and the host's copy keeps their bytes as they are: first stage init sets up
+# verified boot only for an entry it mounts with dm-verity, so with none it would check no
+# vbmeta and report no AVB version. With one, the verified boot data (vbmeta and its chained
+# images, and the boot images' hashes) is checked as in a normal boot.
+DIRECT_MAPPED_FSTAB_SUFFIX = "dsa_dax"
+# The logical partitions the direct-mapped table still verifies with dm-verity: odm, a few
+# hundred KiB in every image, whose hashtree is in the top-level vbmeta.
+DIRECT_MAPPED_VERIFIED = ("odm",)
+# The system disk's size is a whole number of these: Linux maps persistent memory in 2 MiB
+# sections, and a region of another size gets no page structs, so no DAX.
+SYSTEM_DISK_ALIGNMENT = 2 << 20
+DIRECT_MAPPED_FSTAB = f"fstab.{DIRECT_MAPPED_FSTAB_SUFFIX}"
+DIRECT_MAPPED_MOUNT_OPTION = "dax=always"
+# The fs_mgr flags that set up dm-verity for an entry.
+VERITY_FLAGS = ("avb", "avb_keys")
+DIRECT_MAPPED_FSTAB_HEADER = """\
+# The guest's mount table for a boot whose read-only disks the host maps as persistent memory
+# (the host's direct-mapped mode). Made from fstab.dsa by make-image.py: the logical partitions
+# mount with dax=always and without dm-verity, which cannot pass DAX through, all but odm, which
+# keeps dm-verity so first stage init still checks the verified boot data; everything else is
+# fstab.dsa's. erofs falls back to its page cache, with a line in the kernel log, wherever the
+# device or a file cannot be mapped (a compressed file, a disk on SCSI).
+"""
+
+
+def direct_mapped_entry(uncompressed_erofs):
+    """image.json's "direct_mapped": the mount table the host names for that mode, and whether
+    the read-only partitions were built uncompressed."""
+    return {"fstab_suffix": DIRECT_MAPPED_FSTAB_SUFFIX, "uncompressed_erofs": bool(uncompressed_erofs),
+            "verified_partitions": list(DIRECT_MAPPED_VERIFIED)}
+
+
+# What dsa-release direct-mapped adds to image.json's "direct_mapped": the host's copy of the
+# system disk, its format, size, SHA-256 and super partition size.
+SYSTEM_DISK_KEYS = {"format": int, "bytes": int, "sha256": str, "super_bytes": int}
+
+
+def direct_mapped_fstab(text):
+    """The mount table for the direct-mapped mode, from `text`, fstab.dsa."""
+    lines = [DIRECT_MAPPED_FSTAB_HEADER]
+    for line in text.splitlines(keepends=True):
+        fields = line.split()
+        if (line.startswith("#") or len(fields) < 5 or "logical" not in fields[4].split(",")
+                or fields[0] in DIRECT_MAPPED_VERIFIED):
+            lines.append(line)
+            continue
+        options = [o for o in fields[3].split(",") if o != DIRECT_MAPPED_MOUNT_OPTION]
+        flags = [f for f in fields[4].split(",") if f.split("=", 1)[0] not in VERITY_FLAGS]
+        lines.append(" ".join(fields[:3] + [",".join(options + [DIRECT_MAPPED_MOUNT_OPTION]),
+                                            ",".join(flags)]) + "\n")
+    return "".join(lines)
+
+
+# What --uncompressed-erofs sets in the build's misc_info.txt, which add_img_to_target_files
+# builds the read-only partitions from. erofs maps a file directly (DAX) only when its data is
+# stored whole, a block per block: never a compressed file, and never one whose last block is
+# kept inline in its inode. The published build compresses every file but its APEXes with
+# lz4hc. So no compressor and no compression hints, and 4 KiB chunks (--chunksize 4096 in
+# build_image.py), the chunk-based layout erofs maps directly too, which also stores identical
+# blocks once.
+UNCOMPRESSED_EROFS_PROPS = {
+    "erofs_default_compressor": "none",
+    "erofs_share_dup_blocks": "true",
+}
+# Keys that would bring compression back for one partition or for some files.
+UNCOMPRESSED_EROFS_DROPPED = re.compile(r"^(?:\w+_)?erofs_(?:compressor|compress_hints|default_compress_hints"
+                                        r"|pcluster_size|use_legacy_compression)$")
+MISC_INFO = "META/misc_info.txt"
+
+
+def direct_mapped_problems(names, read, entry):
+    """The problems with an image's direct-mapped mode, given the names in its target files, a
+    function that reads one, and image.json's "direct_mapped": each fstab.dsa has the mapped
+    table beside it, made from it, and image.json says so; an image that says its read-only
+    partitions are uncompressed was built from a misc_info.txt that compresses nothing."""
+    described = {k: v for k, v in entry.items() if k != "system_disk"} if isinstance(entry, dict) else entry
+    if described != direct_mapped_entry(entry.get("uncompressed_erofs") if isinstance(entry, dict) else False):
+        return [f"image.json describes the direct-mapped mode as {entry!r}, not with the mount table "
+                f"{DIRECT_MAPPED_FSTAB}, so the host cannot boot the image with its disks mapped"]
+    problems = []
+    disk = entry.get("system_disk")
+    if disk is not None and (not isinstance(disk, dict) or set(disk) != set(SYSTEM_DISK_KEYS)
+                             or any(not isinstance(disk[k], t) for k, t in SYSTEM_DISK_KEYS.items())
+                             or len(disk["sha256"]) != 64 or disk["bytes"] % SYSTEM_DISK_ALIGNMENT):
+        problems.append(f"image.json describes the host's copy of the system disk as {disk!r}, which the "
+                        "host cannot check its copy against")
+    for directory in FSTAB_DIRS:
+        normal, mapped = directory + "fstab.dsa", directory + DIRECT_MAPPED_FSTAB
+        if normal not in names:
+            continue
+        if mapped not in names:
+            problems.append(f"{mapped} is missing, so a direct-mapped boot finds no mount table")
+            continue
+        text = read(mapped).decode(errors="replace")
+        if text != direct_mapped_fstab(read(normal).decode(errors="replace")):
+            problems.append(f"{mapped} is not the direct-mapped table made from {normal}")
+        for line in text.splitlines():
+            fields = line.split()
+            if line.startswith("#") or len(fields) < 5 or "logical" not in fields[4].split(","):
+                continue
+            if fields[0] in DIRECT_MAPPED_VERIFIED:
+                if DIRECT_MAPPED_MOUNT_OPTION in fields[3].split(",") or "avb" not in [
+                        f.split("=", 1)[0] for f in fields[4].split(",")]:
+                    problems.append(f"{mapped} does not verify {fields[1]} with dm-verity, so first stage "
+                                    "init checks no verified boot data")
+                continue
+            if DIRECT_MAPPED_MOUNT_OPTION not in fields[3].split(","):
+                problems.append(f"{mapped} mounts {fields[1]} without {DIRECT_MAPPED_MOUNT_OPTION}")
+            if any(f.split("=", 1)[0] in VERITY_FLAGS for f in fields[4].split(",")):
+                problems.append(f"{mapped} sets up dm-verity for {fields[1]}, which cannot be mapped")
+    if MISC_INFO in names:
+        info = read(MISC_INFO).decode(errors="replace").splitlines()
+        settings = dict(line.split("=", 1) for line in info if "=" in line)
+        dynamic = settings.get("dynamic_partition_list")
+        for name in DIRECT_MAPPED_VERIFIED:
+            if dynamic is not None and name not in dynamic.split():
+                problems.append(f"the image has no {name} partition, which a direct-mapped boot verifies "
+                                "so first stage init checks the verified boot data")
+    if entry["uncompressed_erofs"] and MISC_INFO in names:
+        info = read(MISC_INFO).decode(errors="replace").splitlines()
+        settings = dict(line.split("=", 1) for line in info if "=" in line)
+        for key, value in UNCOMPRESSED_EROFS_PROPS.items():
+            if settings.get(key) != value:
+                problems.append(f"image.json says the read-only partitions are uncompressed, but "
+                                f"{MISC_INFO} sets {key}={settings.get(key)}")
+        left = sorted(key for key in settings if UNCOMPRESSED_EROFS_DROPPED.match(key))
+        if left:
+            problems.append(f"image.json says the read-only partitions are uncompressed, but "
+                            f"{MISC_INFO} still sets {', '.join(left)}")
+    return problems
+
+
+def uncompressed_erofs_misc_info(text):
+    """`text`, a misc_info.txt, with the read-only erofs partitions built uncompressed and in
+    4 KiB chunks (UNCOMPRESSED_EROFS_PROPS)."""
+    kept = []
+    for line in text.splitlines():
+        key = line.split("=", 1)[0].strip()
+        if key in UNCOMPRESSED_EROFS_PROPS or UNCOMPRESSED_EROFS_DROPPED.match(key):
+            continue
+        kept.append(line)
+    kept += [f"{key}={value}" for key, value in UNCOMPRESSED_EROFS_PROPS.items()]
+    return "\n".join(kept) + "\n"
+
 # The transport library stays in vendor with the rest of the Cuttlefish graphics stack.
 # Supplying it at image-build time keeps the signed target_files archive as the single
 # source from which AVB-protected partitions are generated.
@@ -5184,7 +5339,7 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
            agent=None, hwcomposer=None, framework_overlay=None, settings_overlay=None, power_hal=None,
            codec2=None, audio=None, gnss_hal=None,
            sensors=None, camera=None, arm_translation=None, framework=None, overlays=None, su_client=None,
-           arch=None):
+           arch=None, uncompressed_erofs=False):
     """Copies target_files, removing the shell apps and the published kernel modules,
     switching to a user build and adding the Hyper-V mount table, the control channel
     daemon when `channeld` names one, the agent when `agent` names its APK, DSA's
@@ -5202,8 +5357,12 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
     and the other system screen overlays (DESIGN_OVERLAYS) that `overlays` maps from their file
     names to their APKs. An image for `arch` x86_64 (the default) gets the empty folders, the
     empty file and the links a translation package is reached through; every image gets the
-    folders the Google apps are laid over that the build lacks."""
+    folders the Google apps are laid over that the build lacks. Every image gets the mount table
+    of the host's direct-mapped mode beside fstab.dsa (DIRECT_MAPPED_FSTAB); with
+    `uncompressed_erofs` the read-only partitions are built uncompressed, so that mode maps
+    every file (UNCOMPRESSED_EROFS_PROPS)."""
     fstab = (HERE / "fstab.dsa").read_bytes()
+    mapped_fstab = direct_mapped_fstab(fstab.decode()).encode()
     default_translator = (Path(arm_translation) / ARM_TRANSLATION_IMAGE).read_bytes() if arm_translation else None
     graphics_payload = Path(graphics_library).read_bytes() if graphics_library else None
     vulkan_payload = Path(vulkan_driver).read_bytes() if vulkan_driver else None
@@ -5542,6 +5701,7 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                             else:
                                 prefix = directory.lower()
                             text += f"{prefix}fstab.dsa 0 0 644 capabilities=0x0\n"
+                            text += f"{prefix}{DIRECT_MAPPED_FSTAB} 0 0 644 capabilities=0x0\n"
                     if name == "META/vendor_filesystem_config.txt":
                         text = update_vendor_filesystem_config(text, channeld_payload is not None, has_hwcomposer,
                                                                has_power, codec2=has_codec2, audio=has_audio, gnss=has_gnss, sensors=has_sensors, camera=has_camera, keymint=has_keymint)
@@ -5552,6 +5712,8 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                         for overlay_name in design_payloads:
                             text = add_filesystem_config(text, overlay_fs_config(overlay_name))
                     data = text.encode()
+                elif name == MISC_INFO and uncompressed_erofs:
+                    data = uncompressed_erofs_misc_info(data.decode()).encode()
                 elif name == PLAT_FILE_CONTEXTS:
                     text = with_zram_backing_context(data.decode())
                     if channeld_payload is not None:
@@ -5575,6 +5737,7 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
         zout.writestr(PREBUILT_OAT_RECORD, json.dumps(prebuilt, indent=2, sort_keys=True) + "\n")
         for directory in FSTAB_DIRS:
             zout.writestr(directory + "fstab.dsa", fstab)
+            zout.writestr(directory + DIRECT_MAPPED_FSTAB, mapped_fstab)
         zout.writestr(MEMORY_RC, (HERE / "dsa-memory.rc").read_bytes())
         zout.writestr(DISPLAY_RC, (HERE / "dsa-display.rc").read_bytes())
         zout.writestr(TRACE_RC, (HERE / "dsa-trace.rc").read_bytes())
@@ -6563,7 +6726,9 @@ def system_disk(images, otatools, work, out):
         shutil.copy(super_img, super_raw)
     raw = work / "system.raw"
     needed = sum(size for _, size in SYSTEM_SMALL_PARTITIONS) + super_raw.stat().st_size + (128 << 20)
-    system_disk_size = ((needed + (1 << 20) - 1) // (1 << 20)) * (1 << 20)
+    # A whole number of 2 MiB: the host's direct-mapped mode attaches the disk as persistent
+    # memory, which the guest maps in sections of that size.
+    system_disk_size = ((needed + SYSTEM_DISK_ALIGNMENT - 1) // SYSTEM_DISK_ALIGNMENT) * SYSTEM_DISK_ALIGNMENT
     make_raw_disk(raw, system_disk_size)
     on_disk = {name for name, _ in SYSTEM_SMALL_PARTITIONS}
     found = verified_boot_partitions(images / "vbmeta.img", otatools)
@@ -6750,6 +6915,11 @@ def main():
                              "SurfaceFlinger, libhwui and libEGL that recover from a GPU device loss, and "
                              "DSA's KeyMint, whose root key comes from the host, built from the image's own "
                              "build for its architecture")
+    parser.add_argument("--uncompressed-erofs", action="store_true",
+                        help="build the read-only partitions uncompressed, in 4 KiB chunks, so that the "
+                             "host's direct-mapped mode maps every file of them from persistent memory "
+                             "instead of the guest caching it; the system disk grows by the compression "
+                             "it loses")
     args = parser.parse_args()
     if args.arm_translation:
         checked_arm_translation(args.arm_translation, args.arch)
@@ -6822,7 +6992,7 @@ def main():
            codec2=args.codec2, audio=args.audio, gnss_hal=args.gnss_hal,
            sensors=args.sensors, camera=args.camera, arm_translation=args.arm_translation,
            framework=framework_payloads, overlays=design_overlays, su_client=args.su_client,
-           arch=args.arch)
+           arch=args.arch, uncompressed_erofs=args.uncompressed_erofs)
 
     signed = work / "signed.zip"
     # It runs where AOSP's certificates sit at the paths apkcerts.txt names, so every path
@@ -6895,6 +7065,9 @@ def main():
         # What the host needs to compose a fingerprint from a device identity the user chose.
         "identity": image_identity(zipfile.ZipFile(signed).read("SYSTEM/build.prop").decode()),
         "files": {name: {"size": (out / name).stat().st_size, "sha256": sha256(out / name)} for name in files},
+        # What the host's direct-mapped mode boots with: the mount table it names, and whether
+        # the read-only partitions are uncompressed, so that every file of them is mapped.
+        "direct_mapped": direct_mapped_entry(args.uncompressed_erofs),
     }
     (out / ARM_TRANSLATION_ZIP).unlink(missing_ok=True)
     if args.arm_translation:

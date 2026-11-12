@@ -15,7 +15,10 @@
 //!   init. Hyper-V on ARM64 has no direct Linux boot, so there, as WSL does, the VM's UEFI
 //!   firmware starts the kernel's EFI stub from a folder it reads over VMBus (`VmbFs`), and
 //!   the stub loads the initrd from the same folder (see [`GuestArch`]);
-//! - the system image attached read only, the user data on a disk that may stay sparse;
+//! - the system image attached read only, the user data on a disk that may stay sparse. In the
+//!   host's direct-mapped mode (off by default) the system disk and the add-on disk are virtual
+//!   persistent memory instead, mapped from their files, so the guest maps their files rather
+//!   than caching them (see [`DirectMapped`]);
 //! - Hyper-V sockets limited to SYSTEM and the user the VM belongs to;
 //! - the guest's console on the first serial port (COM1 on x86_64, a PL011 UART on ARM64),
 //!   which HCS connects to a named pipe the host serves, as WSL does for its debug console.
@@ -137,7 +140,36 @@ pub struct AndroidVmConfig {
     /// The synthetic network adapter, connected to the HCN endpoint the host made for this
     /// VM (see `network`). `None` gives the VM no network.
     pub network_adapter: Option<NetworkAdapter>,
+    /// The host's direct-mapped mode: the system disk, and the add-on disk when there is one,
+    /// attached as virtual persistent memory instead of SCSI disks, so the guest maps their
+    /// files rather than caching them. `None` attaches them as disks.
+    pub direct_mapped: Option<DirectMapped>,
 }
+
+/// How a direct-mapped boot attaches the read-only disks (see
+/// [`AndroidVmConfig::direct_mapped`] and `dsa_host_core::direct_mapped`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DirectMapped {
+    /// The system disk as a fixed VHD: the uncompressed copy the service made of
+    /// [`AndroidVmConfig::system_image`] and checked against the image's hash (virtual
+    /// persistent memory takes a flat image only).
+    pub system_disk: PathBuf,
+    /// The size of the system disk's data, without its VHD footer: a whole number of 2 MiB.
+    pub system_bytes: u64,
+    /// The size of the add-on disk's data, without its footer, while it is attached; it is a
+    /// fixed VHD already. `None` attaches no add-on disk as persistent memory.
+    pub addon_bytes: Option<u64>,
+    /// The image's support for the mode: the mount table it boots with.
+    pub support: dsa_host_core::direct_mapped::ImageSupport,
+}
+
+/// The platform device the guest kernel puts Hyper-V's persistent memory bus (ACPI NFIT)
+/// below, which a direct-mapped boot names as a boot device.
+pub const PERSISTENT_MEMORY_BOOT_DEVICE: &str = "nfit";
+
+/// Linux maps persistent memory in sections of this size; a device of another size gets no
+/// page structs, and so no DAX.
+pub const PERSISTENT_MEMORY_SECTION: u64 = 2 << 20;
 
 /// A synthetic network adapter of the VM, which the guest's hv_netvsc drives as eth0.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -263,6 +295,26 @@ impl AndroidVmConfig {
         if let Some(initrd) = &self.initrd {
             paths.push(("initrd", initrd));
         }
+        if let Some(mapped) = &self.direct_mapped {
+            paths.push(("persistent memory system disk", &mapped.system_disk));
+            // hcsshim, Microsoft's own client of these devices, turns them off on ARM64.
+            if arch != GuestArch::X86_64 {
+                return Err(ConfigError(
+                    "the direct-mapped mode needs virtual persistent memory, which DSA uses on \
+                     x86_64 hosts only"
+                        .into(),
+                ));
+            }
+            if let Some(bad) = std::iter::once(mapped.system_bytes)
+                .chain(mapped.addon_bytes)
+                .find(|size| *size == 0 || size % PERSISTENT_MEMORY_SECTION != 0)
+            {
+                return Err(ConfigError(format!(
+                    "a persistent memory disk of {bad} bytes is not a whole number of 2 MiB, \
+                     so the guest could not map it"
+                )));
+            }
+        }
         for (what, path) in paths {
             if !is_absolute(path) {
                 return Err(ConfigError(format!(
@@ -346,11 +398,49 @@ impl AndroidVmConfig {
             cmdline.push(' ');
             cmdline.push_str(crate::pstore_disk::KERNEL_CMDLINE);
         }
-        if !self.kernel_cmdline.trim().is_empty() {
+        let image = match &self.direct_mapped {
+            Some(mapped) => dsa_host_core::direct_mapped::kernel_cmdline(
+                self.kernel_cmdline.trim(),
+                PERSISTENT_MEMORY_BOOT_DEVICE,
+                &mapped.support,
+            ),
+            None => self.kernel_cmdline.trim().to_string(),
+        };
+        if !image.is_empty() {
             cmdline.push(' ');
-            cmdline.push_str(self.kernel_cmdline.trim());
+            cmdline.push_str(&image);
         }
         cmdline
+    }
+
+    /// The document's virtual persistent memory controller for a direct-mapped boot: device 0
+    /// the system disk, device 1 the add-on disk while it is attached, both read only and
+    /// backed by a mapping of their file (`Virtual`), never by memory of their own.
+    fn persistent_memory(&self, mapped: &DirectMapped) -> Value {
+        let mut devices = json!({
+            "0": {
+                "HostPath": path_string(&mapped.system_disk),
+                "ReadOnly": true,
+                "ImageFormat": "Vhd1",
+            },
+        });
+        let mut largest = mapped.system_bytes;
+        if let (Some(addons), Some(bytes)) = (&self.addon_disk, mapped.addon_bytes) {
+            devices["1"] = json!({
+                "HostPath": path_string(addons),
+                "ReadOnly": true,
+                "ImageFormat": "Vhd1",
+            });
+            largest = largest.max(bytes);
+        }
+        let count = devices.as_object().map_or(0, |d| d.len());
+        json!({
+            "Devices": devices,
+            // As many devices as there are images: a larger count adds empty ones.
+            "MaximumCount": count,
+            "MaximumSizeBytes": largest.div_ceil(PERSISTENT_MEMORY_SECTION) * PERSISTENT_MEMORY_SECTION,
+            "Backing": "Virtual",
+        })
     }
 
     /// The HCS compute system document (schema 2.3) that creates the VM on this host.
@@ -430,7 +520,10 @@ impl AndroidVmConfig {
             // architecture's console parameters name.
             devices["ComPorts"] = json!({ "0": { "NamedPipe": pipe } });
         }
-        let attachments = match &self.system_image {
+        // In the direct-mapped mode the read-only disks are persistent memory, not SCSI disks.
+        let mapped = self.direct_mapped.as_ref();
+        let system_on_scsi = self.system_image.as_ref().filter(|_| mapped.is_none());
+        let attachments = match system_on_scsi {
             Some(system) => json!({
                 "0": { "Type": "VirtualDisk", "Path": path_string(system), "ReadOnly": true },
                 "1": data,
@@ -446,7 +539,11 @@ impl AndroidVmConfig {
                 "ReadOnly": false,
             });
         }
-        if let Some(addons) = &self.addon_disk {
+        let addons_on_scsi = self
+            .addon_disk
+            .as_ref()
+            .filter(|_| mapped.is_none_or(|m| m.addon_bytes.is_none()));
+        if let Some(addons) = addons_on_scsi {
             let lun = attachments.as_object().map_or(0, |a| a.len()).to_string();
             attachments[lun] = json!({
                 "Type": "VirtualDisk",
@@ -455,6 +552,9 @@ impl AndroidVmConfig {
             });
         }
         devices["Scsi"]["0"]["Attachments"] = attachments;
+        if let Some(mapped) = mapped {
+            devices["VirtualPMem"] = self.persistent_memory(mapped);
+        }
         if let Some(adapter) = &self.network_adapter {
             devices["NetworkAdapters"] = json!({});
             devices["NetworkAdapters"][NETWORK_ADAPTER_NAME] = adapter.to_hcs();

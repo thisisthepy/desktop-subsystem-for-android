@@ -27,6 +27,8 @@
 
 use dsa_host_core::memory::{HostRole, MemorySnapshot};
 
+pub mod direct_mapped;
+
 /// The recorded baseline the measurement is compared with, checked in beside this module.
 pub const BASELINE: &str = include_str!("baseline.json");
 

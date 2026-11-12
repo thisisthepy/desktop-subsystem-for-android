@@ -2642,6 +2642,128 @@ class GuestMemoryTests(unittest.TestCase):
             for directory in make_image.FSTAB_DIRS:
                 self.assertIn(b"max_comp_streams=-1", archive.read(directory + "fstab.dsa"))
 
+    def test_nfr1_the_direct_mapped_table_maps_the_logical_partitions_without_verity(self):
+        # The host's direct-mapped mode attaches the system disk as persistent memory; erofs maps
+        # the files with dax=always, which dm-verity cannot pass through, so those entries lose
+        # their verity flags and nothing else changes.
+        fstab = (Path(make_image.__file__).with_name("fstab.dsa")).read_text()
+        mapped = make_image.direct_mapped_fstab(fstab)
+        normal = [line.split() for line in fstab.splitlines() if line and not line.startswith("#")]
+        changed = [line.split() for line in mapped.splitlines() if line and not line.startswith("#")]
+        self.assertEqual(len(normal), len(changed))
+        logical = 0
+        for before, after in zip(normal, changed):
+            self.assertEqual(before[:3], after[:3])
+            if before[0] in make_image.DIRECT_MAPPED_VERIFIED:
+                # odm keeps dm-verity, so first stage init still checks the verified boot data.
+                self.assertEqual(before, after)
+            elif "logical" in before[4].split(","):
+                logical += 1
+                self.assertEqual(after[3].split(","), before[3].split(",") + ["dax=always"], before[1])
+                self.assertFalse([f for f in after[4].split(",") if f.split("=")[0] in ("avb", "avb_keys")],
+                                 before[1])
+                self.assertEqual([f for f in before[4].split(",") if f.split("=")[0] not in ("avb", "avb_keys")],
+                                 after[4].split(","), before[1])
+            else:
+                # /data, /metadata, misc, zram and the verified boot data of the boot partitions.
+                self.assertEqual(before, after)
+        self.assertGreaterEqual(logical, 6)
+        # Every image carries it beside fstab.dsa, in the partition and the first stage ramdisk.
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
+            names = set(archive.namelist())
+            for directory in make_image.FSTAB_DIRS:
+                self.assertEqual(archive.read(directory + "fstab.dsa_dax").decode(), mapped)
+            self.assertIn("vendor/etc/fstab.dsa_dax 0 0 644 capabilities=0x0",
+                          archive.read("META/vendor_filesystem_config.txt").decode())
+            self.assertEqual(make_image.direct_mapped_problems(names, archive.read,
+                                                               make_image.direct_mapped_entry(False)), [])
+        self.assertEqual(make_image.direct_mapped_entry(True),
+                         {"fstab_suffix": "dsa_dax", "uncompressed_erofs": True,
+                          "verified_partitions": ["odm"]})
+
+    def test_nfr1_the_direct_mapped_table_still_verifies_odm_so_vbmeta_is_checked(self):
+        # First stage init opens verified boot only for an entry it mounts with dm-verity; odm
+        # keeps its entry as it is, so the vbmeta images and the boot images' hashes are
+        # checked, and ro.boot.avb_version is set, as in a normal boot.
+        fstab = (Path(make_image.__file__).with_name("fstab.dsa")).read_text()
+        mapped = make_image.direct_mapped_fstab(fstab)
+        odm = [line.split() for line in mapped.splitlines() if line.startswith("odm ")]
+        self.assertEqual(len(odm), 2)
+        for fields in odm:
+            self.assertIn("avb", fields[4].split(","))
+            self.assertIn("first_stage_mount", fields[4].split(","))
+            self.assertNotIn("dax=always", fields[3].split(","))
+        broken = mapped.replace("odm /odm erofs ro wait,logical,first_stage_mount,slotselect,avb,nofail",
+                                "odm /odm erofs ro,dax=always wait,logical,first_stage_mount,slotselect,nofail")
+        files = {"VENDOR/etc/fstab.dsa": fstab.encode(), "VENDOR/etc/fstab.dsa_dax": broken.encode()}
+        problems = make_image.direct_mapped_problems(set(files), files.__getitem__,
+                                                     make_image.direct_mapped_entry(False))
+        self.assertTrue(any("does not verify /odm" in p for p in problems), problems)
+
+    def test_nfr1_image_json_may_describe_the_hosts_copy_of_the_system_disk(self):
+        fstab = (Path(make_image.__file__).with_name("fstab.dsa")).read_text()
+        files = {"VENDOR/etc/fstab.dsa": fstab.encode(),
+                 "VENDOR/etc/fstab.dsa_dax": make_image.direct_mapped_fstab(fstab).encode()}
+        entry = make_image.direct_mapped_entry(False)
+        entry["system_disk"] = {"format": 1, "bytes": 2304 << 20, "sha256": "ab" * 32, "super_bytes": 2048 << 20}
+        self.assertEqual(make_image.direct_mapped_problems(set(files), files.__getitem__, entry), [])
+        entry["system_disk"]["bytes"] += 4096
+        self.assertEqual(len(make_image.direct_mapped_problems(set(files), files.__getitem__, entry)), 1)
+
+    def test_nfr1_check_image_refuses_a_direct_mapped_table_that_still_verifies(self):
+        fstab = (Path(make_image.__file__).with_name("fstab.dsa")).read_text().encode()
+        files = {"VENDOR/etc/fstab.dsa": fstab, "VENDOR/etc/fstab.dsa_dax": fstab}
+        problems = make_image.direct_mapped_problems(set(files), files.__getitem__,
+                                                     make_image.direct_mapped_entry(False))
+        self.assertTrue(any("is not the direct-mapped table" in p for p in problems), problems)
+        self.assertTrue(any("without dax=always" in p for p in problems), problems)
+        self.assertTrue(any("sets up dm-verity" in p for p in problems), problems)
+        del files["VENDOR/etc/fstab.dsa_dax"]
+        self.assertEqual(make_image.direct_mapped_problems(set(files), files.__getitem__,
+                                                           make_image.direct_mapped_entry(False)),
+                         ["VENDOR/etc/fstab.dsa_dax is missing, so a direct-mapped boot finds no mount table"])
+        self.assertEqual(len(make_image.direct_mapped_problems(set(files), files.__getitem__, None)), 1)
+
+    def test_nfr1_uncompressed_erofs_builds_every_read_only_partition_whole(self):
+        # erofs maps only files stored whole (FLAT_PLAIN or chunk-based); the published build
+        # compresses with lz4hc and keeps APEXes whole through its hints.
+        published = ("erofs_default_compress_hints=device/google/cuttlefish/shared/erofs_compress_hints.txt\n"
+                     "erofs_default_compressor=lz4hc,9\n"
+                     "erofs_sparse_flag=-s\n"
+                     "system_erofs_compressor=lz4\n"
+                     "vendor_erofs_pcluster_size=262144\n"
+                     "system_fs_type=erofs\n")
+        info = make_image.uncompressed_erofs_misc_info(published)
+        settings = dict(line.split("=", 1) for line in info.splitlines())
+        self.assertEqual(settings["erofs_default_compressor"], "none")
+        self.assertEqual(settings["erofs_share_dup_blocks"], "true")
+        self.assertEqual(settings["erofs_sparse_flag"], "-s")
+        self.assertEqual(settings["system_fs_type"], "erofs")
+        for key in ("erofs_default_compress_hints", "system_erofs_compressor", "vendor_erofs_pcluster_size"):
+            self.assertNotIn(key, settings)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "target-files.zip"
+            with zipfile.ZipFile(source, "w") as archive:
+                archive.writestr("SYSTEM/etc/selinux/plat_sepolicy.cil", "(type init)\n")
+                archive.writestr("META/vendor_filesystem_config.txt", "vendor/bin/sh 0 2000 755 capabilities=0x0\n")
+                archive.writestr("META/misc_info.txt", published)
+            for uncompressed in (False, True):
+                modified = root / f"modified-{uncompressed}.zip"
+                make_image.modify(source, modified, uncompressed_erofs=uncompressed)
+                with zipfile.ZipFile(modified) as archive:
+                    text = archive.read("META/misc_info.txt").decode()
+                    self.assertEqual(text, info if uncompressed else published)
+                    problems = make_image.direct_mapped_problems(
+                        set(archive.namelist()), archive.read, make_image.direct_mapped_entry(True))
+                    self.assertEqual(problems == [], uncompressed, problems)
+
+    def test_nfr1_the_system_disk_is_a_whole_number_of_persistent_memory_sections(self):
+        self.assertEqual(make_image.SYSTEM_DISK_ALIGNMENT, 2 << 20)
+        source = Path(make_image.__file__).read_text()
+        self.assertIn("system_disk_size = ((needed + SYSTEM_DISK_ALIGNMENT - 1) // SYSTEM_DISK_ALIGNMENT)",
+                      source)
+
     def test_nfr1_the_kernel_has_what_zram_swap_needs(self):
         config = (make_image.REPO / "dsa/kernel/android.config").read_text().splitlines()
         for option in ("CONFIG_SWAP", "CONFIG_ZSMALLOC", "CONFIG_ZRAM",
@@ -6167,10 +6289,15 @@ class ArmTranslationImageTests(unittest.TestCase):
             "on post-fs-data && property:ro.boot.dsa.arm_translation=default":
                 "/system/etc/dsa/arm-translation/default.img",
         }
+        # In the host's direct-mapped mode, the image's own partition on the persistent memory
+        # the add-on disk is then, mapped with DAX rather than read into the guest's cache.
+        mapped = f"{on} && property:ro.boot.dsa.arm_translation_image=dax"
+        images[mapped] = "/dev/block/by-name/dsa_arm_translation"
         for trigger, image in images.items():
             commands = dict(sections)[trigger]
+            option = "dax=always" if trigger == mapped else "directio"
             mount = (f"mount erofs {image} /mnt/dsa-arm-translation ro nodev nosuid "
-                     "directio,fscontext=u:object_r:dsa_arm_translation_fs:s0,"
+                     f"{option},fscontext=u:object_r:dsa_arm_translation_fs:s0,"
                      "context=u:object_r:system_lib_file:s0")
             self.assertIn(mount, commands, trigger)
             self.assertEqual([c for c in commands if c.startswith("mount erofs ")], [mount], trigger)
@@ -6371,11 +6498,15 @@ class ArmTranslationImageTests(unittest.TestCase):
         images = {
             f"{on} && property:ro.boot.dsa.gapps_image=disk": "/mnt/dsa-addons/gapps.img",
             f"{on} && property:ro.boot.dsa.gapps_image=data": "/data/vendor/dsa/gapps/system.img",
+            # In the host's direct-mapped mode, the image's own partition on the persistent
+            # memory the add-on disk is then, mapped with DAX rather than cached by the guest.
+            f"{on} && property:ro.boot.dsa.gapps_image=dax": "/dev/block/by-name/dsa_gapps",
         }
         for trigger, image in images.items():
             commands = dict(sections)[trigger]
+            option = "dax=always" if trigger.endswith("=dax") else "directio"
             mount = (f"mount erofs {image} /mnt/dsa-gapps ro nodev nosuid "
-                     "directio,fscontext=u:object_r:dsa_gapps_fs:s0,context=u:object_r:system_file:s0")
+                     f"{option},fscontext=u:object_r:dsa_gapps_fs:s0,context=u:object_r:system_file:s0")
             self.assertEqual([c for c in commands if c.startswith("mount ")], [mount], trigger)
             # Mounted before it is laid over: init runs one trigger's actions in file order.
             self.assertLess(triggers.index(trigger), triggers.index(on), trigger)

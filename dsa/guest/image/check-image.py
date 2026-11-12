@@ -268,6 +268,7 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
     if plat_contexts in names and make_image.ZRAM_BACKING_CONTEXT not in z.read(plat_contexts).decode().splitlines():
         problems.append("plat_file_contexts does not label zram's backing folder, so the loop driver "
                         "may not read or write the file")
+    problems += make_image.direct_mapped_problems(names, z.read, manifest.get("direct_mapped"))
     if "SYSTEM/etc/selinux/plat_sepolicy.cil" not in names:
         problems.append("plat_sepolicy.cil is missing from the image")
     else:

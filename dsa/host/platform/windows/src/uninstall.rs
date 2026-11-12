@@ -195,12 +195,18 @@ pub fn remove_user_files(root: &UserRoot, programs: &Path) -> Vec<String> {
 
 /// Removes what the service made in the machine's DSA folder besides the images and the
 /// downloaded setup files (which [`remove_downloaded_images`] and [`remove_downloaded_updates`]
-/// remove): the settings, the logs, the `tmp` folder and the trace switch files of earlier
+/// remove): the settings, the logs, the `tmp` folder, the direct-mapped mode's system disks and
+/// the trace switch files of earlier
 /// releases. A `users` folder, where the first releases kept each user's Android disk, stays,
 /// since a disk that could not be moved into its user's profile is still there. Returns what
 /// could not be removed.
 pub fn remove_machine_files(root: &MachineRoot) -> Vec<String> {
-    let mut paths = vec![root.settings(), root.logs(), root.tmp()];
+    let mut paths = vec![
+        root.settings(),
+        root.logs(),
+        root.tmp(),
+        root.direct_mapped(),
+    ];
     paths.extend(root.old_trace_markers());
     paths
         .iter()

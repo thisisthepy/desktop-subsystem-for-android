@@ -7,7 +7,9 @@
 # The Android 17 x86_64 image is then booted by eight boot checks at once, each on a runner of
 # its own, with the guest kernel built from the same commit. That image is kept in the Actions
 # cache, keyed on everything that decides it, so a run whose inputs did not change takes it
-# from there instead of making it again; the checks run on it all the same.
+# from there instead of making it again; the checks run on it all the same. A ninth check boots
+# it with the uncompressed system disk the host makes of it, to measure the host's direct-mapped
+# mode.
 
 name: Image test
 
@@ -59,6 +61,10 @@ on:
       - "scripts/tests/image-cache-workflow.test.sh"
       - "scripts/tests/image-boot-parallel-workflow.test.sh"
       - "dsa/host/platform/linux/src/config.rs"
+      - "dsa/host/platform/linux/src/crosvm.rs"
+      - "dsa/host/platform/linux/src/launcher.rs"
+      - "dsa/host/core/src/addon_disk.rs"
+      - "dsa/host/core/src/direct_mapped.rs"
   workflow_dispatch:
     inputs:
       keep_disk:
@@ -905,6 +911,58 @@ jobs:
           mapfile -t args < .scratch/image-args
           uv run dsa/guest/image/make-image.py "${args[@]}"
 
+      # The host makes the direct-mapped mode's uncompressed system disk from system.vhdx
+      # itself, so the download stays the size it is (GitHub takes 2 GiB a file). image.json
+      # records the hash the host checks that disk against, made here exactly as the host makes
+      # it, and the hash of the disk as it is, which hosts that attach raw disks check their copy
+      # against; the signed list covers both through image.json's own hash. An image this
+      # cannot describe boots without the mode, so a failure here warns and does not stop it.
+      - name: Record the hashes of the system disk the host makes
+        if: env.BOOT_IMAGE == 'true'
+        working-directory: dsa
+        run: |
+          cargo build -q --release -p dsa-host-core --bin dsa-release
+          dir="$(echo target/image/*/)"
+          if ! target/release/dsa-release direct-mapped "$dir"; then
+            echo "::warning::the direct-mapped system disk could not be described; the image boots without the direct-mapped mode"
+          fi
+          jq '{direct_mapped, system_disk_raw}' "$dir/image.json"
+
+      # The copies the host makes of the image's erofs partitions, beside the originals: each
+      # copy passes erofs-utils' own check, and the two extract to the same files, modes and
+      # owners, so the copy the direct-mapped mode maps holds what the image does.
+      - name: Check the host's uncompressed file systems against erofs-utils
+        if: env.BOOT_IMAGE == 'true'
+        continue-on-error: true
+        run: |
+          sudo apt-get install -y -q erofs-utils >/dev/null
+          work=/mnt/direct-mapped-check
+          sudo rm -rf "$work"
+          sudo mkdir -p "$work"
+          sudo chown "$USER" "$work"
+          dsa/target/release/dsa-release direct-mapped-partitions dsa/target/image/*/ "$work"
+          failed=0
+          for copy in "$work"/*.copy.img; do
+            name="$(basename "$copy" .copy.img)"
+            echo "::group::$name"
+            ls -l "$work/$name.original.img" "$copy"
+            fsck.erofs "$copy" || { echo "::error::fsck.erofs refuses the copy of $name"; failed=1; }
+            sudo fsck.erofs --extract="$work/a" --preserve "$work/$name.original.img" >/dev/null
+            sudo fsck.erofs --extract="$work/b" --preserve "$copy" >/dev/null
+            sudo diff -r --no-dereference "$work/a" "$work/b" > "$work/$name.diff" \
+              || { echo "::error::the copy of $name holds other files"; head -50 "$work/$name.diff"; failed=1; }
+            (cd "$work/a" && sudo find . -printf '%p %m %U %G %y %l\n' | sort) > "$work/$name.a.txt"
+            (cd "$work/b" && sudo find . -printf '%p %m %U %G %y %l\n' | sort) > "$work/$name.b.txt"
+            diff "$work/$name.a.txt" "$work/$name.b.txt" | head -50 \
+              && cmp -s "$work/$name.a.txt" "$work/$name.b.txt" \
+              || { echo "::error::the copy of $name has other modes, owners or links"; failed=1; }
+            echo "$name: $(wc -l < "$work/$name.a.txt") entries"
+            sudo rm -rf "$work/a" "$work/b" "$work/$name.original.img" "$copy"
+            echo "::endgroup::"
+          done
+          sudo rm -rf "$work"
+          exit $failed
+
       # Runs on every image, the one from the cache too.
       - name: Check the image
         run: uv run dsa/guest/image/check-image.py dsa/target/image/*/ .scratch/image-keys
@@ -935,7 +993,7 @@ jobs:
         if: env.BOOT_IMAGE == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: boot-image
+          name: ${{ env.BOOT_IMAGE_ARTIFACT || 'boot-image' }}
           path: |
             dsa/target/image/
             !dsa/target/image/*/signed-target_files.zip
@@ -1188,7 +1246,7 @@ jobs:
             keep: Keep the overlay check's logs
             artifact: overlay-check-logs
             # The idle reclaim and memory measurements boot on runners of their own, below.
-            filter: --skip nfr3_the_idle_reclaim_with_google_apps_is_measured --skip nfr1_the_memory_with_google_play_and_one_app_window_is_measured
+            filter: --skip nfr3_the_idle_reclaim_with_google_apps_is_measured --skip nfr1_the_memory_with_google_play_and_one_app_window_is_measured --skip nfr1_nfr2_the_direct_mapped_disks_are_measured_against_the_cached_ones
             logs: |
               /tmp/overlays-test-*/*.log
               /tmp/overlays-test-*/*.txt
@@ -1215,6 +1273,23 @@ jobs:
             logs: |
               /tmp/overlays-test-*/*.log
               /tmp/overlays-test-*/memory*
+              /tmp/overlays-test-*/google-play-mounts.txt
+          # The host's direct-mapped mode (off by default) against the cached disks: the image
+          # as it is published, whose uncompressed system disk the service makes, checks and
+          # maps on virtio-pmem with DAX, and then the image's disks on virtio-blk, with Google
+          # Play and one app window each time. The guest's page cache and the VM's memory of both
+          # go on the job's page.
+          - check: Measure the direct-mapped read-only disks against the cached ones on the booted image
+            test: overlays
+            timeout: 55
+            keep: Keep the direct-mapped measurement
+            artifact: direct-mapped-measurement
+            filter: nfr1_nfr2_the_direct_mapped_disks_are_measured_against_the_cached_ones
+            summary: /tmp/overlays-test-*/direct-mapped.md
+            logs: |
+              /tmp/overlays-test-*/*.log
+              /tmp/overlays-test-*/direct-mapped*
+              /tmp/overlays-test-*/cached*
               /tmp/overlays-test-*/google-play-mounts.txt
     steps:
       - uses: actions/checkout@v4

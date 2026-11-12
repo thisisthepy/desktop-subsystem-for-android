@@ -120,6 +120,13 @@ pub struct HostConfig {
     /// How long Android stays in Doze before it is frozen, for a user who turned freezing on.
     #[serde(default)]
     pub freeze_after_minutes: Option<u64>,
+    /// The direct-mapped mode: each boot attaches the image's system disk and the user's
+    /// add-on disk as virtio-pmem instead of virtio-blk, so the guest maps the read-only
+    /// partitions' files from the host's page cache rather than keeping a cache of its own
+    /// (`dsa_host_core::direct_mapped`). Off until its saving is measured; only for images
+    /// that carry the mode's mount table.
+    #[serde(default)]
+    pub direct_mapped_images: bool,
     /// Where the local API is served.
     #[serde(default = "default_socket")]
     pub socket: PathBuf,
@@ -304,6 +311,20 @@ mod tests {
         assert_eq!(
             config.session_config().stop_timeout,
             Duration::from_secs(30)
+        );
+    }
+
+    #[test]
+    fn nfr1_the_direct_mapped_mode_is_a_host_setting_that_is_off_by_default() {
+        assert!(
+            !HostConfig::parse(r#"{ "image_dir": "/a" }"#)
+                .unwrap()
+                .direct_mapped_images
+        );
+        assert!(
+            HostConfig::parse(r#"{ "image_dir": "/a", "direct_mapped_images": true }"#)
+                .unwrap()
+                .direct_mapped_images
         );
     }
 

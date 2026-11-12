@@ -750,6 +750,41 @@ What keeps the number small:
 - `dsa-wm` empties its working set 30 seconds after the last task window closes, and logs
   how much it held. Memory it touches again comes back by itself.
 
+### Direct-mapped read-only disks
+
+Off by default, while its saving is measured: `"direct_mapped_images": true` in
+`dsa-hostd.json` (read when the service starts). Each boot then attaches the image's system
+disk and the user's add-on disk as Hyper-V virtual persistent memory instead of SCSI disks.
+The guest mounts the read-only partitions with DAX: it maps each file from the host's mapping
+of the image instead of reading it into a page cache of its own, on top of Windows' file cache
+of the same file. The pages the VM maps are clean file pages, which Windows can drop and read
+again; the guest keeps page structs for the mapped disks, about 1.6% of their size.
+
+- It works on x86_64 PCs only (Hyper-V on ARM64 boots with the disks on SCSI), and only for an
+  image whose `image.json` describes the mode's system disk (`direct_mapped.system_disk`); any
+  other boot attaches the disks as before, with a line in the service's log saying why.
+- The published images compress their read-only partitions, which keeps each download under
+  GitHub's 2 GiB a file, and only a file stored whole can be mapped. So after an image is
+  installed or downloaded and checked, the service makes the disk the mode maps itself, on the
+  PC: a copy of `system.vhdx` with every erofs partition uncompressed, as a fixed VHD, in
+  `%ProgramData%\DSA\direct-mapped\<version>.vhd`. It runs in the background at Windows'
+  lowest priority, resumes where a stopped run left off, and logs its progress, its time and
+  its size. Until the copy is made and checked, Android boots with the image's own disk on
+  SCSI, verified by dm-verity as without the mode. The copy of an image that was replaced is
+  removed.
+- The copy is checked, not trusted: the image build makes the same copy and records its
+  SHA-256 in `image.json`, which the signed release list covers, and the service compares the
+  copy with it before the first boot uses it, and again each time the service starts. A copy
+  that does not match is removed and made again. Only SYSTEM writes the folder; administrators
+  may read and delete, and the VMs read, so a VM opens it read only.
+- A mapped partition cannot be checked by dm-verity in the guest, so the host's check stands
+  in for it. `odm` stays as the image has it, with dm-verity, so the guest still checks the
+  verified boot data (vbmeta and the boot images) as in a normal boot. The guest marks its
+  persistent memory disks read only.
+- About 2.3 GB more on the disk for an Android 17 image (the copy beside the 1.8 GB
+  `system.vhdx`), and a few tens of seconds to a few minutes to make on a laptop SSD; the log
+  says how long it took.
+
 ## DSA Settings
 
 `settings/` is the settings app, a WPF app in C# with WPF UI (MIT), an open source

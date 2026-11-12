@@ -290,6 +290,17 @@ pub struct HostConfig {
     /// (`dsa-hostd <config.json>`), the setting alone turns freezing on.
     #[serde(default)]
     pub freeze_after_minutes: Option<u64>,
+    /// The direct-mapped mode: each boot attaches the image's system disk and the user's
+    /// add-on disk as virtual persistent memory, mapped from their files, instead of SCSI
+    /// disks, so the guest maps the read-only partitions' files rather than keeping a page
+    /// cache of them on top of Windows' (`dsa_host_core::direct_mapped`). Off until its saving
+    /// is measured; on x86_64 hosts only, and only for images that describe the mode's system
+    /// disk. The service makes that disk (an uncompressed copy of the image's) in the background
+    /// after each image is installed or downloaded, checks it against the image's hash, and keeps
+    /// it in the machine's `direct-mapped` folder; until it is ready, Android boots as without
+    /// the mode.
+    #[serde(default)]
+    pub direct_mapped_images: bool,
     /// The machine's DSA folder: the folder the configuration file is in, which `dsa-hostd`
     /// fills in when it reads the file. Not a key of the file.
     #[serde(skip)]
@@ -686,6 +697,7 @@ impl HostConfig {
             hosting_process_name_suffix: None,
             fine_grained_memory: false,
             network_adapter: None,
+            direct_mapped: None,
         }
     }
 

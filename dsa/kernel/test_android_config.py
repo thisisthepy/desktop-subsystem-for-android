@@ -243,9 +243,17 @@ class AndroidKernelConfigTests(unittest.TestCase):
                                        "/data/vendor/dsa/arm-translation/system.img",
                                        "/system/etc/dsa/arm-translation/default.img"],
         }
+        # In the host's direct-mapped mode each add-on image is mounted from its own partition on
+        # the persistent memory the add-on disk is then, with DAX, so it is not read into a cache.
+        partitions = {"dsa-gapps.rc": "/dev/block/by-name/dsa_gapps",
+                      "dsa-arm-translation.rc": "/dev/block/by-name/dsa_arm_translation"}
         for name, files in images.items():
             mounts = [line.split() for line in (image / name).read_text().splitlines()
                       if line.strip().startswith("mount erofs ")]
+            mapped = [words for words in mounts if words[2] == partitions[name]]
+            self.assertEqual(len(mapped), 1, name)
+            self.assertIn("dax=always", mapped[0][-1].split(","), name)
+            mounts = [words for words in mounts if words not in mapped]
             self.assertEqual(sorted(words[2] for words in mounts), sorted(files), name)
             for words in mounts:
                 self.assertNotIn("loop@", " ".join(words), name)
@@ -258,6 +266,55 @@ class AndroidKernelConfigTests(unittest.TestCase):
         self.assertEqual([words[2] for words in disk], ["/dev/block/by-name/dsa_addons"])
         # The loop driver stays for apexd.
         self.assertIn("CONFIG_BLK_DEV_LOOP=y", lines)
+
+    def test_nfr1_the_system_images_can_be_mapped_from_persistent_memory_with_dax(self):
+        # With the direct-mapped system setting the host attaches the read-only disks as
+        # persistent memory (Hyper-V's through ACPI NFIT, virtio-pmem under KVM), and erofs maps
+        # their files with dax=always instead of caching them in the guest.
+        lines = fragment_lines(CONFIG)
+        for option in ["CONFIG_ACPI_NFIT=y", "CONFIG_LIBNVDIMM=y", "CONFIG_BLK_DEV_PMEM=y",
+                       "CONFIG_VIRTIO_PMEM=y", "CONFIG_ZONE_DEVICE=y", "CONFIG_DAX=y",
+                       "CONFIG_FS_DAX=y", "CONFIG_EROFS_FS=y"]:
+            self.assertIn(option, lines)
+        # dm-linear carries DAX for the logical partitions; dm-verity cannot, so the image's
+        # direct-mapped table verifies nothing itself (the host checks the disk instead).
+        patch = (PATCHES / "pmem-dax.patch").read_text()
+        self.assertIn("drivers/acpi/nfit/core.c", patch)
+        # A raw namespace on Hyper-V gets page structs, which DAX needs, without a pfn info
+        # block the read-only device could not hold.
+        self.assertIn("+\t\tset_bit(ND_REGION_PAGEMAP, &ndr_desc->flags);", patch)
+        # The NVDIMM bus sits below the platform device "nfit", which the image names as a boot
+        # device, so first stage init makes by-name links for the persistent memory disk.
+        self.assertIn('platform_device_register_simple("nfit", PLATFORM_DEVID_NONE,', patch)
+        self.assertIn("nvdimm_bus_register(acpi_nfit_bus_parent(dev),", patch)
+        self.assertIn("+#include <linux/platform_device.h>", patch)
+        # virtio-pmem's bus moves below the platform device "virtio-pmem" the same way: the VMM
+        # picks a pmem device's PCI slot itself, so the slot cannot be named as a boot device.
+        self.assertIn("drivers/nvdimm/virtio_pmem.c", patch)
+        self.assertIn('platform_device_register_simple("virtio-pmem",', patch)
+        self.assertIn("nvdimm_bus_register(virtio_pmem_bus_parent(vdev),", patch)
+
+    def test_nfr1_persistent_memory_disks_are_read_only_in_the_guest(self):
+        # Every persistent memory device in the guest is a disk image the host maps read only,
+        # so its region is read only and the pmem driver marks its disk read only: a write
+        # fails in the guest rather than reaching the host's mapping, as on the read-only SCSI
+        # disk outside the direct-mapped mode.
+        patch = (PATCHES / "pmem-dax.patch").read_text().replace("\r\n", "\n")
+        self.assertIn("+\tND_REGION_READONLY = 5,", patch)
+        self.assertIn("+\tif (test_bit(ND_REGION_READONLY, &ndr_desc->flags))\n+\t\tro = 1;", patch)
+        self.assertIn("+\t\tset_bit(ND_REGION_READONLY, &ndr_desc->flags);", patch)
+        self.assertIn("+\tset_bit(ND_REGION_READONLY, &ndr_desc.flags);", patch)
+
+    def test_nfr1_the_pmem_patch_hunks_count_their_lines(self):
+        text = (PATCHES / "pmem-dax.patch").read_text().replace("\r\n", "\n")
+        hunks = re.split(r"(?m)^(@@ -\d+,(\d+) \+\d+,(\d+) @@.*)$", text)
+        self.assertGreater(len(hunks), 1)
+        for at in range(1, len(hunks), 4):
+            old, new = int(hunks[at + 1]), int(hunks[at + 2])
+            body = [line for line in hunks[at + 3].strip("\n").split("\n")
+                    if not line.startswith(("diff --git ", "--- a/", "+++ b/"))]
+            self.assertEqual(sum(1 for line in body if line[:1] in (" ", "-")), old, hunks[at])
+            self.assertEqual(sum(1 for line in body if line[:1] in (" ", "+")), new, hunks[at])
 
     def test_fr1_binder_device_nodes_are_created_for_android_init(self):
         config = CONFIG.read_text()

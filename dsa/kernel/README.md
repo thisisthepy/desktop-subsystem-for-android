@@ -32,7 +32,17 @@ when VMBus is there and otherwise leaves the place to virtio's.
 
 The patches touch only architecture-neutral code (VMBus's ACPI probe, which Hyper-V uses on
 both architectures, the command-line partition parser, cgroup v1, wakeup sources, shmem,
-free page reporting, ext4), so the same set applies to both builds.
+free page reporting, ext4, the persistent memory drivers), so the same set applies to both builds.
+
+The host's direct-mapped mode (off by default) attaches the read-only disks as persistent
+memory: Hyper-V's virtual persistent memory, which the kernel finds through ACPI's NFIT, or
+virtio-pmem under KVM. erofs then maps their files with DAX instead of caching them.
+`patches/pmem-dax.patch` gives Hyper-V's raw persistent memory page structs, which DAX needs
+(virtio-pmem has them already), and puts each persistent memory bus below a platform device of
+its own (`nfit`, `virtio-pmem`): Android makes `/dev/block/by-name` links only for disks below
+a boot device, and the host names those two in such a boot. It also makes every persistent
+memory region read only (`ND_REGION_READONLY`), so its disk refuses writes, as the read-only
+SCSI disk does outside the mode: each one is a disk image the host maps read only.
 
 Memory the guest frees goes back to the host at once. Upstream free page reporting waits two
 seconds before each pass, and again after each pass that used up its budget, so a large
