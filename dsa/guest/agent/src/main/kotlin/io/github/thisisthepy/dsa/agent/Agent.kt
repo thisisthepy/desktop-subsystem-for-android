@@ -1071,6 +1071,7 @@ class Agent(
         settingsSync.tasksRunning(restartedByFontScale(running))
         val arranging = System.nanoTime()
         val bounds = arranger.arrange(running.filter(reporter::reportable))
+        for ((taskId, to) in arranger.resizedTo) trace.asked(taskId, to.right - to.left, to.bottom - to.top)
         trace.applied((System.nanoTime() - arranging) / 1_000_000.0)
         if (arranger.waiting) checkMoves()
         if (!channel.connected) return
