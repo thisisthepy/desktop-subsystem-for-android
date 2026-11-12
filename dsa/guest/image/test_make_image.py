@@ -4169,6 +4169,16 @@ class CompiledSystemAppTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             make_image.next_revision(spec, ["android-17.0.0-16373615-99"])
 
+    def test_fr14_a_development_build_names_its_number_after_the_revision(self):
+        spec = {"version": "17.0.0-16373615-9", "build_id": "16373615", "revision": 9}
+        dev = make_image.as_development_build(make_image.revised(spec, 15), 42)
+        self.assertEqual(dev["version"], "17.0.0-16373615-15-dev.42")
+        # The build number the image gets is the revision's, unchanged.
+        self.assertEqual(dev["revision"], 15)
+        for bad in (0, -1, "7"):
+            with self.assertRaises(ValueError):
+                make_image.as_development_build(spec, bad)
+
     def test_fr14_the_release_publishes_each_image_under_a_new_revision(self):
         workflow = (Path(make_image.__file__).resolve().parents[3] / ".github/workflows/release-image.yml").read_text()
         self.assertIn("make-image.py --major ${{ matrix.android }} --arch ${{ matrix.arch }} --next-revision", workflow)
