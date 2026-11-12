@@ -23,6 +23,12 @@ class LauncherApp(
     val primaryAbi: String = "",
     /** The native libraries of the app's APKs on the device, base and splits together: ABI to names. */
     val nativeLibraries: Map<String, List<String>> = emptyMap(),
+    /**
+     * The user ID the app shares with other apps (its manifest's `android:sharedUserId`); empty
+     * for an app with a user ID of its own. Apps that share one run under one uid, so the host
+     * treats them as one group for root elevation and shows them together.
+     */
+    val sharedUserId: String = "",
 ) {
     /** Whether the host would show [other] exactly as this. */
     fun sameAs(other: LauncherApp): Boolean =
@@ -38,7 +44,8 @@ class LauncherApp(
             dataBytes == other.dataBytes &&
             cacheBytes == other.cacheBytes &&
             primaryAbi == other.primaryAbi &&
-            nativeLibraries == other.nativeLibraries
+            nativeLibraries == other.nativeLibraries &&
+            sharedUserId == other.sharedUserId
 }
 
 /** The installed apps a launcher lists, and word of every change to them. */

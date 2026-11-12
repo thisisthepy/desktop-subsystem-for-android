@@ -128,6 +128,23 @@ class InstalledAppReporterTest {
     }
 
     @Test
+    fun fr35_apps_sharing_a_user_id_are_approved_as_one_group() {
+        val one = LauncherApp("org.example.one", "One", byteArrayOf(1), sharedUserId = "org.example.shared")
+        val two = LauncherApp("org.example.two", "Two", byteArrayOf(2), sharedUserId = "org.example.shared")
+        reporter.update(listOf(one, two, app("org.example.alone")))
+
+        val byPackage = sent.filter { it.hasInstalledApp() }.associate { it.installedApp.packageName to it.installedApp }
+        assertEquals("org.example.shared", byPackage.getValue("org.example.one").sharedUserId)
+        assertEquals("org.example.shared", byPackage.getValue("org.example.two").sharedUserId)
+        assertEquals("", byPackage.getValue("org.example.alone").sharedUserId)
+
+        // An app that joins a group is described again, so the host groups it at once.
+        sent.clear()
+        reporter.update(listOf(one, two, LauncherApp("org.example.alone", "Name of org.example.alone", byteArrayOf(1, 2, 3), sharedUserId = "org.example.shared")))
+        assertEquals(listOf("org.example.alone"), described())
+    }
+
+    @Test
     fun fr23_a_new_version_or_size_describes_the_app_again() {
         reporter.update(listOf(detailed()))
         sent.clear()
