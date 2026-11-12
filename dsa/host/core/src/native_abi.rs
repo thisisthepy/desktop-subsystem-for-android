@@ -222,6 +222,58 @@ pub fn choose(
     }
 }
 
+/// Whether an app with `libraries` runs only through ARM translation: it has arm64-v8a
+/// libraries and no x86_64 ones.
+pub fn needs_translation(libraries: &NativeLibraries) -> bool {
+    libraries.has(ARM64) && !libraries.has(X86_64)
+}
+
+/// The ABI the package installer is told to install an app with `libraries` for, as
+/// [`choose`] says, or why the app is not installed at all. `translation` says whether the
+/// running Android translates ARM code (`None` when it cannot be asked); it is asked only when
+/// the answer depends on it.
+///
+/// An app whose 64-bit code is for arm64-v8a only is installed as arm64-v8a while translation
+/// is on, and refused with [`TranslationOff`] while it is off: Android would refuse it too, in
+/// words that do not say translation is the way out. When translation cannot be asked, the app
+/// is left to Android.
+pub fn install_abi(
+    libraries: &NativeLibraries,
+    translation: impl FnOnce() -> Option<bool>,
+) -> Result<Option<&'static str>, TranslationOff> {
+    if needs_translation(libraries) {
+        return match translation() {
+            Some(true) => Ok(Some(ARM64)),
+            Some(false) => Err(TranslationOff),
+            None => Ok(None),
+        };
+    }
+    Ok(choose(libraries, || translation() == Some(true)))
+}
+
+/// Why an app is not installed: its 64-bit native code is for arm64-v8a only, which the guest
+/// runs through ARM translation, and the running Android does not translate ARM code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TranslationOff;
+
+impl TranslationOff {
+    /// A stable code for programs, such as the install window, that say it in the user's
+    /// language.
+    pub fn code(self) -> &'static str {
+        "translation-off"
+    }
+}
+
+impl fmt::Display for TranslationOff {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(
+            "the app's native code is for arm64-v8a only, which DSA's Android runs through ARM \
+             translation, and ARM translation is not on in the running Android. Turn it on \
+             under ARM apps, restart Android and install the app again",
+        )
+    }
+}
+
 /// Whether `abilist`, the guest's `ro.product.cpu.abilist`, holds arm64-v8a, which it does
 /// only while a translator is in place.
 pub fn translates_arm64(abilist: &str) -> bool {
@@ -930,6 +982,74 @@ mod tests {
         assert_eq!(choose(&apk(X86_PARTIAL), off), Some(X86_64));
         assert_eq!(choose(&apk(ARM_ONLY), off), None);
         assert_eq!(choose(&apk(NO_LIBRARIES), off), None);
+    }
+
+    #[test]
+    fn fr25_an_app_with_x86_64_and_arm64_code_is_installed_as_x86_64() {
+        for translation in [Some(true), Some(false), None] {
+            assert_eq!(
+                install_abi(&apk(BOTH), || translation),
+                Ok(Some(X86_64)),
+                "{translation:?}"
+            );
+        }
+        // Partial x86_64 code runs as ARM only while translation is on.
+        assert_eq!(
+            install_abi(&apk(X86_PARTIAL), || Some(true)),
+            Ok(Some(ARM64))
+        );
+        assert_eq!(
+            install_abi(&apk(X86_PARTIAL), || Some(false)),
+            Ok(Some(X86_64))
+        );
+    }
+
+    #[test]
+    fn fr25_an_app_with_arm64_code_only_is_installed_as_arm64_while_translation_is_on() {
+        assert!(needs_translation(&apk(ARM_ONLY)));
+        assert_eq!(install_abi(&apk(ARM_ONLY), || Some(true)), Ok(Some(ARM64)));
+        // Android judges it when the running Android cannot be asked.
+        assert_eq!(install_abi(&apk(ARM_ONLY), || None), Ok(None));
+    }
+
+    #[test]
+    fn fr25_an_app_with_arm64_code_only_is_refused_with_its_reason_while_translation_is_off() {
+        let refused = install_abi(&apk(ARM_ONLY), || Some(false)).unwrap_err();
+        assert_eq!(refused.code(), "translation-off");
+        let text = refused.to_string();
+        assert!(text.contains("arm64-v8a only"), "{text}");
+        assert!(text.contains("ARM translation is not on"), "{text}");
+        assert!(text.contains("Turn it on under ARM apps"), "{text}");
+        // ARM code beside 32-bit code needs translation as much.
+        let mut with_32_bit = apk(ARM_ONLY);
+        with_32_bit.add("armeabi-v7a", "libmain.so");
+        assert_eq!(
+            install_abi(&with_32_bit, || Some(false)),
+            Err(TranslationOff)
+        );
+    }
+
+    #[test]
+    fn fr25_an_app_with_32_bit_code_only_is_still_refused() {
+        // The install refuses it before Android sees it, whatever translation does.
+        for abis in [
+            &["lib/armeabi-v7a/libmain.so"][..],
+            &["lib/x86/libmain.so"][..],
+        ] {
+            let mut code = NativeCode::new();
+            for entry in abis {
+                code.add_entry(entry, 1);
+            }
+            assert!(
+                matches!(code.wont_run(), Some(WontRun::ThirtyTwoBitOnly { .. })),
+                "{abis:?}"
+            );
+            // Neither 64-bit ABI is ever chosen for it.
+            let libraries = apk(abis);
+            for translation in [Some(true), Some(false), None] {
+                assert_eq!(install_abi(&libraries, || translation), Ok(None));
+            }
+        }
     }
 
     #[test]

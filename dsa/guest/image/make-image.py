@@ -18,7 +18,9 @@ It takes the pinned target_files, otatools and dexpreopt_tools (fetch.sh downloa
    (dexpreopt_tools.zip), against the guest's boot image, so they do not run interpreted, and
    compiles again, with its own filter, any app the published build shipped compiled whose
    dex no longer matches its odex (PREBUILT_OAT_RECORD), and services.jar, whose window
-   manager it edits so a freeform window gets its status bar inset (SERVICES_CODE);
+   manager it edits so a freeform window gets its status bar inset (SERVICES_INSETS_CODE) and
+   whose package manager it edits so an app with arm64-v8a code only installs while ARM
+   translation is on (SERVICES_ABI_CODE);
 6. builds the images, and lays them out on the template of a user's Android disk.
 
 The results go to dsa/target/image/<version>/:
@@ -445,13 +447,58 @@ DOCUMENTSUI_CODE = {
 # dex: the edited jar is compiled again with the published build's filter, class loader
 # context and profile (SERVICES_PROFILE), as compile_apps compiles an edited app.
 SERVICES_JAR = "SYSTEM/framework/services.jar"
-SERVICES_CODE = {
+SERVICES_INSETS_CODE = {
     "Lcom/android/server/wm/InsetsPolicy;->enforceInsetsPolicyForTarget": ("replace call", {
         "after": "Landroid/app/WindowConfiguration;->isFloating",
         "old": "Landroid/view/WindowInsets$Type;->captionBar",
         "new": "Landroid/view/WindowInsets$Type;->systemBars",
     }),
 }
+
+# An app whose native code is for arm64-v8a only installs while ARM translation is on, whatever
+# its manifest says. PackageAbiHelperImpl.derivePackageAbi chooses the ABI of a multiArch app
+# (android:multiArch="true") that targets Android 15 or later, installed without an ABI
+# override, from the "natively supported" 64-bit ABIs only: Build.SUPPORTED_64_BIT_ABIS
+# without each ABI a native bridge translates (ro.dalvik.vm.isa.<isa> set). Its libraries
+# must cover one of those, or Android refuses the app with
+# INSTALL_FAILED_MULTI_ARCH_NOT_MATCH_ALL_NATIVE_ABIS ("The multiArch app's native libs don't
+# support all the natively supported ABIs of the device"). With translation on, the guest's
+# 64-bit ABIs are x86_64 and arm64-v8a (arm-translation-on.prop), arm64-v8a through the bridge,
+# so that list was x86_64 alone, and Google Play's arm64-v8a-only multiArch apps were refused
+# although the translator runs them, as it runs every other arm64-v8a app.
+#
+# getNativelySupported64BitAbis returns Build.SUPPORTED_64_BIT_ABIS instead, in its order:
+# x86_64 first, then arm64-v8a while translation is on. Android takes the first of them the
+# app's libraries have, so an app with x86_64 code is installed as x86_64 as before, and one
+# with arm64-v8a code only is installed as arm64-v8a and runs through the translator. With
+# translation off the list is x86_64 alone (arm-translation-off.prop), so nothing changes:
+# Android refuses an arm64-v8a-only app, and the host says why before it reaches Android (the
+# translation-off refusal). The guest is 64-bit only: Build.SUPPORTED_32_BIT_ABIS is empty and
+# the 32-bit list is left as it is, so an app with only 32-bit code is still refused.
+_ABI_HELPER = "Lcom/android/server/pm/PackageAbiHelperImpl;"
+SERVICES_ABI_CODE = {
+    f"{_ABI_HELPER}->getNativelySupported64BitAbis": ("replace code", {
+        # As d8 compiles Android 16's and 17's: the cached list, or the list derived from
+        # Build.SUPPORTED_64_BIT_ABIS and cached.
+        "old": [
+            f"sget-object v0, {_ABI_HELPER}->sNativelySupported64BitAbis",
+            "if-eqz v0, :derive",
+            "return-object v0",
+            ":derive",
+            "sget-object v0, Landroid/os/Build;->SUPPORTED_64_BIT_ABIS",
+            f"invoke-static {{v0}}, {_ABI_HELPER}->getNativelySupportedAbis",
+            "move-result-object v0",
+            f"sput-object v0, {_ABI_HELPER}->sNativelySupported64BitAbis",
+            "return-object v0",
+        ],
+        "registers": 1,
+        "new": [
+            "sget-object v0, Landroid/os/Build;->SUPPORTED_64_BIT_ABIS",
+            "return-object v0",
+        ],
+    }),
+}
+SERVICES_CODE = {**SERVICES_INSETS_CODE, **SERVICES_ABI_CODE}
 # The jars whose dex make-image.py edits, compiled again after the edit like EDITED_APPS.
 EDITED_JARS = [SERVICES_JAR]
 # The profile services.jar was compiled with: frameworks/base's services/art-profile and
@@ -2316,6 +2363,7 @@ DEX_ASSEMBLY = {
     "goto": (0x28, "10t"), "if-ge": (0x35, "22t"), "if-eqz": (0x38, "21t"),
     "if-nez": (0x39, "21t"),
     "iget": (0x52, "22c"), "iget-object": (0x54, "22c"), "sget": (0x60, "21c"),
+    "sget-object": (0x62, "21c"), "sput-object": (0x69, "21c"),
     "invoke-virtual": (0x6E, "35c"), "invoke-super": (0x6F, "35c"), "invoke-direct": (0x70, "35c"),
     "invoke-static": (0x71, "35c"), "float-to-int": (0x87, "12x"),
     "add-float/2addr": (0xC6, "12x"), "mul-float/2addr": (0xC8, "12x"),
@@ -2617,8 +2665,9 @@ def zip_misaligned(data, alignment=4):
 
 def edit_services_jar(data, name):
     """services.jar with InsetsPolicy giving a freeform window its status bar inset
-    (SERVICES_CODE), its stored dex files aligned again. Returns the jar as it was when it
-    already has the edit."""
+    (SERVICES_INSETS_CODE) and the package manager taking every 64-bit ABI the guest lists for
+    a multiArch app (SERVICES_ABI_CODE), its stored dex files aligned again. Returns the jar as
+    it was when it already has the edits."""
     edited = edit_apk(data, name, code=SERVICES_CODE)
     return data if edited is data else aligned_zip(edited)
 
@@ -4061,8 +4110,8 @@ GAPPS_FRAMEWORK_OVERLAY = {
     "bool/config_enableGeocoderOverlay": False,
     "string/config_geocoderProviderPackageName": GAPPS_GEOCODER_PACKAGE,
 }
-# The host window's title bar is Android's status bar (see SERVICES_CODE): many apps take the
-# status bar's height from the framework's resources (getIdentifier("status_bar_height",
+# The host window's title bar is Android's status bar (see SERVICES_INSETS_CODE): many apps
+# take the status bar's height from the framework's resources (getIdentifier("status_bar_height",
 # "dimen", "android"), or SystemBarUtils' status_bar_height_default) rather than from their
 # window's insets, and pad their own status bar background and toolbar by it, as they would on
 # a phone. These resources are the title bar's height, so such an app also stays clear of it.

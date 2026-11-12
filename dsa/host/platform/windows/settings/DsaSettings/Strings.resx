@@ -2083,6 +2083,9 @@
   <data name="ApkWindow_Reason_invalid-bundle" xml:space="preserve">
     <value>The bundle is not one app that Android can install.</value>
   </data>
+  <data name="ApkWindow_Reason_translation-off" xml:space="preserve">
+    <value>The app runs only as ARM code (arm64-v8a), and ARM translation is not on. Turn it on under ARM apps, restart Android, and install the app again.</value>
+  </data>
   <data name="UpdatesAndroidHeader.Text" xml:space="preserve">
     <value>Android</value>
   </data>
