@@ -4002,6 +4002,70 @@ fn fr25_an_app_that_runs_as_arm_or_has_no_arm_code_is_offered_nothing() {
 }
 
 #[test]
+fn fr25_a_32_bit_build_that_ends_at_start_is_told_to_get_its_64_bit_build() {
+    use dsa_host_core::native_abi::Notice;
+    let (session, mut agent, _launcher) = active_session();
+    let watch = session.watch_notifications();
+    let tasks = session.watch_tasks();
+    // Chrome's build made to run as 32-bit code, as Google Play delivers it to a device
+    // without 32-bit code: the same library under x86 and x86_64, and no ARM code.
+    send_body(
+        &mut agent,
+        Body::InstalledApp(dsa_protocol::control::InstalledApp {
+            package_name: "com.android.chrome".into(),
+            label: "Chrome".into(),
+            primary_abi: "x86_64".into(),
+            version_code: 495106126,
+            native_libraries: vec![
+                game_libraries("x86", &["libmonochrome.so"]),
+                game_libraries("x86_64", &["libmonochrome.so"]),
+            ],
+            ..Default::default()
+        }),
+    );
+    send_body(
+        &mut agent,
+        Body::InstalledApps(dsa_protocol::control::InstalledApps {
+            package_names: vec!["com.android.chrome".into()],
+        }),
+    );
+    loop {
+        if let TaskEvent::Installed(apps) = tasks.events.recv_timeout(WAIT).expect("the apps") {
+            if apps.iter().any(|app| app.package_name == "com.android.chrome") {
+                break;
+            }
+        }
+    }
+    send_body(
+        &mut agent,
+        Body::NativeLibraryCrash(dsa_protocol::control::NativeLibraryCrash {
+            package_name: "com.android.chrome".into(),
+            detail: "java.lang.RuntimeException: Starting in 64-bit mode requires the 64-bit \
+                     native library."
+                .into(),
+            arm64_supported: true,
+        }),
+    );
+    let notice = match watch.recv_timeout(WAIT).unwrap() {
+        NotificationEvent::Posted(notice) => notice,
+        other => panic!("expected the notice, not {other:?}"),
+    };
+    assert_eq!(notice.key, Notice::Needs64Bit.key("com.android.chrome"));
+    assert_eq!(notice.app_label, "Chrome");
+    assert!(notice.text.contains("x86_64 build"), "{}", notice.text);
+    // A click removes it and installs nothing.
+    session
+        .notification_action(NotificationAction::Open {
+            key: notice.key.clone(),
+        })
+        .expect("taken");
+    assert_eq!(
+        watch.recv_timeout(WAIT).unwrap(),
+        NotificationEvent::Removed { key: notice.key }
+    );
+}
+
+#[test]
 fn fr23_installed_apps_carry_their_version_dates_sizes_and_kind() {
     let (session, mut agent, _launcher) = active_session();
     let watch = session.watch_tasks();

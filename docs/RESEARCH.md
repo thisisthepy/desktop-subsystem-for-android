@@ -2752,3 +2752,38 @@ FLO의 BLAST 버퍼 5개: `VRI[MainActivity]#1`의 4개는 HWUI가 창마다 잡
 - 모든 값. 새 Framework 이미지에서 클라이언트 합성(영상 재생) 뒤 logcat의 "its buffers are freed"와 dumpsys의 `LegacyFramebufferSurface` 슬롯이 비는지, 렌더러 private이 63 MiB 줄어드는지 재야 한다.
 - 이 빌드에서 클라이언트 합성 782 프레임(`frame-counter=782`)이 언제 무엇 때문에 생겼는지. logcat에 SurfaceFlinger와 hwcomposer의 정보 줄이 거의 없다.
 - "unaccounted"의 나머지(약 160 MiB). 게스트에서 `/proc/meminfo`의 SwapCached와 KReclaimable, `/proc/vmstat`의 `nr_memmap_pages`, `/proc/zoneinfo`의 pageset `count`, binder 통계를 함께 읽어야 나뉜다.
+
+## R36. Google Play가 DSA에 Chrome 101(32비트 브라우저 빌드)을 내려 준 까닭 (FR-11, FR-25, FR-32)
+
+**기준.** 소유자 PC의 DSA(Android 17 `16373615`, 지문 `Samsung/dsa_x86_64/dsa_x86_64:17/CP2A.260605.016/...`, 모델 `NT960XGP-G72AG`)를 adb로 읽기만 했다(`getprop`, `pm list features`, `pm list libraries`, `logcat -d`, `/proc/meminfo`). 게스트는 `ro.product.cpu.abilist=x86_64,arm64-v8a`, `ro.system.product.cpu.abilist32`가 빈 값, `ro.dalvik.vm.isa.arm64=x86_64`, `ro.zygote=zygote64`, `MemTotal` 2,542,800 kB다. 비교 대상은 이 PC의 SDK에 있는 `system-images/android-35/google_apis/x86_64`(`AE3A.240806.043`, `abilist32` 빈 값)다. `google_apis_playstore/x86_64`는 받다 만 폴더(`.installer`뿐)라 비교하지 못했다. 이미지는 `.scratch/chrome-trichrome/`에 복사해 7-Zip 24.08로 GPT, super, ext4를 차례로 풀고, APK는 aapt2(build-tools 36.0.0)로 읽었다. 버전 코드는 Chromium `build/util/android_chrome_version.py`(main)의 표로 풀었다. 버전 코드는 `{빌드}{패치 3자리}{패키지 1자리}{ABI 1자리}`이고, ABI 자리의 표는 빌드 5750에서 바뀐다. 작업이 끝난 뒤 복사본은 지웠다.
+
+### 본 것
+
+- Play가 설치한 Chrome은 `chromium-Monochrome.aab-stable-495106126`, 101.0.4951.61이다. 4951 / 061 / 2 / 6: 빌드가 5750보다 작아 옛 표를 쓰고, 패키지 자리 2는 MONOCHROME, ABI 자리 6은 intel `32_64`(브라우저는 32비트 x86, WebView만 64비트 x86_64)다. 32비트 ABI가 없는 기기에서 Android는 이 앱을 x86_64로 설치한다. x86_64 라이브러리에는 WebView만 있어서, Chrome은 시작하자마자 "Starting in 64-bit mode requires the 64-bit native library"로 끝난다(`am_crash` 세 번). Trichrome 라이브러리는 설치되지 않았다. Monochrome은 라이브러리 없이 혼자 도는 형식이기 때문이다.
+- 에뮬레이터 이미지의 Chrome은 `product/app/Chrome`, `TrichromeLibrary`, `WebViewGoogle`(각각 `.apk.gz`와 `-Stub`)이고, 모두 124.0.6367.219, 버전 코드 636771938이다. 6367 / 219 / 3 / 8: TRICHROME, 새 표의 intel `64_32`(브라우저 64비트, WebView 32비트)다. Chrome과 TrichromeLibrary는 `lib/x86_64`에 코드(`libmonochrome_64.so` 129.7 MB)를, `lib/x86`에 빈 `libplaceholder.so`를 둔다. WebViewGoogle은 반대로 `lib/x86`에 코드, `lib/x86_64`에 빈 자리표시자를 둔다. 셋 다 `multiArch=true`이고 `use32bitAbi`가 없으며, minSdk 29, targetSdk 34다. 에뮬레이터에서 Chrome이 되는 까닭은 이미지가 64비트 브라우저 빌드를 미리 설치해 두기 때문이다. 이 PC의 AVD(`skylens35`, `google_apis`, RAM 2G)에는 Play가 없으니, 에뮬레이터의 결과는 Play가 무엇을 고르는지에 대해서는 아무것도 말하지 않는다.
+- 사용자가 APKPure로 받은 `.xapk`는 Chrome 151.0.7922.174, 792217431이다. 7922 / 174 / 3 / 1: TRICHROME, 새 표의 arm `32_64`다. 기본 APK는 `lib/armeabi-v7a`에 코드, `lib/arm64-v8a`에 빈 자리표시자를 두고 `use32bitAbi=true`, `multiArch=true`, targetSdk 36이다. 패키지 관리자는 "The multiArch app's native libs don't support all the natively supported ABIs of the device"로 거부했다. Android 15부터 `forceMultiArchNativeLibsMatch` 플래그가 켜져 있고 targetSdk가 35 이상이며 ABI 지정이 없으면, multiArch 앱은 기기 고유 ABI마다 라이브러리를 가져야 한다(`PackageAbiHelperImpl`). 기기 고유 ABI는 `ro.dalvik.vm.isa.<isa>`가 없는 ABI라, DSA에서는 x86_64뿐이다. arm64는 번역이라 빠진다.
+- 따라서 Play가 arm64 전용 multiArch 앱(targetSdk 35 이상)을 내려 주면 DSA의 패키지 관리자는 번역이 켜져 있어도 거부한다. 호스트 설치는 ABI를 지정하므로(`setAbiOverride`) 이 검사를 받지 않는다.
+- 기능 비교: 에뮬레이터는 `android.hardware.bluetooth`, `bluetooth_le`, `location.gps`, `location.network`, `telephony.*`, `software.midi`를 더 알린다. 그러나 Chrome 101의 매니페스트(태그 `101.0.4951.61`)도 151도 `uses-permission-sdk-23 BLUETOOTH`로 `android.hardware.bluetooth`를 암묵적으로 요구한다(aapt2의 `uses-feature-sdk-23`). 두 버전의 조건이 같으므로, 기능 차이로는 101만 받은 것을 설명할 수 없다. Chrome이 쓰는 공유 라이브러리 가운데 DSA에 없는 것도 없다. `com.google.android.trichromelibrary`는 정적 라이브러리라 Play가 함께 준다.
+- APKMirror에는 2026년의 Chrome에도 x86 + x86_64 빌드가 있다. 예를 들어 Trichrome Library Dev 788500038은 7885 / 000 / 3 / 8, intel `64_32`다. 그러니 DSA에서 돌 64비트 브라우저 빌드는 Play에 있는데, Play가 DSA에 주지 않는다.
+- 메모리: Chrome은 64비트 브라우저를 RAM 8 GB 이상인 Android 10 이상 기기에만 주고, 나머지에는 32비트 브라우저 빌드(`32_64`)를 준다고 알려져 있다(2021년 출시 보도). DSA 게스트의 `MemTotal`은 2.4 GiB다. 그래서 RAM으로는 32비트 브라우저 빌드의 대상이고, 32비트 ABI가 없어 현재의 `32_64` 빌드는 맞지 않으며, 그런 제한이 없던 마지막 빌드인 Monochrome 101 `32_64`가 남았다고 본다. 이것은 증거에 맞춘 설명이지 확인한 것이 아니다. Play의 대상 지정은 서버에 있어 읽을 수 없다.
+
+### 고친 것
+
+- 호스트 설치(FR-11의 설치 창, 끌어 놓기, `dsa install`, `dsa apk-info`)는 Android가 보기 전에 네이티브 코드를 읽는다. 빈 파일은 코드로 치지 않는다. 64비트 코드(x86_64, 또는 번역을 거친 arm64-v8a)가 없고 32비트 코드나 다른 ABI의 코드만 있으면, 또는 `use32bitAbi`인데 64비트 쪽이 32비트 쪽의 라이브러리를 빠뜨리면, `unsupported-abi`로 거부하고 이유와 받을 빌드를 말한다. 정적 공유 라이브러리를 쓰고 64비트 ABI에 자리표시자만 둔 앱(Trichrome WebView `64_32`)은 64비트 코드가 라이브러리에 있으므로 받는다. 위 `.xapk`는 이제 Android에 가기 전에 이유와 함께 거부된다.
+- Play로 설치된 앱은 호스트가 설치 전에 볼 수 없다. 대신 에이전트가 Chromium의 위 메시지로 끝난 앱도 알리고, 호스트는 그 앱의 APK가 32비트 코드를 갖고 ARM 실행으로도 길이 없으면 64비트판을 설치하라는 알림을 띄운다(FR-25의 알림과 같은 경로). Monochrome 101은 x86과 x86_64에 같은 이름의 라이브러리를 두므로, 이름 비교가 아니라 이 메시지로 알아본다.
+
+### 사용자가 할 수 있는 것
+
+- Play의 Chrome(Monochrome 101)을 지우고, 같은 버전의 Trichrome Library와 Chrome 짝을 DSA의 APK 설치로 설치한다. 버전 코드가 `38`로 끝나는 것(intel `64_32`, x86 + x86_64)이다. 라이브러리를 먼저 설치한다. ARM 번역이 켜져 있으면 `34`로 끝나는 arm `64` 짝(arm64-v8a 전용)도 되지만, 번역이라 느리다.
+- 이렇게 설치한 Chrome은 Play가 이 기기에 맞는 빌드를 주지 않는 한 Play로 업데이트되지 않는다.
+
+### 소유자가 정할 것(제안, SPEC에 없다)
+
+- 게스트가 알리는 RAM을 8 GB 이상으로 하는 것. 위 설명이 맞다면 Play가 64비트 브라우저 빌드를 준다. 비용: VM 메모리 크기를 키우면 커널의 페이지 표(`struct page`)만 1.6%다(8 GiB에 128 MiB). 프레임워크가 보고하는 값만 키우면 앱이 그만큼 캐시를 크게 잡는다. 둘 다 메모리 목표와 부딪친다.
+- FR-25가 ARM 번역기를 받는 것처럼, 사용자가 고를 때 Google x86_64 에뮬레이터 이미지에서 Chrome과 TrichromeLibrary를 꺼내 Google 앱 추가 구성 요소(FR-32)에 넣는 것. 이미지의 빌드가 64비트 브라우저 빌드이므로 DSA에서 돈다. 새 요구사항이다.
+- `forceMultiArchNativeLibsMatch`를 끄거나, 번역되는 ABI도 기기 고유 ABI로 세게 하는 것. 프레임워크를 바꾸는 일이라 빌드 전에 소유자의 승인이 필요하다.
+
+### 확인하지 못한 것
+
+- RAM 가설. Play의 서버 쪽 대상 지정은 읽을 수 없고, 메모리를 바꾼 게스트로 시험하지 않았다.
+- 실기. 빌드하거나 실행하지 않았다. 64비트 빌드 짝이 DSA에서 열리는지, 알림이 Chrome 101의 첫 시작에 뜨는지, `.xapk`가 설치 창에서 이유와 함께 거부되는지는 PC에서 본다.
