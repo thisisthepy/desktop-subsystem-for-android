@@ -1,0 +1,44 @@
+diff --git a/drivers/block/zram/zram_drv.c b/drivers/block/zram/zram_drv.c
+--- a/drivers/block/zram/zram_drv.c
++++ b/drivers/block/zram/zram_drv.c
+@@ -1990,14 +1990,17 @@
+ static int recompress_slot(struct zram *zram, u32 index, struct page *page,
+ 			   u64 *num_recomp_pages, u32 threshold, u32 prio,
+ 			   u32 prio_max)
+ {
+ 	struct zcomp_strm *zstrm = NULL;
+ 	unsigned long handle_old;
+ 	unsigned long handle_new;
+ 	unsigned int comp_len_old;
+ 	unsigned int comp_len_new;
+ 	unsigned int class_index_old;
+ 	unsigned int class_index_new;
++#ifdef CONFIG_ZRAM_TRACK_ENTRY_ACTIME
++	ktime_t ac_time;
++#endif
+ 	void *src;
+ 	int ret = 0;
+ 
+@@ -2117,10 +2120,22 @@
+ 	zs_obj_write(zram->mem_pool, handle_new, zstrm->buffer, comp_len_new);
+ 	zcomp_stream_put(zstrm);
+ 
++	/*
++	 * Compressing a page again is not an access: the page keeps the time it was last
++	 * written or read. zram_free_page() clears that time, which made every page compressed
++	 * again look idle since boot, so an idle writeback by age ("echo <seconds> > idle")
++	 * wrote it to the backing device however recently it had been used.
++	 */
++#ifdef CONFIG_ZRAM_TRACK_ENTRY_ACTIME
++	ac_time = zram->table[index].ac_time;
++#endif
+ 	zram_free_page(zram, index);
+ 	zram_set_handle(zram, index, handle_new);
+ 	zram_set_obj_size(zram, index, comp_len_new);
+ 	zram_set_priority(zram, index, prio);
++#ifdef CONFIG_ZRAM_TRACK_ENTRY_ACTIME
++	zram->table[index].ac_time = ac_time;
++#endif
+ 
+ 	atomic64_add(comp_len_new, &zram->stats.compr_data_size);
+ 	atomic64_inc(&zram->stats.pages_stored);

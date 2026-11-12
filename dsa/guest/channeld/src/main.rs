@@ -592,6 +592,122 @@ mod daemon {
     #[cfg(not(target_os = "android"))]
     fn page_out_after_wakes(_router: Arc<Router>) {}
 
+    /// Writes what stays cold in zram on to its backing file while no app is in use (see
+    /// `writeback`): every so often decides whether a run is due, gives init the run's budget,
+    /// has init run it, and logs and counts what it wrote. Only init may write zram's files;
+    /// the daemon only asks and reads. Stops for good when zram has no backing file.
+    #[cfg(target_os = "android")]
+    fn write_back_cold_zram(router: Arc<Router>) {
+        use dsa_guest_channeld::writeback::{
+            day_of, has_backing_device, BackingStat, Day, Run, Writeback, WritebackPolicy,
+            ZramStat, CHECK_INTERVAL, RUN_WAIT_LIMIT, WRITEBACK_AFTER_PROPERTY,
+            WRITEBACK_AGE_PROPERTY, WRITEBACK_DAY_PROPERTY, WRITEBACK_PAGES_PROPERTY,
+            WRITEBACK_PROPERTY, ZRAM,
+        };
+        fn today() -> u64 {
+            day_of(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_secs()),
+            )
+        }
+        fn zram_stat() -> Option<ZramStat> {
+            ZramStat::parse(&std::fs::read_to_string(format!("{ZRAM}/mm_stat")).ok()?)
+        }
+        fn backing_stat() -> Option<BackingStat> {
+            BackingStat::parse(&std::fs::read_to_string(format!("{ZRAM}/bd_stat")).ok()?)
+        }
+        while read_property("vendor.dsa.boot_completed") != "1" {
+            thread::sleep(CHECK_INTERVAL);
+        }
+        match std::fs::read_to_string(format!("{ZRAM}/backing_dev")) {
+            Ok(name) if has_backing_device(&name) => {}
+            Ok(_) => {
+                say!(
+                    "zram has no backing file, so what stays cold in it stays in memory: fs_mgr \
+                     could not make /data/per_boot/zram_swap (look for \"zram backing device\" \
+                     in the log of init)"
+                );
+                return;
+            }
+            Err(error) => {
+                say!(
+                    "cannot read zram's backing device ({error}), so what stays cold in zram \
+                     stays in memory"
+                );
+                return;
+            }
+        }
+        let policy = WritebackPolicy::with_times(
+            &read_property(WRITEBACK_AFTER_PROPERTY),
+            &read_property(WRITEBACK_AGE_PROPERTY),
+        );
+        let start = std::time::Instant::now();
+        let mut writeback = Writeback::new(
+            policy,
+            today(),
+            Day::parse(&read_property(WRITEBACK_DAY_PROPERTY)),
+        );
+        say!(
+            "zram writes what no one has used for {} s to its backing file once no app has been \
+             in use for {} s, at most {} MiB a run and {} MiB a day ({} MiB left today)",
+            policy.age.as_secs(),
+            policy.idle_after.as_secs(),
+            policy.run_pages * 4 / 1024,
+            policy.daily_pages * 4 / 1024,
+            writeback.left_pages() * 4 / 1024
+        );
+        loop {
+            thread::sleep(CHECK_INTERVAL);
+            let Some(before) = zram_stat() else {
+                continue;
+            };
+            let Some(pages) =
+                writeback.decide(start.elapsed(), today(), router.tasks_in_use(), &before)
+            else {
+                continue;
+            };
+            let backing_before = backing_stat().unwrap_or_default();
+            if let Err(why) = set_property(WRITEBACK_PAGES_PROPERTY, &pages.to_string()) {
+                say!("could not give the zram writeback its budget: {why}");
+                continue;
+            }
+            let began = std::time::Instant::now();
+            if let Err(why) = set_property(WRITEBACK_PROPERTY, "1") {
+                say!("could not ask init for the zram writeback: {why}");
+                continue;
+            }
+            while read_property(WRITEBACK_PROPERTY) == "1" && began.elapsed() < RUN_WAIT_LIMIT {
+                thread::sleep(std::time::Duration::from_millis(100));
+            }
+            let run = Run {
+                before,
+                after: zram_stat().unwrap_or(before),
+                backing_before,
+                backing_after: backing_stat().unwrap_or(backing_before),
+                took: began.elapsed(),
+                left_pages: 0,
+                daily_pages: policy.daily_pages,
+            };
+            let day = writeback.wrote(run.written_pages());
+            if let Err(why) = set_property(WRITEBACK_DAY_PROPERTY, &day.to_property()) {
+                say!("could not keep what the zram writeback wrote today: {why}");
+            }
+            say!(
+                "{}",
+                Run {
+                    left_pages: writeback.left_pages(),
+                    ..run
+                }
+                .line()
+            );
+        }
+    }
+
+    /// Off Android there is no zram backing file.
+    #[cfg(not(target_os = "android"))]
+    fn write_back_cold_zram(_router: Arc<Router>) {}
+
     /// Tells the host how much memory the guest has, so it can add memory before the guest
     /// runs out and take it back once the guest no longer needs it.
     fn report_memory_pressure(router: Arc<Router>) {
@@ -874,6 +990,10 @@ mod daemon {
         {
             let router = Arc::clone(&router);
             thread::spawn(move || page_out_after_wakes(router));
+        }
+        {
+            let router = Arc::clone(&router);
+            thread::spawn(move || write_back_cold_zram(router));
         }
         {
             let router = Arc::clone(&router);

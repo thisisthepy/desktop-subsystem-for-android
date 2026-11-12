@@ -15,8 +15,9 @@
 //! the Google apps; [`image_store`] reads and removes the image of either that an older host
 //! left on the user's disk, which the host moves onto its add-on disk.
 //! [`gamepad`] makes the host's game controllers gamepad devices of the guest.
-//! [`reclaim`] decides when the guest drops its caches so the host gets the memory back, and
-//! [`pageout`] pages an idle app out to zram again soon after something woke it.
+//! [`reclaim`] decides when the guest drops its caches so the host gets the memory back,
+//! [`pageout`] pages an idle app out to zram again soon after something woke it, and
+//! [`writeback`] writes what stays cold in zram on to its backing file on the data disk.
 //! [`pressure`] tells the host how much memory the guest has, so the VM grows and shrinks.
 //! [`logbridge`] sends the guest's log on the log port, only while the host asks for it, and
 //! the guest's diagnostics; [`logd`] reads logd for it.
@@ -57,6 +58,7 @@ pub mod su_process;
 pub mod su_relay;
 pub mod su_wire;
 pub mod webdav;
+pub mod writeback;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};

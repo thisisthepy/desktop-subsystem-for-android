@@ -10,6 +10,8 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "dsa_hardware_buffer_import.h"
+
 namespace {
 
 // The platform's native_handle_t: a version, the counts, then the fds and the ints.
@@ -18,9 +20,6 @@ struct NativeHandleHeader {
     int numFds;
     int numInts;
 };
-
-// AHARDWAREBUFFER_CREATE_FROM_HANDLE_METHOD_CLONE: the buffer keeps copies of the descriptors.
-constexpr int32_t kCreateFromHandleClone = 1;
 
 }  // namespace
 
@@ -58,7 +57,7 @@ AHardwareBuffer* importBuffer(const HandleParts& handle, uint32_t width, uint32_
     desc.usage = usage;
     desc.stride = width;
     AHardwareBuffer* buffer = nullptr;
-    const int result = AHardwareBuffer_createFromHandle(&desc, header, kCreateFromHandleClone, &buffer);
+    const int result = AHardwareBuffer_createFromHandle(&desc, header, dsa::kAhbCreateFromHandleClone, &buffer);
     std::free(header);
     return result == 0 ? buffer : nullptr;
 }

@@ -183,6 +183,9 @@ impl<P: Platform> Manager<P> {
             ManagerEvent::Task(event) => {
                 self.app_event(&event, now);
                 let changes = self.windows.apply(&event);
+                for note in self.windows.take_notes() {
+                    self.platform.log(&note);
+                }
                 self.guest_change(changes, now);
                 // A task that took a size its window gave it live outside a drag is
                 // reconfigured for it now, at a size it has.
@@ -893,6 +896,15 @@ mod tests {
             ManagerEvent::Task(Box::new(TaskEvent::Updated(task(9)))),
             now,
         );
+        // The window host is told, so the window's own input goes to the new task.
+        assert!(manager.platform().sent.iter().any(|(host, message)| {
+            *host == HOST
+                && *message
+                    == ToHost::ShownTask {
+                        task_id: 7,
+                        shown_task_id: 9,
+                    }
+        }));
         let frames = TaskEvent::Frames {
             task_id: 9,
             display_id: 5,

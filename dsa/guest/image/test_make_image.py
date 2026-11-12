@@ -2461,6 +2461,113 @@ class GuestMemoryTests(unittest.TestCase):
             policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
             self.assertIn("(allow vendor_init sysfs_zram (file (write open getattr)))", policy)
 
+    def test_nfr1_zram_has_a_backing_file_on_the_data_disk(self):
+        # fs_mgr makes /data/per_boot/zram_swap before it sizes zram, but only in a folder that
+        # exists; a system script makes it (vendor_init may not write the top of /data), with a
+        # label the loop driver may read and write, and removes the last boot's file first.
+        fstab = (Path(make_image.__file__).with_name("fstab.dsa")).read_text()
+        entries = [line.split() for line in fstab.splitlines() if line.startswith("/dev/block/zram0")]
+        self.assertEqual(len(entries), 1)
+        self.assertIn("zram_backingdev_size=512M", entries[0][4].split(","))
+        contexts = {"SYSTEM/etc/selinux/plat_file_contexts": "/system/bin/sh u:object_r:shell_exec:s0\n"}
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp), extra=contexts) as archive:
+            for directory in make_image.FSTAB_DIRS:
+                self.assertIn(b"zram_backingdev_size=512M", archive.read(directory + "fstab.dsa"))
+            rc = archive.read(make_image.ZRAM_BACKING_RC).decode()
+            trigger = rc[rc.index("on post-fs-data\n"):]
+            # As Android's init.rc makes it when the boot completes: the last boot's folder
+            # goes, and the new one has init.rc's owner and per-boot key. A folder left with
+            # another key makes init.rc's mkdir ask for a wipe of the user's data.
+            remove = trigger.index("exec - system system -- /bin/rm -rf /data/per_boot")
+            mkdir = trigger.index(
+                "mkdir /data/per_boot 0700 system system encryption=Require key=per_boot_ref"
+            )
+            self.assertLess(remove, mkdir)
+            self.assertIn(
+                "system/etc/init/dsa-zram-backing.rc 0 0 644 capabilities=0x0",
+                archive.read("META/filesystem_config.txt").decode(),
+            )
+            contexts = archive.read("SYSTEM/etc/selinux/plat_file_contexts").decode().splitlines()
+            self.assertEqual(contexts.count(make_image.ZRAM_BACKING_CONTEXT), 1)
+            policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+            self.assertIn("(type dsa_zram_backing_file)", policy)
+            self.assertIn("(allow kernel dsa_zram_backing_file (file (read write getattr)))", policy)
+            self.assertIn(
+                "(allow init dsa_zram_backing_file (file (create open read write getattr setattr unlink relabelto)))",
+                policy,
+            )
+            # No other domain may open what zram wrote: it is apps' memory. toolbox's rm may
+            # only unlink it and remove the folder.
+            file_rules = re.findall(r"\(allow (\S+) dsa_zram_backing_file \(file \(([^)]*)\)\)\)", policy)
+            readers = {domain for domain, perms in file_rules if {"open", "read"} & set(perms.split())}
+            self.assertEqual(readers, {"init", "kernel"})
+            self.assertIn("(allow toolbox dsa_zram_backing_file (file (getattr unlink)))", policy)
+            self.assertIn(
+                "(allow toolbox dsa_zram_backing_file (dir (getattr open read search write remove_name rmdir)))",
+                policy,
+            )
+        # A label the build already has for the folder goes, as two would conflict.
+        text = make_image.with_zram_backing_context("/data/per_boot(/.*)? u:object_r:system_data_file:s0\n")
+        self.assertEqual(text.splitlines(), [make_image.ZRAM_BACKING_CONTEXT])
+
+    def test_nfr1_zram_writes_nothing_back_until_the_daemon_gives_it_a_budget(self):
+        # The limit goes on as the swap starts, with no budget, so nothing writes to the disk
+        # until dsa-channeld asks; the times the daemon and init use come from the boot or the
+        # defaults.
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
+            rc = archive.read("VENDOR/etc/init/dsa-memory.rc").decode()
+            enable = rc.index("write /sys/devices/virtual/block/zram0/writeback_limit_enable 1")
+            self.assertLess(rc.index("swapon_all /vendor/etc/fstab.dsa"), enable)
+            self.assertIn(
+                "setprop vendor.dsa.memory.writeback_after ${ro.boot.dsa.zram_writeback_after:-600}", rc)
+            self.assertIn(
+                "setprop vendor.dsa.memory.writeback_age ${ro.boot.dsa.zram_writeback_age:-1800}", rc)
+
+    def test_nfr1_the_zram_writeback_writes_only_old_pages_within_its_budget(self):
+        # The run's budget is set first and taken away last; only pages unused for the age are
+        # marked idle, incompressible ones go first, and the freed memory is reported again.
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp), channeld=True) as archive:
+            rc = archive.read("VENDOR/etc/init/dsa-channeld.rc").decode()
+            start = rc.index("on property:vendor.dsa.memory.writeback=1 && property:sys.boot_completed=1")
+            trigger = rc[start:].split("\n\n")[0]
+            zram = "write /sys/devices/virtual/block/zram0/"
+            budget = trigger.index(zram + "writeback_limit ${vendor.dsa.memory.writeback_pages}")
+            age = trigger.index(zram + "idle ${vendor.dsa.memory.writeback_age}")
+            huge = trigger.index(zram + "writeback huge_idle")
+            idle = trigger.index(zram + "writeback idle")
+            closed = trigger.index(zram + "writeback_limit 0")
+            compact = trigger.index(zram + "compact 1")
+            again = trigger.index("write /sys/module/page_reporting/parameters/rereport 1")
+            done = trigger.index("setprop vendor.dsa.memory.writeback 0")
+            self.assertEqual(sorted([budget, age, huge, idle, closed, compact, again, done]),
+                             [budget, age, huge, idle, closed, compact, again, done])
+            self.assertNotIn("idle all", trigger)
+            contexts = archive.read("VENDOR/etc/selinux/vendor_property_contexts").decode().splitlines()
+            for context in make_image.WRITEBACK_PROPERTY_CONTEXTS.values():
+                self.assertIn(context, contexts)
+            policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+            # The daemon reads what was written; only init writes zram's files.
+            self.assertIn("(allow dsa_channeld sysfs_zram (file (read open getattr)))", policy)
+            self.assertNotRegex(policy, r"\(allow dsa_channeld sysfs_zram \(file \([^)]*write")
+
+    def test_nfr2_the_idle_reclaim_reports_every_free_page_to_the_host_again(self):
+        # After the reclaim has freed and compacted memory, the kernel reports every free page
+        # again, those a host that faults in clusters took back in included.
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp), channeld=True) as archive:
+            rc = archive.read("VENDOR/etc/init/dsa-channeld.rc").decode()
+            start = rc.index("on property:vendor.dsa.memory.reclaim=1 && property:sys.boot_completed=1")
+            trigger = rc[start:].split("\n\n")[0]
+            again = trigger.index("write /sys/module/page_reporting/parameters/rereport 1")
+            self.assertLess(trigger.index("write /proc/sys/vm/compact_memory 1"), again)
+            self.assertLess(again, trigger.index("setprop vendor.dsa.memory.reclaim 0"))
+            policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+            self.assertIn(
+                '(genfscon sysfs "/module/page_reporting/parameters/rereport" '
+                '(u object_r dsa_sysfs_page_reporting ((s0) (s0))))',
+                policy,
+            )
+            self.assertIn("(allow vendor_init dsa_sysfs_page_reporting (file (write open getattr)))", policy)
+
     def test_nfr1_free_memory_is_compacted_sooner_so_page_reporting_hands_it_back(self):
         with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
             rc = archive.read("VENDOR/etc/init/dsa-memory.rc").decode()
@@ -2633,6 +2740,7 @@ class GuestMemoryTests(unittest.TestCase):
             + make_image.RECLAIM_STEP_PROPERTY_CONTEXT + "\n"
             + make_image.TRIM_PROPERTY_CONTEXT + "\n"
             + make_image.TRIM_SIZE_PROPERTY_CONTEXT + "\n"
+            + "".join(context + "\n" for context in make_image.WRITEBACK_PROPERTY_CONTEXTS.values())
             + make_image.BOOT_PROPERTY_CONTEXT + "\n"
             + make_image.ADB_PROPERTY_CONTEXT + "\n"
             + make_image.SHARES_PROPERTY_CONTEXT + "\n"

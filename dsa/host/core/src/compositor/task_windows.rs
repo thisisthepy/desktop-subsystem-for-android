@@ -101,6 +101,11 @@ pub enum WindowChange {
     /// the place of the app's icon. Comes with a window that opens past its first screen, and
     /// with every change.
     CaptionBack { task_id: i32, back: bool },
+    /// The window opened for task `task_id` shows task `shown_task_id` from now on: a task
+    /// that took the window over after a GPU reset (see [`super::gpu_reset`]). The window keeps
+    /// its ID; what it sends Android itself goes to the task it shows. The task rules never make
+    /// it; it comes from [`super::gpu_reset::GpuResetWindows`], by window ID.
+    ShownTask { task_id: i32, shown_task_id: i32 },
 }
 
 /// The title of a task's window: its label, else its package, else its ID.
@@ -276,6 +281,16 @@ pub struct TaskWindows {
     /// caption inset was given to the task at: given again at a window's new scale, since the
     /// task has it in its own pixels.
     bands: BTreeMap<i32, (CaptionBand, Scale)>,
+    /// What the window manager logs, until it takes it ([`TaskWindows::take_notes`]).
+    notes: Vec<String>,
+}
+
+/// `size` as `WxH`, or "none" when there is no limit.
+fn describe_size(size: Option<(u32, u32)>) -> String {
+    size.map_or_else(
+        || "none".to_string(),
+        |(width, height)| format!("{width}x{height}"),
+    )
 }
 
 /// `cursor`, in a task's pixels, where its window shows it at `scale`.
@@ -311,6 +326,12 @@ fn caption_request(task_id: i32, band: CaptionBand, scale: Scale) -> TaskRequest
 impl TaskWindows {
     pub fn new() -> TaskWindows {
         TaskWindows::default()
+    }
+
+    /// The lines the window manager logs about what the tasks did, once each: a size the
+    /// guest gave a task in place of the one its window asked for.
+    pub fn take_notes(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.notes)
     }
 
     /// Whether the task has a window now.
@@ -489,7 +510,22 @@ impl TaskWindows {
                     Some(sizing) if previous.is_some() => {
                         // Another activity on top may say otherwise about a change of density.
                         sizing.set_mode(scaling);
-                        sizing.guest_updated(task)
+                        let follow = sizing.guest_updated(task);
+                        if let Some((asked, given)) = sizing.take_clamped() {
+                            self.notes.push(format!(
+                                "task {} took {}x{}, not the {}x{} its window asked for: \
+                                 Android keeps it within its smallest size ({}) and its largest \
+                                 ({}); the window takes the task's size",
+                                task.task_id,
+                                given.0,
+                                given.1,
+                                asked.0,
+                                asked.1,
+                                describe_size(task.min_size()),
+                                describe_size(task.max_size()),
+                            ));
+                        }
+                        follow
                     }
                     _ => {
                         let sizing = self.sizing_for(task);
@@ -1592,6 +1628,43 @@ mod tests {
                 scale: (1, 1),
             }]
         );
+    }
+
+    #[test]
+    fn fr4_a_size_the_guest_keeps_within_the_tasks_minimum_answers_the_window_and_is_logged() {
+        let mut windows = TaskWindows::new();
+        let mut clock = task(1, "Clock", 800, 600);
+        clock.min_width = 700;
+        clock.min_height = 500;
+        windows.apply(&TaskEvent::Updated(clock.clone()));
+        assert_eq!(
+            windows.window_resized(1, (690, 600), Instant::now()),
+            vec![TaskRequest::Resize {
+                task_id: 1,
+                width: 690,
+                height: 600,
+                live: true,
+            }]
+        );
+        assert!(windows.take_notes().is_empty());
+        // The guest gives the task its smallest width: the window takes it at once.
+        clock.bounds.right = clock.bounds.left + 700;
+        let changes = windows.apply(&TaskEvent::Updated(clock));
+        assert!(
+            changes.contains(&WindowChange::Resize {
+                task_id: 1,
+                width: 700,
+                height: 600,
+            }),
+            "{changes:?}"
+        );
+        let notes = windows.take_notes();
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(
+            notes[0].contains("task 1 took 700x600, not the 690x600"),
+            "{notes:?}"
+        );
+        assert!(windows.take_notes().is_empty());
     }
 
     #[test]

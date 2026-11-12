@@ -880,6 +880,9 @@ impl Main {
     fn task_event(&mut self, event: &TaskEvent) {
         self.shell_event(event);
         let changes = self.windows.apply(event);
+        for note in self.windows.take_notes() {
+            log(&note);
+        }
         self.guest_changes(changes);
     }
 

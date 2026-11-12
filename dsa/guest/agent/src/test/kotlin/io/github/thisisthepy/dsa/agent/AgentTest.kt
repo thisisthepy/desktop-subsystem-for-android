@@ -712,6 +712,26 @@ class AgentTest {
     }
 
     @Test
+    fun fr4_a_size_kept_at_the_tasks_smallest_is_summarised_at_the_size_it_landed_at() {
+        val smallest = appTask(1, bounds = TaskBounds(0, 0, 500, 400)).copy(minWidth = 300, minHeight = 250)
+        tasks.running = listOf(smallest)
+        started()
+
+        resize(1, 200, 400)
+        scheduler.runDue()
+        assertEquals(TaskBounds(0, 0, 300, 400), actions.resized.single().second)
+        // The window manager gives the task its smallest width.
+        tasks.running = listOf(smallest.copy(bounds = TaskBounds(0, 0, 300, 400)))
+        scheduler.advance(100)
+
+        assertTrue(log.lines.toString(), log.lines.any { "task 1 takes 300x400, not the 200x400 the host asked for" in it })
+        // The resize ended when the task landed at the size it was given, not never.
+        val summary = log.lines.single { "stage=agent.summary" in it }
+        assertTrue(summary, summary.contains("size=300x400"))
+        assertTrue(summary, summary.contains("asked=200x400"))
+    }
+
+    @Test
     fun fr4_a_size_that_does_not_land_holds_up_the_next_one_only_briefly() {
         tasks.running = listOf(appTask(1, bounds = TaskBounds(0, 0, 500, 400)))
         started()

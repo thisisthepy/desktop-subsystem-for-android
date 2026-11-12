@@ -21,6 +21,7 @@ default is x86_64. The arm64 guest runs no 32-bit ARM code, because the target h
 | `dsa-keymint-key.rc` | Makes the tmpfs folder for KeyMint's root key and starts the daemon's mode that fetches it from the host, on init |
 | `dsa-cacerts.rc` | Binds tmpfs copies of Android's system certificate folders over the originals before the zygote starts, so the daemon can add the root certificates the host added beside Android's |
 | `dsa-memory.rc` | Turns on the zram swap and tunes the kernel for it |
+| `dsa-zram-backing.rc` | Makes the folder for zram's backing file on the data disk and removes the last boot's file |
 | `dsa-display.rc` | Starts SurfaceFlinger, and so every app, at the density the boot names (the user's main monitor's) |
 | `dsa-channel-manifest.xml` | The vendor manifest entry declaring the daemon's binder service |
 | `dsa-trace.rc` | Turns on main thread timing in every app when the input trace is on |
@@ -62,7 +63,12 @@ aapt2 from the Android SDK's build-tools for the system screen overlays.
   minimized), or most of its memory is cache, the control daemon sets
   `vendor.dsa.memory.reclaim`. Once boot has finished, init moves cold pages to zram, drops the
   clean caches and compacts memory, which free page reporting then hands back to Hyper-V.
-  While idle it does so again when memory has grown back. ART keeps less free heap
+  While idle it does so again when memory has grown back, and then has the kernel report
+  every free page to the host again (`page_reporting.rereport`). What stays cold in zram goes
+  on to a backing file on the data disk (`/data/per_boot/zram_swap`, 512 MiB, made again each
+  boot): once no app has been open for ten minutes, at most every ten minutes, the daemon has
+  init write zram's pages unused for half an hour, incompressible ones first, at most 32 MiB a
+  run and 512 MiB a day. ART keeps less free heap
   (`MEMORY_PROPS` in `make-image.py`). Only the daemon
   may set the property, and only init's vendor scripts may write those kernel settings.
 - The oemlock, UWB, Bluetooth and Thread HAL APEXes are removed. Their devices

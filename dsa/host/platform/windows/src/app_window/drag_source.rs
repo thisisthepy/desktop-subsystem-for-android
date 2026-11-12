@@ -17,6 +17,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use dsa_host_core::compositor::window_tasks::WindowTasks;
 use dsa_host_core::drag::{DragOffer, DragOut, DragRead, READ_BYTES};
 use dsa_host_core::host_api::HostApiClient;
 use windows::core::{implement, Ref, BOOL, HRESULT, PCWSTR};
@@ -64,13 +65,19 @@ pub struct PendingDrag {
 }
 
 /// The starter of a window host: each question goes to the service at `api` on a thread of
-/// its own, one at a time; `note` logs.
-pub fn starter(api: ApiConnect, note: Arc<dyn Fn(&str) + Send + Sync>) -> DragStarter {
+/// its own, one at a time, about the task the window shows (as `tasks` says); `note` logs.
+pub fn starter(
+    api: ApiConnect,
+    tasks: WindowTasks,
+    note: Arc<dyn Fn(&str) + Send + Sync>,
+) -> DragStarter {
     let busy = Arc::new(AtomicBool::new(false));
     Arc::new(move |hwnd, out| {
         if busy.swap(true, Ordering::AcqRel) {
             return;
         }
+        // A window a task took over after a GPU reset knows only the task it opened for.
+        let out = tasks.drag_out(out);
         let (api, worker_note, worker_busy) =
             (Arc::clone(&api), Arc::clone(&note), Arc::clone(&busy));
         let spawned = std::thread::Builder::new()
@@ -658,5 +665,82 @@ mod tests {
         let name = name_of(&bytes, 0);
         assert_eq!(name.len(), NAME_CHARS - 1);
         assert!(name.ends_with(".jpg"));
+    }
+
+    /// Connects to the in-memory local API as one user.
+    struct AsUser(dsa_transport::local::MemoryLocalConnector);
+
+    impl dsa_transport::Connector for AsUser {
+        fn connect(
+            &mut self,
+            _: Duration,
+        ) -> Result<Box<dyn dsa_transport::Connection>, dsa_transport::TransportError> {
+            self.0.connect_as(dsa_transport::local::Peer {
+                user: "test-user".into(),
+                administrator: false,
+            })
+        }
+    }
+
+    #[test]
+    fn nfr5_a_drag_out_of_a_window_taken_over_after_a_gpu_reset_asks_the_new_task() {
+        use dsa_host_core::compositor::window_hosts::ToHost;
+        use dsa_host_core::host_api::{UserAndroid, UserAndroids};
+        use dsa_host_core::host_api_conformance::{FakeAndroids, RunningService};
+        // The task the fake Android has something to drag out of.
+        const DRAGGING: i32 = 7;
+        let (listener, connector) = dsa_transport::local::pair();
+        let androids = Arc::new(FakeAndroids::default());
+        let android = {
+            let _ = androids.android("test-user");
+            androids.of("test-user").expect("the user's Android")
+        };
+        android.start();
+        let _service = RunningService::start(Box::new(listener), androids.clone());
+        let api: ApiConnect = Arc::new(move || {
+            Box::new(AsUser(connector.clone())) as Box<dyn dsa_transport::Connector>
+        });
+        let notes: Arc<Mutex<Vec<String>>> = Arc::default();
+        let said = Arc::clone(&notes);
+        let tasks = WindowTasks::new();
+        let start = starter(
+            api,
+            tasks.clone(),
+            Arc::new(move |line: &str| said.lock().unwrap().push(line.to_string())),
+        );
+
+        // Window 3 opened for a task that ended after a GPU reset; task 7 took it over.
+        tasks.follow(&ToHost::ShownTask {
+            task_id: 3,
+            shown_task_id: DRAGGING,
+        });
+        // A handle no window has: the offer cannot reach a window, so the drag ends at once.
+        let no_window = 0x7ff0_fff0_isize;
+        start(
+            no_window,
+            DragOut {
+                task_id: 3,
+                x: 10.0,
+                y: 20.0,
+                tool: dsa_protocol::control::PointerTool::Mouse as i32,
+                pointer_id: 0,
+            },
+        );
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            let dragged =
+                notes.lock().unwrap().iter().any(|line| {
+                    line.starts_with(&format!("task {DRAGGING}: 2 item(s) dragged out"))
+                });
+            if dragged {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the drag never asked task {DRAGGING}: {:?}",
+                notes.lock().unwrap()
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
 }

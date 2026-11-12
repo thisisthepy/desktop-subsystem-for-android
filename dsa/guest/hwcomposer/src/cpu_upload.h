@@ -55,7 +55,10 @@ class CpuUploads {
     dsa::UploadTracker mTracker;
     std::vector<uint8_t> mStaging;
     dsa::UploadRate mRate;
-    bool mFailureLogged = false;
+    // A failure that repeats on every picture is logged at its first and then once in a
+    // while, with its count: a failure logged only once in a boot hid that no upload ever
+    // succeeded.
+    UploadFailureLog mFailures;
 };
 
 }  // namespace dsa::hwc

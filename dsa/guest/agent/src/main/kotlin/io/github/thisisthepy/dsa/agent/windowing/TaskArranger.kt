@@ -90,6 +90,14 @@ class TaskArranger(
     var display: Size? = null
         private set
 
+    /**
+     * The bounds the last [arrange] asked the framework to give each task it resized: the size
+     * the host asked for, kept within the task's smallest size and the display.
+     */
+    val resizedTo: Map<Int, TaskBounds> get() = lastResized
+
+    private val lastResized = HashMap<Int, TaskBounds>()
+
     /** Whether a change has been asked for and not yet seen to land, or is waiting its turn. */
     val waiting: Boolean get() = pending.isNotEmpty() || wanted.isNotEmpty()
 
@@ -122,6 +130,7 @@ class TaskArranger(
      * where it is going.
      */
     fun arrange(apps: List<TaskSnapshot>): Map<Int, TaskBounds> {
+        lastResized.clear()
         val current = LinkedHashMap<Int, TaskBounds>()
         val screens = HashMap<Int, ScreenDp?>()
         val smallest = HashMap<Int, Size>()
@@ -251,6 +260,7 @@ class TaskArranger(
         }
         stuck.remove(taskId)
         pending[taskId] = Pending(to, giveUpMillis, resize = true)
+        lastResized[taskId] = to
     }
 
     private fun expected(current: Map<Int, TaskBounds>): Map<Int, TaskBounds> =

@@ -193,3 +193,94 @@ fn nfr1_the_report_shows_the_host_total_and_the_values_to_record_as_the_baseline
         .markdown
         .contains("| Google Play services (resident plus zram share) | 50 |"));
 }
+
+#[test]
+fn nfr2_the_report_shows_how_much_more_the_vm_holds_than_the_guest_uses() {
+    use memory_check::{median_gap_kb, signed_mib, vm_beyond_guest_kb};
+    // The VM holds 600 resident and 700 private; the guest uses 550.
+    let r = reading(&snapshot(600, 550), SERVICE).unwrap();
+    assert_eq!(vm_beyond_guest_kb(&r), (50 * 1024, 150 * 1024));
+    // A host that trimmed the VM below what the guest uses: negative.
+    let trimmed = reading(&snapshot(500, 550), SERVICE).unwrap();
+    assert_eq!(signed_mib(vm_beyond_guest_kb(&trimmed).0), -50);
+    let readings = vec![r, trimmed, reading(&snapshot(560, 550), SERVICE).unwrap()];
+    assert_eq!(median_gap_kb(&readings), Some((10 * 1024, 110 * 1024)));
+    assert_eq!(median_gap_kb(&[]), None);
+    let setting = Setting {
+        google_play: "LiteGapps' core",
+        app: "Settings",
+        memory_mb: 4096,
+        processors: 2,
+        environment: "test",
+    };
+    let report = report(&readings, &[], &serde_json::json!({}), &setting).unwrap();
+    assert!(
+        report.markdown.contains(
+            "The VM holds 10 MiB resident and 110 MiB private beyond what the guest uses"
+        ),
+        "{}",
+        report.markdown
+    );
+    assert_eq!(report.json["vm_beyond_guest_kb"]["resident"], 10 * 1024);
+}
+
+#[test]
+fn nfr1_the_zram_writebacks_are_read_from_the_guests_log() {
+    use memory_check::{no_backing_file, writeback_runs, WritebackRun};
+    let log = "[  812.1] dsa-channeld: reclaiming the guest's memory (Idle, 0 tasks in use)\n\
+               [  843.5] dsa-channeld: zram writeback: wrote 32768 KiB of cold pages to the \
+               backing file in 640 ms; zram store 163840 -> 153600 KiB (holding 491520 -> \
+               458752 KiB, 512 -> 0 incompressible pages), 32000 KiB on the disk; 480 of \
+               today's 512 MiB left\n\
+               [  900.0] dsa-channeld: zram writeback: wrote garbled\n";
+    assert_eq!(
+        writeback_runs(log),
+        vec![WritebackRun {
+            written_kb: 32768,
+            took_ms: 640,
+            store_before_kb: 163840,
+            store_after_kb: 153600,
+            on_disk_kb: 32000,
+        }]
+    );
+    assert!(!no_backing_file(log));
+    assert!(no_backing_file(
+        "dsa-channeld: zram has no backing file, so what stays cold in it stays in memory"
+    ));
+}
+
+#[test]
+fn nfr1_the_report_after_the_window_closes_shows_the_zram_store_and_what_was_written() {
+    use memory_check::{idle_report, WritebackRun};
+    let open = vec![reading(&snapshot(600, 800), SERVICE).unwrap()];
+    let idle = vec![reading(&snapshot(500, 480), SERVICE).unwrap()];
+    let runs = [WritebackRun {
+        written_kb: 32768,
+        took_ms: 640,
+        store_before_kb: 163840,
+        store_after_kb: 153600,
+        on_disk_kb: 32000,
+    }];
+    let report = idle_report(&open, &idle, &runs, 150).unwrap();
+    for line in [
+        "| VM resident | 600 | 500 |",
+        "| guest in use | 800 | 480 |",
+        "| VM resident beyond guest in use | -200 | 20 |",
+        "| VM private beyond guest in use | -100 | 120 |",
+        "zram writeback: 1 run(s) wrote 32768 KiB; the zram store went from 163840 to 153600 KiB",
+    ] {
+        assert!(
+            report.markdown.contains(line),
+            "{line}\n{}",
+            report.markdown
+        );
+    }
+    assert_eq!(report.json["writeback"]["written_kb"], 32768);
+    assert_eq!(
+        report.json["vm_beyond_guest_kb"]["closed"]["resident"],
+        20 * 1024
+    );
+    let none = idle_report(&open, &idle, &[], 150).unwrap();
+    assert!(none.markdown.contains("No zram writeback ran."));
+    assert!(idle_report(&open, &[], &runs, 150).is_none());
+}
