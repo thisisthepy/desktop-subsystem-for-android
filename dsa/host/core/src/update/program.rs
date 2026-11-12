@@ -14,7 +14,10 @@
 //! ```
 //!
 //! Versions are dot-separated numbers and compare as numbers, so 0.1.10 is newer than
-//! 0.1.9. A version that is not in that form is refused, never guessed at.
+//! 0.1.9. A development build (the Development build workflow makes one, and never publishes
+//! it) adds `-dev.<n>`: 0.2.4-dev.7 is newer than 0.2.3 and than 0.2.4-dev.6, and older than
+//! 0.2.4, so the release it leads up to replaces it. A version in any other form is refused,
+//! never guessed at.
 //!
 //! The project publishes one such list per release channel: the stable list names the newest
 //! stable release, the pre-release list the newest pre-release. A computer on the stable
@@ -121,33 +124,50 @@ pub struct SetupFile {
 }
 
 /// A release version: dot-separated numbers, compared as numbers. Missing trailing parts
-/// count as zero, so 0.1 and 0.1.0 are the same version.
+/// count as zero, so 0.1 and 0.1.0 are the same version. A development build's version ends
+/// in `-dev.<n>`, and is older than the release of the same numbers.
 #[derive(Debug, Clone)]
 pub struct Version {
     parts: Vec<u64>,
+    /// The `<n>` of `-dev.<n>`; `None` for a release.
+    dev: Option<u64>,
     text: String,
 }
 
 impl Version {
     /// Parses `text`, or says why it is not a version this build can compare.
     pub fn parse(text: &str) -> Result<Version, String> {
-        let parts: Option<Vec<u64>> = text
-            .split('.')
-            .map(|part| {
-                (!part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
-                    .then(|| part.parse().ok())
-                    .flatten()
-            })
-            .collect();
-        match parts {
-            Some(parts) if !text.is_empty() => Ok(Version {
+        let number = |part: &str| {
+            (!part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
+                .then(|| part.parse::<u64>().ok())
+                .flatten()
+        };
+        let (release, dev) = match text.split_once("-dev.") {
+            Some((release, dev)) => (release, Some(number(dev))),
+            None => (text, None),
+        };
+        let parts: Option<Vec<u64>> = release.split('.').map(number).collect();
+        match (parts, dev) {
+            (Some(parts), None) if !text.is_empty() => Ok(Version {
                 parts,
+                dev: None,
+                text: text.to_string(),
+            }),
+            (Some(parts), Some(Some(dev))) => Ok(Version {
+                parts,
+                dev: Some(dev),
                 text: text.to_string(),
             }),
             _ => Err(format!(
-                "{text:?} is not a version of dot-separated numbers (such as 0.1.2)"
+                "{text:?} is not a version of dot-separated numbers (such as 0.1.2), or of \
+                 such numbers and -dev.<n> for a development build (such as 0.1.2-dev.5)"
             )),
         }
+    }
+
+    /// Whether this is a development build's version.
+    pub fn is_development(&self) -> bool {
+        self.dev.is_some()
     }
 
     fn part(&self, i: usize) -> u64 {
@@ -161,7 +181,13 @@ impl Ord for Version {
         (0..len)
             .map(|i| self.part(i).cmp(&other.part(i)))
             .find(|order| order.is_ne())
-            .unwrap_or(Ordering::Equal)
+            // A release comes after every development build of its numbers.
+            .unwrap_or_else(|| match (self.dev, other.dev) {
+                (None, None) => Ordering::Equal,
+                (None, Some(_)) => Ordering::Greater,
+                (Some(_), None) => Ordering::Less,
+                (Some(a), Some(b)) => a.cmp(&b),
+            })
     }
 }
 

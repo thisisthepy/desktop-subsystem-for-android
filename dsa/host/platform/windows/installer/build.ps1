@@ -77,6 +77,27 @@ if (-not $Arch) {
     $native = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
     $Arch = if ($native -eq "ARM64") { "arm64" } else { "x64" }
 }
+# Windows Installer and the setup engine take versions of numbers only. A release's version
+# is that already. A development build's, <major>.<minor>.<patch>-dev.<n>, which the
+# Development build workflow passes, comes after the release before <major>.<minor>.<patch>
+# and before that release itself, so it is packaged as the release before it with <n> as a
+# fourth part: 0.2.4-dev.7 is 0.2.3.7. Setup then upgrades 0.2.3 to it, one development build
+# to the next, and it to 0.2.4. The programs, the service's update check and the file names
+# keep the full version.
+if ($Version -match '^(\d+)\.(\d+)\.(\d+)-dev\.(\d+)$') {
+    $vMajor = [int]$Matches[1]; $vMinor = [int]$Matches[2]; $vPatch = [int]$Matches[3]; $vDev = [int]$Matches[4]
+    if ($vDev -gt 65535) { throw "the development build number $vDev is above 65535, which a package version cannot hold" }
+    if ($vPatch -gt 0) { $vPatch -= 1 }
+    elseif ($vMinor -gt 0) { $vMinor -= 1; $vPatch = 65534 }
+    elseif ($vMajor -gt 0) { $vMajor -= 1; $vMinor = 255; $vPatch = 65534 }
+    else { throw "$Version has no release before it to package it after" }
+    $packageVersion = "$vMajor.$vMinor.$vPatch.$vDev"
+} elseif ($Version -match '^\d+(\.\d+){0,3}$') {
+    $packageVersion = $Version
+} else {
+    throw "$Version is not a version of numbers (such as 0.2.4) or a development build's (such as 0.2.4-dev.7)"
+}
+
 $rustTarget = if ($Arch -eq "arm64") { "aarch64-pc-windows-msvc" } else { "x86_64-pc-windows-msvc" }
 $kernelName = if ($Arch -eq "arm64") { "Image" } else { "bzImage" }
 
@@ -225,7 +246,7 @@ $package | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8NoBOM (Join-Path 
 
 # The setup screens: a .NET Framework 4.7.2 program that setup.exe carries and starts.
 $setupUi = Join-Path $out "setup-ui"
-dotnet build (Join-Path $installer "setup-ui\DsaSetup.csproj") -c Release -o $setupUi -p:Version=$Version
+dotnet build (Join-Path $installer "setup-ui\DsaSetup.csproj") -c Release -o $setupUi -p:Version=$packageVersion -p:InformationalVersion=$Version
 if ($LASTEXITCODE -ne 0) { throw "building the setup screens failed" }
 
 # The settings app: a self-contained WPF app (the .NET runtime in its own folder), installed
@@ -233,13 +254,13 @@ if ($LASTEXITCODE -ne 0) { throw "building the setup screens failed" }
 $settingsApp = Join-Path $out "settings-app"
 Remove-Item -Recurse -Force $settingsApp -ErrorAction SilentlyContinue
 dotnet publish (Join-Path $installer "..\settings\DsaSettings\DsaSettings.csproj") -c Release -r win-$Arch `
-    -p:Version=$Version -o $settingsApp
+    -p:Version=$packageVersion -p:InformationalVersion=$Version -o $settingsApp
 if ($LASTEXITCODE -ne 0) { throw "building the settings app failed" }
 if (-not (Test-Path (Join-Path $settingsApp "DsaSettings.exe"))) { throw "the settings app has no DsaSettings.exe" }
 # The APK Installer, the program .apk files open in: published into the same folder, where it
 # shares the settings app's copy of the .NET runtime and WPF UI.
 dotnet publish (Join-Path $installer "..\settings\DsaApkInstaller\DsaApkInstaller.csproj") -c Release -r win-$Arch `
-    -p:Version=$Version -o $settingsApp
+    -p:Version=$packageVersion -p:InformationalVersion=$Version -o $settingsApp
 if ($LASTEXITCODE -ne 0) { throw "building the APK Installer failed" }
 if (-not (Test-Path (Join-Path $settingsApp "DsaApkInstaller.exe"))) { throw "the settings folder has no DsaApkInstaller.exe" }
 
@@ -267,7 +288,7 @@ if (-not (Test-Path $utilDll)) {
 
 $msi = Join-Path $out "dsa-$fileTag$Version.msi"
 $setup = Join-Path $out "setup-$fileTag$Version.exe"
-$defines = @("-d", "Arch=$Arch", "-d", "KernelName=$kernelName", "-d", "Version=$Version", "-d", "ProductName=$productName", "-d", "SourceDir=$stage", "-d", "SettingsDir=$settingsApp")
+$defines = @("-d", "Arch=$Arch", "-d", "KernelName=$kernelName", "-d", "Version=$packageVersion", "-d", "ProductName=$productName", "-d", "SourceDir=$stage", "-d", "SettingsDir=$settingsApp")
 if ($ImageDir) { $defines += @("-d", "ImageDir=$ImageDir", "-d", "ImageVersion=$ImageVersion") }
 if ($imageManifest) {
     $defines += @("-d", "ImageManifest=1")
@@ -291,7 +312,7 @@ try {
     $loc = @("-culture", "en-US", "-loc", "dsa.en-us.wxl", "-loc", "dsa.ko-kr.wxl")
     wix build -arch $Arch @msiExt @defines @loc dsa.wxs -o $msi
     if ($LASTEXITCODE -ne 0) { throw "building the package failed" }
-    $bundleDefines = @("-d", "Arch=$Arch", "-d", "Version=$Version", "-d", "ProductName=$productName", "-d", "MsiPath=$msi", "-d", "SetupUiDir=$setupUi")
+    $bundleDefines = @("-d", "Arch=$Arch", "-d", "Version=$packageVersion", "-d", "ProductName=$productName", "-d", "MsiPath=$msi", "-d", "SetupUiDir=$setupUi")
     if ($AndroidMajor -gt 0) { $bundleDefines += @("-d", "AndroidMajor=$AndroidMajor") }
     if ($ImageDir) { $bundleDefines += @("-d", "BundledImage=1") }
     wix build -arch $Arch -ext $balDll @bundleDefines bundle.wxs -o $setup
