@@ -9,7 +9,7 @@ were made from, the build's version (framework_lock.py version), the architectur
 file's size and SHA-256. make-image.py takes the files only into an image of that same build
 and architecture, and check-image.py finds the same hashes in the image.
 
-Beside the framework's three files it holds DSA's KeyMint: the files the build installs
+Beside the framework's files (framework_lock.OUTPUTS) it holds DSA's KeyMint: the files the build installs
 (framework_lock.KEYMINT_OUTPUTS), and the VINTF fragments and the feature file the KeyMint APEX
 carries, which come from the tree as it was fetched (framework_lock.KEYMINT_SOURCES; hence
 --top).
