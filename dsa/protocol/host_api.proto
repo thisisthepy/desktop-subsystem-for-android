@@ -2190,6 +2190,62 @@ message ArmTranslation {
   bool guest_left_on_data = 10;
 }
 
+// The Widevine module a user installed: the com.google.android.widevine APEX of Google's
+// emulator system image for their Android version and architecture, which the client
+// downloaded from Google's SDK repository and took out unchanged. DSA does not ship it.
+message WidevinePackage {
+  // The APEX's file name in the image's /vendor/apex, such as
+  // "com.google.android.widevine.apex". The guest's apexd reads it from there.
+  string apex = 1;
+  // The image it came from: its build, API level and revision, such as
+  // "BE2A.250530.026.F3 (API 36, r7)".
+  string version = 2;
+  // The Android major version and the ABI ("x86_64", "arm64-v8a") of that image, which are
+  // the caller's Android's.
+  uint32 android_major = 3;
+  string abi = 4;
+  // The system image archive it was taken from, on Google's download server.
+  string source = 5;
+  // The APEX's size in bytes and its SHA-256 digest, as the image holds it.
+  uint64 size = 6;
+  bytes sha256 = 7;
+  // The licence Google offers the image under, as its list names it.
+  string license = 8;
+}
+
+// Installs Widevine for the caller's Android. The service answers at once: Done when it takes
+// an APEX with this description, or an error. After Done the client sends the APEX, exactly
+// as the image holds it, package.size bytes, in ApkChunk frames, and the service answers the
+// same request id once more: Widevine once the APEX is on the caller's add-on disk, or an
+// error. The connection then ends. Android need not run: the module is used from its next
+// start.
+message InstallWidevine {
+  WidevinePackage package = 1;
+}
+
+// Asks where Widevine stands for the caller. Answered with Widevine.
+message GetWidevine {}
+
+// Removes the caller's Widevine module. Answered with Widevine. From Android's next start the
+// module is gone, and so are the device certificates Widevine kept in /data/vendor/mediadrm.
+// A running Android keeps the module it booted with until it restarts.
+message RemoveWidevine {}
+
+// Where Widevine stands for the caller.
+message Widevine {
+  // The module the caller installed; absent when there is none.
+  WidevinePackage package = 1;
+  // The caller's add-on disk holds the module, for Android's next start.
+  bool on_disk = 2;
+  // The caller's Android runs now: the two fields below hold only then.
+  bool running = 3;
+  // The running Android was started with Widevine.
+  bool active = 4;
+  // What is installed differs from what the running Android was started with, so it applies
+  // once Android starts again.
+  bool restart_needed = 5;
+}
+
 // The Google apps package a user installed: LiteGapps' Core build for their Android, which the
 // service downloaded from LiteGapps' file host.
 message GappsPackage {
@@ -2694,6 +2750,9 @@ message Request {
     SetAppVolume set_app_volume = 661;
     LaunchShortcut launch_shortcut = 680;
     AnswerPinShortcut answer_pin_shortcut = 681;
+    InstallWidevine install_widevine = 700;
+    GetWidevine get_widevine = 701;
+    RemoveWidevine remove_widevine = 702;
   }
 }
 
@@ -2732,6 +2791,7 @@ message Response {
     BackupRecoveryKey backup_recovery_key = 621;
     KeyProtection key_protection = 622;
     AppAudio app_audio = 660;
+    Widevine widevine = 700;
   }
 }
 
