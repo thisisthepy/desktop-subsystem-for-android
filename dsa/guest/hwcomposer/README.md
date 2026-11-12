@@ -124,7 +124,12 @@ So the hwcomposer copies them up (`src/cpu_upload.*`, with the rules in
 - A buffer whose usage says a CPU writes it and the GPU does not draw it keeps its
   descriptors when SurfaceFlinger first sends it.
 - At each validate, before SurfaceFlinger draws its client layers, each such layer's planes
-  are read through a gralloc CPU lock and sent with `rcUpdateColorBuffer`. A layer whose
+  are read through a gralloc CPU lock and sent with `rcUpdateColorBuffer`. The lock needs the
+  buffer imported from its handle (`AHardwareBuffer_createFromHandle`, cloning it, with the
+  method number in `dsa/graphics/include/dsa_hardware_buffer_import.h`): a wrong method is
+  refused before the mapper sees the buffer, and nothing is copied up. SurfaceFlinger's own
+  graphics driver leaves these copies to the hwcomposer, so a failed copy shows a video as
+  green. A failure is logged at its first, then once in 600 with its count. A layer whose
   buffer changed holds a new picture and is copied; a buffer seen again is copied only when
   a fingerprint of every eighth row of its planes changed. A buffer the GPU draws is never
   copied. The bytes copied each second are logged at debug level.

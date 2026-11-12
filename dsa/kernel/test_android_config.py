@@ -282,6 +282,38 @@ class AndroidKernelConfigTests(unittest.TestCase):
         self.assertIn("-#define PAGE_REPORTING_DELAY	(2 * HZ)", patch)
         self.assertIn("+#define PAGE_REPORTING_DELAY	0", patch)
 
+    def test_nfr2_every_free_page_can_be_reported_to_the_host_again(self):
+        # A host that faults guest memory in clusters takes reported free neighbours back in
+        # with a page the guest touches again; the guest marks them reported and never offers
+        # them again. The parameter empties the per-CPU lists, forgets the marks and starts a
+        # pass. It applies after the patch that removes the reporting delay.
+        patch = (PATCHES / "page-reporting-rereport.patch").read_text()
+        self.assertIn("+++ b/mm/page_reporting.c", patch)
+        self.assertIn("+module_param_cb(rereport, &page_reporting_rereport_ops, NULL, 0200);", patch)
+        self.assertIn("+\t\tdrain_all_pages(NULL);", patch)
+        self.assertIn("+\t\t\t\t__ClearPageReported(page);", patch)
+        self.assertIn("+\t\t__page_reporting_request(prdev);", patch)
+        names = sorted(p.name for p in PATCHES.glob("*.patch"))
+        self.assertLess(names.index("page-reporting-no-delay.patch"),
+                        names.index("page-reporting-rereport.patch"))
+
+    def test_nfr1_cold_zram_pages_can_be_written_to_a_backing_file_by_age(self):
+        # Writeback by age needs the access time; compressing a page again with zstd must not
+        # reset it, or every recompressed page would look unused since boot.
+        config = CONFIG.read_text()
+        for option in ["CONFIG_ZRAM_WRITEBACK=y", "CONFIG_ZRAM_TRACK_ENTRY_ACTIME=y",
+                       "CONFIG_ZRAM_MULTI_COMP=y", "CONFIG_BLK_DEV_LOOP=y"]:
+            self.assertIn(option, config)
+        patch = (PATCHES / "zram-recompress-keeps-access-time.patch").read_text()
+        self.assertIn("+++ b/drivers/block/zram/zram_drv.c", patch)
+        self.assertIn("+\tac_time = zram->table[index].ac_time;", patch)
+        self.assertIn("+\tzram->table[index].ac_time = ac_time;", patch)
+        keep = patch.index("+\tac_time = zram->table[index].ac_time;")
+        restore = patch.index("+\tzram->table[index].ac_time = ac_time;")
+        free = patch.index(" \tzram_free_page(zram, index);")
+        self.assertLess(keep, free)
+        self.assertLess(free, restore)
+
     def test_nfr1_the_guest_can_swap_to_zram(self):
         config = CONFIG.read_text()
         for option in [

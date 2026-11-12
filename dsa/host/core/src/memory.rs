@@ -111,7 +111,8 @@ pub struct KernelMemory {
     pub percpu_kb: u64,
     pub cma_total_kb: u64,
     pub hugetlb_kb: u64,
-    /// The memory the kernel was given (its online memory blocks).
+    /// The memory the kernel was given: its online memory blocks, or the VM's size when the
+    /// host set it smaller ([`GuestMemory::given`]).
     pub mem_online_kb: u64,
 }
 
@@ -348,6 +349,21 @@ impl GuestMemory {
                 + k.hugetlb_kb
                 + self.zram_used_kb,
         )
+    }
+
+    /// This report with the memory the guest was given taken as the VM's size, `vm_mb` MiB,
+    /// when the host knows it and it is less than the guest's online memory blocks. Memory
+    /// hot-added while the guest ran stays online after the host has ballooned it back, so
+    /// the blocks alone count it as given, and [`GuestMemory::reserved_at_boot_kb`] would take
+    /// all of it for the kernel's own.
+    pub fn given(&self, vm_mb: Option<u64>) -> GuestMemory {
+        let mut memory = self.clone();
+        if let Some(vm_kb) = vm_mb.map(|mb| mb * 1024) {
+            if memory.kernel.mem_online_kb > vm_kb {
+                memory.kernel.mem_online_kb = vm_kb;
+            }
+        }
+        memory
     }
 
     /// What the kernel reserved at boot, before MemTotal: its code and data, the page
@@ -794,8 +810,13 @@ pub enum GrowthAction {
 /// ceiling below the maximum.
 ///
 /// - Grow when the guest's available memory falls under a fifth of its total (at least
-///   512 MiB), or when its tasks stall on memory for 10% of the time: by half the current size,
-///   at least 1 GiB, up to the maximum, at most every 5 seconds.
+///   512 MiB), or when its tasks stall on memory for 10% of the time: to what it uses plus half
+///   again (at least 1 GiB of headroom), the same size a shrink would leave, and by at least
+///   512 MiB, up to the maximum, at most every 5 seconds. Memory added once costs the guest its
+///   page records (about 1.6% of it) for as long as it runs, even after it has been ballooned
+///   back to the host, so the VM grows only as far as the guest needs: a step of half the
+///   current size took a guest with 2560 MiB and 500 MiB available to 3840 MiB, where 3072 MiB
+///   was enough.
 /// - Shrink on the first report that finds the guest not short, once 5 seconds have passed
 ///   since the last change: to what it uses plus half again (at least 1 GiB of headroom),
 ///   never below the base. Memory the guest no longer needs goes back at once; the headroom,
@@ -832,6 +853,8 @@ pub struct MemoryGrowth {
 
 /// Memory is added and removed in steps of this, in MiB, the guest's memory block size.
 const GROWTH_GRANULE_MB: u64 = 128;
+/// The least one growth adds, in MiB: a guest short of memory gets at least this much more.
+const GROW_STEP_MIN_MB: u64 = 512;
 const GROW_COOLDOWN: Duration = Duration::from_secs(5);
 const SHRINK_COOLDOWN: Duration = Duration::from_secs(5);
 const HOT_ADD_DEADLINE: Duration = Duration::from_secs(30);
@@ -909,7 +932,10 @@ impl MemoryGrowth {
             if self.current_mb >= self.max_mb || !since_change(GROW_COOLDOWN) {
                 return None;
             }
-            let mut step = (self.current_mb / 2).max(1024);
+            let used_mb = p.used_mb();
+            let wanted = round_up_mb(used_mb + (used_mb / 2).max(1024))
+                .max(self.current_mb + GROW_STEP_MIN_MB);
+            let mut step = wanted - self.current_mb;
             if let Some(limit) = self.grow_limit_mb {
                 step = step.min(limit);
             }
@@ -1113,8 +1139,16 @@ pub fn committed_line(c: &CommittedMemory) -> String {
 /// check, within a second; pages touched again come back from the standby list on their own.
 pub const IDLE_TRIM_DELAY: Duration = Duration::ZERO;
 
+/// How long after a give-back the window manager gives memory back again while still no task
+/// window is shown. While Android dozes the window manager keeps working (task and memory
+/// events, the guest's notifications), and what that touches stays in its working set until
+/// Windows runs short; one give-back per idle stretch left it there for hours. Five minutes
+/// keeps the cost (a working set emptied and a few log lines) small.
+pub const IDLE_TRIM_REPEAT: Duration = Duration::from_secs(5 * 60);
+
 /// Decides when a host process that serves task windows (the window manager) should give
-/// back the memory it is not using: once each time no task window has been open for a while.
+/// back the memory it is not using: each time no task window has been open for a while, and
+/// again every [`IDLE_TRIM_REPEAT`] while none is.
 ///
 /// While windows are open its memory is in use (the renderer, each task's frames); once the
 /// last one closes, most of it is not, but the system takes it back only under pressure, so
@@ -1128,6 +1162,9 @@ pub struct IdleTrim {
     all_hidden: bool,
     idle_since: Option<Instant>,
     trimmed: bool,
+    /// When the current idle stretch last gave memory back.
+    last_trim: Option<Instant>,
+    repeat: Duration,
     /// The current quiet stretch (windows shown, no new frame) has had its trim.
     quiet_trimmed: bool,
 }
@@ -1146,6 +1183,8 @@ impl IdleTrim {
             all_hidden: false,
             idle_since: Some(now),
             trimmed: false,
+            last_trim: None,
+            repeat: IDLE_TRIM_REPEAT,
             quiet_trimmed: false,
         }
     }
@@ -1188,6 +1227,7 @@ impl IdleTrim {
         if !self.open.is_empty() && !self.all_hidden {
             self.idle_since = None;
             self.trimmed = false;
+            self.last_trim = None;
         } else if self.idle_since.is_none() {
             self.idle_since = Some(now);
         }
@@ -1207,14 +1247,19 @@ impl IdleTrim {
         due
     }
 
-    /// Whether to give memory back now. True once per idle stretch.
+    /// Whether to give memory back now: once the idle stretch is `delay` old, and again every
+    /// [`IDLE_TRIM_REPEAT`] after that until a window is shown.
     pub fn due(&mut self, now: Instant) -> bool {
-        let due = !self.trimmed
-            && self
-                .idle_since
-                .is_some_and(|since| now.saturating_duration_since(since) >= self.delay);
+        let idle = self
+            .idle_since
+            .is_some_and(|since| now.saturating_duration_since(since) >= self.delay);
+        let again = self
+            .last_trim
+            .is_some_and(|at| now.saturating_duration_since(at) >= self.repeat);
+        let due = idle && (!self.trimmed || again);
         if due {
             self.trimmed = true;
+            self.last_trim = Some(now);
         }
         due
     }

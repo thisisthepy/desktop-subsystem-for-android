@@ -13,14 +13,12 @@
 #include <ctime>
 #include <mutex>
 
+#include "dsa_hardware_buffer_import.h"
 #include "log.h"
 
 namespace dsa::hwc {
 
 namespace {
-
-// AHardwareBuffer_createFromHandle's method that clones the handle's descriptors.
-constexpr int32_t kCreateFromHandleClone = 1;
 
 // The libnativewindow calls a CPU lock needs, opened once.
 struct NativeWindow {
@@ -122,20 +120,23 @@ bool CpuUploads::upload(HostRenderer& host, uint32_t colorBuffer, const BufferRe
     std::memcpy(&native->data[owned.fds.size()], owned.ints.data(), owned.ints.size() * sizeof(int));
 
     // The buffer as it was allocated: the mapper checks a description against the handle.
+    const dsa::HardwareBufferImport import = dsa::cloneImportFor(dsa::GrallocBufferFacts{
+        buffer.width, buffer.height, buffer.androidFormat, buffer.usage, buffer.pixelStride});
     AHardwareBuffer_Desc desc = {};
-    desc.width = buffer.width;
-    desc.height = buffer.height;
-    desc.layers = 1;
-    desc.format = static_cast<uint32_t>(buffer.androidFormat);
-    desc.usage = buffer.usage;
-    desc.stride = buffer.pixelStride;
+    desc.width = import.width;
+    desc.height = import.height;
+    desc.layers = import.layers;
+    desc.format = import.format;
+    desc.usage = import.usage;
+    desc.stride = import.stride;
     AHardwareBuffer* ahb = nullptr;
-    int result = calls.createFromHandle(&desc, native, kCreateFromHandleClone, &ahb);
+    int result = calls.createFromHandle(&desc, native, import.method, &ahb);
     if (result != 0 || !ahb) {
-        if (!mFailureLogged) {
-            HWC_LOGE("cannot import gralloc buffer %u to copy what the CPU wrote: %d", buffer.id,
-                     result);
-            mFailureLogged = true;
+        uint32_t failures = 0;
+        if (mFailures.shouldLog(&failures)) {
+            HWC_LOGE("cannot import gralloc buffer %u (%ux%u, format %#x) to copy what the CPU "
+                     "wrote: %d (%u in a row); its layer shows what the host held before",
+                     buffer.id, buffer.width, buffer.height, buffer.format, result, failures);
         }
         return false;
     }
@@ -168,11 +169,11 @@ bool CpuUploads::upload(HostRenderer& host, uint32_t colorBuffer, const BufferRe
     }
     calls.release(ahb);
     if (!ok) {
-        if (!mFailureLogged) {
+        uint32_t failures = 0;
+        if (mFailures.shouldLog(&failures)) {
             HWC_LOGE("cannot read gralloc buffer %u (%ux%u, format %#x) to copy what the CPU "
-                     "wrote: lock %d",
-                     buffer.id, buffer.width, buffer.height, buffer.format, result);
-            mFailureLogged = true;
+                     "wrote: lock %d (%u in a row)",
+                     buffer.id, buffer.width, buffer.height, buffer.format, result, failures);
         }
         return false;
     }
@@ -180,14 +181,15 @@ bool CpuUploads::upload(HostRenderer& host, uint32_t colorBuffer, const BufferRe
         return true;
     }
     if (!host.uploadColorBuffer(colorBuffer, layout, mStaging.data())) {
-        if (!mFailureLogged) {
+        uint32_t failures = 0;
+        if (mFailures.shouldLog(&failures)) {
             HWC_LOGE("the host did not take what the CPU wrote into gralloc buffer %u (%ux%u, "
-                     "format %#x)",
-                     buffer.id, buffer.width, buffer.height, buffer.format);
-            mFailureLogged = true;
+                     "format %#x) (%u in a row)",
+                     buffer.id, buffer.width, buffer.height, buffer.format, failures);
         }
         return false;
     }
+    mFailures.reset();
     mTracker.uploaded(buffer.id, print);
     dsa::UploadRate::Report report;
     if (mRate.add(monotonicNs(), mStaging.size(), &report)) {

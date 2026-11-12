@@ -26,11 +26,20 @@ class ResizeTrace(
 ) {
     private class Pending(val size: Size, val receivedAt: Double, val queuedMillis: Double?) {
         var appliedAt: Double? = null
+
+        /** The size the agent gave the task for [size], when it is another one. */
+        var given: Size? = null
+
+        /** The size the task's bounds read back at once the resize has landed. */
+        val landing: Size get() = given ?: size
     }
 
     private val pending = HashMap<Int, Pending>()
     private val stages = HashMap<Pair<Int, String>, Size>()
     private val summaries = HashMap<Int, Pair<Double, Int>>()
+
+    /** The size each task was last given in place of the one asked, as last logged. */
+    private val clamps = HashMap<Int, Size>()
 
     /**
      * The host asked for task [taskId] to take [size]. [queuedMillis], when known, is how long
@@ -59,23 +68,48 @@ class ResizeTrace(
         }
     }
 
+    /**
+     * The agent asked the framework to give task [taskId] [width] x [height]. When that is
+     * not the size the host asked for (the agent keeps a task within its smallest size and the
+     * display), the resize lands at the size given: its summary carries that size, with the
+     * one asked as `asked=`, and the guest's log says so once for each size given in a row.
+     */
+    fun asked(taskId: Int, width: Int, height: Int) {
+        val resize = pending[taskId] ?: return
+        val given = Size(width, height)
+        if (given == resize.size) {
+            resize.given = null
+            clamps.remove(taskId)
+            return
+        }
+        resize.given = given
+        if (clamps.put(taskId, given) == given) return
+        log.info(
+            "task $taskId takes ${width}x$height, not the ${resize.size.width}x${resize.size.height} " +
+                "the host asked for: a task stays within its smallest size and the display",
+        )
+    }
+
     /** Task [taskId] reads back with bounds of [width] x [height]. */
     fun boundsRead(taskId: Int, width: Int, height: Int) {
         val resize = pending[taskId] ?: return
-        if (resize.size.width != width || resize.size.height != height) return
+        val landing = resize.landing
+        if (landing.width != width || landing.height != height) return
         pending.remove(taskId)
         val now = monoMillis()
         val applied = resize.appliedAt
         val appliedPart = if (applied == null) "applied=none" else "applied=${fmt(applied - resize.receivedAt)}"
-        stage(taskId, "agent.bounds", resize.size, "since_received=${fmt(now - resize.receivedAt)}")
+        stage(taskId, "agent.bounds", landing, "since_received=${fmt(now - resize.receivedAt)}")
         val queuedPart = resize.queuedMillis?.let { " queued=${fmt(it)}" } ?: ""
-        summary(taskId, resize.size, "$appliedPart bounds=${fmt(now - resize.receivedAt)}$queuedPart")
+        val askedPart = if (resize.given == null) "" else " asked=${resize.size.width}x${resize.size.height}"
+        summary(taskId, landing, "$appliedPart bounds=${fmt(now - resize.receivedAt)}$queuedPart$askedPart")
     }
 
     /** The task has ended. */
     fun forget(taskId: Int) {
         pending.remove(taskId)
         summaries.remove(taskId)
+        clamps.remove(taskId)
         stages.keys.removeAll { it.first == taskId }
     }
 

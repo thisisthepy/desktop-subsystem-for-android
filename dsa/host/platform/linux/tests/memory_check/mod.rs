@@ -11,7 +11,12 @@
 //! - in the guest: what it uses, page cache, app memory, the kernel and the rest, zram, and what
 //!   its processes cost (resident plus their share of zram at the ratio zram measures, not the
 //!   size before compression), with Google Play services on a line of its own;
-//! - the guest's PSS by process, as `dumpsys meminfo` lists it.
+//! - the guest's PSS by process, as `dumpsys meminfo` lists it;
+//! - how much more the VM holds than the guest uses (resident and private), the memory the
+//!   guest has freed but the host has not yet taken back;
+//! - after the window has closed and the guest has had its idle reclaim and its zram writeback
+//!   ([`idle_report`]): the same numbers again, with what each writeback wrote and how the zram
+//!   store changed around it, read from the guest's log ([`writeback_runs`]).
 //!
 //! Each number is the median of the readings, so one reading taken during a reclaim does not
 //! decide it. The check fails only on a large regression: a number more than a quarter above
@@ -155,6 +160,180 @@ pub fn median(readings: &[Reading]) -> Option<Reading> {
     })
 }
 
+/// How much more the VM holds than the guest uses, in KiB, resident and private; negative
+/// when the host has trimmed the VM below what the guest uses.
+pub fn vm_beyond_guest_kb(r: &Reading) -> (i64, i64) {
+    (
+        r.vm_kb as i64 - r.guest_used_kb as i64,
+        r.vm_private_kb as i64 - r.guest_used_kb as i64,
+    )
+}
+
+/// The median of each of [`vm_beyond_guest_kb`]'s two numbers across `readings`, in KiB (the
+/// lower of the two middle ones for an even count). `None` without readings.
+pub fn median_gap_kb(readings: &[Reading]) -> Option<(i64, i64)> {
+    if readings.is_empty() {
+        return None;
+    }
+    let pick = |which: fn((i64, i64)) -> i64| {
+        let mut values: Vec<i64> = readings
+            .iter()
+            .map(|r| which(vm_beyond_guest_kb(r)))
+            .collect();
+        values.sort_unstable();
+        values[(values.len() - 1) / 2]
+    };
+    Some((pick(|g| g.0), pick(|g| g.1)))
+}
+
+/// KiB to whole MiB, rounded to nearest, keeping the sign.
+pub fn signed_mib(kb: i64) -> i64 {
+    if kb < 0 {
+        -(mib(kb.unsigned_abs()) as i64)
+    } else {
+        mib(kb as u64) as i64
+    }
+}
+
+/// One zram writeback as the guest's daemon logged it (`zram writeback: wrote N KiB ...`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WritebackRun {
+    pub written_kb: u64,
+    pub took_ms: u64,
+    pub store_before_kb: u64,
+    pub store_after_kb: u64,
+    pub on_disk_kb: u64,
+}
+
+/// The zram writebacks in the guest's log `log`, in order. A line it cannot read is skipped.
+pub fn writeback_runs(log: &str) -> Vec<WritebackRun> {
+    fn number_after(text: &str, marker: &str) -> Option<(u64, usize)> {
+        let at = text.find(marker)? + marker.len();
+        let digits: String = text[at..]
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect();
+        Some((digits.parse().ok()?, at + digits.len()))
+    }
+    log.lines()
+        .filter_map(|line| {
+            let line = &line[line.find("zram writeback: wrote ")?..];
+            let (written_kb, at) = number_after(line, "wrote ")?;
+            let line = &line[at..];
+            let (took_ms, at) = number_after(line, " in ")?;
+            let line = &line[at..];
+            let (store_before_kb, at) = number_after(line, "zram store ")?;
+            let line = &line[at..];
+            let (store_after_kb, at) = number_after(line, " -> ")?;
+            let line = &line[at..];
+            let (on_disk_kb, _) = number_after(line, "), ")?;
+            Some(WritebackRun {
+                written_kb,
+                took_ms,
+                store_before_kb,
+                store_after_kb,
+                on_disk_kb,
+            })
+        })
+        .collect()
+}
+
+/// Whether the guest's daemon said zram has no backing file, so no writeback can run.
+pub fn no_backing_file(log: &str) -> bool {
+    log.contains("zram has no backing file") || log.contains("cannot read zram's backing device")
+}
+
+/// The second part of the report: the memory with the window open (`open`) and after it closed
+/// (`idle`), and the zram writebacks that ran in between (`runs`), `waited_secs` after the
+/// window closed. `None` without readings of both.
+pub fn idle_report(
+    open: &[Reading],
+    idle: &[Reading],
+    runs: &[WritebackRun],
+    waited_secs: u64,
+) -> Option<Report> {
+    let before = median(open)?;
+    let after = median(idle)?;
+    let (gap_before, private_gap_before) = median_gap_kb(open)?;
+    let (gap_after, private_gap_after) = median_gap_kb(idle)?;
+    let mut md = String::new();
+    md.push_str("## After the window closes\n\n");
+    md.push_str(&format!(
+        "The window closed and no app was in use for {waited_secs} s: the idle reclaim, which \
+         also reports every free page to the host again, and the zram writeback (the boot \
+         shortens its wait and its page age for this check). The median of {} readings, beside \
+         the ones with the window open.\n\n",
+        idle.len()
+    ));
+    md.push_str("| | Window open MiB | Closed MiB |\n|---|---|---|\n");
+    for (name, b, a) in [
+        ("VM resident", before.vm_kb, after.vm_kb),
+        ("VM private", before.vm_private_kb, after.vm_private_kb),
+        ("guest in use", before.guest_used_kb, after.guest_used_kb),
+        ("zram store", before.zram_used_kb, after.zram_used_kb),
+        (
+            "zram holds (before compression)",
+            before.zram_stored_kb,
+            after.zram_stored_kb,
+        ),
+    ] {
+        md.push_str(&format!("| {name} | {} | {} |\n", mib(b), mib(a)));
+    }
+    for (name, b, a) in [
+        ("VM resident beyond guest in use", gap_before, gap_after),
+        (
+            "VM private beyond guest in use",
+            private_gap_before,
+            private_gap_after,
+        ),
+    ] {
+        md.push_str(&format!(
+            "| {name} | {} | {} |\n",
+            signed_mib(b),
+            signed_mib(a)
+        ));
+    }
+    md.push('\n');
+    let written_kb: u64 = runs.iter().map(|r| r.written_kb).sum();
+    match (runs.first(), runs.last()) {
+        (Some(first), Some(last)) => md.push_str(&format!(
+            "zram writeback: {} run(s) wrote {} KiB; the zram store went from {} to {} KiB \
+             around them, and the backing file holds {} KiB.\n",
+            runs.len(),
+            written_kb,
+            first.store_before_kb,
+            last.store_after_kb,
+            last.on_disk_kb
+        )),
+        _ => md.push_str("No zram writeback ran.\n"),
+    }
+    let json = serde_json::json!({
+        "waited_secs": waited_secs,
+        "readings": idle.len(),
+        "median_kb": reading_json(&after),
+        "each_kb": idle.iter().map(reading_json).collect::<Vec<_>>(),
+        "vm_beyond_guest_kb": {
+            "open": {"resident": gap_before, "private": private_gap_before},
+            "closed": {"resident": gap_after, "private": private_gap_after},
+        },
+        "writeback": {
+            "runs": runs.len(),
+            "written_kb": written_kb,
+            "each": runs
+                .iter()
+                .map(|r| serde_json::json!({
+                    "written_kb": r.written_kb,
+                    "took_ms": r.took_ms,
+                    "store_before_kb": r.store_before_kb,
+                    "store_after_kb": r.store_after_kb,
+                    "on_disk_kb": r.on_disk_kb,
+                }))
+                .collect::<Vec<_>>(),
+        },
+    });
+    Some(Report { markdown: md, json })
+}
+
 /// One number of a reading, in MiB.
 type Number = fn(&Reading) -> u64;
 
@@ -296,6 +475,13 @@ pub fn report(
         "\nVM private (all the guest memory it holds): {} MiB.\n\n",
         mib(m.vm_private_kb)
     ));
+    let (gap, private_gap) = median_gap_kb(readings)?;
+    md.push_str(&format!(
+        "The VM holds {} MiB resident and {} MiB private beyond what the guest uses (memory the \
+         guest freed that the host has not taken back yet).\n\n",
+        signed_mib(gap),
+        signed_mib(private_gap)
+    ));
     md.push_str("| Guest | MiB |\n|---|---|\n");
     for (name, kb) in [
         ("given", m.guest_total_kb),
@@ -355,6 +541,7 @@ pub fn report(
         "readings": readings.len(),
         "baseline": measured,
         "median_kb": reading_json(&m),
+        "vm_beyond_guest_kb": {"resident": gap, "private": private_gap},
         "each_kb": readings.iter().map(reading_json).collect::<Vec<_>>(),
         "pss_by_process_kb": pss
             .iter()

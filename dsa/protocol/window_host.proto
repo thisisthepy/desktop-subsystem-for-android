@@ -421,6 +421,18 @@ message SetWindowMode {
   bool resizable = 3;
 }
 
+// Window manager to window host: the window opened for task `task_id` shows task
+// `shown_task_id` from now on. After a GPU reset an app's task can end and the app start
+// again; its new task then takes the window over, so the window keeps its place and its size.
+// Every message on this connection still names the window by `task_id`. What the window sends
+// Android itself, past the window manager (its pointer, key and text input, its accessibility
+// watch and actions, a drag out of it), goes to `shown_task_id`, since the task the window
+// opened for has ended. Sent again with each later takeover.
+message SetShownTask {
+  int32 task_id = 1;
+  int32 shown_task_id = 2;
+}
+
 // The one message type on the wire. Each frame carries exactly one.
 message Envelope {
   oneof body {
@@ -455,5 +467,6 @@ message Envelope {
     AppIcon app_icon = 62;
     AppMedia app_media = 63;
     MediaButtonPressed media_button_pressed = 64;
+    SetShownTask set_shown_task = 65;
   }
 }

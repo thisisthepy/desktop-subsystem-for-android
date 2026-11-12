@@ -1,0 +1,79 @@
+diff --git a/mm/page_reporting.c b/mm/page_reporting.c
+--- a/mm/page_reporting.c
++++ b/mm/page_reporting.c
+@@ -358,6 +358,75 @@
+ static DEFINE_MUTEX(page_reporting_mutex);
+ DEFINE_STATIC_KEY_FALSE(page_reporting_enabled);
+ 
++/*
++ * Report every free page to the host again, those already reported included. A host that
++ * backs guest memory in pieces larger than a page (Hyper-V faults a VM's memory in 64 KiB
++ * clusters, a Linux host may back it with transparent huge pages) takes back a reported page
++ * and later, when the guest touches a neighbour, backs the whole piece again, the reported
++ * free pages in it included. The guest still marks those reported and never offers them a
++ * second time, so they stay with the VM until they are allocated and freed. Free pages the
++ * per-CPU lists hold are not on the free lists at all and are never reported.
++ *
++ * Writing 1 to page_reporting.rereport empties the per-CPU lists into the free lists, forgets
++ * which free pages were reported and starts a pass, so the host gets all of them back. It is
++ * meant for a guest that has just freed and compacted memory: the pass costs one report for
++ * each free block, and compacted free memory is in few, large blocks.
++ */
++static void page_reporting_forget_zone(struct zone *zone)
++{
++	unsigned int order, mt;
++	struct page *page;
++
++	for (order = page_reporting_order; order < NR_PAGE_ORDERS; order++) {
++		for (mt = 0; mt < MIGRATE_TYPES; mt++) {
++			struct list_head *list = &zone->free_area[order].free_list[mt];
++
++			if (is_migrate_isolate(mt))
++				continue;
++			spin_lock_irq(&zone->lock);
++			list_for_each_entry(page, list, lru)
++				__ClearPageReported(page);
++			spin_unlock_irq(&zone->lock);
++			cond_resched();
++		}
++	}
++}
++
++static int page_reporting_rereport_set(const char *val,
++				       const struct kernel_param *kp)
++{
++	struct page_reporting_dev_info *prdev;
++	struct zone *zone;
++	bool rereport;
++	int err;
++
++	err = kstrtobool(val, &rereport);
++	if (err)
++		return err;
++	if (!rereport)
++		return 0;
++
++	mutex_lock(&page_reporting_mutex);
++	prdev = rcu_dereference_protected(pr_dev_info,
++				lockdep_is_held(&page_reporting_mutex));
++	if (prdev) {
++		drain_all_pages(NULL);
++		for_each_populated_zone(zone)
++			page_reporting_forget_zone(zone);
++		__page_reporting_request(prdev);
++	}
++	mutex_unlock(&page_reporting_mutex);
++
++	return 0;
++}
++
++static const struct kernel_param_ops page_reporting_rereport_ops = {
++	.set = page_reporting_rereport_set,
++};
++
++module_param_cb(rereport, &page_reporting_rereport_ops, NULL, 0200);
++MODULE_PARM_DESC(rereport, "Write 1 to report every free page to the host again");
++
+ int page_reporting_register(struct page_reporting_dev_info *prdev)
+ {
+ 	int err = 0;

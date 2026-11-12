@@ -119,6 +119,13 @@ interface AccessibilitySource {
  * task reports go on meanwhile. A task's tree is read by one read at a time; a change that
  * comes during a read is read once that read is done.
  *
+ * Each of those calls also takes the app's UI thread away from laying itself out and drawing.
+ * Right after its window is resized that is the frame the user waits for, and on a guest
+ * with few processors a tree read then held a Settings window's first frame at its new size
+ * back by half a second. So a task's tree is not read while the host resizes it ([resizing]):
+ * a read waits until [RESIZE_QUIET_MILLIS] have passed since the task's last new size or
+ * density, and the screen reader hears of the new layout once, after it has been drawn.
+ *
  * A watched task gets its tree however long Android takes to bind the service. The export
  * tries every [RETRY_MILLIS] for [MAX_RETRIES] tries, then every [SLOW_RETRY_MILLIS] for as long
  * as the task is watched, rather than waiting for an event from a service that may never have
@@ -165,6 +172,9 @@ class AccessibilityExport(
 
         /** Whether the guest's log said that the tree could not be read yet. */
         var warned = false
+
+        /** Until when, on [clock], the task is being resized and its tree is not read. */
+        var quietAt = Long.MIN_VALUE / 2
     }
 
     private val watched = HashMap<Int, TaskState>()
@@ -208,6 +218,14 @@ class AccessibilityExport(
             else -> return false
         }
         return true
+    }
+
+    /**
+     * The host gave task [taskId] a new size or density: its app is laying itself out again,
+     * and its tree is not read until it has had [RESIZE_QUIET_MILLIS] to draw.
+     */
+    fun resizing(taskId: Int) {
+        watched[taskId]?.quietAt = clock() + RESIZE_QUIET_MILLIS
     }
 
     /** The content of some window may have changed. Called on the scheduler thread. */
@@ -294,7 +312,8 @@ class AccessibilityExport(
     private fun schedule(taskId: Int, state: TaskState, wait: Long) {
         if (state.pending) return
         state.pending = true
-        val delay = maxOf(wait, state.lastSentAt + MIN_INTERVAL_MILLIS - clock(), 0L)
+        val now = clock()
+        val delay = maxOf(wait, state.lastSentAt + MIN_INTERVAL_MILLIS - now, state.quietAt - now, 0L)
         scheduler.postDelayed(delay) {
             state.pending = false
             if (watched[taskId] === state) read(taskId, state)
@@ -305,6 +324,11 @@ class AccessibilityExport(
     private fun read(taskId: Int, state: TaskState) {
         if (state.reading) {
             state.changedWhileReading = true
+            return
+        }
+        // Resized since the read was planned: it waits for the app to have drawn.
+        if (clock() < state.quietAt) {
+            schedule(taskId, state, 0)
             return
         }
         val bounds = taskBounds(taskId)
@@ -504,6 +528,13 @@ class AccessibilityExport(
 
         /** The least time between two trees of a task: at most four a second. */
         const val MIN_INTERVAL_MILLIS = 250L
+
+        /**
+         * How long after a task's last new size or density its tree waits to be read: about
+         * as long as an app takes to draw at a new size on a slow guest, and short enough that
+         * a screen reader hears of the new layout within a second of the resize.
+         */
+        const val RESIZE_QUIET_MILLIS = 500L
 
         /** How long to wait for a service that is still starting, or a task not yet placed. */
         const val RETRY_MILLIS = 200L

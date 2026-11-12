@@ -93,6 +93,12 @@
 (allow dsa_channeld init (unix_stream_socket (connectto)))
 (allow dsa_channeld dsa_memory_prop (property_service (set)))
 (allow dsa_channeld dsa_memory_prop (file (read open getattr map)))
+;
+; The zram writeback reads zram's backing device and statistics (backing_dev, mm_stat,
+; bd_stat), to skip a guest whose zram has no backing file and to log and count what each run
+; wrote against the day's budget. It writes nothing there: init does.
+(allow dsa_channeld sysfs_zram (dir (search)))
+(allow dsa_channeld sysfs_zram (file (read open getattr)))
 
 ; The gradual trim skips a guest under memory pressure, which the daemon reads from the
 ; kernel's pressure stall information.
