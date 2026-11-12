@@ -70,6 +70,13 @@ on post-fs-data && property:ro.boot.dsa.arm_translation=on && property:ro.boot.d
     mkdir /mnt/dsa-arm-translation 0755 root root
     mount erofs /mnt/dsa-addons/arm-translation.img /mnt/dsa-arm-translation ro nodev nosuid directio,fscontext=u:object_r:dsa_arm_translation_fs:s0,context=u:object_r:system_lib_file:s0
 
+# In the host's direct-mapped mode ("dax") the add-on disk is persistent memory, and the host's
+# partition table also names the image's own bytes on it (dsa_arm_translation). erofs mounts that
+# partition with dax=always, so the translator's files are mapped from the host, not cached.
+on post-fs-data && property:ro.boot.dsa.arm_translation=on && property:ro.boot.dsa.arm_translation_image=dax
+    mkdir /mnt/dsa-arm-translation 0755 root root
+    mount erofs /dev/block/by-name/dsa_arm_translation /mnt/dsa-arm-translation ro nodev nosuid dax=always,fscontext=u:object_r:dsa_arm_translation_fs:s0,context=u:object_r:system_lib_file:s0
+
 on post-fs-data && property:ro.boot.dsa.arm_translation=on && property:ro.boot.dsa.arm_translation_image=data
     mkdir /mnt/dsa-arm-translation 0755 root root
     mount erofs /data/vendor/dsa/arm-translation/system.img /mnt/dsa-arm-translation ro nodev nosuid directio,fscontext=u:object_r:dsa_arm_translation_fs:s0,context=u:object_r:system_lib_file:s0

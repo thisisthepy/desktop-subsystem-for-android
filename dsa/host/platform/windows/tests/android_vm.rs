@@ -44,6 +44,7 @@ fn missing_files() -> AndroidVmConfig {
         hosting_process_name_suffix: None,
         fine_grained_memory: false,
         network_adapter: None,
+        direct_mapped: None,
     }
 }
 
@@ -248,4 +249,48 @@ fn pr6_a_vm_without_an_initrd_is_refused_because_the_secret_cannot_reach_it() {
     let mut launcher = AndroidVmLauncher::new("dsa-test-no-initrd", config);
     let error = launcher.start(&secret()).unwrap_err();
     assert!(error.contains("initrd"), "{error}");
+}
+
+#[test]
+fn nfr1_a_boot_falls_back_to_the_image_disk_while_the_direct_mapped_disk_is_made() {
+    use dsa_host_core::direct_mapped_disk::{DirectMappedImages, Store, FORMAT};
+    use dsa_host_windows::android_vm::direct_mapped_disks;
+    let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("direct-mapped-fallback");
+    let _ = std::fs::remove_dir_all(&root);
+    let image = root.join("images").join("17.0.0-1-1");
+    std::fs::create_dir_all(&image).unwrap();
+    let manifest = serde_json::json!({
+        "version": "17.0.0-1-1",
+        "direct_mapped": {
+            "fstab_suffix": "dsa_dax",
+            "verified_partitions": ["odm"],
+            "system_disk": {"format": FORMAT, "bytes": 2u64 << 30, "sha256": "ab".repeat(32),
+                            "super_bytes": 1u64 << 30},
+        },
+    });
+    std::fs::write(image.join("image.json"), manifest.to_string()).unwrap();
+    let mut config = missing_files();
+    config.system_image = Some(image.join("system.vhdx"));
+    // The maker never gets to the image here: it waits until the test is over.
+    let (hold, held) = std::sync::mpsc::channel::<()>();
+    let images = DirectMappedImages::start(
+        Store::new(root.join("direct-mapped")),
+        Box::new(|| None),
+        Box::new(move || {
+            let _ = held.recv();
+            Ok(())
+        }),
+        std::sync::Arc::new(|_: &str| {}),
+    );
+    let why = direct_mapped_disks(&config, &images).expect_err("no copy is made yet");
+    if GuestArch::HOST == GuestArch::X86_64 {
+        assert!(why.contains("being made in the background"), "{why}");
+    }
+    // Nothing is mapped: the VM attaches the image's own disk on SCSI, with dm-verity.
+    let document = config.to_hcs_document().unwrap();
+    assert!(document["VirtualMachine"]["Devices"]["VirtualPMem"].is_null());
+    assert!(document.to_string().contains("system.vhdx"));
+    drop(hold);
+    images.stop();
+    let _ = std::fs::remove_dir_all(&root);
 }

@@ -10,6 +10,8 @@
 //!   settings\                        machine.json, users\<SID>.json, widget placements
 //!   logs\                            dsa-hostd.log, android-<SID>.log (the guest console)
 //!   tmp\                             files that cannot be avoided, such as each boot's initrd
+//!   direct-mapped\                   the direct-mapped mode's uncompressed system disks, one
+//!                                    per image (only SYSTEM writes there)
 //!
 //! %LOCALAPPDATA%\DSA                 each user's (the user, SYSTEM and Administrators)
 //!   android.vhdx                     the user's Android disk, which uninstalling keeps
@@ -118,6 +120,10 @@ impl MachineRoot {
     }
     pub fn tmp(&self) -> PathBuf {
         join(&self.0, &["tmp"])
+    }
+    /// Where the direct-mapped mode's uncompressed copies of the system disk are kept.
+    pub fn direct_mapped(&self) -> PathBuf {
+        join(&self.0, &["direct-mapped"])
     }
     /// Where each user's installed Google apps package is kept, so a later DSA can make its
     /// image again; `tmp` is cleared at every start of the service.

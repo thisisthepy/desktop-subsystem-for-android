@@ -70,6 +70,7 @@ fn config() -> AndroidVmConfig {
         hosting_process_name_suffix: None,
         fine_grained_memory: false,
         network_adapter: None,
+        direct_mapped: None,
     }
 }
 
@@ -577,4 +578,131 @@ fn nfr2_the_guest_kernel_sets_little_memory_aside_at_boot() {
         // The user's own parameters still come last, so they can override these.
         assert!(cmdline.ends_with("androidboot.hardware=dsa"), "{cmdline}");
     }
+}
+
+fn direct_mapped(addon_bytes: Option<u64>) -> dsa_host_windows::vm::DirectMapped {
+    dsa_host_windows::vm::DirectMapped {
+        system_disk: PathBuf::from(r"C:\ProgramData\DSA\direct-mapped\17.0.0-1.vhd"),
+        system_bytes: 1800 << 20,
+        addon_bytes,
+        support: dsa_host_core::direct_mapped::ImageSupport {
+            fstab_suffix: "dsa_dax".into(),
+            system_disk: dsa_host_core::direct_mapped_disk::SystemDisk {
+                format: dsa_host_core::direct_mapped_disk::FORMAT,
+                bytes: 1800 << 20,
+                sha256: "ab".repeat(32),
+                super_bytes: 1600 << 20,
+            },
+            verified_partitions: vec!["odm".into()],
+        },
+    }
+}
+
+#[test]
+fn nfr1_a_direct_mapped_vm_maps_its_read_only_disks_as_persistent_memory() {
+    let mut vm = config();
+    vm.addon_disk = Some(PathBuf::from(r"C:\Users\me\AppData\Local\DSA\addons.vhd"));
+    vm.kernel_cmdline =
+        "androidboot.boot_devices=vmbus androidboot.fstab_suffix=dsa androidboot.hardware=dsa"
+            .into();
+    vm.direct_mapped = Some(direct_mapped(Some(300 << 20)));
+    let doc = document(&vm);
+    let devices = &doc["VirtualMachine"]["Devices"];
+    // The system disk and the add-on disk are read-only persistent memory, mapped from their
+    // flat VHD files, and no longer SCSI disks; the user's disk and the pstore disk stay there.
+    let pmem = &devices["VirtualPMem"];
+    assert_eq!(
+        pmem["Devices"]["0"]["HostPath"],
+        r"C:\ProgramData\DSA\direct-mapped\17.0.0-1.vhd"
+    );
+    assert_eq!(
+        pmem["Devices"]["1"]["HostPath"],
+        r"C:\Users\me\AppData\Local\DSA\addons.vhd"
+    );
+    for device in ["0", "1"] {
+        assert_eq!(pmem["Devices"][device]["ReadOnly"], true, "{device}");
+        assert_eq!(pmem["Devices"][device]["ImageFormat"], "Vhd1", "{device}");
+    }
+    assert_eq!(pmem["MaximumCount"], 2, "no empty devices");
+    assert_eq!(pmem["MaximumSizeBytes"], 1800u64 << 20);
+    // Backed by a mapping of the file, which the host can drop and read again, never by
+    // memory of the VM's own.
+    assert_eq!(pmem["Backing"], "Virtual");
+    let disks = devices["Scsi"]["0"]["Attachments"].as_object().unwrap();
+    let mut paths: Vec<&str> = disks
+        .values()
+        .map(|d| d["Path"].as_str().unwrap())
+        .collect();
+    paths.sort();
+    assert_eq!(
+        paths,
+        [
+            r"C:\Users\me\AppData\Local\DSA\data.vhdx",
+            r"C:\Users\me\AppData\Local\DSA\pstore.vhd"
+        ]
+    );
+    assert_eq!(disks["0"]["ReadOnly"], false);
+    // The guest boots the image's mount table for the mode, with the persistent memory's
+    // platform device among the boot devices, each named once.
+    let cmdline = vm.full_kernel_cmdline_for(GuestArch::X86_64);
+    assert!(
+        cmdline.contains(" androidboot.boot_devices=vmbus,nfit "),
+        "{cmdline}"
+    );
+    assert!(
+        cmdline.contains(" androidboot.fstab_suffix=dsa_dax "),
+        "{cmdline}"
+    );
+    assert_eq!(cmdline.matches("androidboot.fstab_suffix=").count(), 1);
+    assert!(cmdline.ends_with("androidboot.hardware=dsa"), "{cmdline}");
+}
+
+#[test]
+fn nfr1_without_the_direct_mapped_mode_the_disks_stay_on_scsi() {
+    let mut vm = config();
+    vm.addon_disk = Some(PathBuf::from(r"C:\Users\me\AppData\Local\DSA\addons.vhd"));
+    let doc = document(&vm);
+    assert!(doc["VirtualMachine"]["Devices"]
+        .get("VirtualPMem")
+        .is_none());
+    let disks = &doc["VirtualMachine"]["Devices"]["Scsi"]["0"]["Attachments"];
+    assert_eq!(disks["0"]["Path"], r"C:\Program Files\DSA\vm\system.vhdx");
+    assert_eq!(
+        disks["3"]["Path"],
+        r"C:\Users\me\AppData\Local\DSA\addons.vhd"
+    );
+    assert!(!vm
+        .full_kernel_cmdline_for(GuestArch::X86_64)
+        .contains("dsa_dax"));
+    // A direct-mapped boot with no add-on disk to map keeps an attached one on SCSI.
+    vm.direct_mapped = Some(direct_mapped(None));
+    let doc = document(&vm);
+    let pmem = &doc["VirtualMachine"]["Devices"]["VirtualPMem"];
+    assert_eq!(pmem["MaximumCount"], 1);
+    assert!(pmem["Devices"].get("1").is_none());
+    let disks = &doc["VirtualMachine"]["Devices"]["Scsi"]["0"]["Attachments"];
+    assert_eq!(
+        disks["2"]["Path"],
+        r"C:\Users\me\AppData\Local\DSA\addons.vhd"
+    );
+}
+
+#[test]
+fn nfr1_a_direct_mapped_vm_that_could_not_map_its_disks_is_refused() {
+    let mut vm = config();
+    let mut mapped = direct_mapped(None);
+    mapped.system_bytes = (1800 << 20) + 4096;
+    vm.direct_mapped = Some(mapped);
+    let why = vm
+        .to_hcs_document_for(GuestArch::X86_64)
+        .unwrap_err()
+        .to_string();
+    assert!(why.contains("whole number of 2 MiB"), "{why}");
+    let mut arm = arm64_config();
+    arm.direct_mapped = Some(direct_mapped(None));
+    let why = arm
+        .to_hcs_document_for(GuestArch::Arm64)
+        .unwrap_err()
+        .to_string();
+    assert!(why.contains("x86_64"), "{why}");
 }
