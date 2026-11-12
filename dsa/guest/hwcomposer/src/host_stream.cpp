@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "dsa_spare_pages.h"
 #include "log.h"
 
 namespace dsa::hwc {
@@ -59,7 +60,18 @@ void* HostStream::allocBuffer(size_t minSize) {
     return mBuffer;
 }
 
-int HostStream::commitBuffer(size_t size) { return size == 0 ? 0 : writeFully(mBuffer, size); }
+int HostStream::commitBuffer(size_t size) {
+    if (size == 0) {
+        return 0;
+    }
+    const int result = writeFully(mBuffer, size);
+    // What was sent is dead: the next command writes the buffer again before anything reads
+    // it. The buffer grows to the largest command the hwcomposer ever sent (a picture a CPU
+    // wrote goes up through it), so the pages past its first part go back when the guest
+    // reclaims page cache, as the apps' streams do, and steady frames reuse them in place.
+    dsa::releaseSparePages(mBuffer, size);
+    return result;
+}
 
 int HostStream::writeFully(const void* buf, size_t len) {
     if (mFd < 0 || mFailed || (!buf && len != 0)) {

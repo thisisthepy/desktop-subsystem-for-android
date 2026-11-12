@@ -60,6 +60,44 @@ class ReadBufferPatchTests(unittest.TestCase):
             self.assertIn("0027", script.read_text(encoding="utf-8"))
 
 
+class VulkanReplyBufferPatchTests(unittest.TestCase):
+    """Patch 0028: the Vulkan decoder's reply buffer (host/vulkan/VulkanStream.cpp), which grew
+    to twice the largest reply, a guest's copy of host-visible memory among them, goes back to
+    256 KiB on a small reply once no large one has gone out for 2 s. The rule is in
+    include/dsa_reply_buffer.h, tested by tests/reply_buffer_test.cpp."""
+
+    def setUp(self):
+        self.patch = next((HERE / "patches").glob("0028-*.patch"))
+        self.source = added(self.patch, "host/vulkan/VulkanStream.cpp")
+        self.header = added(self.patch, "host/vulkan/VulkanStream.h")
+
+    def test_nfr1_each_commit_asks_whether_the_reply_buffer_goes_back(self):
+        self.assertIn('#include "dsa_reply_buffer.h"', self.source)
+        self.assertIn("const size_t sent = mWritePos;", self.source)
+        self.assertIn("dsa::replyBufferShrinks(sent, mWriteBuffer.capacity(), dsa::ReplyClock::now(),",
+                      self.source)
+        self.assertIn("dsa::shrinkReplyBuffer(mWriteBuffer);", self.source)
+        # The header other libraries include stays free of the folder the rule is in.
+        self.assertNotIn('#include "dsa_reply_buffer.h"', self.header)
+        self.assertIn("std::chrono::steady_clock::time_point mLastLargeWrite{};", self.header)
+        self.assertIn("bool mSeenLargeWrite = false;", self.header)
+
+    def test_nfr1_the_rule_keeps_large_steady_replies_and_is_tested(self):
+        rule = (HERE / "include/dsa_reply_buffer.h").read_text(encoding="utf-8")
+        self.assertIn("kReplyKeepBytes = 256 * 1024;", rule)
+        self.assertIn("kReplyQuietFor{2000};", rule)
+        self.assertIn('"$here/reply_buffer_test.cpp"',
+                      (HERE / "tests/test.sh").read_text(encoding="utf-8"))
+        # The decoder that compiles VulkanStream.cpp has the folder on its include path.
+        cmake = (HERE / "host/CMakeLists.txt").read_text(encoding="utf-8")
+        server = cmake[cmake.index("if(TARGET gfxstream-vulkan-server)"):]
+        self.assertIn('"${CMAKE_CURRENT_SOURCE_DIR}/../include"', server[:server.index("endif()")])
+
+    def test_nfr1_the_fetch_applies_it(self):
+        for script in (HERE / "host/fetch.ps1", HERE / "host/fetch.sh"):
+            self.assertIn("0028", script.read_text(encoding="utf-8"))
+
+
 class BumpPoolPatchTests(unittest.TestCase):
     def test_nfr1_a_bump_pool_that_grew_for_one_command_shrinks(self):
         text = added(BUMP_POOL, "base/include/aemu/base/BumpPool.h")
