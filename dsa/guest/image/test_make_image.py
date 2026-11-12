@@ -1064,6 +1064,21 @@ class ImageLayoutTests(unittest.TestCase):
         self.assertIn("ro.hardware.gralloc=minigbm\n", props)
         self.assertIn("ro.cpuvulkan.version=0\n", props)
 
+    def test_fr4_angle_keeps_static_and_read_back_buffers_out_of_coherent_memory(self):
+        # The guest Vulkan driver reads coherent host-visible memory back each time an app's work
+        # finishes; ANGLE's own switches keep the buffers it can place elsewhere out of it.
+        for vendor in (False, True):
+            props = make_image.edit_props("ro.debuggable=1\n", vendor=vendor)
+            self.assertIn("debug.angle.feature_overrides_disabled=preferDeviceLocalMemoryHostVisible\n",
+                          props)
+            self.assertIn(
+                "debug.angle.feature_overrides_enabled="
+                "preferCachedNoncoherentForDynamicStreamBufferUsage\n", props)
+            # ANGLE splits each property's value at colons: one feature name each, no spaces.
+            for line in props.splitlines():
+                if line.startswith("debug.angle.feature_overrides_"):
+                    self.assertNotIn(" ", line)
+
     def test_fr32_pr3_android_reports_opengles_3_2_to_app_stores(self):
         # v0.2.1 on a real PC: ro.opengles.version was empty and `pm list features` reported
         # reqGlEsVersion=0x0, so Google Play called YouTube incompatible and left YouTube and
