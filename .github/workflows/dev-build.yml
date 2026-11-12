@@ -33,6 +33,12 @@
 name: Development build
 
 on:
+  # GitHub starts a hand-run workflow only once it is on the default branch or has run at
+  # least once. A push to develop that changes this file runs it with the defaults, which
+  # registers it until the release sync carries it to main.
+  push:
+    branches: [develop]
+    paths: [.github/workflows/dev-build.yml]
   workflow_dispatch:
     inputs:
       build:
@@ -74,7 +80,7 @@ jobs:
         id: version
         env:
           REF: ${{ github.ref }}
-          NEXT: ${{ inputs.next_release }}
+          NEXT: ${{ inputs.next_release || '0.2.4' }}
         run: |
           if [[ "$REF" != refs/heads/develop ]]; then
             echo "::error::A Development build is made from develop only, not from $REF." >&2
