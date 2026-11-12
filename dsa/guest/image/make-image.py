@@ -2942,10 +2942,18 @@ FSTAB_DIRS = {
 # (androidboot.fstab_suffix) and the persistent memory's platform devices as boot devices on
 # such a boot only. It differs from fstab.dsa in the logical partitions alone: they mount with
 # dax=always, and without dm-verity, which cannot pass DAX through (device-mapper's linear
-# target can, and maps them as before). The image is verified on the host instead: the disk is
-# the published, checksummed one, attached read only. The verified boot data of the boot
-# partitions is still checked as before, so what the boot reports about itself is the same.
+# target can, and maps them as before). They are verified on the host instead: the disk is the
+# host's uncompressed copy of the published one, which it checks against the hash image.json
+# gives (direct_mapped.system_disk, which dsa-release direct-mapped records), attached read
+# only. The partitions in DIRECT_MAPPED_VERIFIED keep their entries as they are, dm-verity
+# included, and the host's copy keeps their bytes as they are: first stage init sets up
+# verified boot only for an entry it mounts with dm-verity, so with none it would check no
+# vbmeta and report no AVB version. With one, the verified boot data (vbmeta and its chained
+# images, and the boot images' hashes) is checked as in a normal boot.
 DIRECT_MAPPED_FSTAB_SUFFIX = "dsa_dax"
+# The logical partitions the direct-mapped table still verifies with dm-verity: odm, a few
+# hundred KiB in every image, whose hashtree is in the top-level vbmeta.
+DIRECT_MAPPED_VERIFIED = ("odm",)
 # The system disk's size is a whole number of these: Linux maps persistent memory in 2 MiB
 # sections, and a region of another size gets no page structs, so no DAX.
 SYSTEM_DISK_ALIGNMENT = 2 << 20
@@ -2956,7 +2964,8 @@ VERITY_FLAGS = ("avb", "avb_keys")
 DIRECT_MAPPED_FSTAB_HEADER = """\
 # The guest's mount table for a boot whose read-only disks the host maps as persistent memory
 # (the host's direct-mapped mode). Made from fstab.dsa by make-image.py: the logical partitions
-# mount with dax=always and without dm-verity, which cannot pass DAX through; everything else is
+# mount with dax=always and without dm-verity, which cannot pass DAX through, all but odm, which
+# keeps dm-verity so first stage init still checks the verified boot data; everything else is
 # fstab.dsa's. erofs falls back to its page cache, with a line in the kernel log, wherever the
 # device or a file cannot be mapped (a compressed file, a disk on SCSI).
 """
@@ -2965,7 +2974,13 @@ DIRECT_MAPPED_FSTAB_HEADER = """\
 def direct_mapped_entry(uncompressed_erofs):
     """image.json's "direct_mapped": the mount table the host names for that mode, and whether
     the read-only partitions were built uncompressed."""
-    return {"fstab_suffix": DIRECT_MAPPED_FSTAB_SUFFIX, "uncompressed_erofs": bool(uncompressed_erofs)}
+    return {"fstab_suffix": DIRECT_MAPPED_FSTAB_SUFFIX, "uncompressed_erofs": bool(uncompressed_erofs),
+            "verified_partitions": list(DIRECT_MAPPED_VERIFIED)}
+
+
+# What dsa-release direct-mapped adds to image.json's "direct_mapped": the host's copy of the
+# system disk, its format, size, SHA-256 and super partition size.
+SYSTEM_DISK_KEYS = {"format": int, "bytes": int, "sha256": str, "super_bytes": int}
 
 
 def direct_mapped_fstab(text):
@@ -2973,7 +2988,8 @@ def direct_mapped_fstab(text):
     lines = [DIRECT_MAPPED_FSTAB_HEADER]
     for line in text.splitlines(keepends=True):
         fields = line.split()
-        if line.startswith("#") or len(fields) < 5 or "logical" not in fields[4].split(","):
+        if (line.startswith("#") or len(fields) < 5 or "logical" not in fields[4].split(",")
+                or fields[0] in DIRECT_MAPPED_VERIFIED):
             lines.append(line)
             continue
         options = [o for o in fields[3].split(",") if o != DIRECT_MAPPED_MOUNT_OPTION]
@@ -3005,10 +3021,17 @@ def direct_mapped_problems(names, read, entry):
     function that reads one, and image.json's "direct_mapped": each fstab.dsa has the mapped
     table beside it, made from it, and image.json says so; an image that says its read-only
     partitions are uncompressed was built from a misc_info.txt that compresses nothing."""
-    if entry != direct_mapped_entry(entry.get("uncompressed_erofs") if isinstance(entry, dict) else False):
+    described = {k: v for k, v in entry.items() if k != "system_disk"} if isinstance(entry, dict) else entry
+    if described != direct_mapped_entry(entry.get("uncompressed_erofs") if isinstance(entry, dict) else False):
         return [f"image.json describes the direct-mapped mode as {entry!r}, not with the mount table "
                 f"{DIRECT_MAPPED_FSTAB}, so the host cannot boot the image with its disks mapped"]
     problems = []
+    disk = entry.get("system_disk")
+    if disk is not None and (not isinstance(disk, dict) or set(disk) != set(SYSTEM_DISK_KEYS)
+                             or any(not isinstance(disk[k], t) for k, t in SYSTEM_DISK_KEYS.items())
+                             or len(disk["sha256"]) != 64 or disk["bytes"] % SYSTEM_DISK_ALIGNMENT):
+        problems.append(f"image.json describes the host's copy of the system disk as {disk!r}, which the "
+                        "host cannot check its copy against")
     for directory in FSTAB_DIRS:
         normal, mapped = directory + "fstab.dsa", directory + DIRECT_MAPPED_FSTAB
         if normal not in names:
@@ -3023,10 +3046,24 @@ def direct_mapped_problems(names, read, entry):
             fields = line.split()
             if line.startswith("#") or len(fields) < 5 or "logical" not in fields[4].split(","):
                 continue
+            if fields[0] in DIRECT_MAPPED_VERIFIED:
+                if DIRECT_MAPPED_MOUNT_OPTION in fields[3].split(",") or "avb" not in [
+                        f.split("=", 1)[0] for f in fields[4].split(",")]:
+                    problems.append(f"{mapped} does not verify {fields[1]} with dm-verity, so first stage "
+                                    "init checks no verified boot data")
+                continue
             if DIRECT_MAPPED_MOUNT_OPTION not in fields[3].split(","):
                 problems.append(f"{mapped} mounts {fields[1]} without {DIRECT_MAPPED_MOUNT_OPTION}")
             if any(f.split("=", 1)[0] in VERITY_FLAGS for f in fields[4].split(",")):
                 problems.append(f"{mapped} sets up dm-verity for {fields[1]}, which cannot be mapped")
+    if MISC_INFO in names:
+        info = read(MISC_INFO).decode(errors="replace").splitlines()
+        settings = dict(line.split("=", 1) for line in info if "=" in line)
+        dynamic = settings.get("dynamic_partition_list")
+        for name in DIRECT_MAPPED_VERIFIED:
+            if dynamic is not None and name not in dynamic.split():
+                problems.append(f"the image has no {name} partition, which a direct-mapped boot verifies "
+                                "so first stage init checks the verified boot data")
     if entry["uncompressed_erofs"] and MISC_INFO in names:
         info = read(MISC_INFO).decode(errors="replace").splitlines()
         settings = dict(line.split("=", 1) for line in info if "=" in line)

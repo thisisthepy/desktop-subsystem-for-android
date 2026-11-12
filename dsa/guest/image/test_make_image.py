@@ -2639,7 +2639,10 @@ class GuestMemoryTests(unittest.TestCase):
         logical = 0
         for before, after in zip(normal, changed):
             self.assertEqual(before[:3], after[:3])
-            if "logical" in before[4].split(","):
+            if before[0] in make_image.DIRECT_MAPPED_VERIFIED:
+                # odm keeps dm-verity, so first stage init still checks the verified boot data.
+                self.assertEqual(before, after)
+            elif "logical" in before[4].split(","):
                 logical += 1
                 self.assertEqual(after[3].split(","), before[3].split(",") + ["dax=always"], before[1])
                 self.assertFalse([f for f in after[4].split(",") if f.split("=")[0] in ("avb", "avb_keys")],
@@ -2649,7 +2652,7 @@ class GuestMemoryTests(unittest.TestCase):
             else:
                 # /data, /metadata, misc, zram and the verified boot data of the boot partitions.
                 self.assertEqual(before, after)
-        self.assertGreaterEqual(logical, 8)
+        self.assertGreaterEqual(logical, 6)
         # Every image carries it beside fstab.dsa, in the partition and the first stage ramdisk.
         with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
             names = set(archive.namelist())
@@ -2660,7 +2663,37 @@ class GuestMemoryTests(unittest.TestCase):
             self.assertEqual(make_image.direct_mapped_problems(names, archive.read,
                                                                make_image.direct_mapped_entry(False)), [])
         self.assertEqual(make_image.direct_mapped_entry(True),
-                         {"fstab_suffix": "dsa_dax", "uncompressed_erofs": True})
+                         {"fstab_suffix": "dsa_dax", "uncompressed_erofs": True,
+                          "verified_partitions": ["odm"]})
+
+    def test_nfr1_the_direct_mapped_table_still_verifies_odm_so_vbmeta_is_checked(self):
+        # First stage init opens verified boot only for an entry it mounts with dm-verity; odm
+        # keeps its entry as it is, so the vbmeta images and the boot images' hashes are
+        # checked, and ro.boot.avb_version is set, as in a normal boot.
+        fstab = (Path(make_image.__file__).with_name("fstab.dsa")).read_text()
+        mapped = make_image.direct_mapped_fstab(fstab)
+        odm = [line.split() for line in mapped.splitlines() if line.startswith("odm ")]
+        self.assertEqual(len(odm), 2)
+        for fields in odm:
+            self.assertIn("avb", fields[4].split(","))
+            self.assertIn("first_stage_mount", fields[4].split(","))
+            self.assertNotIn("dax=always", fields[3].split(","))
+        broken = mapped.replace("odm /odm erofs ro wait,logical,first_stage_mount,slotselect,avb,nofail",
+                                "odm /odm erofs ro,dax=always wait,logical,first_stage_mount,slotselect,nofail")
+        files = {"VENDOR/etc/fstab.dsa": fstab.encode(), "VENDOR/etc/fstab.dsa_dax": broken.encode()}
+        problems = make_image.direct_mapped_problems(set(files), files.__getitem__,
+                                                     make_image.direct_mapped_entry(False))
+        self.assertTrue(any("does not verify /odm" in p for p in problems), problems)
+
+    def test_nfr1_image_json_may_describe_the_hosts_copy_of_the_system_disk(self):
+        fstab = (Path(make_image.__file__).with_name("fstab.dsa")).read_text()
+        files = {"VENDOR/etc/fstab.dsa": fstab.encode(),
+                 "VENDOR/etc/fstab.dsa_dax": make_image.direct_mapped_fstab(fstab).encode()}
+        entry = make_image.direct_mapped_entry(False)
+        entry["system_disk"] = {"format": 1, "bytes": 2304 << 20, "sha256": "ab" * 32, "super_bytes": 2048 << 20}
+        self.assertEqual(make_image.direct_mapped_problems(set(files), files.__getitem__, entry), [])
+        entry["system_disk"]["bytes"] += 4096
+        self.assertEqual(len(make_image.direct_mapped_problems(set(files), files.__getitem__, entry)), 1)
 
     def test_nfr1_check_image_refuses_a_direct_mapped_table_that_still_verifies(self):
         fstab = (Path(make_image.__file__).with_name("fstab.dsa")).read_text().encode()
