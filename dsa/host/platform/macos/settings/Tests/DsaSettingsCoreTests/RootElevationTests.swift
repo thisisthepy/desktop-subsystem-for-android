@@ -89,6 +89,22 @@ final class RootElevationTests: XCTestCase {
         XCTAssertEqual(vm.rows.first { $0.package == "com.android.settings" }?.rootIndex, RootLevel.remember.index)
     }
 
+    func test_fr35_apps_sharing_a_user_id_are_approved_as_one_group() async {
+        let cli = FakeCli()
+        cli.answer("apps list --json", #"{"apps":[{"package":"com.example.zeta","label":"Zeta","root":"ask","shared_user_id":"com.example.shared"},{"package":"com.example.middle","label":"Middle","root":"off"},{"package":"com.example.alpha","label":"Alpha","root":"ask","shared_user_id":"com.example.shared"}]}"#)
+        let vm = AppsViewModel(service: AppsService(cli: cli), text: KeyText())
+        await vm.refresh()
+        XCTAssertNil(vm.error)
+        // The group is listed together, in the place of its first app by name.
+        XCTAssertEqual(vm.rows.map(\.label), ["Alpha", "Zeta", "Middle"])
+        // Each app of the group says its root level is one setting with the others.
+        XCTAssertEqual(vm.rows.first { $0.package == "com.example.zeta" }?.rootGroupNote, "Apps_RootGroup")
+        XCTAssertNil(vm.rows.first { $0.package == "com.example.middle" }?.rootGroupNote ?? nil)
+        // A search that finds one app of the group shows the whole group.
+        vm.search = "zeta"
+        XCTAssertEqual(vm.rows.map(\.label), ["Alpha", "Zeta"])
+    }
+
     func test_fr35_no_app_level_can_be_chosen_while_root_elevation_is_off_for_the_mac() async {
         let cli = FakeCli()
         cli.answer("apps list --json", #"{"apps":[{"package":"com.example.backup","label":"Backup","root":"unavailable"}]}"#)

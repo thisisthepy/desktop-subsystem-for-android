@@ -1395,6 +1395,12 @@ pub struct AppInfo {
     /// in rank order, then the pinned ones. Empty for a task's app.
     #[prost(message, repeated, tag = "17")]
     pub shortcuts: ::prost::alloc::vec::Vec<AppShortcut>,
+    /// The user ID the app shares with other apps (its manifest's `android:sharedUserId`), in
+    /// the list of installed apps. Apps with the same value run under one Android uid and are
+    /// one group for root elevation: their level and grace apply to all of them, and a settings
+    /// app shows them together. Empty for an app with a user ID of its own, and for a task's app.
+    #[prost(string, tag = "18")]
+    pub shared_user_id: ::prost::alloc::string::String,
 }
 /// One of an app's launcher shortcuts in Android: a static one from its manifest, a dynamic
 /// one it published, or one pinned at its request. The host's jump list (Dock menu, desktop

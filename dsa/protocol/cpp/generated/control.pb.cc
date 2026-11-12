@@ -275,6 +275,7 @@ PROTOBUF_CONSTEXPR InstalledApp::InstalledApp(
   , /*decltype(_impl_.icon_png_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
   , /*decltype(_impl_.version_name_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
   , /*decltype(_impl_.primary_abi_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.shared_user_id_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
   , /*decltype(_impl_.version_code_)*/int64_t{0}
   , /*decltype(_impl_.first_install_time_ms_)*/uint64_t{0u}
   , /*decltype(_impl_.last_update_time_ms_)*/uint64_t{0u}
@@ -10277,6 +10278,7 @@ InstalledApp::InstalledApp(const InstalledApp& from)
     , decltype(_impl_.icon_png_){}
     , decltype(_impl_.version_name_){}
     , decltype(_impl_.primary_abi_){}
+    , decltype(_impl_.shared_user_id_){}
     , decltype(_impl_.version_code_){}
     , decltype(_impl_.first_install_time_ms_){}
     , decltype(_impl_.last_update_time_ms_){}
@@ -10327,6 +10329,14 @@ InstalledApp::InstalledApp(const InstalledApp& from)
     _this->_impl_.primary_abi_.Set(from._internal_primary_abi(), 
       _this->GetArenaForAllocation());
   }
+  _impl_.shared_user_id_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.shared_user_id_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (!from._internal_shared_user_id().empty()) {
+    _this->_impl_.shared_user_id_.Set(from._internal_shared_user_id(), 
+      _this->GetArenaForAllocation());
+  }
   ::memcpy(&_impl_.version_code_, &from._impl_.version_code_,
     static_cast<size_t>(reinterpret_cast<char*>(&_impl_.system_app_) -
     reinterpret_cast<char*>(&_impl_.version_code_)) + sizeof(_impl_.system_app_));
@@ -10344,6 +10354,7 @@ inline void InstalledApp::SharedCtor(
     , decltype(_impl_.icon_png_){}
     , decltype(_impl_.version_name_){}
     , decltype(_impl_.primary_abi_){}
+    , decltype(_impl_.shared_user_id_){}
     , decltype(_impl_.version_code_){int64_t{0}}
     , decltype(_impl_.first_install_time_ms_){uint64_t{0u}}
     , decltype(_impl_.last_update_time_ms_){uint64_t{0u}}
@@ -10373,6 +10384,10 @@ inline void InstalledApp::SharedCtor(
   #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
     _impl_.primary_abi_.Set("", GetArenaForAllocation());
   #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  _impl_.shared_user_id_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.shared_user_id_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
 }
 
 InstalledApp::~InstalledApp() {
@@ -10392,6 +10407,7 @@ inline void InstalledApp::SharedDtor() {
   _impl_.icon_png_.Destroy();
   _impl_.version_name_.Destroy();
   _impl_.primary_abi_.Destroy();
+  _impl_.shared_user_id_.Destroy();
 }
 
 void InstalledApp::SetCachedSize(int size) const {
@@ -10410,6 +10426,7 @@ void InstalledApp::Clear() {
   _impl_.icon_png_.ClearToEmpty();
   _impl_.version_name_.ClearToEmpty();
   _impl_.primary_abi_.ClearToEmpty();
+  _impl_.shared_user_id_.ClearToEmpty();
   ::memset(&_impl_.version_code_, 0, static_cast<size_t>(
       reinterpret_cast<char*>(&_impl_.system_app_) -
       reinterpret_cast<char*>(&_impl_.version_code_)) + sizeof(_impl_.system_app_));
@@ -10540,6 +10557,16 @@ const char* InstalledApp::_InternalParse(const char* ptr, ::_pbi::ParseContext* 
         } else
           goto handle_unusual;
         continue;
+      // string shared_user_id = 14;
+      case 14:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 114)) {
+          auto str = _internal_mutable_shared_user_id();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+          CHK_(::_pbi::VerifyUTF8(str, nullptr));
+        } else
+          goto handle_unusual;
+        continue;
       default:
         goto handle_unusual;
     }  // switch
@@ -10665,6 +10692,16 @@ uint8_t* InstalledApp::_InternalSerialize(
         InternalWriteMessage(13, repfield, repfield.GetCachedSize(), target, stream);
   }
 
+  // string shared_user_id = 14;
+  if (!this->_internal_shared_user_id().empty()) {
+    ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::VerifyUtf8String(
+      this->_internal_shared_user_id().data(), static_cast<int>(this->_internal_shared_user_id().length()),
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::SERIALIZE,
+      "dsa.control.v1.InstalledApp.shared_user_id");
+    target = stream->WriteStringMaybeAliased(
+        14, this->_internal_shared_user_id(), target);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -10721,6 +10758,13 @@ size_t InstalledApp::ByteSizeLong() const {
     total_size += 1 +
       ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
         this->_internal_primary_abi());
+  }
+
+  // string shared_user_id = 14;
+  if (!this->_internal_shared_user_id().empty()) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_shared_user_id());
   }
 
   // int64 version_code = 5;
@@ -10795,6 +10839,9 @@ void InstalledApp::MergeFrom(const InstalledApp& from) {
   if (!from._internal_primary_abi().empty()) {
     _this->_internal_set_primary_abi(from._internal_primary_abi());
   }
+  if (!from._internal_shared_user_id().empty()) {
+    _this->_internal_set_shared_user_id(from._internal_shared_user_id());
+  }
   if (from._internal_version_code() != 0) {
     _this->_internal_set_version_code(from._internal_version_code());
   }
@@ -10855,6 +10902,10 @@ void InstalledApp::InternalSwap(InstalledApp* other) {
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
       &_impl_.primary_abi_, lhs_arena,
       &other->_impl_.primary_abi_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.shared_user_id_, lhs_arena,
+      &other->_impl_.shared_user_id_, rhs_arena
   );
   ::PROTOBUF_NAMESPACE_ID::internal::memswap<
       PROTOBUF_FIELD_OFFSET(InstalledApp, _impl_.system_app_)

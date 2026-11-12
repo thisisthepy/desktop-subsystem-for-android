@@ -33,7 +33,8 @@ public sealed record InstalledAppInfo(
     ulong CacheBytes,
     byte[] IconPng,
     RunAsArmSwitch? RunAsArm = null,
-    string Root = "")
+    string Root = "",
+    string SharedUserId = "")
 {
     public ulong TotalBytes => AppBytes + DataBytes + CacheBytes;
 }
@@ -248,7 +249,8 @@ public sealed class AppsService
         Number(app, "cache_bytes"),
         Png(app, "icon_png"),
         ReadRunAsArm(app),
-        String(app, "root"));
+        String(app, "root"),
+        String(app, "shared_user_id"));
 
     /// <summary>The start of dsa's line for a root level the service did not set: the
     /// package, then the service's words.</summary>
@@ -450,9 +452,14 @@ public sealed record AppRow(
     bool IsHighlighted = false,
     int RootIndex = -1,
     bool CanChangeRoot = false,
-    string? RootTip = null)
+    string? RootTip = null,
+    string? RootGroupNote = null)
 {
     public bool NoIcon => Icon is null;
+
+    /// <summary>Whether the app shares its user ID with other apps, so the page says that
+    /// their root level is one setting.</summary>
+    public bool HasRootGroupNote => RootGroupNote is not null;
 
     /// <summary>Whether the page says why the app cannot run as ARM.</summary>
     public bool HasRunAsArmTip => RunAsArmTip is not null;
@@ -561,20 +568,50 @@ public sealed class AppsViewModel : ObservableObject
             ? string.Format(culture ?? CultureInfo.CurrentCulture, "{0:0} KB", Math.Ceiling(bytes / 1024.0))
             : Format.Size(bytes / 1024, culture);
 
-    /// <summary>The apps the search matches, by name.</summary>
+    /// <summary>The apps the search matches, by name. Apps that share a user ID are one group:
+    /// the group is listed together, in the place of its first app by name, and a search that
+    /// finds one of them shows them all.</summary>
     public IReadOnlyList<AppRow> Rows
     {
         get
         {
             var query = _search.Trim();
-            return (_apps ?? Array.Empty<InstalledAppInfo>())
-                .Where(a => query.Length == 0
-                    || a.Label.Contains(query, StringComparison.CurrentCultureIgnoreCase)
-                    || a.Package.Contains(query, StringComparison.OrdinalIgnoreCase))
-                .OrderBy(a => a.Label.Length > 0 ? a.Label : a.Package, StringComparer.CurrentCultureIgnoreCase)
+            var apps = _apps ?? Array.Empty<InstalledAppInfo>();
+            bool Found(InstalledAppInfo a) => query.Length == 0
+                || a.Label.Contains(query, StringComparison.CurrentCultureIgnoreCase)
+                || a.Package.Contains(query, StringComparison.OrdinalIgnoreCase);
+            string Name(InstalledAppInfo a) => a.Label.Length > 0 ? a.Label : a.Package;
+            string GroupName(InstalledAppInfo a) => SharedWith(a).Append(a)
+                .Select(Name)
+                .OrderBy(n => n, StringComparer.CurrentCultureIgnoreCase)
+                .First();
+            return apps
+                .Where(a => Found(a) || SharedWith(a).Any(Found))
+                .OrderBy(GroupName, StringComparer.CurrentCultureIgnoreCase)
+                .ThenBy(a => a.SharedUserId, StringComparer.Ordinal)
+                .ThenBy(Name, StringComparer.CurrentCultureIgnoreCase)
                 .Select(Row)
                 .ToList();
         }
+    }
+
+    /// <summary>The other apps that share <paramref name="app"/>'s user ID, by name.</summary>
+    private IEnumerable<InstalledAppInfo> SharedWith(InstalledAppInfo app) =>
+        app.SharedUserId.Length == 0
+            ? Enumerable.Empty<InstalledAppInfo>()
+            : (_apps ?? Array.Empty<InstalledAppInfo>())
+                .Where(other => other.SharedUserId == app.SharedUserId && other.Package != app.Package)
+                .OrderBy(other => other.Label.Length > 0 ? other.Label : other.Package, StringComparer.CurrentCultureIgnoreCase);
+
+    /// <summary>What the page says under an app's root level when it shares its user ID with
+    /// other apps: which apps, and that their level is one setting; null for an app with a
+    /// user ID of its own.</summary>
+    public string? RootGroupNoteOf(InstalledAppInfo app)
+    {
+        var others = SharedWith(app).Select(other => other.Label.Length > 0 ? other.Label : other.Package).ToList();
+        return others.Count == 0
+            ? null
+            : string.Format(CultureInfo.CurrentCulture, _text.Get("Apps_RootGroup"), string.Join(", ", others));
     }
 
     /// <summary>The start sizes the page offers: Android's own, then phone and tablet sizes, in
@@ -664,7 +701,8 @@ public sealed class AppsViewModel : ObservableObject
             app.Package == _highlighted,
             RootLevels.Parse(app.Root) is { } level ? (int)level : -1,
             RootLevels.Parse(app.Root) is not null,
-            RootTipOf(app.Root));
+            RootTipOf(app.Root),
+            RootGroupNoteOf(app));
     }
 
     /// <summary>The root levels the page offers, in the order of <see cref="RootLevel"/>.</summary>
