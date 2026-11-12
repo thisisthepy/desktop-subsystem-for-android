@@ -984,8 +984,10 @@ jobs:
 
   list:
     name: Sign and ${{ inputs.dev_build && 'keep' || 'publish' }} the release list
+    # A skipped job before the image (the arm64 kernel, which a development build does not
+    # make) would skip this one too under the implicit success() check.
     needs: image
-    if: inputs.rebuild_images
+    if: inputs.rebuild_images && !cancelled() && needs.image.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
