@@ -1256,3 +1256,58 @@ fn nfr1_the_renderer_counts_every_device_after_a_lost_device() {
     cmd_thread.join().expect("command stream ends");
     process.end();
 }
+
+const RC_CLOSE_COLOR_BUFFER: u32 = 10014;
+const RC_OPEN_COLOR_BUFFER_2: u32 = 10025;
+
+#[test]
+fn nfr2_a_destroyed_color_buffer_is_freed_without_another_call() {
+    let Some(adapter) = test_renderer() else {
+        return;
+    };
+    let process = GuestProcess::start(&adapter);
+    let (mut wire, cmd_thread) = process.stream(&adapter);
+    assert!(wire.renderer_version() > 0, "renderControl answers");
+
+    // A 512x512 buffer (1 MiB), opened by this process as gralloc opens a window's buffers.
+    let (before_kb, _) = counted(&adapter);
+    let args = [512u32, 512, GL_RGBA]
+        .iter()
+        .flat_map(|value| value.to_le_bytes())
+        .collect::<Vec<u8>>();
+    wire.render_control(GfxstreamWire::RC_CREATE_COLOR_BUFFER, &args);
+    let buffer = wire.read_u32();
+    assert_ne!(buffer, 0, "a color buffer is made");
+    wire.render_control(RC_OPEN_COLOR_BUFFER_2, &buffer.to_le_bytes());
+    assert_eq!(wire.read_u32(), 0, "the color buffer opens");
+    let (made_kb, _) = counted(&adapter);
+    assert!(
+        made_kb >= before_kb + 1024,
+        "the color buffer is counted ({before_kb} KiB before, {made_kb} KiB after)"
+    );
+
+    // The window closes: its last buffer is closed, and nothing else is made or destroyed
+    // after it. Its memory goes once the GPU is done with it, without another call; it used
+    // to stay until the next color buffer was made or destroyed.
+    wire.render_control(RC_CLOSE_COLOR_BUFFER, &buffer.to_le_bytes());
+    assert!(wire.renderer_version() > 0, "the close is carried out");
+    let closed = Instant::now();
+    let mut now_kb = made_kb;
+    while closed.elapsed() < Duration::from_secs(10) {
+        now_kb = counted(&adapter).0;
+        if now_kb + 1024 <= made_kb {
+            break;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    assert!(
+        now_kb + 1024 <= made_kb,
+        "the closed color buffer's memory is freed ({made_kb} KiB before the close, {now_kb} \
+         KiB {:?} after)",
+        closed.elapsed()
+    );
+
+    drop(wire);
+    cmd_thread.join().expect("command stream ends");
+    process.end();
+}
