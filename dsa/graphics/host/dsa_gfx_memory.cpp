@@ -19,14 +19,21 @@
  * Without the hook, the table of a device made again after a GPU reset was filled anew
  * with the driver's entries, and nothing was counted from then on; a guest device's
  * allocations were never counted. A few allocations made while the renderer started are not
- * seen, and a free of one of them is ignored. */
+ * seen, and a free of one of them is ignored.
+ *
+ * And the trim: a thread that, once a second, lets go of what nothing uses any more without
+ * waiting for the guest's next call (the Vulkan objects of destroyed color buffers, whose GPU
+ * work has finished). */
 
 #include "dsa_gfx_backend.h"
 #include "dsa_gfx_memory.h"
 
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <map>
 #include <mutex>
+#include <thread>
 #include <utility>
 
 #include "FrameBuffer.h"
@@ -196,6 +203,51 @@ void wrap_destroy(VulkanDispatch* table, PFN_vkDestroyDevice wrapper,
     table->vkDestroyDevice = wrapper;
 }
 
+/* The trim's thread, and how it is told to end. */
+std::mutex s_trim_mutex;
+std::condition_variable s_trim_wake;
+bool s_trim_stop = false;
+std::thread s_trim;
+
+/* How often the trim looks. Freeing waits for nothing, so a look costs a lock and a check. */
+constexpr std::chrono::seconds kTrimInterval{1};
+
+void trim_run() {
+    std::unique_lock<std::mutex> lock(s_trim_mutex);
+    while (!s_trim_wake.wait_for(lock, kTrimInterval, [] { return s_trim_stop; })) {
+        lock.unlock();
+        if (VkEmulation* emu = emulation()) {
+            /* A destroyed color buffer's image and memory are freed once the GPU is done with
+             * them; without this they waited for the next color buffer to be made or
+             * destroyed, so those of a window that closed last stayed. */
+            emu->freeFinishedRetired();
+        }
+        lock.lock();
+    }
+}
+
+void start_trim() {
+    std::lock_guard<std::mutex> lock(s_trim_mutex);
+    if (s_trim.joinable()) {
+        return;
+    }
+    s_trim_stop = false;
+    s_trim = std::thread(trim_run);
+}
+
+void stop_trim() {
+    std::thread trim;
+    {
+        std::lock_guard<std::mutex> lock(s_trim_mutex);
+        s_trim_stop = true;
+        trim.swap(s_trim);
+    }
+    s_trim_wake.notify_all();
+    if (trim.joinable()) {
+        trim.join();
+    }
+}
+
 }  // namespace
 
 void dsa_gfx_memory_install(void) {
@@ -216,9 +268,12 @@ void dsa_gfx_memory_install(void) {
     /* The renderer's own device was made before the hook was set. */
     wrap_device_table(emu->getDevice(), emu->getDeviceDispatch());
     gfxstream::vk::setDeviceDispatchHook(wrap_device_table);
+    start_trim();
 }
 
 void dsa_gfx_memory_uninstall(void) {
+    /* Before the renderer is torn down, which the trim must not reach into. */
+    stop_trim();
     /* The wrapped entries stay: they forward to the driver, and the teardown still calls
      * them. Only the count stops. */
     std::lock_guard<std::mutex> lock(s_mutex);
