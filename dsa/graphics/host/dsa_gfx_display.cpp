@@ -1120,6 +1120,137 @@ void cmd_barriers(VulkanDispatch* vk, VkCommandBuffer commands, VkPipelineStageF
                              static_cast<uint32_t>(barriers.size()), barriers.data());
 }
 
+/* The barriers a copy into the embedder's image takes: the first band takes the images over
+ * (`acquire_*`), the last hands them back (`release_*`). */
+struct CopyBarriers {
+    std::vector<VkImageMemoryBarrier> acquire_transfers;
+    std::vector<VkImageMemoryBarrier> acquire_layouts;
+    std::vector<VkImageMemoryBarrier> release_layouts;
+    std::vector<VkImageMemoryBarrier> release_transfers;
+};
+
+/* Copies the top-left `width` x `height` of `source` into `target` on the GPU. The copy goes in
+ * bands of at most dsa::kMaxCopyPixels, each a submission of its own that is waited for before
+ * the next, as on Windows: a frame of a window maximized on a HiDPI monitor (2880x1800 and more)
+ * is never one GPU job, and the GPU can turn to other work between the bands. A blit (`blit`)
+ * converts between formats, as from the ColorBuffer's RGBA into a BGRA IOSurface; otherwise the
+ * pixels are copied as they are. True when the whole frame was copied; false when the copy was
+ * given up (the device was lost or hung, or the submission failed), and the frame is dropped. */
+bool copy_in_bands(VkEmulation& emu, PixelPresenter& presenter, uint32_t display_id,
+                   VkImage source, VkImage target, uint32_t width, uint32_t height, bool blit,
+                   const CopyBarriers& barriers) {
+    VulkanDispatch* vk = emu.getDeviceDispatch();
+    const std::vector<dsa::CopyBand> bands = dsa::copy_bands(width, height);
+    uint64_t took_ns = 0;
+    for (size_t band = 0; band < bands.size(); ++band) {
+        const bool first = band == 0;
+        const bool last = band + 1 == bands.size();
+        const int32_t top = static_cast<int32_t>(bands[band].y);
+        const uint32_t rows = bands[band].rows;
+
+        VkCommandBufferBeginInfo begin = {};
+        begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        vk->vkResetCommandBuffer(presenter.commands, 0);
+        vk->vkBeginCommandBuffer(presenter.commands, &begin);
+        if (first) {
+            cmd_barriers(vk, presenter.commands, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, barriers.acquire_transfers);
+            cmd_barriers(vk, presenter.commands, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, barriers.acquire_layouts);
+        } else {
+            /* After the bands before, and the layouts the first one set. */
+            VkMemoryBarrier after = {};
+            after.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+            after.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+            after.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+            vk->vkCmdPipelineBarrier(presenter.commands, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                                     VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 1, &after, 0, nullptr, 0,
+                                     nullptr);
+        }
+        if (blit) {
+            /* The sizes match, so nothing is scaled. */
+            VkImageBlit region = {};
+            region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+            region.srcOffsets[0] = {0, top, 0};
+            region.srcOffsets[1] = {static_cast<int32_t>(width),
+                                    top + static_cast<int32_t>(rows), 1};
+            region.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+            region.dstOffsets[0] = region.srcOffsets[0];
+            region.dstOffsets[1] = region.srcOffsets[1];
+            vk->vkCmdBlitImage(presenter.commands, source, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                               target, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region,
+                               VK_FILTER_NEAREST);
+        } else {
+            VkImageCopy region = {};
+            region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+            region.srcOffset = {0, top, 0};
+            region.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+            region.dstOffset = {0, top, 0};
+            region.extent = {width, rows, 1};
+            vk->vkCmdCopyImage(presenter.commands, source, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                               target, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+        }
+        if (last) {
+            cmd_barriers(vk, presenter.commands, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, barriers.release_layouts);
+            cmd_barriers(vk, presenter.commands, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, barriers.release_transfers);
+        }
+        vk->vkEndCommandBuffer(presenter.commands);
+
+        VkSubmitInfo submit = {};
+        submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit.commandBufferCount = 1;
+        submit.pCommandBuffers = &presenter.commands;
+        VkResult submitted;
+        {
+            android::base::AutoLock lock(*emu.getQueueLock());
+            submitted = vk->vkQueueSubmit(emu.getQueue(), 1, &submit, presenter.fence);
+        }
+        if (submitted != VK_SUCCESS) {
+            if (submitted == VK_ERROR_DEVICE_LOST) {
+                /* The device is made again, and a frame after that finds the new one. */
+                emu.noteDeviceLost();
+            }
+            log_once("submitting the copy of a frame into a task window failed");
+            return false;
+        }
+        uint64_t band_ns = 0;
+        const dsa::CopyEnd end = finish_copy(emu, presenter.fence, &band_ns);
+        took_ns += band_ns;
+        switch (end) {
+            case dsa::CopyEnd::Done:
+                break;
+            case dsa::CopyEnd::DeviceLost:
+                ERR("The GPU was reset while a frame of display %u (%ux%u) was copied into its "
+                    "task window (rows %d to %d, band %zu of %zu).",
+                    display_id, width, height, top, top + static_cast<int32_t>(rows), band + 1,
+                    bands.size());
+                return false;
+            case dsa::CopyEnd::Hung:
+                /* The GPU may still run the command buffer: it and its fence are never used
+                 * again, and the next frame makes new ones. */
+                ERR("Copying a frame of display %u (%ux%u) into its task window (rows %d to %d, "
+                    "band %zu of %zu) has not finished in %llu ms; the GPU may have hung. The "
+                    "copy is given up and the device is checked.",
+                    display_id, width, height, top, top + static_cast<int32_t>(rows), band + 1,
+                    bands.size(), static_cast<unsigned long long>(band_ns / 1000000ull));
+                presenter.pool = VK_NULL_HANDLE;
+                presenter.commands = VK_NULL_HANDLE;
+                presenter.fence = VK_NULL_HANDLE;
+                return false;
+        }
+    }
+    if (took_ns > dsa::kCopySlowNs && slow_copy_may_log()) {
+        WARN("Copying a frame of display %u (%ux%u, in %zu band(s)) into its task window took "
+             "%llu ms.",
+             display_id, width, height, bands.size(),
+             static_cast<unsigned long long>(took_ns / 1000000ull));
+    }
+    return true;
+}
+
 /* Copies the frame into the display's next dmabuf on the GPU. False when it cannot, and the
  * frame is read back instead. */
 bool present_dmabuf(PixelPresenter& presenter, uint32_t display_id, const PendingFrame& frame) {
@@ -1162,78 +1293,24 @@ bool present_dmabuf(PixelPresenter& presenter, uint32_t display_id, const Pendin
     if (content_width == 0 || content_height == 0) {
         return true;
     }
-    VulkanDispatch* vk = emu->getDeviceDispatch();
     const uint32_t family = emu->getQueueFamilyIndex();
 
-    std::vector<VkImageMemoryBarrier> acquire_transfers;
-    std::vector<VkImageMemoryBarrier> acquire_layouts;
-    std::vector<VkImageMemoryBarrier> release_layouts;
-    std::vector<VkImageMemoryBarrier> release_transfers;
+    CopyBarriers barriers;
     gfxstream::vk::addNeededBarriersToUseBorrowedImage(
         *source, family, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_ACCESS_TRANSFER_READ_BIT, &acquire_transfers,
-        &acquire_layouts, &release_layouts, &release_transfers);
-    acquire_layouts.push_back(image_barrier(
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_ACCESS_TRANSFER_READ_BIT,
+        &barriers.acquire_transfers, &barriers.acquire_layouts, &barriers.release_layouts,
+        &barriers.release_transfers);
+    barriers.acquire_layouts.push_back(image_barrier(
         slot.image, 0, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED));
-    release_transfers.push_back(image_barrier(
+    barriers.release_transfers.push_back(image_barrier(
         slot.image, VK_ACCESS_TRANSFER_WRITE_BIT, 0, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
         VK_IMAGE_LAYOUT_GENERAL, family, VK_QUEUE_FAMILY_FOREIGN_EXT));
-
-    VkCommandBufferBeginInfo begin = {};
-    begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vk->vkResetCommandBuffer(presenter.commands, 0);
-    vk->vkBeginCommandBuffer(presenter.commands, &begin);
-    cmd_barriers(vk, presenter.commands, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                 VK_PIPELINE_STAGE_TRANSFER_BIT, acquire_transfers);
-    cmd_barriers(vk, presenter.commands, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                 VK_PIPELINE_STAGE_TRANSFER_BIT, acquire_layouts);
-    VkImageCopy region = {};
-    region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-    region.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-    region.extent = {content_width, content_height, 1};
-    vk->vkCmdCopyImage(presenter.commands, source->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                       slot.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
-    cmd_barriers(vk, presenter.commands, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                 VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, release_layouts);
-    cmd_barriers(vk, presenter.commands, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                 VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, release_transfers);
-    vk->vkEndCommandBuffer(presenter.commands);
-
-    VkSubmitInfo submit = {};
-    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submit.commandBufferCount = 1;
-    submit.pCommandBuffers = &presenter.commands;
-    VkResult submitted;
-    {
-        android::base::AutoLock lock(*emu->getQueueLock());
-        submitted = vk->vkQueueSubmit(emu->getQueue(), 1, &submit, presenter.fence);
-    }
-    if (submitted != VK_SUCCESS) {
-        if (submitted == VK_ERROR_DEVICE_LOST) {
-            /* The next frame finds a new device. */
-            emu->noteDeviceLost();
-        }
-        log_once("submitting the copy of a frame into a task window failed");
+    /* In bands, none of them one GPU job the size of the window. */
+    if (!copy_in_bands(*emu, presenter, display_id, source->image, slot.image, content_width,
+                       content_height, false, barriers)) {
         return true;
-    }
-    uint64_t took_ns = 0;
-    switch (finish_copy(*emu, presenter.fence, &took_ns)) {
-        case dsa::CopyEnd::Done:
-            break;
-        case dsa::CopyEnd::DeviceLost:
-            log_once("the GPU was reset while a frame was copied into a task window");
-            return true;
-        case dsa::CopyEnd::Hung:
-            /* The GPU may still run the command buffer: it and its fence are never used again. */
-            ERR("Copying a frame of display %u into its task window has not finished in %llu ms; "
-                "the GPU may have hung. The copy is given up and the device is checked.",
-                display_id, static_cast<unsigned long long>(took_ns / 1000000ull));
-            presenter.pool = VK_NULL_HANDLE;
-            presenter.commands = VK_NULL_HANDLE;
-            presenter.fence = VK_NULL_HANDLE;
-            return true;
     }
     display.next = (index + 1) % kSlots;
     presenter.dmabuf_frame_cb(presenter.context, display_id, index, content_width,
@@ -1446,83 +1523,25 @@ bool present_iosurface(PixelPresenter& presenter, uint32_t display_id, const Pen
     if (content_width == 0 || content_height == 0) {
         return true;
     }
-    VulkanDispatch* vk = emu->getDeviceDispatch();
     const uint32_t family = emu->getQueueFamilyIndex();
 
-    std::vector<VkImageMemoryBarrier> acquire_transfers;
-    std::vector<VkImageMemoryBarrier> acquire_layouts;
-    std::vector<VkImageMemoryBarrier> release_layouts;
-    std::vector<VkImageMemoryBarrier> release_transfers;
+    CopyBarriers barriers;
     gfxstream::vk::addNeededBarriersToUseBorrowedImage(
         *source, family, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_ACCESS_TRANSFER_READ_BIT, &acquire_transfers,
-        &acquire_layouts, &release_layouts, &release_transfers);
-    acquire_layouts.push_back(image_barrier(
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_ACCESS_TRANSFER_READ_BIT,
+        &barriers.acquire_transfers, &barriers.acquire_layouts, &barriers.release_layouts,
+        &barriers.release_transfers);
+    barriers.acquire_layouts.push_back(image_barrier(
         target->image, 0, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED));
-    release_layouts.push_back(image_barrier(
+    barriers.release_layouts.push_back(image_barrier(
         target->image, VK_ACCESS_TRANSFER_WRITE_BIT, 0, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
         VK_IMAGE_LAYOUT_GENERAL, VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED));
-
-    VkCommandBufferBeginInfo begin = {};
-    begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vk->vkResetCommandBuffer(presenter.commands, 0);
-    vk->vkBeginCommandBuffer(presenter.commands, &begin);
-    cmd_barriers(vk, presenter.commands, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                 VK_PIPELINE_STAGE_TRANSFER_BIT, acquire_transfers);
-    cmd_barriers(vk, presenter.commands, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
-                 VK_PIPELINE_STAGE_TRANSFER_BIT, acquire_layouts);
     /* A blit, not a copy: the color buffer is RGBA and the surface BGRA, and only a blit
-     * converts between them. The sizes match, so nothing is scaled. */
-    VkImageBlit region = {};
-    region.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-    region.srcOffsets[1] = {static_cast<int32_t>(content_width),
-                            static_cast<int32_t>(content_height), 1};
-    region.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-    region.dstOffsets[1] = region.srcOffsets[1];
-    vk->vkCmdBlitImage(presenter.commands, source->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                       target->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region,
-                       VK_FILTER_NEAREST);
-    cmd_barriers(vk, presenter.commands, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                 VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, release_layouts);
-    cmd_barriers(vk, presenter.commands, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                 VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, release_transfers);
-    vk->vkEndCommandBuffer(presenter.commands);
-
-    VkSubmitInfo submit = {};
-    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submit.commandBufferCount = 1;
-    submit.pCommandBuffers = &presenter.commands;
-    VkResult submitted;
-    {
-        android::base::AutoLock lock(*emu->getQueueLock());
-        submitted = vk->vkQueueSubmit(emu->getQueue(), 1, &submit, presenter.fence);
-    }
-    if (submitted != VK_SUCCESS) {
-        if (submitted == VK_ERROR_DEVICE_LOST) {
-            /* The next frame finds a new device. */
-            emu->noteDeviceLost();
-        }
-        log_once("submitting the copy of a frame into a task window failed");
+     * converts between them. In bands, none of them one GPU job the size of the window. */
+    if (!copy_in_bands(*emu, presenter, display_id, source->image, target->image, content_width,
+                       content_height, true, barriers)) {
         return true;
-    }
-    uint64_t took_ns = 0;
-    switch (finish_copy(*emu, presenter.fence, &took_ns)) {
-        case dsa::CopyEnd::Done:
-            break;
-        case dsa::CopyEnd::DeviceLost:
-            log_once("the GPU was reset while a frame was copied into a task window");
-            return true;
-        case dsa::CopyEnd::Hung:
-            /* The GPU may still run the command buffer: it and its fence are never used again. */
-            ERR("Copying a frame of display %u into its task window has not finished in %llu ms; "
-                "the GPU may have hung. The copy is given up and the device is checked.",
-                display_id, static_cast<unsigned long long>(took_ns / 1000000ull));
-            presenter.pool = VK_NULL_HANDLE;
-            presenter.commands = VK_NULL_HANDLE;
-            presenter.fence = VK_NULL_HANDLE;
-            return true;
     }
     presenter.iosurface_frame_cb(presenter.context, display_id, content_width, content_height);
     return true;

@@ -252,9 +252,11 @@ class HostGraphicsBuildTests(unittest.TestCase):
         # it.
         display = (HERE / "dsa_gfx_display.cpp").read_text(encoding="utf-8")
         self.assertNotIn("UINT64_MAX", display)
-        self.assertEqual(display.count("finish_copy(*emu, presenter.fence, &took_ns)"), 2)
-        # On Windows each band of a copy is waited for on its own.
+        # Each band of a copy is waited for on its own: on Windows in the frame copy, on Linux
+        # and macOS in the one copy the dmabuf and IOSurface paths share.
+        self.assertEqual(display.count("finish_copy(*emu, presenter.fence, &took_ns)"), 0)
         self.assertEqual(display.count("finish_copy(*emu, presenter.fence, &band_ns)"), 1)
+        self.assertEqual(display.count("finish_copy(emu, presenter.fence, &band_ns)"), 1)
         tests = (HERE.parent / "tests" / "test.sh").read_text(encoding="utf-8")
         self.assertIn("copy_wait_test.cpp", tests)
 
@@ -273,6 +275,30 @@ class HostGraphicsBuildTests(unittest.TestCase):
         self.assertIn('target_include_directories(gfxstream_backend PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../include")', cmake)
         tests = (HERE.parent / "tests" / "test.sh").read_text(encoding="utf-8")
         self.assertIn("copy_bands_test.cpp", tests)
+
+    def test_nfr5_linux_and_macos_copies_into_a_task_window_are_cut_into_bounded_jobs(self):
+        # The dmabuf (Linux) and IOSurface (macOS) copies were one GPU job each, the size of
+        # the window, as the Windows one was before. They now go through one banded copy, each
+        # band submitted and waited for before the next, with the same 2 Mpixel limit.
+        display = (HERE / "dsa_gfx_display.cpp").read_text(encoding="utf-8")
+        unix = display[display.index("#else /* !_WIN32 */"):]
+        banded = unix[unix.index("bool copy_in_bands("):unix.index("bool present_dmabuf(")]
+        self.assertIn("dsa::copy_bands(width, height);", banded)
+        loop = banded[banded.index("for (size_t band = 0; band < bands.size(); ++band) {"):]
+        self.assertLess(loop.index("vkQueueSubmit"), loop.index("finish_copy("))
+        # Each band covers its own rows of the frame, in the copy and in the blit.
+        self.assertIn("region.extent = {width, rows, 1};", banded)
+        self.assertIn("region.srcOffset = {0, top, 0};", banded)
+        self.assertIn("region.srcOffsets[0] = {0, top, 0};", banded)
+        # The images are taken over in the first band and handed back in the last.
+        self.assertLess(banded.index("if (first) {"), banded.index("if (last) {"))
+        # Neither path submits a copy of its own any more.
+        dmabuf = unix[unix.index("bool present_dmabuf("):unix.index("#ifdef __APPLE__\n\nvoid release_import")]
+        self.assertNotIn("vkQueueSubmit", dmabuf)
+        self.assertIn("copy_in_bands(*emu, presenter, display_id, source->image, slot.image", dmabuf)
+        iosurface = unix[unix.index("bool present_iosurface("):unix.index("#endif /* __APPLE__ */")]
+        self.assertNotIn("vkQueueSubmit", iosurface)
+        self.assertIn("copy_in_bands(*emu, presenter, display_id, source->image, target->image", iosurface)
 
     def test_pr3_renderer_on_macos_finds_moltenvk_without_being_told(self):
         # stream_renderer_init clears ANDROID_EMU_VK_ICD, and without portability enumeration

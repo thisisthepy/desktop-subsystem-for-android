@@ -25,7 +25,7 @@ use dsa_host_core::renderer::{
     QUESTION_TIMEOUT, WINDOW_MANAGER_ARGUMENT,
 };
 use dsa_protocol::renderer::types::{
-    envelope::Body, DeviceState, ForgetDisplay, GuestVm, MemoryReport, MemoryRequest, Start,
+    envelope::Body, ForgetDisplay, GuestVm, MemoryReport, MemoryRequest, Start,
     Started, Target,
 };
 use dsa_transport::local::LocalListener;
@@ -47,20 +47,7 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// How often the window manager looks whether the VM changed, to tell the renderer.
 const VM_POLL: Duration = Duration::from_millis(100);
 
-/// The window manager's line for a renderer's DeviceState.
-pub fn describe_device_state(state: &DeviceState) -> String {
-    if state.losses > state.generation {
-        format!(
-            "the graphics renderer found its GPU device lost (loss {}); task windows are kept              while it makes a new one, and the guest's calls on the lost one fail at once",
-            state.losses
-        )
-    } else {
-        format!(
-            "the graphics renderer made its GPU device again (number {} since it started)",
-            state.generation
-        )
-    }
-}
+pub use dsa_host_core::renderer::describe_device_state;
 
 /// The compositor's stream renderer once the renderer runs in its own process: the
 /// compositor never takes a stream itself (`Compositor::without_graphics_streams`), so this
@@ -630,6 +617,7 @@ impl DisplayPresenter for RendererClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dsa_protocol::renderer::types::DeviceState;
 
     fn client() -> Arc<RendererClient> {
         RendererClient::new(GpuRequest::Ranking, (0, 0), Arc::default(), None)

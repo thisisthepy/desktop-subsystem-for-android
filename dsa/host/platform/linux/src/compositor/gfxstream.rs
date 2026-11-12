@@ -242,6 +242,11 @@ pub struct Renderer {
     process_pipe: unsafe extern "C" fn(ReadFn, WriteFn, *mut c_void) -> c_int,
     forget_display: Option<unsafe extern "C" fn(u32)>,
     memory_stats: Option<GetMemoryStatsFn>,
+    /// Absent from a backend built before it survived a GPU reset.
+    device_generation: Option<unsafe extern "C" fn() -> u64>,
+    /// Absent from a backend built before it made a lost device again on a thread of its own.
+    device_losses: Option<unsafe extern "C" fn() -> u64>,
+    simulate_device_loss: Option<unsafe extern "C" fn() -> c_int>,
     path: FramePath,
     notes: Vec<String>,
 }
@@ -325,6 +330,18 @@ impl Renderer {
                 .get(b"dsa_gfx_get_memory_stats\0")
                 .ok()
                 .map(|symbol| *symbol);
+            let device_generation: Option<unsafe extern "C" fn() -> u64> = library
+                .get(b"dsa_gfx_device_generation\0")
+                .ok()
+                .map(|symbol| *symbol);
+            let device_losses: Option<unsafe extern "C" fn() -> u64> = library
+                .get(b"dsa_gfx_device_losses\0")
+                .ok()
+                .map(|symbol| *symbol);
+            let simulate_device_loss: Option<unsafe extern "C" fn() -> c_int> = library
+                .get(b"dsa_gfx_simulate_device_loss\0")
+                .ok()
+                .map(|symbol| *symbol);
             if let Some(gpu) = gpu {
                 let select: Option<SelectGpuFn> = library
                     .get(b"dsa_gfx_select_gpu\0")
@@ -366,6 +383,9 @@ impl Renderer {
                 process_pipe,
                 forget_display,
                 memory_stats,
+                device_generation,
+                device_losses,
+                simulate_device_loss,
                 path,
                 notes,
             })
@@ -388,6 +408,29 @@ impl Renderer {
             // SAFETY: the backend takes any display ID; one it does not know is ignored.
             unsafe { forget(display_id) }
         }
+    }
+
+    /// How many times the renderer found its Vulkan device lost (a GPU reset): it counts up
+    /// the moment it does, before the device is made again. 0 when it cannot say.
+    pub fn device_losses(&self) -> u64 {
+        // SAFETY: takes nothing.
+        self.device_losses.map_or(0, |losses| unsafe { losses() })
+    }
+
+    /// How many times the renderer made its Vulkan device again after a loss. 0 when it
+    /// cannot say.
+    pub fn device_generation(&self) -> u64 {
+        // SAFETY: takes nothing.
+        self.device_generation
+            .map_or(0, |generation| unsafe { generation() })
+    }
+
+    /// Makes every Vulkan device's queue and fence calls fail as a GPU reset does, so a test
+    /// sees the renderer survive one on any driver. False when the renderer cannot.
+    pub fn simulate_device_loss(&self) -> bool {
+        // SAFETY: takes nothing.
+        self.simulate_device_loss
+            .is_some_and(|simulate| unsafe { simulate() } == 0)
     }
 
     /// What the renderer holds, as it counts it; `None` when it cannot say.

@@ -336,6 +336,27 @@ impl TaskWindows {
             && !self.pending.contains_key(&task_id)
     }
 
+    /// The package of the task's root activity, while the task is known.
+    pub fn package_of(&self, task_id: i32) -> Option<&str> {
+        self.tasks
+            .get(&task_id)
+            .map(|task| task.package_name.as_str())
+    }
+
+    /// The packages of the tasks that have a window, each once, in task ID order of their
+    /// first window: the apps to open again once Android has started again.
+    pub fn window_packages(&self) -> Vec<String> {
+        let mut packages: Vec<String> = Vec::new();
+        for task_id in self.windows() {
+            if let Some(package) = self.package_of(task_id) {
+                if !packages.iter().any(|known| known == package) {
+                    packages.push(package.to_string());
+                }
+            }
+        }
+        packages
+    }
+
     /// The tasks that have a window, in task ID order.
     pub fn windows(&self) -> Vec<i32> {
         self.tasks

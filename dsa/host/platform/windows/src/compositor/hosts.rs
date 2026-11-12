@@ -29,6 +29,7 @@ use std::time::{Duration, Instant};
 use dsa_host_core::background::MediaCommand;
 use dsa_host_core::compositor::early_frames::EarlyFrames;
 use dsa_host_core::compositor::frame_buffers::texture_fits;
+use dsa_host_core::compositor::frame_stall::{FrameStall, Stall};
 use dsa_host_core::compositor::gpu_reset::{GpuResetWindows, Report};
 use dsa_host_core::compositor::program_exit::{describe_exit, ended_by_crash, CrashRestarts};
 use dsa_host_core::compositor::shown_windows::ShownWindows;
@@ -768,6 +769,10 @@ fn serve_host(
     let _ = events.send(ManagerEvent::Gone { host: id, exit });
 }
 
+/// What is done when the guest's compositor did not recover from a GPU reset, with the apps
+/// that had windows.
+pub type Recovery = Box<dyn Fn(&Stall, Vec<String>) + Send>;
+
 /// What the manager thread is given.
 pub struct ManagerSetup {
     pub events: Receiver<ManagerEvent>,
@@ -795,6 +800,10 @@ pub struct ManagerSetup {
     /// controls' connection to the service, which sends it to the app's media session, as a
     /// media key's press goes. None when the media sessions are not followed.
     pub media_pressed: Option<Sender<(String, MediaCommand)>>,
+    /// Told when the guest's compositor did not recover from a GPU reset, with the apps that
+    /// had windows: it tells the user, and restarts Android when the stall says to. None when
+    /// nothing is done about it.
+    pub recover: Option<Recovery>,
 }
 
 struct Manager {
@@ -803,6 +812,8 @@ struct Manager {
     resets: GpuResetWindows,
     /// How often each app's window program started again after a crash lately.
     crashes: CrashRestarts,
+    /// Whether the guest draws again after a GPU reset.
+    stall: FrameStall,
     /// The generations of the window manager's Direct3D device and of the renderer's Vulkan
     /// device last seen: a change is a GPU reset.
     gpu_generation: u64,
@@ -829,6 +840,7 @@ pub fn manage(setup: ManagerSetup) {
         windows: TaskWindows::new(),
         resets: GpuResetWindows::new(),
         crashes: CrashRestarts::new(),
+        stall: FrameStall::new(),
         gpu_generation,
         renderer_generation,
         hosts: WindowHosts::new(),
@@ -1238,11 +1250,34 @@ impl Manager {
         }
         if reset {
             self.resets.gpu_reset(now);
+            self.stall.gpu_reset(now, self.setup.router.frames_shown());
+        }
+    }
+
+    /// After a GPU reset, looks whether the guest draws again: when no task window has had a
+    /// frame for long, its compositor did not recover, and the user is told and Android
+    /// restarted, with the apps that had windows opened again.
+    fn follow_frame_stall(&mut self, now: Instant) {
+        let shown = self.shown.shown_among(&self.windows.windows());
+        let frames = self.setup.router.frames_shown();
+        let Some(stall) = self.stall.tick(now, &shown, frames) else {
+            return;
+        };
+        self.log(&stall.reason());
+        let mut packages = self.windows.window_packages();
+        for package in self.resets.kept_packages() {
+            if !packages.contains(&package) {
+                packages.push(package);
+            }
+        }
+        if let Some(recover) = &self.setup.recover {
+            recover(&stall, packages);
         }
     }
 
     fn tick(&mut self) {
         self.follow_gpu_resets(Instant::now());
+        self.follow_frame_stall(Instant::now());
         // A window kept through a GPU reset whose app did not come back closes.
         let late = self.resets.tick(Instant::now());
         if !late.is_empty() {

@@ -114,6 +114,17 @@ impl GpuResetWindows {
         self.kept.contains_key(&window)
     }
 
+    /// The apps whose kept windows wait for their next task, each once.
+    pub fn kept_packages(&self) -> Vec<String> {
+        let mut packages: Vec<String> = Vec::new();
+        for kept in self.kept.values() {
+            if !packages.contains(&kept.package) {
+                packages.push(kept.package.clone());
+            }
+        }
+        packages
+    }
+
     /// The task rules' changes that did not come from the guest ending a task (the user closed
     /// a window, a window's size settled): they go to the window hosts as they are, with
     /// window IDs.

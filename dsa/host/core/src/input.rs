@@ -230,6 +230,50 @@ pub enum InputEvent {
     Ime(crate::ime::ImeEvent),
 }
 
+impl InputEvent {
+    /// The task the event is for.
+    pub fn task_id(&self) -> i32 {
+        match self {
+            InputEvent::Pointer(event) => event.task_id,
+            InputEvent::Key(event) => event.task_id,
+            InputEvent::Ime(event) => event.task_id(),
+        }
+    }
+
+    /// The same event for task `task_id`: a window that a task took over after a GPU reset
+    /// knows only the task it opened for.
+    pub fn for_task(self, task_id: i32) -> InputEvent {
+        use crate::ime::ImeEvent;
+        match self {
+            InputEvent::Pointer(event) => InputEvent::Pointer(PointerEvent { task_id, ..event }),
+            InputEvent::Key(event) => InputEvent::Key(crate::keys::KeyEvent { task_id, ..event }),
+            InputEvent::Ime(event) => InputEvent::Ime(match event {
+                ImeEvent::Composition { text, cursor, .. } => ImeEvent::Composition {
+                    task_id,
+                    text,
+                    cursor,
+                },
+                ImeEvent::Commit { text, .. } => ImeEvent::Commit { task_id, text },
+                ImeEvent::DeleteSurrounding { before, after, .. } => ImeEvent::DeleteSurrounding {
+                    task_id,
+                    before,
+                    after,
+                },
+                ImeEvent::SetSelection { start, end, .. } => ImeEvent::SetSelection {
+                    task_id,
+                    start,
+                    end,
+                },
+                ImeEvent::SetComposingRegion { start, end, .. } => ImeEvent::SetComposingRegion {
+                    task_id,
+                    start,
+                    end,
+                },
+            }),
+        }
+    }
+}
+
 impl From<crate::ime::ImeEvent> for InputEvent {
     fn from(event: crate::ime::ImeEvent) -> InputEvent {
         InputEvent::Ime(event)
@@ -600,6 +644,29 @@ impl PointerMapper {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nfr5_input_in_a_window_a_task_took_over_after_a_gpu_reset_reaches_that_task() {
+        use crate::ime::ImeEvent;
+        let commit = InputEvent::Ime(ImeEvent::Commit {
+            task_id: 7,
+            text: "안녕".into(),
+        });
+        assert_eq!(commit.task_id(), 7);
+        assert_eq!(
+            commit.for_task(9),
+            InputEvent::Ime(ImeEvent::Commit {
+                task_id: 9,
+                text: "안녕".into(),
+            })
+        );
+        let selection = InputEvent::Ime(ImeEvent::SetSelection {
+            task_id: 7,
+            start: 1,
+            end: 3,
+        });
+        assert_eq!(selection.for_task(9).task_id(), 9);
+    }
 
     #[test]
     fn fr5_a_point_lands_on_the_same_pixel_of_the_task() {

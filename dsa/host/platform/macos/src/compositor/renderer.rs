@@ -58,6 +58,11 @@ struct Api {
     set_pixels: extern "C" fn(Pixels, *mut c_void) -> c_int,
     set_iosurface: Option<SetIosurface>,
     forget_display: Option<extern "C" fn(u32)>,
+    /// Absent from a renderer built before it survived a GPU reset.
+    device_generation: Option<extern "C" fn() -> u64>,
+    /// Absent from a renderer built before it made a lost device again on a thread of its own.
+    device_losses: Option<extern "C" fn() -> u64>,
+    simulate_device_loss: Option<extern "C" fn() -> c_int>,
 }
 
 /// The loaded renderer.
@@ -200,6 +205,9 @@ impl Renderer {
                 set_pixels: symbol(library, "dsa_gfx_set_display_pixels_callback")?,
                 set_iosurface: optional(library, "dsa_gfx_set_display_iosurface_callbacks"),
                 forget_display: optional(library, "dsa_gfx_forget_display"),
+                device_generation: optional(library, "dsa_gfx_device_generation"),
+                device_losses: optional(library, "dsa_gfx_device_losses"),
+                simulate_device_loss: optional(library, "dsa_gfx_simulate_device_loss"),
             };
             if (api.init)(display.0, display.1) != 0 {
                 return Err(
@@ -240,6 +248,29 @@ impl Renderer {
         if let Some(forget) = self.api.forget_display {
             forget(display_id);
         }
+    }
+
+    /// How many times the renderer found its Vulkan device lost (a GPU reset, or MoltenVK's
+    /// device lost with the GPU): it counts up the moment it does, before the device is made
+    /// again. 0 when it cannot say.
+    pub fn device_losses(&self) -> u64 {
+        self.api.device_losses.map_or(0, |losses| losses())
+    }
+
+    /// How many times the renderer made its Vulkan device again after a loss. 0 when it
+    /// cannot say.
+    pub fn device_generation(&self) -> u64 {
+        self.api
+            .device_generation
+            .map_or(0, |generation| generation())
+    }
+
+    /// Makes every Vulkan device's queue and fence calls fail as a GPU reset does, so a test
+    /// sees the renderer survive one on any driver. False when the renderer cannot.
+    pub fn simulate_device_loss(&self) -> bool {
+        self.api
+            .simulate_device_loss
+            .is_some_and(|simulate| simulate() == 0)
     }
 
     /// Serves one render stream from the guest until it closes.

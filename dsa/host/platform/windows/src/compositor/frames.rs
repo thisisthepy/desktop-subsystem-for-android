@@ -47,6 +47,9 @@ pub struct FrameRouter<T: FrameTarget> {
     /// gives the GPU driver's spare memory back while shown windows have nothing new to show.
     start: Instant,
     last_frame_ms: AtomicU64,
+    /// How many frames were shown in a window: after a GPU reset, a guest that draws none
+    /// has a compositor that did not recover.
+    frames_shown: AtomicU64,
 }
 
 impl<T: FrameTarget> Default for FrameRouter<T> {
@@ -57,6 +60,7 @@ impl<T: FrameTarget> Default for FrameRouter<T> {
             forget: Mutex::new(None),
             start: Instant::now(),
             last_frame_ms: AtomicU64::new(0),
+            frames_shown: AtomicU64::new(0),
         }
     }
 }
@@ -70,6 +74,11 @@ impl<T: FrameTarget> FrameRouter<T> {
     pub fn quiet_for(&self) -> Duration {
         let last = Duration::from_millis(self.last_frame_ms.load(Ordering::Relaxed));
         self.start.elapsed().saturating_sub(last)
+    }
+
+    /// How many frames have been shown in a window so far.
+    pub fn frames_shown(&self) -> u64 {
+        self.frames_shown.load(Ordering::Relaxed)
     }
 
     /// Sets what is told of each display that lost its window.
@@ -163,6 +172,7 @@ impl<T: FrameTarget + 'static> DisplaySink for FrameRouter<T> {
             .cloned();
         if let Some((window, texture)) = given {
             window.present(&texture, content);
+            self.frames_shown.fetch_add(1, Ordering::Relaxed);
         }
     }
 }
@@ -250,6 +260,21 @@ mod tests {
             *maps.shown.lock().unwrap(),
             vec![(2030, (30, 40), (30, 40))]
         );
+    }
+
+    #[test]
+    fn nfr5_only_frames_shown_in_a_window_count_as_the_guest_drawing() {
+        let router = FrameRouter::new();
+        let clock = Window::new(1000);
+        router.set_routes([(3, Arc::clone(&clock))]);
+        assert_eq!(router.frames_shown(), 0);
+        // A frame of a display without a window shows nowhere.
+        router.frame(9, (10, 20));
+        assert_eq!(router.frames_shown(), 0);
+        assert_eq!(router.target(3, 10, 20), Some(1010));
+        router.frame(3, (10, 20));
+        router.frame(3, (10, 20));
+        assert_eq!(router.frames_shown(), 2);
     }
 
     #[test]

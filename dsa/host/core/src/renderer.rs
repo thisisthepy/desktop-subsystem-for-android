@@ -985,6 +985,46 @@ impl DeviceWatch {
     }
 }
 
+/// The window manager's line for a renderer's DeviceState.
+pub fn describe_device_state(state: &DeviceState) -> String {
+    if state.losses > state.generation {
+        format!(
+            "the graphics renderer found its GPU device lost (loss {}); task windows are kept \
+             while it makes a new one, and the guest's calls on the lost one fail at once",
+            state.losses
+        )
+    } else {
+        format!(
+            "the graphics renderer made its GPU device again (number {} since it started)",
+            state.generation
+        )
+    }
+}
+
+/// What a window manager keeps of its renderer's DeviceState messages: a count that changes
+/// with each one, which the window manager follows as a GPU reset. It is kept across renderer
+/// restarts, whose own counts start from zero again, so it never goes back to a value already
+/// seen.
+#[derive(Debug, Default)]
+pub struct DeviceChanges(std::sync::atomic::AtomicU64);
+
+impl DeviceChanges {
+    pub fn new() -> DeviceChanges {
+        DeviceChanges::default()
+    }
+
+    /// The renderer sent `state`: the count changes, and the line for the log is returned.
+    pub fn told(&self, state: &DeviceState) -> String {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        describe_device_state(state)
+    }
+
+    /// The count: any change since the last look is a GPU reset.
+    pub fn count(&self) -> u64 {
+        self.0.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
 /// One number for the renderer's device that goes up the moment the renderer finds it lost
 /// and again when it has made it again: the window manager takes any change as a GPU reset.
 pub fn device_resets(state: &DeviceState) -> u64 {
@@ -1082,6 +1122,27 @@ mod tests {
             .map(|&(losses, generation)| device_resets(&DeviceState { losses, generation }))
             .collect();
         assert!(resets.windows(2).all(|pair| pair[1] > pair[0]));
+    }
+
+    #[test]
+    fn nfr5_every_device_state_a_renderer_sends_is_a_change_the_window_manager_follows() {
+        let changes = DeviceChanges::new();
+        let mut seen = vec![changes.count()];
+        // A loss, the new device, then a restarted renderer that counts from zero again.
+        for (losses, generation) in [(1, 0), (1, 1), (1, 0), (1, 1)] {
+            let line = changes.told(&DeviceState { losses, generation });
+            assert!(line.starts_with("the graphics renderer "), "{line}");
+            seen.push(changes.count());
+        }
+        assert!(seen.windows(2).all(|pair| pair[1] > pair[0]));
+        let lost = describe_device_state(&DeviceState {
+            losses: 3,
+            generation: 2,
+        });
+        assert!(
+            lost.contains("lost (loss 3); task windows are kept while"),
+            "{lost}"
+        );
     }
 
     #[test]

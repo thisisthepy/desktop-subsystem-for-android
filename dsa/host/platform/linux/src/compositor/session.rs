@@ -17,6 +17,8 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use dsa_host_core::compositor::frame_stall::{restart_in_background, FrameStall, Stall};
+use dsa_host_core::compositor::gpu_reset::{GpuResetWindows, Report};
 use dsa_host_core::compositor::shown_windows::ShownWindows;
 use dsa_host_core::compositor::task_windows::{TaskWindows, WindowChange};
 use dsa_host_core::compositor::window_hosts::{FromHost, MenuWork};
@@ -40,7 +42,7 @@ use crate::input::evdev::EvdevGamepads;
 use crate::renderer::client::RendererClient;
 use crate::shell::dbus::{Notifier, Signal};
 use crate::shell::desktop_entry::{self, Folders};
-use crate::shell::notifications::{Shown as ShownNotifications, UPDATE_PAGE_ARGUMENTS};
+use crate::shell::notifications::{dsa_notice, Shown as ShownNotifications, UPDATE_PAGE_ARGUMENTS};
 use crate::shell::pin_shortcuts::{self, Questions};
 use dsa_host_core::renderer::{spawn_supervisor, RendererHandler};
 use dsa_host_core::update::alerts::is_update_key;
@@ -677,6 +679,36 @@ fn start_accessibility(to_main: ToMain) -> Arc<Accessibility> {
     )
 }
 
+/// The guest's compositor did not recover from a GPU reset: tells the user, as DSA's own
+/// notice in the session's notification service, and restarts Android through the service
+/// when `stall` says so, opening `packages` (the apps that had windows) again. Both on threads
+/// of their own, so the windows never wait for them.
+fn recover(stall: &Stall, packages: Vec<String>, icons: Option<PathBuf>) {
+    let notice = stall.notice().notification(reads_korean());
+    let icons = icons.unwrap_or_else(std::env::temp_dir);
+    std::thread::spawn(move || {
+        let shown = Notifier::connect(icons)
+            .and_then(|notifier| notifier.notify(&dsa_notice(&notice), &[]).map(drop));
+        if let Err(why) = shown {
+            log(&format!(
+                "the user was not told that Android restarts: {why}"
+            ));
+        }
+    });
+    if !stall.restart {
+        return;
+    }
+    let told: Arc<dyn Fn(&str) + Send + Sync> = Arc::new(|line: &str| log(line));
+    if let Err(why) = restart_in_background(
+        Box::new(connector()),
+        format!("dsa-compositor {BUILD} restart after a GPU reset"),
+        packages,
+        told,
+    ) {
+        log(&format!("could not start restarting Android: {why}"));
+    }
+}
+
 /// The main thread's state.
 struct Main {
     desktop: Desktop,
@@ -702,6 +734,16 @@ struct Main {
     accessible: HashMap<i32, WindowFacts>,
     /// Where the apps' requests to pin a shortcut go to be asked about.
     pins: Option<Sender<PinShortcutRequest>>,
+    /// The renderer process, whose word on its GPU device is followed.
+    renderer: Arc<RendererClient>,
+    /// The renderer's count of device changes last seen: a change is a GPU reset.
+    device_changes: u64,
+    /// The windows kept through a GPU reset, and which task each window shows.
+    resets: GpuResetWindows,
+    /// Whether the guest draws again after a GPU reset.
+    stall: FrameStall,
+    /// How many frames have reached a task window.
+    frames_shown: u64,
 }
 
 impl Main {
@@ -715,7 +757,46 @@ impl Main {
         }
     }
 
+    /// The task rules' changes the guest did not cause by ending a task: to the desktop, with
+    /// the IDs of the windows the tasks show.
     fn changes(&mut self, changes: Vec<WindowChange>) {
+        let changes = self.resets.changes(changes);
+        self.to_desktop(changes);
+    }
+
+    /// The task rules' changes after the guest's tasks changed. A task that ended soon after a
+    /// GPU reset keeps its window and its app is started again; the app's new task takes the
+    /// window over.
+    fn guest_changes(&mut self, changes: Vec<WindowChange>) {
+        let now = Instant::now();
+        let outcome = self.resets.guest_changes(changes, now);
+        for window in &outcome.kept {
+            log(&format!(
+                "task window {window}'s task ended right after a GPU reset; the window stays \
+                 open and its app is started again"
+            ));
+        }
+        for package in outcome.relaunch {
+            self.request(TaskRequest::Launch {
+                package_name: package,
+            });
+        }
+        for (task_id, size) in outcome.adopted {
+            log(&format!(
+                "task {task_id} took over task window {} after the GPU reset",
+                self.resets.window_of(task_id)
+            ));
+            // The new task takes the size of the window it shows.
+            if let Some(size) = size {
+                let requests = self.windows.window_resized(task_id, size, now);
+                self.requests(requests);
+            }
+        }
+        self.to_desktop(outcome.changes);
+    }
+
+    /// Changes by window ID, to the desktop's windows.
+    fn to_desktop(&mut self, changes: Vec<WindowChange>) {
         for change in changes {
             let opened = match &change {
                 WindowChange::Open { task_id, .. } => Some(*task_id),
@@ -767,7 +848,7 @@ impl Main {
         match message {
             Message::Tasks(events) => {
                 let changes = self.windows.sync(&events);
-                self.changes(changes);
+                self.guest_changes(changes);
                 for event in &events {
                     self.shell_event(event);
                 }
@@ -802,7 +883,7 @@ impl Main {
         for note in self.windows.take_notes() {
             log(&note);
         }
-        self.changes(changes);
+        self.guest_changes(changes);
     }
 
     /// What a task event changes for the desktop's app menu.
@@ -843,6 +924,12 @@ impl Main {
         let now = Instant::now();
         match event {
             Event::Input(input) => {
+                // A window a task took over after a GPU reset knows only the task it opened
+                // for; its input goes to the task it shows now.
+                let input = match self.resets.task_of(input.task_id()) {
+                    Some(task_id) => input.for_task(task_id),
+                    None => return,
+                };
                 let _ = self.input.send(input);
             }
             Event::PipInput { task_id, input } => {
@@ -854,7 +941,13 @@ impl Main {
                     let _ = self.clipboard.send(text);
                 }
             }
-            Event::DragOut { out, serial } => ask_drag_out(self.to_main.clone(), out, serial),
+            Event::DragOut { mut out, serial } => {
+                let Some(task_id) = self.resets.task_of(out.task_id) else {
+                    return;
+                };
+                out.task_id = task_id;
+                ask_drag_out(self.to_main.clone(), out, serial)
+            }
             Event::Dropped { package, paths, .. } => {
                 for path in paths {
                     match FileTransfer::read(&path, FileAction::Send) {
@@ -866,53 +959,68 @@ impl Main {
                     }
                 }
             }
-            Event::Report(report) => match report {
-                FromHost::Closed { task_id } => {
-                    if let Some(request) = self.windows.user_closed(task_id) {
-                        self.request(request);
-                    }
+            Event::Report(report) => match self.resets.report(report) {
+                Report::Task(report) => self.reported(report, now),
+                Report::CloseKept(close) => {
+                    log("a window kept through a GPU reset was closed before its app came back");
+                    self.to_desktop(vec![close]);
                 }
-                FromHost::Resized {
-                    task_id,
-                    width,
-                    height,
-                } => {
-                    let requests = self.windows.window_resized(task_id, (width, height), now);
-                    self.requests(requests);
-                }
-                FromHost::Dpi { task_id, dpi } => {
-                    let (changes, requests) = self.windows.window_dpi_changed(task_id, dpi);
-                    self.changes(changes);
-                    self.requests(requests);
-                }
-                FromHost::Focus { task_id, focused } => {
-                    if focused {
-                        self.focused = Some(task_id);
-                    } else if self.focused == Some(task_id) {
-                        self.focused = None;
-                    }
-                    self.active.store(self.focused.is_some(), Ordering::Relaxed);
-                }
-                FromHost::Dragging { task_id, dragging } => {
-                    let requests = self.windows.window_dragging(task_id, dragging, now);
-                    self.requests(requests);
-                }
-                FromHost::Shown { task_id, shown } => {
-                    self.shown.reported(task_id, shown);
-                    self.after_changes();
-                }
-                FromHost::Caption { task_id, band } => {
-                    let requests = self.windows.window_caption(task_id, band);
-                    self.requests(requests);
-                }
-                FromHost::MenuChosen { task_id, action } => self.menu_chosen(task_id, action),
-                // Only a Windows taskbar preview has media buttons; these windows send none.
-                FromHost::MediaButton { .. } => {}
+                Report::Dropped => {}
             },
         }
     }
 
-    /// The user chose `action` in the window menu of `task_id`'s window.
+    /// A window reported what the user did to it, with the ID of the task it shows.
+    fn reported(&mut self, report: FromHost, now: Instant) {
+        match report {
+            FromHost::Closed { task_id } => {
+                if let Some(request) = self.windows.user_closed(task_id) {
+                    self.request(request);
+                }
+            }
+            FromHost::Resized {
+                task_id,
+                width,
+                height,
+            } => {
+                let requests = self.windows.window_resized(task_id, (width, height), now);
+                self.requests(requests);
+            }
+            FromHost::Dpi { task_id, dpi } => {
+                let (changes, requests) = self.windows.window_dpi_changed(task_id, dpi);
+                self.changes(changes);
+                self.requests(requests);
+            }
+            FromHost::Focus { task_id, focused } => {
+                if focused {
+                    self.focused = Some(task_id);
+                } else if self.focused == Some(task_id) {
+                    self.focused = None;
+                }
+                self.active.store(self.focused.is_some(), Ordering::Relaxed);
+            }
+            FromHost::Dragging { task_id, dragging } => {
+                let requests = self.windows.window_dragging(task_id, dragging, now);
+                self.requests(requests);
+            }
+            FromHost::Shown { task_id, shown } => {
+                self.shown.reported(task_id, shown);
+                self.after_changes();
+            }
+            FromHost::Caption { task_id, band } => {
+                let requests = self.windows.window_caption(task_id, band);
+                self.requests(requests);
+            }
+            FromHost::MenuChosen { task_id, action } => {
+                let window = self.resets.window_of(task_id);
+                self.menu_chosen(window, action)
+            }
+            // Only a Windows taskbar preview has media buttons; these windows send none.
+            FromHost::MediaButton { .. } => {}
+        }
+    }
+
+    /// The user chose `action` in the window menu of window `task_id`.
     fn menu_chosen(
         &mut self,
         task_id: i32,
@@ -964,15 +1072,58 @@ impl Main {
             let Some(task_id) = self.windows.task_for_display(display_id) else {
                 continue;
             };
+            // A task that took a window over after a GPU reset draws into that window.
+            let window = self.resets.window_of(task_id);
+            if self.desktop.state.windows.contains_key(&window) {
+                self.frames_shown += 1;
+            }
             match frame {
-                Shown::Pixels(frame) => self.desktop.state.present(task_id, frame),
-                Shown::Gpu(frame) => self.desktop.state.present_gpu(task_id, display_id, frame),
+                Shown::Pixels(frame) => self.desktop.state.present(window, frame),
+                Shown::Gpu(frame) => self.desktop.state.present_gpu(window, display_id, frame),
             }
         }
         self.desktop.state.draw_waiting();
     }
 
+    /// Follows the renderer's word on its GPU device: a change is a GPU reset. A task that
+    /// ends soon after one keeps its window, and the windows are watched for the frames that
+    /// follow; when none comes for long, the guest's compositor did not recover, and Android is
+    /// restarted.
+    fn follow_gpu_resets(&mut self, now: Instant) {
+        let changes = self.renderer.device_changes();
+        if changes != self.device_changes {
+            self.device_changes = changes;
+            self.resets.gpu_reset(now);
+            self.stall.gpu_reset(now, self.frames_shown);
+        }
+        let late = self.resets.tick(now);
+        if !late.is_empty() {
+            log(&format!(
+                "{} task window(s) kept through a GPU reset close: their app did not come back",
+                late.len()
+            ));
+            self.to_desktop(late);
+        }
+        let shown = self.shown.shown_among(&self.windows.windows());
+        let Some(stall) = self.stall.tick(now, &shown, self.frames_shown) else {
+            return;
+        };
+        log(&stall.reason());
+        let mut packages = self.windows.window_packages();
+        for package in self.resets.kept_packages() {
+            if !packages.contains(&package) {
+                packages.push(package);
+            }
+        }
+        let icons = self
+            .folders
+            .as_ref()
+            .map(|folders| folders.icons.join("notifications"));
+        recover(&stall, packages, icons);
+    }
+
     fn tick(&mut self, now: Instant) {
+        self.follow_gpu_resets(now);
         let changes = self.windows.tick(now);
         if !changes.is_empty() {
             self.changes(changes);
@@ -1044,7 +1195,7 @@ pub fn run() -> Result<(), String> {
         .state
         .takes_gpu_frames()
         .then(|| Arc::new(Mutex::new(Vec::new())));
-    let _renderer = start_renderer(frames.clone(), images.clone(), waker);
+    let renderer = start_renderer(frames.clone(), images.clone(), waker);
     let accessibility = start_accessibility(to_main.clone());
 
     let mut main = Main {
@@ -1065,6 +1216,11 @@ pub fn run() -> Result<(), String> {
         accessibility,
         accessible: HashMap::new(),
         pins,
+        device_changes: renderer.device_changes(),
+        renderer,
+        resets: GpuResetWindows::new(),
+        stall: FrameStall::new(),
+        frames_shown: 0,
     };
     if let Ok(mut client) = connect() {
         if let Ok(settings) = client.app_window_settings() {

@@ -4569,8 +4569,11 @@ impl HostApiService {
             }
         };
         // An update alert is the host's alone: its desktop opens the update settings on a
-        // click, and Android has nothing to open or dismiss.
-        if update_alerts::is_update_key(action.key()) {
+        // click, and Android has nothing to open or dismiss. So is a notice that Android was
+        // restarted to recover its graphics.
+        if update_alerts::is_update_key(action.key())
+            || crate::compositor::frame_stall::is_recovery_key(action.key())
+        {
             return response::Body::Done(types::Done {});
         }
         let android = match self.androids.android(&peer.user) {

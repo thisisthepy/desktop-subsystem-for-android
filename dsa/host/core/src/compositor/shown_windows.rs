@@ -31,6 +31,15 @@ impl ShownWindows {
         }
     }
 
+    /// Of the tasks that have a window now, those whose window is shown (not minimized).
+    pub fn shown_among(&self, windows: &[i32]) -> Vec<i32> {
+        windows
+            .iter()
+            .copied()
+            .filter(|task_id| !self.minimized.contains(task_id))
+            .collect()
+    }
+
     /// Forgets what the guest was told, so the next [`update`](Self::update) says it again,
     /// as when the service may have restarted and lost it.
     pub fn retell(&mut self) {
