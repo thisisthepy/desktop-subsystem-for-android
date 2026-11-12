@@ -2601,11 +2601,27 @@ class GuestMemoryTests(unittest.TestCase):
             boot = rc[rc.index("on boot"):]
             self.assertIn("write /proc/sys/vm/percpu_pagelist_high_fraction 1048576", boot)
             policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
-            self.assertIn(
-                '(genfscon proc "/sys/vm/percpu_pagelist_high_fraction" '
-                '(u object_r dsa_proc_vm_tunable',
-                policy,
-            )
+            self.assertIn("(allow vendor_init proc_percpu_pagelist_high_fraction (file (write open getattr)))", policy)
+
+    # Android 16 and 17 label the per-CPU page list setting themselves (genfs_contexts).
+    PLATFORM_PERCPU_LABEL = (
+        "(type init)\n"
+        '(genfscon proc "/sys/vm/percpu_pagelist_high_fraction" '
+        "(u object_r proc_percpu_pagelist_high_fraction ((s0) (s0))))\n"
+    )
+
+    def test_nfr2_the_image_never_labels_a_path_android_already_labels(self):
+        # A second genfscon for one path makes secilc refuse the policy, so init cannot boot.
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp), policy=self.PLATFORM_PERCPU_LABEL) as archive:
+            policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+        self.assertEqual(make_image.conflicting_genfscon(policy), [])
+        self.assertEqual(policy.count('"/sys/vm/percpu_pagelist_high_fraction"'), 1)
+
+    def test_nfr2_a_path_labelled_twice_is_found(self):
+        twice = self.PLATFORM_PERCPU_LABEL + (
+            '(genfscon proc "/sys/vm/percpu_pagelist_high_fraction" (u object_r dsa_proc_vm_tunable ((s0) (s0))))\n'
+        )
+        self.assertEqual(make_image.conflicting_genfscon(twice), [("proc", "/sys/vm/percpu_pagelist_high_fraction")])
 
     def test_nfr1_dentries_and_inodes_are_reclaimed_twice_as_readily(self):
         with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
