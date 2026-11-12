@@ -255,6 +255,13 @@ void TaskComposer::compose(Frame& frame, double presentedMs) {
     std::optional<int64_t> refreshAt;
     {
         std::lock_guard<std::mutex> lock(mMutex);
+        const int64_t now = steadyMs();
+        // Counted before the host is reached: a frame SurfaceFlinger composed itself while the
+        // host was away holds its client target buffers just the same, and only the frame asked
+        // for once the delay is up makes it free them.
+        mClientTarget.presented(std::any_of(frame.layers.begin(), frame.layers.end(),
+                                            [](const FrameLayer& layer) { return layer.client; }),
+                                now);
         if (!mHost.connected()) {
             // The reconnecting thread asks for a frame once the host is back; connecting
             // here would hold up SurfaceFlinger for as long as the host takes to answer.
@@ -274,18 +281,11 @@ void TaskComposer::compose(Frame& frame, double presentedMs) {
         const Layout layout = assignLayersToTasks(placements, mTasks.tasks(), frame.display);
 
         bool clientTargetReady = false;
-        const int64_t now = steadyMs();
-        if (std::any_of(frame.layers.begin(), frame.layers.end(),
-                        [](const FrameLayer& layer) { return layer.client; })) {
-            mClientTargetUsedMs = std::max<int64_t>(now, 1);
-        }
-        const bool holdClientTarget =
-                clientTargetHeld(mClientTargetUsedMs, now, kReleaseClientTargetMs);
-        if (!holdClientTarget && mClientTargetUsedMs != 0) {
+        const bool holdClientTarget = mClientTarget.held(now);
+        if (const std::optional<int64_t> since = mClientTarget.letGo(now)) {
             HWC_LOGI("SurfaceFlinger has composed nothing itself for %lld ms: let go of the "
                      "client target",
-                     static_cast<long long>(now - mClientTargetUsedMs));
-            mClientTargetUsedMs = 0;
+                     static_cast<long long>(*since));
         }
         for (const TaskLayers& task : layout.tasks) {
             const auto pairing = mDisplays.acquire(task.task);
@@ -501,11 +501,10 @@ void TaskComposer::compose(Frame& frame, double presentedMs) {
         mUploadedAhead.clear();
 
         std::optional<int64_t> releaseAt = releaseTasksWithoutLayersLocked(layout, now);
-        if (holdClientTarget) {
+        if (const std::optional<int64_t> due = mClientTarget.refreshAt()) {
             // SurfaceFlinger presents nothing more once the video is gone and the rest is
             // still, so a frame is asked for when the client target is due to go.
-            const int64_t due = mClientTargetUsedMs + kReleaseClientTargetMs;
-            releaseAt = releaseAt ? std::min(*releaseAt, due) : due;
+            releaseAt = releaseAt ? std::min(*releaseAt, *due) : *due;
         }
 
         if (!mHost.connected()) {
