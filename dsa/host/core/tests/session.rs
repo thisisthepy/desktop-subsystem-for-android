@@ -5868,8 +5868,8 @@ fn fr35_the_root_elevation_config_is_sent_once_the_agent_connects() {
     let mut agent = connect_agent(&mut connector, &launcher);
     let config = next_root_config(&mut agent);
     assert!(config.enabled);
-    // By package, as the host knows them, in package order; off apps are not listed, and
-    // the guest fills in each uid.
+    // By package, as the host knows them, in package order, off apps included (an app set
+    // to off keeps its whole shared user ID group from root); the guest fills in each uid.
     let apps: Vec<(String, u32, RootLevel)> = config
         .apps
         .iter()
@@ -5880,6 +5880,7 @@ fn fr35_the_root_elevation_config_is_sent_once_the_agent_connects() {
         vec![
             ("com.example.ask".to_string(), 0, RootLevel::Ask),
             ("com.example.keep".to_string(), 0, RootLevel::Remember),
+            ("com.example.off".to_string(), 0, RootLevel::Off),
         ]
     );
 
@@ -6136,6 +6137,115 @@ fn fr35_letting_an_app_keep_root_is_asked_through_the_sessions_prompt() {
         *prompt.asked.lock().unwrap(),
         vec!["com.keep.app".to_string(), "com.keep.app".to_string()]
     );
+}
+
+#[test]
+fn fr35_apps_sharing_a_user_id_are_approved_as_one_group() {
+    use dsa_host_core::root_approval::{
+        ApprovalPrompt, ApprovalRequest, PromptAnswer, RootApproval,
+    };
+    use dsa_host_core::settings::{MachineSettings, MemorySettings, SettingsStore};
+
+    struct RecordingPrompt {
+        seen: Mutex<Vec<ApprovalRequest>>,
+    }
+
+    impl ApprovalPrompt for RecordingPrompt {
+        fn ask(&self, request: &ApprovalRequest, _timeout: Duration) -> PromptAnswer {
+            self.seen.lock().unwrap().push(request.clone());
+            PromptAnswer::Approved
+        }
+    }
+
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    let store = Arc::new(MemorySettings::default());
+    store
+        .set_machine(MachineSettings {
+            root_elevation: true,
+            ..Default::default()
+        })
+        .unwrap();
+    store.set_root_app("user", "com.shared.one", "ask").unwrap();
+    dsa_host_core::root_elevation::apply(&session, &*store, "user");
+
+    let prompt = Arc::new(RecordingPrompt {
+        seen: Mutex::new(Vec::new()),
+    });
+    session.set_root_approval(Arc::new(RootApproval::new(
+        "user",
+        store.clone(),
+        prompt.clone(),
+        Arc::new(|_: &str| {}),
+    )));
+
+    session.start();
+    let mut agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    assert!(next_root_config(&mut agent).enabled);
+
+    // The agent lists both apps with the user ID they share.
+    let watch = session.watch_tasks();
+    for (package, label, icon) in [
+        ("com.shared.one", "Shared One", vec![1, 2, 3]),
+        ("com.shared.two", "Shared Two", vec![4, 5, 6]),
+    ] {
+        send_body(
+            &mut agent,
+            Body::InstalledApp(dsa_protocol::control::InstalledApp {
+                package_name: package.into(),
+                label: label.into(),
+                icon_png: icon,
+                shared_user_id: "com.shared".into(),
+                ..Default::default()
+            }),
+        );
+    }
+    send_body(
+        &mut agent,
+        Body::InstalledApps(dsa_protocol::control::InstalledApps {
+            package_names: vec!["com.shared.one".into(), "com.shared.two".into()],
+        }),
+    );
+    let installed = next_installed(&watch);
+    assert!(installed
+        .iter()
+        .all(|app| app.shared_user_id == "com.shared"));
+
+    send_body(&mut agent, su_request(1, "com.shared.one, com.shared.two"));
+    let approved = next_su_decision(&mut agent);
+    assert!(approved.approved);
+    {
+        let seen = prompt.seen.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].shared_apps.len(), 2);
+        assert_eq!(seen[0].shared_apps[0].label, "Shared One");
+        assert_eq!(seen[0].shared_apps[1].label, "Shared Two");
+        let msg = seen[0].message();
+        assert!(msg.contains("Shared One (com.shared.one)"), "{msg}");
+        assert!(msg.contains("Shared Two (com.shared.two)"), "{msg}");
+        assert!(msg.contains("share a user ID"), "{msg}");
+    }
+
+    // The second app in the group uses the group's grace without prompting again.
+    send_body(&mut agent, su_request(2, "com.shared.one, com.shared.two"));
+    assert!(next_su_decision(&mut agent).approved);
+    assert_eq!(prompt.seen.lock().unwrap().len(), 1);
+
+    // Setting one app in the group to off hides su from the whole group and denies requests.
+    store.set_root_app("user", "com.shared.two", "off").unwrap();
+    dsa_host_core::root_elevation::apply(&session, &*store, "user");
+    // The guest is told the app is off, which its su guard applies to the app's whole uid.
+    let updated = next_root_config(&mut agent);
+    let two = updated
+        .apps
+        .iter()
+        .find(|app| app.package == "com.shared.two")
+        .expect("the app set to off is named");
+    assert_eq!(two.level(), dsa_protocol::control::RootLevel::Off);
+
+    send_body(&mut agent, su_request(3, "com.shared.one, com.shared.two"));
+    assert!(!next_su_decision(&mut agent).approved);
 }
 
 fn speak_text(request_id: u32) -> Body {

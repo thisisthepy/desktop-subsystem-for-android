@@ -390,23 +390,7 @@ fn root_absent_problems(results: &BTreeMap<String, String>) -> Vec<String> {
     problems
 }
 
-fn restart_for_root(
-    api: &mut HostApiClient,
-    adb: &Adb,
-    dir: &Path,
-    enabled: bool,
-) -> Result<(), String> {
-    api.stop().map_err(|e| e.to_string())?;
-    let deadline = Instant::now() + Duration::from_secs(90);
-    loop {
-        if api.status().map_err(|e| e.to_string())?.state == SessionState::Stopped {
-            break;
-        }
-        if Instant::now() >= deadline {
-            return Err("Android did not stop".into());
-        }
-        std::thread::sleep(Duration::from_millis(250));
-    }
+fn set_machine_switch(dir: &Path, enabled: bool) -> Result<(), String> {
     let executable = std::env::current_exe().map_err(|e| e.to_string())?;
     let output = Command::new("sudo")
         .arg("env")
@@ -425,6 +409,27 @@ fn restart_for_root(
             String::from_utf8_lossy(&output.stderr)
         ));
     }
+    Ok(())
+}
+
+fn restart_for_root(
+    api: &mut HostApiClient,
+    adb: &Adb,
+    dir: &Path,
+    enabled: bool,
+) -> Result<(), String> {
+    api.stop().map_err(|e| e.to_string())?;
+    let deadline = Instant::now() + Duration::from_secs(90);
+    loop {
+        if api.status().map_err(|e| e.to_string())?.state == SessionState::Stopped {
+            break;
+        }
+        if Instant::now() >= deadline {
+            return Err("Android did not stop".into());
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    set_machine_switch(dir, enabled)?;
     if enabled {
         let result = api
             .set_app_root(PROBE_PACKAGE, "ask")
@@ -522,17 +527,75 @@ fn root_approval_check(api: &mut HostApiClient, adb: &Adb, dir: &Path) -> Result
             "the app's second root call did not use its grace: {grace:?}"
         ));
     }
-    restart_for_root(api, adb, dir, false)?;
+    let stdin_run = adb.probe(dir, "root_stdin")?;
+    if number(&stdin_run, "root.exit")? != 0
+        || !stdin_run
+            .get("root.output")
+            .is_some_and(|out| out.contains("uid=0"))
+    {
+        return Err(format!(
+            "su with a command on standard input did not run as root: {stdin_run:?}"
+        ));
+    }
+    let adb_root = adb.shell("su -c id")?;
+    if !adb_root.contains("uid=0") || count()? != 4 {
+        return Err(format!(
+            "adb shell su -c id did not ask the host and run as root: {adb_root:?}"
+        ));
+    }
+    let records = std::fs::read_to_string(&requests).map_err(|e| e.to_string())?;
+    let adb_record: serde_json::Value =
+        serde_json::from_str(records.lines().nth(3).unwrap_or("")).map_err(|e| e.to_string())?;
+    if adb_record["package"] != "com.android.shell" || adb_record["app_name"] != "adb shell" {
+        return Err(format!(
+            "the approval prompt did not identify adb shell: {adb_record}"
+        ));
+    }
+    let disallowed = api
+        .set_app_root(PROBE_PACKAGE, "off")
+        .map_err(|e| e.to_string())?;
+    if disallowed.level != "off" {
+        return Err(format!(
+            "setting the probe's root level to off: {}",
+            disallowed.message
+        ));
+    }
+    let per_app_off = adb.probe(dir, "root_absent")?;
+    let problems = root_absent_problems(&per_app_off);
+    if !problems.is_empty() {
+        return Err(problems.join("\n"));
+    }
+    let restored = api
+        .set_app_root(PROBE_PACKAGE, "ask")
+        .map_err(|e| e.to_string())?;
+    if restored.level != "ask" {
+        return Err(format!(
+            "restoring the probe's root level to ask: {}",
+            restored.message
+        ));
+    }
+    let visible = adb.probe(dir, "root_visible")?;
+    if visible.get("root.visible").map(String::as_str) != Some("yes") {
+        return Err(format!("the re-enabled app cannot see su: {visible:?}"));
+    }
+    set_machine_switch(dir, false)?;
     let off = adb.probe(dir, "root_absent")?;
     let problems = root_absent_problems(&off);
     if !problems.is_empty() {
         return Err(problems.join("\n"));
     }
-    let helper = adb.shell("getprop init.svc.dsa_su")?;
-    if !matches!(helper.trim(), "" | "stopped") {
-        return Err(format!(
-            "the helper still runs after root elevation is off: {helper}"
-        ));
+    let stop_until = Instant::now() + Duration::from_secs(5);
+    loop {
+        let helper = adb.shell("getprop init.svc.dsa_su")?;
+        if matches!(helper.trim(), "" | "stopped") {
+            break;
+        }
+        if Instant::now() >= stop_until {
+            return Err(format!(
+                "the helper still runs after root elevation is off: {helper}"
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(200));
     }
     Ok(())
 }

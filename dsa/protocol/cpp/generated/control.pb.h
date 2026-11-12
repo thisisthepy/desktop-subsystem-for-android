@@ -4604,6 +4604,7 @@ class InstalledApp final :
     kIconPngFieldNumber = 3,
     kVersionNameFieldNumber = 4,
     kPrimaryAbiFieldNumber = 12,
+    kSharedUserIdFieldNumber = 14,
     kVersionCodeFieldNumber = 5,
     kFirstInstallTimeMsFieldNumber = 6,
     kLastUpdateTimeMsFieldNumber = 7,
@@ -4700,6 +4701,20 @@ class InstalledApp final :
   std::string* _internal_mutable_primary_abi();
   public:
 
+  // string shared_user_id = 14;
+  void clear_shared_user_id();
+  const std::string& shared_user_id() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_shared_user_id(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_shared_user_id();
+  PROTOBUF_NODISCARD std::string* release_shared_user_id();
+  void set_allocated_shared_user_id(std::string* shared_user_id);
+  private:
+  const std::string& _internal_shared_user_id() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_shared_user_id(const std::string& value);
+  std::string* _internal_mutable_shared_user_id();
+  public:
+
   // int64 version_code = 5;
   void clear_version_code();
   int64_t version_code() const;
@@ -4777,6 +4792,7 @@ class InstalledApp final :
     ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr icon_png_;
     ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr version_name_;
     ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr primary_abi_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr shared_user_id_;
     int64_t version_code_;
     uint64_t first_install_time_ms_;
     uint64_t last_update_time_ms_;
@@ -44650,6 +44666,56 @@ inline const ::PROTOBUF_NAMESPACE_ID::RepeatedPtrField< ::dsa::control::v1::Nati
 InstalledApp::native_libraries() const {
   // @@protoc_insertion_point(field_list:dsa.control.v1.InstalledApp.native_libraries)
   return _impl_.native_libraries_;
+}
+
+// string shared_user_id = 14;
+inline void InstalledApp::clear_shared_user_id() {
+  _impl_.shared_user_id_.ClearToEmpty();
+}
+inline const std::string& InstalledApp::shared_user_id() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.InstalledApp.shared_user_id)
+  return _internal_shared_user_id();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void InstalledApp::set_shared_user_id(ArgT0&& arg0, ArgT... args) {
+ 
+ _impl_.shared_user_id_.Set(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:dsa.control.v1.InstalledApp.shared_user_id)
+}
+inline std::string* InstalledApp::mutable_shared_user_id() {
+  std::string* _s = _internal_mutable_shared_user_id();
+  // @@protoc_insertion_point(field_mutable:dsa.control.v1.InstalledApp.shared_user_id)
+  return _s;
+}
+inline const std::string& InstalledApp::_internal_shared_user_id() const {
+  return _impl_.shared_user_id_.Get();
+}
+inline void InstalledApp::_internal_set_shared_user_id(const std::string& value) {
+  
+  _impl_.shared_user_id_.Set(value, GetArenaForAllocation());
+}
+inline std::string* InstalledApp::_internal_mutable_shared_user_id() {
+  
+  return _impl_.shared_user_id_.Mutable(GetArenaForAllocation());
+}
+inline std::string* InstalledApp::release_shared_user_id() {
+  // @@protoc_insertion_point(field_release:dsa.control.v1.InstalledApp.shared_user_id)
+  return _impl_.shared_user_id_.Release();
+}
+inline void InstalledApp::set_allocated_shared_user_id(std::string* shared_user_id) {
+  if (shared_user_id != nullptr) {
+    
+  } else {
+    
+  }
+  _impl_.shared_user_id_.SetAllocated(shared_user_id, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.shared_user_id_.IsDefault()) {
+    _impl_.shared_user_id_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:dsa.control.v1.InstalledApp.shared_user_id)
 }
 
 // -------------------------------------------------------------------

@@ -146,6 +146,10 @@ struct AppRowView: View {
                 .help(row.rootTip ?? T("AppsRootNote.Text"))
                 Spacer()
             }
+            // Apps that share a user ID: which, and that root is one setting for them.
+            if let note = row.rootGroupNote {
+                Text(note).font(.callout).foregroundStyle(.secondary)
+            }
         }
         .padding(.vertical, 2)
     }

@@ -2152,6 +2152,9 @@
   <data name="Apps_Root_remember" xml:space="preserve">
     <value>Root: remember (no asking)</value>
   </data>
+  <data name="Apps_RootGroup" xml:space="preserve">
+    <value>Shares its user ID with {0}. Android cannot tell these apps apart, so their root access is one setting: changing it here changes it for all of them, and if any of them is set to Not allowed, none of them can use su.</value>
+  </data>
   <data name="Apps_RootTip_unavailable" xml:space="preserve">
     <value>Root access is off for this PC. An administrator turns it on in Advanced.</value>
   </data>

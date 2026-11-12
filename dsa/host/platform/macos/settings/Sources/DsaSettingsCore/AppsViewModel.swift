@@ -69,6 +69,9 @@ public struct InstalledAppInfo: Equatable, Sendable {
     /// `unavailable` while root elevation is off for the Mac. Empty from a dsa that does not
     /// say.
     public var root = ""
+    /// The user ID the app shares with other apps (`android:sharedUserId`); empty for an app
+    /// with a user ID of its own, and from a dsa that does not say.
+    public var sharedUserId = ""
 
     public var totalBytes: UInt64 { appBytes + dataBytes + cacheBytes }
 }
@@ -173,7 +176,8 @@ public final class AppsService {
             versionCode: app.int64("version_code"), firstInstallMs: app.uint("first_install_time_ms"),
             lastUpdateMs: app.uint("last_update_time_ms"), systemApp: app.bool("system_app"),
             appBytes: app.uint("app_bytes"), dataBytes: app.uint("data_bytes"), cacheBytes: app.uint("cache_bytes"),
-            iconPng: app.base64("icon_png"), runAsArm: readRunAsArm(app), root: app.string("root"))
+            iconPng: app.base64("icon_png"), runAsArm: readRunAsArm(app), root: app.string("root"),
+            sharedUserId: app.string("shared_user_id"))
     }
 
     /// Every app installed in Android, with its size read again; Android is started first when
@@ -318,6 +322,9 @@ public struct AppRow: Equatable, Identifiable, Sendable {
     public var rootIndex = -1
     public var canChangeRoot = false
     public var rootTip: String?
+    /// For an app that shares its user ID with other apps: which apps, and that their root
+    /// level is one setting, in the user's language; nil for an app with a user ID of its own.
+    public var rootGroupNote: String?
 
     public var id: String { package }
 }
@@ -384,16 +391,43 @@ public final class AppsViewModel: ObservableObject {
     /// The apps the search matches, by name.
     public var rows: [AppRow] {
         let query = search.trimmingCharacters(in: .whitespaces)
+        func found(_ app: InstalledAppInfo) -> Bool {
+            query.isEmpty || app.label.localizedCaseInsensitiveContains(query)
+                || app.package.range(of: query, options: .caseInsensitive) != nil
+        }
+        // Apps that share a user ID are one group: listed together, in the place of the
+        // group's first app by name, and all shown when a search finds one of them.
+        func groupName(_ app: InstalledAppInfo) -> String {
+            ([app] + sharedWith(app)).map(AppsViewModel.name)
+                .min { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending } ?? AppsViewModel.name(app)
+        }
         return (apps ?? [])
-            .filter {
-                query.isEmpty || $0.label.localizedCaseInsensitiveContains(query)
-                    || $0.package.range(of: query, options: .caseInsensitive) != nil
-            }
-            .sorted {
-                ($0.label.isEmpty ? $0.package : $0.label)
-                    .localizedCaseInsensitiveCompare($1.label.isEmpty ? $1.package : $1.label) == .orderedAscending
+            .filter { found($0) || sharedWith($0).contains(where: found) }
+            .sorted { a, b in
+                let order = groupName(a).localizedCaseInsensitiveCompare(groupName(b))
+                if order != .orderedSame { return order == .orderedAscending }
+                if a.sharedUserId != b.sharedUserId { return a.sharedUserId < b.sharedUserId }
+                return AppsViewModel.name(a).localizedCaseInsensitiveCompare(AppsViewModel.name(b)) == .orderedAscending
             }
             .map(row)
+    }
+
+    /// The name the page shows for `app`: its label, or its package when it has none.
+    private static func name(_ app: InstalledAppInfo) -> String { app.label.isEmpty ? app.package : app.label }
+
+    /// The other apps that share `app`'s user ID, by name.
+    private func sharedWith(_ app: InstalledAppInfo) -> [InstalledAppInfo] {
+        guard !app.sharedUserId.isEmpty else { return [] }
+        return (apps ?? [])
+            .filter { $0.sharedUserId == app.sharedUserId && $0.package != app.package }
+            .sorted { AppsViewModel.name($0).localizedCaseInsensitiveCompare(AppsViewModel.name($1)) == .orderedAscending }
+    }
+
+    /// What the page says under an app's root level when it shares its user ID with other
+    /// apps; nil for an app with a user ID of its own.
+    public func rootGroupNote(_ app: InstalledAppInfo) -> String? {
+        let others = sharedWith(app).map(AppsViewModel.name)
+        return others.isEmpty ? nil : text.format("Apps_RootGroup", others.joined(separator: ", "))
     }
 
     /// The start sizes the page offers: Android's own, then phone and tablet sizes, in
@@ -462,7 +496,7 @@ public final class AppsViewModel: ObservableObject {
             runAsArm: app.runAsArm.on, canRunAsArm: app.runAsArm.available,
             runAsArmTip: runAsArmTip(app.runAsArm),
             rootIndex: RootLevel.read(app.root)?.index ?? -1, canChangeRoot: RootLevel.read(app.root) != nil,
-            rootTip: rootTip(app.root))
+            rootTip: rootTip(app.root), rootGroupNote: rootGroupNote(app))
     }
 
     /// Why the "Run as ARM" switch cannot be changed, in the user's language; nil when it can.

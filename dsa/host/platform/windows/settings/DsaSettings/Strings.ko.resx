@@ -2152,6 +2152,9 @@
   <data name="Apps_Root_remember" xml:space="preserve">
     <value>루트: 기억(묻지 않음)</value>
   </data>
+  <data name="Apps_RootGroup" xml:space="preserve">
+    <value>{0}와(과) 사용자 ID를 함께 씁니다. 안드로이드가 이 앱들을 구별할 수 없으므로 루트 권한은 하나의 설정입니다. 여기서 바꾸면 모두 바뀌고, 하나라도 요청 불가이면 모두 su를 쓸 수 없습니다.</value>
+  </data>
   <data name="Apps_RootTip_unavailable" xml:space="preserve">
     <value>이 PC에서 루트 권한이 꺼져 있습니다. 관리자가 고급 페이지에서 켭니다.</value>
   </data>

@@ -1321,6 +1321,11 @@ message AppInfo {
   // The app's launcher shortcuts, in the list of installed apps: the static and dynamic ones
   // in rank order, then the pinned ones. Empty for a task's app.
   repeated AppShortcut shortcuts = 17;
+  // The user ID the app shares with other apps (its manifest's `android:sharedUserId`), in
+  // the list of installed apps. Apps with the same value run under one Android uid and are
+  // one group for root elevation: their level and grace apply to all of them, and a settings
+  // app shows them together. Empty for an app with a user ID of its own, and for a task's app.
+  string shared_user_id = 18;
 }
 
 // One of an app's launcher shortcuts in Android: a static one from its manifest, a dynamic

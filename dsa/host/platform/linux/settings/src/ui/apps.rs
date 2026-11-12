@@ -102,7 +102,16 @@ pub fn apps(ctx: &Shared) -> gtk::Widget {
             }
             for app in shown {
                 let window = windows.borrow().get(&app.package).cloned();
-                let row = app_row(&ctx, &page, app, window, forced.get(), reload.clone());
+                let group_note = view::root_group_note(app, all);
+                let row = app_row(
+                    &ctx,
+                    &page,
+                    app,
+                    group_note,
+                    window,
+                    forced.get(),
+                    reload.clone(),
+                );
                 // The app App info was opened for: its row opens and comes into view, once.
                 let focused = ctx.focus_app.borrow().as_deref() == Some(app.package.as_str());
                 if focused {
@@ -169,6 +178,7 @@ fn app_row(
     ctx: &Shared,
     page: &Rc<Page>,
     app: &App,
+    group_note: Option<String>,
     window: Option<AppWindow>,
     system_forced_available: bool,
     reload: Hook,
@@ -379,6 +389,15 @@ fn app_row(
     // How far the app may use root: not at all, asking an administrator each time, or without
     // asking.
     let root = view::root_view(app);
+    // Apps that share a user ID are one group for root: the row says so, and with which apps.
+    let root_subtitle = match &group_note {
+        Some(note) => format!(
+            "{}
+{note}",
+            root.subtitle
+        ),
+        None => root.subtitle.clone(),
+    };
     let root_level = {
         let (ctx, page, package, label) = (
             ctx.clone(),
@@ -388,7 +407,7 @@ fn app_row(
         );
         let reload = reload.clone();
         let current = app.root.clone();
-        Combo::new(&tr("Root access"), &root.subtitle, move |index| {
+        Combo::new(&tr("Root access"), &root_subtitle, move |index| {
             let Some(level) = view::ROOT_LEVELS.get(index as usize) else {
                 return;
             };

@@ -93,6 +93,7 @@
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
                                     </Grid.RowDefinitions>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" />
@@ -179,6 +180,11 @@
                                                Style="{StaticResource CardDescription}" HorizontalAlignment="Right"
                                                TextWrapping="Wrap" Margin="0,4,0,0"
                                                Visibility="{Binding HasRunAsArmTip, Converter={StaticResource Visible}}" />
+                                    <!-- Apps that share a user ID: which, and that root is one setting for them. -->
+                                    <TextBlock Grid.Row="3" Grid.ColumnSpan="3" Text="{Binding RootGroupNote}"
+                                               Style="{StaticResource CardDescription}" HorizontalAlignment="Right"
+                                               TextWrapping="Wrap" Margin="0,4,0,0"
+                                               Visibility="{Binding HasRootGroupNote, Converter={StaticResource Visible}}" />
                                 </Grid>
                             </Border>
                         </DataTemplate>

@@ -789,7 +789,9 @@ struct Shared {
 struct RootElevationNow {
     /// The computer's switch, as it stands now.
     on: bool,
-    /// The apps with a level other than off.
+    /// The apps with a level the user set, off included: apps that share an Android user ID
+    /// are one group, and one of them set to off hides su from the whole group, which only
+    /// the guest can tell apart by uid.
     apps: Vec<AppLevel>,
     /// The switch as it stood when the running boot started; `None` while no boot runs. The
     /// kernel's su guard and the relay are set up at boot, so a boot that started with the
@@ -1711,7 +1713,7 @@ impl Session {
     }
 
     /// Sets the user's root elevation settings: the computer's switch and the apps with a
-    /// level other than off. The running Android is told at once, so a changed level applies
+    /// level the user set, off included. The running Android is told at once, so a changed level applies
     /// without a restart; so does turning the switch off. Turning it on applies from the next
     /// start of Android, as the kernel's su guard and the relay are set up at boot. Each boot
     /// is told again once its agent connects.
@@ -1726,11 +1728,9 @@ impl Session {
             if !on && now.boot_on.is_some() {
                 now.off_since_boot = true;
             }
-            now.apps = apps
-                .into_iter()
-                .filter(|app| app.level != Level::Off)
-                .collect();
+            now.apps = apps;
             now.apps.sort_by(|a, b| a.package.cmp(&b.package));
+            now.apps.dedup_by(|a, b| a.package == b.package);
         }
         if let Some(body) = self.shared.root_elevation_body(false) {
             send_quietly(&self.shared, &self.commands, body);
@@ -4763,13 +4763,34 @@ impl Worker {
             }));
             return;
         };
-        let app = self.shared.installed_app(&request.package);
+        // The guest names every app of a shared user ID group, since the uid alone is all the
+        // kernel knows of the caller; the prompt shows each of them with its name and icon.
+        let packages = crate::root_approval::package_group(&request.package);
+        let app = packages
+            .first()
+            .and_then(|package| self.shared.installed_app(package));
+        let mut approval_request =
+            crate::root_approval::ApprovalRequest::from_su(&request, app.as_ref());
+        if packages.len() > 1 {
+            let shared_apps = packages
+                .iter()
+                .map(|package| {
+                    self.shared
+                        .installed_app(package)
+                        .unwrap_or_else(|| AppInfo {
+                            package_name: package.to_string(),
+                            ..Default::default()
+                        })
+                })
+                .collect();
+            approval_request = approval_request.with_shared_apps(shared_apps);
+        }
         let shared = Arc::clone(&self.shared);
         let request_id = request.request_id;
         let spawned = thread::Builder::new()
             .name("dsa-su-approval".into())
             .spawn(move || {
-                let decision = approval.decide(&request, app.as_ref());
+                let decision = approval.answer(&approval_request);
                 send_quietly(&shared, &commands, Body::SuDecision(decision));
             });
         if let Err(error) = spawned {
@@ -6354,6 +6375,7 @@ impl Worker {
                     cache_bytes: app.cache_bytes,
                     native_libraries: NativeLibraries::from_control(&app.native_libraries),
                     primary_abi: native_abi::checked_abi(&app.primary_abi),
+                    shared_user_id: app.shared_user_id,
                     ..Default::default()
                 });
             }

@@ -1611,6 +1611,7 @@ fn app_to_wire(app: AppInfo) -> types::AppInfo {
         multiple_windows: app.multiple_windows,
         root: app.root,
         shortcuts: app.shortcuts.into_iter().map(shortcut_to_wire).collect(),
+        shared_user_id: app.shared_user_id,
     }
 }
 
@@ -1677,6 +1678,7 @@ fn app_from_wire(app: types::AppInfo) -> AppInfo {
         multiple_windows: app.multiple_windows,
         root: app.root,
         shortcuts: app.shortcuts.into_iter().map(shortcut_from_wire).collect(),
+        shared_user_id: app.shared_user_id,
     }
 }
 
@@ -4106,10 +4108,25 @@ impl HostApiService {
         }
     }
 
+    /// The packages that share `package`'s Android user ID in `user`'s Android, `package`
+    /// first, as the guest last listed its installed apps. Just `package` for an app with a
+    /// user ID of its own, or when the list is not known.
+    fn shared_user_group(&self, user: &str, package: &str) -> Vec<String> {
+        let installed = self
+            .androids
+            .android(user)
+            .ok()
+            .and_then(|android| android.watch_tasks())
+            .and_then(|watch| installed_of(watch.current))
+            .unwrap_or_default();
+        crate::root_elevation::shared_user_group(&installed, package)
+    }
+
     /// Sets how far one app may elevate to root. The feature must be on. Moving an app to
     /// "remember" needs an administrator: a caller who is not one gets the administrator
     /// prompt in their own session. A change clears that app's grace, and the running Android
-    /// is sent the new config at once.
+    /// is sent the new config at once. Apps that share an Android user ID are one group, so
+    /// the level is set for every app of the group.
     fn set_app_root(&self, peer: &Peer, set: types::SetAppRoot) -> response::Body {
         use crate::root_elevation::Level;
         if !apk::valid_package_name(&set.package_name) {
@@ -4140,19 +4157,13 @@ impl HostApiService {
                 "root elevation is off for this computer; turn it on first",
             );
         }
-        let current = store
-            .root_apps(&peer.user)
-            .ok()
-            .and_then(|apps| {
-                apps.into_iter()
-                    .find(|a| a.package == set.package_name)
-                    .map(|a| a.level)
-            })
-            .unwrap_or_else(|| {
-                crate::root_elevation::default_level(&set.package_name)
-                    .code()
-                    .to_string()
-            });
+        let group = self.shared_user_group(&peer.user, &set.package_name);
+        let current = crate::root_elevation::group_level(
+            &store.root_apps(&peer.user).unwrap_or_default(),
+            &group,
+        )
+        .code()
+        .to_string();
         if level.change_needs_admin() && !peer.administrator && current != level.code() {
             // The caller is not an administrator, so one is asked in the caller's own session,
             // through the prompt the app's su calls use. Running the command elevated would
@@ -4176,7 +4187,10 @@ impl HostApiService {
                 );
             }
         }
-        match store.set_root_app(&peer.user, &set.package_name, level.code()) {
+        let stored = group
+            .iter()
+            .try_for_each(|member| store.set_root_app(&peer.user, member, level.code()));
+        match stored {
             Ok(()) => {
                 // The running Android follows the new level at once: the guest's su guard
                 // shows su to the app, or hides it, from this message on.
@@ -4186,7 +4200,7 @@ impl HostApiService {
                 eprintln!(
                     "local API: {} set the root level of {} to {}",
                     peer.user,
-                    set.package_name,
+                    group.join(", "),
                     level.code()
                 );
                 app_root(types::AppRootStatus::Success, level.code(), "")
@@ -4216,7 +4230,8 @@ impl HostApiService {
             .to_string()
     }
     /// Fills each listed app's `root` with its level: "unavailable" when the feature is off
-    /// for the computer, otherwise the per-app level ("off", "ask" or "remember").
+    /// for the computer, otherwise the level ("off", "ask" or "remember") of the app, or of
+    /// its group when it shares an Android user ID with other apps.
     fn fill_app_root(&self, user: &str, installed: &mut types::InstalledApps) {
         let Some((store, _facts)) = &self.settings else {
             return;
@@ -4228,12 +4243,25 @@ impl HostApiService {
             return;
         }
         let levels = store.root_apps(user).unwrap_or_default();
-        for app in &mut installed.apps {
-            app.root = levels
-                .iter()
-                .find(|a| a.package == app.package_name)
-                .map(|a| a.level.clone())
-                .unwrap_or_else(|| "off".to_string());
+        let groups: Vec<Vec<String>> = installed
+            .apps
+            .iter()
+            .map(|app| {
+                if app.shared_user_id.is_empty() {
+                    return vec![app.package_name.clone()];
+                }
+                installed
+                    .apps
+                    .iter()
+                    .filter(|other| other.shared_user_id == app.shared_user_id)
+                    .map(|other| other.package_name.clone())
+                    .collect()
+            })
+            .collect();
+        for (app, group) in installed.apps.iter_mut().zip(groups) {
+            app.root = crate::root_elevation::group_level(&levels, &group)
+                .code()
+                .to_string();
         }
     }
 

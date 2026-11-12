@@ -16,6 +16,7 @@ internal sealed class AppsText : ITextSource
         "Apps_NotUninstalled" => "kept {0}: {1} [{2}]",
         "Apps_Refused_system-app" => "part of Android",
         "Apps_DesktopShortcutMade" => "on the desktop: {0}",
+        "Apps_RootGroup" => "Apps_RootGroup {0}",
         _ => key,
     };
 }
