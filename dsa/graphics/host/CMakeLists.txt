@@ -83,6 +83,9 @@ add_subdirectory("${GFXSTREAM_DIR}" gfxstream_build EXCLUDE_FROM_ALL)
 # Stub emulator symbol missing in standalone Windows host build
 if(TARGET gfxstream_backend_static)
     target_sources(gfxstream_backend_static PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/emugl_config_stub.cpp")
+    # The render thread's read buffer follows the reply buffer's rule (dsa_reply_buffer.h,
+    # patch 0027), in whichever backend ReadBuffer.cpp is built into.
+    target_include_directories(gfxstream_backend_static PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../include")
 endif()
 
 if(TARGET gfxstream_backend)
