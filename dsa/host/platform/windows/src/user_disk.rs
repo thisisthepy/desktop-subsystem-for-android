@@ -103,12 +103,21 @@ pub fn backup_folder_sddl(sid: &str) -> String {
 
 /// Makes sure the backup folder of the user with SID `sid` exists. A folder made here gets
 /// [`backup_folder_sddl`], so it is the user's whatever their profile folder passes down; a
-/// folder that is there already (one the user made or set up) keeps its own.
+/// folder that is there already (one the user made or set up) keeps its own. A link is
+/// refused, so the service never changes the access list of another folder.
 pub fn prepare_backup_folder(folder: &Path, sid: &str) -> Result<(), String> {
-    if folder.is_dir() {
+    if std::fs::symlink_metadata(folder).is_ok() {
+        crate::safe_fs::GuardedDir::open(folder)?;
         return Ok(());
     }
+    if let Some(parent) = folder
+        .parent()
+        .filter(|p| std::fs::symlink_metadata(p).is_ok())
+    {
+        crate::safe_fs::GuardedDir::open(parent)?;
+    }
     std::fs::create_dir_all(folder).map_err(|e| format!("creating {}: {e}", folder.display()))?;
+    let _guard = crate::safe_fs::GuardedDir::open(folder)?;
     protect_folder_as(folder, &backup_folder_sddl(sid))
 }
 
