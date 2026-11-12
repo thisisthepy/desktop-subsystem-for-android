@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use dsa_host_core::compositor::{GraphicsRenderer, GraphicsStreamKind};
 use dsa_host_core::renderer::{
-    address_from, follow_device_state, open_renderer, HeldTargets, RendererProcessMemory,
+    address_from, follow_device_state, open_renderer, HeldTargets, RendererProcessMemory, ServedVm,
     WindowManagerLink, WINDOW_MANAGER_ARGUMENT,
 };
 use dsa_protocol::renderer::types::{envelope::Body, FrameDone, FramePath, Started};
@@ -329,6 +329,7 @@ pub fn run(args: &[String]) -> ! {
     }
 
     let vm: VmIdSlot = Arc::default();
+    let mut served = ServedVm::new();
     for (kind, port) in [
         (GraphicsStreamKind::Command, start.command_port),
         (GraphicsStreamKind::ProcessPipe, start.process_pipe_port),
@@ -357,6 +358,19 @@ pub fn run(args: &[String]) -> ! {
         };
         match body {
             Body::GuestVm(guest) => {
+                // The VM this renderer served is gone: a fresh renderer, which the window
+                // manager starts at once, serves the next one without what this one kept.
+                let told = (!guest.vm_id.is_empty()).then_some(guest.vm_id.as_str());
+                if served.told(told) {
+                    let (_, private_kb) = own_memory_kb();
+                    link.note(&format!(
+                        "the VM this renderer served is gone; it ends so that the window \
+                         manager starts a fresh one for the next VM, without the {} MiB of \
+                         private memory this one holds",
+                        private_kb.map_or("?".to_string(), |kb| (kb / 1024).to_string())
+                    ));
+                    break;
+                }
                 let id = if guest.vm_id.is_empty() {
                     None
                 } else {
