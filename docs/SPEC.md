@@ -716,6 +716,8 @@ WSA가 제공한 Widevine L3를 제공한다. DSA는 Google 바이너리를 싣�
 - 수용 기준: 앱을 여럿 열어 게스트가 부족해지면 서비스 로그에 VM이 커졌다는 줄이 남고 게스트의 `MemTotal`이 늘어난다. 앱을 닫고 1분 안에 VM이 시작 크기 쪽으로 줄고 `vmmem` 상주 메모리가 줄어든다. 32 GB PC에서 `Dozing`의 `vmmem` 상주 메모리와 부팅 시간이 3 GiB 고정일 때와 비교해 눈에 띄게 늘지 않는다. (수동 확인, `measure.ps1 -Part grow`로 수치를 기록한다)
 - 앱을 닫으면 캐시로 남기지 않는다. 한 패키지의 마지막 태스크가 사라지면 에이전트가 그 패키지의 프로세스를 바로 끝내고, 풀린 메모리와 페이지 캐시를 회수해 호스트로 돌려준다. 배치된 위젯이 있거나 포그라운드 서비스가 돌고 있는 앱은 끝내지 않는다. 캐시 프로세스 수의 상한은 데스크톱에 맞게 낮춘다. 에이전트는 "closed <package>: returned N MiB in T ms"를 로그에 남긴다.
 - 수용 기준: 앱 창을 닫고 몇 초 안에 그 패키지의 프로세스가 없어지고, 위 로그 줄이 남으며, `vmmem` 상주 메모리가 줄어든다. 위젯을 배치한 앱과 포그라운드 서비스가 있는 앱은 남는다.
+- 창이 없이 쉬는 프로세스도 메모리 부족을 기다리지 않고 정리한다. 안드로이드는 메모리가 넉넉하면 일을 마친 프로세스(Play 스토어의 예약 작업, Play 서비스의 앱 검증 등)를 캐시로 계속 남기기 때문이다. 에이전트는 캐시 상태로 30초 넘게 쉬고, 액티비티가 없으며, 그 패키지에 태스크 창과 포그라운드 서비스가 없는 프로세스를 끝낸다. 곧 다시 뜨는 프로세스는 기다리는 시간을 두 배씩 늘린다(최대 8분). 끝낼 때 예약 작업, 알람, 알림을 지우지 않고 패키지를 중지 상태로 만들지 않는다. 푸시 알림을 받는 Google Play 서비스의 주 프로세스, 시스템, 상주(persistent) 프로세스, 에이전트는 끝내지 않는다.
+- 수용 기준: Play 스토어나 Play 서비스가 일을 마치고 캐시로 남은 프로세스(`com.android.vending`, `com.google.android.gms.unstable` 등)는 1분 안에 없어지고, `com.google.android.gms` 주 프로세스는 남는다. 창이 열려 있어도 다른 패키지의 쉬는 프로세스는 같은 기준으로 정리된다. 포그라운드 서비스가 있는 앱은 남는다. (`nfr2_cached_play_processes_end_after_their_work_and_the_core_stays`, `nfr2_google_play_services_core_is_never_ended_even_when_cached`, `nfr2_an_app_with_a_foreground_service_keeps_its_cached_processes`)
 
 ### NFR-3 대기 CPU (`Agreed`)
 - 제안 목표: `Dozing` 상태 10분 평균 CPU 사용률(게스트와 동반 서비스 합)이 논리 코어 하나의 1% 이하다.
