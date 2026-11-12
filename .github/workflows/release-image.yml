@@ -1327,6 +1327,7 @@ jobs:
           program-list-url: https://github.com/${{ github.repository }}/releases/download/images/program-stable.json
           prerelease-program-list-url: https://github.com/${{ github.repository }}/releases/download/images/program-prerelease.json
           channel: ${{ needs.channel.outputs.channel }}
+          windows-renderer-only: "true"
 
       # Named as a release names its setup file, with the kernel's source beside it, since
       # setup.exe carries the kernel.
