@@ -50,6 +50,7 @@
 //! - [`file_share`]: the user's host folders in the guest's shared storage, and the guest's
 //!   shared storage on the host.
 //! - [`erofs`]: erofs images, the read-only file systems the host hands the guest as one file.
+//! - [`vhdx`]: the disks inside the image's dynamic VHDX files.
 //! - [`settings`]: the settings a user changes from the settings app, kept by the service.
 //! - [`system_settings`]: the host's time zone, languages, regional format, theme and accent
 //!   color, which each user's Android follows.
@@ -141,6 +142,7 @@ pub mod system_settings;
 pub mod tasks;
 pub mod touch_gestures;
 pub mod update;
+pub mod vhdx;
 pub mod video;
 pub mod video_layout;
 pub mod widgets;
