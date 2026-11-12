@@ -595,7 +595,9 @@ mod tests {
             assert_eq!(english.key, korean.key);
             assert_eq!(english.app_label, "DSA");
             assert_ne!(english.title, korean.title);
-            assert!(!english.text.contains('\u{2014}') && !korean.text.contains('\u{2014}'));
+            // The long dash the house style forbids, named by its code point.
+            let dash = char::from_u32(0x2014).unwrap();
+            assert!(!english.text.contains(dash) && !korean.text.contains(dash));
         }
         assert!(Notice::Restarting
             .notification(false)
