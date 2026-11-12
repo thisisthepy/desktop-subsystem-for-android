@@ -631,6 +631,9 @@ pub struct App {
     /// How far the app may use root: `off`, `ask` or `remember`, or `unavailable` while root
     /// elevation is off for the computer. Empty from a `dsa` that does not say.
     pub root: String,
+    /// The user ID the app shares with other apps (`android:sharedUserId`); empty for an app
+    /// with a user ID of its own, and from a `dsa` that does not say.
+    pub shared_user_id: String,
 }
 
 /// The "Run as ARM" switch of an app, as `dsa apps list` reports it.
@@ -675,6 +678,7 @@ impl App {
             icon_png: base64_decode(json["icon_png"].as_str().unwrap_or_default()),
             run_as_arm: RunAsArm::read(&json["run_as_arm"]),
             root: text(json, "root"),
+            shared_user_id: text(json, "shared_user_id"),
         }
     }
 }

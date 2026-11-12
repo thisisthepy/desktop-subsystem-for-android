@@ -1419,6 +1419,9 @@ msgstr "바꾸지 않음"
 msgid "Not allowed hides su from the app. Ask each time asks an administrator for each request, then not again for 15 minutes. Remember approves without asking, and choosing it needs an administrator's approval."
 msgstr "요청 불가는 앱에게 su를 보이지 않게 합니다. 요청할 때 묻기는 요청마다 관리자에게 묻고, 승인한 뒤 15분 동안은 다시 묻지 않습니다. 기억은 묻지 않고 승인하며, 이 수준을 고르려면 관리자 승인이 필요합니다."
 
+msgid "Shares its user ID with {0}. Android cannot tell these apps apart, so their root access is one setting: changing it here changes it for all of them, and if any of them is set to Not allowed, none of them can use su."
+msgstr "{0}와(과) 사용자 ID를 함께 씁니다. 안드로이드가 이 앱들을 구별할 수 없으므로 루트 권한은 하나의 설정입니다. 여기서 바꾸면 모두 바뀌고, 하나라도 요청 불가이면 모두 su를 쓸 수 없습니다."
+
 msgid "Root access is off for this computer. An administrator turns it on under Advanced."
 msgstr "이 컴퓨터에서 루트 권한이 꺼져 있습니다. 관리자가 고급에서 켭니다."
 

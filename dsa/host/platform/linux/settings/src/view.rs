@@ -430,19 +430,59 @@ pub fn android_move(info: &AndroidVersion, choice: &AndroidChoice) -> AndroidMov
 }
 
 /// The apps a search matches, by name: the query is matched against the label and the
-/// package, ignoring case.
+/// package, ignoring case. Apps that share a user ID are one group: the group is shown
+/// together, in the place of its first app by name, when any of its apps matches.
 pub fn filter_apps<'a>(apps: &'a [App], query: &str) -> Vec<&'a App> {
     let query = query.trim().to_lowercase();
+    let matches = |a: &App| {
+        query.is_empty()
+            || a.label.to_lowercase().contains(&query)
+            || a.package.to_lowercase().contains(&query)
+    };
     let mut shown: Vec<&App> = apps
         .iter()
-        .filter(|a| {
-            query.is_empty()
-                || a.label.to_lowercase().contains(&query)
-                || a.package.to_lowercase().contains(&query)
-        })
+        .filter(|a| matches(a) || shared_with(a, apps).into_iter().any(matches))
         .collect();
-    shown.sort_by_key(|a| a.label.to_lowercase());
+    shown.sort_by_key(|a| {
+        let first = std::iter::once(*a)
+            .chain(shared_with(a, apps))
+            .map(|member| member.label.to_lowercase())
+            .min()
+            .unwrap_or_default();
+        (first, a.shared_user_id.clone(), a.label.to_lowercase())
+    });
     shown
+}
+
+/// The other apps that share `app`'s user ID among `apps`, by name.
+pub fn shared_with<'a>(app: &App, apps: &'a [App]) -> Vec<&'a App> {
+    if app.shared_user_id.is_empty() {
+        return Vec::new();
+    }
+    let mut others: Vec<&App> = apps
+        .iter()
+        .filter(|other| other.shared_user_id == app.shared_user_id && other.package != app.package)
+        .collect();
+    others.sort_by_key(|other| other.label.to_lowercase());
+    others
+}
+
+/// What the Apps page says under an app's root level when it shares its user ID with other
+/// apps; `None` for an app with a user ID of its own.
+pub fn root_group_note(app: &App, apps: &[App]) -> Option<String> {
+    let others = shared_with(app, apps);
+    if others.is_empty() {
+        return None;
+    }
+    let names = others
+        .iter()
+        .map(|other| other.label.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(trf(
+        "Shares its user ID with {0}. Android cannot tell these apps apart, so their root access is one setting: changing it here changes it for all of them, and if any of them is set to Not allowed, none of them can use su.",
+        &[&names],
+    ))
 }
 
 pub fn apps_count(total: usize, shown: usize, searching: bool) -> String {
