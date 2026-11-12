@@ -2804,3 +2804,26 @@ FLO의 BLAST 버퍼 5개: `VRI[MainActivity]#1`의 4개는 HWUI가 창마다 잡
 
 - 남은 것: 게스트 프로세스마다 호스트에 VkDevice가 하나씩 있고(ANGLE), 드라이버의 기기별 몫과 ANGLE의 버퍼 풀은 이번 고침에 들지 않는다. 0023 뒤의 CPU-mapped 줄이 그 크기를 처음 보여 준다. 위 절감은 모두 실기에서 재지 않았다. 다음 측정에서 같은 조건(FLO 창 하나, 1분)으로 렌더러 줄을 비교한다.
 - 결정: 위 고침을 develop에 넣었다. 기기별 몫을 줄일지(기기 공유 등)는 측정 뒤에 따로 정한다.
+
+## R38. 비일관 캐시 메모리 형식과 일관 쌍둥이: ANGLE이 어느 형식을 고르는가 (PR-3, FR-4)
+
+**기준.** R33의 제안 1(소유자 승인): v0.1.9의 싼 경로(비일관 캐시 형식, 앱의 `vkInvalidateMappedMemoryRanges`에서만 되읽기)를 되살리면서 Vulkan이 요구하는 HOST_VISIBLE|HOST_COHERENT 형식을 지킨다. ANGLE은 이미지 입력 빌드 16373615(Android 17)에 든 것을 `external/angle`의 `android-17.0.0_r1`(`1f4500d3`) 소스로 읽었다. 빌드하거나 실행하지 않았다.
+
+**한 일.** guest/mesa 0012는 호스트가 캐시하는 호스트 가시 형식 T마다 둘을 보인다. T는 호스트가 보인 그대로(비일관) 제 인덱스에 두고, T|COHERENT 쌍둥이를 호스트의 형식들 뒤에 붙인다(`dsa_memory_types.h`). 호스트의 인덱스와 마스크는 그대로 게스트의 것이므로 색 버퍼 인덱스처럼 호스트가 준 값은 바뀌지 않는다. 쌍둥이 인덱스는 호스트로 갈 때 T가 되고, 호스트의 마스크에 T가 있으면 쌍둥이도 들어간다. 완료 시점(펜스, 세마포어, 큐와 장치 대기)의 되읽기는 일관 형식만 한다. Vulkan의 순서 규칙(플래그가 엄격한 부분 집합인 형식이 앞)은 호스트의 어떤 형식도 COHERENT가 없으므로 지켜진다.
+
+**ANGLE이 고르는 형식.** ANGLE은 VMA로 고르고, VMA는 필수 플래그를 가진 형식 가운데 선호 플래그를 덜 놓친 것을, 같으면 앞의 것을 고른다.
+
+| 경로 | ANGLE이 묻는 것 | 고르는 형식 |
+|---|---|---|
+| 텍스처 올리기 스테이징 (`CachedNonCoherent`) | 필수 HV+HC, 선호 없음 | T (비일관). 쓰고 `flush`한다 |
+| 내부 `DynamicBuffer` (정점, 인덱스 변환, 기본 유니폼) | 필수 HV, 선호 HC 또는 없음 | 앞의 HV 형식 (T 또는 캐시 없는 형식) |
+| `glReadPixels`와 장치 버퍼 매핑의 스테이징 (`CachedPreferCoherent`) | 필수 HV+HC, 선호 COH | 쌍둥이. 드물고, 읽기 전에 `invalidate`를 부른다 |
+| GL 버퍼 `DYNAMIC_DRAW`, `STREAM_DRAW` | 필수 HV, 선호 COH(+HC) | 쌍둥이. 바꿀 ANGLE 스위치가 없다 |
+| GL 버퍼 `DYNAMIC_READ`, `STREAM_COPY` 등 | 스위치에 따라 HV+HC 또는 HV+COH+HC | 이미지가 `preferCachedNoncoherentForDynamicStreamBufferUsage`를 켜서 T |
+| GL 버퍼 `STATIC_*` | 내장 GPU면 DL+HV+COH 선호(`preferDeviceLocalMemoryHostVisible`), 아니면 DL | 이미지가 그 스위치를 꺼서 DL 전용 형식 |
+
+HWUI는 `SkiaOpenGLPipeline`으로 ANGLE 위에서 그리므로(R19) 위 표를 그대로 따른다. 글리프 아틀라스와 비트맵 올리기는 T로, Skia의 정점, 인덱스, 유니폼 스트리밍(`DYNAMIC_DRAW`, `STREAM_DRAW`)은 쌍둥이로 간다. 장치는 그 버퍼에 쓰지 않으므로 완료 때의 되읽기는 호스트가 크기 0으로 답하는 왕복 하나와 렌더러의 조각 해시만 남는다(R33의 남은 비용). ANGLE은 비일관 형식에서 `flush`와 `invalidate`를 명시적 범위로 부르며, 그 범위는 `nonCoherentAtomSize`로 올림한다.
+
+**함께 고친 것.** 비일관 형식의 사용자는 범위를 `flush`하고 `invalidate`한다. 인코더의 `vkFlushMappedMemoryRanges`는 `VK_WHOLE_SIZE`를 오프셋과 상관없이 매핑 크기만큼 보내 게스트 사본의 끝을 넘어 읽었고, 호스트 렌더러는 `VK_WHOLE_SIZE` 범위를 오프셋에서 할당 크기만큼 읽고 보내 매핑 끝을 넘는다. 0012는 보낼 바이트를 사본 안으로 자르고, 그림자 메모리의 `VK_WHOLE_SIZE` 범위를 호스트 할당 끝까지의 바이트 수로 바꾸어 보낸다.
+
+**확인하지 못한 것.** 모두 CI와 실기의 몫이다. `dEQP-VK.info.device_memory_properties`, `dEQP-VK.memory.allocation.basic.*`, `dEQP-VK.memory.mapping.suballocation.full.*`(비일관 형식의 `flush`와 `invalidate`, 쌍둥이 할당)가 CTS 부분 집합에 있다. 크기 변경 지연과 `driver.readback` 줄의 변화는 재지 않았다. 호스트가 HV만 있는(캐시 없는) 형식을 보이는 GPU(NVIDIA 등)에서는 그 형식이 Vulkan이 허용하는 플래그 조합이 아니며(HV는 COH나 HC와 함께여야 한다), 이 변경 전부터 그렇다. ANGLE 속성(`debug.angle.feature_overrides_*`)이 앱 프로세스에서 읽히는지는 이미지에서 확인하지 않았다.
