@@ -709,6 +709,7 @@ pub fn install_reason(status: &str) -> String {
         "encrypted-bundle" => "the bundle is encrypted, so its APKs cannot be read. Get the app as an APK, or as a newer bundle.",
         "split-signature-mismatch" => "a split APK of the bundle is signed with another key than its base APK, so Android would refuse it.",
         "invalid-bundle" => "the bundle is not one app that Android can install.",
+        "unsupported-abi" => "the app's native code is none that DSA's Android runs, which runs 64-bit code only: x86_64, and arm64-v8a through ARM translation. Get the app's x86_64 or arm64-v8a build.",
         _ => "Android did not install the app.",
     })
 }

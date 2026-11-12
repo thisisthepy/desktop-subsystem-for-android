@@ -4425,7 +4425,11 @@ fn read_install_file(path: &std::path::Path) -> Result<(ApkInfo, Option<Bundle>)
         .and_then(|name| name.to_str())
         .is_some_and(|name| dsa_host_core::apk::check_name(name).is_ok());
     if named_apk {
-        return Ok((ApkInfo::read(path)?, None));
+        let info = ApkInfo::read(path)?;
+        // An app whose native code the guest cannot run is refused as `dsa install` refuses it.
+        dsa_host_core::apk_bundle::check_native_code(path)
+            .map_err(|refusal| describe_file_refusal(path, &refusal))?;
+        return Ok((info, None));
     }
     let file = InstallFile::open(path, &user_tmp()?);
     match file.map_err(|refusal| describe_file_refusal(path, &refusal))? {

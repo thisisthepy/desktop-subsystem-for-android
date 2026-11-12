@@ -79,6 +79,10 @@ public class ApkInstallerFileTests
         Assert.StartsWith("a.apkm is an encrypted bundle", UnsupportedFile.Message(UnsupportedKind.EncryptedBundle, "a.apkm"));
         Assert.Contains("another certificate", UnsupportedFile.Message(UnsupportedKind.SplitSignatureMismatch, "a.xapk"));
         Assert.Equal("a.bin is not a valid APK file.", UnsupportedFile.Message(UnsupportedKind.NotApk, "a.bin"));
+        // An app whose native code DSA's 64-bit-only Android does not run says why, in dsa's words.
+        Assert.Equal("chrome.xapk cannot run in DSA: the app's native code is 32-bit only (armeabi-v7a).",
+            UnsupportedFile.Message(UnsupportedKind.UnsupportedAbi, "chrome.xapk", "the app's native code is 32-bit only (armeabi-v7a)."));
+        Assert.Contains("64-bit code only", UnsupportedFile.Message(UnsupportedKind.UnsupportedAbi, "a.apk"));
     }
 
     [Theory]
@@ -86,6 +90,7 @@ public class ApkInstallerFileTests
     [InlineData("dsa: not installed (encrypted-bundle): a.apkm: the bundle is encrypted", UnsupportedKind.EncryptedBundle)]
     [InlineData("dsa: not installed (split-signature-mismatch): a.xapk: config.ko.apk is signed with another certificate", UnsupportedKind.SplitSignatureMismatch)]
     [InlineData("dsa: not installed (invalid-bundle): a.apks: the bundle holds two base APKs", UnsupportedKind.SplitBundle)]
+    [InlineData("dsa: not installed (unsupported-abi): chrome.xapk: the app's native code is 32-bit only (armeabi-v7a)", UnsupportedKind.UnsupportedAbi)]
     public void Fr11_a_bundle_dsa_refuses_is_named_by_its_reason(string error, UnsupportedKind kind)
     {
         var refusal = UnsupportedFile.FromRefusal(error);
