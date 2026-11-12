@@ -13,7 +13,9 @@ use std::ffi::{c_char, c_int, c_void, CString};
 use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::{Duration, Instant};
 
 use dsa_host_core::memory::RendererMemory;
 use libloading::Library;
@@ -247,8 +249,36 @@ pub struct Renderer {
     /// Absent from a backend built before it made a lost device again on a thread of its own.
     device_losses: Option<unsafe extern "C" fn() -> u64>,
     simulate_device_loss: Option<unsafe extern "C" fn() -> c_int>,
+    /// Stops the backend: its render threads, its presentation thread and the thread that
+    /// makes a lost device again are joined, and its Vulkan devices destroyed.
+    teardown: Option<unsafe extern "C" fn()>,
+    /// Set by [`Renderer::shutdown`]: every stream ends at its next read or write, and no new
+    /// one is served.
+    stopping: AtomicBool,
+    /// Whether the backend was torn down.
+    torn_down: AtomicBool,
+    /// How many streams are being served now, and its change.
+    serving: Mutex<usize>,
+    served: Condvar,
     path: FramePath,
     notes: Vec<String>,
+}
+
+/// What a stream's read and write calls get as their `user` pointer.
+struct StreamContext {
+    fd: RawFd,
+    stopping: *const AtomicBool,
+}
+
+/// Counts a served stream down when its serving ends.
+struct Serving<'a>(&'a Renderer);
+
+impl Drop for Serving<'_> {
+    fn drop(&mut self) {
+        let mut serving = self.0.serving.lock().unwrap_or_else(|e| e.into_inner());
+        *serving -= 1;
+        self.0.served.notify_all();
+    }
 }
 
 /// Where the renderer is: `GFXSTREAM_BACKEND_PATH` when set, else beside this program, else
@@ -342,6 +372,10 @@ impl Renderer {
                 .get(b"dsa_gfx_simulate_device_loss\0")
                 .ok()
                 .map(|symbol| *symbol);
+            let teardown: Option<unsafe extern "C" fn()> = library
+                .get(b"dsa_gfx_teardown\0")
+                .ok()
+                .map(|symbol| *symbol);
             if let Some(gpu) = gpu {
                 let select: Option<SelectGpuFn> = library
                     .get(b"dsa_gfx_select_gpu\0")
@@ -386,6 +420,11 @@ impl Renderer {
                 device_generation,
                 device_losses,
                 simulate_device_loss,
+                teardown,
+                stopping: AtomicBool::new(false),
+                torn_down: AtomicBool::new(false),
+                serving: Mutex::new(0),
+                served: Condvar::new(),
                 path,
                 notes,
             })
@@ -453,13 +492,75 @@ impl Renderer {
         })
     }
 
-    /// Serves one stream until the guest closes it.
+    /// How many guest streams are being served now.
+    pub fn streams(&self) -> usize {
+        *self.serving.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Whether [`Renderer::shutdown`] tore the backend down.
+    pub fn is_torn_down(&self) -> bool {
+        self.torn_down.load(Ordering::SeqCst)
+    }
+
+    /// Stops the renderer, for a process that ends with its libraries' own teardown (static
+    /// destructors, the Vulkan loader and the driver unloading): a backend thread still
+    /// running then uses what they free, and the process dies with SIGSEGV.
+    ///
+    /// Every stream ends at its next read or write (a read waits at most 50 ms), and no new
+    /// one is served. Once all of them have ended within `limit`, the backend is torn down:
+    /// that joins its render threads, its presentation thread and the thread that makes a
+    /// lost device again, and destroys its Vulkan devices (and the driver's threads with
+    /// them). A stream that does not end within `limit` leaves the backend running, since
+    /// tearing it down under a stream would free what the stream uses; the error says so.
+    /// Calling it again does nothing more.
+    pub fn shutdown(&self, limit: Duration) -> Result<(), String> {
+        self.stopping.store(true, Ordering::SeqCst);
+        let deadline = Instant::now() + limit;
+        let mut serving = self.serving.lock().unwrap_or_else(|e| e.into_inner());
+        while *serving > 0 {
+            let now = Instant::now();
+            if now >= deadline {
+                return Err(format!(
+                    "{} guest graphics streams did not end within {} ms, so the renderer is \
+                     left running",
+                    *serving,
+                    limit.as_millis()
+                ));
+            }
+            serving = self
+                .served
+                .wait_timeout(serving, deadline - now)
+                .unwrap_or_else(|e| e.into_inner())
+                .0;
+        }
+        drop(serving);
+        let Some(teardown) = self.teardown else {
+            return Err("this renderer cannot be torn down (it has no dsa_gfx_teardown)".into());
+        };
+        if !self.torn_down.swap(true, Ordering::SeqCst) {
+            // SAFETY: no stream is served and none will be, so nothing uses the backend.
+            unsafe { teardown() };
+        }
+        Ok(())
+    }
+
+    /// Serves one stream until the guest closes it or the renderer shuts down.
     pub fn serve(&self, port: u32, stream: OwnedFd) {
-        let fd = stream.as_raw_fd();
-        let mut context = fd;
-        let user = (&mut context as *mut RawFd).cast();
-        // SAFETY: the callbacks read `user` as the stream's descriptor, which stays open
-        // until this returns.
+        {
+            let mut serving = self.serving.lock().unwrap_or_else(|e| e.into_inner());
+            if self.stopping.load(Ordering::SeqCst) {
+                return;
+            }
+            *serving += 1;
+        }
+        let _serving = Serving(self);
+        let mut context = StreamContext {
+            fd: stream.as_raw_fd(),
+            stopping: &self.stopping,
+        };
+        let user = (&mut context as *mut StreamContext).cast();
+        // SAFETY: the callbacks read `user` as the stream's context, which stays, with the
+        // descriptor it names and the renderer it points into, until this returns.
         unsafe {
             if port == PROCESS_PIPE_PORT {
                 (self.process_pipe)(read_stream, write_stream, user);
@@ -475,14 +576,31 @@ impl Renderer {
 unsafe impl Send for Renderer {}
 unsafe impl Sync for Renderer {}
 
+/// The stream's descriptor, or `None` once the renderer is shutting down, which ends the
+/// stream.
+///
+/// # Safety
+/// `user` is the [`StreamContext`] `serve` keeps.
+unsafe fn stream_fd(user: *mut c_void) -> Option<RawFd> {
+    // SAFETY: as the caller promises.
+    let context = unsafe { &*(user as *const StreamContext) };
+    // SAFETY: the renderer outlives the streams it serves.
+    if unsafe { &*context.stopping }.load(Ordering::SeqCst) {
+        return None;
+    }
+    Some(context.fd)
+}
+
 /// The backend's read: some bytes, 0 when none came within a moment (it asks again), -1
-/// when the stream ended.
+/// when the stream ended or the renderer is shutting down.
 unsafe extern "C" fn read_stream(user: *mut c_void, buf: *mut c_void, count: usize) -> c_int {
     if user.is_null() || buf.is_null() || count == 0 {
         return 0;
     }
-    // SAFETY: `user` points at the descriptor `serve` keeps.
-    let fd = unsafe { *(user as *const RawFd) };
+    // SAFETY: `user` is the context `serve` keeps.
+    let Some(fd) = (unsafe { stream_fd(user) }) else {
+        return -1;
+    };
     let mut poll = libc::pollfd {
         fd,
         events: libc::POLLIN,
@@ -509,7 +627,8 @@ unsafe extern "C" fn read_stream(user: *mut c_void, buf: *mut c_void, count: usi
     }
 }
 
-/// The backend's write: all of `count` bytes, or -1.
+/// The backend's write: all of `count` bytes, or -1 (also once the renderer is shutting
+/// down).
 unsafe extern "C" fn write_stream(user: *mut c_void, buf: *const c_void, count: usize) -> c_int {
     if user.is_null() {
         return -1;
@@ -517,8 +636,10 @@ unsafe extern "C" fn write_stream(user: *mut c_void, buf: *const c_void, count: 
     if buf.is_null() || count == 0 {
         return 0;
     }
-    // SAFETY: `user` points at the descriptor `serve` keeps.
-    let fd = unsafe { *(user as *const RawFd) };
+    // SAFETY: `user` is the context `serve` keeps.
+    let Some(fd) = (unsafe { stream_fd(user) }) else {
+        return -1;
+    };
     let mut written = 0usize;
     while written < count {
         // SAFETY: writes from within `buf`'s `count` bytes.
@@ -630,7 +751,7 @@ impl Listener {
     }
 }
 
-/// Accepts the guest's streams on `port` for as long as the process runs, serving each on a
+/// Accepts the guest's streams on `port` until the renderer shuts down, serving each on a
 /// thread of its own. `log` hears what went wrong.
 pub fn serve_port(
     renderer: Arc<Renderer>,
@@ -649,7 +770,12 @@ pub fn serve_port(
             }
         };
         loop {
-            match listener.accept() {
+            let accepted = listener.accept();
+            if renderer.stopping.load(Ordering::SeqCst) {
+                // The renderer serves no more: the stream closes, and the listener with it.
+                return;
+            }
+            match accepted {
                 Ok(stream) => {
                     let renderer = renderer.clone();
                     std::thread::spawn(move || renderer.serve(port, stream));

@@ -357,6 +357,29 @@ fn nfr5_killing_the_renderer_keeps_the_window_and_its_frame_and_frames_resume() 
     assert!(log.contains(&format!("pid {first}) ended")), "{log}");
 }
 
+/// How long a renderer in this process has to stop its streams and threads.
+const SHUTDOWN: Duration = Duration::from_secs(10);
+
+/// A renderer in this test process, shut down when it goes, also when the test fails: a
+/// backend thread still running when the process ends uses what the libraries' teardown
+/// frees, and the whole test program dies with SIGSEGV after its tests pass.
+struct Here(Arc<Renderer>);
+
+impl std::ops::Deref for Here {
+    type Target = Renderer;
+    fn deref(&self) -> &Renderer {
+        &self.0
+    }
+}
+
+impl Drop for Here {
+    fn drop(&mut self) {
+        if let Err(why) = self.0.shutdown(SHUTDOWN) {
+            eprintln!("the renderer in this test did not stop: {why}");
+        }
+    }
+}
+
 /// The renderer in this process, on Unix sockets in `sockets`, its frames into `frames` and
 /// `images` as the compositor takes them.
 fn renderer_here(
@@ -364,7 +387,7 @@ fn renderer_here(
     sockets: &Path,
     frames: &Arc<Mutex<LatestFrames>>,
     images: &GpuImages,
-) -> Arc<Renderer> {
+) -> Here {
     let sink = Arc::new(FrameSink {
         frames: Arc::clone(frames),
         waker: Arc::new(Wakes(AtomicUsize::new(0))),
@@ -381,7 +404,7 @@ fn renderer_here(
             Arc::clone(&log),
         );
     }
-    renderer
+    Here(renderer)
 }
 
 #[test]
@@ -496,5 +519,36 @@ fn nfr5_a_lost_device_reaches_the_compositor_at_once_guest_calls_fail_fast_and_f
         taken(&mut last)
     });
     assert!(resumed, "frames resume after the GPU reset");
+
+    // The renderer stops before the process ends, with the guest still connected: its streams
+    // end, and the backend is torn down, which joins its render threads, its presentation
+    // thread and the thread that made the device again.
+    assert_eq!(
+        renderer.streams(),
+        2,
+        "the guest's pipe and stream are served"
+    );
+    renderer
+        .shutdown(SHUTDOWN)
+        .expect("the renderer stops its streams and threads");
+    assert_eq!(
+        renderer.streams(),
+        0,
+        "no stream is served after the shutdown"
+    );
+    assert!(renderer.is_torn_down(), "the backend is torn down");
+    guest
+        .stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let mut rest = Vec::new();
+    let ended = guest.stream.read_to_end(&mut rest);
+    assert!(
+        !matches!(&ended, Err(error) if matches!(
+            error.kind(),
+            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+        )),
+        "the guest's stream ends with the renderer: {ended:?}"
+    );
     let _ = std::fs::remove_dir_all(&sockets);
 }
