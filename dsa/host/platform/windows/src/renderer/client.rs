@@ -25,8 +25,7 @@ use dsa_host_core::renderer::{
     QUESTION_TIMEOUT, WINDOW_MANAGER_ARGUMENT,
 };
 use dsa_protocol::renderer::types::{
-    envelope::Body, ForgetDisplay, GuestVm, MemoryReport, MemoryRequest, Start,
-    Started, Target,
+    envelope::Body, ForgetDisplay, GuestVm, MemoryReport, MemoryRequest, Start, Started, Target,
 };
 use dsa_transport::local::LocalListener;
 use dsa_transport::TransportError;
