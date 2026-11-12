@@ -16,6 +16,7 @@ HEADER = HERE / "include/dsa_spare_pages.h"
 TESTS = HERE / "tests/test.sh"
 CMAKE = HERE / "cmake/CMakeLists.txt"
 HWC_UPLOAD = HERE.parent / "guest/hwcomposer/src/cpu_upload.cpp"
+HWC_STREAM = HERE.parent / "guest/hwcomposer/src/host_stream.cpp"
 
 
 def added(patch, name):
@@ -54,6 +55,19 @@ class SparePagesTests(unittest.TestCase):
         self.assertIn('#include "dsa_spare_pages.h"', hwc)
         self.assertLess(hwc.index("host.uploadColorBuffer(colorBuffer, layout, mStaging.data())"),
                         hwc.index("dsa::releaseSparePages(mStaging.data(), mStaging.size())"))
+
+    def test_nfr1_the_hwcomposers_own_stream_hands_back_its_spare_pages_after_each_transfer(self):
+        # The hwcomposer's vsock stream to the renderer carries the pictures a CPU wrote, so it
+        # grew to the largest of them as the apps' streams did.
+        stream = HWC_STREAM.read_text(encoding="utf-8")
+        self.assertIn('#include "dsa_spare_pages.h"', stream)
+        commit = stream[stream.index("int HostStream::commitBuffer(size_t size) {"):]
+        commit = commit[:commit.index("\n}")]
+        self.assertLess(commit.index("writeFully(mBuffer, size)"),
+                        commit.index("dsa::releaseSparePages(mBuffer, size)"))
+        # The image build finds the header.
+        self.assertIn("${REPO_DIR}/dsa/graphics/include",
+                      (HERE.parent / "guest/hwcomposer/CMakeLists.txt").read_text(encoding="utf-8"))
 
     def test_nfr1_the_rule_is_tested_on_the_build_machine(self):
         self.assertIn('"$here/spare_pages_test.cpp"', TESTS.read_text(encoding="utf-8"))
