@@ -959,6 +959,40 @@ impl WindowManagerLink {
 /// within this of the renderer finding it.
 pub const DEVICE_STATE_POLL: Duration = Duration::from_millis(50);
 
+/// Which guest VM a renderer serves, and whether it should end because that VM is gone.
+///
+/// A renderer that served a VM keeps what that VM's guests left behind after they are gone:
+/// on the owner's PC (Intel Arc) its private memory read 336 and then 456 MiB with no guest
+/// connected, where a fresh renderer starts at 199 MiB, and one renderer served two Android
+/// boots in a row. When the window manager says the VM is gone (no VM, or another one), the
+/// renderer ends and the window manager starts a fresh one, which the next VM's guests
+/// connect to as they do after a renderer crash.
+#[derive(Debug, Default)]
+pub struct ServedVm {
+    served: Option<String>,
+}
+
+impl ServedVm {
+    pub fn new() -> ServedVm {
+        ServedVm::default()
+    }
+
+    /// The window manager says the guest VM is now `vm` (`None`: there is none). True when
+    /// the VM this renderer served is gone, so it should end. A renderer that has not served
+    /// a VM yet takes this one.
+    pub fn told(&mut self, vm: Option<&str>) -> bool {
+        match (&self.served, vm) {
+            (None, Some(id)) => {
+                self.served = Some(id.to_string());
+                false
+            }
+            (None, None) => false,
+            (Some(served), Some(id)) => served != id,
+            (Some(_), None) => true,
+        }
+    }
+}
+
 /// What the window manager was last told of the renderer's device, so a change is sent once.
 ///
 /// A GPU reset lost the renderer's device 13 s before the window manager's own Direct3D

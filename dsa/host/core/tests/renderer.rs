@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use dsa_host_core::renderer::{
     describe_exit_code, describe_signal, open_renderer, restart_line, spawn_supervisor, Given,
     HeldTargets, Launched, Pending, RendererChild, RendererHandler, RendererLauncher, RendererLink,
-    TextureBook, WindowManagerLink,
+    ServedVm, TextureBook, WindowManagerLink,
 };
 use dsa_protocol::renderer::types::{envelope::Body, FrameDone, Start, Started, Target};
 use dsa_protocol::renderer::{decode_body, send};
@@ -391,4 +391,23 @@ fn nfr5_the_log_says_why_the_renderer_ended_and_when_it_starts_again() {
          and keep their last frame; starting it again in 0.5 s (restart 3)"
     );
     assert!(restart_line(77, "x", Duration::ZERO, 1).contains("starting it again now"));
+}
+
+#[test]
+fn nfr2_a_renderer_ends_once_the_vm_it_served_is_gone() {
+    let mut served = ServedVm::new();
+    // Before any VM, and while the first one runs, it keeps serving.
+    assert!(!served.told(None), "no VM yet");
+    assert!(!served.told(Some("vm-a")), "the first VM is taken");
+    assert!(!served.told(Some("vm-a")), "the same VM again");
+    // The VM stops: the renderer ends, so the next VM gets a fresh one.
+    assert!(served.told(None), "the VM it served stopped");
+
+    // A VM that is replaced at once by another ends it too.
+    let mut served = ServedVm::new();
+    assert!(!served.told(Some("vm-a")));
+    assert!(
+        served.told(Some("vm-b")),
+        "another VM took the place of the one it served"
+    );
 }
