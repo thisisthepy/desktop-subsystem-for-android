@@ -231,6 +231,7 @@ fn start_direct_mapped(
 /// the lowest priority: one that changed while the service was not running is removed, and the
 /// next boot makes it again from the image's checked VHDX.
 fn check_raw_system_disk(config: &HostConfig, updates: Option<&Updates>, build: &str) {
+    let label = build.to_string();
     let (config, updates, build) = (config.clone(), updates.cloned(), build.to_string());
     let spawned = thread::Builder::new()
         .name("dsa-check-system-disk".into())
@@ -256,7 +257,7 @@ fn check_raw_system_disk(config: &HostConfig, updates: Option<&Updates>, build: 
             }
         });
     if let Err(why) = spawned {
-        eprintln!("{build}: the raw system disk is not checked: {why}");
+        eprintln!("{label}: the raw system disk is not checked: {why}");
     }
 }
 
