@@ -8,13 +8,20 @@
 //! change takes effect within a frame or two, without restarting Android or touching a window.
 //! A battery saver that saves nothing on a 60 Hz monitor changes nothing there.
 //!
+//! While the user drags a task window to a new size, the guest refreshes at no more than
+//! [`LIVE_RESIZE_CAP_HZ`] ([`LiveResizes`]), and goes back to the monitor's rate when the drag
+//! ends. Every frame of a resize costs the app a layout, a draw and a round trip to the host,
+//! so at 144 or 240 Hz the app spends the drag catching up with frames nobody sees, and each
+//! new size waits behind them. A 60 Hz monitor sees no change.
+//!
 //! The guest's display offers a fixed set of rates ([`GUEST_RATES_HZ`]): the guest's
 //! hwcomposer (`dsa/guest/hwcomposer/src/refresh_rates.h`) lists the same ones, one display
 //! configuration each. A monitor's rate is lowered to the nearest of them at or below it, so a
 //! 59.94 Hz monitor, which Windows reports as 59 Hz, is 60 and an 85 Hz one is 75.
 
+use std::collections::HashMap;
 use std::sync::Weak;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::session::Session;
 
@@ -49,6 +56,66 @@ pub fn refresh_rate(monitor_hz: u32, battery_saver: bool) -> u32 {
         rate.min(SAVER_CAP_HZ)
     } else {
         rate
+    }
+}
+
+/// The fastest the guest's display refreshes while a task window is being resized live.
+pub const LIVE_RESIZE_CAP_HZ: u32 = 60;
+
+/// How long a task stays in a live resize after its last live step, when no step that ends
+/// it comes: a window program that died in the middle of a drag never sends one. A drag that
+/// holds still longer than this lets the rate go back up until the next step.
+pub const LIVE_RESIZE_EXPIRY: Duration = Duration::from_secs(5);
+
+/// [`refresh_rate`], held at [`LIVE_RESIZE_CAP_HZ`] or below while `resizing`.
+pub fn refresh_rate_while(monitor_hz: u32, battery_saver: bool, resizing: bool) -> u32 {
+    let rate = refresh_rate(monitor_hz, battery_saver);
+    if resizing {
+        rate.min(LIVE_RESIZE_CAP_HZ)
+    } else {
+        rate
+    }
+}
+
+/// The tasks whose windows are being resized live: a resize step marked live starts or
+/// continues one, the step that is not live (the end of the drag, which reconfigures the task)
+/// ends it, and one that hears nothing for [`LIVE_RESIZE_EXPIRY`] ends by itself. Several
+/// windows can be dragged at once; the guest is held at the lower rate until the last ends.
+#[derive(Debug, Default)]
+pub struct LiveResizes {
+    last_step: HashMap<i32, Instant>,
+}
+
+impl LiveResizes {
+    /// A resize step of `task_id`, live or not, at `now`. Returns whether any task is in a
+    /// live resize changed.
+    pub fn step(&mut self, task_id: i32, live: bool, now: Instant) -> bool {
+        let before = self.any();
+        if live {
+            self.last_step.insert(task_id, now);
+        } else {
+            self.last_step.remove(&task_id);
+        }
+        before != self.any()
+    }
+
+    /// Ends every live resize whose last step is [`LIVE_RESIZE_EXPIRY`] or more before `now`.
+    /// Returns whether any task is in a live resize changed.
+    pub fn expire(&mut self, now: Instant) -> bool {
+        let before = self.any();
+        self.last_step
+            .retain(|_, step| now.saturating_duration_since(*step) < LIVE_RESIZE_EXPIRY);
+        before != self.any()
+    }
+
+    /// Ends every live resize, as when the guest starts again and has no task left.
+    pub fn clear(&mut self) {
+        self.last_step.clear();
+    }
+
+    /// Whether any task window is being resized live.
+    pub fn any(&self) -> bool {
+        !self.last_step.is_empty()
     }
 }
 
@@ -137,6 +204,39 @@ mod tests {
         assert_eq!(fastest([60, 144, 0]), Some(144));
         assert_eq!(fastest([0, 0]), None);
         assert_eq!(fastest([]), None);
+    }
+
+    #[test]
+    fn fr10_a_live_resize_holds_the_guest_at_60_hz_and_a_60_hz_monitor_is_unchanged() {
+        assert_eq!(refresh_rate_while(144, false, true), 60);
+        assert_eq!(refresh_rate_while(144, false, false), 144);
+        assert_eq!(refresh_rate_while(240, true, false), 60);
+        assert_eq!(refresh_rate_while(60, false, true), 60);
+        assert_eq!(refresh_rate_while(60, false, false), 60);
+    }
+
+    #[test]
+    fn fr10_live_resizes_end_with_the_last_window_and_expire_when_no_end_comes() {
+        let start = Instant::now();
+        let mut resizes = LiveResizes::default();
+        assert!(!resizes.any());
+        // One window, then a second while the first is still dragged.
+        assert!(resizes.step(1, true, start));
+        assert!(!resizes.step(1, true, start + Duration::from_millis(100)));
+        assert!(!resizes.step(2, true, start + Duration::from_millis(200)));
+        // The first ends: the second still holds the rate down.
+        assert!(!resizes.step(1, false, start + Duration::from_millis(300)));
+        assert!(resizes.any());
+        assert!(resizes.step(2, false, start + Duration::from_millis(400)));
+        assert!(!resizes.any());
+        // An end that was never preceded by a live step changes nothing.
+        assert!(!resizes.step(3, false, start));
+        // A window that never ends its drag lets go after the expiry, not before.
+        assert!(resizes.step(4, true, start));
+        assert!(!resizes.expire(start + LIVE_RESIZE_EXPIRY - Duration::from_millis(1)));
+        assert!(resizes.any());
+        assert!(resizes.expire(start + LIVE_RESIZE_EXPIRY));
+        assert!(!resizes.any());
     }
 
     #[test]
