@@ -78,6 +78,21 @@ pub fn to_task_size((width, height): (u32, u32), scale: Scale) -> (u32, u32) {
     )
 }
 
+/// The client size a frame (or task) of `size` task pixels fills at `scale`, given the client
+/// sizes the window has or asked for (`views`). A window size goes to the guest rounded to
+/// whole task pixels, and that task size rounded back can land a pixel off the window size it
+/// came from (at 131:65 a 1009 pixel window asks for 501, and 501 is 1010 again). So a frame
+/// of the size a view was turned into is that view, not the size rounded back: otherwise the
+/// window would take a size a pixel off the one the user dragged to, and the frame it asked
+/// for would never count as its size. Any other frame is its size at `scale`.
+pub fn window_size_of(size: (u32, u32), scale: Scale, views: &[(u32, u32)]) -> (u32, u32) {
+    views
+        .iter()
+        .copied()
+        .find(|view| view.0 != 0 && view.1 != 0 && to_task_size(*view, scale) == size)
+        .unwrap_or_else(|| to_window_size(size, scale))
+}
+
 /// A rectangle in task pixels in window pixels at `scale`.
 pub fn to_window_rect(rect: Bounds, (numerator, denominator): Scale) -> Bounds {
     let at = |v: i32| -> i32 {
@@ -612,7 +627,7 @@ impl WindowSizing {
             self.min = Some(min);
         }
         let previous = std::mem::replace(&mut self.guest, size);
-        let shown = to_window_size(size, self.scale());
+        let shown = window_size_of(size, self.scale(), &[self.view]);
         match self.asked {
             Some((asked, _)) if asked == size => {
                 self.asked = None;
@@ -658,7 +673,7 @@ impl WindowSizing {
             return None;
         }
         self.asked = None;
-        let shown = to_window_size(self.guest, self.scale());
+        let shown = window_size_of(self.guest, self.scale(), &[self.view]);
         if shown == self.view {
             return None;
         }
@@ -987,6 +1002,52 @@ mod tests {
         declared.min_width = 800;
         sizing.guest_updated(&declared);
         assert_eq!(sizing.task_size().2, Some((800, 500)));
+    }
+
+    #[test]
+    fn fr4_a_scaled_frame_of_the_asked_size_fills_exactly_the_size_dragged_to() {
+        use crate::compositor::frame_follow::{Arrival, FrameFollow};
+        use crate::compositor::resize_latency::ResizeLatency;
+        // A 200% monitor showing a task drawn at 130 dpi: 1009x700 window pixels go to the
+        // guest as 501x347, and 501x347 rounded back is 1010x699.
+        let scale = scale_between(262, 130);
+        assert_eq!(to_task_size((1009, 700), scale), (501, 347));
+        assert_eq!(to_window_size((501, 347), scale), (1010, 699));
+        // The frame of the size asked for is the size asked for.
+        assert_eq!(
+            window_size_of((501, 347), scale, &[(1009, 700)]),
+            (1009, 700)
+        );
+        // Any other frame is its own size at the scale, and an empty size names nothing.
+        assert_eq!(
+            window_size_of((500, 347), scale, &[(1009, 700)]),
+            (1008, 699)
+        );
+        assert_eq!(window_size_of((1, 1), scale, &[(0, 0)]), (2, 2));
+        // 1:1 is the frame's size, as before.
+        assert_eq!(
+            window_size_of((800, 600), (1, 1), &[(801, 600)]),
+            (800, 600)
+        );
+
+        // The window shows a 1009x700 frame and the user drags to 1009x700 from 900x700:
+        // the frame of 501x347 is shown at once, not kept for a window a pixel off the drag.
+        let mut follow = FrameFollow::new((900, 700));
+        let mut latency = ResizeLatency::new();
+        let now = Instant::now();
+        let first = window_size_of((447, 347), scale, &[follow.view()]);
+        assert_eq!(follow.frame_arrived(first), Arrival::Show);
+        latency.frame_shown(first, now);
+        follow.view_taken((1009, 700));
+        latency.view_changed((1009, 700), now);
+        let frame = window_size_of((501, 347), scale, &[follow.view(), (1009, 700)]);
+        assert_eq!(follow.frame_arrived(frame), Arrival::Show);
+        // And the wait for it ends with it, so it is neither lost from the summary nor
+        // reported as a window stuck at its old size.
+        assert!(latency
+            .frame_shown(frame, now + Duration::from_millis(80))
+            .is_some());
+        assert_eq!(latency.stuck(now + Duration::from_secs(3)), None);
     }
 
     #[test]

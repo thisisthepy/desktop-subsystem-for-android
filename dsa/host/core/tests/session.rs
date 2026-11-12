@@ -785,6 +785,34 @@ fn fr2_an_agent_from_a_different_protocol_definition_is_refused_and_the_guest_st
 }
 
 #[test]
+fn fr2_a_newer_boot_that_is_up_forgets_why_the_one_before_it_stopped() {
+    // The boot before an update is refused for its old protocol definition...
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.start();
+    let mut agent = connector.connect(WAIT).expect("the agent connects");
+    let mut hello = local_hello(Role::Guest, "dsa-guestd old");
+    hello.schema_hash = vec![0x5a; 32];
+    let _ = guest_connect(agent.as_mut(), &hello, &launcher.secret(), WAIT);
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    assert!(matches!(
+        session.last_reason(),
+        Some(StopReason::HandshakeRejected(_))
+    ));
+
+    // ...and the updated guest boots and connects. Its status shows no stop that is over.
+    session.start();
+    let _updated = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    assert_eq!(session.last_reason(), None);
+
+    // A stop of this boot is reported as before.
+    session.stop();
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    assert_eq!(session.last_reason(), Some(StopReason::Requested));
+}
+
+#[test]
 fn fr2_stop_while_starting_stops_the_guest() {
     let launcher = FakeLauncher::default();
     let (session, _connector) = session_with(launcher.clone(), WAIT);

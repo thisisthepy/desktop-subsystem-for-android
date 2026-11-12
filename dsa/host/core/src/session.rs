@@ -1007,6 +1007,14 @@ impl Shared {
         *self.vm_id.lock().unwrap_or_else(|e| e.into_inner()) = vm_id;
     }
 
+    /// Forgets why an earlier boot stopped, once a newer one is up and well. Shown beside a
+    /// healthy Android, the old cause reads as a current fault: a refusal from the boot before
+    /// an update went on reading "was built from a different protocol definition" after the
+    /// updated guest had connected.
+    fn forget_last_reason(&self) {
+        self.status.lock().unwrap_or_else(|e| e.into_inner()).1 = None;
+    }
+
     fn set_problem(&self, problem: Option<BootProblem>) {
         *self.problem.lock().unwrap_or_else(|e| e.into_inner()) = problem;
     }
@@ -5798,6 +5806,7 @@ impl Worker {
         match self.state() {
             SessionState::Starting | SessionState::Stalled if ready => {
                 self.shared.set_problem(None);
+                self.shared.forget_last_reason();
                 // The doze delay counts from here when no window is shown.
                 self.hidden_since = now;
                 let doze = self.stall_doze.take();
