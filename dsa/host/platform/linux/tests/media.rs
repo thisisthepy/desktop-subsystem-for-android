@@ -22,9 +22,14 @@
 //! clips at 426x240 and 360x640 with those and the guest's own decoders, to buffers and to
 //! surfaces on screen, and fails on green or wrong colours, on pictures that stop reaching the
 //! screen when a player or a feed of short videos changes surface, and on a sound that stops.
+//! The colours are checked twice: in the app's own copy of its surface, and in a capture of the
+//! display, where SurfaceFlinger composes the picture from what the composer copied up to the
+//! host. Only the second saw YouTube's green video: the composer had copied nothing up, while
+//! the app's own graphics driver copied the picture for the first.
 //!
-//! The test also reads the guest's log for a denial of a media service's shared memory, and
-//! for the codec HAL losing a picture because its surface gave it no buffer.
+//! The test also reads the guest's log for a denial of a media service's shared memory, for
+//! the codec HAL losing a picture because its surface gave it no buffer, and for the composer
+//! failing to copy a picture up to the host.
 //!
 //! The root certificate check makes a throwaway root and a server certificate for a test name
 //! of its own ([`CERTIFICATE_HOST`]) signed by it, serves HTTPS with it on the host
@@ -830,6 +835,21 @@ fn codec_buffer_errors(log: &str) -> Vec<&str> {
         .collect()
 }
 
+/// The guest's composer logging that it could not copy what a CPU wrote into a buffer up to
+/// the host: a decoder's pictures then reach the screen as the ColorBuffer's untouched memory,
+/// which a YUV layer shows as green.
+fn copy_up_errors(log: &str) -> Vec<&str> {
+    log.lines()
+        .filter(|line| line.contains("dsa-hwcomposer"))
+        .filter(|line| line.contains("what the CPU wrote") || line.contains("what a CPU wrote"))
+        .filter(|line| {
+            line.contains("cannot import")
+                || line.contains("cannot read")
+                || line.contains("did not take")
+        })
+        .collect()
+}
+
 /// The first Codec 2.0 component name (`c2.<vendor>.<name>`) a log line mentions.
 fn component_in(line: &str) -> Option<&str> {
     let mut from = 0;
@@ -938,6 +958,21 @@ fn video_problems(results: &BTreeMap<String, String>) -> Vec<String> {
                         Err(format!("colours: {}", colour.unwrap_or("not reported"))),
                     );
                 }
+                // What the display shows, as SurfaceFlinger composes it. The copy of the
+                // surface above is read in the probe's own process, which copies the decoder's
+                // picture up to the host itself, so it stays right even when the composer's
+                // copy fails and the screen is green.
+                if way != "buffer" {
+                    let screen = results
+                        .get(&format!("{at}.{way}.screen"))
+                        .map(String::as_str);
+                    if screen != Some("ok") {
+                        check(
+                            way,
+                            Err(format!("on screen: {}", screen.unwrap_or("not reported"))),
+                        );
+                    }
+                }
             }
             let at_least = |key: &str, wanted: i64| -> Result<(), String> {
                 match number(results, key) {
@@ -1039,11 +1074,13 @@ fn video_results() -> BTreeMap<String, String> {
                 ("surface.presented", "30"),
                 ("surface.after_swap", "15"),
                 ("surface.colour", "ok"),
+                ("surface.screen", "ok"),
                 ("surface.audio", "48000"),
                 ("shorts.first", "30"),
                 ("shorts.second", "30"),
                 ("shorts.first_frame_ms", "40"),
                 ("shorts.colour", "ok"),
+                ("shorts.screen", "ok"),
             ] {
                 results.insert(format!("{at}.{k}"), v.to_string());
             }
@@ -1099,10 +1136,40 @@ fn fr26_green_pictures_and_a_stalled_surface_fail_the_video_check() {
     );
     assert_eq!(video_problems(&unlisted).len(), 1);
 
+    // What YouTube showed in issue 387: the picture is right in the app's own copy of its
+    // surface but green on the display, because the composer never copied it up.
+    let mut green_on_screen = good.clone();
+    green_on_screen.insert(
+        format!("{at}.surface.screen"),
+        "wrong colour on screen at 300,410: #008700, not #c1c1c1".into(),
+    );
+    green_on_screen.insert(
+        format!("{at}.shorts.screen"),
+        "wrong colour on screen at 300,410: #008700, not #c1c1c1".into(),
+    );
+    let problems = video_problems(&green_on_screen);
+    assert_eq!(problems.len(), 2, "{problems:?}");
+    assert!(problems.iter().all(|p| p.contains("on screen")));
+    let mut unreported = good.clone();
+    unreported.remove(&format!("{at}.surface.screen"));
+    assert_eq!(video_problems(&unreported).len(), 1);
+
     // The error the HAL logged on every picture.
     let log = "11-10 05:00:00.000  612  640 E dsa-codec2: c2.dsa.vp9.decoder: the surface gave no 426x240 buffer (1 in a row): Status(-8, EX_SERVICE_SPECIFIC): '14: '\n\
                11-10 05:00:00.010  612  640 I dsa-codec2: c2.dsa.vp9.decoder: decoding 426x240 on the host's GPU\n";
     assert_eq!(codec_buffer_errors(log).len(), 1);
+}
+
+#[test]
+fn fr26_a_composer_that_cannot_copy_a_picture_up_fails_the_media_check() {
+    let log = "11-12 06:03:13.682   536   541 E dsa-hwcomposer: cannot import gralloc buffer 72 to copy what the CPU wrote: -22\n\
+               11-12 06:03:13.700   536   541 E dsa-hwcomposer: cannot import gralloc buffer 73 (640x360, format 0x37393939) to copy what the CPU wrote: -22 (1 in a row); its layer shows what the host held before\n\
+               11-12 06:03:13.710   536   541 D dsa-hwcomposer: copied 4050 KiB that a CPU wrote up to the host in 12 uploads over 1003 ms\n\
+               11-12 06:03:13.720   536   541 I dsa-hwcomposer: the host renderer makes YUV ColorBuffers\n";
+    assert_eq!(copy_up_errors(log).len(), 2);
+    assert!(
+        copy_up_errors("11-12 06:03:13.710   536   541 E dsa-codec2: cannot import\n").is_empty()
+    );
 }
 
 #[test]
@@ -1991,6 +2058,11 @@ fn boot_check(check_media: bool, check_root: bool, check_certificates: bool) {
         }
         for line in codec_buffer_errors(&guest_log) {
             problems.push(format!("the codec HAL lost a picture: {line}"));
+        }
+        for line in copy_up_errors(&guest_log) {
+            problems.push(format!(
+                "the composer could not copy a picture up to the host: {line}"
+            ));
         }
         for line in dsa_config_corrupted(&guest_log) {
             problems.push(format!(

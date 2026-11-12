@@ -19,4 +19,10 @@ bool LayerPictures::show(int64_t layer, uint32_t buffer) {
     return changed;
 }
 
+bool UploadFailureLog::shouldLog(uint32_t* count) {
+    ++mCount;
+    *count = mCount;
+    return mCount == 1 || (mEvery > 0 && mCount % mEvery == 0);
+}
+
 }  // namespace dsa::hwc
