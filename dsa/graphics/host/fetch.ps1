@@ -73,7 +73,8 @@ git -C $GfxstreamDir clean -fdx
 # Without 0024 a fence or semaphore whose operation never looked finished (its fence reset by the
 # guest before it was polled) is leaked, and a device destroyed with such garbage leaks it too.
 # Without 0025 the images and memory of destroyed ColorBuffers wait for the next ColorBuffer to be
-# made or destroyed, so those of the window that closed last stay.
+# made or destroyed, so those of the window that closed last stay. Without 0026 the renderer holds a
+# 128 MiB host-visible staging buffer from the start, whether or not a copy ever needs it.
 # A patch that does not apply stops the fetch.
 $PatchDir = Join-Path $RepoRoot "dsa/graphics/patches"
 $Patches = @(Get-ChildItem -Path $PatchDir -Filter "0001-*.patch") +
@@ -97,7 +98,8 @@ $Patches = @(Get-ChildItem -Path $PatchDir -Filter "0001-*.patch") +
     @(Get-ChildItem -Path $PatchDir -Filter "0022-*.patch") +
     @(Get-ChildItem -Path $PatchDir -Filter "0023-*.patch") +
     @(Get-ChildItem -Path $PatchDir -Filter "0024-*.patch") +
-    @(Get-ChildItem -Path $PatchDir -Filter "0025-*.patch")
+    @(Get-ChildItem -Path $PatchDir -Filter "0025-*.patch") +
+    @(Get-ChildItem -Path $PatchDir -Filter "0026-*.patch")
 foreach ($Patch in $Patches) {
     Write-Host "Applying patch: $($Patch.Name)"
     git -C $GfxstreamDir apply --recount $Patch.FullName
