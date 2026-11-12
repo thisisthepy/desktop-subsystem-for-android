@@ -236,7 +236,8 @@ fn fr14_a_new_image_that_does_not_boot_is_undone_by_the_service() {
         check_now: Default::default(),
     };
     let sid = current_user_sid().unwrap();
-    let android = create_user_android(&config, "service test", &sid, Some(&updates), None).unwrap();
+    let android =
+        create_user_android(&config, "service test", &sid, Some(&updates), None, None).unwrap();
     android.start();
     let mut notice = None;
     wait_until("the trial to end", Duration::from_secs(60), || {

@@ -22,6 +22,7 @@ use dsa_host_core::clock_trace::{ClockTrace, HostClock};
 use dsa_host_core::data_reset::TemplateDataDisk;
 use dsa_host_core::device_identity::{BootIdentity, FileDeviceIdentities, ImageBuild};
 use dsa_host_core::diagnostics::HostFile;
+use dsa_host_core::direct_mapped_disk::{DirectMappedImages, Store};
 use dsa_host_core::guest_log::{LogFilter, LogWatch, DEFAULT_BUFFERS, WARN};
 use dsa_host_core::handshake::ControlHandshake;
 use dsa_host_core::host_api::{
@@ -188,6 +189,94 @@ fn service_settings_store(config: &HostConfig, build: &str) -> Arc<dyn SettingsS
     Arc::new(store)
 }
 
+/// Starts the maker of direct-mapped system disks when the host's direct-mapped mode is on: it
+/// keeps the uncompressed copy of the current image's system disk in `direct-mapped` in the
+/// machine's folder, made in the background after the image was installed or downloaded and
+/// checked. The folder is the service's (root's when it runs as root) and its files are
+/// readable by every user, whose crosvm maps them read only.
+fn start_direct_mapped(
+    config: &HostConfig,
+    updates: Option<&Updates>,
+    build: &str,
+) -> Option<Arc<DirectMappedImages>> {
+    if !config.direct_mapped_images {
+        return None;
+    }
+    let folder = config.machine_dir.join("direct-mapped");
+    if let Err(why) = std::fs::create_dir_all(&folder) {
+        eprintln!(
+            "{build}: direct-mapped: creating {}: {why}",
+            folder.display()
+        );
+    }
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755));
+    }
+    let (config, updates, log_build) = (config.clone(), updates.cloned(), build.to_string());
+    Some(DirectMappedImages::start(
+        Store::raw(folder),
+        Box::new(move || {
+            let (dir, version) = current_image(&config, updates.as_ref()).ok()?;
+            let version = version
+                .or_else(|| dsa_host_core::direct_mapped_disk::worker::image_version(&dir))?;
+            Some((version, dir))
+        }),
+        Box::new(lower_this_thread),
+        Arc::new(move |line: &str| eprintln!("{log_build}: {line}")),
+    ))
+}
+
+/// Checks the raw copy of the current image's system disk byte by byte, in the background at
+/// the lowest priority: one that changed while the service was not running is removed, and the
+/// next boot makes it again from the image's checked VHDX.
+fn check_raw_system_disk(config: &HostConfig, updates: Option<&Updates>, build: &str) {
+    let (config, updates, build) = (config.clone(), updates.cloned(), build.to_string());
+    let spawned = thread::Builder::new()
+        .name("dsa-check-system-disk".into())
+        .spawn(move || {
+            if let Err(why) = lower_this_thread() {
+                eprintln!("{build}: checking the raw system disk at normal priority: {why}");
+            }
+            let Ok((dir, _)) = current_image(&config, updates.as_ref()) else {
+                return;
+            };
+            let had_copy = dir.join("system.img").exists();
+            match crate::image::verify_raw_disk(&dir) {
+                Ok(true) => eprintln!(
+                    "{build}: the raw copy of {}'s system disk matches its record",
+                    dir.display()
+                ),
+                Ok(false) if had_copy => eprintln!(
+                    "{build}: the raw copy of {}'s system disk did not match the image; it was removed, and the next boot makes it again",
+                    dir.display()
+                ),
+                Ok(false) => {}
+                Err(why) => eprintln!("{build}: checking the raw system disk: {why}"),
+            }
+        });
+    if let Err(why) = spawned {
+        eprintln!("{build}: the raw system disk is not checked: {why}");
+    }
+}
+
+/// Takes the calling thread to the lowest CPU priority (nice 19) and the idle I/O class, for
+/// as long as it runs.
+fn lower_this_thread() -> Result<(), String> {
+    // SAFETY: plain system calls on the calling thread (0 names it for both).
+    unsafe {
+        if libc::setpriority(libc::PRIO_PROCESS, 0, 19) != 0 {
+            return Err(std::io::Error::last_os_error().to_string());
+        }
+        // ioprio_set(IOPRIO_WHO_PROCESS, this thread, IOPRIO_CLASS_IDLE << 13).
+        let (who, this, idle): (libc::c_long, libc::c_long, libc::c_long) = (1, 0, 3 << 13);
+        if libc::syscall(libc::SYS_ioprio_set, who, this, idle) != 0 {
+            return Err(std::io::Error::last_os_error().to_string());
+        }
+    }
+    Ok(())
+}
+
 /// The image folder the next boot starts from, and its version.
 fn current_image(
     config: &HostConfig,
@@ -269,6 +358,7 @@ pub fn create_user_android(
     updates: Option<&Updates>,
     power: Option<&PowerHub>,
     network_status: SharedNetworkStatus,
+    direct_mapped: Option<&Arc<DirectMappedImages>>,
 ) -> Result<Arc<dyn UserAndroid>, String> {
     let uid = uid_of(user)?;
     let account = Account::of_uid(uid)?;
@@ -411,7 +501,7 @@ pub fn create_user_android(
             Some(identity.boot_properties(built.as_ref()))
         })
     })
-    .with_direct_mapped(config.direct_mapped_images);
+    .with_direct_mapped(direct_mapped.cloned());
     if config.network {
         let (store, user) = (Arc::clone(&store), user.to_string());
         launcher = launcher.with_networking(
@@ -619,6 +709,7 @@ fn check_for_updates(
     build: String,
     stop: Arc<AtomicBool>,
     store: Arc<dyn SettingsStore>,
+    direct_mapped: Option<&DirectMappedImages>,
 ) {
     let Some(settings) = config.update.clone() else {
         return;
@@ -682,6 +773,11 @@ fn check_for_updates(
             Ok(Some(notice)) => {
                 eprintln!("{build}: {notice}");
                 updates.notices.set(notice);
+                // A new image was downloaded and checked: its direct-mapped system disk is
+                // made now, in the background, before the next start of Android needs it.
+                if let Some(images) = direct_mapped {
+                    images.kick();
+                }
             }
             Ok(None) => {}
             Err(error) => {
@@ -781,17 +877,22 @@ pub fn serve(config: HostConfig, build: &str, stop: Arc<AtomicBool>) -> Result<(
             None
         }
     };
+    let direct_mapped = start_direct_mapped(&config, updates.as_ref(), build);
+    check_raw_system_disk(&config, updates.as_ref(), build);
     if let Some(updates) = &updates {
-        let (config, updates, worker_build, stop, store) = (
+        let (config, updates, worker_build, stop, store, made) = (
             config.clone(),
             updates.clone(),
             build.to_string(),
             Arc::clone(&stop),
             Arc::clone(&store),
+            direct_mapped.clone(),
         );
         if let Err(error) = thread::Builder::new()
             .name("dsa-updates".into())
-            .spawn(move || check_for_updates(config, updates, worker_build, stop, store))
+            .spawn(move || {
+                check_for_updates(config, updates, worker_build, stop, store, made.as_deref())
+            })
         {
             eprintln!("{build}: starting the update check failed: {error}");
         }
@@ -849,6 +950,7 @@ pub fn serve(config: HostConfig, build: &str, stop: Arc<AtomicBool>) -> Result<(
                 factory_updates.as_ref(),
                 Some(power.as_ref()),
                 network_of(&factory_networks, user),
+                direct_mapped.as_ref(),
             )
         })) {
             Ok(result) => result,

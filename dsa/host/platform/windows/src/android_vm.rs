@@ -15,6 +15,7 @@ use std::time::{Duration, SystemTime};
 
 use dsa_host_core::bootconfig;
 use dsa_host_core::device_identity::{append_overlay, ramdisk_overlay};
+use dsa_host_core::direct_mapped_disk::DirectMappedImages;
 use dsa_host_core::session::{GuestLauncher, GuestStall, MemoryResizer};
 use dsa_protocol::auth::{bootconfig_entry, BootSecret};
 
@@ -77,17 +78,21 @@ pub struct AndroidVmLauncher {
     /// The VM's network, made at each start and removed at each stop. Without it the VM has
     /// no network adapter.
     networking: Option<crate::hcn::VmNetworking>,
-    /// Whether each boot maps the read-only disks as persistent memory (the host's
-    /// direct-mapped mode), where the host and the image can.
-    direct_mapped: bool,
+    /// The service's maker of direct-mapped system disks, while the host's direct-mapped mode
+    /// is on: each boot maps the read-only disks as persistent memory where it can.
+    direct_mapped: Option<Arc<DirectMappedImages>>,
 }
 
 /// How the boot `config` describes maps its read-only disks in the host's direct-mapped mode:
-/// the system disk as a fixed VHD made from the image's, and the add-on disk, brought to the
-/// layout the mode maps, while there is one. An error says why this boot cannot, and the boot
-/// then attaches its disks as SCSI disks: a host other than x86_64, an image from before the
-/// mode, or a copy that could not be made.
-pub fn direct_mapped_disks(config: &AndroidVmConfig) -> Result<crate::vm::DirectMapped, String> {
+/// the system disk as the uncompressed copy `images` made of the image's and checked, and the
+/// add-on disk, brought to the layout the mode maps, while there is one. An error says why
+/// this boot cannot, and the boot then attaches its disks as SCSI disks, the image's own system
+/// disk verified by dm-verity as outside the mode: a host other than x86_64, an image from
+/// before the mode, or a copy that is not made and checked yet (being made in the background).
+pub fn direct_mapped_disks(
+    config: &AndroidVmConfig,
+    images: &DirectMappedImages,
+) -> Result<crate::vm::DirectMapped, String> {
     if GuestArch::HOST != GuestArch::X86_64 {
         return Err("the direct-mapped mode is for x86_64 hosts only".into());
     }
@@ -95,17 +100,10 @@ pub fn direct_mapped_disks(config: &AndroidVmConfig) -> Result<crate::vm::Direct
         .system_image
         .as_ref()
         .ok_or("the image has no separate system disk to map")?;
-    let support = system
-        .parent()
-        .and_then(dsa_host_core::direct_mapped::ImageSupport::from_image_dir)
-        .ok_or("the image has no mount table for the direct-mapped mode")?;
-    if !support.uncompressed_erofs {
-        eprintln!(
-            "direct-mapped: the image's read-only partitions are compressed, so only their \
-             uncompressed files are mapped; the rest is cached by the guest as before"
-        );
-    }
-    let (system_disk, system_bytes) = crate::pmem_disk::prepare_system_disk(system)?;
+    let (version, dir) =
+        crate::pmem_disk::image_of(system).ok_or("the image's folder cannot be named")?;
+    let (ready, support) = images.boot_disk(&version, &dir)?;
+    let (system_disk, system_bytes) = (ready.path, ready.disk_bytes);
     let addon_bytes = match &config.addon_disk {
         None => None,
         Some(path) => {
@@ -298,16 +296,19 @@ impl AndroidVmLauncher {
             bootconfig: None,
             boot_properties: None,
             networking: None,
-            direct_mapped: false,
+            direct_mapped: None,
         }
     }
 
-    /// Maps the read-only disks (the system disk, and the add-on disk while there is one) as
-    /// virtual persistent memory at each boot where the host and the image can, so the guest
-    /// maps their files instead of caching them (see [`direct_mapped_disks`]). Off, every boot
-    /// attaches them as SCSI disks.
-    pub fn with_direct_mapped(mut self, on: bool) -> AndroidVmLauncher {
-        self.direct_mapped = on;
+    /// Maps the read-only disks (the uncompressed copy of the system disk `images` makes, and
+    /// the add-on disk while there is one) as virtual persistent memory at each boot where the
+    /// host and the image can, so the guest maps their files instead of caching them (see
+    /// [`direct_mapped_disks`]). Without it, every boot attaches them as SCSI disks.
+    pub fn with_direct_mapped(
+        mut self,
+        images: Option<Arc<DirectMappedImages>>,
+    ) -> AndroidVmLauncher {
+        self.direct_mapped = images;
         self
     }
 
@@ -434,17 +435,12 @@ impl AndroidVmLauncher {
         let system =
             ComputeSystem::create(&self.id, &document, CALL_TIMEOUT).map_err(|e| e.to_string())?;
         // The VM opens its disk when it starts. A disk in the user's profile admits only the
-        // user, SYSTEM and administrators, so the VM is let in to that one file first.
+        // user, SYSTEM and administrators, so the VM is let in to that one file first. The
+        // direct-mapped system disk is not: its folder lets every VM read it and none write it.
         let mut access = vec![config.data_disk.clone()];
         access.extend(boot.vm_access());
         access.extend(config.pstore_disk.iter().cloned());
         access.extend(config.addon_disk.iter().cloned());
-        access.extend(
-            config
-                .direct_mapped
-                .iter()
-                .map(|mapped| mapped.system_disk.clone()),
-        );
         for path in &access {
             grant_vm_access(&self.id, path).map_err(|e| {
                 format!(
@@ -506,8 +502,8 @@ impl GuestLauncher for AndroidVmLauncher {
                 config.addon_disk = None;
             }
         }
-        if self.direct_mapped {
-            match direct_mapped_disks(&config) {
+        if let Some(images) = &self.direct_mapped {
+            match direct_mapped_disks(&config, images) {
                 Ok(mapped) => config.direct_mapped = Some(mapped),
                 Err(why) => eprintln!(
                     "{}: {why}; Android starts with its disks on SCSI this time",

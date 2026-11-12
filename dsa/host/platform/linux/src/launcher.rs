@@ -21,6 +21,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use dsa_host_core::bootconfig;
 use dsa_host_core::device_identity::{append_overlay, ramdisk_overlay};
+use dsa_host_core::direct_mapped_disk::DirectMappedImages;
 use dsa_host_core::host_api::NetworkStatus;
 use dsa_host_core::session::{GuestLauncher, GuestStall};
 use dsa_protocol::auth::{bootconfig_entry, BootSecret};
@@ -172,9 +173,9 @@ pub struct LinuxVmLauncher {
     signs: Arc<Mutex<BootSigns>>,
     /// What the last finished boot's console says, for a start that failed.
     report: Option<String>,
-    /// Whether each boot maps the read-only disks as virtio-pmem (the host's direct-mapped
-    /// mode), where the image can.
-    direct_mapped: bool,
+    /// The service's maker of direct-mapped system disks, while the host's direct-mapped mode
+    /// is on: each boot maps the read-only disks as virtio-pmem where it can.
+    direct_mapped: Option<Arc<DirectMappedImages>>,
 }
 
 /// What a launcher is made from: who it is for and where their files are.
@@ -224,16 +225,20 @@ impl LinuxVmLauncher {
             vmm_tail: Tail::default(),
             signs: Arc::default(),
             report: None,
-            direct_mapped: false,
+            direct_mapped: None,
         }
     }
 
-    /// Maps the read-only disks (the system disk, and the add-on disk while there is one) as
-    /// virtio-pmem at each boot whose image carries the direct-mapped mode's mount table, so
-    /// the guest maps their files instead of caching them (`dsa_host_core::direct_mapped`).
-    /// Off, every boot attaches them as virtio-blk disks.
-    pub fn with_direct_mapped(mut self, on: bool) -> LinuxVmLauncher {
-        self.direct_mapped = on;
+    /// Maps the read-only disks (the uncompressed copy of the system disk `images` makes, and
+    /// the add-on disk while there is one) as virtio-pmem at each boot whose image describes
+    /// the direct-mapped mode, so the guest maps their files instead of caching them
+    /// (`dsa_host_core::direct_mapped`). Without it, every boot attaches them as virtio-blk
+    /// disks.
+    pub fn with_direct_mapped(
+        mut self,
+        images: Option<Arc<DirectMappedImages>>,
+    ) -> LinuxVmLauncher {
+        self.direct_mapped = images;
         self
     }
 
@@ -245,9 +250,7 @@ impl LinuxVmLauncher {
         files: &ImageFiles,
         addon_disk: Option<&Path>,
     ) -> Option<crate::crosvm::DirectMapped> {
-        if !self.direct_mapped {
-            return None;
-        }
+        let images = self.direct_mapped.as_ref()?;
         let why = |why: &str| {
             eprintln!(
                 "{}: {why}; Android starts with its disks on virtio-blk this time",
@@ -258,14 +261,22 @@ impl LinuxVmLauncher {
             why("the image has no separate system disk to map");
             return None;
         }
-        let Some(support) = files
-            .initrd
-            .as_deref()
-            .and_then(Path::parent)
-            .and_then(dsa_host_core::direct_mapped::ImageSupport::from_image_dir)
-        else {
-            why("the image has no mount table for the direct-mapped mode");
+        let Some(dir) = files.initrd.as_deref().and_then(Path::parent) else {
+            why("the image's folder cannot be named");
             return None;
+        };
+        let Some(version) = dsa_host_core::direct_mapped_disk::worker::image_version(dir) else {
+            why("the image's version cannot be named");
+            return None;
+        };
+        // The copy of the system disk, made and checked in the background; until then the
+        // boot starts with the image's own disk, verified by dm-verity.
+        let (ready, support) = match images.boot_disk(&version, dir) {
+            Ok(found) => found,
+            Err(reason) => {
+                why(&reason);
+                return None;
+            }
         };
         let addons = addon_disk.is_some_and(|path| {
             let disk = dsa_host_core::addon_disk::AddonDisk::new(
@@ -280,7 +291,11 @@ impl LinuxVmLauncher {
             }
             disk.is_mappable()
         });
-        Some(crate::crosvm::DirectMapped { support, addons })
+        Some(crate::crosvm::DirectMapped {
+            support,
+            addons,
+            system_disk: ready.path,
+        })
     }
 
     /// Gives each boot a network adapter: on the LAN while `advanced` says so, else NAT. The

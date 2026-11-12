@@ -14,8 +14,8 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 pub use dsa_host_core::vhdx::{
-    guid_bytes, layout, Layout, BAT_REGION, FILE_PARAMETERS, LOGICAL_SECTOR_SIZE,
-    METADATA_REGION, VIRTUAL_DISK_SIZE,
+    guid_bytes, layout, Layout, BAT_REGION, FILE_PARAMETERS, LOGICAL_SECTOR_SIZE, METADATA_REGION,
+    VIRTUAL_DISK_SIZE,
 };
 
 const MIB: u64 = 1024 * 1024;

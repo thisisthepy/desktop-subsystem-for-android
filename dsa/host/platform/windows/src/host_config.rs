@@ -294,8 +294,11 @@ pub struct HostConfig {
     /// add-on disk as virtual persistent memory, mapped from their files, instead of SCSI
     /// disks, so the guest maps the read-only partitions' files rather than keeping a page
     /// cache of them on top of Windows' (`dsa_host_core::direct_mapped`). Off until its saving
-    /// is measured; on x86_64 hosts only, and only for images that carry the mode's mount table.
-    /// The first boot of each image makes a fixed copy of its system disk beside it.
+    /// is measured; on x86_64 hosts only, and only for images that describe the mode's system
+    /// disk. The service makes that disk (an uncompressed copy of the image's) in the background
+    /// after each image is installed or downloaded, checks it against the image's hash, and keeps
+    /// it in the machine's `direct-mapped` folder; until it is ready, Android boots as without
+    /// the mode.
     #[serde(default)]
     pub direct_mapped_images: bool,
     /// The machine's DSA folder: the folder the configuration file is in, which `dsa-hostd`

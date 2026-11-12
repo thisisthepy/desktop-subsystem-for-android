@@ -147,6 +147,9 @@ pub struct DirectMapped {
     /// Whether the add-on disk is persistent memory too: only one in the layout the mode maps,
     /// with a partition over each image.
     pub addons: bool,
+    /// The system disk the mode maps: the uncompressed copy of the image's that the service
+    /// made and checked, in place of [`VmConfig::system_image`].
+    pub system_disk: PathBuf,
 }
 
 /// The platform device the guest kernel puts each virtio-pmem bus below, which a
@@ -244,11 +247,12 @@ impl VmConfig {
             .filter(|_| self.direct_mapped.is_none())
     }
 
-    /// The system disk when it is virtio-pmem, in the direct-mapped mode.
+    /// The system disk when it is virtio-pmem, in the direct-mapped mode: the copy made for it.
     fn system_on_pmem(&self) -> Option<&PathBuf> {
         self.system_image
             .as_ref()
-            .filter(|_| self.direct_mapped.is_some())
+            .and(self.direct_mapped.as_ref())
+            .map(|mapped| &mapped.system_disk)
     }
 
     /// Whether the add-on disk is virtio-pmem this boot.
@@ -526,9 +530,16 @@ mod tests {
         DirectMapped {
             support: dsa_host_core::direct_mapped::ImageSupport {
                 fstab_suffix: "dsa_dax".into(),
-                uncompressed_erofs: true,
+                system_disk: dsa_host_core::direct_mapped_disk::SystemDisk {
+                    format: dsa_host_core::direct_mapped_disk::FORMAT,
+                    bytes: 2304 << 20,
+                    sha256: "ab".repeat(32),
+                    super_bytes: 2048 << 20,
+                },
+                verified_partitions: vec!["odm".into()],
             },
             addons,
+            system_disk: "/var/lib/dsa/direct-mapped/1.img".into(),
         }
     }
 
@@ -543,7 +554,7 @@ mod tests {
         assert_eq!(
             value_of(&args, "--pmem"),
             [
-                "path=/var/lib/dsa/images/1/system.img,ro=true",
+                "path=/var/lib/dsa/direct-mapped/1.img,ro=true",
                 "path=/home/u/.local/share/dsa/addons.img,ro=true"
             ]
         );
@@ -571,7 +582,7 @@ mod tests {
         let args = config.crosvm_args().unwrap();
         assert_eq!(
             value_of(&args, "--pmem"),
-            ["path=/var/lib/dsa/images/1/system.img,ro=true"]
+            ["path=/var/lib/dsa/direct-mapped/1.img,ro=true"]
         );
         assert!(value_of(&args, "--block")
             .iter()

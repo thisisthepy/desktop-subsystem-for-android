@@ -150,8 +150,9 @@ pub struct AndroidVmConfig {
 /// [`AndroidVmConfig::direct_mapped`] and `dsa_host_core::direct_mapped`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DirectMapped {
-    /// The system disk as a fixed VHD (`system.pmem.vhd`), made from
-    /// [`AndroidVmConfig::system_image`]: virtual persistent memory takes a flat image only.
+    /// The system disk as a fixed VHD: the uncompressed copy the service made of
+    /// [`AndroidVmConfig::system_image`] and checked against the image's hash (virtual
+    /// persistent memory takes a flat image only).
     pub system_disk: PathBuf,
     /// The size of the system disk's data, without its VHD footer: a whole number of 2 MiB.
     pub system_bytes: u64,

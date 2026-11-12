@@ -31,6 +31,7 @@ use std::time::{Duration, Instant};
 
 use dsa_host_core::device_identity::{BootIdentity, FileDeviceIdentities, ImageBuild};
 use dsa_host_core::diagnostics::HostFile;
+use dsa_host_core::direct_mapped_disk::DirectMappedImages;
 use dsa_host_core::guest_display::{display_or_smallest, with_display_density, with_display_size};
 use dsa_host_core::guest_log::{LogFilter, LogWatch, DEFAULT_BUFFERS, WARN};
 use dsa_host_core::handshake::ControlHandshake;
@@ -311,12 +312,15 @@ fn serve_host_services(
 
 /// The user's Android: their data disk, VM and session, created on their first request.
 /// With `power`, the session hears the computer's power from it.
+/// With `direct_mapped` (the host's direct-mapped mode is on), each boot maps the read-only
+/// disks where it can.
 pub fn create_user_android(
     config: &HostConfig,
     build: &str,
     sid: &str,
     updates: Option<&Updates>,
     power: Option<&PowerHub>,
+    direct_mapped: Option<&Arc<DirectMappedImages>>,
 ) -> Result<Arc<dyn UserAndroid>, String> {
     let user = config.user_vm(sid).map_err(|e| e.to_string())?;
     if user.disk_in_profile {
@@ -433,7 +437,7 @@ pub fn create_user_android(
         )
     })
     .with_memory_max(memory_max)
-    .with_direct_mapped(config.direct_mapped_images)
+    .with_direct_mapped(direct_mapped.cloned())
     .with_boot_dir(config.machine_root().tmp())
     .with_bootconfig({
         // An ARM translator (the package the user installed, else the image's default one) is
@@ -723,6 +727,7 @@ fn check_for_updates(
     build: String,
     stop: Arc<AtomicBool>,
     store: Arc<dyn SettingsStore>,
+    direct_mapped: Option<&DirectMappedImages>,
 ) {
     let Some(settings) = config.update.clone() else {
         return;
@@ -789,6 +794,11 @@ fn check_for_updates(
             Ok(Some(notice)) => {
                 eprintln!("{build}: {notice}");
                 updates.notices.set(notice);
+                // A new image was downloaded and checked: its direct-mapped system disk is
+                // made now, in the background, before the next start of Android needs it.
+                if let Some(images) = direct_mapped {
+                    images.kick();
+                }
             }
             Ok(None) => {}
             Err(error) => {
@@ -809,6 +819,27 @@ fn check_for_updates(
                 interval
             };
     }
+}
+
+/// Starts the maker of direct-mapped system disks when the host's direct-mapped mode is on:
+/// it keeps the uncompressed copy of the current image's system disk in the machine's
+/// `direct-mapped` folder, made in the background after the image was installed or downloaded
+/// and checked.
+fn start_direct_mapped(
+    config: &HostConfig,
+    updates: Option<&Updates>,
+    build: &str,
+) -> Option<Arc<DirectMappedImages>> {
+    if !config.direct_mapped_images {
+        return None;
+    }
+    let configured = config.system_image.clone();
+    let log_build = build.to_string();
+    Some(crate::pmem_disk::start(
+        &config.machine_root().direct_mapped(),
+        crate::pmem_disk::current_image(updates.map(|u| Arc::clone(&u.store)), configured),
+        Arc::new(move |line: &str| eprintln!("{log_build}: {line}")),
+    ))
 }
 
 /// How soon the service tries again while it has no image to boot.
@@ -983,17 +1014,21 @@ where
         }
     };
     let image_updates_available = updates.is_some() && config.image_updates_available();
+    let direct_mapped = start_direct_mapped(&config, updates.as_ref(), build);
     if let Some(updates) = &updates {
-        let (config, updates, worker_build, stop, store) = (
+        let (config, updates, worker_build, stop, store, made) = (
             config.clone(),
             updates.clone(),
             build.to_string(),
             Arc::clone(&stop),
             Arc::clone(&store),
+            direct_mapped.clone(),
         );
         if let Err(error) = thread::Builder::new()
             .name("dsa-updates".into())
-            .spawn(move || check_for_updates(config, updates, worker_build, stop, store))
+            .spawn(move || {
+                check_for_updates(config, updates, worker_build, stop, store, made.as_deref())
+            })
         {
             eprintln!("{build}: starting the update check failed: {error}");
         }
@@ -1069,6 +1104,7 @@ where
                 sid,
                 updates.as_ref(),
                 Some(power.as_ref()),
+                direct_mapped.as_ref(),
             )
         })) {
             Ok(res) => res,

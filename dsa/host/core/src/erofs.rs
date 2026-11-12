@@ -112,7 +112,7 @@ fn nid(index: usize) -> u64 {
 
 /// A folder's data from its entries (name, inode number, file type), `.` and `..` among them:
 /// sorted by name and split into blocks, the last block cut where it ends.
-fn folder_blocks(mut entries: Vec<(&[u8], u64, u8)>) -> Vec<u8> {
+pub(crate) fn folder_blocks(mut entries: Vec<(&[u8], u64, u8)>) -> Vec<u8> {
     entries.sort_by(|a, b| a.0.cmp(b.0));
     let mut data = Vec::new();
     let mut rest = &entries[..];

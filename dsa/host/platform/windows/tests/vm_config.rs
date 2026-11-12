@@ -582,12 +582,18 @@ fn nfr2_the_guest_kernel_sets_little_memory_aside_at_boot() {
 
 fn direct_mapped(addon_bytes: Option<u64>) -> dsa_host_windows::vm::DirectMapped {
     dsa_host_windows::vm::DirectMapped {
-        system_disk: PathBuf::from(r"C:\ProgramData\DSA\images\images\17.0.0-1\system.pmem.vhd"),
+        system_disk: PathBuf::from(r"C:\ProgramData\DSA\direct-mapped\17.0.0-1.vhd"),
         system_bytes: 1800 << 20,
         addon_bytes,
         support: dsa_host_core::direct_mapped::ImageSupport {
             fstab_suffix: "dsa_dax".into(),
-            uncompressed_erofs: true,
+            system_disk: dsa_host_core::direct_mapped_disk::SystemDisk {
+                format: dsa_host_core::direct_mapped_disk::FORMAT,
+                bytes: 1800 << 20,
+                sha256: "ab".repeat(32),
+                super_bytes: 1600 << 20,
+            },
+            verified_partitions: vec!["odm".into()],
         },
     }
 }
@@ -607,7 +613,7 @@ fn nfr1_a_direct_mapped_vm_maps_its_read_only_disks_as_persistent_memory() {
     let pmem = &devices["VirtualPMem"];
     assert_eq!(
         pmem["Devices"]["0"]["HostPath"],
-        r"C:\ProgramData\DSA\images\images\17.0.0-1\system.pmem.vhd"
+        r"C:\ProgramData\DSA\direct-mapped\17.0.0-1.vhd"
     );
     assert_eq!(
         pmem["Devices"]["1"]["HostPath"],

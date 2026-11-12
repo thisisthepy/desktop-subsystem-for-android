@@ -761,18 +761,29 @@ of the same file. The pages the VM maps are clean file pages, which Windows can 
 again; the guest keeps page structs for the mapped disks, about 1.6% of their size.
 
 - It works on x86_64 PCs only (Hyper-V on ARM64 boots with the disks on SCSI), and only for an
-  image that carries the mode's mount table (`direct_mapped` in its `image.json`); any other
-  boot attaches the disks as before, with a line in the service's log saying why.
-- Virtual persistent memory maps a flat image, so the first boot of each image makes a fixed
-  VHD of its system disk beside it (`system.pmem.vhd`, as large as the disk) with Windows' own
-  virtual disk service, and the next boots use it. The published `system.vhdx` stays as it
-  was. An add-on disk from an earlier DSA is written again in the layout the mode maps.
-- A mapped partition cannot be checked by dm-verity in the guest. The disk is the one the
-  service checked against the signed release list, kept where only SYSTEM and administrators
-  may write, and attached read only.
-- Only files stored uncompressed are mapped. The published images compress their partitions,
-  so the mode saves most on an image made with `make-image.py --uncompressed-erofs`, which the
-  image CI's direct-mapped measurement boots.
+  image whose `image.json` describes the mode's system disk (`direct_mapped.system_disk`); any
+  other boot attaches the disks as before, with a line in the service's log saying why.
+- The published images compress their read-only partitions, which keeps each download under
+  GitHub's 2 GiB a file, and only a file stored whole can be mapped. So after an image is
+  installed or downloaded and checked, the service makes the disk the mode maps itself, on the
+  PC: a copy of `system.vhdx` with every erofs partition uncompressed, as a fixed VHD, in
+  `%ProgramData%\DSA\direct-mapped\<version>.vhd`. It runs in the background at Windows'
+  lowest priority, resumes where a stopped run left off, and logs its progress, its time and
+  its size. Until the copy is made and checked, Android boots with the image's own disk on
+  SCSI, verified by dm-verity as without the mode. The copy of an image that was replaced is
+  removed.
+- The copy is checked, not trusted: the image build makes the same copy and records its
+  SHA-256 in `image.json`, which the signed release list covers, and the service compares the
+  copy with it before the first boot uses it, and again each time the service starts. A copy
+  that does not match is removed and made again. Only SYSTEM writes the folder; administrators
+  may read and delete, and the VMs read, so a VM opens it read only.
+- A mapped partition cannot be checked by dm-verity in the guest, so the host's check stands
+  in for it. `odm` stays as the image has it, with dm-verity, so the guest still checks the
+  verified boot data (vbmeta and the boot images) as in a normal boot. The guest marks its
+  persistent memory disks read only.
+- About 2.3 GB more on the disk for an Android 17 image (the copy beside the 1.8 GB
+  `system.vhdx`), and a few tens of seconds to a few minutes to make on a laptop SSD; the log
+  says how long it took.
 
 ## DSA Settings
 

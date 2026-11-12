@@ -735,7 +735,7 @@ fn partition_table(sectors: u64, partition_sectors: u64, images: &[Entry]) -> Ve
 }
 
 /// The VHD disk geometry for `sectors`, by the algorithm of the VHD format.
-fn geometry(sectors: u64) -> (u16, u8, u8) {
+pub(crate) fn geometry(sectors: u64) -> (u16, u8, u8) {
     let total = sectors.min(65535 * 16 * 255);
     let (mut spt, mut heads, mut cth);
     if total >= 65535 * 16 * 63 {

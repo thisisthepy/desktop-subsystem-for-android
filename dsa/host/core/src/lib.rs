@@ -94,6 +94,7 @@ pub mod data_reset;
 pub mod device_identity;
 pub mod diagnostics;
 pub mod direct_mapped;
+pub mod direct_mapped_disk;
 pub mod dns;
 pub mod drag;
 pub mod erofs;

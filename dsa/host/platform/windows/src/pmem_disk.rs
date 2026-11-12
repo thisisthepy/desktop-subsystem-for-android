@@ -1,34 +1,34 @@
-//! The disks of the host's direct-mapped mode: the read-only system disk and the add-on disk
-//! attached as Hyper-V virtual persistent memory (see `dsa_host_core::direct_mapped`).
+//! The disks of the host's direct-mapped mode on Windows: the uncompressed system disk the
+//! service makes, and the add-on disk, attached as Hyper-V virtual persistent memory (see
+//! `dsa_host_core::direct_mapped`).
 //!
 //! Virtual persistent memory maps its file into the VM as it is, so it takes a flat image: a
 //! fixed VHD (HCS's `Vhd1`), the disk's bytes followed by a 512-byte footer. The add-on disk is
-//! one already. The image's system disk is a dynamic VHDX, which holds only what was written,
-//! so the service makes a fixed VHD of it once, beside it in the image's folder
-//! (`system.pmem.vhd`), with Windows' own virtual disk service, and uses that copy while the
-//! image's VHDX stays as it was published, with its checksum. The copy is made again when the
-//! VHDX changes, and goes with the image's folder.
+//! one already. The system disk is the copy `dsa_host_core::direct_mapped_disk` makes from the
+//! image's `system.vhdx` in the background, after the image's download was checked, with its
+//! read-only partitions uncompressed, and checks against the hash the image's signed
+//! `image.json` gives. It is kept in the machine's DSA folder, in `direct-mapped`
+//! ([`crate::paths::MachineRoot::direct_mapped`]), where only SYSTEM writes
+//! ([`DIRECT_MAPPED_SDDL`]); administrators may read and delete, and the VMs read.
 //!
-//! Integrity is the host's in this mode: the guest cannot run dm-verity over a mapped
-//! partition. The copy is made by the service, which runs as SYSTEM, from the VHDX it checked
-//! against the signed release list, into the image store only SYSTEM and administrators may
-//! write, and the VM attaches it read only.
+//! The service makes it at the lowest priority Windows has (`THREAD_MODE_BACKGROUND_BEGIN`:
+//! idle CPU, very low I/O and memory priority), so a running Android and the desktop go first.
 
 use std::fs;
 use std::io::{self, Read, Seek, SeekFrom};
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::sync::Arc;
 
-use crate::vm::PERSISTENT_MEMORY_SECTION;
+use dsa_host_core::direct_mapped_disk::{
+    worker::{image_version, CurrentImage},
+    DirectMappedImages, Store,
+};
 
-/// The fixed VHD made from the system disk `system_image`, in the same folder.
-pub fn system_disk_beside(system_image: &Path) -> PathBuf {
-    system_image.with_file_name("system.pmem.vhd")
-}
-
-/// Where the copy records which VHDX it was made from (its size and modification time).
-fn source_record(pmem: &Path) -> PathBuf {
-    pmem.with_file_name("system.pmem.source")
-}
+/// The `direct-mapped` folder: SYSTEM writes; administrators read and may delete (an uninstall
+/// removes it); Hyper-V's virtual machines (`S-1-5-83-0`) read, so a VM opens its system disk
+/// read only and never with write access. Inherited by what the folder holds.
+pub const DIRECT_MAPPED_SDDL: &str =
+    "D:P(A;OICI;FA;;;SY)(A;OICI;0x1300e9;;;BA)(A;OICI;0x1200a9;;;S-1-5-83-0)";
 
 const FOOTER_BYTES: u64 = 512;
 
@@ -57,149 +57,76 @@ pub fn fixed_vhd_disk_bytes(path: &Path) -> io::Result<u64> {
     Ok(size)
 }
 
-/// What the copy's record says of `source`: its size and modification time, in one line.
-fn describe(source: &Path) -> io::Result<String> {
-    let meta = fs::metadata(source)?;
-    let modified = meta
-        .modified()?
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    Ok(format!("{} {modified}\n", meta.len()))
+/// The image the next boot starts from, for the disk maker: the update store's current one,
+/// else the one the configuration names.
+pub fn current_image(
+    store: Option<Arc<dsa_host_core::update::store::ImageStore>>,
+    configured: Option<std::path::PathBuf>,
+) -> CurrentImage {
+    Box::new(move || {
+        let dir = match &store {
+            Some(store) => {
+                let state = store.state().ok()?;
+                store.image_dir(&state.current.version)
+            }
+            None => configured.as_ref()?.parent()?.to_path_buf(),
+        };
+        Some((image_version(&dir)?, dir))
+    })
 }
 
-/// The copy of `system_image` made earlier, with its disk size, when it is still the copy of
-/// that VHDX as it is now and a whole number of persistent memory sections.
-pub fn current_copy(system_image: &Path) -> Option<(PathBuf, u64)> {
-    let pmem = system_disk_beside(system_image);
-    let recorded = fs::read_to_string(source_record(&pmem)).ok()?;
-    if recorded != describe(system_image).ok()? {
-        return None;
+/// Takes the calling thread to Windows' background mode: idle CPU priority, very low I/O and
+/// memory priority, for as long as it runs.
+pub fn lower_this_thread() -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::Threading::{
+            GetCurrentThread, SetThreadPriority, THREAD_MODE_BACKGROUND_BEGIN,
+        };
+        // SAFETY: the pseudo handle of the calling thread, which needs no closing.
+        if unsafe { SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN) } == 0 {
+            return Err(io::Error::last_os_error().to_string());
+        }
     }
-    let bytes = fixed_vhd_disk_bytes(&pmem).ok()?;
-    (bytes > 0 && bytes % PERSISTENT_MEMORY_SECTION == 0).then_some((pmem, bytes))
+    Ok(())
 }
 
-/// Records that `pmem` was made from `system_image` as it is now.
-#[cfg_attr(not(windows), allow(dead_code))]
-fn record_source(system_image: &Path, pmem: &Path) -> io::Result<()> {
-    fs::write(source_record(pmem), describe(system_image)?)
-}
-
-/// The fixed VHD of `system_image` for the direct-mapped mode, made now unless the one made
-/// earlier is still current; with its disk size.
-#[cfg(windows)]
-pub fn prepare_system_disk(system_image: &Path) -> Result<(PathBuf, u64), String> {
-    if let Some(current) = current_copy(system_image) {
-        return Ok(current);
-    }
-    let pmem = system_disk_beside(system_image);
-    // Windows' virtual disk service names the format by the extension, so the partial copy
-    // keeps it.
-    let partial = pmem.with_file_name("system.pmem.part.vhd");
-    let _ = fs::remove_file(&partial);
-    let _ = fs::remove_file(source_record(&pmem));
-    let started = std::time::Instant::now();
-    vhd::copy_to_fixed_vhd(system_image, &partial)?;
-    let bytes = fixed_vhd_disk_bytes(&partial).map_err(|e| e.to_string())?;
-    if bytes == 0 || bytes % PERSISTENT_MEMORY_SECTION != 0 {
-        let _ = fs::remove_file(&partial);
-        return Err(format!(
-            "the system disk {} is {bytes} bytes, not a whole number of 2 MiB, so the guest \
-             could not map it; an image made for the direct-mapped mode is",
-            system_image.display()
+/// Starts the service's disk maker over the folder `folder`, made and closed to all but
+/// SYSTEM first ([`DIRECT_MAPPED_SDDL`]), for the image `current` names.
+pub fn start(
+    folder: &Path,
+    current: CurrentImage,
+    log: dsa_host_core::direct_mapped_disk::worker::Log,
+) -> Arc<DirectMappedImages> {
+    if let Err(why) = fs::create_dir_all(folder) {
+        log(&format!(
+            "direct-mapped: creating {}: {why}",
+            folder.display()
         ));
     }
-    let _ = fs::remove_file(&pmem);
-    fs::rename(&partial, &pmem).map_err(|e| format!("placing {}: {e}", pmem.display()))?;
-    record_source(system_image, &pmem).map_err(|e| format!("recording {}: {e}", pmem.display()))?;
-    eprintln!(
-        "direct-mapped: made {} ({} MiB) from {} in {:.1} s",
-        pmem.display(),
-        bytes >> 20,
-        system_image.display(),
-        started.elapsed().as_secs_f64()
-    );
-    Ok((pmem, bytes))
+    #[cfg(windows)]
+    if let Err(why) = crate::user_disk::protect_folder_as(folder, DIRECT_MAPPED_SDDL) {
+        log(&format!("direct-mapped: {why}"));
+    }
+    DirectMappedImages::start(
+        Store::new(folder),
+        current,
+        Box::new(lower_this_thread),
+        log,
+    )
 }
 
-#[cfg(windows)]
-mod vhd {
-    use std::path::Path;
-
-    use windows_sys::Win32::Foundation::{CloseHandle, ERROR_SUCCESS, HANDLE};
-    use windows_sys::Win32::Storage::Vhd::{
-        CreateVirtualDisk, CREATE_VIRTUAL_DISK_FLAG_FULL_PHYSICAL_ALLOCATION,
-        CREATE_VIRTUAL_DISK_PARAMETERS, CREATE_VIRTUAL_DISK_VERSION_2, VIRTUAL_DISK_ACCESS_NONE,
-        VIRTUAL_STORAGE_TYPE, VIRTUAL_STORAGE_TYPE_DEVICE_VHD, VIRTUAL_STORAGE_TYPE_DEVICE_VHDX,
-        VIRTUAL_STORAGE_TYPE_VENDOR_MICROSOFT,
-    };
-
-    fn wide(path: &Path) -> Vec<u16> {
-        path.as_os_str()
-            .to_string_lossy()
-            .encode_utf16()
-            .chain(std::iter::once(0))
-            .collect()
-    }
-
-    /// Makes `target`, a fixed VHD holding the disk of the VHDX `source`, at its size.
-    pub fn copy_to_fixed_vhd(source: &Path, target: &Path) -> Result<(), String> {
-        let storage = VIRTUAL_STORAGE_TYPE {
-            DeviceId: VIRTUAL_STORAGE_TYPE_DEVICE_VHD,
-            VendorId: VIRTUAL_STORAGE_TYPE_VENDOR_MICROSOFT,
-        };
-        let source_path = wide(source);
-        let target_path = wide(target);
-        let mut parameters = CREATE_VIRTUAL_DISK_PARAMETERS {
-            Version: CREATE_VIRTUAL_DISK_VERSION_2,
-            ..Default::default()
-        };
-        // Writing union fields is safe; they are the version 2 members, matching `Version`. A
-        // size of 0 takes the source's.
-        parameters.Anonymous.Version2.MaximumSize = 0;
-        parameters.Anonymous.Version2.SourcePath = source_path.as_ptr();
-        parameters.Anonymous.Version2.SourceVirtualStorageType = VIRTUAL_STORAGE_TYPE {
-            DeviceId: VIRTUAL_STORAGE_TYPE_DEVICE_VHDX,
-            VendorId: VIRTUAL_STORAGE_TYPE_VENDOR_MICROSOFT,
-        };
-        let mut handle: HANDLE = std::ptr::null_mut();
-        // SAFETY: valid parameters whose paths outlive the call, and an out pointer; the handle
-        // is closed below. A null security descriptor makes the file inherit the folder's
-        // access list. Without an OVERLAPPED the call returns once the copy is whole.
-        let code = unsafe {
-            CreateVirtualDisk(
-                &storage,
-                target_path.as_ptr(),
-                VIRTUAL_DISK_ACCESS_NONE,
-                std::ptr::null_mut(),
-                CREATE_VIRTUAL_DISK_FLAG_FULL_PHYSICAL_ALLOCATION,
-                0,
-                &parameters,
-                std::ptr::null(),
-                &mut handle,
-            )
-        };
-        if code != ERROR_SUCCESS {
-            let _ = std::fs::remove_file(target);
-            return Err(format!(
-                "making the fixed VHD {} from {}: {}",
-                target.display(),
-                source.display(),
-                std::io::Error::from_raw_os_error(code as i32)
-            ));
-        }
-        // SAFETY: the handle CreateVirtualDisk returned, closed once.
-        unsafe { CloseHandle(handle) };
-        Ok(())
-    }
+/// The version and folder of the image whose system disk is `system_image`.
+pub fn image_of(system_image: &Path) -> Option<(String, std::path::PathBuf)> {
+    let dir = system_image.parent()?.to_path_buf();
+    Some((image_version(&dir)?, dir))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn scratch(name: &str) -> PathBuf {
+    fn scratch(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("dsa-pmem-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
@@ -216,32 +143,6 @@ mod tests {
     }
 
     #[test]
-    fn nfr1_the_persistent_memory_copy_is_used_while_it_is_the_copy_of_the_system_disk() {
-        let dir = scratch("copy");
-        let system = dir.join("system.vhdx");
-        fs::write(&system, b"published system disk").unwrap();
-        let pmem = system_disk_beside(&system);
-        assert_eq!(pmem, dir.join("system.pmem.vhd"));
-        assert_eq!(current_copy(&system), None, "no copy yet");
-        fs::write(&pmem, fixed_vhd(4 << 20)).unwrap();
-        assert_eq!(
-            current_copy(&system),
-            None,
-            "a copy with no record of its source"
-        );
-        record_source(&system, &pmem).unwrap();
-        assert_eq!(current_copy(&system), Some((pmem.clone(), 4 << 20)));
-        // A changed VHDX needs a new copy.
-        fs::write(&system, b"a newer published system disk").unwrap();
-        assert_eq!(current_copy(&system), None);
-        // So does one the guest could not map.
-        fs::write(&pmem, fixed_vhd((4 << 20) + 4096)).unwrap();
-        record_source(&system, &pmem).unwrap();
-        assert_eq!(current_copy(&system), None);
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
     fn nfr1_only_a_fixed_vhd_can_be_mapped() {
         let dir = scratch("vhd");
         let path = dir.join("addons.vhd");
@@ -254,6 +155,23 @@ mod tests {
         assert!(fixed_vhd_disk_bytes(&path).is_err());
         fs::write(&path, vec![0u8; 100]).unwrap();
         assert!(fixed_vhd_disk_bytes(&path).is_err());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn nfr1_the_image_of_a_system_disk_is_its_folders() {
+        let dir = scratch("image");
+        let image = dir.join("17.0.0-1-2");
+        fs::create_dir_all(&image).unwrap();
+        assert_eq!(
+            image_of(&image.join("system.vhdx")),
+            Some(("17.0.0-1-2".to_string(), image.clone()))
+        );
+        fs::write(image.join("image.json"), r#"{"version": "17.0.0-1-3"}"#).unwrap();
+        assert_eq!(
+            image_of(&image.join("system.vhdx")).map(|(v, _)| v),
+            Some("17.0.0-1-3".to_string())
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 }
