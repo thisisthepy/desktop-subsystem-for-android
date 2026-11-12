@@ -1,0 +1,79 @@
+diff --git a/host/vulkan/VkCommonOperations.cpp b/host/vulkan/VkCommonOperations.cpp
+index 6d3757091..0456451d7 100644
+--- a/host/vulkan/VkCommonOperations.cpp
++++ b/host/vulkan/VkCommonOperations.cpp
+@@ -1702,6 +1702,7 @@ std::unique_ptr<VkEmulation> VkEmulation::create(VulkanDispatch* gvk,
+     // device created; populate dispatch table
+     emulation->mDvk = new VulkanDispatch();
+     init_vulkan_dispatch_from_device(ivk, emulation->mDevice, emulation->mDvk);
++    runDeviceDispatchHook(emulation->mDevice, emulation->mDvk);
+ 
+     auto dvk = emulation->mDvk;
+ 
+@@ -2372,6 +2373,8 @@ VkResult VkEmulation::waitForFenceBounded(VulkanDispatch* vk, VkFence fence, con
+ 
+ bool VkEmulation::makeDeviceObjectsLocked() {
+     init_vulkan_dispatch_from_device(mIvk, mDevice, mDvk);
++    // The new device's entries replace what the embedder wrapped in the lost one's.
++    runDeviceDispatchHook(mDevice, mDvk);
+     auto dvk = mDvk;
+ 
+     if (mDeviceInfo.supportsExternalMemoryImport) {
+diff --git a/host/vulkan/VkDecoderGlobalState.cpp b/host/vulkan/VkDecoderGlobalState.cpp
+index 68de0bf06..9ba4983f5 100644
+--- a/host/vulkan/VkDecoderGlobalState.cpp
++++ b/host/vulkan/VkDecoderGlobalState.cpp
+@@ -2056,6 +2056,7 @@ class VkDecoderGlobalState::Impl {
+ 
+         VulkanDispatch* dispatch = dispatch_VkDevice(boxedDevice);
+         init_vulkan_dispatch_from_device(vk, *pDevice, dispatch);
++        runDeviceDispatchHook(*pDevice, dispatch);
+         if (m_vkEmulation->debugUtilsEnabled()) {
+             deviceInfo.debugUtilsHelper = DebugUtilsHelper::withUtilsEnabled(*pDevice, dispatch);
+         }
+diff --git a/host/vulkan/VulkanDispatch.cpp b/host/vulkan/VulkanDispatch.cpp
+index bb839702e..adb4011a1 100644
+--- a/host/vulkan/VulkanDispatch.cpp
++++ b/host/vulkan/VulkanDispatch.cpp
+@@ -14,6 +14,8 @@
+ 
+ #include "VulkanDispatch.h"
+ 
++#include <atomic>
++
+ #include "aemu/base/SharedLibrary.h"
+ #include "aemu/base/files/PathUtils.h"
+ #include "aemu/base/synchronization/Lock.h"
+@@ -309,5 +311,15 @@ bool vkDispatchValid(const VulkanDispatch* vk) {
+            vk->vkGetInstanceProcAddr != nullptr || vk->vkGetDeviceProcAddr != nullptr;
+ }
+ 
++static std::atomic<DeviceDispatchHook> sDeviceDispatchHook{nullptr};
++
++void setDeviceDispatchHook(DeviceDispatchHook hook) { sDeviceDispatchHook.store(hook); }
++
++void runDeviceDispatchHook(VkDevice device, VulkanDispatch* dispatch) {
++    if (DeviceDispatchHook hook = sDeviceDispatchHook.load()) {
++        hook(device, dispatch);
++    }
++}
++
+ }  // namespace vk
+ }  // namespace gfxstream
+diff --git a/host/vulkan/VulkanDispatch.h b/host/vulkan/VulkanDispatch.h
+index 2c3938089..9ac5d2c32 100644
+--- a/host/vulkan/VulkanDispatch.h
++++ b/host/vulkan/VulkanDispatch.h
+@@ -21,5 +21,12 @@ namespace vk {
+ VulkanDispatch* vkDispatch(bool forTesting = false);
+ bool vkDispatchValid(const VulkanDispatch* vk);
+ 
++// Called with every device dispatch table once it is filled from its device: the renderer's
++// own, each one made again after its device was lost, and each guest device's. An embedder
++// sets it to wrap entries of the table, so that what it counts follows every device.
++using DeviceDispatchHook = void (*)(VkDevice device, VulkanDispatch* dispatch);
++void setDeviceDispatchHook(DeviceDispatchHook hook);
++void runDeviceDispatchHook(VkDevice device, VulkanDispatch* dispatch);
++
+ }  // namespace vk
+ }  // namespace gfxstream

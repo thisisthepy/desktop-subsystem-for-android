@@ -447,6 +447,16 @@ jobs:
         run: |
           cargo test -p dsa-host-windows --test window_manager -- nfr5_a_lost_device_is_reported_to_the_guest_and_made_again --nocapture
 
+      - name: Check the renderer's memory count follows every device, also after a lost one
+        shell: pwsh
+        working-directory: dsa
+        env:
+          VK_ICD_FILENAMES: ${{ env.LVP_ICD }}
+          VK_DRIVER_FILES: ${{ env.LVP_ICD }}
+          GFXSTREAM_BACKEND_PATH: ${{ github.workspace }}\.scratch\build-host\dist\bin\gfxstream_backend.dll
+        run: |
+          cargo test -p dsa-host-windows --test window_manager -- nfr1_the_renderer_counts_every_device_after_a_lost_device --nocapture
+
       - name: Check killing the renderer process keeps the windows and frames resume
         shell: pwsh
         working-directory: dsa
