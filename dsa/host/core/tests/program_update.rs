@@ -391,10 +391,53 @@ fn fr15_versions_compare_as_numbers_and_anything_else_is_refused() {
     assert!(v("0.1.10") > v("0.1.9"));
     assert!(v("1.0") > v("0.99.99"));
     assert_eq!(v("0.1"), v("0.1.0"));
-    for bad in ["", "0.1.", ".1", "0.1.0-rc1", "v0.1", "0..1", "../0.1"] {
+    for bad in [
+        "",
+        "0.1.",
+        ".1",
+        "0.1.0-rc1",
+        "v0.1",
+        "0..1",
+        "../0.1",
+        "-dev.1",
+        "0.1.0-dev.",
+        "0.1.0-dev.x",
+        "0.1.0-dev.1-dev.2",
+    ] {
         let why = Version::parse(bad).unwrap_err();
         assert!(why.contains("dot-separated numbers"), "{bad:?}: {why}");
     }
+}
+
+#[test]
+fn fr15_a_development_build_is_newer_than_the_last_release_and_older_than_the_next() {
+    let v = |text| Version::parse(text).unwrap();
+    assert!(v("0.2.4-dev.7").is_development());
+    assert!(!v("0.2.4").is_development());
+    assert!(v("0.2.4-dev.7") > v("0.2.3"));
+    assert!(v("0.2.4-dev.7") > v("0.2.4-dev.6"));
+    assert!(v("0.2.4-dev.7") < v("0.2.4"));
+    assert!(v("0.2.4-dev.7") < v("0.2.4.1"));
+    assert_eq!(v("0.2.4-dev.7"), v("0.2.4.0-dev.7"));
+    assert_eq!(v("0.2.4-dev.7").to_string(), "0.2.4-dev.7");
+    // A development build never takes the release it leads up to for an older version, and
+    // never moves down to the release before it.
+    let decide = |running: &str, offered: &str| {
+        program::decide(running, &list_of(offered, b"setup")).unwrap()
+    };
+    assert!(matches!(
+        decide("0.2.4-dev.7", "0.2.4"),
+        ProgramDecision::Install(_)
+    ));
+    assert!(matches!(
+        decide("0.2.4-dev.7", "0.2.3"),
+        ProgramDecision::NotNewer(_)
+    ));
+    // A pre-release below 1.0, like every other version below 1.0.
+    assert_eq!(
+        ReleaseChannel::of_version("0.2.4-dev.7"),
+        ReleaseChannel::Prerelease
+    );
 }
 
 #[test]

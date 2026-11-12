@@ -5775,6 +5775,17 @@ def revised(spec, revision):
     return dict(spec, revision=revision, version=version_of(spec, revision))
 
 
+def as_development_build(spec, number):
+    """The inputs.json entry `spec` as development build `number`: its version ends in
+    -dev.<number>, and its build number stays the revision's. The Development build workflow
+    makes such an image for testing on one computer and never publishes it; the host orders it
+    after the release before it and before the release of its own revision, and a newer
+    development build of the same revision after an older one."""
+    if not isinstance(number, int) or isinstance(number, bool) or number < 1:
+        raise ValueError(f"a development build number is a whole number from 1, not {number!r}")
+    return dict(spec, version=f"{spec['version']}-dev.{number}")
+
+
 def next_revision(spec, tags):
     """The revision a new image of `spec` gets, given the release tags already published: one
     past the highest published image of the same build and architecture, and never below
@@ -6612,6 +6623,9 @@ def main():
                         help="print the revision the next image of --major and --arch gets, given "
                              "the release tags already published, one per line on standard input, "
                              "and make nothing")
+    parser.add_argument("--dev-build", type=int, metavar="N",
+                        help="make development build N: the version ends in -dev.N. The Development "
+                             "build workflow passes its run number; such an image is never published")
     parser.add_argument("--inputs", type=Path, default=REPO / ".scratch/aosp-inputs")
     parser.add_argument("--out", type=Path, default=REPO / "dsa/target/image")
     parser.add_argument("--arch", choices=sorted(ARCHES), default=DEFAULT_ARCH,
@@ -6677,6 +6691,8 @@ def main():
         parser.error("--keys is required to make an image")
     if args.revision is not None:
         spec = revised(spec, args.revision)
+    if args.dev_build is not None:
+        spec = as_development_build(spec, args.dev_build)
     use_arch(args.arch)
     framework_payloads = framework_description = None
     if args.framework:

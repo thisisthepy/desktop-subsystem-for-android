@@ -4031,7 +4031,10 @@ fn fr25_a_32_bit_build_that_ends_at_start_is_told_to_get_its_64_bit_build() {
     );
     loop {
         if let TaskEvent::Installed(apps) = tasks.events.recv_timeout(WAIT).expect("the apps") {
-            if apps.iter().any(|app| app.package_name == "com.android.chrome") {
+            if apps
+                .iter()
+                .any(|app| app.package_name == "com.android.chrome")
+            {
                 break;
             }
         }
