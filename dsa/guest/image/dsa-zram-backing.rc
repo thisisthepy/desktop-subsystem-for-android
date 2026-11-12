@@ -1,14 +1,21 @@
 # zram's backing file. fs_mgr makes /data/per_boot/zram_swap when swapon_all turns the swap
-# on (fstab.dsa's zram_backingdev_size, dsa-memory.rc), but only in a folder that exists, and
-# this Android makes none. The folder has a type of its own (memory.cil), which init may write
-# and the kernel's loop driver may read and write, and nothing else may open.
+# on (fstab.dsa's zram_backingdev_size, dsa-memory.rc), but only in a folder that exists.
+# Android's own init.rc makes /data/per_boot only once the boot has completed, after zram is
+# on, so the folder is made here first, in exactly the way init.rc makes it: the last boot's
+# folder goes, then a new one with the key that lasts for this boot alone (per_boot_ref), so
+# nothing zram wrote outlives the boot it was swapped out in. init.rc repeats both steps when
+# the boot completes; the backing file it then removes stays open, and in use, until Android
+# stops. The same owner and key matter: init asks for a wipe of the user's data when a folder it
+# makes at the top of /data already has another key.
 #
-# What zram wrote there is for this boot only. The file of the last boot goes first, so no page
-# of it outlives the boot it was swapped out in, and fs_mgr allocates a fresh one.
+# The folder has a type of its own (memory.cil), which init may write, the kernel's loop driver
+# may read and write, toolbox's rm (the step above and init.rc's) may empty and remove, and
+# nothing else may open.
 #
 # A system script, because only init itself may make a folder at the top of /data; init's
-# vendor scripts run as vendor_init, which may not.
+# vendor scripts run as vendor_init, which may not. It runs after init.rc's own post-fs-data
+# steps, which install the keys.
 on post-fs-data
-    mkdir /data/per_boot 0700 root root
+    exec - system system -- /bin/rm -rf /data/per_boot
+    mkdir /data/per_boot 0700 system system encryption=Require key=per_boot_ref
     restorecon_recursive /data/per_boot
-    rm /data/per_boot/zram_swap

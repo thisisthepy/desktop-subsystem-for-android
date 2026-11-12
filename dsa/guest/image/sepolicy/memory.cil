@@ -50,6 +50,11 @@
 (allow init dsa_zram_backing_file (dir (create search getattr setattr open read write add_name remove_name relabelto)))
 (allow init dsa_zram_backing_file (file (create open read write getattr setattr unlink relabelto)))
 (allow kernel dsa_zram_backing_file (file (read write getattr)))
+; dsa-zram-backing.rc and Android's init.rc remove the last boot's folder with toolbox's rm,
+; which may only empty it: list it, unlink the file and remove the folder, never open the file.
+; A folder left behind with the last boot's key would make init.rc's mkdir ask for a wipe.
+(allow toolbox dsa_zram_backing_file (dir (getattr open read search write remove_name rmdir)))
+(allow toolbox dsa_zram_backing_file (file (getattr unlink)))
 
 ; The idle reclaim and the zram writeback ask the kernel to report every free page to the host
 ; again (page_reporting.rereport, a parameter DSA's kernel adds): free pages a host that backs

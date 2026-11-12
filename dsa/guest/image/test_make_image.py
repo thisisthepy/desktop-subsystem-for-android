@@ -2475,11 +2475,14 @@ class GuestMemoryTests(unittest.TestCase):
                 self.assertIn(b"zram_backingdev_size=512M", archive.read(directory + "fstab.dsa"))
             rc = archive.read(make_image.ZRAM_BACKING_RC).decode()
             trigger = rc[rc.index("on post-fs-data\n"):]
-            mkdir = trigger.index("mkdir /data/per_boot 0700 root root")
-            label = trigger.index("restorecon_recursive /data/per_boot")
-            remove = trigger.index("rm /data/per_boot/zram_swap")
-            self.assertLess(mkdir, label)
-            self.assertLess(label, remove)
+            # As Android's init.rc makes it when the boot completes: the last boot's folder
+            # goes, and the new one has init.rc's owner and per-boot key. A folder left with
+            # another key makes init.rc's mkdir ask for a wipe of the user's data.
+            remove = trigger.index("exec - system system -- /bin/rm -rf /data/per_boot")
+            mkdir = trigger.index(
+                "mkdir /data/per_boot 0700 system system encryption=Require key=per_boot_ref"
+            )
+            self.assertLess(remove, mkdir)
             self.assertIn(
                 "system/etc/init/dsa-zram-backing.rc 0 0 644 capabilities=0x0",
                 archive.read("META/filesystem_config.txt").decode(),
@@ -2493,9 +2496,16 @@ class GuestMemoryTests(unittest.TestCase):
                 "(allow init dsa_zram_backing_file (file (create open read write getattr setattr unlink relabelto)))",
                 policy,
             )
-            # No other domain may open what zram wrote: it is apps' memory.
-            openers = set(re.findall(r"\(allow (\S+) dsa_zram_backing_file \(file", policy))
-            self.assertEqual(openers, {"init", "kernel"})
+            # No other domain may open what zram wrote: it is apps' memory. toolbox's rm may
+            # only unlink it and remove the folder.
+            file_rules = re.findall(r"\(allow (\S+) dsa_zram_backing_file \(file \(([^)]*)\)\)\)", policy)
+            readers = {domain for domain, perms in file_rules if {"open", "read"} & set(perms.split())}
+            self.assertEqual(readers, {"init", "kernel"})
+            self.assertIn("(allow toolbox dsa_zram_backing_file (file (getattr unlink)))", policy)
+            self.assertIn(
+                "(allow toolbox dsa_zram_backing_file (dir (getattr open read search write remove_name rmdir)))",
+                policy,
+            )
         # A label the build already has for the folder goes, as two would conflict.
         text = make_image.with_zram_backing_context("/data/per_boot(/.*)? u:object_r:system_data_file:s0\n")
         self.assertEqual(text.splitlines(), [make_image.ZRAM_BACKING_CONTEXT])
