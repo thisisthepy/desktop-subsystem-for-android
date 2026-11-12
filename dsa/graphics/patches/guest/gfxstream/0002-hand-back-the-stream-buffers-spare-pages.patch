@@ -1,0 +1,42 @@
+Subject: Hand back the spare pages of the stream buffer once a transfer has been sent
+
+Each guest thread's stream to the host renderer (HvSocketStream, 0001) keeps one buffer for
+everything it sends, and the buffer grows to the largest transfer the thread ever made: a
+picture a CPU wrote (a 2880x2880 one is 32 MiB), a large texture, a big command batch. Its pages
+then stay resident in the process for as long as it runs, though nothing reads them again
+before the next transfer writes them. Once a transfer has been written to the socket, the whole
+pages past the buffer's first 256 KiB are marked free (dsa_spare_pages.h): the kernel takes them
+when the guest reclaims page cache, and a transfer written before then reuses them without a
+fault.
+
+Applies after 0001 on gfxstream d047a57228332d995d36600792fa9ccc26cf8ae6.
+---
+diff --git a/guest/OpenglSystemCommon/HvSocketStream.cpp b/guest/OpenglSystemCommon/HvSocketStream.cpp
+--- a/guest/OpenglSystemCommon/HvSocketStream.cpp
++++ b/guest/OpenglSystemCommon/HvSocketStream.cpp
+@@ -12,6 +12,8 @@
+ #include <unistd.h>
+
+ #include <cutils/log.h>
++
++#include "dsa_spare_pages.h"
+
+ HvSocketStream::HvSocketStream(size_t buffer_size, uint32_t port)
+     : IOStream(buffer_size), fd_(-1), port_(port), buffer_size_(buffer_size), buffer_(nullptr) {}
+@@ -66,7 +68,15 @@
+ }
+
+ int HvSocketStream::commitBuffer(size_t size) {
+-    return size == 0 ? 0 : writeFully(buffer_, size);
++    if (size == 0) {
++        return 0;
++    }
++    const int result = writeFully(buffer_, size);
++    // What was sent is dead: the next transfer writes the buffer again before anything reads
++    // it. Pages past the first part go back when the guest reclaims page cache, so a buffer
++    // that once carried a large transfer does not keep it resident for the process's life.
++    dsa::releaseSparePages(buffer_, size);
++    return result;
+ }
+
+ int HvSocketStream::writeFully(const void* buffer, size_t size) {
