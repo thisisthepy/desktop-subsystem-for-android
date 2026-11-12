@@ -7780,8 +7780,160 @@ class CaptionIsStatusBarTests(unittest.TestCase):
 
     def test_fr22_check_image_checks_services_jar(self):
         script = (Path(make_image.__file__).parent / "check-image.py").read_text()
-        self.assertIn("apk_edits_left(services, code=make_image.SERVICES_CODE)", script)
+        self.assertIn("apk_edits_left(services, code=make_image.SERVICES_INSETS_CODE)", script)
         self.assertIn("zip_misaligned(services)", script)
+
+
+ABI_HELPER = "Lcom/android/server/pm/PackageAbiHelperImpl;"
+NATIVE_64_BIT_ABIS = f"{ABI_HELPER}->getNativelySupported64BitAbis"
+BUILD_64_BIT_ABIS = "Landroid/os/Build;->SUPPORTED_64_BIT_ABIS"
+
+
+def abi_helper_dex(cached=True):
+    """PackageAbiHelperImpl.getNativelySupported64BitAbis of services.jar as d8 compiles Android
+    16's and 17's (the same in both): the cached list, or Build.SUPPORTED_64_BIT_ABIS without
+    the ABIs a native bridge translates, cached. Without `cached`, a build that does not cache
+    it, which the edit is not written for."""
+    methods = [
+        (ABI_HELPER, "getNativelySupported64BitAbis", "L"),
+        (ABI_HELPER, "getNativelySupportedAbis", "LL"),
+    ]
+    fields = [
+        (ABI_HELPER, "sNativelySupported64BitAbis", "[Ljava/lang/String;"),
+        ("Landroid/os/Build;", "SUPPORTED_64_BIT_ABIS", "[Ljava/lang/String;"),
+    ]
+    code = ""
+    if cached:
+        code += "62000000"  # sget-object v0, sNativelySupported64BitAbis
+        code += "38000300"  # if-eqz v0, :derive
+        code += "1100"  # return-object v0
+    code += "62000100"  # :derive sget-object v0, Build.SUPPORTED_64_BIT_ABIS
+    code += "71100100 0000"  # invoke-static {v0}, getNativelySupportedAbis
+    code += "0c00"  # move-result-object v0
+    if cached:
+        code += "69000000"  # sput-object v0, sNativelySupported64BitAbis
+    code += "1100"  # return-object v0
+    return dex_file(methods, {0: (1, bytes.fromhex(code))}, fields)
+
+
+def translation_props(state):
+    """The properties arm-translation-<state>.prop sets."""
+    text = (Path(make_image.__file__).parent / f"arm-translation-{state}.prop").read_text()
+    return dict(line.split("=", 1) for line in text.splitlines() if line and not line.startswith("#"))
+
+
+def guest_64_bit_abis(state):
+    """Build.SUPPORTED_64_BIT_ABIS of the guest with ARM translation `state` ("on" or "off"):
+    ro.product.cpu.abilist64, or the image's own x86_64 where that file sets none."""
+    return translation_props(state).get("ro.product.cpu.abilist64", "x86_64").split(",")
+
+
+def natively_supported(abis, props):
+    """What PackageAbiHelperImpl.getNativelySupportedAbis leaves of `abis`: each ABI no native
+    bridge translates, that is whose instruction set has no ro.dalvik.vm.isa.<isa>."""
+    isa = {"arm64-v8a": "arm64", "x86_64": "x86_64", "armeabi-v7a": "arm", "x86": "x86"}
+    return [abi for abi in abis if not props.get(f"ro.dalvik.vm.isa.{isa[abi]}")]
+
+
+class PackageRefused(Exception):
+    pass
+
+
+def multi_arch_abi(libraries, supported_64, supported_32=()):
+    """The ABI PackageAbiHelperImpl.derivePackageAbi installs a multiArch app for when it
+    targets Android 15 or later and comes without an ABI override, from the ABIs its native
+    libraries are for (`libraries`) and the lists getNativelySupported64BitAbis and
+    getNativelySupported32BitAbis return, or PackageRefused when Android refuses it. Of each
+    list, NativeLibraryHelper.findSupportedAbi takes the first ABI the app has a library for."""
+    def find(supported):
+        if not supported or not libraries:
+            return None
+        found = next((abi for abi in supported if abi in libraries), None)
+        if found is None:
+            raise PackageRefused("INSTALL_FAILED_MULTI_ARCH_NOT_MATCH_ALL_NATIVE_ABIS")
+        return found
+    abi32 = find(list(supported_32))
+    abi64 = find(list(supported_64))
+    return abi64 or abi32
+
+
+class MultiArchAbiTests(unittest.TestCase):
+    """The package manager takes every 64-bit ABI the guest lists for a multiArch app, so an app
+    with arm64-v8a code only installs while ARM translation is on."""
+
+    def edited(self):
+        edited, changed = make_image.edit_dex(abi_helper_dex(), make_image.SERVICES_CODE)
+        self.assertEqual(changed, [NATIVE_64_BIT_ABIS])
+        return edited
+
+    def test_fr25_the_package_manager_takes_every_64_bit_abi_the_guest_lists(self):
+        edited = self.edited()
+        code = dex_code(edited, NATIVE_64_BIT_ABIS)
+        _, _, fields = make_image.dex_ids(edited)
+        # sget-object v0, Build.SUPPORTED_64_BIT_ABIS; return-object v0; the rest no-ops.
+        self.assertEqual(code[:6], struct.pack("<HHH", 0x0062, fields.index(BUILD_64_BIT_ABIS), 0x0011))
+        self.assertEqual(code[6:], bytes(len(code) - 6))
+        # The method keeps its size and the file its length; applied again, nothing changes.
+        self.assertEqual(len(code), len(dex_code(abi_helper_dex(), NATIVE_64_BIT_ABIS)))
+        self.assertEqual(len(edited), len(abi_helper_dex()))
+        self.assertEqual(make_image.edit_dex(edited, make_image.SERVICES_CODE)[1], [])
+        self.assertIn(NATIVE_64_BIT_ABIS, make_image.SERVICES_ABI_CODE)
+
+    def test_fr25_a_package_manager_built_from_other_sources_stops_the_image(self):
+        with self.assertRaisesRegex(ValueError, "built from other sources"):
+            make_image.edit_dex(abi_helper_dex(cached=False), make_image.SERVICES_CODE)
+
+    def test_fr25_the_edited_services_jar_has_both_edits_and_stays_aligned(self):
+        jar = jar_of(abi_helper_dex())
+        self.assertEqual(make_image.apk_edits_left(jar, code=make_image.SERVICES_ABI_CODE),
+                         [f"classes.dex: {NATIVE_64_BIT_ABIS}"])
+        edited = make_image.edit_services_jar(jar, make_image.SERVICES_JAR)
+        self.assertEqual(make_image.apk_edits_left(edited, code=make_image.SERVICES_CODE), [])
+        self.assertEqual(make_image.zip_misaligned(edited), [])
+
+    def test_fr25_check_image_checks_the_package_managers_abis(self):
+        script = (Path(make_image.__file__).parent / "check-image.py").read_text()
+        self.assertIn("apk_edits_left(services, code=make_image.SERVICES_ABI_CODE)", script)
+        self.assertEqual(make_image.SERVICES_CODE,
+                         {**make_image.SERVICES_INSETS_CODE, **make_image.SERVICES_ABI_CODE})
+
+    def test_fr25_the_guest_lists_x86_64_first_and_no_32_bit_abi(self):
+        self.assertEqual(guest_64_bit_abis("on"), ["x86_64", "arm64-v8a"])
+        self.assertEqual(guest_64_bit_abis("off"), ["x86_64"])
+        for state in ("on", "off"):
+            self.assertNotIn("ro.product.cpu.abilist32", translation_props(state))
+            self.assertFalse(any(abi in ("x86", "armeabi-v7a", "armeabi")
+                                 for abi in translation_props(state).get("ro.product.cpu.abilist", "").split(",")))
+
+    def test_fr25_an_app_with_x86_64_and_arm64_code_is_installed_as_x86_64(self):
+        self.edited()
+        for state in ("on", "off"):
+            self.assertEqual(multi_arch_abi({"x86_64", "arm64-v8a"}, guest_64_bit_abis(state)), "x86_64")
+            self.assertEqual(multi_arch_abi({"x86_64"}, guest_64_bit_abis(state)), "x86_64")
+
+    def test_fr25_an_app_with_arm64_code_only_is_installed_as_arm64_while_translation_is_on(self):
+        self.edited()
+        self.assertEqual(multi_arch_abi({"arm64-v8a"}, guest_64_bit_abis("on")), "arm64-v8a")
+        # Before the edit the package manager left the translated ABI out, and refused it.
+        props = translation_props("on")
+        self.assertEqual(natively_supported(guest_64_bit_abis("on"), props), ["x86_64"])
+        with self.assertRaises(PackageRefused):
+            multi_arch_abi({"arm64-v8a"}, natively_supported(guest_64_bit_abis("on"), props))
+
+    def test_fr25_an_app_with_arm64_code_only_is_refused_while_translation_is_off(self):
+        self.edited()
+        with self.assertRaises(PackageRefused):
+            multi_arch_abi({"arm64-v8a"}, guest_64_bit_abis("off"))
+
+    def test_fr25_an_app_with_32_bit_code_only_is_still_refused(self):
+        self.edited()
+        for state in ("on", "off"):
+            for libraries in ({"armeabi-v7a"}, {"x86"}, {"x86", "armeabi-v7a"}):
+                with self.assertRaises(PackageRefused, msg=(state, libraries)):
+                    multi_arch_abi(libraries, guest_64_bit_abis(state))
+
+    def test_fr25_an_app_without_native_code_installs_without_an_abi(self):
+        self.assertIsNone(multi_arch_abi(set(), guest_64_bit_abis("on")))
 
 
 if __name__ == "__main__":

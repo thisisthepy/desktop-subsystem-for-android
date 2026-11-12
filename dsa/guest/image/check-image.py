@@ -9,8 +9,9 @@ missing or was built against another framework-res or another build of the app i
 when Settings' pages would open with their large title folded, when the trace script is missing, when the agent is missing or not signed with the platform key, when
 Settings still has the preferences or code that crash it without Bluetooth, when a list in
 Settings or Files that sets its own padding keeps no room below its last row, when the window
-manager would not give a freeform window its status bar inset or services.jar stores its dex
-unaligned, when the framework overlay's status bar heights are not the window title bar's, when a system
+manager would not give a freeform window its status bar inset, when the package manager would
+refuse a multiArch app with arm64-v8a code only while ARM translation is on, or services.jar
+stores its dex unaligned, when the framework overlay's status bar heights are not the window title bar's, when a system
 app users open is not compiled for the guest's boot image and its own dex, when an app the
 published build shipped compiled lost its odex, vdex or app image, or has one made for
 other dex, another boot image or another compiler filter, when the files
@@ -235,10 +236,16 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
         problems.append(f"{make_image.SERVICES_JAR} is missing")
     else:
         services = z.read(make_image.SERVICES_JAR)
-        left = make_image.apk_edits_left(services, code=make_image.SERVICES_CODE)
+        left = make_image.apk_edits_left(services, code=make_image.SERVICES_INSETS_CODE)
         if left:
             problems.append(f"{make_image.SERVICES_JAR} still has {'; '.join(left)}, so a freeform window "
                             "gets no status bar inset and an app that pads by it draws under the title bar")
+        # The package manager takes every 64-bit ABI the guest lists for a multiArch app, so an
+        # app with arm64-v8a code only installs while ARM translation is on.
+        left = make_image.apk_edits_left(services, code=make_image.SERVICES_ABI_CODE)
+        if left:
+            problems.append(f"{make_image.SERVICES_JAR} still has {'; '.join(left)}, so Android refuses a "
+                            "multiArch app with arm64-v8a code only even while ARM translation is on")
         misaligned = make_image.zip_misaligned(services)
         if misaligned:
             problems.append(f"{make_image.SERVICES_JAR} stores {', '.join(misaligned)} unaligned, so "
