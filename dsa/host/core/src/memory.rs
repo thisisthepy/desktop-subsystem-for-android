@@ -727,6 +727,20 @@ pub fn summary_lines(androids: &dyn UserAndroids, host: &dyn HostMemory) -> Vec<
         .collect()
 }
 
+/// Kernel command line settings that keep what the guest kernel sets aside at boot small, the
+/// same on every host. Each is memory the guest never gets back while it runs.
+/// - `swiotlb=2048`: the bounce buffer for devices that cannot reach all of memory, 4 MiB
+///   (2048 slabs of 2 KiB) instead of 64. The kernel makes it whenever memory may reach past
+///   4 GiB, which a hot-add range makes true, but the VM's disks and network adapter (VMBus on
+///   Hyper-V, virtio elsewhere) reach all of memory and bounce nothing.
+/// - `kfence.sample_interval=0`: no KFENCE pool (2 MiB and its metadata) when the kernel has
+///   KFENCE; nobody reads its reports in a user's VM.
+/// - `dhash_entries`, `ihash_entries`, `thash_entries`, `uhash_entries`: the dentry, inode,
+///   TCP and UDP hash tables sized for a desktop guest's few files and connections, not
+///   scaled to its memory (about 8 MiB for 3 GiB, down to under 1 MiB).
+pub const GUEST_BOOT_MEMORY_CMDLINE: &str = "swiotlb=2048 kfence.sample_interval=0 \
+     dhash_entries=65536 ihash_entries=32768 thash_entries=16384 uhash_entries=1024";
+
 /// The least memory the host's own system keeps when the VM is sized to the host, in MiB.
 pub const HOST_RESERVE_MIN_MB: u64 = 2048;
 

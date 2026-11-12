@@ -4,6 +4,7 @@
 //!     dsa-channeld --keymint-key
 //!     dsa-channeld --cacerts-setup
 //!     dsa-channeld --dns-redirect
+//!     dsa-channeld --memory-report
 //!
 //! It reads the boot's secret from the kernel's bootconfig, connects to the host over
 //! vsock, and keeps the connection, connecting again whenever it is lost. While the host
@@ -15,6 +16,8 @@
 //! over them, so the host's roots can be added beside them later, and exits. With
 //! `--dns-redirect` (as root) it only makes the packet filter rules that send the guest's DNS
 //! queries to its DNS stub match `vendor.dsa.dns`, and exits.
+//! With `--memory-report` it only writes what the guest kernel's memory is made of (as root,
+//! when the shell asks) and exits.
 //! Messages go to standard error, which init sends to the kernel log.
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -870,6 +873,9 @@ mod daemon {
             // A folder that could not be copied is not there, so init's bind of it fails and
             // Android's own folder stays in use.
             return 0;
+        }
+        if std::env::args().nth(1).as_deref() == Some("--memory-report") {
+            return dsa_guest_channeld::memory_report::run(&say_line);
         }
         let options = match options() {
             Ok(options) => options,

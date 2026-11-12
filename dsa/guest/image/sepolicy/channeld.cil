@@ -241,3 +241,29 @@
 ; iptables asks the kernel to load a table's module first, which this kernel has built in.
 (dontaudit dsa_dns_redirect self (capability (sys_module)))
 (dontaudit dsa_dns_redirect kernel (system (module_request)))
+; The memory report: dsa-channeld --memory-report, which init runs as root while developer
+; mode is on and the shell asks (dsa-channeld.rc). It reads what the guest kernel's memory is
+; made of and writes it to the kernel log; nothing it may touch can be written. root and these
+; reads are what /proc/slabinfo and /proc/vmallocinfo need. Every process's status and command
+; line under /proc (each labelled with the process's own domain, at the app's own MLS level for
+; an app, hence mlstrustedsubject), the root cgroup's statistics, and dm-bufio's cache size.
+(type dsa_memory_report)
+(roletype object_r dsa_memory_report)
+(typeattributeset domain (dsa_memory_report))
+(typeattributeset mlstrustedsubject (dsa_memory_report))
+(allow init dsa_memory_report (process (transition siginh rlimitinh)))
+(dontaudit init dsa_memory_report (process (noatsecure)))
+(allow dsa_memory_report dsa_channeld_exec (file (entrypoint read getattr map execute open)))
+(allow dsa_memory_report init (fd (use)))
+(allow dsa_memory_report kmsg_device (chr_file (write append getattr)))
+(allow dsa_memory_report kmsg_debug_device (chr_file (write append getattr)))
+(allow dsa_memory_report proc_meminfo (file (read open getattr)))
+(allow dsa_memory_report proc_slabinfo (file (read open getattr)))
+(allow dsa_memory_report proc_vmallocinfo (file (read open getattr)))
+(allow dsa_memory_report proc (dir (search read open getattr)))
+(allow dsa_memory_report domain (dir (search getattr)))
+(allow dsa_memory_report domain (file (read open getattr)))
+(allow dsa_memory_report cgroup_v2 (dir (search)))
+(allow dsa_memory_report cgroup_v2 (file (read open getattr)))
+(allow dsa_memory_report sysfs (dir (search)))
+(allow dsa_memory_report sysfs (file (read open getattr)))

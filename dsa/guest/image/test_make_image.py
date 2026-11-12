@@ -2578,6 +2578,29 @@ class GuestMemoryTests(unittest.TestCase):
                 policy,
             )
 
+    def test_nfr1_dentries_and_inodes_are_reclaimed_twice_as_readily(self):
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
+            rc = archive.read("VENDOR/etc/init/dsa-memory.rc").decode()
+            self.assertIn("write /proc/sys/vm/vfs_cache_pressure 200", rc)
+            policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+            self.assertIn(
+                '(genfscon proc "/sys/vm/vfs_cache_pressure" (u object_r dsa_proc_vm_tunable',
+                policy,
+            )
+
+    def test_nfr1_system_server_starts_no_service_for_a_radio_virt_wifi_does_not_have(self):
+        # virt_wifi is a station on the host's network: no Wi-Fi Direct, Aware or round-trip
+        # timing, and the Thread HAL is removed. Declared, system_server starts a service and
+        # its threads for each.
+        self.assertIn("com.android.hardware.threadnetwork", make_image.REMOVED_APEXES)
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
+            xml = archive.read("VENDOR/etc/permissions/dsa-unavailable-features.xml").decode()
+        for feature in ["android.hardware.wifi.direct", "android.hardware.wifi.aware",
+                        "android.hardware.wifi.rtt", "android.hardware.thread_network"]:
+            self.assertIn(f'<unavailable-feature name="{feature}" />', xml)
+        # Wi-Fi itself stays: apps see the host's network as a Wi-Fi network.
+        self.assertNotIn('<unavailable-feature name="android.hardware.wifi" />', xml)
+
     def test_nfr1_swapon_all_does_not_stop_at_the_missing_max_comp_streams(self):
         # fs_mgr opens /sys/block/zram0/max_comp_streams for any value of 0 or more, its
         # default, and skips the device when the file is missing, as it is on the guest's
@@ -2682,6 +2705,26 @@ class GuestMemoryTests(unittest.TestCase):
             self.assertIn("(typeattributeset domain (dsa_sharemount))", policy)
             self.assertIn("(typeattributeset domain (dsa_files))", policy)
 
+    def test_nfr1_the_shell_can_ask_root_for_the_kernel_memory_report_only_in_developer_mode(self):
+        # The shell of a user build cannot read /proc/slabinfo or /proc/vmallocinfo; the report
+        # runs as root in a domain that may only read, and only while adb is on.
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp), channeld=True) as archive:
+            rc = archive.read("VENDOR/etc/init/dsa-channeld.rc").decode().splitlines()
+            service = rc.index("service dsa_memory_report /vendor/bin/dsa-channeld --memory-report")
+            block = rc[service:rc.index("", service)]
+            for line in ["    user root", "    group root readproc", "    seclabel u:r:dsa_memory_report:s0",
+                         "    oneshot", "    disabled", "    stdio_to_kmsg"]:
+                self.assertIn(line, block)
+            trigger = rc.index("on property:debug.dsa.memory_report=1 && property:vendor.dsa.adb=1")
+            self.assertEqual(rc[trigger + 1], "    start dsa_memory_report")
+            policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+            self.assertIn("(typeattributeset domain (dsa_memory_report))", policy)
+            for kind in ["proc_slabinfo", "proc_vmallocinfo", "proc_meminfo"]:
+                self.assertIn(f"(allow dsa_memory_report {kind} (file (read open getattr)))", policy)
+            # It writes nothing but its log.
+            writes = re.findall(r"\(allow dsa_memory_report (\S+) \((\S+) \([^)]*\b(?:write|append)\b", policy)
+            self.assertEqual(sorted(writes), [("kmsg_debug_device", "chr_file"), ("kmsg_device", "chr_file")])
+
     def test_nfr1_an_idle_reclaim_swaps_cold_pages_out_before_dropping_caches_and_waits_for_boot(self):
         with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp), channeld=True) as archive:
             rc = archive.read("VENDOR/etc/init/dsa-channeld.rc").decode()
@@ -2700,7 +2743,7 @@ class GuestMemoryTests(unittest.TestCase):
         props = make_image.edit_props("dalvik.vm.heapmaxfree=32m\ndalvik.vm.heapsize=512m\n").splitlines()
         self.assertIn("dalvik.vm.heaptargetutilization=0.75", props)
         self.assertIn("dalvik.vm.heapminfree=512k", props)
-        self.assertIn("dalvik.vm.heapmaxfree=8m", props)
+        self.assertIn("dalvik.vm.heapmaxfree=4m", props)
         self.assertNotIn("dalvik.vm.heapmaxfree=32m", props)
         self.assertIn("dalvik.vm.heapsize=512m", props)
         self.assertNotIn("ro.config.low_ram", "\n".join(props))

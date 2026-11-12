@@ -45,6 +45,20 @@ fn nfr2_freed_memory_is_reported_a_page_at_a_time() {
 }
 
 #[test]
+fn nfr1_the_guest_kernel_sets_aside_as_little_at_boot_as_on_every_host() {
+    let cmdline = for_virtualization_framework(HYPER_V_CMDLINE, "", false);
+    let words: Vec<&str> = cmdline.split_whitespace().collect();
+    for word in dsa_host_core::memory::GUEST_BOOT_MEMORY_CMDLINE.split_whitespace() {
+        assert_eq!(
+            words.iter().filter(|w| **w == word).count(),
+            1,
+            "{word} in {cmdline}"
+        );
+    }
+    assert!(words.contains(&"dhash_entries=65536"), "{cmdline}");
+}
+
+#[test]
 fn fr2_android_finds_its_partitions_on_every_pci_slot() {
     let cmdline = for_virtualization_framework(HYPER_V_CMDLINE, "", false);
     assert!(!cmdline.contains("boot_devices=vmbus"));
