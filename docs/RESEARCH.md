@@ -2612,3 +2612,42 @@ v0.1.9 때도 렌더러는 따로 된 프로세스(`dsa-gfx`)였고, 앱 창 프
 - 모든 값. PC에서 같은 조건(배율이 다른 모니터, Google Play, 크기 변경 추적 켬)으로 `app.summary waited=`, `agent.summary queued=`, "no WxH frame came" 줄의 수를 PR #653과 이 고침 앞뒤로 재야 한다.
 - 1의 남은 비용 가운데 해시가 차지하는 몫. 입력 추적 부팅의 `driver.readback ms_per_read`가 그것을 보인다.
 - Linux 창 관리자의 `wayland` 모듈은 Linux에서만 컴파일되므로 이 PC의 컴파일 확인에 들지 않았다. CI의 Linux 검사가 처음 컴파일한다.
+
+## R34. 앱 창 하나에서 게스트의 "unaccounted" 215 MiB와 클라이언트 타깃 (NFR-1)
+
+**기준.** v0.2.3, Android 17 `16373615-14` 이미지, 디스플레이 2880x2880, FLO 창 하나와 위젯 하나, Google Play 있음. 소유자가 모은 `logs-mem-now.zip`(dumpsys meminfo, dumpsys SurfaceFlinger, logcat 12:58-14:04)과 `mem-now.json`(`dsa memory`의 값)만 읽었다. AOSP frameworks/native `ae266dcb`의 파일과 Linux v6.18의 `hv_balloon.c`, `hyperv_transport.c`, `netvsc_drv.c`를 받아 읽었다. 빌드하거나 실행하지 않았다.
+
+### 클라이언트 타깃이 놓이지 않은 까닭
+
+dumpsys가 주 디스플레이의 표면을 `LegacyFramebufferSurface`로 적는다. Android 17의 SurfaceFlinger는 `wb_framebuffersurface2` 플래그로 `FramebufferSurface`와 `LegacyFramebufferSurface` 가운데 하나를 고르고(`SurfaceFlinger.cpp`의 `processDisplayAdded`), 이 빌드는 플래그가 꺼져 있어 늘 레거시 쪽이다. frameworks/native 0004는 `FramebufferSurface`에만 놓기를 넣었으므로 한 번도 돌지 않았다. 그래서 클라이언트 합성이 없는데(`usesClientComposition=false`, 모든 층 DEVICE) 2880x2880 버퍼 둘(32411 KiB씩)이 남았고, "its buffers are freed" 줄이 logcat에 없었다. Android 16의 `FramebufferSurface`는 레거시와 같은 ConsumerBase 클래스여서 0004가 그대로 듣는다.
+
+### 게스트 RAM이 아닌 것: gralloc 버퍼
+
+meminfo의 DMA-BUF 109,836K는 minigbm이 vkms에서 만든 dumb 버퍼다. vkms의 GEM은 shmem이고 페이지는 처음 쓸 때 생긴다. 게스트에서 그 페이지를 쓰는 것은 CPU가 쓰거나 읽는 버퍼뿐이고(렌더링은 호스트 ColorBuffer로 간다), 같은 때 Shmem 전체가 24,428K다. 그러므로 gralloc 버퍼가 차지하는 게스트 RAM은 많아야 24 MiB이고 그것도 "page cache"에 들어간다. "unaccounted"에는 들지 않는다. 클라이언트 타깃 63 MiB와 FLO의 버퍼 22 MiB는 렌더러 프로세스의 ColorBuffer(호스트 메모리)다.
+
+FLO의 BLAST 버퍼 5개: `VRI[MainActivity]#1`의 4개는 HWUI가 창마다 잡는 수(꺼내지 않는 하나 더하기 셋)다. `#29`의 1개는 같은 창 이름의 두 번째 창(액티비티에 붙은 대화 상자, SurfaceFlinger 층 `#472`가 `#96`을 다 덮는다)이다. 닫힌 태스크의 버퍼는 목록에 없다. 위젯이 보이는 동안의 `ImageReader-663x278` 둘과 `VRI[]#3` 넷(합 5.3 MiB)은 위젯이 쓰는 것이다.
+
+### "unaccounted"를 이루는 것 (추정)
+
+`unaccounted_kb`는 MemTotal - MemFree에서 Cached, Buffers, AnonPages, SReclaimable, SUnreclaim, KernelStack, PageTables, VmallocUsed, Percpu, Hugetlb, zram 사용량을 뺀 값이다(`memory.rs`). `mem-now.json`에서 196,572K, 같은 VM이 2048 MiB이던 때(`idle.txt`) 61 MiB다.
+
+| 후보 | 크기 | 근거 |
+|---|---|---|
+| 핫 애드된 메모리의 struct page | 약 28 MiB | 온라인 3840 MiB 가운데 부팅 뒤 늘어난 1792 MiB, 4 KiB마다 64바이트. 부팅 때의 몫은 MemTotal 밖이다 |
+| VMBus 링 버퍼 | 수 MiB | hv_sock 연결마다 최소 24 KiB씩 두 방향(`RINGBUFFER_HVS_*`, gfxstream은 버퍼 크기를 바꾸지 않는다), netvsc 채널마다 512 KiB씩 두 방향 |
+| SwapCached, KReclaimable에서 SReclaimable을 뺀 것, binder 버퍼 페이지, CPU별 free 페이지 목록 | 재지 않았다 | 이 값들은 보고에 없어서 모두 "unaccounted"에 들어간다 |
+
+`hv_balloon`은 풍선으로 내준 페이지를 MemTotal에서 뺀다(`adjust_managed_page_count`). 핫 애드에서 아직 덮이지 않은 페이지도 MemTotal 밖이다. 그래서 `reserved_at_boot_kb`(온라인 - MemTotal)는 핫 애드 뒤 1,389,360K로 커지고, "부팅 때 커널이 잡은 것"이 아니라 풍선과 덮이지 않은 핫 애드를 함께 센다.
+
+### 고친 것
+
+- frameworks/native 0005(PR #668): `LegacyFramebufferSurface`에 0004와 같은 놓기를 넣었다. 마지막 클라이언트 합성 1초 뒤의 합성 없는 프레임에서 현재 버퍼를 돌려주고 큐의 빈 버퍼를 버리며, HWC가 본 버퍼 ID를 잊고, RenderSurface가 텍스처를 놓게 한다. 시험: `test_nfr1_android17_frees_the_client_target_whichever_framebuffer_surface_it_picks`. Framework build가 develop에서 돈 뒤에야 이미지에 들어간다.
+- hwcomposer(PR #670): 호스트에 다시 붙는 동안 온 클라이언트 프레임도 세어, 클라이언트 타깃을 놓을 프레임을 2초 뒤에 요청한다(`ClientTargetUse`). 시험: `nfr1_a_client_frame_asks_for_the_frame_that_frees_the_client_target`.
+
+기대: 렌더러의 ColorBuffer 63 MiB(2880x2880 둘, 디스플레이가 작으면 그만큼 적다)와 게스트 dumpsys의 DMA-BUF 63 MiB. 게스트 RAM은 거의 줄지 않는다(위).
+
+### 확인하지 못한 것
+
+- 모든 값. 새 Framework 이미지에서 클라이언트 합성(영상 재생) 뒤 logcat의 "its buffers are freed"와 dumpsys의 `LegacyFramebufferSurface` 슬롯이 비는지, 렌더러 private이 63 MiB 줄어드는지 재야 한다.
+- 이 빌드에서 클라이언트 합성 782 프레임(`frame-counter=782`)이 언제 무엇 때문에 생겼는지. logcat에 SurfaceFlinger와 hwcomposer의 정보 줄이 거의 없다.
+- "unaccounted"의 나머지(약 160 MiB). 게스트에서 `/proc/meminfo`의 SwapCached와 KReclaimable, `/proc/vmstat`의 `nr_memmap_pages`, `/proc/zoneinfo`의 pageset `count`, binder 통계를 함께 읽어야 나뉜다.
