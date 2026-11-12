@@ -172,9 +172,9 @@ class TaskComposer {
     // Buffers copied up for a frame not yet composed: a frame still being composed does not
     // know them, and must not let go of their ColorBuffers.
     std::set<uint32_t> mUploadedAhead;
-    // Steady clock milliseconds of the last frame with a client layer; 0 for none since the
-    // client target was let go.
-    int64_t mClientTargetUsedMs = 0;
+    // When SurfaceFlinger last composed into the client target, and when the frame that lets
+    // go of it is due.
+    ClientTargetUse mClientTarget{kReleaseClientTargetMs};
     CpuUploads mUploads;
     bool mWarnedNoDisplay = false;
 

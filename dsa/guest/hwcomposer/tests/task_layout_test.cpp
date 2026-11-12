@@ -632,4 +632,32 @@ TEST(nfr1_the_client_target_is_let_go_after_a_while_without_client_composition) 
     EXPECT_TRUE(!clientTargetHeld(0, 600'000, 2'000));
 }
 
+TEST(nfr1_a_client_frame_asks_for_the_frame_that_frees_the_client_target) {
+    ClientTargetUse use(2'000);
+    // Nothing composed by SurfaceFlinger yet: nothing held, no frame owed.
+    EXPECT_TRUE(!use.held(1'000));
+    EXPECT_TRUE(!use.refreshAt());
+    EXPECT_TRUE(!use.letGo(1'000));
+
+    // A client frame at t = 10 s, which the host may not have seen (it was reconnecting): it
+    // holds SurfaceFlinger's buffers all the same, so the frame at the end of the delay is owed.
+    use.presented(true, 10'000);
+    // Frames without client composition after it change nothing.
+    use.presented(false, 10'500);
+    EXPECT_TRUE(use.held(10'500));
+    EXPECT_TRUE(use.refreshAt() && *use.refreshAt() == 12'000);
+    EXPECT_TRUE(!use.letGo(11'999));
+
+    // The owed frame lets go once, and owes nothing more.
+    const std::optional<int64_t> since = use.letGo(12'000);
+    EXPECT_TRUE(since && *since == 2'000);
+    EXPECT_TRUE(!use.held(12'000));
+    EXPECT_TRUE(!use.refreshAt());
+    EXPECT_TRUE(!use.letGo(20'000));
+
+    // The next client frame starts over.
+    use.presented(true, 30'000);
+    EXPECT_TRUE(use.refreshAt() && *use.refreshAt() == 32'000);
+}
+
 int main() { return ::dsa::test::runAll(); }
