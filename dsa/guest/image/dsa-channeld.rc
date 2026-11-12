@@ -37,6 +37,10 @@ on property:sys.boot_completed=1
 # own compaction then frees the memory the old copies left in its pages. Then the
 # clean page cache and the reclaimable kernel caches are dropped, and compaction leaves whole
 # blocks free, which free page reporting hands back to Hyper-V. Nothing is lost: what left is read back when needed.
+# Last, every free page is reported to the host again (page_reporting.rereport, DSA's kernel):
+# Hyper-V backs a VM's memory in 64 KiB clusters, so a page the guest touches again brings its
+# reported free neighbours back with it, and the guest, which marked them reported, would never
+# offer them again; the per-CPU lists' free pages go to the free lists first.
 # It waits for boot to finish, so a boot still under way does not swap out what it is using;
 # a request made before then stays set, and runs when boot completes.
 on property:vendor.dsa.memory.reclaim=1 && property:sys.boot_completed=1
@@ -49,7 +53,30 @@ on property:vendor.dsa.memory.reclaim=1 && property:sys.boot_completed=1
     write /sys/devices/virtual/block/zram0/compact 1
     write /proc/sys/vm/drop_caches 3
     write /proc/sys/vm/compact_memory 1
+    write /sys/module/page_reporting/parameters/rereport 1
     setprop vendor.dsa.memory.reclaim 0
+
+# zram writeback: what stays cold in zram goes to its backing file on the data disk
+# (fstab.dsa), so the host keeps disk space for it instead of memory. dsa-channeld sets this
+# only after no app has been open for vendor.dsa.memory.writeback_after seconds, at most every
+# ten minutes, and gives it vendor.dsa.memory.writeback_pages, the 4 KiB pages this run may
+# write: what is left of the day's budget, and at most 32 MiB, so init is busy for a fraction
+# of a second. zram counts the budget down as it writes and stops at zero, and it is set back
+# to zero afterwards, so nothing else writes. Only pages untouched for
+# vendor.dsa.memory.writeback_age seconds are marked idle (zram keeps when each page was last
+# read or written, and compressing one again with zstd is not a use). Incompressible pages go
+# first: each one written frees a whole 4 KiB page, a compressed one only its share of one.
+# A page read back leaves the file. Then zram's pages are compacted, and the memory they
+# freed is reported to the host again as after the idle reclaim.
+on property:vendor.dsa.memory.writeback=1 && property:sys.boot_completed=1
+    write /sys/devices/virtual/block/zram0/writeback_limit ${vendor.dsa.memory.writeback_pages}
+    write /sys/devices/virtual/block/zram0/idle ${vendor.dsa.memory.writeback_age}
+    write /sys/devices/virtual/block/zram0/writeback huge_idle
+    write /sys/devices/virtual/block/zram0/writeback idle
+    write /sys/devices/virtual/block/zram0/writeback_limit 0
+    write /sys/devices/virtual/block/zram0/compact 1
+    write /sys/module/page_reporting/parameters/rereport 1
+    setprop vendor.dsa.memory.writeback 0
 
 # The working set trim: dsa-channeld sets this on the first look that finds page cache grown
 # past the guest's working set (an app closed, or files were read), while the guest is not

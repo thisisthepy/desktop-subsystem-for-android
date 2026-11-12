@@ -869,6 +869,28 @@ fn nfr2_memory_given_is_the_vms_size_when_the_host_set_it_below_the_online_block
 }
 
 #[test]
+fn nfr2_the_window_manager_gives_memory_back_again_while_no_window_is_shown() {
+    use dsa_host_core::memory::{IDLE_TRIM_DELAY, IDLE_TRIM_REPEAT};
+    let start = Instant::now();
+    let mut trim = IdleTrim::new(IDLE_TRIM_DELAY, start);
+    assert!(trim.due(start));
+    // What the idle window manager touches meanwhile goes back on the next round, not hours
+    // later.
+    assert!(!trim.due(start + IDLE_TRIM_REPEAT - Duration::from_secs(1)));
+    assert!(trim.due(start + IDLE_TRIM_REPEAT));
+    assert!(!trim.due(start + IDLE_TRIM_REPEAT + Duration::from_secs(1)));
+    assert!(trim.due(start + IDLE_TRIM_REPEAT * 2));
+    // A shown window ends the rounds; closing it starts a new stretch at once.
+    let shown = start + IDLE_TRIM_REPEAT * 2 + Duration::from_secs(10);
+    trim.sync(&[opened(1)], shown);
+    assert!(!trim.due(shown + IDLE_TRIM_REPEAT * 3));
+    let closed = shown + IDLE_TRIM_REPEAT * 3;
+    trim.task_event(Some(&TaskEvent::Removed { task_id: 1 }), closed);
+    assert!(trim.due(closed));
+    assert!(IDLE_TRIM_REPEAT <= Duration::from_secs(5 * 60));
+}
+
+#[test]
 fn nfr2_the_window_manager_gives_memory_back_as_soon_as_no_window_is_open() {
     use dsa_host_core::memory::IDLE_TRIM_DELAY;
     let start = Instant::now();
