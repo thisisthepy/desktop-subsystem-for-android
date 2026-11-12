@@ -2083,6 +2083,9 @@
   <data name="ApkWindow_Reason_invalid-bundle" xml:space="preserve">
     <value>Android가 설치할 수 있는 하나의 앱으로 된 묶음이 아닙니다.</value>
   </data>
+  <data name="ApkWindow_Reason_translation-off" xml:space="preserve">
+    <value>ARM 코드(arm64-v8a)로만 실행되는 앱인데 ARM 번역이 꺼져 있습니다. ARM 앱에서 ARM 번역을 켜고 Android를 다시 시작한 뒤 앱을 다시 설치하세요.</value>
+  </data>
   <data name="UpdatesAndroidHeader.Text" xml:space="preserve">
     <value>Android</value>
   </data>
