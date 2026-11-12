@@ -134,15 +134,77 @@ fn nfr2_a_host_short_of_memory_gets_it_back_with_tasks_open_and_again_while_shor
         reclaimer.decide_under(secs(30), 2, &cache, true),
         Some(Reason::HostShort)
     );
-    // Not again at once, but again after the gap while the host stays short.
+    // Not again at once, and not while nothing has come back: dropping the caches again
+    // would only drop the open apps' working set, which they read straight back.
     assert_eq!(reclaimer.decide_under(secs(60), 2, &cache, true), None);
+    assert_eq!(reclaimer.decide_under(secs(90), 2, &cache, true), None);
+    assert_eq!(reclaimer.decide_under(secs(150), 2, &cache, true), None);
+    // Once 64 MiB or more has come back since, again.
+    let grown = memory(2000, 700);
     assert_eq!(
-        reclaimer.decide_under(secs(90), 2, &cache, true),
+        reclaimer.decide_under(secs(180), 2, &grown, true),
         Some(Reason::HostShort)
     );
     // Once the host is no longer short, the guest keeps what it has.
     reclaimer.host_short(false);
-    assert_eq!(reclaimer.decide_under(secs(200), 2, &cache, true), None);
+    assert_eq!(reclaimer.decide_under(secs(300), 2, &grown, true), None);
+    // A new shortage gets its reclaim at once.
+    reclaimer.host_short(true);
+    assert_eq!(
+        reclaimer.decide_under(secs(360), 2, &grown, true),
+        Some(Reason::HostShort)
+    );
+}
+
+#[test]
+fn nfr1_what_the_apps_read_back_right_after_a_full_reclaim_does_not_raise_the_target() {
+    // The owner's PC, v0.2.3: each cache drop for a host short of memory was followed by some
+    // 400 MiB read back within seconds, which raised the target toward 1 GiB.
+    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
+    reclaimer.refaults(0);
+    reclaimer.host_short(true);
+    assert_eq!(
+        reclaimer.decide_under(secs(30), 2, &memory(2000, 600), true),
+        Some(Reason::HostShort)
+    );
+    for look in 1..=6 {
+        reclaimer.refaults(look * 66 * MIB);
+    }
+    assert_eq!(reclaimer.working_set_target_kb(), 256 * MIB);
+    // After half a minute, what comes back counts again.
+    reclaimer.refaults(6 * 66 * MIB + 40 * MIB);
+    assert_eq!(reclaimer.working_set_target_kb(), 320 * MIB);
+}
+
+#[test]
+fn nfr1_a_working_set_learnt_high_comes_down_by_half_with_each_trim_nobody_reads_back() {
+    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
+    reclaimer.refaults(0);
+    // A trim of 1000 MiB came straight back: the working set was 1 GiB, the most it may be.
+    assert_eq!(
+        reclaimer.decide_under(secs(60), 1, &memory(1000, 1256), false),
+        Some(Reason::Gradual)
+    );
+    assert_eq!(reclaimer.trim_mib(), 1000);
+    reclaimer.refaults(800 * MIB);
+    assert_eq!(reclaimer.working_set_target_kb(), 1024 * MIB);
+    // The need passes: each trim no one reads back halves the way down to 256 MiB, at least
+    // 64 MiB a step. A fixed 64 MiB a step would read 1024, 1024, 960, 896, 832, 768.
+    let mut targets = Vec::new();
+    let mut t = 60;
+    for _ in 0..6 {
+        for _ in 0..20 {
+            reclaimer.refaults(800 * MIB);
+        }
+        let target = reclaimer.working_set_target_kb() / MIB;
+        targets.push(target);
+        t += 10;
+        assert_eq!(
+            reclaimer.decide_under(secs(t), 1, &memory(1000, target + 100), false),
+            Some(Reason::Gradual)
+        );
+    }
+    assert_eq!(targets, [1024, 1024, 640, 448, 352, 288]);
 }
 
 #[test]

@@ -1229,7 +1229,7 @@ fn nfr2_the_guest_memory_grows_when_its_daemon_says_it_is_short() {
         }),
     );
     wait_until("the memory is grown", || {
-        launcher.0.lock().unwrap().memory_sizes == vec![4096]
+        launcher.0.lock().unwrap().memory_sizes == vec![3712]
     });
 }
 
@@ -1248,18 +1248,18 @@ fn nfr2_memory_ballooned_back_to_the_host_is_not_counted_as_reserved_by_the_kern
             stall_centipercent: 0,
         })
     };
-    // Short: the VM grows by hot-add, to what the guest uses plus 1 GiB.
+    // Short: the VM grows by hot-add, to what the guest uses plus 768 MiB of headroom.
     send_body(&mut agent, pressure(1950, 300));
     wait_until("the memory is grown", || {
-        launcher.0.lock().unwrap().memory_sizes == vec![2688]
+        launcher.0.lock().unwrap().memory_sizes == vec![2560]
     });
     // Calm again after the cooldown: it is ballooned back to the base.
     thread::sleep(Duration::from_millis(5100));
     send_body(&mut agent, pressure(2600, 2200));
     wait_until("the memory is given back", || {
-        launcher.0.lock().unwrap().memory_sizes == vec![2688, 2048]
+        launcher.0.lock().unwrap().memory_sizes == vec![2560, 2048]
     });
-    // The hot-added blocks stay online in the guest, which counts 2688 MiB; the kernel kept
+    // The hot-added blocks stay online in the guest, which counts 2560 MiB; the kernel kept
     // 98 MiB of the 2048 MiB the VM has now, and the host has the rest back.
     send_body(
         &mut agent,
@@ -1267,7 +1267,7 @@ fn nfr2_memory_ballooned_back_to_the_host_is_not_counted_as_reserved_by_the_kern
             mem_total_kb: 1950 * 1024,
             mem_free_kb: 1000 * 1024,
             mem_available_kb: 1500 * 1024,
-            mem_online_kb: 2688 * 1024,
+            mem_online_kb: 2560 * 1024,
             ..Default::default()
         }),
     );
@@ -1283,7 +1283,7 @@ fn nfr2_a_resize_that_times_out_is_tried_again_smaller_and_later_resizes_still_h
     {
         let mut guest = launcher.0.lock().unwrap();
         guest.memory_range = Some((3072, 16384));
-        guest.refuse_memory = vec![4096];
+        guest.refuse_memory = vec![3712];
     }
     let (session, mut connector) = session_with(launcher.clone(), WAIT);
     session.start();
@@ -1298,17 +1298,17 @@ fn nfr2_a_resize_that_times_out_is_tried_again_smaller_and_later_resizes_still_h
     };
     send_body(&mut agent, short());
     wait_until("the growth is asked for", || {
-        launcher.0.lock().unwrap().memory_sizes == vec![4096]
+        launcher.0.lock().unwrap().memory_sizes == vec![3712]
     });
     // Within the retry wait nothing more is asked.
     send_body(&mut agent, short());
     thread::sleep(Duration::from_millis(200));
-    assert_eq!(launcher.0.lock().unwrap().memory_sizes, vec![4096]);
+    assert_eq!(launcher.0.lock().unwrap().memory_sizes, vec![3712]);
     // After it, the growth is tried again in a step half the size of the one that failed.
     thread::sleep(Duration::from_millis(5100));
     send_body(&mut agent, short());
     wait_until("the growth is tried again, smaller", || {
-        launcher.0.lock().unwrap().memory_sizes == vec![4096, 3584]
+        launcher.0.lock().unwrap().memory_sizes == vec![3712, 3456]
     });
     // The failure never told the launcher to stop growing.
     assert_eq!(launcher.0.lock().unwrap().growth_failed, 0);
@@ -1362,10 +1362,10 @@ fn nfr2_a_slow_resize_runs_beside_the_session_which_keeps_serving_and_asks_for_n
         changed.notify_all();
     }
     wait_until("the resize lands", || {
-        launcher.0.lock().unwrap().memory_sizes == vec![4096]
+        launcher.0.lock().unwrap().memory_sizes == vec![3712]
     });
     thread::sleep(Duration::from_millis(200));
-    assert_eq!(launcher.0.lock().unwrap().memory_sizes, vec![4096]);
+    assert_eq!(launcher.0.lock().unwrap().memory_sizes, vec![3712]);
     assert_eq!(launcher.0.lock().unwrap().growth_failed, 0);
 }
 

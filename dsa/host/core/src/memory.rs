@@ -824,17 +824,17 @@ pub enum GrowthAction {
 /// ceiling below the maximum.
 ///
 /// - Grow when the guest's available memory falls under a fifth of its total (at least
-///   512 MiB), or when its tasks stall on memory for 10% of the time: to what it uses plus half
-///   again (at least 1 GiB of headroom), the same size a shrink would leave, and by at least
+///   512 MiB), or when its tasks stall on memory for 10% of the time: to what it uses plus
+///   [`headroom_mb`], the same size a shrink would leave, and by at least
 ///   512 MiB, up to the maximum, at most every 5 seconds. Memory added once costs the guest its
 ///   page records (about 1.6% of it) for as long as it runs, even after it has been ballooned
 ///   back to the host, so the VM grows only as far as the guest needs: a step of half the
 ///   current size took a guest with 2560 MiB and 500 MiB available to 3840 MiB, where 3072 MiB
 ///   was enough.
 /// - Shrink on the first report that finds the guest not short, once 5 seconds have passed
-///   since the last change: to what it uses plus half again (at least 1 GiB of headroom),
-///   never below the base. Memory the guest no longer needs goes back at once; the headroom,
-///   not a wait, keeps the size from swinging.
+///   since the last change: to what it uses plus [`headroom_mb`], never below the base. Memory
+///   the guest no longer needs goes back at once; the headroom, and growing and shrinking to
+///   the same size, keep it from swinging.
 /// - If memory added does not show in the guest's total within 30 seconds, give up growing:
 ///   the platform or the guest cannot hot-add.
 /// - A resize the platform refuses or that times out ([`MemoryGrowth::refused`]) leaves the VM
@@ -875,6 +875,15 @@ const HOT_ADD_DEADLINE: Duration = Duration::from_secs(30);
 /// The wait before the first retry of a failed resize; it doubles with each failure in a row.
 const RETRY_FIRST: Duration = Duration::from_secs(5);
 const RETRY_MOST: Duration = Duration::from_secs(5 * 60);
+
+/// The memory the VM keeps beyond what the guest uses, in MiB, when it grows or shrinks: a
+/// third of the use, at least 768 MiB, which is more than the 512 MiB below which the guest
+/// counts as short, so a VM just resized is not short at once. Half the use and at least
+/// 1 GiB, as before, kept a guest that started at 2 GiB and used 1.1 GiB at 2.2 GiB, and one
+/// that used 1.6 GiB at 2.7 GiB, after the need had passed.
+pub fn headroom_mb(used_mb: u64) -> u64 {
+    (used_mb / 3).max(768)
+}
 
 fn round_up_mb(mb: u64) -> u64 {
     mb.div_ceil(GROWTH_GRANULE_MB) * GROWTH_GRANULE_MB
@@ -947,8 +956,8 @@ impl MemoryGrowth {
                 return None;
             }
             let used_mb = p.used_mb();
-            let wanted = round_up_mb(used_mb + (used_mb / 2).max(1024))
-                .max(self.current_mb + GROW_STEP_MIN_MB);
+            let wanted =
+                round_up_mb(used_mb + headroom_mb(used_mb)).max(self.current_mb + GROW_STEP_MIN_MB);
             let mut step = wanted - self.current_mb;
             if let Some(limit) = self.grow_limit_mb {
                 step = step.min(limit);
@@ -965,7 +974,7 @@ impl MemoryGrowth {
             return None;
         }
         let used_mb = p.used_mb();
-        let want = round_up_mb(used_mb + (used_mb / 2).max(1024)).max(self.base_mb);
+        let want = round_up_mb(used_mb + headroom_mb(used_mb)).max(self.base_mb);
         // Not worth a balloon for less than half a gibibyte, unless it is the rest of a shrink
         // that goes back in steps.
         let resuming = self.shrink_goal_mb.is_some();
