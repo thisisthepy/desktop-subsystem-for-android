@@ -545,11 +545,16 @@ DROPPED_PROPS = {"persist.adb.tcp.port", "service.adb.tcp.port"}
 # guest thrash through a full zram. Thrashing past 30% of the time reclaiming counts as
 # pressure too, as on Android Go devices, which have the same small-memory, zram-backed shape.
 #
-# ART keeps less free space in each process's heap, with the values of a 1 GiB phone: the
-# heap is 75% full rather than 60% after a collection, with at most 8 MiB free. Cuttlefish's
-# values are for a 4 GiB phone that has nothing else to do with its memory. The cost is more
-# frequent collections in apps that allocate a lot. The limits on how far a heap may grow stay
-# as they are, so no app has less memory to work with.
+# ART keeps less free space in each process's heap: the heap is 75% full rather than 60%
+# after a collection, as on a 1 GiB phone, with at most 4 MiB free, half a 1 GiB phone's 8 and
+# twice a 512 MiB Android Go phone's 2. Cuttlefish's values are for a 4 GiB phone that has
+# nothing else to do with its memory. The free space matters in the processes with the largest
+# heaps, which are the ones that stay: system_server (its heap holds the state of every
+# service), Google Play services and the app on screen each grow by up to that much between
+# two collections, and none of them is in the background, where ART would trim it. The cost
+# is a collection twice as often in those, which ART does concurrently with pauses well under
+# a millisecond, on a desktop's processor. The limits on how far a heap may grow stay as they
+# are, so no app has less memory to work with.
 #
 # ro.config.low_ram is not set, whatever it would save: it turns off multi-window, and every
 # task here is a freeform window.
@@ -562,7 +567,7 @@ MEMORY_PROPS = {
     "ro.lmk.thrashing_limit": "30",
     "dalvik.vm.heaptargetutilization": "0.75",
     "dalvik.vm.heapminfree": "512k",
-    "dalvik.vm.heapmaxfree": "8m",
+    "dalvik.vm.heapmaxfree": "4m",
 }
 
 # The density of the freeform display every task window lives on, by default: a 100% monitor's.

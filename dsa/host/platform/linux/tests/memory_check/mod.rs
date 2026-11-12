@@ -584,3 +584,356 @@ fn reading_json(r: &Reading) -> serde_json::Value {
 pub fn mib(kb: u64) -> u64 {
     (kb + 512) / 1024
 }
+
+/// KiB to MiB with one decimal, for the smaller kernel parts.
+fn mib1(kb: u64) -> String {
+    format!("{:.1}", kb as f64 / 1024.0)
+}
+
+/// What starts each line of the guest's kernel memory report in the kernel log, after the
+/// daemon's prefix: `dsa-channeld: memory report: <line>`.
+pub const KERNEL_REPORT_MARK: &str = "memory report: ";
+
+/// The property the shell sets to ask the guest for its kernel memory report.
+pub const KERNEL_REPORT_PROPERTY: &str = "debug.dsa.memory_report";
+
+/// The last whole kernel memory report in `log` (a `logcat -b kernel`), its lines without the
+/// mark, `begin` and `end` left out. `None` when no report has both.
+pub fn kernel_report(log: &str) -> Option<Vec<String>> {
+    let mut current: Option<Vec<String>> = None;
+    let mut last = None;
+    for line in log.lines() {
+        let Some((_, rest)) = line.split_once(KERNEL_REPORT_MARK) else {
+            continue;
+        };
+        match rest.trim() {
+            "begin" => current = Some(Vec::new()),
+            "end" => {
+                if let Some(lines) = current.take() {
+                    last = Some(lines);
+                }
+            }
+            other => {
+                if let Some(lines) = current.as_mut() {
+                    lines.push(other.to_string());
+                }
+            }
+        }
+    }
+    last
+}
+
+/// The words of the report's lines of `kind`, after the kind.
+fn report_lines<'a>(lines: &'a [String], kind: &'a str) -> impl Iterator<Item = Vec<&'a str>> {
+    lines.iter().filter_map(move |line| {
+        let mut words = line.split_whitespace();
+        (words.next() == Some(kind)).then(|| words.collect())
+    })
+}
+
+fn number(word: Option<&&str>) -> u64 {
+    word.and_then(|w| w.parse().ok()).unwrap_or(0)
+}
+
+/// The kernel memory report as Markdown for the job's page: what the guest kernel's
+/// unreclaimable slab, vmalloc, kernel stacks and page tables are made of.
+pub fn kernel_markdown(lines: &[String]) -> String {
+    let mut md = String::from("## The guest kernel's memory\n\n");
+    let meminfo: Vec<(String, u64)> = report_lines(lines, "meminfo")
+        .filter_map(|w| Some((w.first()?.to_string(), w.get(1)?.parse().ok()?)))
+        .collect();
+    if !meminfo.is_empty() {
+        md.push_str("| /proc/meminfo | MiB |\n|---|---|\n");
+        for (key, kib) in &meminfo {
+            md.push_str(&format!("| {key} | {} |\n", mib1(*kib)));
+        }
+        md.push('\n');
+    }
+    if let Some(total) = report_lines(lines, "slab-total").next() {
+        md.push_str(&format!(
+            "**Slab: {} caches, {} MiB**, of which {} MiB holds no object in use.\n\n",
+            number(total.first()),
+            mib1(number(total.get(1))),
+            mib1(number(total.get(2)))
+        ));
+        md.push_str("| Slab cache | MiB | Objects in use | Objects | Object size |\n|---|---|---|---|---|\n");
+        for w in report_lines(lines, "slab").take(25) {
+            md.push_str(&format!(
+                "| {} | {} | {} | {} | {} |\n",
+                w.first().unwrap_or(&"?"),
+                mib1(number(w.get(1))),
+                number(w.get(2)),
+                number(w.get(3)),
+                number(w.get(4))
+            ));
+        }
+        md.push('\n');
+    }
+    if let Some(total) = report_lines(lines, "vmalloc-total").next() {
+        md.push_str(&format!(
+            "**vmalloc: {} areas, {} MiB.**\n\n| Caller | MiB | Areas |\n|---|---|---|\n",
+            number(total.first()),
+            mib1(number(total.get(1)))
+        ));
+        for w in report_lines(lines, "vmalloc").take(15) {
+            md.push_str(&format!(
+                "| {} | {} | {} |\n",
+                w.first().unwrap_or(&"?"),
+                mib1(number(w.get(1))),
+                number(w.get(2))
+            ));
+        }
+        md.push('\n');
+    }
+    if let Some(total) = report_lines(lines, "threads-total").next() {
+        let stack = number(total.get(3));
+        md.push_str(&format!(
+            "**Threads: {}** ({} kernel, {} user), each with a {stack} KiB kernel stack.\n\n",
+            number(total.first()),
+            number(total.get(1)),
+            number(total.get(2))
+        ));
+        md.push_str("| Threads of | Kind | Threads | Processes | Kernel stacks MiB |\n|---|---|---|---|---|\n");
+        for kind in ["kernel", "user"] {
+            for w in report_lines(lines, "threads")
+                .filter(|w| w.first() == Some(&kind))
+                .take(15)
+            {
+                let threads = number(w.get(2));
+                md.push_str(&format!(
+                    "| {} | {kind} | {threads} | {} | {} |\n",
+                    w.get(1).unwrap_or(&"?"),
+                    number(w.get(3)),
+                    mib1(threads * stack)
+                ));
+            }
+        }
+        md.push('\n');
+    }
+    let tables: Vec<Vec<&str>> = report_lines(lines, "page-tables").take(10).collect();
+    if !tables.is_empty() {
+        md.push_str("| Page tables of | MiB |\n|---|---|\n");
+        for w in tables {
+            md.push_str(&format!(
+                "| {} | {} |\n",
+                w.first().unwrap_or(&"?"),
+                mib1(number(w.get(1)))
+            ));
+        }
+        md.push('\n');
+    }
+    if let Some(w) = report_lines(lines, "cgroups").next() {
+        md.push_str(&format!(
+            "Control groups: {} live, {} dying (removed, still holding memory charged to them).\n\n",
+            number(w.first()),
+            number(w.get(1))
+        ));
+    }
+    if let Some(w) = report_lines(lines, "bufio").next() {
+        md.push_str(&format!(
+            "dm-bufio (dm-verity's hash block cache): {} MiB.\n\n",
+            mib1(number(w.first()) / 1024)
+        ));
+    }
+    for w in report_lines(lines, "missing") {
+        md.push_str(&format!("Not read: {}.\n\n", w.join(" ")));
+    }
+    md
+}
+
+/// One line of the App Summary of a `dumpsys meminfo <pid>`: its name and its PSS in KiB.
+/// A line with no PSS of its own (`Unknown`, which only has an RSS) is left out.
+pub fn app_summary(meminfo: &str) -> Vec<(String, u64)> {
+    let mut lines = meminfo.lines();
+    if !lines.by_ref().any(|l| l.trim() == "App Summary") {
+        return Vec::new();
+    }
+    let Some(columns) = lines.next() else {
+        return Vec::new();
+    };
+    // The PSS column ends where its heading does; a number that ends further right is RSS.
+    let Some(pss_end) = columns.find("Pss(KB)").map(|at| at + "Pss(KB)".len()) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for line in lines {
+        let trimmed = line.trim();
+        if trimmed.starts_with("TOTAL") {
+            let words: Vec<&str> = trimmed.split_whitespace().collect();
+            for (at, pair) in words.windows(2).enumerate() {
+                if pair[0] == "PSS:" {
+                    let name = if at >= 2 && words[at - 1] == "SWAP" {
+                        "TOTAL SWAP PSS"
+                    } else {
+                        "TOTAL PSS"
+                    };
+                    if let Ok(kb) = pair[1].parse() {
+                        out.push((name.to_string(), kb));
+                    }
+                }
+            }
+            break;
+        }
+        let Some((name, values)) = line.split_once(':') else {
+            continue;
+        };
+        let offset = name.len() + 1;
+        let Some(start) = values.find(|c: char| c.is_ascii_digit()) else {
+            continue;
+        };
+        let digits: String = values[start..]
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect();
+        if offset + start + digits.len() > pss_end + 2 {
+            continue;
+        }
+        if let Ok(kb) = digits.parse() {
+            out.push((name.trim().to_string(), kb));
+        }
+    }
+    out
+}
+
+/// The value after `label` in a `dumpsys meminfo <pid>`'s Objects section
+/// (`Local Binders:`, `Proxy Binders:`, `Death Recipients:`).
+pub fn meminfo_object(meminfo: &str, label: &str) -> Option<u64> {
+    meminfo.lines().find_map(|line| {
+        let (_, after) = line.split_once(label)?;
+        after.split_whitespace().next()?.parse().ok()
+    })
+}
+
+/// Thread names grouped by their shape, every run of digits made `#` (`Binder:1234_3` is
+/// `Binder:#_#`), most threads first.
+pub fn thread_shapes(names: &str) -> Vec<(String, u64)> {
+    let mut groups: Vec<(String, u64)> = Vec::new();
+    for name in names.lines().map(str::trim).filter(|n| !n.is_empty()) {
+        let mut shape = String::new();
+        let mut in_digits = false;
+        for c in name.chars() {
+            if c.is_ascii_digit() {
+                if !in_digits {
+                    shape.push('#');
+                }
+                in_digits = true;
+            } else {
+                shape.push(c);
+                in_digits = false;
+            }
+        }
+        match groups.iter_mut().find(|(s, _)| *s == shape) {
+            Some((_, count)) => *count += 1,
+            None => groups.push((shape, 1)),
+        }
+    }
+    groups.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    groups
+}
+
+/// The services `dumpsys -l` lists.
+pub fn listed_services(list: &str) -> Vec<&str> {
+    list.lines()
+        .filter(|line| line.starts_with("  "))
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect()
+}
+
+/// What the measurement found about system_server, for the report.
+pub struct SystemServer<'a> {
+    /// Its `dumpsys meminfo <pid>`.
+    pub meminfo: &'a str,
+    /// Its threads' names, one a line.
+    pub threads: &'a str,
+    /// `dumpsys -l`.
+    pub services: &'a str,
+    /// The ART heap settings, `<name>=<value>` a line.
+    pub heap_settings: &'a str,
+    /// What asking for a heap dump said.
+    pub heap_dump: &'a str,
+}
+
+/// The system_server part of the report, as Markdown and JSON.
+pub fn system_server_report(s: &SystemServer<'_>) -> (String, serde_json::Value) {
+    let summary = app_summary(s.meminfo);
+    let shapes = thread_shapes(s.threads);
+    let threads: u64 = shapes.iter().map(|(_, n)| n).sum();
+    let services = listed_services(s.services);
+    let mut md = String::from("## system_server\n\n");
+    if summary.is_empty() {
+        md.push_str("Its `dumpsys meminfo` had no App Summary.\n\n");
+    } else {
+        md.push_str("| App Summary | PSS MiB |\n|---|---|\n");
+        for (name, kb) in &summary {
+            md.push_str(&format!("| {name} | {} |\n", mib1(*kb)));
+        }
+        md.push('\n');
+    }
+    let binders: Vec<String> = ["Local Binders:", "Proxy Binders:", "Death Recipients:"]
+        .iter()
+        .filter_map(|label| {
+            meminfo_object(s.meminfo, label)
+                .map(|n| format!("{} {n}", label.trim_end_matches(':').to_lowercase()))
+        })
+        .collect();
+    if !binders.is_empty() {
+        md.push_str(&format!("Binder objects: {}.\n\n", binders.join(", ")));
+    }
+    md.push_str(&format!(
+        "**{threads} threads** (a 16 KiB kernel stack each, about {} MiB), {} system services \
+         listed by `dumpsys -l`.\n\n",
+        mib1(threads * 16),
+        services.len()
+    ));
+    if !shapes.is_empty() {
+        md.push_str("| Thread name | Threads |\n|---|---|\n");
+        for (shape, n) in shapes.iter().take(20) {
+            md.push_str(&format!("| `{shape}` | {n} |\n"));
+        }
+        md.push('\n');
+    }
+    if !s.heap_settings.trim().is_empty() {
+        md.push_str("ART heap settings: ");
+        let settings: Vec<String> = s
+            .heap_settings
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(|l| format!("`{l}`"))
+            .collect();
+        md.push_str(&settings.join(", "));
+        md.push_str(".\n\n");
+    }
+    md.push_str(&format!("Heap dump: {}\n", s.heap_dump.trim()));
+    let json = serde_json::json!({
+        "app_summary_kb": summary
+            .iter()
+            .map(|(name, kb)| serde_json::json!({"name": name, "pss_kb": kb}))
+            .collect::<Vec<_>>(),
+        "threads": threads,
+        "thread_names": shapes
+            .iter()
+            .map(|(shape, n)| serde_json::json!({"name": shape, "threads": n}))
+            .collect::<Vec<_>>(),
+        "services": services,
+        "heap_settings": s.heap_settings.lines().map(str::trim).filter(|l| !l.is_empty()).collect::<Vec<_>>(),
+        "heap_dump": s.heap_dump.trim(),
+    });
+    (md, json)
+}
+
+/// The ART heap settings in a `getprop`'s output, as `<name>=<value>` lines.
+pub fn heap_settings(getprop: &str) -> String {
+    getprop
+        .lines()
+        .filter_map(|line| {
+            let (name, value) = line.trim().split_once("]: [")?;
+            let name = name.strip_prefix('[')?;
+            let value = value.strip_suffix(']')?;
+            name.starts_with("dalvik.vm.heap")
+                .then(|| format!("{name}={value}"))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}

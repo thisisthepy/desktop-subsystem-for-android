@@ -4,16 +4,22 @@
  */
 
 /* What the renderer holds in memory, by owner, so the window manager can say where its
- * committed memory goes; and the trim that lets go of what nothing uses.
+ * committed memory goes.
  *
- * Every Vulkan allocation the renderer makes goes through its device dispatch table:
- * the guest's own allocations (decoded from its streams), the color buffers behind every
- * gralloc buffer, and the textures of task windows imported from Direct3D. Once the
- * renderer is up, the allocate and free entries of that table are wrapped, so each live
- * allocation is counted by kind: memory only the GPU sees, memory the host's CPU maps
- * (which the guest's copies of host-visible memory are written into), and memory imported
- * from another API. A few allocations made while the renderer started are not seen, and a
- * free of one of them is ignored. */
+ * Every Vulkan allocation the renderer makes goes through a device dispatch table: the
+ * renderer's own device holds the color buffers behind every gralloc buffer and the textures
+ * of task windows imported from Direct3D, and each guest process's device holds what that
+ * guest allocates (decoded from its streams). Once the renderer is up, gfxstream hands every
+ * dispatch table it fills to the hook here (the renderer's own, the one it makes again after
+ * a lost device, and each guest device's), and the allocate and free entries of each are
+ * wrapped, so each live allocation is counted by kind: memory only the GPU sees, memory the
+ * host's CPU maps (which the guest's copies of host-visible memory are written into), and
+ * memory imported from another API. A destroyed device takes its allocations with it.
+ *
+ * Without the hook, the table of a device made again after a GPU reset was filled anew
+ * with the driver's entries, and nothing was counted from then on; a guest device's
+ * allocations were never counted. A few allocations made while the renderer started are not
+ * seen, and a free of one of them is ignored. */
 
 #include "dsa_gfx_backend.h"
 #include "dsa_gfx_memory.h"
@@ -21,6 +27,7 @@
 #include <atomic>
 #include <map>
 #include <mutex>
+#include <utility>
 
 #include "FrameBuffer.h"
 #include "vulkan/VkCommonOperations.h"
@@ -39,13 +46,29 @@ struct Allocation {
     Kind kind = Kind::DeviceLocal;
 };
 
+/* The driver's entries of one device's table, which the wrapped ones call. */
+struct DeviceEntries {
+    PFN_vkAllocateMemory allocate = nullptr;
+    PFN_vkFreeMemory free = nullptr;
+};
+
 std::mutex s_mutex;
-std::map<VkDeviceMemory, Allocation> s_live;
+/* Live allocations by device and memory: handles of different devices may be equal. */
+std::map<std::pair<VkDevice, VkDeviceMemory>, Allocation> s_live;
+/* Kept after counting stops: a wrapped table may still be called while the renderer is torn
+ * down, and the call must reach the driver. */
+std::map<VkDevice, DeviceEntries> s_devices;
+/* The first device's entries, for a call naming a device the hook never saw. One driver
+ * serves every device the renderer makes. */
+DeviceEntries s_fallback;
 VkPhysicalDeviceMemoryProperties s_types = {};
-VulkanDispatch* s_dispatch = nullptr;
-PFN_vkAllocateMemory s_allocate = nullptr;
-PFN_vkFreeMemory s_free = nullptr;
+bool s_counting = false;
 std::atomic<int32_t> s_processes{0};
+
+/* The driver's vkDestroyDevice behind the two tables a device is destroyed through: the
+ * decoder's (a guest's device) and the renderer's instance table (its own device). */
+PFN_vkDestroyDevice s_decoder_destroy = nullptr;
+PFN_vkDestroyDevice s_instance_destroy = nullptr;
 
 VkEmulation* emulation() {
     FrameBuffer* fb = FrameBuffer::getFB();
@@ -72,16 +95,30 @@ bool imported(const VkMemoryAllocateInfo* info) {
     return false;
 }
 
+DeviceEntries entries_of(VkDevice device) {
+    std::lock_guard<std::mutex> lock(s_mutex);
+    const auto found = s_devices.find(device);
+    return found != s_devices.end() ? found->second : s_fallback;
+}
+
 VKAPI_ATTR VkResult VKAPI_CALL counted_allocate(VkDevice device,
                                                 const VkMemoryAllocateInfo* info,
                                                 const VkAllocationCallbacks* callbacks,
                                                 VkDeviceMemory* memory) {
-    VkResult result = s_allocate(device, info, callbacks, memory);
+    const DeviceEntries entries = entries_of(device);
+    if (!entries.allocate) {
+        return VK_ERROR_INITIALIZATION_FAILED;
+    }
+    VkResult result = entries.allocate(device, info, callbacks, memory);
     if (result != VK_SUCCESS || !info || !memory) {
         return result;
     }
     Allocation allocation;
     allocation.bytes = info->allocationSize;
+    std::lock_guard<std::mutex> lock(s_mutex);
+    if (!s_counting) {
+        return result;
+    }
     if (imported(info)) {
         allocation.kind = Kind::Imported;
     } else if (info->memoryTypeIndex < s_types.memoryTypeCount &&
@@ -89,19 +126,74 @@ VKAPI_ATTR VkResult VKAPI_CALL counted_allocate(VkDevice device,
                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)) {
         allocation.kind = Kind::HostVisible;
     }
-    std::lock_guard<std::mutex> lock(s_mutex);
-    s_live[*memory] = allocation;
+    s_live[{device, *memory}] = allocation;
     return result;
 }
 
 VKAPI_ATTR void VKAPI_CALL counted_free(VkDevice device,
                                         VkDeviceMemory memory,
                                         const VkAllocationCallbacks* callbacks) {
+    DeviceEntries entries;
     {
         std::lock_guard<std::mutex> lock(s_mutex);
-        s_live.erase(memory);
+        s_live.erase({device, memory});
+        const auto found = s_devices.find(device);
+        entries = found != s_devices.end() ? found->second : s_fallback;
     }
-    s_free(device, memory, callbacks);
+    if (entries.free) {
+        entries.free(device, memory, callbacks);
+    }
+}
+
+/* A device is destroyed: what it still held goes with it. */
+void forget_device(VkDevice device) {
+    std::lock_guard<std::mutex> lock(s_mutex);
+    for (auto it = s_live.lower_bound({device, VkDeviceMemory{}});
+         it != s_live.end() && it->first.first == device;) {
+        it = s_live.erase(it);
+    }
+    s_devices.erase(device);
+}
+
+VKAPI_ATTR void VKAPI_CALL counted_destroy_through_decoder(VkDevice device,
+                                                           const VkAllocationCallbacks* callbacks) {
+    forget_device(device);
+    s_decoder_destroy(device, callbacks);
+}
+
+VKAPI_ATTR void VKAPI_CALL counted_destroy_through_instance(VkDevice device,
+                                                            const VkAllocationCallbacks* callbacks) {
+    forget_device(device);
+    s_instance_destroy(device, callbacks);
+}
+
+/* gfxstream filled `dispatch` from `device`: its allocate and free entries are wrapped. */
+void wrap_device_table(VkDevice device, VulkanDispatch* dispatch) {
+    if (!dispatch || !dispatch->vkAllocateMemory || !dispatch->vkFreeMemory) {
+        return;
+    }
+    if (dispatch->vkAllocateMemory == counted_allocate) {
+        return;
+    }
+    {
+        std::lock_guard<std::mutex> lock(s_mutex);
+        DeviceEntries entries{dispatch->vkAllocateMemory, dispatch->vkFreeMemory};
+        s_devices[device] = entries;
+        if (!s_fallback.allocate) {
+            s_fallback = entries;
+        }
+    }
+    dispatch->vkAllocateMemory = counted_allocate;
+    dispatch->vkFreeMemory = counted_free;
+}
+
+void wrap_destroy(VulkanDispatch* table, PFN_vkDestroyDevice wrapper,
+                  PFN_vkDestroyDevice* original) {
+    if (!table || !table->vkDestroyDevice || table->vkDestroyDevice == wrapper) {
+        return;
+    }
+    *original = table->vkDestroyDevice;
+    table->vkDestroyDevice = wrapper;
 }
 
 }  // namespace
@@ -111,28 +203,26 @@ void dsa_gfx_memory_install(void) {
     if (!emu) {
         return;
     }
-    VulkanDispatch* vk = emu->getDeviceDispatch();
-    if (!vk || !vk->vkAllocateMemory || !vk->vkFreeMemory || vk->vkAllocateMemory == counted_allocate) {
-        return;
-    }
     VulkanDispatch* ivk = emu->getInstanceDispatch();
     if (ivk && ivk->vkGetPhysicalDeviceMemoryProperties) {
         ivk->vkGetPhysicalDeviceMemoryProperties(emu->getPhysicalDevice(), &s_types);
     }
-    s_dispatch = vk;
-    s_allocate = vk->vkAllocateMemory;
-    s_free = vk->vkFreeMemory;
-    vk->vkAllocateMemory = counted_allocate;
-    vk->vkFreeMemory = counted_free;
+    wrap_destroy(gfxstream::vk::vkDispatch(), counted_destroy_through_decoder, &s_decoder_destroy);
+    wrap_destroy(ivk, counted_destroy_through_instance, &s_instance_destroy);
+    {
+        std::lock_guard<std::mutex> lock(s_mutex);
+        s_counting = true;
+    }
+    /* The renderer's own device was made before the hook was set. */
+    wrap_device_table(emu->getDevice(), emu->getDeviceDispatch());
+    gfxstream::vk::setDeviceDispatchHook(wrap_device_table);
 }
 
 void dsa_gfx_memory_uninstall(void) {
+    /* The wrapped entries stay: they forward to the driver, and the teardown still calls
+     * them. Only the count stops. */
     std::lock_guard<std::mutex> lock(s_mutex);
-    if (s_dispatch && s_dispatch->vkAllocateMemory == counted_allocate) {
-        s_dispatch->vkAllocateMemory = s_allocate;
-        s_dispatch->vkFreeMemory = s_free;
-    }
-    s_dispatch = nullptr;
+    s_counting = false;
     s_live.clear();
 }
 
@@ -147,10 +237,10 @@ extern "C" DSA_GFX_EXPORT int dsa_gfx_get_memory_stats(dsa_gfx_memory_stats* out
     *out = dsa_gfx_memory_stats{};
     out->guest_processes = s_processes.load(std::memory_order_relaxed);
     std::lock_guard<std::mutex> lock(s_mutex);
-    if (!s_dispatch) {
+    if (!s_counting) {
         return -1;
     }
-    for (const auto& [memory, allocation] : s_live) {
+    for (const auto& [key, allocation] : s_live) {
         switch (allocation.kind) {
             case Kind::DeviceLocal:
                 out->device_local_bytes += allocation.bytes;

@@ -1140,3 +1140,119 @@ fn nfr5_a_lost_device_is_reported_to_the_guest_and_made_again() {
     cmd_thread.join().expect("command stream ends");
     process.end();
 }
+
+const VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO: u32 = 5;
+const VK_ALLOCATE_MEMORY: u32 = 20021;
+const VK_FREE_MEMORY: u32 = 20022;
+
+/// Allocates `size` bytes of the guest's memory type `type_index` on its `device`: the
+/// memory's handle and the result.
+fn allocate_memory(
+    wire: &mut GfxstreamWire,
+    device: u64,
+    size: u64,
+    type_index: u32,
+) -> (u64, u32) {
+    let body = VkBody::default()
+        .u64(device)
+        .s_type(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO)
+        .u64(size)
+        .u32(type_index)
+        .ptr(false) // pAllocator
+        .u64(0) // pMemory
+        .done();
+    wire.vulkan(VK_ALLOCATE_MEMORY, &body);
+    let memory = wire.read_u64();
+    (memory, wire.read_u32())
+}
+
+/// Frees `memory` of the guest's `device`. Nothing is answered; a later call that is answered
+/// shows it was carried out.
+fn free_memory(wire: &mut GfxstreamWire, device: u64, memory: u64) {
+    let body = VkBody::default()
+        .u64(device)
+        .u64(memory)
+        .ptr(false) // pAllocator
+        .done();
+    wire.vulkan(VK_FREE_MEMORY, &body);
+}
+
+/// Everything the renderer counts, of every kind: KiB and allocations.
+fn counted(adapter: &GfxstreamAdapter) -> (u64, u32) {
+    let memory = adapter
+        .counted_memory()
+        .expect("the renderer counts its allocations while it runs");
+    (
+        memory.device_local_kb + memory.host_visible_kb + memory.imported_kb,
+        memory.device_local_count + memory.host_visible_count + memory.imported_count,
+    )
+}
+
+#[test]
+fn nfr1_the_renderer_counts_every_device_after_a_lost_device() {
+    let Some(adapter) = test_renderer() else {
+        return;
+    };
+    let process = GuestProcess::start(&adapter);
+    let (mut wire, cmd_thread) = process.stream(&adapter);
+    assert!(wire.renderer_version() > 0, "renderControl answers");
+
+    // What a guest allocates on its own device is counted, and stops being counted when it
+    // is freed. The count used to see only the renderer's own device.
+    let device = create_vulkan_device(&mut wire);
+    let (before_kb, before_count) = counted(&adapter);
+    let (memory, result) = allocate_memory(&mut wire, device, 1 << 20, 0);
+    assert_eq!(result, VK_SUCCESS, "vkAllocateMemory");
+    assert_ne!(memory, 0, "vkAllocateMemory returns the memory");
+    let (allocated_kb, allocated_count) = counted(&adapter);
+    assert!(
+        allocated_count > before_count && allocated_kb >= before_kb + 1024,
+        "a guest's 1 MiB allocation is counted ({before_kb} KiB in {before_count} before, \
+         {allocated_kb} KiB in {allocated_count} after)"
+    );
+    free_memory(&mut wire, device, memory);
+    assert_eq!(device_wait_idle(&mut wire, device), VK_SUCCESS);
+    let (freed_kb, freed_count) = counted(&adapter);
+    assert!(
+        freed_count < allocated_count && freed_kb + 1024 <= allocated_kb,
+        "a freed allocation is no longer counted ({allocated_kb} KiB in {allocated_count} \
+         before the free, {freed_kb} KiB in {freed_count} after)"
+    );
+
+    // A color buffer on the renderer's own device.
+    let args = [64u32, 64, GL_RGBA]
+        .iter()
+        .flat_map(|value| value.to_le_bytes())
+        .collect::<Vec<u8>>();
+    wire.render_control(GfxstreamWire::RC_CREATE_COLOR_BUFFER, &args);
+    assert_ne!(wire.read_u32(), 0, "a color buffer is made");
+
+    // A GPU reset: the renderer makes its device again, and the color buffer on it. On the
+    // owner's PC the count read 0 ever after, while the renderer's private memory grew.
+    let before = adapter.device_generation();
+    assert!(
+        adapter.simulate_device_loss(),
+        "the renderer can lose its devices"
+    );
+    // The call that finds the loss starts the remake.
+    wire.render_control(GfxstreamWire::RC_CREATE_COLOR_BUFFER, &args);
+    wire.read_u32();
+    let made = Instant::now();
+    while adapter.device_generation() == before && made.elapsed() < Duration::from_secs(30) {
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(
+        adapter.device_generation(),
+        before + 1,
+        "the renderer made its device again"
+    );
+    let (kb, count) = counted(&adapter);
+    assert!(
+        count >= 1 && kb >= 16,
+        "the color buffers made again on the new device are counted ({kb} KiB in {count})"
+    );
+
+    drop(wire);
+    cmd_thread.join().expect("command stream ends");
+    process.end();
+}

@@ -26,6 +26,12 @@
 # has used for vendor.dsa.memory.writeback_age seconds, and within a daily budget
 # (dsa-channeld.rc). The boot can set both times (androidboot.dsa.zram_writeback_after and
 # androidboot.dsa.zram_writeback_age), for a check that cannot wait for the defaults.
+#
+# The kernel's caches of file names and inodes (dentries and inodes, in slab) are weighed
+# against page cache when memory is reclaimed. At 200, twice the default, each reclaim, the
+# working set trim's included, takes them back twice as readily: a desktop guest walks its
+# APEX packages and app folders at boot and seldom again, and a name looked up again is read
+# from the page cache or the disk in microseconds. The idle reclaim drops them all anyway.
 on boot
     write /sys/devices/virtual/block/zram0/recomp_algorithm "algo=zstd priority=1"
     swapon_all /vendor/etc/fstab.dsa
@@ -35,3 +41,4 @@ on boot
     write /proc/sys/vm/swappiness 100
     write /proc/sys/vm/page-cluster 0
     write /proc/sys/vm/compaction_proactiveness 40
+    write /proc/sys/vm/vfs_cache_pressure 200

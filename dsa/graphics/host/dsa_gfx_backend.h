@@ -254,8 +254,9 @@ DSA_GFX_EXPORT void dsa_gfx_channel_stop(void* channel);
 /* What the renderer holds, by owner: its live Vulkan allocations by kind (memory only the GPU
  * sees, memory the host's CPU maps, which holds the guest's host-visible memory, and memory
  * imported from another API, such as a task window's Direct3D texture), the largest one, and
- * how many guest processes have their process pipe open. Allocations made while the renderer
- * started are not counted. */
+ * how many guest processes have their process pipe open. The allocations of the renderer's
+ * own device (made again after a GPU reset) and of every guest process's device are counted;
+ * those made while the renderer started are not. */
 typedef struct dsa_gfx_memory_stats {
     uint64_t device_local_bytes;
     uint64_t host_visible_bytes;
