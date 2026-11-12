@@ -264,6 +264,16 @@ aapt2 from the Android SDK's build-tools for the system screen overlays.
   permission its privileged apps ask for (`dsa-gapps-privapp-permissions.xml` in each
   partition's `etc/permissions`), so the log should stay empty. `sepolicy/gapps.cil` lets init
   lay the image over.
+- Google Play sees the computer's memory as the device's memory. Play gives a device under
+  8 GB a Chrome whose browser is 32-bit, which this 64-bit only guest cannot start, and the VM
+  starts small and grows. The host passes the computer's physical memory in the bootconfig
+  (`kernel.dsa_host_memory.total_kb`). `dsa-channeld` names the Play Store's and Play services'
+  uids in `vendor.dsa.host_memory.uids`, and `dsa-memory.rc` hands them to the kernel
+  (`/sys/module/dsa_host_memory/parameters/uids`), which shows those apps the computer's memory
+  as `MemTotal` in `/proc/meminfo` and in `sysinfo()`. The framework build's
+  `libandroid_runtime` answers their `ActivityManager.getMemoryInfo` (`totalMem`) with it.
+  Every other app and Android itself see the VM's memory. Only init may write the list and only
+  the daemon may set the property (`sepolicy/memory.cil`), which `check-image.py` checks.
 - The add-on images a user installs (the Google apps, an ARM translation package, Widevine) are on the
   user's add-on disk, which the host builds, one per user, and attaches to the VM read only.
   Its one partition, `dsa_addons`, is an erofs file system holding each image as a plain,

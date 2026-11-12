@@ -100,6 +100,14 @@
 (allow dsa_channeld sysfs_zram (dir (search)))
 (allow dsa_channeld sysfs_zram (file (read open getattr)))
 
+; Google Play sees the computer's memory as the device's: the daemon names the Play Store's and
+; Play services' uids, from the package manager's list, in vendor.dsa.host_memory.uids (its
+; type, dsa_host_memory_prop, is in memory.cil), and init hands them to the kernel. The daemon is
+; the only domain that may set it. Reading the package list is granted in su.cil, which the
+; image always carries with this file.
+(allow dsa_channeld dsa_host_memory_prop (property_service (set)))
+(allow dsa_channeld dsa_host_memory_prop (file (read open getattr map)))
+
 ; The gradual trim skips a guest under memory pressure, which the daemon reads from the
 ; kernel's pressure stall information.
 (allow dsa_channeld proc_pressure_mem (file (read open getattr)))

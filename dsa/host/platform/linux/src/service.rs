@@ -82,8 +82,13 @@ pub fn memory_sizing(limit_mb: u32, total_mb: Option<u64>) -> (u32, Option<u32>)
 }
 
 fn host_total_mb() -> Option<u64> {
+    host_total_kb().map(|total_kb| total_kb / 1024)
+}
+
+/// The computer's physical memory, in KiB.
+fn host_total_kb() -> Option<u64> {
     let text = std::fs::read_to_string("/proc/meminfo").ok()?;
-    crate::devices::power::parse_meminfo(&text).map(|(total_kb, _)| total_kb / 1024)
+    crate::devices::power::parse_meminfo(&text).map(|(total_kb, _)| total_kb)
 }
 
 /// The host's monotonic clock, for the clock lines.
@@ -488,6 +493,9 @@ pub fn create_user_android(
                 + &dsa_host_core::arm_translation::bootconfig_for(&*store, &user, dir, &attached)
                 + &dsa_host_core::gapps::bootconfig_for(&*store, &user, &attached)
                 + &dsa_host_core::widevine::bootconfig_for(&*store, &user, &attached)
+                // The computer's physical memory, read at each start, which Google Play sees
+                // as the device's memory.
+                + &dsa_host_core::host_memory::bootconfig(host_total_kb())
         })
     })
     .with_boot_properties({

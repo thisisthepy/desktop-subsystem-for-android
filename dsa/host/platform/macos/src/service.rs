@@ -58,6 +58,11 @@ pub fn local_user() -> String {
 
 /// The total memory of this Mac, in MiB.
 fn total_memory_mb() -> Option<u64> {
+    total_memory_kb().map(|kb| kb / 1024)
+}
+
+/// The total memory of this Mac, in KiB.
+fn total_memory_kb() -> Option<u64> {
     let mut bytes: u64 = 0;
     let mut len = std::mem::size_of::<u64>();
     let name = c"hw.memsize";
@@ -71,7 +76,7 @@ fn total_memory_mb() -> Option<u64> {
             0,
         )
     };
-    (result == 0).then_some(bytes / (1024 * 1024))
+    (result == 0).then_some(bytes / 1024)
 }
 
 /// Keeps the window manager running. Installed, it has a launchd agent of its own, which is
@@ -303,7 +308,10 @@ impl Planner {
                     &attached,
                 )
                 + &dsa_host_core::gapps::bootconfig_for(&*self.settings, &self.name, &attached)
-                + &dsa_host_core::widevine::bootconfig_for(&*self.settings, &self.name, &attached),
+                + &dsa_host_core::widevine::bootconfig_for(&*self.settings, &self.name, &attached)
+                // The Mac's physical memory, read at each start, which Google Play sees as the
+                // device's memory.
+                + &dsa_host_core::host_memory::bootconfig(total_memory_kb()),
         })
     }
 }
