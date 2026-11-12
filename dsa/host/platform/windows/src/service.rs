@@ -162,30 +162,64 @@ pub fn host_logs_of(config: &HostConfig, sid: &str) -> Vec<HostFile> {
             only_user: Some(sid.to_string()),
         });
     }
+    let user_root = local_app_data(sid)
+        .ok()
+        .map(|dir| crate::paths::UserRoot::in_local_app_data(&dir));
+    // A log in the user's own folder is checked as the user (and never through a link or a
+    // hard link), so the service does not open what the user pointed a link at.
+    let plain_in_user_root = |path: &Path| -> bool {
+        let Some(root) = user_root
+            .as_ref()
+            .filter(|root| crate::safe_fs::is_below(path, root.dir()))
+        else {
+            return true;
+        };
+        if std::fs::symlink_metadata(root.dir()).is_err() {
+            return true;
+        }
+        let check = || -> bool {
+            if crate::safe_fs::guard_below(root.dir(), root.dir()).is_err() {
+                return false;
+            }
+            if let Some(folder) = path.parent() {
+                if std::fs::symlink_metadata(folder).is_err() {
+                    return true;
+                }
+            }
+            crate::safe_fs::guard_files(root.dir(), &[path]).is_ok()
+        };
+        crate::safe_fs::as_user(sid, check).unwrap_or_else(|_| check())
+    };
     if let Ok(user) = config.user_vm(sid) {
-        files.push(HostFile {
-            name: "host/android-console.log".into(),
-            path: user.console_log.clone(),
-            only_user: None,
-        });
-        files.push(HostFile {
-            name: "host/android-console.1.log".into(),
-            path: old_copy_path(&user.console_log),
-            only_user: None,
-        });
+        for (name, path) in [
+            ("host/android-console.log", user.console_log.clone()),
+            (
+                "host/android-console.1.log",
+                old_copy_path(&user.console_log),
+            ),
+        ] {
+            if plain_in_user_root(&path) {
+                files.push(HostFile {
+                    name: name.into(),
+                    path,
+                    only_user: None,
+                });
+            }
+        }
     }
-    if let Ok(dir) = local_app_data(sid) {
-        let root = crate::paths::UserRoot::in_local_app_data(&dir);
-        files.push(HostFile {
-            name: "host/dsa-wm.log".into(),
-            path: root.window_manager_log(),
-            only_user: None,
-        });
-        files.push(HostFile {
-            name: "host/dsa-app-window.log".into(),
-            path: root.app_window_log(),
-            only_user: None,
-        });
+    if let Some(root) = &user_root {
+        for (name, path) in [
+            ("host/dsa-wm.log", root.window_manager_log()),
+            ("host/dsa-app-window.log", root.app_window_log()),
+        ] {
+            if plain_in_user_root(&path) {
+                files.push(HostFile {
+                    name: name.into(),
+                    path,
+                    only_user: None,
+                });
+            }
+        }
     }
     files
 }
@@ -287,16 +321,23 @@ fn serve_host_services(
                     Arc::new(MemorySwitch::default())
                 }
             };
-            // Made at the first backup, never before the user turns backup on.
+            // Made at the first backup, never before the user turns backup on, and used
+            // with the user's own rights.
             let owner = sid.to_string();
             let prepare = Arc::new(move |folder: &Path| {
                 crate::user_disk::prepare_backup_folder(folder, &owner)
             });
+            let access_owner = sid.to_string();
+            let access: dsa_host_core::backup::FileAccess =
+                Arc::new(move |work: &mut dyn FnMut()| {
+                    crate::safe_fs::as_user(&access_owner, work)
+                });
             let made_on = crate::computer_identity::computer_name();
             session.serve_backup(Arc::new(
                 BackupService::new(folder, keys, &made_on)
                     .with_switch(switch)
-                    .with_prepare(prepare),
+                    .with_prepare(prepare)
+                    .with_file_access(access),
             ));
         }
         Err(why) => eprintln!("{sid}: backup: the user's backups cannot be kept: {why}"),
@@ -308,6 +349,21 @@ fn serve_host_services(
     session.serve_passkeys(Arc::new(PasskeyService::new(Arc::new(
         crate::https::WinHttpsGet::default(),
     ))));
+}
+
+/// Holds the folders of a user's Android disk `disk` in their own folder `root`, and checks
+/// the disk and the files beside it are plain files, for as long as the service works on them
+/// (see `crate::safe_fs`). Without `root`, the disk is in a folder only the service writes.
+pub(crate) fn guard_android_disk(
+    root: Option<&Path>,
+    disk: &Path,
+) -> Result<Vec<crate::safe_fs::GuardedDir>, String> {
+    let Some(root) = root else {
+        return Ok(Vec::new());
+    };
+    let version = disk.with_extension("image-version");
+    let partial = disk.with_extension("vhdx.new");
+    crate::safe_fs::guard_files(root, &[disk, &version, &partial])
 }
 
 /// The user's Android: their data disk, VM and session, created on their first request.
@@ -323,25 +379,39 @@ pub fn create_user_android(
     direct_mapped: Option<&Arc<DirectMappedImages>>,
 ) -> Result<Arc<dyn UserAndroid>, String> {
     let user = config.user_vm(sid).map_err(|e| e.to_string())?;
-    if user.disk_in_profile {
-        if let Some(root) = user
-            .config
-            .data_disk
-            .parent()
-            .map(crate::paths::UserRoot::from_dir)
+    // The folder the user's Android disk is in, when it is the user's own: every file the
+    // service touches there is checked and its folders held (see `crate::safe_fs`).
+    let user_root = user
+        .disk_in_profile
+        .then(|| {
+            user.config
+                .data_disk
+                .parent()
+                .map(std::path::Path::to_path_buf)
+        })
+        .flatten();
+    prepare_user_disk_folder(&user.config.data_disk, !user.disk_in_profile)?;
+    if let Some(root) = &user_root {
         {
-            for note in crate::paths::migrate_user_disk(&config.machine_root(), &root, sid) {
+            let _guard = crate::safe_fs::guard_below(root, root)?;
+            for note in crate::paths::migrate_user_disk(
+                &config.machine_root(),
+                &crate::paths::UserRoot::from_dir(root),
+                sid,
+            ) {
                 eprintln!("{build}: {note}");
             }
         }
+        crate::machine_user_folder::prepare(&config.machine_root(), sid)?;
+        move_disks_of(&config.machine_root(), sid, build);
     }
     // Earlier releases wrote each boot's initrd to the service's temporary folder; one a
     // stopped start left there goes.
     let _ = std::fs::remove_file(crate::paths::old_boot_initrd(&user.vm_name));
-    prepare_user_disk_folder(&user.config.data_disk, !user.disk_in_profile)?;
     // With updates the disk is made when the VM first starts, from the image current then:
     // before the first image is downloaded there is nothing to copy it from yet.
     if updates.is_none() {
+        let _guard = guard_android_disk(user_root.as_deref(), &user.config.data_disk)?;
         prepare_user_data_disk(&user.config.data_disk, user.data_disk_size_gb)?;
     }
     let disk_size_gb = user.data_disk_size_gb;
@@ -386,12 +456,14 @@ pub fn create_user_android(
             let store = Arc::clone(&updates.store);
             let base = user.config;
             let config = config.clone();
+            let root = user_root.clone();
             AndroidVmLauncher::with_source(
                 &user.vm_name,
                 Box::new(move || {
                     let current = store.state().map_err(|e| e.to_string())?.current;
                     let files = config.image_files(Some(&store.image_dir(&current.version)));
                     let mut vm = base.clone();
+                    let _guard = guard_android_disk(root.as_deref(), &vm.data_disk)?;
                     // A disk holding a newer Android's data than this image, after the user
                     // chose an older version and agreed to erase it, starts afresh.
                     dsa_host_core::data_reset::erase_if_newer(
@@ -422,6 +494,7 @@ pub fn create_user_android(
         }
     }
     .with_console_log(console_log)
+    .with_user_root(user_root.clone())
     .with_networking({
         // NAT unless the user turned advanced networking on; read at each start.
         let store = settings_store(config);
@@ -889,13 +962,70 @@ fn take_old_trace_markers(config: &HostConfig, store: &dyn SettingsStore, build:
         return;
     }
     for marker in &old.found {
-        match std::fs::remove_file(marker) {
-            Ok(()) => eprintln!(
+        // A marker in a user's folder is removed as itself, never through a link.
+        match crate::safe_fs::remove_plain_file(marker) {
+            Ok(_) => eprintln!(
                 "{build}: {} is now the trace setting, and the file is removed",
                 marker.display()
             ),
             Err(why) => eprintln!("{build}: removing {}: {why}", marker.display()),
         }
+    }
+}
+
+/// Moves the add-on and pstore disks of every user whose Android disk is in their profile out
+/// of their folder into the machine's (see [`crate::machine_user_folder`]), then checks the
+/// images on each add-on disk at low priority, so their first start need not.
+fn move_user_disks(config: &HostConfig, build: &str) {
+    let users: Vec<String> = crate::profile::profiles()
+        .into_iter()
+        .map(|(sid, _)| sid)
+        .filter(|sid| crate::vm::is_sid(sid))
+        .filter(|sid| config.user_vm(sid).is_ok_and(|user| user.disk_in_profile))
+        .collect();
+    let machine = config.machine_root();
+    for sid in &users {
+        move_disks_of(&machine, sid, build);
+    }
+    let config = config.clone();
+    let worker_build = build.to_string();
+    let spawned = thread::Builder::new()
+        .name("dsa-addon-check".into())
+        .spawn(move || {
+            use windows_sys::Win32::System::Threading::{
+                GetCurrentThread, SetThreadPriority, THREAD_MODE_BACKGROUND_BEGIN,
+            };
+            // SAFETY: lowers this thread's own priority, for CPU and for disk reads.
+            unsafe { SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN) };
+            for sid in users {
+                if let Some(path) = config.user_vm(&sid).ok().and_then(|u| u.config.addon_disk) {
+                    let disk = dsa_host_core::addon_disk::AddonDisk::new(
+                        path,
+                        dsa_host_core::addon_disk::Format::Vhd,
+                    );
+                    if disk.path().exists() {
+                        let intact = disk.verify();
+                        eprintln!(
+                            "{worker_build}: {sid}: the add-on disk is checked; {} intact images",
+                            intact.len()
+                        );
+                    }
+                }
+            }
+        });
+    if let Err(error) = spawned {
+        eprintln!("{build}: the add-on disks are checked at each start instead: {error}");
+    }
+}
+
+/// Moves one user's add-on and pstore disks out of their folder, as [`move_user_disks`] does.
+fn move_disks_of(machine: &crate::paths::MachineRoot, sid: &str, build: &str) {
+    let Ok(local) = local_app_data(sid) else {
+        return;
+    };
+    let root = crate::paths::UserRoot::in_local_app_data(&local);
+    for note in crate::machine_user_folder::migrate_disks(machine, &root, sid) {
+        eprintln!("{build}: {sid}: {note}");
     }
 }
 
@@ -1189,6 +1319,7 @@ where
         }
     };
     take_old_trace_markers(&config, &*store, build);
+    move_user_disks(&config, build);
     let host_memory: Arc<dyn HostMemory> = Arc::new(WindowsHostMemory);
     let mut service = HostApiService::new(androids.clone(), build)
         .with_data_reset(Arc::new(crate::data_reset::windows_data_reset(
@@ -1251,12 +1382,15 @@ where
         )
         .with_package_dir(config.machine_root().gapps()),
     );
-    // Each user's add-ons, on the add-on disk beside their Android disk, which their VM
-    // attaches read only.
+    // Each user's add-ons, on their add-on disk, which their VM attaches read only: in the
+    // machine's folder for them when their Android disk is in their profile, else beside it.
     service = service.with_addon_disks({
         let config = config.clone();
         Arc::new(move |sid: &str| {
             let vm = config.user_vm(sid).map_err(|e| e.to_string())?;
+            if vm.disk_in_profile {
+                crate::machine_user_folder::prepare(&config.machine_root(), sid)?;
+            }
             let path = vm
                 .config
                 .addon_disk

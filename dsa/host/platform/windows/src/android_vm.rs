@@ -60,6 +60,9 @@ pub struct AndroidVmLauncher {
     console_report: Option<String>,
     /// Where each boot's initrd, with its secret, is written while the VM starts.
     boot_dir: PathBuf,
+    /// The user's own folder the Android disk is in, when it is in one: its folders are held
+    /// and the disk checked while the VM is let into it (see `crate::safe_fs`).
+    user_root: Option<PathBuf>,
     /// Says what the VM cannot run without and is missing, and tries to provide it.
     prerequisite: Option<Prerequisite>,
     /// The disk the running VM boots from, for what a stalled boot tells the user to do.
@@ -297,6 +300,7 @@ impl AndroidVmLauncher {
             boot_properties: None,
             networking: None,
             direct_mapped: None,
+            user_root: None,
         }
     }
 
@@ -309,6 +313,12 @@ impl AndroidVmLauncher {
         images: Option<Arc<DirectMappedImages>>,
     ) -> AndroidVmLauncher {
         self.direct_mapped = images;
+        self
+    }
+
+    /// Says the Android disk is in the user's own folder `root`, which the user can change.
+    pub fn with_user_root(mut self, root: Option<PathBuf>) -> AndroidVmLauncher {
+        self.user_root = root;
         self
     }
 
@@ -387,6 +397,19 @@ impl AndroidVmLauncher {
         let (Some(pipe), Some(path)) = (&config.console_pipe, &self.console_log) else {
             return None;
         };
+        if let Some(root) = self
+            .user_root
+            .as_deref()
+            .filter(|root| crate::safe_fs::is_below(path, root))
+        {
+            let old = crate::console_log::old_copy_path(path);
+            if let Err(why) = crate::safe_fs::guard_files(root, &[path, &old]) {
+                let why = format!("the Android console is not kept for this boot: {why}");
+                eprintln!("{}: {why}", self.id);
+                self.console_report = Some(why);
+                return None;
+            }
+        }
         let header = boot_header(
             SystemTime::now(),
             config.image_version.as_deref(),
@@ -441,6 +464,10 @@ impl AndroidVmLauncher {
         access.extend(boot.vm_access());
         access.extend(config.pstore_disk.iter().cloned());
         access.extend(config.addon_disk.iter().cloned());
+        // Changing a file's access list as SYSTEM, in a folder its user can change, only on
+        // the very file checked: the folders are held until the VM has it open.
+        let _guard =
+            crate::service::guard_android_disk(self.user_root.as_deref(), &config.data_disk)?;
         for path in &access {
             grant_vm_access(&self.id, path).map_err(|e| {
                 format!(

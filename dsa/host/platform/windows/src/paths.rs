@@ -12,14 +12,17 @@
 //!   tmp\                             files that cannot be avoided, such as each boot's initrd
 //!   direct-mapped\                   the direct-mapped mode's uncompressed system disks, one
 //!                                    per image (only SYSTEM writes there)
+//!   users\<SID>\                     the disks the service makes for each user, which only
+//!                                    SYSTEM and Administrators write and the user may read:
+//!     addons.vhd                     the user's add-ons (Google Play, an ARM translator), a
+//!                                    fixed disk the VM attaches read only; addons.vhd.next is
+//!                                    the one the next start puts in its place, and
+//!                                    addons.vhd.sha256 holds its images' digests
+//!     pstore.vhd                     the guest kernel's last log, a fixed 4 MiB disk
 //!
 //! %LOCALAPPDATA%\DSA                 each user's (the user, SYSTEM and Administrators)
 //!   android.vhdx                     the user's Android disk, which uninstalling keeps
 //!   android.image-version            the image version that disk holds, kept with it
-//!   pstore.vhd                       the guest kernel's last log, a fixed 4 MiB disk
-//!   addons.vhd                       the user's add-ons (Google Play, an ARM translator), a
-//!                                    fixed disk the VM attaches read only; addons.vhd.next is
-//!                                    the one the next start puts in its place
 //!   apps\<package>\                  each app's own window program
 //!   notifications\                   the icons notifications show
 //!   logs\                            dsa-wm.log, dsa-app-window.log
@@ -41,7 +44,10 @@
 //! the machine's `tmp` when it starts ([`clear_tmp`]).
 //!
 //! Some files used to be elsewhere; [`migrate`] moves them, and never removes or replaces a
-//! user's Android disk.
+//! user's Android disk. The add-on disk and the pstore disk were kept in the user's own folder
+//! until the service, which writes them as SYSTEM, moved them into the machine's folder, where
+//! the user cannot change what the service writes; [`UserRoot::old_addon_disk`] and
+//! [`UserRoot::old_pstore_disk`] are where they were.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -135,6 +141,19 @@ impl MachineRoot {
     pub fn old_user_disk(&self, sid: &str) -> PathBuf {
         join(&self.0, &["users", sid, "data.vhdx"])
     }
+    /// The folder of the disks the service makes for the user with SID `sid`:
+    /// `users\<SID>`, which only SYSTEM and Administrators write.
+    pub fn user_dir(&self, sid: &str) -> PathBuf {
+        join(&self.0, &["users", sid])
+    }
+    /// The user's add-on disk, which the VM attaches read only.
+    pub fn user_addon_disk(&self, sid: &str) -> PathBuf {
+        join(&self.0, &["users", sid, "addons.vhd"])
+    }
+    /// The disk the guest kernel of the user's Android keeps its last log on.
+    pub fn user_pstore_disk(&self, sid: &str) -> PathBuf {
+        join(&self.0, &["users", sid, "pstore.vhd"])
+    }
     /// The empty files that turned traces on before they were settings.
     pub fn old_trace_markers(&self) -> [PathBuf; 2] {
         [
@@ -180,12 +199,14 @@ impl UserRoot {
     pub fn android_disk(&self) -> PathBuf {
         join(&self.0, &["android.vhdx"])
     }
-    /// The disk the guest kernel keeps its last log on, which uninstalling removes.
-    pub fn pstore_disk(&self) -> PathBuf {
+    /// Where releases before the machine's `users\<SID>` folder kept the pstore disk; the
+    /// service moves it from here, and uninstalling removes one that is left.
+    pub fn old_pstore_disk(&self) -> PathBuf {
         pstore_disk_beside(&self.android_disk())
     }
-    /// The disk of the add-ons the user installed, which the VM attaches read only.
-    pub fn addon_disk(&self) -> PathBuf {
+    /// Where releases before the machine's `users\<SID>` folder kept the add-on disk, with
+    /// `.next` after it for the pending one; the service moves them from here once.
+    pub fn old_addon_disk(&self) -> PathBuf {
         addon_disk_beside(&self.android_disk())
     }
     /// The image version the Android disk holds, kept beside it and with it.
@@ -265,8 +286,9 @@ impl UserRoot {
 }
 
 /// The pstore disk of the VM whose Android disk is `android_disk`: `pstore.vhd` in the same
-/// folder. For a user root that is [`UserRoot::pstore_disk`]; a VM configured with its disk
-/// elsewhere keeps its pstore disk beside it.
+/// folder. A VM whose disk is in a folder only the service writes (a configured `data_dir`)
+/// keeps its pstore disk beside it; one whose disk is in the user's profile keeps it in the
+/// machine's `users\<SID>` folder ([`MachineRoot::user_pstore_disk`]).
 pub fn pstore_disk_beside(android_disk: &Path) -> PathBuf {
     // By the text, so a Windows path splits the same on every platform the tests run on.
     let text = android_disk.to_string_lossy();

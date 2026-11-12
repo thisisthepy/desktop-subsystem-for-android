@@ -28,6 +28,21 @@ use dsa_host_core::guest_refresh;
 /// More than any real record.
 const MAX_RECORD_BYTES: u64 = 4096;
 
+/// Opens the plain record file `path` below `local_app_data`, refusing links and hard links
+/// in the user's folder.
+fn open_record(local_app_data: &Path, path: &Path) -> Option<std::fs::File> {
+    #[cfg(windows)]
+    {
+        let root = crate::paths::UserRoot::in_local_app_data(local_app_data);
+        if std::fs::symlink_metadata(root.dir()).is_ok() {
+            crate::safe_fs::guard_files(root.dir(), &[path]).ok()?;
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = local_app_data;
+    std::fs::File::open(path).ok()
+}
+
 /// Where the monitors are recorded, below a user's local application data.
 pub fn record_path(local_app_data: &Path) -> PathBuf {
     crate::paths::UserRoot::in_local_app_data(local_app_data).monitors()
@@ -36,7 +51,7 @@ pub fn record_path(local_app_data: &Path) -> PathBuf {
 /// The guest display for the monitors recorded below `local_app_data`, when there is a record
 /// with a usable monitor in it.
 pub fn recorded_display(local_app_data: &Path) -> Option<(u32, u32)> {
-    let file = std::fs::File::open(record_path(local_app_data)).ok()?;
+    let file = open_record(local_app_data, &record_path(local_app_data))?;
     let mut text = String::new();
     file.take(MAX_RECORD_BYTES).read_to_string(&mut text).ok()?;
     display_for(&parse_record(&text))
@@ -62,7 +77,7 @@ pub fn refresh_record_path(local_app_data: &Path) -> PathBuf {
 /// The refresh rate of the fastest monitor recorded below `local_app_data`, in hertz, when
 /// there is a record with a rate in it.
 pub fn recorded_refresh(local_app_data: &Path) -> Option<u32> {
-    let file = std::fs::File::open(refresh_record_path(local_app_data)).ok()?;
+    let file = open_record(local_app_data, &refresh_record_path(local_app_data))?;
     let mut text = String::new();
     file.take(MAX_RECORD_BYTES).read_to_string(&mut text).ok()?;
     guest_refresh::parse_record(&text)
@@ -87,13 +102,11 @@ pub fn density_record_path(local_app_data: &Path) -> PathBuf {
 /// The density Android starts at for the main monitor recorded below `local_app_data`: that
 /// monitor's, or a 100% monitor's when there is no record.
 pub fn recorded_density(local_app_data: &Path) -> u32 {
-    let dpi = std::fs::File::open(density_record_path(local_app_data))
-        .ok()
-        .and_then(|file| {
-            let mut text = String::new();
-            file.take(MAX_RECORD_BYTES).read_to_string(&mut text).ok()?;
-            parse_density_record(&text)
-        });
+    let dpi = open_record(local_app_data, &density_record_path(local_app_data)).and_then(|file| {
+        let mut text = String::new();
+        file.take(MAX_RECORD_BYTES).read_to_string(&mut text).ok()?;
+        parse_density_record(&text)
+    });
     boot_density(dpi)
 }
 
