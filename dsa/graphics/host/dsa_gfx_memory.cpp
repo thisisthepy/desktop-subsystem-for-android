@@ -23,7 +23,7 @@
  *
  * And the trim: a thread that, once a second, lets go of what nothing uses any more without
  * waiting for the guest's next call (the Vulkan objects of destroyed color buffers, whose GPU
- * work has finished). */
+ * work has finished, and the staging buffer once no copy used it for a while). */
 
 #include "dsa_gfx_backend.h"
 #include "dsa_gfx_memory.h"
@@ -212,6 +212,10 @@ std::thread s_trim;
 /* How often the trim looks. Freeing waits for nothing, so a look costs a lock and a check. */
 constexpr std::chrono::seconds kTrimInterval{1};
 
+/* How long the staging buffer stays with no copy using it. A video whose frames a guest CPU
+ * writes uses it every frame and keeps it; a screenshot makes it again in a millisecond. */
+constexpr std::chrono::seconds kStagingIdle{5};
+
 void trim_run() {
     std::unique_lock<std::mutex> lock(s_trim_mutex);
     while (!s_trim_wake.wait_for(lock, kTrimInterval, [] { return s_trim_stop; })) {
@@ -221,6 +225,10 @@ void trim_run() {
              * them; without this they waited for the next color buffer to be made or
              * destroyed, so those of a window that closed last stayed. */
             emu->freeFinishedRetired();
+            /* The staging buffer of CPU reads and writes of color buffers, made as large as
+             * the copy that needed it, goes when no copy used it for a while. It used to be
+             * 128 MiB of host-visible memory held from the start. */
+            emu->releaseIdleStaging(kStagingIdle);
         }
         lock.lock();
     }

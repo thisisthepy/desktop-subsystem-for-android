@@ -1,0 +1,444 @@
+diff --git a/host/vulkan/VkCommonOperations.cpp b/host/vulkan/VkCommonOperations.cpp
+index 7b7835e3d..9be5dd293 100644
+--- a/host/vulkan/VkCommonOperations.cpp
++++ b/host/vulkan/VkCommonOperations.cpp
+@@ -1819,86 +1819,25 @@ std::unique_ptr<VkEmulation> VkEmulation::create(VulkanDispatch* gvk,
+         dvk->vkCreateFence(emulation->mDevice, &fenceCi, nullptr, &emulation->mCommandBufferFence);
+ 
+     if (fenceCreateRes != VK_SUCCESS) {
+         VK_EMU_INIT_RETURN_OR_ABORT_ON_ERROR(
+             fenceCreateRes, "Failed to create fence for command buffer. Error: %s.",
+             string_VkResult(fenceCreateRes));
+     }
+ 
+-    // At this point, the global emulation state's logical device can alloc
+-    // memory and send commands. However, it can't really do much yet to
+-    // communicate the results without the staging buffer. Set that up here.
+-    // Note that the staging buffer is meant to use external memory, with a
+-    // non-external-memory fallback.
+-
+-    VkBufferCreateInfo bufCi = {
+-        VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+-        0,
+-        0,
+-        emulation->mStaging.size,
+-        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+-        VK_SHARING_MODE_EXCLUSIVE,
+-        0,
+-        nullptr,
+-    };
+-
+-    VkResult bufCreateRes =
+-        dvk->vkCreateBuffer(emulation->mDevice, &bufCi, nullptr, &emulation->mStaging.buffer);
+-
+-    if (bufCreateRes != VK_SUCCESS) {
+-        VK_EMU_INIT_RETURN_OR_ABORT_ON_ERROR(bufCreateRes,
+-                                             "Failed to create staging buffer index. Error: %s.",
+-                                             string_VkResult(bufCreateRes));
+-    }
+-
+-    VkMemoryRequirements memReqs;
+-    dvk->vkGetBufferMemoryRequirements(emulation->mDevice, emulation->mStaging.buffer, &memReqs);
+-
+-    emulation->mStaging.memory.size = memReqs.size;
+-
+-    bool gotStagingTypeIndex =
+-        getStagingMemoryTypeIndex(dvk, emulation->mDevice, &emulation->mDeviceInfo.memProps,
+-                                  &emulation->mStaging.memory.typeIndex);
+-
+-    if (!gotStagingTypeIndex) {
+-        VK_EMU_INIT_RETURN_OR_ABORT_ON_ERROR(ABORT_REASON_OTHER,
+-                                             "Failed to determine staging memory type index.");
+-    }
+-
+-    if (!((1 << emulation->mStaging.memory.typeIndex) & memReqs.memoryTypeBits)) {
+-        VK_EMU_INIT_RETURN_OR_ABORT_ON_ERROR(
+-            ABORT_REASON_OTHER,
+-            "Failed: Inconsistent determination of memory type index for staging buffer");
+-    }
+-
+-    if (!emulation->allocExternalMemory(dvk, &emulation->mStaging.memory, false /* not external */,
+-                                        kNullopt /* deviceAlignment */)) {
+-        VK_EMU_INIT_RETURN_OR_ABORT_ON_ERROR(ABORT_REASON_OTHER,
+-                                             "Failed to allocate memory for staging buffer.");
+-    }
+-
+-    VkResult stagingBufferBindRes = dvk->vkBindBufferMemory(
+-        emulation->mDevice, emulation->mStaging.buffer, emulation->mStaging.memory.memory, 0);
+-
+-    if (stagingBufferBindRes != VK_SUCCESS) {
+-        VK_EMU_INIT_RETURN_OR_ABORT_ON_ERROR(stagingBufferBindRes,
+-                                             "Failed to bind memory for staging buffer. Error %s.",
+-                                             string_VkResult(stagingBufferBindRes));
+-    }
++    // The staging buffer is made when a copy first needs it (ensureStagingLocked).
+ 
+     if (debugUtilsAvailableAndRequested) {
+         emulation->mDebugUtilsAvailableAndRequested = true;
+         emulation->mDebugUtilsHelper =
+             DebugUtilsHelper::withUtilsEnabled(emulation->mDevice, emulation->mIvk);
+ 
+         emulation->mDebugUtilsHelper.addDebugLabel(emulation->mInstance, "AEMU_Instance");
+         emulation->mDebugUtilsHelper.addDebugLabel(emulation->mDevice, "AEMU_Device");
+-        emulation->mDebugUtilsHelper.addDebugLabel(emulation->mStaging.buffer,
+-                                                   "AEMU_StagingBuffer");
+         emulation->mDebugUtilsHelper.addDebugLabel(emulation->mCommandBuffer, "AEMU_CommandBuffer");
+     }
+ 
+     if (commandBufferCheckpointsSupportedAndRequested) {
+         emulation->mCommandBufferCheckpointsSupportedAndRequested = true;
+         emulation->mDeviceLostHelper.enableWithNvidiaDeviceDiagnosticCheckpoints();
+     }
+ 
+@@ -1982,19 +1921,17 @@ VkEmulation::~VkEmulation() {
+         freeRetiredLocked(/*wait=*/true);
+     }
+ 
+     mCompositor.use(nullptr);
+     mCompositorVk.reset();
+     mDisplayVk.reset();
+ 
+     if (mDvk && mDevice != VK_NULL_HANDLE) {
+-        freeExternalMemoryLocked(mDvk, &mStaging.memory);
+-
+-        mDvk->vkDestroyBuffer(mDevice, mStaging.buffer, nullptr);
++        releaseStagingLocked();
+         mDvk->vkDestroyFence(mDevice, mCommandBufferFence, nullptr);
+         if (mCommandPool != VK_NULL_HANDLE) {
+             mDvk->vkFreeCommandBuffers(mDevice, mCommandPool, 1, &mCommandBuffer);
+             mDvk->vkDestroyCommandPool(mDevice, mCommandPool, nullptr);
+         }
+     }
+ 
+     if (mIvk && mDevice != VK_NULL_HANDLE) {
+@@ -2414,40 +2351,17 @@ bool VkEmulation::makeDeviceObjectsLocked() {
+     cbAi.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+     cbAi.commandBufferCount = 1;
+     VK_EMU_TRY(dvk->vkAllocateCommandBuffers(mDevice, &cbAi, &mCommandBuffer), false);
+ 
+     VkFenceCreateInfo fenceCi = {};
+     fenceCi.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+     VK_EMU_TRY(dvk->vkCreateFence(mDevice, &fenceCi, nullptr, &mCommandBufferFence), false);
+ 
+-    VkBufferCreateInfo bufCi = {};
+-    bufCi.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+-    bufCi.size = mStaging.size;
+-    bufCi.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+-    bufCi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+-    VK_EMU_TRY(dvk->vkCreateBuffer(mDevice, &bufCi, nullptr, &mStaging.buffer), false);
+-
+-    VkMemoryRequirements memReqs;
+-    dvk->vkGetBufferMemoryRequirements(mDevice, mStaging.buffer, &memReqs);
+-    mStaging.memory = ExternalMemoryInfo{};
+-    mStaging.memory.size = memReqs.size;
+-    if (!getStagingMemoryTypeIndex(dvk, mDevice, &mDeviceInfo.memProps,
+-                                   &mStaging.memory.typeIndex) ||
+-        !((1 << mStaging.memory.typeIndex) & memReqs.memoryTypeBits)) {
+-        ERR("No memory type for the staging buffer of the new Vulkan device.");
+-        return false;
+-    }
+-    if (!allocExternalMemory(dvk, &mStaging.memory, false /* not external */,
+-                             kNullopt /* deviceAlignment */)) {
+-        ERR("Could not allocate the staging buffer of the new Vulkan device.");
+-        return false;
+-    }
+-    VK_EMU_TRY(dvk->vkBindBufferMemory(mDevice, mStaging.buffer, mStaging.memory.memory, 0),
+-               false);
++    // The staging buffer is made again when a copy first needs it.
+     return true;
+ }
+ 
+ VkDevice VkEmulation::releaseLostDeviceLocked(bool* hadCompositor) {
+     auto vk = mDvk;
+ 
+     if (mDevice != VK_NULL_HANDLE) {
+         // Nothing runs on a lost device any more, so nothing is waited for, and Vulkan lets
+@@ -2500,21 +2414,17 @@ VkDevice VkEmulation::releaseLostDeviceLocked(bool* hadCompositor) {
+     // left rather than destroyed: its destructor waits on the lost queue and would end the
+     // process.
+     *hadCompositor = *hadCompositor || mCompositorVk != nullptr;
+     mCompositor.use(nullptr);
+     (void)mCompositorVk.release();
+ 
+     VkDevice lost = mDevice;
+     if (mDevice != VK_NULL_HANDLE) {
+-        if (mStaging.buffer != VK_NULL_HANDLE) {
+-            vk->vkDestroyBuffer(mDevice, mStaging.buffer, nullptr);
+-            mStaging.buffer = VK_NULL_HANDLE;
+-        }
+-        freeExternalMemoryLocked(vk, &mStaging.memory);
++        releaseStagingLocked();
+         if (mCommandBufferFence != VK_NULL_HANDLE) {
+             vk->vkDestroyFence(mDevice, mCommandBufferFence, nullptr);
+             mCommandBufferFence = VK_NULL_HANDLE;
+         }
+         if (mCommandPool != VK_NULL_HANDLE) {
+             vk->vkDestroyCommandPool(mDevice, mCommandPool, nullptr);
+             mCommandPool = VK_NULL_HANDLE;
+         }
+@@ -3796,16 +3706,99 @@ void VkEmulation::freeFinishedRetired() {
+     std::lock_guard<std::mutex> lock(mMutex);
+     // A device being made again has none: the lost one's were freed with it.
+     if (mDevice == VK_NULL_HANDLE || mRetired.empty()) {
+         return;
+     }
+     freeRetiredLocked(/*wait=*/false);
+ }
+ 
++bool VkEmulation::ensureStagingLocked(VkDeviceSize bytes) {
++    mStaging.lastUse = std::chrono::steady_clock::now();
++    if (mStaging.buffer != VK_NULL_HANDLE && mStaging.allocated >= bytes) {
++        return true;
++    }
++    if (bytes > mStaging.size) {
++        ERR("A copy of %llu bytes does not fit the staging buffer's %llu.",
++            static_cast<unsigned long long>(bytes),
++            static_cast<unsigned long long>(mStaging.size));
++        return false;
++    }
++    if (mDevice == VK_NULL_HANDLE) {
++        return false;
++    }
++    // A smaller one goes: every copy that used it has been waited for under mMutex.
++    releaseStagingLocked();
++
++    // Rounded up, so a window that grows a little keeps its buffer.
++    constexpr VkDeviceSize kStep = 4ull * 1048576ull;
++    const VkDeviceSize want = std::min(mStaging.size, (bytes + kStep - 1) / kStep * kStep);
++    auto dvk = mDvk;
++    VkBufferCreateInfo bufCi = {};
++    bufCi.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
++    bufCi.size = want;
++    bufCi.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
++    bufCi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
++    const VkResult made = dvk->vkCreateBuffer(mDevice, &bufCi, nullptr, &mStaging.buffer);
++    if (made != VK_SUCCESS) {
++        mStaging.buffer = VK_NULL_HANDLE;
++        noteDeviceFailure(made, "vkCreateBuffer", __func__, __LINE__);
++        return false;
++    }
++
++    VkMemoryRequirements memReqs;
++    dvk->vkGetBufferMemoryRequirements(mDevice, mStaging.buffer, &memReqs);
++    mStaging.memory = ExternalMemoryInfo{};
++    mStaging.memory.size = memReqs.size;
++    if (!getStagingMemoryTypeIndex(dvk, mDevice, &mDeviceInfo.memProps,
++                                   &mStaging.memory.typeIndex) ||
++        !((1 << mStaging.memory.typeIndex) & memReqs.memoryTypeBits)) {
++        ERR("No memory type for the staging buffer.");
++        releaseStagingLocked();
++        return false;
++    }
++    if (!allocExternalMemory(dvk, &mStaging.memory, false /* not external */,
++                             kNullopt /* deviceAlignment */)) {
++        ERR("Could not allocate the staging buffer (%llu bytes).",
++            static_cast<unsigned long long>(memReqs.size));
++        releaseStagingLocked();
++        return false;
++    }
++    const VkResult bound =
++        dvk->vkBindBufferMemory(mDevice, mStaging.buffer, mStaging.memory.memory, 0);
++    if (bound != VK_SUCCESS) {
++        ERR("Could not bind the staging buffer's memory: %s.", string_VkResult(bound));
++        releaseStagingLocked();
++        return false;
++    }
++    mStaging.allocated = want;
++    return true;
++}
++
++void VkEmulation::releaseStagingLocked() {
++    if (mDvk && mDevice != VK_NULL_HANDLE) {
++        if (mStaging.buffer != VK_NULL_HANDLE) {
++            mDvk->vkDestroyBuffer(mDevice, mStaging.buffer, nullptr);
++        }
++        freeExternalMemoryLocked(mDvk, &mStaging.memory);
++    }
++    mStaging.buffer = VK_NULL_HANDLE;
++    mStaging.memory = ExternalMemoryInfo{};
++    mStaging.allocated = 0;
++}
++
++void VkEmulation::releaseIdleStaging(std::chrono::steady_clock::duration idle) {
++    std::lock_guard<std::mutex> lock(mMutex);
++    if (mStaging.buffer == VK_NULL_HANDLE ||
++        std::chrono::steady_clock::now() - mStaging.lastUse < idle) {
++        return;
++    }
++    releaseStagingLocked();
++}
++
+ void VkEmulation::destroyRetiredLocked(RetiredResource* resource) {
+     auto vk = mDvk;
+     if (resource->imageView != VK_NULL_HANDLE) {
+         vk->vkDestroyImageView(mDevice, resource->imageView, nullptr);
+     }
+     if (resource->ycbcrConversion != VK_NULL_HANDLE) {
+         vk->vkDestroySamplerYcbcrConversion(mDevice, resource->ycbcrConversion, nullptr);
+     }
+@@ -3942,16 +3935,21 @@ bool VkEmulation::readColorBufferToBytesLocked(uint32_t colorBufferHandle, uint3
+     std::vector<VkBufferImageCopy> bufferImageCopies;
+     if (!getFormatTransferInfo(colorBufferInfo->imageCreateInfoShallow.format,
+                                colorBufferInfo->imageCreateInfoShallow.extent.width,
+                                colorBufferInfo->imageCreateInfoShallow.extent.height,
+                                &bufferCopySize, &bufferImageCopies)) {
+         ERR("Failed to read ColorBuffer:%d, unable to get transfer info.", colorBufferHandle);
+         return false;
+     }
++    if (!ensureStagingLocked(bufferCopySize)) {
++        ERR("Failed to read ColorBuffer:%d, no staging buffer for %llu bytes.",
++            colorBufferHandle, static_cast<unsigned long long>(bufferCopySize));
++        return false;
++    }
+ 
+     // Avoid transitioning from VK_IMAGE_LAYOUT_UNDEFINED. Unfortunetly, Android does not
+     // yet have a mechanism for sharing the expected VkImageLayout. However, the Vulkan
+     // spec's image layout transition sections says "If the old layout is
+     // VK_IMAGE_LAYOUT_UNDEFINED, the contents of that range may be discarded." Some
+     // Vulkan drivers have been observed to actually perform the discard which leads to
+     // ColorBuffer-s being unintentionally cleared. See go/ahb-vkimagelayout for a more
+     // thorough write up.
+@@ -4169,21 +4167,20 @@ bool VkEmulation::updateColorBufferFromBytesLocked(uint32_t colorBufferHandle, u
+     if (!getFormatTransferInfo(creationFormat,
+                                colorBufferInfo->imageCreateInfoShallow.extent.width,
+                                colorBufferInfo->imageCreateInfoShallow.extent.height,
+                                &dstBufferSize, &bufferImageCopies)) {
+         ERR("Failed to update ColorBuffer:%d, unable to get transfer info.", colorBufferHandle);
+         return false;
+     }
+ 
+-    const VkDeviceSize stagingBufferSize = mStaging.size;
+-    if (dstBufferSize > stagingBufferSize) {
+-        ERR("Failed to update ColorBuffer:%d, transfer size %" PRIu64
+-            " too large for staging buffer size:%" PRIu64 ".",
+-            colorBufferHandle, dstBufferSize, stagingBufferSize);
++    if (!ensureStagingLocked(dstBufferSize)) {
++        ERR("Failed to update ColorBuffer:%d, no staging buffer for transfer size %" PRIu64
++            ".",
++            colorBufferHandle, dstBufferSize);
+         return false;
+     }
+     const bool isRGBA4onBGRA4 = (colorBufferInfo->internalFormat == GL_RGBA4_OES) &&
+                           (creationFormat == VK_FORMAT_B4G4R4A4_UNORM_PACK16);
+     const bool isThreeByteRgb =
+         (colorBufferInfo->internalFormat == GL_RGB || colorBufferInfo->internalFormat == GL_RGB8);
+     const size_t expectedInputSize = (isThreeByteRgb ? dstBufferSize / 4 * 3 : dstBufferSize);
+ 
+@@ -4677,18 +4674,19 @@ bool VkEmulation::readBufferToBytes(uint32_t bufferHandle, uint64_t offset, uint
+ 
+     auto bufferInfo = android::base::find(mBuffers, bufferHandle);
+     if (!bufferInfo) {
+         ERR("Failed to read from Buffer:%d, not found.", bufferHandle);
+         return false;
+     }
+ 
+     const auto& stagingBufferInfo = mStaging;
+-    if (size > stagingBufferInfo.size) {
+-        ERR("Failed to read from Buffer:%d, staging buffer too small.", bufferHandle);
++    if (!ensureStagingLocked(size)) {
++        ERR("Failed to read from Buffer:%d, no staging buffer for %llu bytes.", bufferHandle,
++            static_cast<unsigned long long>(size));
+         return false;
+     }
+ 
+     const VkCommandBufferBeginInfo beginInfo = {
+         .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+         .pNext = nullptr,
+         .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+     };
+@@ -4763,18 +4761,19 @@ bool VkEmulation::updateBufferFromBytes(uint32_t bufferHandle, uint64_t offset,
+ 
+     auto bufferInfo = android::base::find(mBuffers, bufferHandle);
+     if (!bufferInfo) {
+         ERR("Failed to update Buffer:%d, not found.", bufferHandle);
+         return false;
+     }
+ 
+     const auto& stagingBufferInfo = mStaging;
+-    if (size > stagingBufferInfo.size) {
+-        ERR("Failed to update Buffer:%d, staging buffer too small.", bufferHandle);
++    if (!ensureStagingLocked(size)) {
++        ERR("Failed to update Buffer:%d, no staging buffer for %llu bytes.", bufferHandle,
++            static_cast<unsigned long long>(size));
+         return false;
+     }
+ 
+     const void* srcPtr = bytes;
+     const void* srcPtrOffset =
+         reinterpret_cast<const void*>(reinterpret_cast<const char*>(srcPtr) + offset);
+     void* dstPtr = stagingBufferInfo.memory.mappedPtr;
+     std::memcpy(dstPtr, srcPtrOffset, size);
+diff --git a/host/vulkan/VkCommonOperations.h b/host/vulkan/VkCommonOperations.h
+index 27179c9ab..c4f4d30da 100644
+--- a/host/vulkan/VkCommonOperations.h
++++ b/host/vulkan/VkCommonOperations.h
+@@ -12,16 +12,17 @@
+ // See the License for the specific language governing permissions and
+ // limitations under the License.
+ #pragma once
+ 
+ #include <GLES2/gl2.h>
+ #include <vulkan/vulkan.h>
+ 
+ #include <atomic>
++#include <chrono>
+ #include <cstdint>
+ #include <functional>
+ #include <map>
+ #include <memory>
+ #include <mutex>
+ #include <shared_mutex>
+ #include <string>
+ #include <thread>
+@@ -495,16 +496,20 @@ class VkEmulation {
+     void loseDeviceForTesting();
+ 
+     // Frees the Vulkan objects of destroyed ColorBuffers and Buffers whose GPU work has
+     // finished, without waiting. They are otherwise freed only when the next ColorBuffer or
+     // Buffer is made or destroyed, so those a closed window left (each as large as the
+     // window) stayed until another window came. An embedder calls it now and then.
+     void freeFinishedRetired();
+ 
++    // Frees the staging buffer when no copy has used it for `idle`. The next copy that needs
++    // one makes it again.
++    void releaseIdleStaging(std::chrono::steady_clock::duration idle);
++
+    private:
+     VkEmulation() = default;
+ 
+     std::optional<RepresentativeColorBufferMemoryTypeInfo>
+     findRepresentativeColorBufferMemoryTypeIndexLocked() REQUIRES(mMutex);
+ 
+     struct ImageSupportInfo {
+         // Input parameters
+@@ -724,19 +729,30 @@ class VkEmulation {
+     // ought to be big enough for anybody!
+     static constexpr VkDeviceSize kDefaultStagingBufferSize = 128ULL * 1048576ULL;
+ 
+     struct StagingBufferInfo {
+         // TODO: Don't actually use this as external memory until host visible
+         // external is supported on all platforms
+         ExternalMemoryInfo memory;
+         VkBuffer buffer = VK_NULL_HANDLE;
++        // The most a copy may stage.
+         VkDeviceSize size = kDefaultStagingBufferSize;
++        // What the buffer holds now: 0 while there is none. It is made when a copy needs it,
++        // as large as that copy (rounded up), and freed once no copy used it for a while: a
++        // buffer of `size` made at the start held 128 MiB of host-visible memory (system
++        // memory on an integrated GPU) for the renderer's whole life, mostly unused.
++        VkDeviceSize allocated = 0;
++        std::chrono::steady_clock::time_point lastUse;
+     };
+ 
++    // Makes the staging buffer hold at least `bytes`, or says why it cannot.
++    bool ensureStagingLocked(VkDeviceSize bytes) REQUIRES(mMutex);
++    void releaseStagingLocked() REQUIRES(mMutex);
++
+     // Track what is supported on whatever device was selected.
+     DeviceSupportInfo mDeviceInfo;
+ 
+     // A single staging buffer to perform most transfers to/from OpenGL on the
+     // host. It is shareable across instances. The memory is shareable but the
+     // buffer is not; other users need to create buffers that
+     // bind to imported versions of the memory.
+     StagingBufferInfo mStaging GUARDED_BY(mMutex);
