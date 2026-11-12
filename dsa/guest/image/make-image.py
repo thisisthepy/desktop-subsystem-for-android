@@ -641,12 +641,34 @@ DISPLAY_DPI = 130
 # YouTube incompatible and left YouTube and Chrome out of its search.
 OPENGLES_VERSION = 0x30002
 
+# Where ANGLE puts GL buffers, through its own feature switches (read from these properties in
+# every process, SurfaceFlinger's too). The guest Vulkan driver shares no memory with the host
+# here: it reports each cached host-visible type twice, non-coherent first, read back only when
+# the app invalidates, and as a coherent twin read back each time the app's work finishes, which
+# ANGLE's renderer learns at every frame. ANGLE takes the coherent twin wherever it prefers
+# coherence, so:
+# - preferDeviceLocalMemoryHostVisible off: on a GPU whose device memory is host visible
+#   (integrated, or a virtual GPU with such a heap), a static buffer went to host-visible
+#   coherent memory, where the guest keeps a copy of it and reads it back at every frame. Off,
+#   it stays in device memory and is uploaded through ANGLE's non-coherent staging, as on a
+#   discrete GPU.
+# - preferCachedNoncoherentForDynamicStreamBufferUsage on: buffers the device writes and the
+#   app reads (DYNAMIC_READ, STREAM_COPY and the like) go to the non-coherent cached type, which
+#   ANGLE invalidates before the app reads it, instead of the twin.
+# Buffers the app streams to the device (DYNAMIC_DRAW, STREAM_DRAW) and glReadPixels' staging
+# still prefer coherence, and ANGLE has no switch for them.
+ANGLE_MEMORY_PROPS = {
+    "debug.angle.feature_overrides_disabled": "preferDeviceLocalMemoryHostVisible",
+    "debug.angle.feature_overrides_enabled": "preferCachedNoncoherentForDynamicStreamBufferUsage",
+}
+
 GRAPHICS_PROPS = {
     "ro.hardware.egl": "angle",
     "ro.hardware.vulkan": "ranchu",
     "ro.hardware.gralloc": "minigbm",
     "ro.cpuvulkan.version": "0",
     "ro.opengles.version": str(OPENGLES_VERSION),
+    **ANGLE_MEMORY_PROPS,
 }
 
 # Properties no build.prop may set, whatever the input build's files say: the boot sets them.
