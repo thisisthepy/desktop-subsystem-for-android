@@ -156,6 +156,9 @@ impl<P: Platform> Manager<P> {
             ManagerEvent::Task(event) => {
                 self.app_event(&event, now);
                 let changes = self.windows.apply(&event);
+                for note in self.windows.take_notes() {
+                    self.platform.log(&note);
+                }
                 self.change(changes, now);
                 // A task that took a size its window gave it live outside a drag is
                 // reconfigured for it now, at a size it has.

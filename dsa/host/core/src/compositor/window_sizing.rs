@@ -208,6 +208,25 @@ pub fn clamp_size(size: (u32, u32), max: Option<(u32, u32)>) -> (u32, u32) {
     }
 }
 
+/// The size the guest gives a task asked to take `asked`: no less than its smallest size
+/// `min` and no more than its largest `max` in each direction, the largest winning where the
+/// two cross, as the agent sizes a task.
+pub fn guest_choice(
+    asked: (u32, u32),
+    min: Option<(u32, u32)>,
+    max: Option<(u32, u32)>,
+) -> (u32, u32) {
+    let fit = |length: u32, min: Option<u32>, max: Option<u32>| {
+        let max = max.map_or(u32::MAX, |max| max.max(1));
+        let min = min.unwrap_or(1).clamp(1, max);
+        length.clamp(min, max)
+    };
+    (
+        fit(asked.0, min.map(|m| m.0), max.map(|m| m.0)),
+        fit(asked.1, min.map(|m| m.1), max.map(|m| m.1)),
+    )
+}
+
 /// Where a maximised window of `outer` pixels goes, along one direction, on a work area
 /// that starts at `start` and is `area` pixels long, when the window's border on that side
 /// is `border` pixels thick. A window is never larger than the guest can draw, so on a
@@ -314,6 +333,9 @@ pub struct WindowSizing {
     /// while it follows its monitor. Fixed while the window is scaled, so a report of the task
     /// in between cannot change the scale under the window.
     kept_density: u32,
+    /// A size asked of the guest and the other size the guest gave the task for it, until the
+    /// window manager takes it to log ([`take_clamped`](Self::take_clamped)).
+    clamped: Option<((u32, u32), (u32, u32))>,
 }
 
 impl WindowSizing {
@@ -346,6 +368,7 @@ impl WindowSizing {
                 ScalingMode::App => 0,
                 ScalingMode::System => task.density_dpi,
             },
+            clamped: None,
         }
     }
 
@@ -595,6 +618,20 @@ impl WindowSizing {
                 self.asked = None;
                 None
             }
+            // The guest gave the task the size it gives for the one asked: never less than the
+            // task's smallest size, never more than its largest. That is its answer, and no
+            // report of the size asked will ever come, so the window takes the task's size now
+            // rather than show its frames out of shape until `SETTLE` runs out.
+            Some((asked, _)) if guest_choice(asked, self.min, self.max) == size => {
+                self.asked = None;
+                self.clamped = Some((asked, size));
+                if shown != self.view && !self.dragging {
+                    self.view = shown;
+                    Some(shown)
+                } else {
+                    None
+                }
+            }
             // Still on its way to the size last asked for.
             Some(_) => None,
             None if size != previous && shown != self.view && !self.dragging => {
@@ -603,6 +640,13 @@ impl WindowSizing {
             }
             None => None,
         }
+    }
+
+    /// The size last asked of the guest and the other size the guest gave the task for it,
+    /// once, when the guest's report answered a request with a size kept within the task's
+    /// limits ([`guest_updated`](Self::guest_updated)). The window manager logs it.
+    pub fn take_clamped(&mut self) -> Option<((u32, u32), (u32, u32))> {
+        self.clamped.take()
     }
 
     /// Time has passed. Returns the client size the window must take when the guest has not
@@ -742,6 +786,39 @@ mod tests {
         // it does not keep the configuration the live size held.
         assert_eq!(sizing.tick(start + SETTLE), Some((608, 1080)));
         assert_eq!(sizing.reconfigure(start + SETTLE), resize(608, 1080));
+    }
+
+    #[test]
+    fn fr4_a_size_the_guest_keeps_within_the_tasks_limits_is_taken_as_its_answer() {
+        let mut declared = task(800, 600, 130);
+        declared.min_width = 700;
+        declared.min_height = 500;
+        let mut sizing = WindowSizing::new(&declared);
+        let now = Instant::now();
+        // A window one pixel narrower than the task's smallest size, as rounding at another
+        // scale can make it.
+        assert_eq!(sizing.view_resized((699, 650), now), live_resize(699, 650));
+        // An earlier report, of the size the task had, is no answer.
+        assert_eq!(sizing.guest_updated(&declared), None);
+        assert!(sizing.waiting());
+        assert_eq!(sizing.take_clamped(), None);
+        // The guest gives the task its smallest width instead: that is the answer, at once.
+        let mut given = declared.clone();
+        given.bounds.right = given.bounds.left + 700;
+        given.bounds.bottom = given.bounds.top + 650;
+        assert_eq!(sizing.guest_updated(&given), Some((700, 650)));
+        assert!(!sizing.waiting());
+        assert_eq!(sizing.take_clamped(), Some(((699, 650), (700, 650))));
+        assert_eq!(sizing.take_clamped(), None, "said once");
+        // The task is reconfigured for its size without waiting for `SETTLE`.
+        assert_eq!(sizing.reconfigure(now), resize(700, 650));
+        assert_eq!(sizing.tick(now + SETTLE * 2), None);
+        // Past the largest size the guest draws goes the same way.
+        assert_eq!(
+            guest_choice((2000, 400), Some((700, 500)), Some((1920, 1080))),
+            (1920, 500)
+        );
+        assert_eq!(guest_choice((300, 200), None, None), (300, 200));
     }
 
     #[test]
