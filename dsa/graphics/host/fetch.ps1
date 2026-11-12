@@ -70,6 +70,8 @@ git -C $GfxstreamDir clean -fdx
 # read back or written whole is one GPU job however large the window, 2880x2048 and more for a
 # window maximized on a 200% monitor. Without 0023 the renderer's memory count follows neither the
 # device it makes again after a GPU reset nor any guest's device, so after a reset it reads 0.
+# Without 0024 a fence or semaphore whose operation never looked finished (its fence reset by the
+# guest before it was polled) is leaked, and a device destroyed with such garbage leaks it too.
 # A patch that does not apply stops the fetch.
 $PatchDir = Join-Path $RepoRoot "dsa/graphics/patches"
 $Patches = @(Get-ChildItem -Path $PatchDir -Filter "0001-*.patch") +
@@ -91,7 +93,8 @@ $Patches = @(Get-ChildItem -Path $PatchDir -Filter "0001-*.patch") +
     @(Get-ChildItem -Path $PatchDir -Filter "0020-*.patch") +
     @(Get-ChildItem -Path $PatchDir -Filter "0021-*.patch") +
     @(Get-ChildItem -Path $PatchDir -Filter "0022-*.patch") +
-    @(Get-ChildItem -Path $PatchDir -Filter "0023-*.patch")
+    @(Get-ChildItem -Path $PatchDir -Filter "0023-*.patch") +
+    @(Get-ChildItem -Path $PatchDir -Filter "0024-*.patch")
 foreach ($Patch in $Patches) {
     Write-Host "Applying patch: $($Patch.Name)"
     git -C $GfxstreamDir apply --recount $Patch.FullName
