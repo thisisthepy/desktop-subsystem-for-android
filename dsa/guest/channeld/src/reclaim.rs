@@ -20,7 +20,7 @@
 //! When the host says it is short of memory, the guest gives back what it can at once, as a
 //! phone's low memory killer would: the agent ends the cached app processes first, and the
 //! daemon's next look reclaims whatever that and the caches freed, whether tasks are open or
-//! not, and again every so often while the host stays short.
+//! not, and again while the host stays short each time memory has grown back since.
 //!
 //! Between those, and whether or not the host is short, the guest keeps only its working set:
 //! all the page cache beyond a target goes back in one trim of the coldest pages, on the next
@@ -237,7 +237,8 @@ pub struct ReclaimPolicy {
     /// was in use: the target rises by `min_trim_kb` and that look trims nothing. A quarter of
     /// it or less lets the target fall back by `min_trim_kb`.
     pub refault_limit_kb: u64,
-    /// The least time between two reclaims while the host is short of memory.
+    /// The least time between two reclaims while the host is short of memory. The second also
+    /// waits for [`ReclaimPolicy::idle_growth_kb`] to come back since the first.
     pub host_short_gap: Duration,
 }
 
@@ -297,7 +298,20 @@ pub struct Reclaimer {
     /// The last trim not yet judged: the refault count when it ran, what it took and the
     /// target it left, in KiB.
     trim_mark: Option<TrimMark>,
+    /// Looks left in which refaults say nothing about the working set: a full reclaim dropped
+    /// every cache, and what the running apps read back right after is their own working set
+    /// coming back, not cache a trim took by mistake.
+    refault_settle: u32,
+    /// A reclaim for the host's shortage ran in this stretch of it: the next waits for memory
+    /// to come back first ([`ReclaimPolicy::idle_growth_kb`]).
+    host_short_reclaimed: bool,
 }
+
+/// How many looks after a full reclaim the refaults are not counted (half a minute at
+/// [`CHECK_INTERVAL`]). On the owner's PC each cache drop for a host short of memory was
+/// followed by some 400 MiB read back within seconds; counted, it raised the working set target
+/// 64 MiB a look toward 1 GiB, and the trim then left 500 to 600 MiB of cache in place.
+pub const REFAULT_SETTLE_LOOKS: u32 = 6;
 
 /// A working set trim, as the next looks judge it by what of it comes back.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -326,6 +340,8 @@ impl Reclaimer {
             trim_kb: 0,
             floor_kb: policy.keep_cache_kb,
             trim_mark: None,
+            refault_settle: 0,
+            host_short_reclaimed: false,
         }
     }
 
@@ -339,14 +355,14 @@ impl Reclaimer {
 
     /// Notes a working set trim of `took_kb` that leaves the target: the looks after it judge
     /// it by what of it is read back. The trim before it, if no look found a quarter of it
-    /// back, took cache no app used, so the floor steps down toward `keep_cache_kb` and the
-    /// next trims try for a little more.
+    /// back, took cache no app used, so the floor steps down toward `keep_cache_kb`: half the
+    /// way, at least `min_trim_kb`. A fixed 64 MiB a step took a floor learnt at 1 GiB more than
+    /// ten trims to come back down while the apps that needed it were long gone.
     fn mark_trim(&mut self, took_kb: u64) {
         if self.trim_mark.take().is_some() {
-            self.floor_kb = self
-                .floor_kb
-                .saturating_sub(self.policy.min_trim_kb)
-                .max(self.policy.keep_cache_kb);
+            let keep = self.policy.keep_cache_kb;
+            let step = (self.floor_kb.saturating_sub(keep) / 2).max(self.policy.min_trim_kb);
+            self.floor_kb = self.floor_kb.saturating_sub(step).max(keep);
         }
         if let Some(refaults_kb) = self.last_refaults_kb {
             self.trim_mark = Some(TrimMark {
@@ -375,6 +391,10 @@ impl Reclaimer {
             .last_refaults_kb
             .map(|last| total_kb.saturating_sub(last));
         self.last_refaults_kb = Some(total_kb);
+        if self.refault_settle > 0 {
+            self.refault_settle -= 1;
+            return;
+        }
         let Some(grown) = grown else {
             return;
         };
@@ -447,11 +467,15 @@ impl Reclaimer {
         self.last_reclaim = Some(now);
         self.last_trim = Some(now);
         self.measure_floor = true;
+        self.refault_settle = REFAULT_SETTLE_LOOKS;
         Some(Reason::AppClosed)
     }
 
     /// Takes in whether the host is short of memory, for the decisions that follow.
     pub fn host_short(&mut self, short: bool) {
+        if !short {
+            self.host_short_reclaimed = false;
+        }
         self.host_short = short;
     }
 
@@ -516,8 +540,17 @@ impl Reclaimer {
             >= memory.used_kb().saturating_mul(self.policy.cache_percent);
         // Going idle is the moment the guest stops needing its cache, so the gap does not hold
         // the idle reclaim back.
+        // While the host stays short, the reclaim runs again only once memory has come back
+        // since the last one. Dropping the caches again when nothing grew only drops the open
+        // apps' working set, which they read straight back: on the owner's PC a drop every
+        // minute found 580 to 870 MiB droppable each time, refilled within seconds.
+        let host_short_grew = !self.host_short_reclaimed
+            || self
+                .idle_floor_kb
+                .is_some_and(|floor| memory.reclaimable_kb() >= floor + self.policy.idle_growth_kb);
         let host_short_due = self.host_short
             && idle_worth_it
+            && host_short_grew
             && self
                 .last_reclaim
                 .is_none_or(|last| now.saturating_sub(last) >= self.policy.host_short_gap);
@@ -525,6 +558,7 @@ impl Reclaimer {
             self.idle_reclaimed = true;
             Some(Reason::Idle)
         } else if host_short_due {
+            self.host_short_reclaimed = true;
             Some(Reason::HostShort)
         } else if settled && gap_passed && worth_it && mostly_cache {
             Some(Reason::MostlyCache)
@@ -555,8 +589,9 @@ impl Reclaimer {
             self.last_trim = Some(now);
             self.measure_floor = true;
             // It dropped every cache, so what is read back now says nothing about the trim
-            // before it.
+            // before it, nor about the working set until the apps have read theirs back.
             self.trim_mark = None;
+            self.refault_settle = REFAULT_SETTLE_LOOKS;
         }
         reason
     }
