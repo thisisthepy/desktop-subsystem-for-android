@@ -1311,3 +1311,66 @@ fn nfr2_a_destroyed_color_buffer_is_freed_without_another_call() {
     cmd_thread.join().expect("command stream ends");
     process.end();
 }
+
+const RC_READ_COLOR_BUFFER: u32 = 10023;
+const GL_UNSIGNED_BYTE: u32 = 0x1401;
+
+#[test]
+fn nfr1_the_staging_buffer_is_made_for_a_copy_and_freed_when_idle() {
+    let Some(adapter) = test_renderer() else {
+        return;
+    };
+    let process = GuestProcess::start(&adapter);
+    let (mut wire, cmd_thread) = process.stream(&adapter);
+    assert!(wire.renderer_version() > 0, "renderControl answers");
+
+    let args = [512u32, 512, GL_RGBA]
+        .iter()
+        .flat_map(|value| value.to_le_bytes())
+        .collect::<Vec<u8>>();
+    wire.render_control(GfxstreamWire::RC_CREATE_COLOR_BUFFER, &args);
+    let buffer = wire.read_u32();
+    assert_ne!(buffer, 0, "a color buffer is made");
+    let (made_kb, _) = counted(&adapter);
+
+    // A guest CPU reads the buffer back (1 MiB): the copy goes through a staging buffer,
+    // which is made for it. One of 128 MiB used to be held from the start.
+    let size = 512 * 512 * 4;
+    let read = [buffer, 0, 0, 512, 512, GL_RGBA, GL_UNSIGNED_BYTE, size]
+        .iter()
+        .flat_map(|value| value.to_le_bytes())
+        .collect::<Vec<u8>>();
+    wire.render_control(RC_READ_COLOR_BUFFER, &read);
+    assert_eq!(
+        wire.read(size as usize).len(),
+        size as usize,
+        "the pixels come back"
+    );
+    let (read_kb, _) = counted(&adapter);
+    assert!(
+        read_kb >= made_kb + 1024 && read_kb <= made_kb + 8 * 1024,
+        "a staging buffer as large as the copy is made for it ({made_kb} KiB before the read, \
+         {read_kb} KiB after)"
+    );
+
+    // No copy uses it for a while: it goes, and the color buffer stays.
+    let idle = Instant::now();
+    let mut now_kb = read_kb;
+    while idle.elapsed() < Duration::from_secs(20) {
+        now_kb = counted(&adapter).0;
+        if now_kb + 1024 <= read_kb {
+            break;
+        }
+        thread::sleep(Duration::from_millis(200));
+    }
+    assert!(
+        now_kb + 1024 <= read_kb && now_kb >= made_kb,
+        "the idle staging buffer is freed ({read_kb} KiB after the read, {now_kb} KiB {:?} \
+         later)",
+        idle.elapsed()
+    );
+
+    drop(wire);
+    cmd_thread.join().expect("command stream ends");
+    process.end();
+}

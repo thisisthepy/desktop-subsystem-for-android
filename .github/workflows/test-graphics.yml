@@ -467,6 +467,16 @@ jobs:
         run: |
           cargo test -p dsa-host-windows --test window_manager -- nfr2_a_destroyed_color_buffer_is_freed_without_another_call --nocapture
 
+      - name: Check the staging buffer is made for a copy and freed when idle
+        shell: pwsh
+        working-directory: dsa
+        env:
+          VK_ICD_FILENAMES: ${{ env.LVP_ICD }}
+          VK_DRIVER_FILES: ${{ env.LVP_ICD }}
+          GFXSTREAM_BACKEND_PATH: ${{ github.workspace }}\.scratch\build-host\dist\bin\gfxstream_backend.dll
+        run: |
+          cargo test -p dsa-host-windows --test window_manager -- nfr1_the_staging_buffer_is_made_for_a_copy_and_freed_when_idle --nocapture
+
       - name: Check killing the renderer process keeps the windows and frames resume
         shell: pwsh
         working-directory: dsa
