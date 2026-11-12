@@ -1364,6 +1364,7 @@ impl Manager {
                         | ToHost::CaptionTone { .. }
                         | ToHost::CaptionMode { .. }
                         | ToHost::CaptionBack { .. }
+                        | ToHost::ShownTask { .. }
                         | ToHost::Mode { .. } => {}
                     }
                     link.send(to_wire(&message));

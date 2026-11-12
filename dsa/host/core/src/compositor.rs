@@ -36,6 +36,7 @@ pub mod visible_change;
 pub mod window_hosts;
 pub mod window_mode;
 pub mod window_sizing;
+pub mod window_tasks;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;

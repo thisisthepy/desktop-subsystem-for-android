@@ -53,6 +53,7 @@ use dsa_host_core::compositor::window_mode::{picture_in_picture_place, ModeState
 use dsa_host_core::compositor::window_sizing::{
     maximized_outer, maximized_position, min_client_size, rescaled_rect, to_task_size,
 };
+use dsa_host_core::compositor::window_tasks::WindowTasks;
 use dsa_host_core::input::InputEvent;
 use windows_sys::Win32::Foundation::{
     GetLastError, ERROR_CLASS_ALREADY_EXISTS, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM,
@@ -235,6 +236,8 @@ pub struct UiSetup {
     /// Dials the service's local API to watch a task's accessibility tree, while a UI
     /// Automation client reads its window. `None` answers clients with an empty tree.
     pub accessibility: Option<ApiConnect>,
+    /// The task each window shows, which a window's accessibility tree is watched for.
+    pub tasks: WindowTasks,
     /// What happens to files dropped on a task window. `None` takes no drops.
     pub drops: Option<DropHandler>,
     /// Asks whether an app drags out of a task window a press has left. `None` starts no
@@ -1641,6 +1644,9 @@ impl Ui {
                             }
                         }
                     }
+                    // The window host's `WindowTasks` takes it, before it reaches this thread;
+                    // the window itself shows the same.
+                    ToHost::ShownTask { .. } => {}
                     ToHost::AppMenu { new_window } => {
                         // Every window of the app has the same menu, and the next ones too.
                         self.new_window = new_window;
@@ -1754,6 +1760,7 @@ impl Ui {
                 task_id,
                 size,
                 self.setup.input.clone(),
+                self.setup.tasks.clone(),
                 self.setup.accessibility.clone(),
                 self.setup.logger.clone(),
             )),

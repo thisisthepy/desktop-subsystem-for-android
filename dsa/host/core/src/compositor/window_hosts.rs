@@ -119,6 +119,13 @@ pub enum ToHost {
         task_id: i32,
         back: bool,
     },
+    /// The window opened for task `task_id` shows task `shown_task_id` from now on, which
+    /// took it over after a GPU reset. Messages still name the window by `task_id`; what the
+    /// window sends Android itself goes to `shown_task_id` (see [`super::window_tasks`]).
+    ShownTask {
+        task_id: i32,
+        shown_task_id: i32,
+    },
     /// What every window of the app offers in its system menu: New window only when the app
     /// supports several windows. It is about the app, not one window, so it names no task.
     AppMenu {
@@ -214,6 +221,7 @@ impl ToHost {
             | ToHost::Mode { task_id, .. }
             | ToHost::CaptionMode { task_id, .. }
             | ToHost::CaptionBack { task_id, .. }
+            | ToHost::ShownTask { task_id, .. }
             | ToHost::Close { task_id } => *task_id,
         })
     }
@@ -673,6 +681,13 @@ impl WindowHosts {
                 task_id: *task_id,
                 back: *back,
             }),
+            WindowChange::ShownTask {
+                task_id,
+                shown_task_id,
+            } => self.forward(ToHost::ShownTask {
+                task_id: *task_id,
+                shown_task_id: *shown_task_id,
+            }),
         }
     }
 
@@ -1116,6 +1131,13 @@ pub fn to_wire(message: &ToHost) -> Body {
         ToHost::CaptionBack { task_id, back } => {
             Body::SetCaptionBack(dsa_protocol::window_host::types::SetCaptionBack { task_id, back })
         }
+        ToHost::ShownTask {
+            task_id,
+            shown_task_id,
+        } => Body::SetShownTask(dsa_protocol::window_host::types::SetShownTask {
+            task_id,
+            shown_task_id,
+        }),
         ToHost::AppMenu { new_window } => {
             Body::AppMenu(dsa_protocol::window_host::types::AppMenu { new_window })
         }
@@ -1243,6 +1265,10 @@ pub fn to_host_from_wire(body: &Body) -> Option<ToHost> {
         Body::SetCaptionBack(set) => ToHost::CaptionBack {
             task_id: set.task_id,
             back: set.back,
+        },
+        Body::SetShownTask(set) => ToHost::ShownTask {
+            task_id: set.task_id,
+            shown_task_id: set.shown_task_id,
         },
         Body::AppMenu(menu) => ToHost::AppMenu {
             new_window: menu.new_window,
@@ -1987,6 +2013,10 @@ mod tests {
             ToHost::CaptionBack {
                 task_id: 11,
                 back: true,
+            },
+            ToHost::ShownTask {
+                task_id: 12,
+                shown_task_id: 31,
             },
             ToHost::AppMenu { new_window: true },
             ToHost::AppMenu { new_window: false },
