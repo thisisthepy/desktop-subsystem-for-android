@@ -302,7 +302,8 @@ impl Planner {
                     Some(dir.as_path()),
                     &attached,
                 )
-                + &dsa_host_core::gapps::bootconfig_for(&*self.settings, &self.name, &attached),
+                + &dsa_host_core::gapps::bootconfig_for(&*self.settings, &self.name, &attached)
+                + &dsa_host_core::widevine::bootconfig_for(&*self.settings, &self.name, &attached),
         })
     }
 }

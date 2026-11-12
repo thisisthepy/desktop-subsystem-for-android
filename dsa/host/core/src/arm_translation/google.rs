@@ -25,10 +25,10 @@
 //! package's folders onto its own empty ones. It binds `system/bin` onto
 //! `/system/bin/dsa-arm-translation`, so each rule taken names its runner there ([`RUNNERS`]).
 
-mod disk;
-mod ext4;
+pub(crate) mod disk;
+pub(crate) mod ext4;
 pub(crate) mod inflate;
-mod sha1;
+pub(crate) mod sha1;
 
 use std::fs::{self, File};
 use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
@@ -241,24 +241,31 @@ fn revision_numbers(revision: &str) -> Vec<u32> {
     revision.split('.').filter_map(|p| p.parse().ok()).collect()
 }
 
-/// The image to take for Android `android_major` from what a list offers: the Google APIs
-/// x86_64 image of the same API level, on the stable channel, that translates ARM64. Of
-/// several, the base release (the lowest minor API level) and then the newest revision.
-fn choose(listed: &[Listed], android_major: u32) -> Result<SdkImage, String> {
+/// The image to take for Android `android_major` and `abi` from what a list offers: the Google
+/// APIs image of the same API level and architecture, on the stable channel, and when
+/// `require_arm64_translation` one that translates ARM64. Of several, the base release (the
+/// lowest minor API level) and then the newest revision.
+fn choose_for_abi(
+    listed: &[Listed],
+    android_major: u32,
+    abi: &str,
+    require_arm64_translation: bool,
+) -> Result<SdkImage, String> {
     let Some(api) = api_level(android_major) else {
         return Err(format!("Android {android_major} is not known to DSA"));
     };
     let translates = |l: &Listed| {
         let abis = l.translated.as_deref().unwrap_or(ARM64);
-        abis.split(',').any(|abi| abi.trim() == ARM64)
+        abis.split(',').any(|a| a.trim() == ARM64)
     };
     let mut fitting: Vec<(u32, Vec<u32>, &SdkImage)> = Vec::new();
     for one in listed {
         let Some((major, minor)) = api_numbers(&one.image.api_level) else {
             continue;
         };
-        let kind = one.tag == "google_apis" && one.abi == "x86_64";
-        if kind && one.base && one.stable && major == api && translates(one) {
+        let kind = one.tag == "google_apis" && one.abi == abi;
+        let ok_trans = !require_arm64_translation || translates(one);
+        if kind && one.base && one.stable && major == api && ok_trans {
             let revision = revision_numbers(&one.image.revision);
             fitting.push((minor, revision, &one.image));
         }
@@ -266,19 +273,42 @@ fn choose(listed: &[Listed], android_major: u32) -> Result<SdkImage, String> {
     fitting.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| b.1.cmp(&a.1)));
     match fitting.first() {
         Some((_, _, image)) => Ok((*image).clone()),
+        None if require_arm64_translation => Err(format!(
+            "Google's SDK repository lists no Google APIs {abi} image with the ARM translator \
+             for Android {android_major} (API {api}); nothing was changed"
+        )),
         None => Err(format!(
-            "Google's SDK repository lists no Google APIs x86_64 image with the ARM translator \
+            "Google's SDK repository lists no Google APIs {abi} image \
              for Android {android_major} (API {api}); nothing was changed"
         )),
     }
 }
 
-/// Reads the list in `repository` ([`REPOSITORY`], or a mirror of it) and picks the image for
-/// Android `android_major`.
-pub fn find_image(
+/// The image to take for Android `android_major` from what a list offers: the Google APIs
+/// x86_64 image of the same API level, on the stable channel, that translates ARM64. Of
+/// several, the base release (the lowest minor API level) and then the newest revision.
+#[cfg(test)]
+fn choose(listed: &[Listed], android_major: u32) -> Result<SdkImage, String> {
+    choose_for_abi(listed, android_major, "x86_64", true)
+}
+
+/// Reads the list in `repository` ([`REPOSITORY`], or a mirror of it) and picks the Google APIs
+/// image for Android `android_major` and `abi` (`x86_64`, `arm64-v8a`), translator or not.
+pub fn find_image_for_abi(
     fetch: &dyn Fetch,
     repository: &str,
     android_major: u32,
+    abi: &str,
+) -> Result<SdkImage, String> {
+    find_image_matching(fetch, repository, android_major, abi, false)
+}
+
+fn find_image_matching(
+    fetch: &dyn Fetch,
+    repository: &str,
+    android_major: u32,
+    abi: &str,
+    require_arm64_translation: bool,
 ) -> Result<SdkImage, String> {
     let mut repository = repository.to_string();
     if !repository.ends_with('/') {
@@ -297,11 +327,21 @@ pub fn find_image(
             problem = format!("{list} lists no system image DSA can read");
             continue;
         }
-        return choose(&listed, android_major);
+        return choose_for_abi(&listed, android_major, abi, require_arm64_translation);
     }
     Err(format!(
         "Google's SDK repository could not be read ({problem}); nothing was changed"
     ))
+}
+
+/// Reads the list in `repository` ([`REPOSITORY`], or a mirror of it) and picks the image for
+/// Android `android_major`.
+pub fn find_image(
+    fetch: &dyn Fetch,
+    repository: &str,
+    android_major: u32,
+) -> Result<SdkImage, String> {
+    find_image_matching(fetch, repository, android_major, "x86_64", true)
 }
 
 /// How making the package goes.
@@ -316,7 +356,7 @@ pub enum Progress {
 }
 
 /// A folder that is removed, with everything in it, when this goes.
-struct Scratch(PathBuf);
+pub(crate) struct Scratch(pub(crate) PathBuf);
 
 impl Drop for Scratch {
     fn drop(&mut self) {
@@ -493,7 +533,7 @@ fn check_taken(taken: &Taken, rules: &[Vec<u8>]) -> Result<(), String> {
 }
 
 /// The image's build ID, from its `build.prop`.
-fn build_id(build_prop: &[u8]) -> Option<String> {
+pub(crate) fn build_id(build_prop: &[u8]) -> Option<String> {
     let text = String::from_utf8_lossy(build_prop);
     let value = |key: &str| {
         text.lines()
@@ -505,7 +545,7 @@ fn build_id(build_prop: &[u8]) -> Option<String> {
 }
 
 /// The package's version: the image's build, API level and revision.
-fn version(image: &SdkImage, build: Option<&str>) -> String {
+pub(crate) fn version(image: &SdkImage, build: Option<&str>) -> String {
     let short = format!("API {}, r{}", image.api_level, image.revision);
     match build {
         Some(build) if build.len() + short.len() + 3 <= 64 => format!("{build} ({short})"),
@@ -513,16 +553,45 @@ fn version(image: &SdkImage, build: Option<&str>) -> String {
     }
 }
 
-fn io(what: &Path) -> impl Fn(std::io::Error) -> String + '_ {
+pub(crate) fn io(what: &Path) -> impl Fn(std::io::Error) -> String + '_ {
     move |e| format!("{}: {e}", what.display())
 }
 
 /// Takes the system partition out of the image archive at `zip`, into `out`.
 fn extract_system(zip: &Path, out: &Path) -> Result<(), String> {
+    extract_partition(zip, out, "system")
+}
+
+/// Whether the archive entry `name` is the image file `file` (`system.img`), at the archive's
+/// root or in its ABI's folder.
+fn is_image_file(name: &str, file: &str) -> bool {
+    name == file
+        || name
+            .strip_suffix(file)
+            .is_some_and(|folder| folder.ends_with('/'))
+}
+
+/// Takes the partition `partition` (`system`, `vendor`) out of the image archive at `zip`,
+/// into `out`: from the archive's own `<partition>.img` when it has one, as older images do,
+/// else from the disk in its `system.img`, whose `super` partition holds them all.
+pub(crate) fn extract_partition(
+    zip: &Path,
+    out: &Path,
+    partition: &'static str,
+) -> Result<(), String> {
     let file = File::open(zip).map_err(io(zip))?;
     let mut archive = Archive::open(BufReader::new(file))?;
-    let is_system = |name: &str| name == "system.img" || name.ends_with("/system.img");
-    let entry = archive.entries.iter().find(|entry| is_system(&entry.name));
+    let own = format!("{partition}.img");
+    let entry = archive
+        .entries
+        .iter()
+        .find(|entry| partition != "system" && is_image_file(&entry.name, &own))
+        .or_else(|| {
+            archive
+                .entries
+                .iter()
+                .find(|entry| is_image_file(&entry.name, "system.img"))
+        });
     let entry = entry.ok_or("the image archive holds no system.img")?;
     let entry = entry.clone();
     let (method, offset, length) = archive.data_span(&entry)?;
@@ -530,7 +599,7 @@ fn extract_system(zip: &Path, out: &Path) -> Result<(), String> {
     reader.seek(SeekFrom::Start(offset)).map_err(io(zip))?;
     let input = reader.take(length);
     let output = File::create(out).map_err(io(out))?;
-    let mut extract = disk::Extract::new(BufWriter::new(output), entry.size());
+    let mut extract = disk::Extract::for_partition(BufWriter::new(output), entry.size(), partition);
     match method {
         0 => {
             let mut input = input;
@@ -546,12 +615,31 @@ fn extract_system(zip: &Path, out: &Path) -> Result<(), String> {
             let mut sink = |piece: &[u8]| extract.take(piece);
             inflate::inflate(input, &mut sink)?;
         }
-        other => return Err(format!("system.img uses compression method {other}")),
+        other => return Err(format!("{} uses compression method {other}", entry.name)),
     }
     let (output, size) = extract.finish()?;
     let output = output.into_inner().map_err(|e| io(out)(e.into_error()))?;
     output.set_len(size).map_err(io(out))?;
     Ok(())
+}
+
+/// The text of the archive's `source.properties`, which says which system image it is
+/// (`AndroidVersion.ApiLevel`, `SystemImage.Abi`), or `None` when it has none.
+pub(crate) fn source_properties(zip: &Path) -> Result<Option<String>, String> {
+    let file = File::open(zip).map_err(io(zip))?;
+    let mut archive = Archive::open(BufReader::new(file))?;
+    let entry = archive
+        .entries
+        .iter()
+        .find(|entry| is_image_file(&entry.name, "source.properties"))
+        .cloned();
+    match entry {
+        Some(entry) => {
+            let data = archive.read(&entry, 64 << 10)?;
+            Ok(Some(String::from_utf8_lossy(&data).into_owned()))
+        }
+        None => Ok(None),
+    }
 }
 
 /// Takes the translator's files out of the system partition at `partition`.
@@ -589,15 +677,14 @@ fn take_translator(partition: &Path) -> Result<(Taken, Option<String>), String> 
     Ok((taken, build))
 }
 
-fn build(
+/// Downloads `image` to `zip` and checks it against the size and SHA-1 Google's list gives.
+pub(crate) fn download(
     fetch: &dyn Fetch,
     image: &SdkImage,
-    work: &Path,
-    out: &Path,
+    zip: &Path,
     progress: &mut dyn FnMut(Progress),
-) -> Result<Package, String> {
-    let zip = work.join("image.zip");
-    let file = File::create(&zip).map_err(io(&zip))?;
+) -> Result<(), String> {
+    let file = File::create(zip).map_err(io(zip))?;
     let mut download = Download {
         file: BufWriter::new(file),
         hasher: sha1::Sha1::new(),
@@ -608,13 +695,9 @@ fn build(
     fetch
         .fetch(&image.url, &mut download)
         .map_err(|why| format!("downloading {} failed: {why}", image.url))?;
-    download.flush().map_err(io(&zip))?;
+    download.flush().map_err(io(zip))?;
     let Download {
-        file,
-        hasher,
-        done,
-        progress,
-        ..
+        file, hasher, done, ..
     } = download;
     drop(file);
     if done != image.size {
@@ -631,6 +714,18 @@ fn build(
             image.url, image.sha1
         ));
     }
+    Ok(())
+}
+
+fn build(
+    fetch: &dyn Fetch,
+    image: &SdkImage,
+    work: &Path,
+    out: &Path,
+    progress: &mut dyn FnMut(Progress),
+) -> Result<Package, String> {
+    let zip = work.join("image.zip");
+    download(fetch, image, &zip, progress)?;
     progress(Progress::Extracting);
     let partition = work.join("system.part");
     extract_system(&zip, &partition)?;
