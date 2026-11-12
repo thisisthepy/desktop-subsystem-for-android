@@ -576,6 +576,8 @@ enum RefreshInput {
     MonitorHz(u32),
     /// Whether the host's battery saver is on.
     BatterySaver(bool),
+    /// Whether any task window is being resized live changed.
+    LiveResize,
 }
 
 enum Command {
@@ -667,6 +669,9 @@ struct Shared {
     last_transfer: AtomicU32,
     /// How to pair the host's clock with the guest's, when the platform traces input.
     clock_trace: Mutex<Option<ClockTrace>>,
+    /// The task windows being resized live, which hold the guest's refresh rate down until
+    /// they end. The caller that sends a resize marks it, and the worker reads it for the rate.
+    live_resizes: Mutex<crate::guest_refresh::LiveResizes>,
     /// Who hears of the text the guest copies.
     clipboard_watchers: Mutex<Vec<Sender<String>>>,
     /// Who plays the rumble effects the guest's apps play on the host's controllers.
@@ -1396,6 +1401,7 @@ impl Session {
             transfers: Mutex::new(HashMap::new()),
             last_transfer: AtomicU32::new(0),
             clock_trace: Mutex::new(None),
+            live_resizes: Mutex::new(Default::default()),
             clipboard_watchers: Mutex::new(Vec::new()),
             rumble_watchers: Mutex::new(Vec::new()),
             notification_watchers: Mutex::new(Vec::new()),
@@ -3082,12 +3088,14 @@ impl Session {
                 width,
                 height,
                 live,
-            } => Body::ResizeTask(control::ResizeTask {
-                task_id,
-                width,
-                height,
-                live,
-            }),
+            } => {
+                return self.resize(control::ResizeTask {
+                    task_id,
+                    width,
+                    height,
+                    live,
+                })
+            }
             TaskRequest::SetDensity {
                 task_id,
                 density_dpi,
@@ -3110,6 +3118,36 @@ impl Session {
         self.send(dsa_protocol::encode(&control::Envelope {
             body: Some(body),
         }))
+    }
+
+    /// Sends a step of a task window's resize, and holds the guest's refresh rate down while
+    /// any window is resized live ([`crate::guest_refresh::LiveResizes`]).
+    ///
+    /// A step that starts or ends the live resizes goes through the worker, right behind the
+    /// word that changes the rate, so the first live step reaches a guest already at the lower
+    /// rate. The caller waits for the worker to send it, so the steps after it, which go out
+    /// at once as every other step does, never overtake it.
+    fn resize(&self, resize: control::ResizeTask) -> Result<(), SessionError> {
+        let changed = self
+            .shared
+            .live_resizes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .step(resize.task_id, resize.live, Instant::now());
+        let frame = dsa_protocol::encode(&control::Envelope {
+            body: Some(Body::ResizeTask(resize)),
+        });
+        if !changed {
+            return self.send(frame);
+        }
+        let _ = self
+            .commands
+            .send(Command::Refresh(RefreshInput::LiveResize));
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.commands
+            .send(Command::Send(frame, reply_tx))
+            .map_err(|_| SessionError::Gone)?;
+        reply_rx.recv().map_err(|_| SessionError::Gone)?
     }
 
     /// The widgets the agent hosts now, and every change to them from now on. The watch lasts
@@ -5328,8 +5366,32 @@ impl Worker {
         match input {
             RefreshInput::MonitorHz(hz) => self.monitor_hz = Some(hz),
             RefreshInput::BatterySaver(on) => self.battery_saver = on,
+            RefreshInput::LiveResize => {}
         }
         self.update_refresh();
+    }
+
+    fn resizing_live(&self) -> bool {
+        self.shared
+            .live_resizes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .any()
+    }
+
+    /// Ends the live resizes that have heard nothing for a while, and tells the guest the rate
+    /// that follows.
+    fn tick_refresh(&mut self) {
+        let expired = self
+            .shared
+            .live_resizes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .expire(Instant::now());
+        if expired {
+            eprintln!("lifecycle: a live resize ended without its last step");
+            self.update_refresh();
+        }
     }
 
     /// Tells the guest its display refresh rate, if it changed since it was last told and the
@@ -5338,7 +5400,8 @@ impl Worker {
         let Some(monitor_hz) = self.monitor_hz else {
             return;
         };
-        let hz = crate::guest_refresh::refresh_rate(monitor_hz, self.battery_saver);
+        let resizing = self.resizing_live();
+        let hz = crate::guest_refresh::refresh_rate_while(monitor_hz, self.battery_saver, resizing);
         if self.refresh_sent == Some(hz) {
             return;
         }
@@ -5349,8 +5412,9 @@ impl Worker {
             | SessionState::Dozing => {
                 eprintln!(
                     "lifecycle: the guest's display refreshes at {hz} Hz (fastest monitor \
-                     {monitor_hz} Hz, battery saver {})",
-                    if self.battery_saver { "on" } else { "off" }
+                     {monitor_hz} Hz, battery saver {}, live resize {})",
+                    if self.battery_saver { "on" } else { "off" },
+                    if resizing { "on" } else { "off" }
                 );
                 self.refresh_sent = Some(hz);
                 self.send_body(Body::DisplayRefresh(control::DisplayRefresh { hz }));
@@ -5615,8 +5679,14 @@ impl Worker {
             if let Some(power) = self.power {
                 self.send_body(Body::PowerState(power.to_control()));
             }
-            // A new agent holds the display at the rate it is told, from the start.
+            // A new agent holds the display at the rate it is told, from the start. A resize
+            // under way went to the agent before it, and the next live step starts it again.
             self.refresh_sent = None;
+            self.shared
+                .live_resizes
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clear();
             self.update_refresh();
             if self.host_memory_low {
                 self.send_body(Body::HostMemory(control::HostMemory { low: true }));
@@ -6118,6 +6188,7 @@ impl Worker {
                 return;
             }
             self.tick_lifecycle();
+            self.tick_refresh();
             self.tick_clock();
             self.offer_host_clipboard();
             self.tick_notifications();
