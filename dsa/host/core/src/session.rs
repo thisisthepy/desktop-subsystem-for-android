@@ -4601,18 +4601,24 @@ impl Worker {
             &app.native_libraries,
             crash.arm64_supported,
         );
-        if switch.on {
-            eprintln!("apps: {package} runs as ARM already; nothing is offered");
+        if switch.available() && !switch.on {
+            self.post_notice(native_abi::Notice::Offer.notification(&app));
             return;
         }
-        if let Some(why) = switch.unavailable {
+        if switch.on {
+            eprintln!("apps: {package} runs as ARM already; nothing is offered");
+        } else if let Some(why) = switch.unavailable {
             eprintln!(
                 "apps: {package} cannot run as ARM ({}); nothing is offered",
                 why.code()
             );
-            return;
         }
-        self.post_notice(native_abi::Notice::Offer.notification(&app));
+        // A build made to run as 32-bit code, which the 64-bit-only guest does not run: the
+        // user is told to install its 64-bit build.
+        if native_abi::needs_64_bit_build(&app.native_libraries, switch, &detail) {
+            eprintln!("apps: {package} holds 32-bit code, which Android here does not run");
+            self.post_notice(native_abi::Notice::Needs64Bit.notification(&app));
+        }
     }
 
     /// What the user did with one of the host's notifications about running an app as ARM.
@@ -4656,7 +4662,9 @@ impl Worker {
                     new_window: false,
                 }));
             }
-            native_abi::Notice::NeedsErase | native_abi::Notice::Failed => {}
+            native_abi::Notice::NeedsErase
+            | native_abi::Notice::Failed
+            | native_abi::Notice::Needs64Bit => {}
         }
         Ok(())
     }
