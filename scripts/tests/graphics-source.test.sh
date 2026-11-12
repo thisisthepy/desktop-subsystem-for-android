@@ -19,6 +19,7 @@ uv run dsa/graphics/test_memory_count_patch.py
 uv run dsa/graphics/test_device_garbage_patch.py
 uv run dsa/graphics/test_free_retired_patch.py
 uv run dsa/graphics/test_lazy_staging_patch.py
+uv run dsa/graphics/test_stream_buffers_patch.py
 uv run dsa/graphics/test_build.py
 uv run dsa/graphics/test_check_guest_driver.py
 uv run dsa/graphics/host/test_host_build.py

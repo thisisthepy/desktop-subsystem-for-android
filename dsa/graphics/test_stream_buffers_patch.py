@@ -1,0 +1,79 @@
+"""Tests for shrinking the renderer's per-thread buffers after a large guest transfer.
+
+Every guest thread with a graphics stream has a render thread on the host, and two buffers of
+it grow with the largest thing that thread ever sent and never shrank (RESEARCH R33 on
+develop: candidates for the gap between the renderer's private and resident memory):
+
+- the render thread's ReadBuffer (host/ReadBuffer.cpp), which a batch of commands is read
+  into; it grows to twice the largest batch, and a guest's copy of host-visible memory
+  travels in one;
+- the Vulkan decoder's BumpPool (aemu base/BumpPool.h), which a command's arguments are
+  decoded into; it grows to twice the most one command needed.
+
+Patch 0027 gives the ReadBuffer back its first size once it holds no data: at once above
+8 MiB, otherwise after 256 reads that fit the first size. aemu patch 0003 does the same for a
+BumpPool above 1 MiB after 256 commands that needed a quarter of it or less."""
+
+import re
+import unittest
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+READ_BUFFER = next((HERE / "patches").glob("0027-*.patch"))
+BUMP_POOL = next((HERE / "patches" / "aemu").glob("0003-*.patch"))
+
+
+def added(patch, name):
+    text = patch.read_text(encoding="utf-8")
+    for part in re.split(r"^diff --git ", text, flags=re.M):
+        if part.startswith(f"a/{name} "):
+            return "\n".join(l[1:] for l in part.splitlines()
+                             if l.startswith("+") and not l.startswith("+++"))
+    raise AssertionError(f"{patch.name} does not change {name}")
+
+
+class ReadBufferPatchTests(unittest.TestCase):
+    def setUp(self):
+        self.source = added(READ_BUFFER, "host/ReadBuffer.cpp")
+        self.header = added(READ_BUFFER, "host/ReadBuffer.h")
+
+    def test_nfr1_an_empty_read_buffer_goes_back_to_its_first_size(self):
+        consume = self.source[self.source.index("    if (m_validData == 0) {"):]
+        self.assertIn("shrinkWhenEmpty();", consume)
+        shrink = self.source[self.source.index("void ReadBuffer::shrinkWhenEmpty() {"):]
+        shrink = shrink[:shrink.index("\n}")]
+        self.assertIn("malloc(m_initialSize)", shrink)
+        self.assertIn("free(m_buf);", shrink)
+        self.assertIn("m_size = m_initialSize;", shrink)
+        self.assertIn("m_readPtr = m_buf;", shrink)
+
+    def test_nfr1_a_very_large_buffer_goes_at_once_and_a_large_one_after_small_reads(self):
+        self.assertIn("static constexpr size_t kReleaseAtOnce = 8 * 1024 * 1024;", self.header)
+        self.assertIn("static constexpr size_t kSmallReadsBeforeShrink = 256;", self.header)
+        self.assertIn("if (m_size <= kReleaseAtOnce && m_smallReads < kSmallReadsBeforeShrink) {",
+                      self.source)
+        self.assertIn("m_initialSize = bufsize;", self.source)
+        self.assertIn("if (minSize <= m_initialSize) {", self.source)
+
+    def test_nfr1_the_fetch_applies_it(self):
+        for script in (HERE / "host/fetch.ps1", HERE / "host/fetch.sh"):
+            self.assertIn("0027", script.read_text(encoding="utf-8"))
+
+
+class BumpPoolPatchTests(unittest.TestCase):
+    def test_nfr1_a_bump_pool_that_grew_for_one_command_shrinks(self):
+        text = added(BUMP_POOL, "base/include/aemu/base/BumpPool.h")
+        self.assertIn("mTotalWantedThisGeneration * 4 < mStorage.size() * sizeof(uint64_t)", text)
+        self.assertIn("if (++mSmallGenerations >= kSmallGenerationsBeforeShrink) {", text)
+        self.assertIn("mStorage.resize(keep / sizeof(uint64_t));", text)
+        self.assertIn("static constexpr size_t kShrinkAbove = 1024 * 1024;", text)
+
+    def test_nfr1_both_fetches_apply_every_aemu_patch(self):
+        self.assertIn('Join-Path $PatchDir "aemu"', (HERE / "host/fetch.ps1").read_text(
+            encoding="utf-8"))
+        self.assertIn('"$patch_dir"/aemu/*.patch', (HERE / "host/fetch.sh").read_text(
+            encoding="utf-8"))
+
+
+if __name__ == "__main__":
+    unittest.main()
