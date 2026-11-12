@@ -136,7 +136,8 @@ class ClosedApps(
         /**
          * Cached processes the activity manager keeps: a phone keeps 32 so apps resume fast,
          * but here a closed window ends its app, and what stays cached is services and
-         * providers started in the background. A few keep restarts of those cheap.
+         * providers started in the background. The activity manager keeps half of this many
+         * empty ones for good, so [CachedProcesses] ends those that stay idle.
          */
         const val MAX_CACHED_PROCESSES = 8
 

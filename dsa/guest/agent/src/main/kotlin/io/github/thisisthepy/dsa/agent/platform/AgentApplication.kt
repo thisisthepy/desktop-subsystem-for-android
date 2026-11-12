@@ -99,6 +99,7 @@ class AgentApplication : Application() {
             componentStates = AndroidComponentStates(this),
             widgets = AndroidWidgets(this, log),
             appProcesses = AndroidAppProcesses(this),
+            backgroundProcesses = AndroidBackgroundProcesses(this),
             widgetStore = AndroidWidgetStore(this),
             accessibility = AndroidAccessibilitySource(this, log),
             // Reading an app's accessibility tree waits on the app's UI thread for each node,
