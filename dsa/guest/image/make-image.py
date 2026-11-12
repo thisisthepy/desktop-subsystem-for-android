@@ -3970,6 +3970,7 @@ ADDONS_MOUNT = ("mount erofs /dev/block/by-name/dsa_addons /mnt/dsa-addons ro no
 ADDON_IMAGES = {
     "dsa-gapps.rc": "/mnt/dsa-addons/gapps.img",
     "dsa-arm-translation.rc": "/mnt/dsa-addons/arm-translation.img",
+    "dsa-widevine.rc": "/mnt/dsa-addons/widevine.img",
 }
 
 
@@ -4009,6 +4010,100 @@ def addon_disk_problems(names, read):
 # manager installs the new system apps for every user and grants their default permissions.
 # Without it the "off" file sets nothing. ro.* properties are fixed once read, so this is decided
 # at boot.
+# Widevine, for a user who installs it (`dsa drm widevine install`). DSA ships none of Google's
+# software: the host takes Google's Widevine APEX, unchanged, out of Google's emulator image and
+# puts it on the user's add-on disk as widevine.img. The host puts androidboot.dsa.widevine=on in
+# the boot's bootconfig only while it is there; the script then lays the image over /vendor/apex
+# at post-fs, before apexd activates the vendor's APEXes at post-fs-data. With "off", after the
+# user removed it, the script removes the device certificates the module kept. The image carries
+# the SELinux policy the module's service runs under ahead of any install: the vendor policy's
+# own types where it declares them (Cuttlefish's does), widevine-hal.cil's where it does not.
+WIDEVINE_RC = "SYSTEM/etc/init/dsa-widevine.rc"
+WIDEVINE_FS_CONFIG = ["system/etc/init/dsa-widevine.rc 0 0 644 capabilities=0x0"]
+WIDEVINE_TRIGGER = "on post-fs && property:ro.boot.dsa.widevine=on"
+WIDEVINE_OVERLAY = "mount overlay overlay /vendor/apex ro nodev noexec lowerdir=/mnt/dsa-widevine:/vendor/apex"
+WIDEVINE_OFF_TRIGGER = "on post-fs-data && property:ro.boot.dsa.widevine=off"
+WIDEVINE_RESET = ("exec u:r:dsa_widevine_reset:s0 root root -- /vendor/bin/toybox_vendor rm -rf "
+                  "/data/vendor/mediadrm")
+# What the vendor policy must label for the module's service, and the lines that label them
+# where it has none.
+WIDEVINE_HAL_TYPES = ["hal_drm_widevine", "hal_drm_widevine_exec", "mediadrm_vendor_data_file"]
+WIDEVINE_FILE_CONTEXTS = [
+    (r"/data/vendor/mediadrm", r"/data/vendor/mediadrm(/.*)?  u:object_r:mediadrm_vendor_data_file:s0"),
+]
+WIDEVINE_INSTANCE = "android.hardware.drm.IDrmFactory/widevine"
+WIDEVINE_SERVICE_CONTEXT = f"{WIDEVINE_INSTANCE} u:object_r:hal_drm_service:s0"
+
+
+def declares_type(policy, name):
+    """Whether the CIL text `policy` declares the type `name`."""
+    return re.search(rf"\(type {re.escape(name)}\)", policy) is not None
+
+
+def needs_widevine_hal_policy(vendor_policy):
+    """Whether the image must declare the Widevine service's types itself: the vendor policy
+    (its text, or None when the image has none) does not."""
+    return vendor_policy is None or not all(declares_type(vendor_policy, t) for t in WIDEVINE_HAL_TYPES)
+
+
+def with_widevine_file_contexts(fc_text):
+    """vendor_file_contexts with the label of Widevine's certificate folder, where it has none."""
+    lines = fc_text.splitlines()
+    for pattern, rule in WIDEVINE_FILE_CONTEXTS:
+        if not any(line.startswith(pattern) for line in lines):
+            lines.append(rule)
+    return "\n".join(lines) + "\n"
+
+
+def with_widevine_service_context(text):
+    """vendor_service_contexts with the label of Widevine's service, where it has none."""
+    lines = text.splitlines()
+    if not any(line.split()[:1] == [WIDEVINE_INSTANCE] for line in lines):
+        lines.append(WIDEVINE_SERVICE_CONTEXT)
+    return "\n".join(lines) + "\n"
+
+
+def widevine_problems(names, read):
+    """The problems with how an image takes the Widevine module a user installs, given the names in
+    its target files and a function that reads one: the script lays the module's image over
+    /vendor/apex at post-fs, only when the host says it is installed, removes the certificates
+    after it was removed, and the policy has the image's superblock type and the service's types."""
+    if WIDEVINE_RC not in names:
+        return [f"{WIDEVINE_RC} is missing, so a Widevine module the user installs is never activated"]
+    problems = []
+    rc = read(WIDEVINE_RC).decode(errors="replace")
+    sections = {}
+    trigger = None
+    for line in rc.splitlines():
+        if line.startswith("on "):
+            trigger = line.strip()
+            sections.setdefault(trigger, [])
+        elif line.strip() and not line.lstrip().startswith("#") and trigger:
+            sections[trigger].append(line.strip())
+    if WIDEVINE_OVERLAY not in sections.get(WIDEVINE_TRIGGER, []):
+        problems.append("dsa-widevine.rc does not lay the module's image over /vendor/apex at post-fs once "
+                        f"the host says it is installed ({WIDEVINE_OVERLAY}), so apexd never sees it")
+    if WIDEVINE_RESET not in sections.get(WIDEVINE_OFF_TRIGGER, []):
+        problems.append("dsa-widevine.rc does not remove the certificates a removed module kept")
+    for trigger, commands in sections.items():
+        if "widevine=on" not in trigger and any(c.startswith("mount ") for c in commands):
+            problems.append(f"dsa-widevine.rc mounts something without the host's word: {trigger}")
+    policy_name = "SYSTEM/etc/selinux/plat_sepolicy.cil"
+    if policy_name in names:
+        plat = read(policy_name).decode(errors="replace")
+        vendor_name = "VENDOR/etc/selinux/vendor_sepolicy.cil"
+        vendor = read(vendor_name).decode(errors="replace") if vendor_name in names else ""
+        if not declares_type(plat, "dsa_widevine_fs"):
+            problems.append("the policy has no dsa_widevine_fs, so the module's image cannot be mounted")
+        for name in WIDEVINE_HAL_TYPES:
+            declared = [p for p in (plat, vendor) if declares_type(p, name)]
+            if not declared:
+                problems.append(f"no policy declares {name}, so Widevine's service cannot start")
+            elif len(declared) > 1:
+                problems.append(f"{name} is declared twice, so the policy does not compile")
+    return problems
+
+
 GAPPS_RC = "SYSTEM/etc/init/dsa-gapps.rc"
 GAPPS_PROPS = {
     "SYSTEM/etc/dsa/gapps-on.prop": HERE / "gapps-on.prop",
@@ -4879,6 +4974,8 @@ KERNEL_POLICY = HERE / "sepolicy/kernel.cil"
 ARM_TRANSLATION_POLICY = HERE / "sepolicy/arm-translation.cil"
 GAPPS_POLICY = HERE / "sepolicy/gapps.cil"
 ADDONS_POLICY = HERE / "sepolicy/addons.cil"
+WIDEVINE_POLICY = HERE / "sepolicy/widevine.cil"
+WIDEVINE_HAL_POLICY = HERE / "sepolicy/widevine-hal.cil"
 GPU_RESET_POLICY = HERE / "sepolicy/gpu-reset.cil"
 SU_POLICY = HERE / "sepolicy/su.cil"
 CACERTS_POLICY = HERE / "sepolicy/cacerts.cil"
@@ -5474,6 +5571,9 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
             if conflicts:
                 raise ValueError("; ".join(conflicts))
         added_gapps_folders = missing_folders(names, gapps_folders())
+        vendor_policy_name = "VENDOR/etc/selinux/vendor_sepolicy.cil"
+        widevine_hal = needs_widevine_hal_policy(
+            zin.read(vendor_policy_name).decode(errors="replace") if vendor_policy_name in names else None)
         added_fs_config = {}
         if reach:
             for config, rules in ARM_TRANSLATION_REACH_FS_CONFIG.items():
@@ -5500,6 +5600,11 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
             plat_patched += "\n" + GAPPS_POLICY.read_text()
             # init mounting the user's add-on disk, which those images are on.
             plat_patched += "\n" + ADDONS_POLICY.read_text()
+            # init laying a user's Widevine module over /vendor/apex, and its service's types
+            # where the vendor policy has none.
+            plat_patched += "\n" + WIDEVINE_POLICY.read_text()
+            if widevine_hal:
+                plat_patched += "\n" + WIDEVINE_HAL_POLICY.read_text()
             if framework is not None:
                 # SurfaceFlinger telling the apps about a GPU reset.
                 plat_patched += "\n" + GPU_RESET_POLICY.read_text()
@@ -5696,7 +5801,7 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                                                  TRACE_FS_CONFIG + ARM_TRANSLATION_FS_CONFIG
                                                  + (ARM_TRANSLATION_DEFAULT_FS_CONFIG
                                                     if default_translator is not None else [])
-                                                 + GAPPS_FS_CONFIG + ADDONS_FS_CONFIG
+                                                 + GAPPS_FS_CONFIG + ADDONS_FS_CONFIG + WIDEVINE_FS_CONFIG
                                                  + (["system/etc/init/dsa-su-guard.rc 0 0 644 capabilities=0x0",
                                                      "system/etc/init/dsa-keymint-key.rc 0 0 644 capabilities=0x0",
                                                      "system/etc/init/dsa-cacerts.rc 0 0 644 capabilities=0x0",
@@ -5743,11 +5848,15 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                     data = update_vendor_file_contexts(data.decode(), channeld_payload is not None,
                                                        has_hwcomposer, has_power, codec2=has_codec2,
                                                        audio=has_audio, gnss=has_gnss, sensors=has_sensors, camera=has_camera, keymint=has_keymint).encode()
+                    if widevine_hal:
+                        data = with_widevine_file_contexts(data.decode()).encode()
                 elif name == VENDOR_SERVICE_CONTEXTS and (channeld_payload is not None or has_codec2
-                                                          or has_camera):
+                                                          or has_camera or widevine_hal):
                     data = update_vendor_service_contexts(
                         data.decode(), codec2=has_codec2, channeld=channeld_payload is not None,
                         camera=has_camera).encode()
+                    if widevine_hal:
+                        data = with_widevine_service_context(data.decode()).encode()
                 elif has_audio and AUDIO_POLICY_CONFIG.match(name):
                     data = without_primary_audio_module(data.decode()).encode()
                 elif name == VENDOR_PROPERTY_CONTEXTS:
@@ -5779,6 +5888,7 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                 zout.writestr(link_entry(name), target.encode())
         zout.writestr(GAPPS_RC, (HERE / "dsa-gapps.rc").read_bytes())
         zout.writestr(ADDONS_RC, (HERE / "dsa-addons.rc").read_bytes())
+        zout.writestr(WIDEVINE_RC, (HERE / "dsa-widevine.rc").read_bytes())
         for target, source_file in GAPPS_PROPS.items():
             zout.writestr(target, source_file.read_bytes())
         zout.writestr(GAPPS_COMPILE_SCRIPT, (HERE / "gapps-compile.sh").read_bytes())
@@ -5826,9 +5936,13 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                     zout.writestr(name, framework[name])
                     replaced_framework.add(name)
             zout.writestr(KEYMINT_RC, KEYMINT_RC_SOURCE.read_bytes())
-        if (channeld_payload is not None or has_codec2 or has_camera) and VENDOR_SERVICE_CONTEXTS not in names:
-            zout.writestr(VENDOR_SERVICE_CONTEXTS, update_vendor_service_contexts(
-                "", codec2=has_codec2, channeld=channeld_payload is not None, camera=has_camera))
+        if (channeld_payload is not None or has_codec2 or has_camera or widevine_hal) \
+                and VENDOR_SERVICE_CONTEXTS not in names:
+            contexts = update_vendor_service_contexts(
+                "", codec2=has_codec2, channeld=channeld_payload is not None, camera=has_camera)
+            if widevine_hal:
+                contexts = with_widevine_service_context(contexts)
+            zout.writestr(VENDOR_SERVICE_CONTEXTS, contexts)
         if overlay_payload is not None:
             zout.writestr(FRAMEWORK_OVERLAY_APK, overlay_payload)
         if settings_overlay_payload is not None:
@@ -5844,11 +5958,11 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
             zout.writestr(VULKAN_RANCHU_LIBRARY, vulkan_payload)
             replaced_vulkan_payload = True
         if "VENDOR/etc/selinux/vendor_file_contexts" not in names:
-            zout.writestr(
-                "VENDOR/etc/selinux/vendor_file_contexts",
-                update_vendor_file_contexts("", channeld_payload is not None, has_hwcomposer, has_power,
-                                            codec2=has_codec2, audio=has_audio, gnss=has_gnss, sensors=has_sensors, camera=has_camera, keymint=has_keymint).encode(),
-            )
+            contexts = update_vendor_file_contexts("", channeld_payload is not None, has_hwcomposer, has_power,
+                                                   codec2=has_codec2, audio=has_audio, gnss=has_gnss, sensors=has_sensors, camera=has_camera, keymint=has_keymint)
+            if widevine_hal:
+                contexts = with_widevine_file_contexts(contexts)
+            zout.writestr("VENDOR/etc/selinux/vendor_file_contexts", contexts.encode())
     if graphics_payload is not None and not replaced_graphics_payload:
         dest.unlink(missing_ok=True)
         raise ValueError(f"target_files does not contain {GFXSTREAM_LIBRARY}")

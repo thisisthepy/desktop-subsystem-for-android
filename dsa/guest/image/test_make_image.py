@@ -6003,7 +6003,7 @@ class ArmTranslationImageTests(unittest.TestCase):
         return dropped
 
     def test_fr25_fr32_init_hands_every_mount_option_to_the_kernel(self):
-        for name in ["dsa-arm-translation.rc", "dsa-gapps.rc", "dsa-addons.rc"]:
+        for name in ["dsa-arm-translation.rc", "dsa-gapps.rc", "dsa-addons.rc", "dsa-widevine.rc"]:
             rc = (Path(make_image.__file__).with_name(name)).read_text()
             self.assertEqual(self._dropped_mount_options(rc), [], name)
         # develop 406c30d7 named fscontext= and context= as two arguments. Init dropped
@@ -6023,7 +6023,7 @@ class ArmTranslationImageTests(unittest.TestCase):
         # with proc, and any domain creating, writing or relabelling a file or folder of a
         # contextmount_type. A rule that broke one would stop the policy compiling at boot.
         fs_types = {"labeledfs", "tmpfs", "rootfs", "proc", "binfmt_miscfs"}
-        for name in ("arm-translation.cil", "gapps.cil", "addons.cil"):
+        for name in ("arm-translation.cil", "gapps.cil", "addons.cil", "widevine.cil"):
             text = (Path(make_image.__file__).parent / "sepolicy" / name).read_text()
             attributes = self._attributes(text)
             declared = attributes.get("fs_type", set())
@@ -6554,6 +6554,101 @@ class ArmTranslationImageTests(unittest.TestCase):
             self.assertIn("(allow system_file dsa_gapps_fs (filesystem (associate)))", policy)
             # No domain is given filesystem getattr on a file type: the superblock is not one.
             self.assertNotIn("(allow init system_file (filesystem (getattr)))", policy)
+
+    def test_fr37_widevine_is_laid_over_vendor_apex_only_when_the_host_says_it_is_installed(self):
+        rc = (Path(make_image.__file__).with_name("dsa-widevine.rc")).read_text()
+        sections = self._sections(rc)
+        triggers = [trigger for trigger, _ in sections]
+        on = make_image.WIDEVINE_TRIGGER
+        images = {
+            f"{on} && property:ro.boot.dsa.widevine_image=disk": "/mnt/dsa-addons/widevine.img",
+            # In the host's direct-mapped mode, the image's own partition on persistent memory.
+            f"{on} && property:ro.boot.dsa.widevine_image=dax": "/dev/block/by-name/dsa_widevine",
+        }
+        for trigger, image in images.items():
+            commands = dict(sections)[trigger]
+            option = "dax=always" if trigger.endswith("=dax") else "directio"
+            mount = (f"mount erofs {image} /mnt/dsa-widevine ro nodev nosuid noexec "
+                     f"{option},fscontext=u:object_r:dsa_widevine_fs:s0,"
+                     "context=u:object_r:vendor_apex_file:s0")
+            self.assertEqual([c for c in commands if c.startswith("mount ")], [mount], trigger)
+            # Mounted before it is laid over: init runs one trigger's actions in file order.
+            self.assertLess(triggers.index(trigger), triggers.index(on), trigger)
+        # Laid over /vendor/apex at post-fs, before apexd activates the vendor's APEXes at
+        # post-fs-data, with the vendor's own beneath it.
+        self.assertEqual([c for c in dict(sections)[on] if c.startswith("mount ")],
+                         [make_image.WIDEVINE_OVERLAY])
+        self.assertTrue(on.startswith("on post-fs "), on)
+        # After dsa-addons.rc mounts the disk in the same trigger: init reads the scripts in the
+        # order of their names.
+        self.assertLess("dsa-addons.rc", "dsa-widevine.rc")
+        # Every mount waits for the host's word; a boot after removal removes the certificates.
+        for trigger, commands in sections:
+            if "widevine=on" not in trigger:
+                self.assertFalse([c for c in commands if c.startswith("mount ")], trigger)
+        self.assertIn(make_image.WIDEVINE_RESET, dict(sections)[make_image.WIDEVINE_OFF_TRIGGER])
+        self.assertEqual(self._dropped_mount_options(rc), [])
+
+    def test_fr37_the_image_carries_widevines_policy_ahead_of_any_install(self):
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
+            self.assertEqual(archive.read(make_image.WIDEVINE_RC).decode(),
+                             (Path(make_image.__file__).with_name("dsa-widevine.rc")).read_text())
+            policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+            config = archive.read("META/filesystem_config.txt").decode()
+            services = archive.read(make_image.VENDOR_SERVICE_CONTEXTS).decode()
+            contexts = archive.read("VENDOR/etc/selinux/vendor_file_contexts").decode()
+            files = {name: archive.read(name) for name in archive.namelist()}
+        self.assertEqual(self._context_mount_problems("dsa-widevine.rc", policy), [])
+        for point, fs, files_type in self._erofs_mounts(
+                (Path(make_image.__file__).with_name("dsa-widevine.rc")).read_text()):
+            self.assertEqual((fs, files_type), ("dsa_widevine_fs", "vendor_apex_file"), point)
+        for rule in make_image.WIDEVINE_FS_CONFIG:
+            self.assertIn(rule, config)
+        # This build's vendor policy has no Widevine types, so the image declares them, and labels
+        # the service and the certificate folder.
+        for name in make_image.WIDEVINE_HAL_TYPES:
+            self.assertIn(f"(type {name})", policy)
+        self.assertIn(make_image.WIDEVINE_SERVICE_CONTEXT, services.splitlines())
+        self.assertIn("/data/vendor/mediadrm(/.*)?  u:object_r:mediadrm_vendor_data_file:s0",
+                      contexts.splitlines())
+        self.assertIn("(allow init dsa_widevine_fs (filesystem (mount relabelfrom relabelto)))", policy)
+        self.assertIn("(allow init vendor_apex_file (dir (mounton search read open getattr)))", policy)
+        self.assertEqual(make_image.widevine_problems(list(files), files.__getitem__), [])
+        # An image without the script, or whose script lays nothing over /vendor/apex, is refused.
+        gone = {n: d for n, d in files.items() if n != make_image.WIDEVINE_RC}
+        self.assertIn("is missing", make_image.widevine_problems(list(gone), gone.__getitem__)[0])
+        rc = files[make_image.WIDEVINE_RC].decode()
+        late = dict(files, **{make_image.WIDEVINE_RC: rc.replace(
+            make_image.WIDEVINE_TRIGGER, "on post-fs-data && property:ro.boot.dsa.widevine=on").encode()})
+        self.assertTrue(make_image.widevine_problems(list(late), late.__getitem__))
+
+    def test_fr37_a_vendor_policy_with_widevines_types_keeps_its_own(self):
+        cuttlefish = "(type hal_drm_widevine)\n(type hal_drm_widevine_exec)\n(type mediadrm_vendor_data_file)\n"
+        self.assertFalse(make_image.needs_widevine_hal_policy(cuttlefish))
+        self.assertTrue(make_image.needs_widevine_hal_policy("(type hal_drm_widevine)\n"))
+        self.assertTrue(make_image.needs_widevine_hal_policy(None))
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "target-files.zip"
+            with zipfile.ZipFile(source, "w") as archive:
+                archive.writestr("SYSTEM/etc/selinux/plat_sepolicy.cil", "(type init)\n")
+                archive.writestr("VENDOR/etc/selinux/vendor_sepolicy.cil", cuttlefish)
+                archive.writestr("META/vendor_filesystem_config.txt", "vendor/bin/sh 0 2000 755 capabilities=0x0\n")
+                archive.writestr("META/filesystem_config.txt", "system/bin/sh 0 2000 755 capabilities=0x0\n")
+                archive.writestr("PRODUCT/etc/build.prop", "ro.product.product.name=dsa\n")
+            modified = root / "modified.zip"
+            make_image.modify(source, modified)
+            with zipfile.ZipFile(modified) as archive:
+                policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+                files = {name: archive.read(name) for name in archive.namelist()}
+        # Declared once, in the vendor's policy: a second declaration would not compile.
+        for name in make_image.WIDEVINE_HAL_TYPES:
+            self.assertNotIn(f"(type {name})", policy)
+        self.assertIn("(type dsa_widevine_fs)", policy)
+        self.assertEqual(make_image.widevine_problems(list(files), files.__getitem__), [])
+        twice = dict(files, **{"SYSTEM/etc/selinux/plat_sepolicy.cil": (policy + cuttlefish).encode()})
+        self.assertTrue(any("declared twice" in p for p in
+                            make_image.widevine_problems(list(twice), twice.__getitem__)))
 
     def test_fr32_the_addon_disk_is_mounted_read_only_before_the_images_on_it(self):
         rc = (Path(make_image.__file__).with_name("dsa-addons.rc")).read_text()
