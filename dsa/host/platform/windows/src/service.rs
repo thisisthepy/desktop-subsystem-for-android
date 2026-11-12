@@ -531,6 +531,11 @@ pub fn create_user_android(
                 + &dsa_host_core::arm_translation::bootconfig_for(&*store, &user, image, &attached)
                 + &dsa_host_core::gapps::bootconfig_for(&*store, &user, &attached)
                 + &dsa_host_core::widevine::bootconfig_for(&*store, &user, &attached)
+                // The PC's physical memory, read at each start, which Google Play sees as the
+                // device's memory.
+                + &dsa_host_core::host_memory::bootconfig(
+                    crate::power::read_memory().map(|(total_kb, _)| total_kb),
+                )
         })
     })
     .with_boot_properties({
