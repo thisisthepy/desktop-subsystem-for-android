@@ -15,6 +15,8 @@
 //!
 //! - [`versions`]: the supported Android versions and the one a computer follows.
 //! - [`service`]: the periodic check and a user's Android that boots a new image on trial.
+//! - [`local`]: installing an image from a folder on this computer through the same checks,
+//!   for testing a build that was never published.
 //! - [`restart`]: restarting a user's running Android into an image downloaded after it
 //!   started, at once while no app window is open and after asking otherwise, so the update
 //!   is applied without the user restarting Android.
@@ -32,6 +34,7 @@
 //! Downloading is behind [`store::Fetch`]; the platform crates supply HTTPS.
 
 pub mod alerts;
+pub mod local;
 pub mod manifest;
 pub mod policy;
 pub mod program;

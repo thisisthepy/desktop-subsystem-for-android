@@ -3475,6 +3475,34 @@ fn fr14_dsa_android_shows_the_version_and_moves_down_only_with_erase_data() {
 }
 
 #[test]
+fn fr14_dsa_android_install_image_takes_the_folder_and_refuses_one_without_a_list() {
+    let parsed = parse(&args("android install-image dev-build")).unwrap();
+    assert_eq!(parsed.command, Cmd::AndroidInstallImage);
+    assert_eq!(
+        parsed.file.as_deref(),
+        Some(std::path::Path::new("dev-build"))
+    );
+    let why = parse(&args("android install-image")).unwrap_err();
+    assert!(why.contains("folder"), "{why}");
+    assert!(parse(&args("android install-image --json")).is_err());
+
+    // A folder without a signed list is refused before anything runs, and no service is
+    // needed to say so.
+    let empty = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("install-image-empty-{}", std::process::id()));
+    std::fs::create_dir_all(&empty).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_dsa"))
+        .arg("android")
+        .arg("install-image")
+        .arg(&empty)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let said = String::from_utf8_lossy(&output.stderr);
+    assert!(said.contains("images.json"), "{said}");
+}
+
+#[test]
 fn fr14_a_downloaded_image_is_applied_without_the_user_restarting() {
     use dsa_host_core::host_api::{HostApiService, ServiceFacts};
     use dsa_host_core::settings::MemorySettings;

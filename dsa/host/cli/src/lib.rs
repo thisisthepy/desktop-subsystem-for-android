@@ -269,6 +269,10 @@
 //! restarts Android into the waiting image now, whatever the setting, and `dsa android
 //! version` says when one waits (`restart_pending` in its JSON; `dsa android restart --json`
 //! prints `restarting`, the image or null, and `detail`).
+//! `dsa android install-image <folder>` installs the Android image in a folder on this
+//! computer, such as a development build's: its signed `images.json` and the files it names.
+//! It runs as administrator, and the image passes the same signature, rule and hash checks as
+//! a downloaded one, then boots on trial the same way.
 //! `host-certificates` (on by default) lets the user's Android trust, as system certificates,
 //! the root certificates a user or an administrator added to this computer, such as those an
 //! internet filter or a company proxy installs; the operating system's own are never given.
@@ -421,7 +425,7 @@ pub const USAGE: &str = "usage: dsa <status [--no-start] | start | stop | freeze
      files [open] | gapps [status | install [--progress] | remove] | reset-data --yes | \
      backup [status | on | off [--delete-backups] | now | restore | key show | \
      key import <recovery key>] | \
-     android [version | use <major>|latest [--erase-data] | restart]> \
+     android [version | use <major>|latest [--erase-data] | restart | install-image <folder>]> \
      [--wait] [--timeout <seconds>] [--json] [--pipe <name> | --socket <path>]";
 
 pub mod desktop;
@@ -517,6 +521,8 @@ pub enum Command {
     AndroidUse,
     /// Restart Android now into the downloaded image that waits for it.
     AndroidRestart,
+    /// Install the Android image in the folder [`Invocation::file`] names.
+    AndroidInstallImage,
 }
 
 /// What `dsa app-window` does.
@@ -1342,10 +1348,18 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
                         Command::AndroidUse
                     }
                     Some("restart") => Command::AndroidRestart,
+                    Some("install-image") => {
+                        let folder = args.next().filter(|f| !f.starts_with("--")).ok_or(
+                            "dsa android install-image needs the folder that holds the image: \
+                             its signed images.json and the files it names",
+                        )?;
+                        file = Some(std::path::PathBuf::from(folder));
+                        Command::AndroidInstallImage
+                    }
                     Some(other) => {
                         return Err(format!(
-                            "dsa android takes version, use <major> or restart, not \
-                             {other:?}\n{USAGE}"
+                            "dsa android takes version, use <major>, restart or install-image \
+                             <folder>, not {other:?}\n{USAGE}"
                         ))
                     }
                 });
@@ -2845,6 +2859,61 @@ fn android_restart(invocation: &Invocation, client: &mut HostApiClient) -> Resul
     } else {
         detail
     })
+}
+
+/// `dsa android install-image <folder>`: installs the Android image in the folder (a signed
+/// `images.json` and the files it names, as a development build leaves them) into the image
+/// store the service boots from. The service program beside this one does it, reading the
+/// installed configuration: the list's signature is checked against the keys the service
+/// trusts, and the image goes through the update rules and hash checks. The image store is
+/// the machine's, so it needs an administrator.
+fn android_install_image(invocation: &Invocation) -> Result<String, String> {
+    let folder = invocation
+        .file
+        .as_deref()
+        .ok_or("dsa android install-image needs the folder that holds the image")?;
+    let folder = std::path::absolute(folder).map_err(|e| format!("{}: {e}", folder.display()))?;
+    if !folder.join("images.json").is_file() {
+        return Err(format!(
+            "{} has no images.json; name the folder that holds the image's signed list and \
+             its files",
+            folder.display()
+        ));
+    }
+    #[cfg(windows)]
+    {
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let service = exe.with_file_name("dsa-hostd.exe");
+        if !service.is_file() {
+            return Err(format!(
+                "{} is missing; dsa android install-image runs the service program installed \
+                 beside dsa",
+                service.display()
+            ));
+        }
+        let status = std::process::Command::new(&service)
+            .arg("install-image")
+            .arg(&folder)
+            .status()
+            .map_err(|e| format!("running {}: {e}", service.display()))?;
+        if status.success() {
+            Ok(String::new())
+        } else {
+            Err(format!(
+                "the image in {} was not installed (the reason is above); run dsa from a \
+                 prompt started as administrator, as the image is shared by every user",
+                folder.display()
+            ))
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        Err(format!(
+            "the image in {} was not installed: dsa android install-image installs the image \
+             of a Windows development build, and this host's service has no such command",
+            folder.display()
+        ))
+    }
 }
 
 /// `dsa android version` and `dsa android use`.
@@ -4787,6 +4856,9 @@ pub fn run_with_starter(
     if invocation.command == Command::ApkInfo {
         return apk_info(invocation, connector);
     }
+    if invocation.command == Command::AndroidInstallImage {
+        return android_install_image(invocation);
+    }
     if invocation.command == Command::Gpus {
         let gpus = gpus_json();
         return Ok(if invocation.json {
@@ -4907,7 +4979,9 @@ pub fn run_with_starter(
             let path = invocation.output.clone().unwrap_or_default();
             return logs::collect(client, &path);
         }
-        Command::Gpus | Command::ApkInfo => unreachable!("answered before connecting"),
+        Command::Gpus | Command::ApkInfo | Command::AndroidInstallImage => {
+            unreachable!("answered before connecting")
+        }
     }
     .map_err(|e| e.to_string())?;
     if invocation.command == Command::Status {
