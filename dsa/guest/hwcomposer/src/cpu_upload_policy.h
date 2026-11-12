@@ -30,4 +30,19 @@ class LayerPictures {
     std::map<int64_t, uint32_t> mShown;
 };
 
+// Says when a failure to copy a buffer up is logged: the first of a run, then one in `every`,
+// so a failure on every picture neither floods the log nor goes quiet after one line.
+class UploadFailureLog {
+   public:
+    explicit UploadFailureLog(uint32_t every = 600) : mEvery(every) {}
+    // True when this failure should be logged; `*count` is how many there have been in a row.
+    bool shouldLog(uint32_t* count);
+    // An upload succeeded: the next failure starts a new run.
+    void reset() { mCount = 0; }
+
+   private:
+    uint32_t mEvery;
+    uint32_t mCount = 0;
+};
+
 }  // namespace dsa::hwc
