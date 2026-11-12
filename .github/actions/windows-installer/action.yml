@@ -35,6 +35,10 @@ inputs:
   channel:
     description: The installer's release channel, stable or prerelease
     required: true
+  windows-renderer-only:
+    description: "A development build: take the graphics library from the newest Graphics test run on develop whose Windows x64 renderer job passed, even while other jobs of that run are still running or failed"
+    required: false
+    default: "false"
 runs:
   using: composite
   steps:
@@ -54,11 +58,33 @@ runs:
     # passed is the one shipped.
     - name: Take the graphics library from the newest graphics build
       shell: pwsh
+      env:
+        WINDOWS_RENDERER_ONLY: ${{ inputs.windows-renderer-only }}
       run: |
-        $run = gh run list --repo ${{ github.repository }} --workflow test-graphics.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId'
-        if (-not $run) { throw "no graphics build has succeeded, so there is no gfxstream_backend.dll to ship" }
-        gh run download $run --repo ${{ github.repository }} --name host-gfxstream-windows --dir .scratch\host-gfxstream
-        if ($LASTEXITCODE -ne 0) { throw "downloading host-gfxstream-windows from run $run failed" }
+        $repo = '${{ github.repository }}'
+        if ($env:WINDOWS_RENDERER_ONLY -eq 'true') {
+          # A development build only needs the Windows x64 library, so it does not wait for
+          # the other hosts' jobs of the same run.
+          $run = $null
+          $runs = gh run list --repo $repo --workflow test-graphics.yml --branch develop --limit 10 --json databaseId --jq '.[].databaseId'
+          foreach ($candidate in $runs) {
+            $job = gh api "repos/$repo/actions/runs/$candidate/jobs?per_page=50" --jq '.jobs[] | select(.name == "Build the host graphics renderer (windows, x64)") | .conclusion'
+            if ($job -ne 'success') { continue }
+            $artifact = gh api "repos/$repo/actions/runs/$candidate/artifacts?per_page=50" --jq '.artifacts[] | select(.name == "host-gfxstream-windows" and (.expired | not)) | .id' | Select-Object -First 1
+            if ($artifact) { $run = $candidate; break }
+          }
+          if (-not $run) { throw "no Graphics test run on develop has a passing Windows x64 renderer with its library" }
+          New-Item -ItemType Directory -Force .scratch\host-gfxstream | Out-Null
+          # The artifact API serves a run's artifact while the run is still going; gh run
+          # download waits for the run to end.
+          Invoke-WebRequest -Uri "https://api.github.com/repos/$repo/actions/artifacts/$artifact/zip" -Headers @{ Authorization = "Bearer $env:GH_TOKEN" } -OutFile .scratch\host-gfxstream.zip
+          Expand-Archive -Force .scratch\host-gfxstream.zip .scratch\host-gfxstream
+        } else {
+          $run = gh run list --repo $repo --workflow test-graphics.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId'
+          if (-not $run) { throw "no graphics build has succeeded, so there is no gfxstream_backend.dll to ship" }
+          gh run download $run --repo $repo --name host-gfxstream-windows --dir .scratch\host-gfxstream
+          if ($LASTEXITCODE -ne 0) { throw "downloading host-gfxstream-windows from run $run failed" }
+        }
         $dll = Get-ChildItem -Recurse -File .scratch\host-gfxstream -Filter gfxstream_backend.dll | Select-Object -First 1
         if (-not $dll -or $dll.Length -eq 0) { throw "run $run has no usable gfxstream_backend.dll" }
         "GFXSTREAM_DLL=$($dll.FullName)" >> $env:GITHUB_ENV
