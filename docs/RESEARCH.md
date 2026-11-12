@@ -2526,3 +2526,50 @@ Google Play, 1574x1187, 23:46:41.529 요청(`app.summary waited=1487.9`에서 �
 - GPU 리셋 뒤 게스트 호출이 실제로 곧바로 실패하는지와 새 로그 줄의 단계별 시간. PC에서 같은 조건(YouTube 창 최대화, 또는 `dsa_gfx_simulate_device_loss`)으로 본다.
 - 리셋의 원인. 위의 살핌으로는 DSA의 GPU 일에서 찾지 못했다.
 - 손으로 쓴 생성 코드. 이 PC에는 `protoc`이 없어 `dsa.renderer.v1.rs`와 해시를 생성기와 같은 규칙으로 직접 썼다(해시는 `schema` 크레이트의 정규화를 그대로 옮겨 셈했고, 고치기 전 정의로 기존 해시가 나오는 것을 확인했다). CI의 생성 코드 검사가 다르다고 하면 Protocol sync로 다시 만든다.
+
+## R33. Play의 일회성 프로세스가 캐시로 계속 남은 까닭: 캐시 상한의 절반은 빈 프로세스 몫이고 나이 정리는 1000시간이다 (NFR-1, NFR-2)
+
+**기준.** 소유자 PC의 v0.2.3 진단 묶음(2026-11-12 14:04 UTC, FLO 창 표시, APKPure 백그라운드, 게스트 가용 869 MiB로 메모리 압박 없음)의 `android/dumpsys.txt`(`dumpsys activity processes`, `dumpsys meminfo`), `android/logcat.txt`, `host/android-console.log`를 읽었다. 프레임워크 동작은 AOSP `frameworks/base` main의 `ActivityManagerConstants.java`, `OomAdjuster.java`, `ProcessList.java`, `ActivityManagerService.java`로 확인했다.
+
+### 남은 프로세스
+
+| 프로세스 | 시작(UTC) | 까닭 | 상태 | PSS |
+|---|---|---|---|---|
+| com.android.vending | 14:01:34 | `PhoneskyJobServiceMain`(Play 작업) | CEM, adj 915 | 107.1 MiB |
+| com.google.android.gms.unstable | 14:04:00 | `DroidGuardService`(Play가 묶음) | CEM, adj 905, 동결됨 | 68.2 MiB |
+| com.android.vending:background | 13:47:55 | `BackgroundProcessEndpointService` | CEM, adj 905 | 40.1 MiB |
+| com.android.settings | 13:48:30 | `BatteryUsageBroadcastReceiver` | CEM, adj 905 | 32.0 MiB |
+
+넷의 PSS 합은 247.4 MiB(`Cached` 253,342K)다. 오래 사는 Google 프로세스는 `com.google.android.gms`(BFGS, adj 100, 시스템이 묶음) 하나다. vending UID는 `bg:+2m59s idle`이었다.
+
+### 상한이 듣지 않은 까닭
+
+- 상한 8은 적용됐다. 잠금 해제(12:58:33) 뒤 10분 동안은 `OomAdjuster: Not killing cached processes`가 찍히고(`no_kill_cached_processes_post_boot_completed_duration_millis` 기본 600000), 13:08:39에 `empty #5`부터 `empty #14`까지 열 개가 끝났다.
+- 그러나 `updateAndTrimProcessLSP`는 빈 프로세스를 `CUR_MAX_EMPTY_PROCESSES = 8 / 2 = 4`개까지 남긴다. 넷 모두 빈 프로세스(CEM)이고 수가 정확히 4라서 다섯째가 생기기 전에는 아무것도 끝나지 않는다.
+- 나이로 정리하는 길은 `CUR_TRIM_EMPTY_PROCESSES`(2)를 넘는 빈 프로세스가 `max_empty_time_millis`보다 오래 쉬었을 때인데, 그 기본값이 `1000L * 60 * 60 * 1000`, 1000시간이다.
+- 에이전트의 `activity kill-all`은 태스크가 하나도 없이 화면이 꺼질 때와 호스트가 메모리가 부족하다고 할 때만 돈다. FLO 창이 떠 있었고 호스트도 부족하지 않았다.
+
+### 고친 것
+
+에이전트(`memory/CachedProcesses.kt`)가 15초마다 프로세스 목록을 보고, 캐시 상태로 30초 머문 프로세스 가운데 활동이 없고, 패키지에 태스크와 포그라운드 서비스가 없는 것을 끝낸다. gms 본체(`com.google.android.gms`, `.persistent`, `com.google.process.gapps`), system, persistent, 에이전트는 끝내지 않는다. 끝낸 뒤 곧 돌아오는 프로세스는 다음에 두 배 오래(8분까지) 기다린다.
+
+끝내는 방법은 `ActivityManager.killBackgroundProcesses`다. 다른 방법을 견줬다.
+
+- `forceStopPackage`: 작업, 알람, 알림을 지우고 패키지를 멈춤 상태로 만든다. gms에 쓰면 FCM이 끊긴다. 쓰지 않는다.
+- 프로세스 하나를 끝내는 `killPids`, `killApplicationProcess`, `killProcessesBelowForeground`: system UID만 부를 수 있다.
+- `killProcessesWhenImperceptible`(FORCE_STOP_PACKAGES): 기기가 유휴(Doze)에 들어갈 때만 끝내므로 창이 열린 동안은 듣지 않는다.
+- `killBackgroundProcesses`: 패키지 상태, 작업, 알람을 그대로 두고 점수 500 이상의 프로세스만 끝낸다. 작업 스케줄러와 gms의 푸시가 필요할 때 앱을 다시 띄운다. 다만 패키지 단위이고 그 패키지의 코드를 불러온 다른 프로세스(`packageDependencies`, 예: WebView를 쓰는 최소화된 앱)도 끝낸다. 그래서 끝내기 전에 `dumpsys activity processes`의 기록을 읽어, 그 호출이 닿을 프로세스(여유를 두어 점수 250 이상)가 모두 이 정책이 어차피 끝낼 것일 때만 부른다.
+
+결정을 `dsa-channeld`가 아니라 에이전트에 둔 까닭: 프레임워크를 거쳐 끝낼 수 있는 것은 KILL_ALL_BACKGROUND_PROCESSES를 가진 에이전트이고, 채널 데몬은 lmkd처럼 신호를 보내는 수밖에 없어 활동 관리자의 기록을 건너뛴다. 태스크 창 목록도 에이전트에 있다.
+
+### 기대하는 절감
+
+- PSS로 247.4 MiB(위 표). PSS는 zram에 들어간 몫을 압축 전 크기로 센다.
+- 실제 비용: 채널 데몬의 마지막 pageout 줄(vending 상주 익명 17, 스왑 58 MiB; vending:background 16, 45; gms.unstable 15, 42)과 측정한 압축률 3.76:1(zram 571,232K를 152,112K에)로 셈하면 vending 약 64 MiB(PSS 107에서 58을 빼고 58/3.76을 더함), gms.unstable 약 37 MiB, vending:background 16-29 MiB, Settings 32 MiB 이하로, 합 약 150-160 MiB다. 소유자의 `dsa memory` 수치(62, 29, 110, 33)로는 234 MiB다.
+- Google Play 몫은 gms 본체(38 MiB)와 그것이 묶은 서비스만 남아 100 MiB 아래로 내려간다. 끝난 프로세스의 익명 메모리와 zram은 바로 풀려 빈 페이지 보고로 호스트에 돌아가고, 파일 페이지는 페이지 캐시로 남았다가 다음 회수 때 돌아간다.
+
+### 확인하지 못한 것
+
+- Kotlin 빌드와 시험, 실기. 이 PC에서 빌드하거나 실행하지 않았다.
+- 실제 기기에서 `processState`, `flags` 숨은 필드를 읽는지, `dumpsys activity processes`를 에이전트가 읽는지(DUMP, platform_app의 파이프를 system_server가 쓰는 정책은 이미 있다), 끝낸 줄과 절감량.
+- Play 작업이 끝난 프로세스를 얼마나 자주 다시 띄우는지(다시 띄우는 CPU 비용).
