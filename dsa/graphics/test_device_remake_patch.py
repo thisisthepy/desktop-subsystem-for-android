@@ -167,5 +167,39 @@ class BoundedCopiesPatchTests(unittest.TestCase):
             self.assertIn("0022", script.read_text(encoding="utf-8"))
 
 
+class ColorBufferDuringRemakePatchTests(unittest.TestCase):
+    """Patch 0029: a ColorBuffer asked for while the lost device is made again fails that call.
+
+    On the Linux renderer test (llvmpipe, 2026-11-12) a guest's rcCreateColorBuffer right after
+    a simulated loss found the device lost, ColorBufferVk could not be made, and FrameBuffer
+    aborted ("FATAL in createColorBufferWithResourceHandleLocked"), which ended the guest's
+    stream 15 ms before the new device was made."""
+
+    def setUp(self):
+        self.patch = next((HERE / "patches").glob("0029-*.patch"))
+        self.added, self.removed = file_hunks(self.patch, "host/FrameBuffer.cpp")
+        self.after = new_side(self.patch, "host/FrameBuffer.cpp")
+
+    def test_nfr5_a_color_buffer_asked_for_during_the_remake_fails_without_ending_the_stream(self):
+        text = "\n".join(self.after)
+        before = text.index("lossesBefore = m_emulationVk ? m_emulationVk->deviceLosses() : 0;")
+        create = text.index("ColorBuffer::create(")
+        lost = text.index("!m_emulationVk->deviceUsable() || "
+                          "m_emulationVk->deviceLosses() != lossesBefore")
+        fails = text.index("return 0;", lost)
+        fatal = text.index("GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))")
+        # The losses are counted before the creation, so a loss found by the creation itself
+        # counts, even when the new device is made before the check.
+        self.assertLess(before, create)
+        self.assertLess(create, lost)
+        # A device loss answers the call before the fatal path; other failures stay fatal.
+        self.assertLess(fails, fatal)
+        self.assertEqual(self.removed, [])
+
+    def test_nfr5_the_fetch_applies_it(self):
+        for script in (HERE / "host/fetch.ps1", HERE / "host/fetch.sh"):
+            self.assertIn("0029", script.read_text(encoding="utf-8"))
+
+
 if __name__ == "__main__":
     unittest.main()
