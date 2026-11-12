@@ -42,6 +42,51 @@ class AndroidKernelConfigTests(unittest.TestCase):
         for option in ["CONFIG_IP_NF_NAT=y", "CONFIG_IP6_NF_NAT=y", "CONFIG_NETFILTER_XT_TARGET_REDIRECT=y"]:
             self.assertIn(option, config)
 
+    def test_fr32_listed_apps_see_the_computers_memory_in_meminfo_and_sysinfo(self):
+        # Google Play reads the device's memory from /proc/meminfo and sysinfo(); the apps the
+        # guest lists see the computer's memory there, every other process the VM's own.
+        self.assertIn("CONFIG_DSA_HOST_MEMORY=y", CONFIG.read_text())
+        patch = (PATCHES / "dsa-host-memory.patch").read_text()
+        self.assertIn("+++ b/fs/proc/dsa_host_memory.c", patch)
+        # Both read paths take it: MemTotal in /proc/meminfo and sysinfo()'s totalram.
+        for path in ("fs/proc/meminfo.c", "kernel/sys.c"):
+            hunk = patch[patch.index(f"+++ b/{path}"):]
+            hunk = hunk[:hunk.find("diff --git", 1)] if "diff --git" in hunk[1:] else hunk
+            self.assertIn("+\tdsa_host_memory_adjust(", hunk, path)
+        # Keyed on the calling process's own uid, never on anything a binder peer says.
+        self.assertIn("dsa_app_listed(current_uid())", patch)
+        self.assertNotIn("drivers/android/binder.c", patch)
+        # Only the total changes, and only upwards; free and available memory stay the VM's.
+        self.assertIn("+\tif (pages > info->totalram)\n+\t\tinfo->totalram = pages;", patch)
+        self.assertNotIn("freeram =", patch)
+        # Parameters the bootconfig's kernel.dsa_host_memory.* reach.
+        self.assertIn('+#define MODULE_PARAM_PREFIX "dsa_host_memory."', patch)
+        self.assertIn("+module_param_named(total_kb, dsa_total_kb, ulong, 0444);", patch)
+        self.assertIn("+module_param_cb(uids, &dsa_uids_ops, NULL, 0644);", patch)
+
+    def test_fr32_the_host_memory_patch_hunks_count_their_lines(self):
+        header = re.compile(r"^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@")
+        old_left = new_left = 0
+        current = None
+        for line in (PATCHES / "dsa-host-memory.patch").read_text().splitlines():
+            match = header.match(line)
+            if match:
+                self.assertEqual((old_left, new_left), (0, 0), current)
+                current = line
+                old_left = int(match.group(1) or 1)
+                new_left = int(match.group(2) or 1)
+                continue
+            if old_left == 0 and new_left == 0:
+                continue
+            if line.startswith("+"):
+                new_left -= 1
+            elif line.startswith("-"):
+                old_left -= 1
+            else:
+                old_left -= 1
+                new_left -= 1
+        self.assertEqual((old_left, new_left), (0, 0), current)
+
     def test_fr35_the_su_guard_is_built_in_and_hides_su_by_inode(self):
         # su exists only for the uids the host allows; the guard returns -ENOENT for any
         # other task, so an app that may not ask never finds su (INTENT D28).

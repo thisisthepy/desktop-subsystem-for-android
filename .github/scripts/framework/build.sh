@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds the patched SurfaceFlinger, libhwui and libEGL, and DSA's KeyMint (dsa-keymint, whose
+# Builds the patched SurfaceFlinger, libhwui, libEGL and libandroid_runtime, and DSA's KeyMint (dsa-keymint, whose
 # root key of key blobs comes from the DSA host, with the libssl it needs), in a tree
 # fetch-source.py made from dsa/guest/framework/framework-lock.json.
 #

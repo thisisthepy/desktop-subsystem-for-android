@@ -159,3 +159,26 @@
 (allow hal_codec2_server dsa_codec2_tmpfs (file (ioctl read write getattr map)))
 (allowx hal_codec2_server dsa_codec2_tmpfs (ioctl file ((range 0x7701 0x770b))))
 (allow hal_codec2_client dsa_codec2_tmpfs (file (read write getattr map)))
+
+; Google Play sees the computer's memory as the device's (dsa-memory.rc). The kernel's two
+; parameters, /sys/module/dsa_host_memory/parameters/uids (which apps) and total_kb (how much),
+; get a type of their own: init writes the list of apps when dsa-channeld names them, and
+; system_server reads both to answer those apps' ActivityManager.getMemoryInfo. Nothing else
+; may write the list, so an app cannot name itself, and no app reads either.
+(type dsa_sysfs_host_memory)
+(roletype object_r dsa_sysfs_host_memory)
+(typeattributeset fs_type (dsa_sysfs_host_memory))
+(typeattributeset sysfs_type (dsa_sysfs_host_memory))
+(genfscon sysfs "/module/dsa_host_memory" (u object_r dsa_sysfs_host_memory ((s0) (s0))))
+(allow vendor_init dsa_sysfs_host_memory (dir (search)))
+(allow vendor_init dsa_sysfs_host_memory (file (write open getattr)))
+(allow system_server dsa_sysfs_host_memory (dir (search)))
+(allow system_server dsa_sysfs_host_memory (file (read open getattr)))
+
+; vendor.dsa.host_memory.uids (vendor_property_contexts): dsa-channeld sets it to the apps' uids
+; and init reads it. Only the daemon may set it (channeld.cil).
+(type dsa_host_memory_prop)
+(roletype object_r dsa_host_memory_prop)
+(typeattributeset property_type (dsa_host_memory_prop))
+(typeattributeset vendor_property_type (dsa_host_memory_prop))
+(allow vendor_init dsa_host_memory_prop (file (read open getattr map)))

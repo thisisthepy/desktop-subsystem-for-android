@@ -52,3 +52,16 @@ on boot
     write /proc/sys/vm/compaction_proactiveness 40
     write /proc/sys/vm/vfs_cache_pressure 200
     write /proc/sys/vm/percpu_pagelist_high_fraction 1048576
+
+# The apps that see the computer's memory as the device's (Google Play: the Play Store and Play
+# services). Google Play gives a device under 8 GB a build of Chrome whose browser is 32-bit,
+# which this 64-bit only guest cannot start, and the VM's size says nothing about the computer:
+# it starts small and grows. The host passes the computer's memory at each start
+# (kernel.dsa_host_memory.total_kb in the bootconfig). dsa-channeld names the apps' uids from the
+# package manager's list in vendor.dsa.host_memory.uids ("none" for no app), and init hands them
+# to the kernel, which then shows those apps the computer's memory as MemTotal in /proc/meminfo
+# and in sysinfo(). The framework reads the same two kernel parameters to answer those apps'
+# ActivityManager.getMemoryInfo. Only init may write the list (sepolicy/memory.cil), so no app
+# can name itself; every other process sees the VM's memory, so lmkd is unchanged.
+on property:vendor.dsa.host_memory.uids=*
+    write /sys/module/dsa_host_memory/parameters/uids ${vendor.dsa.host_memory.uids}

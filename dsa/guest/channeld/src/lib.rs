@@ -19,6 +19,7 @@
 //! [`pageout`] pages an idle app out to zram again soon after something woke it, and
 //! [`writeback`] writes what stays cold in zram on to its backing file on the data disk.
 //! [`pressure`] tells the host how much memory the guest has, so the VM grows and shrinks.
+//! [`host_memory`] names the apps that see the computer's memory as the device's (Google Play).
 //! [`logbridge`] sends the guest's log on the log port, only while the host asks for it, and
 //! the guest's diagnostics; [`logd`] reads logd for it.
 //! [`keymint_key`] fetches KeyMint's root key from the host once each boot, for KeyMint alone.
@@ -40,6 +41,7 @@ pub mod dns_redirect;
 pub mod dns_stub;
 pub mod gamepad;
 pub mod gapps;
+pub mod host_memory;
 pub mod image_store;
 pub mod keymint_key;
 pub mod logbridge;
