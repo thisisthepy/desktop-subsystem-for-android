@@ -654,6 +654,9 @@ struct Shared {
     sender: Mutex<Option<Box<dyn FrameSender>>>,
     /// The guest's last memory report, and when it arrived. Cleared when the guest stops.
     guest_memory: Mutex<Option<(GuestMemory, Instant)>>,
+    /// The VM's memory as the host last set it, in MiB, while the platform resizes it (see
+    /// [`MemoryGrowth`]); `None` when it does not, and while the guest is stopped.
+    vm_memory_mb: Mutex<Option<u64>>,
     /// What keeps the guest from being ready, while something does.
     problem: Mutex<Option<BootProblem>>,
     /// Who opens the web links the guest sends.
@@ -1019,6 +1022,10 @@ impl Shared {
         *self.guest_memory.lock().unwrap_or_else(|e| e.into_inner()) = memory;
     }
 
+    fn set_vm_memory_mb(&self, mb: Option<u64>) {
+        *self.vm_memory_mb.lock().unwrap_or_else(|e| e.into_inner()) = mb;
+    }
+
     /// Records a task message and hands it to the watchers, unless it changes nothing.
     fn publish_task(&self, event: TaskEvent) {
         let mut hub = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
@@ -1375,6 +1382,7 @@ impl Session {
             tasks: Mutex::new(TaskHub::default()),
             sender: Mutex::new(None),
             guest_memory: Mutex::new(None),
+            vm_memory_mb: Mutex::new(None),
             problem: Mutex::new(None),
             link_watchers: Mutex::new(Vec::new()),
             transfers: Mutex::new(HashMap::new()),
@@ -1973,14 +1981,26 @@ impl Session {
 
     /// The guest's last memory report and how old it is. `None` until the agent has sent one
     /// since the guest started.
+    ///
+    /// The memory the guest was given is the VM's size as the host last set it, when the
+    /// platform resizes the VM. The guest counts its online memory blocks, and memory that was
+    /// hot-added and then ballooned back to the host stays online in the guest, so its count
+    /// alone takes that memory for the kernel's own: on the owner's PC, a VM grown to 3840 MiB
+    /// and shrunk back to 2560 MiB showed 1357 MiB "reserved by the kernel at boot", where the
+    /// kernel had kept 77 MiB and the host had the other 1280 MiB back.
     pub fn guest_memory(&self) -> Option<GuestMemoryReport> {
+        let vm_mb = *self
+            .shared
+            .vm_memory_mb
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         self.shared
             .guest_memory
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .as_ref()
             .map(|(memory, at)| GuestMemoryReport {
-                memory: memory.clone(),
+                memory: memory.given(vm_mb),
                 age: at.elapsed(),
             })
     }
@@ -5517,6 +5537,7 @@ impl Worker {
         match result {
             Ok(()) => {
                 growth.applied();
+                self.shared.set_vm_memory_mb(Some(mb));
                 eprintln!(
                     "memory: Android's memory {} from {before} to {mb} MiB ({} MiB available, \
                      {:.1}% stalled)",
@@ -5883,6 +5904,8 @@ impl Worker {
             eprintln!("memory: Android starts with {base} MiB and may grow to {max} MiB");
             MemoryGrowth::new(base, max)
         });
+        self.shared
+            .set_vm_memory_mb(self.memory_growth.as_ref().map(MemoryGrowth::current_mb));
         let started = Instant::now();
         self.started_at = started;
         // A new boot of Android: the root policy is read again and no app keeps a grace.
@@ -6731,6 +6754,7 @@ impl Worker {
         // And what it asked of the host's speech and spelling.
         self.shared.language().guest_gone();
         self.shared.set_guest_memory(None);
+        self.shared.set_vm_memory_mb(None);
         // A dump or diagnostics under way gets no more from this guest.
         self.shared
             .logs

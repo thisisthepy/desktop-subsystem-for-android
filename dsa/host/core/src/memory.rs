@@ -111,7 +111,8 @@ pub struct KernelMemory {
     pub percpu_kb: u64,
     pub cma_total_kb: u64,
     pub hugetlb_kb: u64,
-    /// The memory the kernel was given (its online memory blocks).
+    /// The memory the kernel was given: its online memory blocks, or the VM's size when the
+    /// host set it smaller ([`GuestMemory::given`]).
     pub mem_online_kb: u64,
 }
 
@@ -348,6 +349,21 @@ impl GuestMemory {
                 + k.hugetlb_kb
                 + self.zram_used_kb,
         )
+    }
+
+    /// This report with the memory the guest was given taken as the VM's size, `vm_mb` MiB,
+    /// when the host knows it and it is less than the guest's online memory blocks. Memory
+    /// hot-added while the guest ran stays online after the host has ballooned it back, so
+    /// the blocks alone count it as given, and [`GuestMemory::reserved_at_boot_kb`] would take
+    /// all of it for the kernel's own.
+    pub fn given(&self, vm_mb: Option<u64>) -> GuestMemory {
+        let mut memory = self.clone();
+        if let Some(vm_kb) = vm_mb.map(|mb| mb * 1024) {
+            if memory.kernel.mem_online_kb > vm_kb {
+                memory.kernel.mem_online_kb = vm_kb;
+            }
+        }
+        memory
     }
 
     /// What the kernel reserved at boot, before MemTotal: its code and data, the page
@@ -794,8 +810,13 @@ pub enum GrowthAction {
 /// ceiling below the maximum.
 ///
 /// - Grow when the guest's available memory falls under a fifth of its total (at least
-///   512 MiB), or when its tasks stall on memory for 10% of the time: by half the current size,
-///   at least 1 GiB, up to the maximum, at most every 5 seconds.
+///   512 MiB), or when its tasks stall on memory for 10% of the time: to what it uses plus half
+///   again (at least 1 GiB of headroom), the same size a shrink would leave, and by at least
+///   512 MiB, up to the maximum, at most every 5 seconds. Memory added once costs the guest its
+///   page records (about 1.6% of it) for as long as it runs, even after it has been ballooned
+///   back to the host, so the VM grows only as far as the guest needs: a step of half the
+///   current size took a guest with 2560 MiB and 500 MiB available to 3840 MiB, where 3072 MiB
+///   was enough.
 /// - Shrink on the first report that finds the guest not short, once 5 seconds have passed
 ///   since the last change: to what it uses plus half again (at least 1 GiB of headroom),
 ///   never below the base. Memory the guest no longer needs goes back at once; the headroom,
@@ -832,6 +853,8 @@ pub struct MemoryGrowth {
 
 /// Memory is added and removed in steps of this, in MiB, the guest's memory block size.
 const GROWTH_GRANULE_MB: u64 = 128;
+/// The least one growth adds, in MiB: a guest short of memory gets at least this much more.
+const GROW_STEP_MIN_MB: u64 = 512;
 const GROW_COOLDOWN: Duration = Duration::from_secs(5);
 const SHRINK_COOLDOWN: Duration = Duration::from_secs(5);
 const HOT_ADD_DEADLINE: Duration = Duration::from_secs(30);
@@ -909,7 +932,10 @@ impl MemoryGrowth {
             if self.current_mb >= self.max_mb || !since_change(GROW_COOLDOWN) {
                 return None;
             }
-            let mut step = (self.current_mb / 2).max(1024);
+            let used_mb = p.used_mb();
+            let wanted = round_up_mb(used_mb + (used_mb / 2).max(1024))
+                .max(self.current_mb + GROW_STEP_MIN_MB);
+            let mut step = wanted - self.current_mb;
             if let Some(limit) = self.grow_limit_mb {
                 step = step.min(limit);
             }
