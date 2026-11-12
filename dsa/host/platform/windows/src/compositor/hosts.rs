@@ -901,6 +901,9 @@ impl Manager {
                     self.carry_out(actions);
                 }
                 let changes = self.windows.apply(&event);
+                for note in self.windows.take_notes() {
+                    self.log(&note);
+                }
                 self.guest_change(changes, now);
                 // A task that took a size its window gave it live outside a drag (a
                 // maximise, a snap) is reconfigured for it now, at a size it has.

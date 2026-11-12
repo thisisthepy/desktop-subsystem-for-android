@@ -10,7 +10,10 @@
 //! host's requests, each new size waited behind it for up to a second and a half. The test
 //! then gives the window [`SIZES`] sizes, each twice, [`STEP`] apart, the way the window
 //! manager does: live first, then once more (not live) when the guest reports the task at
-//! that size, which reconfigures the task for it.
+//! that size, which reconfigures the task for it. No size follows itself ([`size_at`]): the
+//! window manager never asks for the size a task has, which changes nothing, so no frame of
+//! it comes. A size the guest keeps within the task's limits is waited for at the size the
+//! guest gives ([`guest_choice`]), as the window manager takes it.
 //!
 //! For each resize it measures, on the host's clock, how long the guest took to report the
 //! task at the new size (`reported`): the request's way to the agent, its wait for the
@@ -38,6 +41,7 @@ use std::time::{Duration, Instant};
 
 use boot_check::{lock, Process as Service, Watchdog};
 
+use dsa_host_core::compositor::window_sizing::guest_choice;
 use dsa_host_core::guest_log::LogFilter;
 use dsa_host_core::host_api::HostApiClient;
 use dsa_host_core::tasks::Task;
@@ -80,6 +84,18 @@ const QUEUED_BUDGET: f64 = 50.0;
 /// runner's equivalent, past which a regression like the one this check guards against (a new
 /// size waiting a second for the agent) shows plainly.
 const FRAME_BUDGET: f64 = 1000.0;
+
+/// Which of [`SIZES`] the window takes at `step`: each in turn, then each again the other way,
+/// starting from the one before the last, so every size follows another one, never itself.
+/// Asking for the size a task has changes nothing in the guest, and no frame of it comes.
+fn size_at(step: usize) -> usize {
+    let count = SIZES.len();
+    if step < count {
+        step
+    } else {
+        (2 * count - 2 - (step - count)) % count
+    }
+}
 
 fn scratch() -> PathBuf {
     // Short: the service's socket goes inside, and a socket's path has at most 107 bytes.
@@ -356,6 +372,27 @@ fn fr4_the_check_reads_each_stage_of_a_resize_from_the_guests_trace() {
 }
 
 #[test]
+fn fr4_the_check_asks_each_size_twice_and_never_the_size_the_task_has() {
+    let order: Vec<usize> = (0..2 * SIZES.len()).map(size_at).collect();
+    for index in 0..SIZES.len() {
+        assert_eq!(
+            order.iter().filter(|&&at| at == index).count(),
+            2,
+            "{order:?}"
+        );
+    }
+    // Run 43223832949 asked for the last size of the first round again at the start of the
+    // second; the guest had it, drew nothing new, and the check waited for a frame in vain.
+    assert!(order.windows(2).all(|pair| pair[0] != pair[1]), "{order:?}");
+    assert_eq!(&order[SIZES.len()..], &[6, 5, 4, 3, 2, 1, 0, 7]);
+    // A size the guest keeps within the task's smallest is waited for at the size it gives.
+    assert_eq!(
+        guest_choice((300, 900), Some((400, 300)), Some((1920, 1008))),
+        (400, 900)
+    );
+}
+
+#[test]
 fn fr4_the_check_fails_what_the_owners_pc_measured_and_passes_a_fast_guest() {
     // v0.2.3 on the owner's PC: Google Play's new sizes waited up to 1.4 s for the agent.
     let slow: Vec<Measured> = [1380.0, 450.0, 900.0, 160.0]
@@ -606,78 +643,84 @@ fn fr4_resizing_a_real_app_watched_by_an_accessibility_client_shows_each_size_in
     std::thread::sleep(Duration::from_secs(2));
 
     let mut measured = Vec::new();
-    for round in 0..2 {
-        for (index, (width, height)) in SIZES.iter().enumerate() {
-            // The second round goes the other way, so each size follows another one.
-            let (width, height) = if round == 0 {
-                (*width, *height)
-            } else {
-                SIZES[SIZES.len() - 1 - index]
-            };
-            let size = (
-                ((max.0 as f64) * width) as u32,
-                ((max.1 as f64) * height) as u32,
+    for step in 0..2 * SIZES.len() {
+        let (width, height) = SIZES[size_at(step)];
+        let size = (
+            ((max.0 as f64) * width) as u32,
+            ((max.1 as f64) * height) as u32,
+        );
+        // What the guest gives the task for it: the window manager takes that as the answer.
+        let given = guest_choice(size, task.min_size(), Some(max));
+        if given != size {
+            eprintln!(
+                "the guest keeps task {} at {}x{} for the {}x{} asked, within its smallest size {:?}",
+                task.task_id,
+                given.0,
+                given.1,
+                size.0,
+                size.1,
+                task.min_size()
             );
-            // Only what the guest says from here on is about this resize: the same size was
-            // asked for in the first round.
-            let from = lock(&log).len();
-            let asked = Instant::now();
-            if let Err(why) = api.resize_task(task.task_id, size.0, size.1, true) {
-                fail(
-                    format!("resizing task {}: {why}", task.task_id),
-                    &service,
-                    &log,
-                );
-            }
-            // The window manager reconfigures the task once the guest reports it at the size.
-            let mut reported = None;
-            while asked.elapsed() < FRAME_WAIT {
-                if reported_size(&mut api, task.task_id) == Some(size) {
-                    reported = Some(asked.elapsed());
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(5));
-            }
-            let Some(reported) = reported else {
-                fail(
-                    format!(
-                        "the guest never reported task {} at {}x{}",
-                        task.task_id, size.0, size.1
-                    ),
-                    &service,
-                    &log,
-                );
-            };
-            if let Err(why) = api.resize_task(task.task_id, size.0, size.1, false) {
-                fail(
-                    format!("reconfiguring task {}: {why}", task.task_id),
-                    &service,
-                    &log,
-                );
-            }
-            // The frame of the size, as the guest's trace tells it.
-            let mut guest = None;
-            while asked.elapsed() < FRAME_WAIT {
-                let lines: Vec<TraceLine> = lock(&log)[from..]
-                    .iter()
-                    .map(String::as_str)
-                    .filter_map(trace_line)
-                    .collect();
-                if let Some(found) = guest_resize(&lines, task.task_id, size) {
-                    guest = Some(found);
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            let resize = Measured {
-                size,
-                reported: reported.as_secs_f64() * 1000.0,
-                guest,
-            };
-            eprintln!("{resize:?}");
-            measured.push(resize);
-            std::thread::sleep(STEP.saturating_sub(asked.elapsed()));
         }
+        // Only what the guest says from here on is about this resize: the same size was
+        // asked for in the first round.
+        let from = lock(&log).len();
+        let asked = Instant::now();
+        if let Err(why) = api.resize_task(task.task_id, size.0, size.1, true) {
+            fail(
+                format!("resizing task {}: {why}", task.task_id),
+                &service,
+                &log,
+            );
+        }
+        // The window manager reconfigures the task once the guest reports it at the size.
+        let mut reported = None;
+        while asked.elapsed() < FRAME_WAIT {
+            if reported_size(&mut api, task.task_id) == Some(given) {
+                reported = Some(asked.elapsed());
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let Some(reported) = reported else {
+            fail(
+                format!(
+                    "the guest never reported task {} at {}x{}",
+                    task.task_id, given.0, given.1
+                ),
+                &service,
+                &log,
+            );
+        };
+        if let Err(why) = api.resize_task(task.task_id, size.0, size.1, false) {
+            fail(
+                format!("reconfiguring task {}: {why}", task.task_id),
+                &service,
+                &log,
+            );
+        }
+        // The frame of the size, as the guest's trace tells it.
+        let mut guest = None;
+        while asked.elapsed() < FRAME_WAIT {
+            let lines: Vec<TraceLine> = lock(&log)[from..]
+                .iter()
+                .map(String::as_str)
+                .filter_map(trace_line)
+                .collect();
+            if let Some(found) = guest_resize(&lines, task.task_id, given) {
+                guest = Some(found);
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let resize = Measured {
+            size,
+            reported: reported.as_secs_f64() * 1000.0,
+            guest,
+        };
+        eprintln!("{resize:?}");
+        measured.push(resize);
+        std::thread::sleep(STEP.saturating_sub(asked.elapsed()));
     }
 
     let slow_work: Vec<String> = lock(&log)
