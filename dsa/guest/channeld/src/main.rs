@@ -711,6 +711,37 @@ mod daemon {
     #[cfg(not(target_os = "android"))]
     fn write_back_cold_zram(_router: Arc<Router>) {}
 
+    /// Names the apps that see the computer's memory as the device's (the Play Store and Google
+    /// Play services) in `vendor.dsa.host_memory.uids`, from the package manager's list, again
+    /// whenever Google Play is installed or removed. init hands the list to the kernel
+    /// (`dsa-memory.rc`), and the framework reads the property itself.
+    #[cfg(target_os = "android")]
+    fn name_host_memory_apps() {
+        use dsa_guest_channeld::host_memory::{HostMemoryApps, POLL, PROPERTY};
+        use dsa_guest_channeld::su_relay::PACKAGES_LIST;
+        let mut apps = HostMemoryApps::new();
+        loop {
+            let text = std::fs::read_to_string(PACKAGES_LIST).ok();
+            if let Some(value) = apps.look(text.as_deref()) {
+                match set_property(PROPERTY, &value) {
+                    Ok(()) => {
+                        say!("apps that see the computer's memory (uids): {value}");
+                        apps.set(value);
+                    }
+                    Err(why) => say!(
+                        "could not name the apps that see the computer's memory, so Google \
+                         Play sees the VM's: {why}"
+                    ),
+                }
+            }
+            thread::sleep(POLL);
+        }
+    }
+
+    /// A Linux system other than Android has no package list.
+    #[cfg(not(target_os = "android"))]
+    fn name_host_memory_apps() {}
+
     /// Tells the host how much memory the guest has, so it can add memory before the guest
     /// runs out and take it back once the guest no longer needs it.
     fn report_memory_pressure(router: Arc<Router>) {
@@ -1009,6 +1040,7 @@ mod daemon {
             let router = Arc::clone(&router);
             thread::spawn(move || watch_boot(router));
         }
+        thread::spawn(name_host_memory_apps);
         let (events, event_rx) = mpsc::channel();
         thread::spawn(move || {
             for event in event_rx {
