@@ -57,6 +57,8 @@ import io.github.thisisthepy.dsa.agent.links.Links
 import io.github.thisisthepy.dsa.agent.power.DevicePower
 import io.github.thisisthepy.dsa.agent.power.Lifecycle
 import io.github.thisisthepy.dsa.agent.memory.AppProcesses
+import io.github.thisisthepy.dsa.agent.memory.BackgroundProcesses
+import io.github.thisisthepy.dsa.agent.memory.CachedProcesses
 import io.github.thisisthepy.dsa.agent.memory.ClosedApps
 import io.github.thisisthepy.dsa.agent.memory.MemoryReporter
 import io.github.thisisthepy.dsa.agent.memory.MemorySource
@@ -207,6 +209,8 @@ class Agent(
     arm64Supported: () -> Boolean = { false },
     widgets: WidgetPlatform = WidgetPlatform.NONE,
     appProcesses: AppProcesses = AppProcesses.NONE,
+    /** The app processes for ending those that stay cached with no window; null ends none. */
+    backgroundProcesses: BackgroundProcesses? = null,
     widgetStore: WidgetStore = WidgetStore.memory(),
     accessibility: AccessibilitySource = AccessibilitySource.NONE,
     /** Where the accessibility trees of watched tasks are read, past the scheduler's thread. */
@@ -411,7 +415,10 @@ class Agent(
         log = log,
         clock = clock,
     )
-    private val playServices = DesktopPlayServices(componentStates, scheduler, log, clock)
+    private val cachedProcesses = backgroundProcesses?.let {
+        CachedProcesses(it, scheduler, log, clock, isConnected = { channel.connected }, ownPackage = ownPackage)
+    }
+    private val playServices =DesktopPlayServices(componentStates, scheduler, log, clock)
     private val freeform = FreeformSetup(windowing, scheduler, log)
     private val arranger = TaskArranger(actions, windowing::displaySize, log)
     private val captions = CaptionInsets(actions, log)
@@ -495,6 +502,7 @@ class Agent(
             backupRuns.start()
             freeform.start()
             closedApps.configure()
+            cachedProcesses?.start()
             playServices.start()
             try {
                 inputMethods.useHostInputMethod()
@@ -1096,6 +1104,8 @@ class Agent(
         text.retainTasks(reporter.reported)
         val packages = reported.mapNotNull(reporter::reportedPackage).toSet()
         closedApps.tasks(packages)
+        // Every task's app keeps its processes, a task the host was not told of included.
+        cachedProcesses?.tasks(packages + running.mapNotNull { it.packageName })
         appSound.tasks(packages, reporter.focusedTask()?.let(reporter::reportedPackage))
     }
 
