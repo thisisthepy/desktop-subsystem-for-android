@@ -14,6 +14,7 @@
 #include <mutex>
 
 #include "dsa_hardware_buffer_import.h"
+#include "dsa_spare_pages.h"
 #include "log.h"
 
 namespace dsa::hwc {
@@ -180,7 +181,12 @@ bool CpuUploads::upload(HostRenderer& host, uint32_t colorBuffer, const BufferRe
     if (!send) {
         return true;
     }
-    if (!host.uploadColorBuffer(colorBuffer, layout, mStaging.data())) {
+    const bool uploaded = host.uploadColorBuffer(colorBuffer, layout, mStaging.data());
+    // The host has the planes, so the copy is dead until the next picture: its pages past the
+    // first part go back once the guest reclaims page cache, not when the hwcomposer ends
+    // (a 2880x2880 picture is 32 MiB). The next picture writes them again without a fault.
+    dsa::releaseSparePages(mStaging.data(), mStaging.size());
+    if (!uploaded) {
         uint32_t failures = 0;
         if (mFailures.shouldLog(&failures)) {
             HWC_LOGE("the host did not take what the CPU wrote into gralloc buffer %u (%ux%u, "

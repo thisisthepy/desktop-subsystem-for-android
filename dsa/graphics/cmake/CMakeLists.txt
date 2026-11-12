@@ -56,6 +56,8 @@ add_library(OpenglSystemCommon SHARED ${SOURCES})
 
 target_include_directories(OpenglSystemCommon PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    # DSA's own headers, for the patched stream (dsa_spare_pages.h).
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
     ${GFXSTREAM_DIR}/guest/OpenglSystemCommon
     ${GFXSTREAM_DIR}/guest/renderControl_enc
     ${GFXSTREAM_DIR}/guest/GLESv1_enc

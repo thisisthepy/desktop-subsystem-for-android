@@ -45,6 +45,10 @@ mkdir -p "$out"
     "$here/cpu_upload_test.cpp" -o "$out/cpu_upload_test"
 "$out/cpu_upload_test"
 
+"$cxx" -std=c++17 -O2 -Wall -Wextra -Werror -I"$here/../include" \
+    "$here/spare_pages_test.cpp" -o "$out/spare_pages_test"
+"$out/spare_pages_test"
+
 "$cxx" -std=c++17 -O2 -Wall -Wextra -Werror -I"$here/../host" \
     "$here/frame_crop_test.cpp" -o "$out/frame_crop_test"
 "$out/frame_crop_test"
@@ -69,7 +73,7 @@ upstream=(
     -isystem "$scratch/system_logging/liblog/include"
 )
 
-"$cxx" -std=c++17 "${upstream[@]}" -c \
+"$cxx" -std=c++17 "${upstream[@]}" -I"$here/../include" -c \
     "$scratch/gfxstream/guest/OpenglSystemCommon/HvSocketStream.cpp" -o "$out/HvSocketStream.o"
 "$cxx" -std=c++17 -Wall -Wextra -Werror "${upstream[@]}" \
     "$here/hvsocket_stream_test.cpp" "$out/HvSocketStream.o" -o "$out/hvsocket_stream_test"
