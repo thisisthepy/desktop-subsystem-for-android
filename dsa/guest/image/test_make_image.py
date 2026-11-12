@@ -2578,6 +2578,20 @@ class GuestMemoryTests(unittest.TestCase):
                 policy,
             )
 
+    def test_nfr2_free_pages_do_not_pile_up_on_the_cpus_lists_where_the_host_never_gets_them(self):
+        # Free pages on the per-CPU lists are not reported to the host; by default the lists may
+        # grow from the low watermark (raised by extra_free_kbytes) up to an eighth of a zone.
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
+            rc = archive.read("VENDOR/etc/init/dsa-memory.rc").decode()
+            boot = rc[rc.index("on boot"):]
+            self.assertIn("write /proc/sys/vm/percpu_pagelist_high_fraction 1048576", boot)
+            policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+            self.assertIn(
+                '(genfscon proc "/sys/vm/percpu_pagelist_high_fraction" '
+                '(u object_r dsa_proc_vm_tunable',
+                policy,
+            )
+
     def test_nfr1_dentries_and_inodes_are_reclaimed_twice_as_readily(self):
         with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
             rc = archive.read("VENDOR/etc/init/dsa-memory.rc").decode()

@@ -32,6 +32,15 @@
 # working set trim's included, takes them back twice as readily: a desktop guest walks its
 # APEX packages and app folders at boot and seldom again, and a name looked up again is read
 # from the page cache or the disk in microseconds. The idle reclaim drops them all anyway.
+#
+# Each CPU keeps lists of free pages of its own, to hand out without taking the zone's lock.
+# Pages on them count as neither free nor used (/proc/meminfo leaves them out of MemFree), free
+# page reporting never offers them to the host, and by default the kernel lets the lists grow
+# from each zone's low watermark up to an eighth of its memory, shared by the CPUs. Android
+# raises that watermark for the display (extra_free_kbytes, about 95 MiB for a 2880x2880 one),
+# so the lists of a 2.5 GiB guest may hold 100 to 300 MiB of free memory that stays with the
+# VM. A fraction this large keeps each list at its least, four batches (about 1 MiB a CPU and
+# zone); a desktop guest's few CPUs rarely contend for the zone's lock.
 on boot
     write /sys/devices/virtual/block/zram0/recomp_algorithm "algo=zstd priority=1"
     swapon_all /vendor/etc/fstab.dsa
@@ -42,3 +51,4 @@ on boot
     write /proc/sys/vm/page-cluster 0
     write /proc/sys/vm/compaction_proactiveness 40
     write /proc/sys/vm/vfs_cache_pressure 200
+    write /proc/sys/vm/percpu_pagelist_high_fraction 1048576
