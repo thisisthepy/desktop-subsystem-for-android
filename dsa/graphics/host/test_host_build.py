@@ -146,9 +146,10 @@ class HostGraphicsBuildTests(unittest.TestCase):
         header = (HERE / "dsa_gfx_backend.h").read_text(encoding="utf-8")
         self.assertIn("dsa_gfx_get_memory_stats(dsa_gfx_memory_stats* stats)", header)
         source = (HERE / "dsa_gfx_memory.cpp").read_text(encoding="utf-8")
-        # Every allocation and free of the renderer's device dispatch is counted by kind.
-        self.assertIn("vk->vkAllocateMemory = counted_allocate;", source)
-        self.assertIn("vk->vkFreeMemory = counted_free;", source)
+        # Every allocation and free of each device dispatch table (the renderer's and every
+        # guest's) is counted by kind.
+        self.assertIn("dispatch->vkAllocateMemory = counted_allocate;", source)
+        self.assertIn("dispatch->vkFreeMemory = counted_free;", source)
         self.assertIn("VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT", source)
         backend = (HERE / "dsa_gfx_backend.cpp").read_text(encoding="utf-8")
         self.assertIn("dsa_gfx_memory_install();", backend)

@@ -14,6 +14,7 @@ uv run dsa/graphics/test_cpu_readback_patch.py
 uv run dsa/graphics/test_coherent_memory_patch.py
 uv run dsa/graphics/test_mapped_memory_patch.py
 uv run dsa/graphics/test_readback_patch.py
+uv run dsa/graphics/test_memory_count_patch.py
 uv run dsa/graphics/test_build.py
 uv run dsa/graphics/test_check_guest_driver.py
 uv run dsa/graphics/host/test_host_build.py
