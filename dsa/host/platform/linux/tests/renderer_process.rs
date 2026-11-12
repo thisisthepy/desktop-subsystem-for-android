@@ -479,10 +479,17 @@ fn nfr5_a_lost_device_reaches_the_compositor_at_once_guest_calls_fail_fast_and_f
     }
     assert_ne!(client.device_changes(), seen, "the change is a GPU reset");
 
-    // A buffer asked for during the remake is made now if it was not then, and the guest's
-    // next frame reaches the window on the new device.
+    // A buffer asked for during the remake is made now if it was not then (the same stream
+    // answers: the failed call did not end it), and the guest's next frame reaches the window
+    // on the new device. The generation counts the new device a moment before it is usable,
+    // so the call is asked again until then.
     if made == 0 {
-        let _ = guest.call(Guest::RC_CREATE_COLOR_BUFFER, &[64, 64, Guest::GL_RGBA]);
+        assert!(
+            wait_until(WAIT, || {
+                guest.call(Guest::RC_CREATE_COLOR_BUFFER, &[64, 64, Guest::GL_RGBA]) != 0
+            }),
+            "a ColorBuffer is made on the new device"
+        );
     }
     let resumed = wait_until(WAIT, || {
         guest.post_frame();
