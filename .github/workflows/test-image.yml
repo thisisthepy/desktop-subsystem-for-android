@@ -8,7 +8,8 @@
 # its own, with the guest kernel built from the same commit. That image is kept in the Actions
 # cache, keyed on everything that decides it, so a run whose inputs did not change takes it
 # from there instead of making it again; the checks run on it all the same. A ninth check boots
-# the same image made with uncompressed partitions, to measure the host's direct-mapped mode.
+# it with the uncompressed system disk the host makes of it, to measure the host's direct-mapped
+# mode.
 
 name: Image test
 
@@ -866,11 +867,6 @@ jobs:
           args+=(--agent .scratch/agent/DsaAgent.apk)
           args+=(--aapt2 .scratch/build-tools/aapt2)
           args+=(${{ steps.translator.outputs.args }})
-          # The direct-mapped measurement's image: its read-only partitions uncompressed, so
-          # that every file of them is mapped.
-          if [[ "${UNCOMPRESSED_EROFS:-false}" == true ]]; then
-            args+=(--uncompressed-erofs)
-          fi
           printf '%s\n' "${args[@]}" > .scratch/image-args
           programs=(.scratch/guest-graphics .scratch/channeld .scratch/hwcomposer .scratch/codec2 .scratch/audio
                     .scratch/sensors .scratch/camera .scratch/power-hal .scratch/gnss-hal .scratch/agent
@@ -915,6 +911,58 @@ jobs:
           mapfile -t args < .scratch/image-args
           uv run dsa/guest/image/make-image.py "${args[@]}"
 
+      # The host makes the direct-mapped mode's uncompressed system disk from system.vhdx
+      # itself, so the download stays the size it is (GitHub takes 2 GiB a file). image.json
+      # records the hash the host checks that disk against, made here exactly as the host makes
+      # it, and the hash of the disk as it is, which hosts that attach raw disks check their copy
+      # against; the signed list covers both through image.json's own hash. An image this
+      # cannot describe boots without the mode, so a failure here warns and does not stop it.
+      - name: Record the hashes of the system disk the host makes
+        if: env.BOOT_IMAGE == 'true'
+        working-directory: dsa
+        run: |
+          cargo build -q --release -p dsa-host-core --bin dsa-release
+          dir="$(echo target/image/*/)"
+          if ! target/release/dsa-release direct-mapped "$dir"; then
+            echo "::warning::the direct-mapped system disk could not be described; the image boots without the direct-mapped mode"
+          fi
+          jq '{direct_mapped, system_disk_raw}' "$dir/image.json"
+
+      # The copies the host makes of the image's erofs partitions, beside the originals: each
+      # copy passes erofs-utils' own check, and the two extract to the same files, modes and
+      # owners, so the copy the direct-mapped mode maps holds what the image does.
+      - name: Check the host's uncompressed file systems against erofs-utils
+        if: env.BOOT_IMAGE == 'true'
+        continue-on-error: true
+        run: |
+          sudo apt-get install -y -q erofs-utils >/dev/null
+          work=/mnt/direct-mapped-check
+          sudo rm -rf "$work"
+          sudo mkdir -p "$work"
+          sudo chown "$USER" "$work"
+          dsa/target/release/dsa-release direct-mapped-partitions dsa/target/image/*/ "$work"
+          failed=0
+          for copy in "$work"/*.copy.img; do
+            name="$(basename "$copy" .copy.img)"
+            echo "::group::$name"
+            ls -l "$work/$name.original.img" "$copy"
+            fsck.erofs "$copy" || { echo "::error::fsck.erofs refuses the copy of $name"; failed=1; }
+            sudo fsck.erofs --extract="$work/a" --preserve "$work/$name.original.img" >/dev/null
+            sudo fsck.erofs --extract="$work/b" --preserve "$copy" >/dev/null
+            sudo diff -r --no-dereference "$work/a" "$work/b" > "$work/$name.diff" \
+              || { echo "::error::the copy of $name holds other files"; head -50 "$work/$name.diff"; failed=1; }
+            (cd "$work/a" && sudo find . -printf '%p %m %U %G %y %l\n' | sort) > "$work/$name.a.txt"
+            (cd "$work/b" && sudo find . -printf '%p %m %U %G %y %l\n' | sort) > "$work/$name.b.txt"
+            diff "$work/$name.a.txt" "$work/$name.b.txt" | head -50 \
+              && cmp -s "$work/$name.a.txt" "$work/$name.b.txt" \
+              || { echo "::error::the copy of $name has other modes, owners or links"; failed=1; }
+            echo "$name: $(wc -l < "$work/$name.a.txt") entries"
+            sudo rm -rf "$work/a" "$work/b" "$work/$name.original.img" "$copy"
+            echo "::endgroup::"
+          done
+          sudo rm -rf "$work"
+          exit $failed
+
       # Runs on every image, the one from the cache too.
       - name: Check the image
         run: uv run dsa/guest/image/check-image.py dsa/target/image/*/ .scratch/image-keys
@@ -922,7 +970,7 @@ jobs:
       - name: Keep the ramdisk and the manifest
         uses: actions/upload-artifact@v4
         with:
-          name: image-android-${{ matrix.android }}-${{ matrix.arch }}${{ env.UNCOMPRESSED_EROFS == 'true' && '-uncompressed' || '' }}
+          name: image-android-${{ matrix.android }}-${{ matrix.arch }}
           path: |
             dsa/target/image/*/image.json
             dsa/target/image/*/initrd.img
@@ -931,7 +979,7 @@ jobs:
         if: inputs.keep_disk
         uses: actions/upload-artifact@v4
         with:
-          name: image-disk-android-${{ matrix.android }}-${{ matrix.arch }}${{ env.UNCOMPRESSED_EROFS == 'true' && '-uncompressed' || '' }}
+          name: image-disk-android-${{ matrix.android }}-${{ matrix.arch }}
           path: |
             dsa/target/image/*/system.vhdx
             dsa/target/image/*/data.vhdx
@@ -1003,31 +1051,6 @@ jobs:
     env:
       CACHE_IMAGE: "true"
       BOOT_IMAGE: "true"
-    steps: *image-steps
-
-  # The same image with its read-only partitions uncompressed, which the direct-mapped
-  # measurement boots: erofs maps only a file stored whole, so this is the image whose every
-  # file the host's direct-mapped mode maps. Not cached: one image fills the cache's share for
-  # images. It may fail without holding up the other boot checks, which boot the image above;
-  # the measurement then fails for want of its image.
-  direct-mapped-image:
-    name: Make and check the uncompressed guest image (ubuntu-latest, Android ${{ matrix.android }}, ${{ matrix.arch }})
-    needs: [guest-programs, agent]
-    if: github.event_name != 'workflow_dispatch' || inputs.android == '17' || inputs.android == 'all'
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    continue-on-error: true
-    permissions:
-      contents: read
-    strategy:
-      matrix:
-        android: ["17"]
-        arch: [x86_64]
-    env:
-      CACHE_IMAGE: "false"
-      BOOT_IMAGE: "true"
-      BOOT_IMAGE_ARTIFACT: direct-mapped-boot-image
-      UNCOMPRESSED_EROFS: "true"
     steps: *image-steps
 
   # The kernel the boot checks boot, built from this commit's dsa/kernel/ rather than taken
@@ -1130,7 +1153,7 @@ jobs:
   # takes most of the step.
   boot-check:
     name: ${{ matrix.check }} (ubuntu-latest, Android 17, x86_64)
-    needs: [boot-image, boot-checks, graphics-test-apps, boot-kernel, direct-mapped-image]
+    needs: [boot-image, boot-checks, graphics-test-apps, boot-kernel]
     runs-on: ubuntu-latest
     timeout-minutes: 50
     strategy:
@@ -1252,13 +1275,13 @@ jobs:
               /tmp/overlays-test-*/memory*
               /tmp/overlays-test-*/google-play-mounts.txt
           # The host's direct-mapped mode (off by default) against the cached disks: the image
-          # with uncompressed partitions, booted with its read-only disks on virtio-pmem, mapped
-          # with DAX, and then on virtio-blk, with Google Play and one app window each time. The
-          # guest's page cache and the VM's memory of both go on the job's page.
+          # as it is published, whose uncompressed system disk the service makes, checks and
+          # maps on virtio-pmem with DAX, and then the image's disks on virtio-blk, with Google
+          # Play and one app window each time. The guest's page cache and the VM's memory of both
+          # go on the job's page.
           - check: Measure the direct-mapped read-only disks against the cached ones on the booted image
             test: overlays
-            image: direct-mapped
-            timeout: 40
+            timeout: 55
             keep: Keep the direct-mapped measurement
             artifact: direct-mapped-measurement
             filter: nfr1_nfr2_the_direct_mapped_disks_are_measured_against_the_cached_ones
@@ -1295,18 +1318,10 @@ jobs:
 
       # Out of Cargo's target folder: the image is never kept where rust-cache cleans.
       - name: Download the image
-        if: matrix.image != 'direct-mapped'
         uses: actions/download-artifact@v4
         with:
           name: boot-image
           path: .scratch/boot-image
-
-      - name: Download the image with uncompressed partitions
-        if: matrix.image == 'direct-mapped'
-        uses: actions/download-artifact@v4
-        with:
-          name: direct-mapped-boot-image
-          path: .scratch/direct-mapped-image
 
       - name: Download the kernel built from this commit
         uses: actions/download-artifact@v4
@@ -1318,13 +1333,7 @@ jobs:
         run: |
           test -f .scratch/boot-kernel/bzImage || { echo "the boot-kernel job left no bzImage"; exit 1; }
           echo "DSA_WIDGET_TEST_KERNEL=$PWD/.scratch/boot-kernel/bzImage" >> "$GITHUB_ENV"
-          if [[ "${{ matrix.image }}" == direct-mapped ]]; then
-            image="$(ls -d "$PWD"/.scratch/direct-mapped-image/*/ | head -1)"
-            jq -e '.direct_mapped.uncompressed_erofs == true' "$image/image.json" \
-              || { echo "the direct-mapped measurement's image is not uncompressed"; exit 1; }
-          else
-            image="$(ls -d "$PWD"/.scratch/boot-image/*/ | head -1)"
-          fi
+          image="$(ls -d "$PWD"/.scratch/boot-image/*/ | head -1)"
           test -f "$image/system.vhdx" || { echo "the downloaded image has no system.vhdx"; exit 1; }
           ls -l "$image"
           echo "DSA_WIDGET_TEST_IMAGE=$image" >> "$GITHUB_ENV"
