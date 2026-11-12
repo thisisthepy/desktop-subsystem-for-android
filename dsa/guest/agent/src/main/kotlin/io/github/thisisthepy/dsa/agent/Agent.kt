@@ -762,10 +762,12 @@ class Agent(
             is RequestResult.Resize -> {
                 trace.received(result.taskId, result.size, result.live, queuedMillis)
                 arranger.resize(result.taskId, result.size, result.live)
+                accessibilityExport.resizing(result.taskId)
             }
             is RequestResult.Density -> {
                 log.info("task ${result.taskId} draws at ${result.densityDpi} dpi")
                 arranger.setDensity(result.taskId, result.densityDpi)
+                accessibilityExport.resizing(result.taskId)
             }
             is RequestResult.Caption -> {
                 log.info("task ${result.taskId} is under a title bar ${result.height} pixels high")
