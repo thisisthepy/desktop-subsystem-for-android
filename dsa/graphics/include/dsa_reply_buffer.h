@@ -14,8 +14,13 @@
 // steady stream of frames never reallocates. A thread that sends nothing more keeps the buffer
 // until its next reply: nothing runs on an idle render thread to give it back sooner.
 //
-// Only VulkanStream.cpp includes this header. VulkanStream.h, which other libraries of the
-// renderer include too, keeps the two values of the state as plain members.
+// The render thread's read buffer (ReadBuffer, patch 0027), which a batch of guest commands is
+// read into and which grows the same way, follows the same rule with its own first size as the
+// size it keeps (bufferShrinks): a video's large uploads on every frame keep it, and it goes back
+// on a small read once none larger has come for kReplyQuietFor.
+//
+// Only VulkanStream.cpp and ReadBuffer.cpp include this header. Their headers, which other
+// libraries of the renderer include too, keep the values of the state as plain members.
 
 #pragma once
 
@@ -34,24 +39,32 @@ inline constexpr std::chrono::milliseconds kReplyQuietFor{2000};
 
 using ReplyClock = std::chrono::steady_clock;
 
-// A reply of `sent` bytes went out of a buffer of `capacity` bytes at `now`; `lastLarge` and
-// `seenLarge` say when the last reply larger than kReplyKeepBytes went out, if one has, and
-// are updated. Returns whether the buffer goes back to kReplyKeepBytes now. A reply of nothing
-// (a read that committed no write) is not a reply and changes nothing.
-inline bool replyBufferShrinks(size_t sent, size_t capacity, ReplyClock::time_point now,
-                               ReplyClock::time_point& lastLarge, bool& seenLarge) {
-    if (sent == 0) {
+// A transfer of `used` bytes went through a buffer of `capacity` bytes at `now`, in a buffer
+// that keeps `keep` bytes; `lastLarge` and `seenLarge` say when the last transfer larger than
+// `keep` went through, if one has, and are updated. Returns whether the buffer goes back to
+// `keep` now: on a transfer that fits in it, once none larger has gone through for
+// kReplyQuietFor. A transfer of nothing changes nothing.
+inline bool bufferShrinks(size_t used, size_t capacity, size_t keep, ReplyClock::time_point now,
+                          ReplyClock::time_point& lastLarge, bool& seenLarge) {
+    if (used == 0) {
         return false;
     }
-    if (sent > kReplyKeepBytes) {
+    if (used > keep) {
         lastLarge = now;
         seenLarge = true;
         return false;
     }
-    if (capacity <= kReplyKeepBytes) {
+    if (capacity <= keep) {
         return false;
     }
     return !seenLarge || now - lastLarge >= kReplyQuietFor;
+}
+
+// A reply of `sent` bytes went out of a buffer of `capacity` bytes at `now` (bufferShrinks with
+// kReplyKeepBytes). A reply of nothing (a read that committed no write) is not a reply.
+inline bool replyBufferShrinks(size_t sent, size_t capacity, ReplyClock::time_point now,
+                               ReplyClock::time_point& lastLarge, bool& seenLarge) {
+    return bufferShrinks(sent, capacity, kReplyKeepBytes, now, lastLarge, seenLarge);
 }
 
 // Puts `buffer` back to kReplyKeepBytes, giving its larger allocation back.

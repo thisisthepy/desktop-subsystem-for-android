@@ -123,7 +123,64 @@ static void nfr1_small_replies_and_empty_commits_change_nothing() {
     EXPECT(stream.buffer.capacity() == grown);
 }
 
+// The render thread's read buffer after patch 0027: a batch is read in, growing the buffer to
+// twice what it must hold, and once the buffer is empty again it goes back to its first size if
+// the rule says so for that batch (bufferShrinks with the first size kept).
+struct ReadStream {
+    static constexpr size_t kFirst = 128 * 1024;
+    size_t size = kFirst;
+    dsa::ReplyClock::time_point lastLarge{};
+    bool seenLarge = false;
+    int reallocations = 0;
+
+    void batch(size_t bytes, dsa::ReplyClock::time_point now) {
+        const bool shrinkDue =
+            dsa::bufferShrinks(bytes, size, kFirst, now, lastLarge, seenLarge);
+        if (bytes > size) {
+            size = 2 * bytes > 2 * size ? 2 * bytes : 2 * size;
+            ++reallocations;
+        }
+        // consume: the buffer is empty again.
+        if (shrinkDue && size > kFirst) {
+            size = kFirst;
+            ++reallocations;
+        }
+    }
+};
+
+// nfr1: a video's large upload on every frame, with small batches between, keeps the read
+// buffer: 600 steady frames never free and make it again.
+static void nfr1_steady_large_reads_keep_the_read_buffer() {
+    const auto start = dsa::ReplyClock::now();
+    ReadStream stream;
+    stream.batch(12 * kMiB, start);
+    const int afterFirst = stream.reallocations;
+    const size_t grown = stream.size;
+    for (int frame = 1; frame <= 600; ++frame) {
+        const auto at = start + frame * 16ms;
+        stream.batch(2 * 1024, at);
+        stream.batch(12 * kMiB, at + 1ms);
+        stream.batch(256, at + 2ms);
+    }
+    EXPECT(stream.reallocations == afterFirst);
+    EXPECT(stream.size == grown);
+}
+
+// nfr1: once the uploads stop, the first small batch 2 s later gives the read buffer back, and
+// one sooner does not.
+static void nfr1_the_read_buffer_goes_back_once_the_large_reads_stop() {
+    const auto start = dsa::ReplyClock::now();
+    ReadStream stream;
+    stream.batch(12 * kMiB, start);
+    stream.batch(1024, start + dsa::kReplyQuietFor - 1ms);
+    EXPECT(stream.size > ReadStream::kFirst);
+    stream.batch(1024, start + dsa::kReplyQuietFor);
+    EXPECT(stream.size == ReadStream::kFirst);
+}
+
 int main() {
+    nfr1_steady_large_reads_keep_the_read_buffer();
+    nfr1_the_read_buffer_goes_back_once_the_large_reads_stop();
     nfr1_a_large_reply_then_idle_gives_the_buffer_back();
     nfr1_a_small_reply_soon_after_a_large_one_keeps_the_buffer();
     nfr1_steady_frames_do_not_reallocate();
