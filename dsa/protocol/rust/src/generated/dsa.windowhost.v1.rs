@@ -414,12 +414,26 @@ pub struct SetWindowMode {
     #[prost(bool, tag = "3")]
     pub resizable: bool,
 }
+/// Window manager to window host: the window opened for task `task_id` shows task
+/// `shown_task_id` from now on. After a GPU reset an app's task can end and the app start
+/// again; its new task then takes the window over, so the window keeps its place and its size.
+/// Every message on this connection still names the window by `task_id`. What the window sends
+/// Android itself, past the window manager (its pointer, key and text input, its accessibility
+/// watch and actions, a drag out of it), goes to `shown_task_id`, since the task the window
+/// opened for has ended. Sent again with each later takeover.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SetShownTask {
+    #[prost(int32, tag = "1")]
+    pub task_id: i32,
+    #[prost(int32, tag = "2")]
+    pub shown_task_id: i32,
+}
 /// The one message type on the wire. Each frame carries exactly one.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 30, 31, 32, 33, 34, 35, 36, 60, 61, 62, 63, 64"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 30, 31, 32, 33, 34, 35, 36, 60, 61, 62, 63, 64, 65"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -489,6 +503,8 @@ pub mod envelope {
         AppMedia(super::AppMedia),
         #[prost(message, tag = "64")]
         MediaButtonPressed(super::MediaButtonPressed),
+        #[prost(message, tag = "65")]
+        SetShownTask(super::SetShownTask),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.
