@@ -18,7 +18,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use dsa_host_core::compositor::caption::BandSample;
-use dsa_host_core::compositor::window_sizing::to_window_size;
 use wayland_client::protocol::wl_buffer::WlBuffer;
 use wayland_client::protocol::wl_shm::Format;
 use wayland_client::protocol::wl_subcompositor::WlSubcompositor;
@@ -349,7 +348,7 @@ impl State {
         window.last_gpu = Some((display_id, frame));
         // A task that keeps its density on a monitor of another scale fills the window at the
         // window's scale; the viewport scales it there.
-        let in_window = to_window_size((width, height), window.model.frame_scale);
+        let in_window = window.model.frame_in_window((width, height));
         window.model.frame_shown(in_window);
         let (logical_width, logical_height) = window.model.to_logical(in_window);
         let in_pip = window.pip.is_some();

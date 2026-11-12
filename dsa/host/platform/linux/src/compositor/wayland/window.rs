@@ -10,7 +10,6 @@ use dsa_host_core::compositor::caption::{
 use dsa_host_core::compositor::task_windows::WindowChange;
 use dsa_host_core::compositor::window_hosts::FromHost;
 use dsa_host_core::compositor::window_mode::{picture_in_picture_place, WindowMode};
-use dsa_host_core::compositor::window_sizing::to_window_size;
 use dsa_host_core::ime::ImeCursor;
 use dsa_host_core::input::PointerMapper;
 use dsa_host_core::keys::KeyMapper;
@@ -667,7 +666,7 @@ impl Window {
         let mut shown = if blank || scale == (1, 1) {
             frame.clone()
         } else {
-            frame.scaled(to_window_size((frame.width, frame.height), scale))
+            frame.scaled(self.model.frame_in_window((frame.width, frame.height)))
         };
         let size = (shown.width, shown.height);
         self.buffers

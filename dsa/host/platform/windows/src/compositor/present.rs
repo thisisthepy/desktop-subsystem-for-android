@@ -58,7 +58,7 @@ use dsa_host_core::compositor::present_watch::{FrameStatistics, PresentWatch};
 use dsa_host_core::compositor::resize_latency::ResizeLatency;
 use dsa_host_core::compositor::splash;
 use dsa_host_core::compositor::visible_change::{self, area_around, Area, PressWatch, Verdict};
-use dsa_host_core::compositor::window_sizing::{to_task_length, to_window_size, Scale};
+use dsa_host_core::compositor::window_sizing::{to_task_length, window_size_of, Scale};
 use windows::core::{Interface, BOOL, PCWSTR};
 use windows::Win32::Foundation::{CloseHandle, E_FAIL, HANDLE, HMODULE, HWND, LUID, POINT};
 use windows::Win32::Graphics::Direct3D::{
@@ -634,6 +634,13 @@ pub struct SplashImage {
 /// A press a window has to watch: the point in guest pixels and when it came on the host clock.
 type Press = ((f32, f32), Duration);
 
+/// The client size a frame of `region` task pixels fills at the window's scale. A frame of the
+/// task size the window's size, or the size last asked for, was turned into is that size
+/// exactly, though rounding it back at the scale can land a pixel off.
+fn frame_in_window(state: &State, region: (u32, u32)) -> (u32, u32) {
+    window_size_of(region, state.scale, &[state.follow.view(), state.asked])
+}
+
 /// The presses each task's window has to watch, by task. Filled from the window's thread, taken
 /// by the presenter.
 fn presses() -> &'static Mutex<HashMap<i32, Press>> {
@@ -1011,7 +1018,8 @@ impl WindowPresenter {
         if state.hidden.frame() == HiddenFrame::Hold {
             return;
         }
-        let keep = match state.follow.frame_arrived(to_window_size(region, scale)) {
+        let shown = frame_in_window(&state, region);
+        let keep = match state.follow.frame_arrived(shown) {
             Arrival::Show => false,
             Arrival::Keep => true,
             // The next frame is followed as any other.
@@ -1545,7 +1553,7 @@ impl WindowPresenter {
         let deadline = started + CLAIM_WAIT;
         let arrival = loop {
             // The size the frame fills in the window, at the window's scale.
-            let shown = to_window_size(region, state.scale);
+            let shown = frame_in_window(&state, region);
             match state.follow.frame_arrived(shown) {
                 Arrival::Wait => {
                     let left = deadline.saturating_duration_since(Instant::now());
@@ -1625,7 +1633,7 @@ impl WindowPresenter {
             );
         } else {
             self.watch_press(&mut state, &texture.texture, region);
-            let in_window = to_window_size(region, state.scale);
+            let in_window = frame_in_window(&state, region);
             self.frame_shown(
                 &mut state,
                 in_window,
