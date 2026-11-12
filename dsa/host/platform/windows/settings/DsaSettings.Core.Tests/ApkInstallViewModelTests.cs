@@ -258,6 +258,19 @@ public class ApkInstallViewModelTests
     }
 
     [Fact]
+    public async Task Fr25_an_arm64_only_app_refused_while_translation_is_off_says_so()
+    {
+        var dsa = new FakeRunner()
+            .Answer($"apk-info {Path} --json", Info("running", "\"new\""))
+            .Fail($"install {Path} --progress --json",
+                "dsa: not installed (translation-off): notes.apk: the app's native code is for arm64-v8a only, which DSA's Android runs through ARM translation, and ARM translation is not on in the running Android. Turn it on under ARM apps, restart Android and install the app again");
+        var vm = await Loaded(dsa);
+        await vm.InstallAsync();
+        Assert.Equal(ApkInstallPage.Failed, vm.Page);
+        Assert.Equal("ApkWindow_Reason_translation-off", vm.ResultText);
+    }
+
+    [Fact]
     public async Task Fr11_a_file_that_is_not_an_apk_says_why()
     {
         var dsa = new FakeRunner().Fail($"apk-info {Path} --json", "dsa: the file is not a ZIP archive, so it is not an APK");

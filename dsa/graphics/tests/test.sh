@@ -33,6 +33,12 @@ mkdir -p "$out"
     "$here/shadow_memory_test.cpp" -o "$out/shadow_memory_test"
 "$out/shadow_memory_test"
 
+# The memory types the guest reports without shared memory, and which of them are read back
+# when the app's work finishes (guest/mesa 0012).
+"$cxx" -std=c++17 -O2 -Wall -Wextra -Werror -I"$here/../include" \
+    "$here/memory_types_test.cpp" -o "$out/memory_types_test"
+"$out/memory_types_test"
+
 "$cxx" -std=c++17 -O2 -Wall -Wextra -Werror -I"$here/../include" \
     "$here/lost_stream_test.cpp" -o "$out/lost_stream_test"
 "$out/lost_stream_test"
@@ -48,6 +54,11 @@ mkdir -p "$out"
 "$cxx" -std=c++17 -O2 -Wall -Wextra -Werror -I"$here/../include" \
     "$here/spare_pages_test.cpp" -o "$out/spare_pages_test"
 "$out/spare_pages_test"
+
+# When a render thread's Vulkan reply buffer goes back to its normal size (patch 0028).
+"$cxx" -std=c++17 -O2 -Wall -Wextra -Werror -I"$here/../include" \
+    "$here/reply_buffer_test.cpp" -o "$out/reply_buffer_test"
+"$out/reply_buffer_test"
 
 "$cxx" -std=c++17 -O2 -Wall -Wextra -Werror -I"$here/../host" \
     "$here/frame_crop_test.cpp" -o "$out/frame_crop_test"

@@ -160,7 +160,7 @@ The display offers one configuration per refresh rate (60, 75, 90, 100, 120, 144
 240 Hz, `src/refresh_rates.h`), all the same size and in one group, so SurfaceFlinger moves
 between them seamlessly. `display_refresh_rate` is only the rate it starts at. The host
 chooses the rate while Android runs: the user's fastest monitor, at most 60 Hz while the
-host's battery saver is on. It sends that rate to the agent (`DisplayRefresh`), which holds
+host's battery saver is on or while the user drags a window to a new size. It sends that rate to the agent (`DisplayRefresh`), which holds
 the framework's refresh rate range at it, and SurfaceFlinger then sets the matching
 configuration, whose period the vsync clock takes from its next tick.
 

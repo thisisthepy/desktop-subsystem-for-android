@@ -2006,6 +2006,48 @@ fn fr11_dsa_install_says_why_android_refused_the_apk_and_fails() {
 }
 
 #[test]
+fn fr25_dsa_install_refuses_an_arm64_only_app_with_its_reason_while_translation_is_off() {
+    use dsa_host_core::apk_info::fixture::archive;
+    use dsa_host_core::host_api::{HostApiService, ServiceFacts};
+    use dsa_host_core::settings::MemorySettings;
+    let ((listener, _, user), endpoint) = local_pair();
+    let androids = Arc::new(FakeAndroids::default());
+    let service = HostApiService::new(androids.clone(), "test service")
+        .with_settings(Arc::new(MemorySettings::default()), ServiceFacts::default());
+    let _service = RunningService::start_service(listener, service);
+    let content = archive(
+        &[
+            ("AndroidManifest.xml", &b"manifest"[..]),
+            ("lib/arm64-v8a/libgame.so", &b"\x7fELF"[..]),
+        ],
+        b"",
+    );
+    let path = apk_file("arm-game.apk", &content);
+
+    // The running Android does not translate ARM code: refused with the reason, unsent.
+    let output = dsa_with_path(&endpoint, "install", &path, "");
+    assert_eq!(output.status.code(), Some(1));
+    let error = stderr(&output);
+    assert!(
+        error.starts_with("dsa: not installed (translation-off): arm-game.apk: "),
+        "{error}"
+    );
+    assert!(error.contains("ARM translation is not on"), "{error}");
+    assert!(error.contains("Turn it on under ARM apps"), "{error}");
+    let android = androids.of(&user).unwrap();
+    assert!(android.installs.lock().unwrap().is_empty());
+
+    // It does: installed as arm64-v8a.
+    *android.translating.lock().unwrap() = true;
+    let output = dsa_with_path(&endpoint, "install", &path, "");
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        *android.install_abis.lock().unwrap(),
+        vec![Some("arm64-v8a".to_string())]
+    );
+}
+
+#[test]
 fn fr11_dsa_install_refuses_a_file_that_is_no_apk_before_starting_android() {
     let ((listener, _, user), endpoint) = local_pair();
     let androids = Arc::new(FakeAndroids::default());

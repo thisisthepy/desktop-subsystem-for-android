@@ -710,6 +710,7 @@ pub fn install_reason(status: &str) -> String {
         "split-signature-mismatch" => "a split APK of the bundle is signed with another key than its base APK, so Android would refuse it.",
         "invalid-bundle" => "the bundle is not one app that Android can install.",
         "unsupported-abi" => "the app's native code is none that DSA's Android runs, which runs 64-bit code only: x86_64, and arm64-v8a through ARM translation. Get the app's x86_64 or arm64-v8a build.",
+        "translation-off" => "the app runs only as ARM code (arm64-v8a), and ARM translation is not on. Turn it on under ARM apps, restart Android, and install the app again.",
         _ => "Android did not install the app.",
     })
 }

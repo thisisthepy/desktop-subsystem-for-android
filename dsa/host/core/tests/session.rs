@@ -2165,6 +2165,92 @@ fn fr10_battery_saver_leaves_a_60_hz_monitor_alone() {
     );
 }
 
+fn resize(task_id: i32, width: u32, live: bool) -> TaskRequest {
+    TaskRequest::Resize {
+        task_id,
+        width,
+        height: 600,
+        live,
+    }
+}
+
+fn resize_body(task_id: i32, width: u32, live: bool) -> Body {
+    Body::ResizeTask(dsa_protocol::control::ResizeTask {
+        task_id,
+        width,
+        height: 600,
+        live,
+    })
+}
+
+/// A session with an agent connected and the guest told the `monitor_hz` rate.
+fn session_at(monitor_hz: u32) -> (Session, Box<dyn Connection>, FakeLauncher) {
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.set_monitor_refresh(monitor_hz);
+    session.windows_shown(true).unwrap();
+    session.start();
+    let mut agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    assert_eq!(next_body(&mut agent), display_refresh(monitor_hz));
+    (session, agent, launcher)
+}
+
+#[test]
+fn fr10_a_live_resize_holds_the_guest_at_60_hz_and_its_end_restores_the_monitor_rate() {
+    let (session, mut agent, _launcher) = session_at(144);
+    // The first live step lowers the rate before the step itself reaches the guest.
+    session.request(resize(7, 800, true)).unwrap();
+    assert_eq!(next_body(&mut agent), display_refresh(60));
+    assert_eq!(next_body(&mut agent), resize_body(7, 800, true));
+    // Later steps of the same drag say nothing more about the rate.
+    session.request(resize(7, 820, true)).unwrap();
+    assert_eq!(next_body(&mut agent), resize_body(7, 820, true));
+    // The end of the drag puts the rate back to the monitor's and reconfigures the task.
+    session.request(resize(7, 820, false)).unwrap();
+    assert_eq!(next_body(&mut agent), display_refresh(144));
+    assert_eq!(next_body(&mut agent), resize_body(7, 820, false));
+}
+
+#[test]
+fn fr10_a_live_resize_leaves_a_60_hz_monitor_alone() {
+    let (session, mut agent, _launcher) = session_at(60);
+    session.request(resize(7, 800, true)).unwrap();
+    session.request(resize(7, 800, false)).unwrap();
+    // Only the resize reaches the guest: its rate is 60 Hz either way.
+    assert_eq!(next_body(&mut agent), resize_body(7, 800, true));
+    assert_eq!(next_body(&mut agent), resize_body(7, 800, false));
+    session.set_power(on_battery(80));
+    assert_eq!(
+        next_body(&mut agent),
+        Body::PowerState(on_battery(80).to_control())
+    );
+}
+
+#[test]
+fn fr10_two_windows_dragged_one_after_the_other_each_hold_the_guest_at_60_hz() {
+    let (session, mut agent, _launcher) = session_at(120);
+    for task_id in [7, 8] {
+        session.request(resize(task_id, 800, true)).unwrap();
+        assert_eq!(next_body(&mut agent), display_refresh(60));
+        assert_eq!(next_body(&mut agent), resize_body(task_id, 800, true));
+        session.request(resize(task_id, 800, false)).unwrap();
+        assert_eq!(next_body(&mut agent), display_refresh(120));
+        assert_eq!(next_body(&mut agent), resize_body(task_id, 800, false));
+    }
+    // Two at once: the rate comes back only when the second drag ends.
+    session.request(resize(7, 900, true)).unwrap();
+    assert_eq!(next_body(&mut agent), display_refresh(60));
+    assert_eq!(next_body(&mut agent), resize_body(7, 900, true));
+    session.request(resize(8, 900, true)).unwrap();
+    assert_eq!(next_body(&mut agent), resize_body(8, 900, true));
+    session.request(resize(7, 900, false)).unwrap();
+    assert_eq!(next_body(&mut agent), resize_body(7, 900, false));
+    session.request(resize(8, 900, false)).unwrap();
+    assert_eq!(next_body(&mut agent), display_refresh(120));
+    assert_eq!(next_body(&mut agent), resize_body(8, 900, false));
+}
+
 #[test]
 fn fr10_a_host_without_a_battery_is_a_full_battery_on_ac_power() {
     let power = PowerState::MAINS_ONLY.to_control();

@@ -4899,12 +4899,28 @@ impl HostApiService {
         }
         // x86_64 first: arm64-v8a only when the APK's x86_64 libraries leave out some of its
         // arm64 ones and the running Android translates ARM code. Android is asked only then.
+        // An APK with arm64-v8a code only is refused while it does not, with that reason.
         let libraries = NativeLibraries::from_wire(&install.native_libraries);
-        let abi = native_abi::choose(&libraries, || {
+        let abi = match native_abi::install_abi(&libraries, || {
             android
                 .arm_translation()
-                .is_some_and(|guest| native_abi::translates_arm64(&guest.abilist))
-        });
+                .filter(|guest| !guest.abilist.is_empty())
+                .map(|guest| native_abi::translates_arm64(&guest.abilist))
+        }) {
+            Ok(abi) => abi,
+            Err(why) => {
+                eprintln!(
+                    "install: refused {} from {}: {why}",
+                    install.name, peer.user
+                );
+                answer(
+                    &mut *connection,
+                    error(ErrorCode::InstallRefused, why.to_string()),
+                );
+                connection.close();
+                return;
+            }
+        };
         answer(&mut *connection, response::Body::Done(types::Done {}));
         eprintln!(
             "install: {} asked to install {} ({} bytes){}",
