@@ -146,5 +146,6 @@ pub mod update;
 pub mod vhdx;
 pub mod video;
 pub mod video_layout;
+pub mod widevine;
 pub mod widgets;
 pub mod window_manager;

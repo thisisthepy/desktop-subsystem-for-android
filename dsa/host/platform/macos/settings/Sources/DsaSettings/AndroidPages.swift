@@ -498,6 +498,7 @@ struct NetworkPage: View {
 struct AdvancedPage: View {
     @ObservedObject var vm: SettingsViewModel
     @ObservedObject var gapps: GappsViewModel
+    @ObservedObject var widevine: WidevineViewModel
     @ObservedObject var backup: BackupViewModel
 
     var body: some View {
@@ -582,6 +583,7 @@ struct AdvancedPage: View {
                 }
             }
             GappsSection(vm: gapps)
+            WidevineSection(vm: widevine)
             Section(T("RootHeader.Text")) {
                 AdministratorSwitchRow(
                     title: T("RootElevationCard.Header"), detail: T("RootElevationCard.Description"),

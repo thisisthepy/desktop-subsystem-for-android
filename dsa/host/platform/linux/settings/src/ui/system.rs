@@ -692,6 +692,9 @@ pub fn advanced(ctx: &Shared) -> gtk::Widget {
     // Google Play.
     google_play(ctx, &page);
 
+    // Protected content.
+    widevine(ctx, &page);
+
     // The clipboard and freezing.
     let developer_group = group("", None);
     let clipboard = user_switch(
@@ -1193,6 +1196,136 @@ fn google_play(ctx: &Shared, page: &Rc<Page>) {
         ctx,
         |c| c.gapps(),
         move |r| show(tr("Where Google Play stands could not be read"), r),
+    );
+}
+
+/// The protected content item: whether Widevine is installed, taking it from Google's image
+/// with the user's agreement, removing it, and what L3 means for streaming.
+fn widevine(ctx: &Shared, page: &Rc<Page>) {
+    let group_ = group(
+        &tr("Protected content"),
+        Some(&tr("Widevine lets streaming apps play protected video. DSA does not include or pass on Google's Widevine: when you ask, your computer downloads the Android emulator image Google offers for this Android version, takes out only the Widevine module unchanged and deletes the rest.")),
+    );
+    let (status_row, status) = value_row(&tr("Status"), "");
+    group_.add(&status_row);
+    let busy_row = action_row(&view::widevine_busy_text(), "");
+    busy_row.set_visible(false);
+    group_.add(&busy_row);
+    let restart = action_row(
+        &tr("Restart Android to apply"),
+        &tr(
+            "Android started before this change. Stop and start Android for Widevine to follow it.",
+        ),
+    );
+    restart.set_visible(false);
+    group_.add(&restart);
+    let quality = action_row(&tr("Standard definition only"), &view::widevine_quality());
+    group_.add(&quality);
+    let (install_row, install) = button_row(
+        &tr("Get Widevine"),
+        &tr("Downloads about 2 GB from Google, under Google's Android SDK License, and keeps only Widevine. Nothing is downloaded until you agree. Widevine is there from the next start of Android."),
+        &tr("Get"),
+    );
+    install.add_css_class("suggested-action");
+    group_.add(&install_row);
+    let (remove_row, remove) = button_row(
+        &tr("Remove Widevine"),
+        &tr("Removes the module and the device certificates it kept, from the next start of Android."),
+        &tr("Remove"),
+    );
+    remove.add_css_class("destructive-action");
+    group_.add(&remove_row);
+    let terms = link_row(
+        &tr("Android SDK License"),
+        &tr(
+            "Widevine is Google's software and follows Google's terms. DSA does not distribute it.",
+        ),
+    );
+    group_.add(&terms);
+    page.add(&group_);
+
+    let now: Rc<RefCell<Option<crate::model::Widevine>>> = Rc::default();
+    let busy: Rc<Cell<bool>> = Rc::default();
+    let buttons: Rc<dyn Fn()> = {
+        let (now, busy) = (now.clone(), busy.clone());
+        Rc::new(move || {
+            let (now, busy) = (now.borrow(), busy.get());
+            install_row.set_sensitive(now.as_ref().is_none_or(|w| w.can_install(busy)) && !busy);
+            remove_row.set_sensitive(now.as_ref().is_some_and(|w| w.can_remove(busy)));
+        })
+    };
+    let show: Rc<dyn Fn(String, Result<crate::model::Widevine, crate::api::Failure>)> = {
+        let (page, now, buttons) = (page.clone(), now.clone(), buttons.clone());
+        Rc::new(
+            move |failed: String, r: Result<crate::model::Widevine, crate::api::Failure>| {
+                page.show_failure(&failed, r.as_ref().err());
+                if let Ok(widevine) = r {
+                    status.set_label(&view::widevine_status(&widevine));
+                    restart.set_visible(widevine.restart_needed);
+                    *now.borrow_mut() = Some(widevine);
+                }
+                buttons();
+            },
+        )
+    };
+    {
+        let (ctx, show, busy, buttons) = (ctx.clone(), show.clone(), busy.clone(), buttons.clone());
+        install.connect_clicked(move |_| {
+            let (asking, show, busy, buttons, busy_row) = (
+                ctx.clone(),
+                show.clone(),
+                busy.clone(),
+                buttons.clone(),
+                busy_row.clone(),
+            );
+            confirm(
+                &ctx,
+                &tr("Get Widevine from Google?"),
+                &view::widevine_notice(),
+                &tr("Accept and download"),
+                false,
+                move || {
+                    busy.set(true);
+                    busy_row.set_visible(true);
+                    buttons();
+                    let (show, busy, busy_row) = (show.clone(), busy.clone(), busy_row.clone());
+                    request(
+                        &asking,
+                        |c| c.install_widevine(),
+                        move |r| {
+                            busy.set(false);
+                            busy_row.set_visible(false);
+                            show(tr("Widevine was not installed"), r);
+                        },
+                    );
+                },
+            );
+        });
+    }
+    {
+        let (ctx, show, busy, buttons) = (ctx.clone(), show.clone(), busy.clone(), buttons.clone());
+        remove.connect_clicked(move |_| {
+            busy.set(true);
+            buttons();
+            let (show, busy) = (show.clone(), busy.clone());
+            request(
+                &ctx,
+                |c| c.remove_widevine(),
+                move |r| {
+                    busy.set(false);
+                    show(tr("Widevine was not removed"), r);
+                },
+            );
+        });
+    }
+    {
+        let ctx = ctx.clone();
+        terms.connect_activated(move |_| open_page(&ctx, crate::model::WIDEVINE_TERMS_URL));
+    }
+    request(
+        ctx,
+        |c| c.widevine(),
+        move |r| show(tr("Where Widevine stands could not be read"), r),
     );
 }
 

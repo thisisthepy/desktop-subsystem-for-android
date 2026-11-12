@@ -530,6 +530,7 @@ pub fn create_user_android(
             addon_disk::bootconfig(&attached).to_string()
                 + &dsa_host_core::arm_translation::bootconfig_for(&*store, &user, image, &attached)
                 + &dsa_host_core::gapps::bootconfig_for(&*store, &user, &attached)
+                + &dsa_host_core::widevine::bootconfig_for(&*store, &user, &attached)
         })
     })
     .with_boot_properties({

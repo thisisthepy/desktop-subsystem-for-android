@@ -28,6 +28,7 @@
 //! dsa logs collect -o <file.zip>
 //! dsa arm-translation [status | install <folder> | fetch google [--yes] | remove | use-default]
 //! dsa gapps [status | install [--progress] | remove]
+//! dsa drm widevine [status | install [--yes] | remove]
 //! dsa reset-data --yes
 //! dsa backup [status | on | off [--delete-backups] | now | restore | key show |
 //!             key import <recovery key>]
@@ -351,6 +352,26 @@
 //! `abilist` and `device_id`, or null while Android is not running), `restart_needed`,
 //! `terms_url` and `registration_url`.
 //!
+//! `dsa drm widevine status` (or `dsa drm widevine`) says whether Widevine, the DRM module
+//! streaming apps play protected video with, is installed: from which Google image, whether the
+//! next start of Android has it, and whether the running Android was started with it. DSA ships
+//! no Google software. `dsa drm widevine install` reads Google's list of emulator system images,
+//! downloads the Google APIs image of the Android version and the processor this computer's
+//! Android runs, checks it against the list's SHA-1 and size, takes Google's Widevine APEX out
+//! of its vendor partition unchanged, and puts it on the user's add-on disk; the download is
+//! deleted afterwards. An image or an APEX of another architecture or Android version is
+//! refused, and so is an image without Widevine, and nothing is changed then. It first says
+//! where the download comes from and that Google's Android SDK License covers it, and asks
+//! before downloading; `--yes` agrees without asking, as the settings app does after its own
+//! confirmation. `DSA_GOOGLE_REPOSITORY` points at a mirror of Google's repository, as for the
+//! ARM translator. `dsa drm widevine remove` removes it, and with it the device certificates
+//! Widevine kept. Neither needs Android running; both apply from Android's next start, and say
+//! so. Widevine here is L3: streaming services send it standard definition at most, so for high
+//! definition watch in this computer's own browser or app. With `--json` each prints `package`
+//! (`apex`, `version`, `android_major`, `abi`, `source`, `size`, `sha256`, `license`, or null),
+//! `installed`, `on_disk`, `running`, `active`, `restart_needed`, `security_level` and
+//! `terms_url`.
+//!
 //! `dsa settings device` shows the device identity Android reports to its apps: what the user
 //! chose, and each value as Android reports it from its next start.
 //! `dsa settings set device.<field> <value>` changes one value: `manufacturer`, `brand`,
@@ -409,6 +430,7 @@ use dsa_host_core::tasks::{AppInfo, Task};
 use dsa_host_core::touch_gestures::TouchGesturesState;
 use dsa_host_core::update::store::Fetch;
 use dsa_host_core::update::versions::{Channel, VersionReport};
+use dsa_host_core::widevine::{self, WidevineStatus};
 use dsa_host_core::widgets::{Widget, WidgetEvent, WidgetProvider};
 use dsa_transport::Connector;
 use serde_json::{json, Value};
@@ -427,7 +449,8 @@ pub const USAGE: &str = "usage: dsa <status [--no-start] | start | stop | freeze
      [--dpi-scaling app|system|system-forced|auto] | <package> reset] | \
      logcat [-d] [-b <buffers>] [<tag>[:<priority>] ...] | logs collect -o <file.zip> | \
      arm-translation [status | install <folder> | fetch google [--yes] | remove | use-default] | \
-     files [open] | gapps [status | install [--progress] | remove] | reset-data --yes | \
+     files [open] | gapps [status | install [--progress] | remove] | \
+     drm widevine [status | install [--yes] | remove] | reset-data --yes | \
      backup [status | on | off [--delete-backups] | now | restore | key show | \
      key import <recovery key>] | \
      android [version | use <major>|latest [--erase-data] | restart | install-image <folder>]> \
@@ -495,6 +518,12 @@ pub enum Command {
     GappsInstall,
     /// Remove Google Play.
     GappsRemove,
+    /// Say whether Widevine is installed, and from which image.
+    WidevineStatus,
+    /// Take Widevine out of Google's emulator image and install it.
+    WidevineInstall,
+    /// Remove Widevine.
+    WidevineRemove,
     /// List, describe or uninstall the installed apps, or open their settings in Android
     /// ([`Invocation::apps`]).
     Apps,
@@ -907,7 +936,7 @@ fn is_package_name(name: &str) -> bool {
 fn takes_yes(command: Option<Command>) -> bool {
     matches!(
         command,
-        Some(Command::ResetData | Command::ArmTranslationFetchGoogle)
+        Some(Command::ResetData | Command::ArmTranslationFetchGoogle | Command::WidevineInstall)
     )
 }
 
@@ -1145,6 +1174,33 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
                         return Err(format!(
                             "dsa arm-translation takes status, install <folder>, fetch google, \
                              remove or use-default, not {other:?}\n{USAGE}"
+                        ))
+                    }
+                });
+            }
+            "drm" if command.is_none() => {
+                match args.next().map(String::as_str) {
+                    Some("widevine") => {}
+                    other => {
+                        return Err(format!(
+                            "dsa drm takes widevine, the one DRM module DSA installs, not \
+                             {other:?}\n{USAGE}"
+                        ))
+                    }
+                }
+                // A bare option such as --json belongs to the default action, status.
+                let action = match args.peek() {
+                    Some(next) if next.starts_with("--") => None,
+                    _ => args.next().map(String::as_str),
+                };
+                command = Some(match action {
+                    None | Some("status") => Command::WidevineStatus,
+                    Some("install") => Command::WidevineInstall,
+                    Some("remove") => Command::WidevineRemove,
+                    Some(other) => {
+                        return Err(format!(
+                            "dsa drm widevine takes status, install or remove, not \
+                             {other:?}\n{USAGE}"
                         ))
                     }
                 });
@@ -3802,6 +3858,158 @@ pub fn google_notice(image: &google::SdkImage) -> String {
     )
 }
 
+/// What `dsa drm widevine install` says before it downloads, and asks to agree to.
+pub fn widevine_notice(image: &google::SdkImage) -> String {
+    format!(
+        "DSA downloads Google's emulator system image from Google's SDK repository:\n  {} ({} \
+         MiB, {})\nIt is Google's software, offered under the Android SDK License: {}\nDSA takes \
+         only the Widevine module from it, unchanged, installs it for Android, and deletes the \
+         rest. DSA does not ship or pass on Google's Widevine.",
+        image.url,
+        image.size >> 20,
+        image.path,
+        widevine::TERMS
+    )
+}
+
+/// What every Widevine status says about the security level.
+pub const WIDEVINE_HD_NOTICE: &str = "Widevine here is L3: streaming services send it standard \
+     definition (SD) at most. For high definition, watch in this computer's own browser or app";
+
+/// `dsa drm widevine install`: finds the image for this computer's Android in Google's list,
+/// asks (unless `--yes`), takes Widevine's APEX out of it in a folder of its own and installs
+/// it. The folder, with the download, is removed whatever happens. Android need not run.
+fn install_widevine(
+    invocation: &Invocation,
+    mut client: HostApiClient,
+    connector: &mut dyn Connector,
+) -> Result<String, String> {
+    let major = android_major(&mut client);
+    let abi = widevine::guest_abi();
+    let fetch = web_fetch();
+    let repository = std::env::var(widevine::REPOSITORY_ENV);
+    let repository = repository.unwrap_or_else(|_| widevine::REPOSITORY.to_string());
+    let image = widevine::find_image(&*fetch, &repository, major, abi)?;
+    if !invocation.yes && !agree(&widevine_notice(&image)) {
+        return Err(
+            "Google's image was not downloaded, and nothing was changed. dsa drm widevine \
+             install --yes agrees to Google's terms without asking"
+                .into(),
+        );
+    }
+    let id = std::process::id();
+    // The process ID between dashes keeps the folder while this run uses it.
+    let base = user_tmp()?.join(format!("dsa-widevine-{id}-0"));
+    let _ = std::fs::remove_dir_all(&base);
+    let apex = base.join("module.apex");
+    let quiet = invocation.json;
+    let mut shown = None;
+    let mut progress = |step: google::Progress| {
+        if quiet {
+            return;
+        }
+        match step {
+            google::Progress::Downloading { done, total } => {
+                let percent = (done * 100).checked_div(total).unwrap_or(100);
+                if shown != Some(percent / 5) {
+                    shown = Some(percent / 5);
+                    eprint!("\rDownloading: {} of {} MiB", done >> 20, total >> 20);
+                }
+            }
+            google::Progress::Extracting => eprintln!("\nTaking out the vendor partition"),
+            google::Progress::Building => eprintln!("Taking out the Widevine module"),
+        }
+    };
+    // The download takes minutes; the connection is opened again for the install.
+    drop(client);
+    let work = base.join("download");
+    let taken = widevine::take_apex(&*fetch, &image, major, abi, &work, &apex, &mut progress);
+    let installed = taken.and_then(|package| {
+        let mut file = std::fs::File::open(&apex)
+            .map_err(|e| format!("{} cannot be read: {e}", apex.display()))?;
+        let status = connect(connector, None, false, Duration::from_secs(10))?
+            .install_widevine(&package, &mut file)
+            .map_err(|e| format!("Widevine was not installed: {e}"))?;
+        let done = format!(
+            "Installed Widevine from Google's image {} for Android {} ({})",
+            package.version, package.android_major, package.abi
+        );
+        Ok(show_widevine(invocation, &status, Some(&done)))
+    });
+    let _ = std::fs::remove_dir_all(&base);
+    installed
+}
+
+/// Where Widevine stands as one JSON object.
+pub fn widevine_json(status: &WidevineStatus) -> Value {
+    json!({
+        "package": status.package.as_ref().map(|package| json!({
+            "apex": package.apex,
+            "version": package.version,
+            "android_major": package.android_major,
+            "abi": package.abi,
+            "source": package.source,
+            "size": package.size,
+            "sha256": package.sha256,
+            "license": package.license,
+        })),
+        "installed": status.package.is_some(),
+        "on_disk": status.on_disk,
+        "running": status.running,
+        "active": status.active,
+        "restart_needed": status.restart_needed,
+        "security_level": widevine::SECURITY_LEVEL,
+        "terms_url": widevine::TERMS,
+    })
+}
+
+/// Where Widevine stands, one fact per line, after `done` when an action was taken.
+pub fn describe_widevine(status: &WidevineStatus, done: Option<&str>) -> String {
+    let mut lines: Vec<String> = done.map(str::to_string).into_iter().collect();
+    lines.push(match &status.package {
+        None => "Widevine: not installed (dsa drm widevine install takes it from Google's \
+                 emulator image)"
+            .to_string(),
+        Some(package) => format!(
+            "Widevine: {} from Google's image {} for Android {} ({}), from {}",
+            package.apex, package.version, package.android_major, package.abi, package.source
+        ),
+    });
+    if status.package.is_some() && !status.on_disk {
+        lines.push(
+            "The module is not on this user's add-on disk; install it again (dsa drm widevine \
+             install)"
+                .to_string(),
+        );
+    }
+    lines.push(if !status.running {
+        "Android is not running".to_string()
+    } else if status.active {
+        "Android: runs with Widevine in this boot".to_string()
+    } else {
+        "Android: runs without Widevine in this boot".to_string()
+    });
+    if status.restart_needed {
+        lines.push("Restart Android to apply this (dsa stop --wait, then dsa start)".to_string());
+    }
+    lines.push(format!("{WIDEVINE_HD_NOTICE}."));
+    if status.package.is_some() {
+        lines.push(format!(
+            "Widevine is Google's software under Google's terms ({}); DSA does not distribute it",
+            widevine::TERMS
+        ));
+    }
+    lines.join("\n")
+}
+
+fn show_widevine(invocation: &Invocation, status: &WidevineStatus, done: Option<&str>) -> String {
+    if invocation.json {
+        widevine_json(status).to_string()
+    } else {
+        describe_widevine(status, done)
+    }
+}
+
 /// Starts Android when it is not running, as `dsa gapps install` needs it.
 fn start_for_gapps(invocation: &Invocation, client: &mut HostApiClient) -> Result<(), String> {
     #[cfg(windows)]
@@ -4939,6 +5147,16 @@ pub fn run_with_starter(
         }
         Command::GappsInstall => return install_gapps(invocation, client, connector),
         Command::GappsRemove => return remove_gapps(invocation, client),
+        Command::WidevineStatus => {
+            let status = client.widevine().map_err(|e| e.to_string())?;
+            return Ok(show_widevine(invocation, &status, None));
+        }
+        Command::WidevineInstall => return install_widevine(invocation, client, connector),
+        Command::WidevineRemove => {
+            let status = client.remove_widevine().map_err(|e| e.to_string())?;
+            let done = "Removed Widevine and the device certificates it kept";
+            return Ok(show_widevine(invocation, &status, Some(done)));
+        }
         Command::Widgets => return widgets(invocation, client, connector),
         Command::Apps => return apps(invocation, client, connector),
         Command::Background => return background(invocation, client),

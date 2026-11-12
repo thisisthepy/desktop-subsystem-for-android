@@ -359,6 +359,48 @@
                     <ui:HyperlinkButton Content="{l:Text GappsRegisterLink.Content}" Click="OnOpenGappsRegistration" />
                 </ui:CardControl>
 
+                <TextBlock Text="{l:Text WidevineHeader.Text}" Style="{StaticResource SectionHeader}" />
+                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon VideoClip24}">
+                    <ui:CardControl.Header>
+                        <StackPanel>
+                            <TextBlock Text="{l:Text WidevineCard.Header}" Style="{StaticResource CardTitle}" />
+                            <TextBlock Text="{Binding WidevineStatus, Mode=OneWay}" Style="{StaticResource CardDescription}" />
+                            <TextBlock Text="{l:Text WidevineCard.Description}" Style="{StaticResource CardDescription}" />
+                        </StackPanel>
+                    </ui:CardControl.Header>
+                    <StackPanel Style="{StaticResource CardControls}">
+                        <ui:ProgressRing IsIndeterminate="True" Width="20" Height="20" Margin="0,0,12,0"
+                                         Visibility="{Binding IsInstallingWidevine, Converter={StaticResource Visible}}" />
+                        <ui:HyperlinkButton Content="{l:Text WidevineTermsLink.Content}" Click="OnOpenWidevineTerms" Margin="0,0,8,0" />
+                        <ui:Button Content="{l:Text WidevineInstallButton.Content}" Click="OnInstallWidevine"
+                                   IsEnabled="{Binding CanInstallWidevine, Mode=OneWay}" />
+                    </StackPanel>
+                </ui:CardControl>
+                <ui:InfoBar Title="{l:Text WidevineInstallingBar.Title}" Message="{l:Text WidevineInstallingBar.Message}"
+                            Severity="Informational" IsClosable="False"
+                            IsOpen="{Binding IsInstallingWidevine, Mode=OneWay}" Margin="0,0,0,4" />
+                <ui:InfoBar Title="{l:Text WidevineRestartBar.Title}" Message="{l:Text WidevineRestartBar.Message}"
+                            Severity="Informational" IsClosable="False"
+                            IsOpen="{Binding WidevineRestartNeeded, Mode=OneWay}" Margin="0,0,0,4" />
+                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Info24}">
+                    <ui:CardControl.Header>
+                        <StackPanel>
+                            <TextBlock Text="{l:Text WidevineQualityCard.Header}" Style="{StaticResource CardTitle}" />
+                            <TextBlock Text="{Binding WidevineQualityNotice, Mode=OneWay}" Style="{StaticResource CardDescription}" />
+                        </StackPanel>
+                    </ui:CardControl.Header>
+                </ui:CardControl>
+                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Delete24}">
+                    <ui:CardControl.Header>
+                        <StackPanel>
+                            <TextBlock Text="{l:Text WidevineRemoveCard.Header}" Style="{StaticResource CardTitle}" />
+                            <TextBlock Text="{l:Text WidevineRemoveCard.Description}" Style="{StaticResource CardDescription}" />
+                        </StackPanel>
+                    </ui:CardControl.Header>
+                    <ui:Button Content="{l:Text WidevineRemoveButton.Content}" Click="OnRemoveWidevine"
+                               IsEnabled="{Binding CanRemoveWidevine, Mode=OneWay}" />
+                </ui:CardControl>
+
                 <TextBlock Text="{l:Text RootHeader.Text}" Style="{StaticResource SectionHeader}" />
                 <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon ShieldKeyhole24}">
                     <ui:CardControl.Header>

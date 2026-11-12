@@ -10750,6 +10750,167 @@
           }
         }
       }
+    },
+    "WidevineHeader.Text": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Protected content" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "보호된 콘텐츠" } }
+      }
+    },
+    "WidevineErrorBar.Title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Widevine could not be changed" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "Widevine을 바꾸지 못했습니다" } }
+      }
+    },
+    "WidevineStatusCard.Header": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Widevine" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "Widevine" } }
+      }
+    },
+    "WidevineStatusCard.Description": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Lets streaming apps play protected video. DSA does not include or pass on Google's Widevine." } },
+        "ko": { "stringUnit": { "state": "translated", "value": "스트리밍 앱이 보호된 동영상을 재생하게 합니다. DSA는 Google의 Widevine을 싣거나 다시 배포하지 않습니다." } }
+      }
+    },
+    "WidevineRestartBar.Title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Restart Android" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "Android를 다시 시작하세요" } }
+      }
+    },
+    "WidevineRestartBar.Message": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Android uses the change from its next start." } },
+        "ko": { "stringUnit": { "state": "translated", "value": "Android는 다음에 시작할 때부터 바뀐 내용을 씁니다." } }
+      }
+    },
+    "WidevineInstallCard.Header": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Get Widevine" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "Widevine 받기" } }
+      }
+    },
+    "WidevineInstallCard.Description": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Downloads the Android emulator image Google offers for this Android version, about 2 GB, under Google's Android SDK License, takes out only the Widevine module unchanged and deletes the rest. Nothing is downloaded until you agree. Widevine is there from the next start of Android." } },
+        "ko": { "stringUnit": { "state": "translated", "value": "Google이 이 Android 버전용으로 제공하는 Android 에뮬레이터 이미지(약 2GB)를 Google의 Android SDK 라이선스에 따라 받고, Widevine 모듈만 바꾸지 않고 꺼낸 뒤 나머지는 지웁니다. 동의하기 전에는 아무것도 받지 않습니다. Widevine은 Android를 다음에 시작할 때부터 있습니다." } }
+      }
+    },
+    "WidevineInstalling.Text": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Downloading about 2 GB from Google and taking out Widevine. It takes minutes." } },
+        "ko": { "stringUnit": { "state": "translated", "value": "Google에서 약 2GB를 받아 Widevine을 꺼내고 있습니다. 몇 분 걸립니다." } }
+      }
+    },
+    "WidevineInstallButton.Content": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Get" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "받기" } }
+      }
+    },
+    "WidevineConfirm.Title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Get Widevine from Google?" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "Google에서 Widevine을 받을까요?" } }
+      }
+    },
+    "WidevineConfirm.Action": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Accept and download" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "동의하고 받기" } }
+      }
+    },
+    "WidevineRemoveCard.Header": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Remove Widevine" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "Widevine 제거" } }
+      }
+    },
+    "WidevineRemoveCard.Description": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Removes the module and the device certificates it kept, from the next start of Android." } },
+        "ko": { "stringUnit": { "state": "translated", "value": "Android를 다음에 시작할 때부터 모듈과 모듈이 저장한 기기 인증서를 지웁니다." } }
+      }
+    },
+    "WidevineRemoveButton.Content": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Remove" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "제거" } }
+      }
+    },
+    "WidevineTermsLink.Text": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Android SDK License" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "Android SDK 라이선스" } }
+      }
+    },
+    "Widevine_Unknown": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Not known yet." } },
+        "ko": { "stringUnit": { "state": "translated", "value": "아직 알 수 없습니다." } }
+      }
+    },
+    "Widevine_NotInstalled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Not installed." } },
+        "ko": { "stringUnit": { "state": "translated", "value": "설치되지 않았습니다." } }
+      }
+    },
+    "Widevine_Installed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Installed: from Google's image {0} for Android {1} ({2})." } },
+        "ko": { "stringUnit": { "state": "translated", "value": "설치됨: Android {1}({2})용 Google 이미지 {0}에서 받았습니다." } }
+      }
+    },
+    "Widevine_InstalledRestart": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Installed: from Google's image {0} for Android {1} ({2}). It is used from the next start of Android." } },
+        "ko": { "stringUnit": { "state": "translated", "value": "설치됨: Android {1}({2})용 Google 이미지 {0}에서 받았습니다. Android를 다음에 시작할 때부터 씁니다." } }
+      }
+    },
+    "Widevine_RemovedRestart": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Removed. Android uses it until its next start." } },
+        "ko": { "stringUnit": { "state": "translated", "value": "제거했습니다. Android는 다음에 시작할 때까지 계속 씁니다." } }
+      }
+    },
+    "Widevine_Notice": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "DSA downloads the Android emulator image for this Android version from Google's SDK repository ({0}) and takes out only its Widevine module, unchanged. Widevine is Google's software, offered under the Android SDK License ({1}); by downloading it you accept those terms. DSA does not ship or pass it on. The image is about 2 GB and is deleted afterwards. Widevine works from the next start of Android." } },
+        "ko": { "stringUnit": { "state": "translated", "value": "DSA가 Google의 SDK 저장소({0})에서 이 Android 버전용 Android 에뮬레이터 이미지를 받고, 그 안의 Widevine 모듈만 바꾸지 않고 꺼냅니다. Widevine은 Google의 소프트웨어이며 Android SDK 라이선스({1})에 따라 제공됩니다. 받으면 그 약관에 동의하는 것입니다. DSA는 이를 싣거나 다시 배포하지 않습니다. 이미지는 약 2GB이며 다 쓰면 지웁니다. Widevine은 Android를 다음에 시작할 때부터 동작합니다." } }
+      }
+    },
+    "Widevine_Quality": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Widevine here is security level L3, so streaming services send standard definition (SD) at most. To watch in high definition, use this Mac's own browser or app." } },
+        "ko": { "stringUnit": { "state": "translated", "value": "여기의 Widevine은 보안 수준 L3이라 스트리밍 서비스는 표준 화질(SD)까지만 보냅니다. 고화질로 보려면 이 Mac의 브라우저나 앱을 쓰세요." } }
+      }
     }
   },
   "version": "1.0"
