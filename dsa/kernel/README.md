@@ -32,7 +32,7 @@ when VMBus is there and otherwise leaves the place to virtio's.
 
 The patches touch only architecture-neutral code (VMBus's ACPI probe, which Hyper-V uses on
 both architectures, the command-line partition parser, cgroup v1, wakeup sources, shmem,
-free page reporting), so the same set applies to both builds.
+free page reporting, ext4), so the same set applies to both builds.
 
 Memory the guest frees goes back to the host at once. Upstream free page reporting waits two
 seconds before each pass, and again after each pass that used up its budget, so a large
@@ -51,6 +51,12 @@ zram writes pages that stay cold for long to a backing file on the guest's data 
 (`CONFIG_ZRAM_TRACK_ENTRY_ACTIME`). Upstream clears that time when it compresses a page again,
 so every page zstd had compressed again looked unused since boot;
 `patches/zram-recompress-keeps-access-time.patch` keeps it.
+
+Android mounts each APEX package as a read-only ext4 image, about 75 of them with Google Play.
+Upstream ext4 gives every mount a workqueue for converting unwritten extents, and with it a
+rescuer thread (`ext4-rsv-conversion`) that stays for the life of the mount, though a read-only
+mount of a read-only device never writes. `patches/ext4-rsv-conversion-read-only.patch` makes
+the workqueue only for a mount that can write, or when a mount is remounted read-write.
 
 ## Why the WSL kernel
 

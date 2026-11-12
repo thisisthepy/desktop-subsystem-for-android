@@ -211,3 +211,21 @@ service dsa_cacerts_setup /vendor/bin/dsa-channeld --cacerts-setup
     oneshot
     disabled
     stdio_to_kmsg
+
+# What the guest kernel's own memory is made of: the largest slab caches, vmalloc users and
+# threads, which only root may read. dsa-channeld --memory-report reads them, writes them to
+# the kernel log ("memory report:" lines, which `logcat -b kernel` shows) and exits. It runs as
+# root, which /proc/slabinfo and /proc/vmallocinfo need, in a domain of its own that may only
+# read (channeld.cil), and in the readproc group, which lets it see every process under /proc.
+# Only while developer mode is on, when the shell asks: `setprop debug.dsa.memory_report 1`
+# (0 and then 1 again for another report). The memory measurement in CI asks for one.
+service dsa_memory_report /vendor/bin/dsa-channeld --memory-report
+    user root
+    group root readproc
+    seclabel u:r:dsa_memory_report:s0
+    oneshot
+    disabled
+    stdio_to_kmsg
+
+on property:debug.dsa.memory_report=1 && property:vendor.dsa.adb=1
+    start dsa_memory_report
