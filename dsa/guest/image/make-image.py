@@ -5288,6 +5288,20 @@ def policy_sources(cil_map, vendor_version, genfs_version):
     return [key for key in keys if key in cil_map]
 
 
+def conflicting_genfscon(policy_text):
+    """The (filesystem, path) pairs that genfscon labels with two different contexts. secilc
+    refuses a policy with any, so init cannot load it and Android does not boot."""
+    labels = {}
+    twice = []
+    for m in re.finditer(r'^\(genfscon\s+(\S+)\s+"?([^"\s]+)"?\s+(.*)$', policy_text, re.M):
+        pair = (m.group(1), m.group(2))
+        context = " ".join(m.group(3).split())
+        if pair in labels and labels[pair] != context and pair not in twice:
+            twice.append(pair)
+        labels.setdefault(pair, context)
+    return twice
+
+
 def recompile_precompiled_sepolicy(otatools, cil_map, vendor_version, genfs_version, work_dir=None):
     """Recompiles precompiled_sepolicy with secilc from otatools if available."""
     if not otatools:
@@ -5523,6 +5537,12 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
             # DSA's rules for platform_app hold for Android 17's per-SDK app domains too.
             base = len(narrow_vsock_neverallows(plat_orig).rstrip())
             plat_patched = plat_patched[:base] + with_versioned_app_domains(plat_patched[base:], plat_orig)
+            twice = conflicting_genfscon(plat_patched)
+            if twice:
+                raise SystemExit(
+                    "the SELinux policy labels these paths twice, so secilc would refuse it and "
+                    "Android would not boot: " + ", ".join(f"{fs} {path}" for fs, path in twice)
+                )
             new_plat_bytes = plat_patched.encode()
             cil_map["SYSTEM/etc/selinux/plat_sepolicy.cil"] = new_plat_bytes
 
