@@ -253,6 +253,38 @@ class LockTests(unittest.TestCase):
             self.assertTrue(adds("services/surfaceflinger/DisplayHardware/FramebufferSurface.h",
                                  "kReleaseIdleBuffersAfter = 1'000'000'000"), android)
 
+    def test_nfr1_android17_frees_the_client_target_whichever_framebuffer_surface_it_picks(self):
+        # Android 17 picks FramebufferSurface or LegacyFramebufferSurface by the
+        # wb_framebuffersurface2 flag, and the build DSA ships takes the legacy one. A release
+        # only in FramebufferSurface never ran there: the client target stayed held, and its
+        # "buffers are freed" line never appeared.
+        added = {}
+        for project, patch in framework_lock.patch_files("android17"):
+            if project != "frameworks/native":
+                continue
+            path = None
+            for line in patch.read_text().splitlines():
+                if line.startswith("+++ b/"):
+                    path = line[len("+++ b/"):]
+                elif line.startswith("+") and path:
+                    added.setdefault(path, []).append(line[1:])
+
+        def adds(path, text):
+            return any(text in line for line in added.get(path, []))
+
+        for name in ("FramebufferSurface", "LegacyFramebufferSurface"):
+            source = f"services/surfaceflinger/DisplayHardware/{name}.cpp"
+            header = f"services/surfaceflinger/DisplayHardware/{name}.h"
+            self.assertTrue(adds(header, "bool takeBuffersReleased() override;"), name)
+            self.assertTrue(adds(header, "kReleaseIdleBuffersAfter = 1'000'000'000"), name)
+            self.assertTrue(adds(source, f"bool {name}::takeBuffersReleased()"), name)
+            self.assertTrue(adds(source, "discardFreeBuffers("), name)
+            self.assertTrue(adds(source, "its buffers are freed"), name)
+        # The legacy class tells HWC about each slot's buffer only once; after the discard the
+        # slots hold new buffers, which must go to HWC whole.
+        self.assertTrue(adds("services/surfaceflinger/DisplayHardware/LegacyFramebufferSurface.cpp",
+                             "id = UINT64_MAX;"))
+
     def test_nfr5_each_patch_adds_the_tested_recovery_policy_unchanged(self):
         # The policy the renderers follow is the one test_device_loss_recovery.cpp tests.
         canonical = (HERE / "recovery/DeviceLossRecovery.h").read_text()
