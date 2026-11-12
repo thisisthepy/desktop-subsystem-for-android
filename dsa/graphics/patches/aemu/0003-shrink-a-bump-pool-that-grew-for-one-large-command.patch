@@ -1,0 +1,52 @@
+diff --git a/base/include/aemu/base/BumpPool.h b/base/include/aemu/base/BumpPool.h
+index 0bb5c66..1f81d0c 100644
+--- a/base/include/aemu/base/BumpPool.h
++++ b/base/include/aemu/base/BumpPool.h
+@@ -5,10 +5,11 @@
+ #pragma once
+ 
+ #include "aemu/base/AlignedBuf.h"
+ #include "aemu/base/Allocator.h"
+ 
++#include <algorithm>
+ #include <vector>
+ #include <unordered_set>
+ 
+ #include <inttypes.h>
+ 
+@@ -53,18 +54,35 @@ public:
+             mNeedRealloc = false;
+             for (auto ptr : mFallbackPtrs) {
+                 free(ptr);
+             }
+             mFallbackPtrs.clear();
++            mSmallGenerations = 0;
++        } else if (mStorage.size() * sizeof(uint64_t) > kShrinkAbove &&
++                   mTotalWantedThisGeneration * 4 < mStorage.size() * sizeof(uint64_t)) {
++            // The pool grew to twice the largest command (a guest's copy of host-visible
++            // memory decodes into it) and stayed that size for the decoder's whole life. Once
++            // commands have needed a quarter of it or less for a while, it goes back to twice
++            // what they need.
++            if (++mSmallGenerations >= kSmallGenerationsBeforeShrink) {
++                const size_t keep = std::max(mTotalWantedThisGeneration * 2, kShrinkAbove);
++                mStorage.resize(keep / sizeof(uint64_t));
++                mSmallGenerations = 0;
++            }
++        } else {
++            mSmallGenerations = 0;
+         }
+         mTotalWantedThisGeneration = 0;
+     }
+ private:
++    static constexpr size_t kShrinkAbove = 1024 * 1024;
++    static constexpr size_t kSmallGenerationsBeforeShrink = 256;
+     AlignedBuf<uint64_t, 8> mStorage;
+     std::unordered_set<void*> mFallbackPtrs;
+     size_t mAllocPos = 0;
+     size_t mTotalWantedThisGeneration = 0;
+     bool mNeedRealloc = false;
++    size_t mSmallGenerations = 0;
+ };
+ 
+ } // namespace base
+ } // namespace android

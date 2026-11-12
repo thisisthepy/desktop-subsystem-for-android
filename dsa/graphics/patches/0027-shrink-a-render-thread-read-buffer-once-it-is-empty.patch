@@ -1,0 +1,95 @@
+diff --git a/host/ReadBuffer.cpp b/host/ReadBuffer.cpp
+index 8fc4728a8..2e637e22a 100644
+--- a/host/ReadBuffer.cpp
++++ b/host/ReadBuffer.cpp
+@@ -24,12 +24,13 @@
+ #include <limits.h>
+ 
+ namespace gfxstream {
+ 
+ ReadBuffer::ReadBuffer(size_t bufsize) {
+     m_size = bufsize;
++    m_initialSize = bufsize;
+     m_buf = (unsigned char*)malloc(m_size);
+     m_validData = 0;
+     m_readPtr = m_buf;
+ }
+ 
+ ReadBuffer::~ReadBuffer() {
+@@ -42,12 +43,17 @@ void ReadBuffer::setNeededFreeTailSize(size_t size) {
+ 
+ int ReadBuffer::getData(IOStream* stream, size_t minSize) {
+     assert(stream);
+     assert(minSize > m_validData);
+ 
+     const size_t minSizeToRead = minSize - m_validData;
++    if (minSize <= m_initialSize) {
++        ++m_smallReads;
++    } else {
++        m_smallReads = 0;
++    }
+     const size_t neededFreeTailThisTime =
+         std::max(minSizeToRead,
+                  m_neededFreeTailSize);
+ 
+     size_t maxSizeToRead;
+     const size_t freeTailSize = m_buf + m_size - (m_readPtr + m_validData);
+@@ -106,12 +112,33 @@ int ReadBuffer::getData(IOStream* stream, size_t minSize) {
+ }
+ 
+ void ReadBuffer::consume(size_t amount) {
+     assert(amount <= m_validData);
+     m_validData -= amount;
+     m_readPtr += amount;
++    if (m_validData == 0) {
++        shrinkWhenEmpty();
++    }
++}
++
++void ReadBuffer::shrinkWhenEmpty() {
++    if (m_size <= m_initialSize) {
++        return;
++    }
++    if (m_size <= kReleaseAtOnce && m_smallReads < kSmallReadsBeforeShrink) {
++        return;
++    }
++    auto* small = (unsigned char*)malloc(m_initialSize);
++    if (!small) {
++        return;
++    }
++    free(m_buf);
++    m_buf = small;
++    m_size = m_initialSize;
++    m_readPtr = m_buf;
++    m_smallReads = 0;
+ }
+ 
+ void ReadBuffer::onSave(android::base::Stream* stream) {
+     stream->putBe32(m_size);
+     stream->putBe32(m_validData);
+     stream->write(m_readPtr, m_validData);
+diff --git a/host/ReadBuffer.h b/host/ReadBuffer.h
+index fb0c56f35..a5d366603 100644
+--- a/host/ReadBuffer.h
++++ b/host/ReadBuffer.h
+@@ -39,9 +39,20 @@ private:
+     unsigned char *m_readPtr;
+     size_t m_size;
+     size_t m_validData;
+ 
+     uint64_t m_tailMoveTimeUs = 0;
+     size_t m_neededFreeTailSize = 0;
++
++    // The buffer grows to twice the largest batch of commands a guest thread sent (a guest's
++    // copy of host-visible memory travels in one), and it used to stay that size for the
++    // thread's whole life. Once it holds no data it goes back to its first size: at once
++    // when it is above kReleaseAtOnce, since a batch that large costs more to send than the
++    // allocation, and otherwise after kSmallReadsBeforeShrink reads that fit the first size.
++    static constexpr size_t kReleaseAtOnce = 8 * 1024 * 1024;
++    static constexpr size_t kSmallReadsBeforeShrink = 256;
++    size_t m_initialSize = 0;
++    size_t m_smallReads = 0;
++    void shrinkWhenEmpty();
+ };
+ 
+ }  // namespace gfxstream
