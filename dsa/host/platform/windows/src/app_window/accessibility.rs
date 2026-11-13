@@ -45,6 +45,7 @@ use dsa_host_core::accessibility::{
     from_screen, to_screen, ActionRequest, Changes, ClientPresence, GuestAccessibility, Node,
     NodeAction, PresenceChange, Tree, TreeError,
 };
+use dsa_host_core::compositor::window_sizing::{frame_placement, FramePlacement};
 use dsa_host_core::compositor::window_tasks::WindowTasks;
 use dsa_host_core::host_api::HostApiClient;
 use dsa_host_core::input::{InputEvent, WindowGeometry};
@@ -164,13 +165,39 @@ const MAX_PROPERTY_EVENTS: usize = 64;
 pub const WM_APP_ACCESSIBILITY: u32 = windows_sys::Win32::UI::WindowsAndMessaging::WM_APP + 3;
 
 impl State {
-    /// What node bounds and points are converted with, for a client area of `client`.
+    /// What node bounds and points are converted with, for a client area of `client`. A
+    /// window that holds the size the desktop gave it shows a frame of another size in its
+    /// middle ([`frame_placement`]), at the scale that fits it there.
     fn geometry(&self, client: (u32, u32)) -> WindowGeometry {
-        WindowGeometry {
-            client,
-            task: self.task_size,
-            scale: self.scale,
+        match self.placement(client) {
+            Some(placement) => WindowGeometry {
+                client: placement.size,
+                task: self.task_size,
+                scale: placement.scale,
+            },
+            None => WindowGeometry {
+                client,
+                task: self.task_size,
+                scale: self.scale,
+            },
         }
+    }
+
+    /// Where the frame's top left is on the screen, for a client area of `client` whose top
+    /// left is at `origin`.
+    fn frame_origin(&self, origin: (i32, i32), client: (u32, u32)) -> (i32, i32) {
+        match self.placement(client) {
+            Some(placement) => (
+                origin.0 + placement.origin.0 as i32,
+                origin.1 + placement.origin.1 as i32,
+            ),
+            None => origin,
+        }
+    }
+
+    fn placement(&self, client: (u32, u32)) -> Option<FramePlacement> {
+        self.held
+            .then(|| frame_placement(self.task_size, client, self.scale, true))
     }
 }
 
@@ -181,6 +208,9 @@ struct State {
     task_size: (u32, u32),
     /// How large the window shows each task pixel (window pixels per task pixels).
     scale: (u32, u32),
+    /// Whether the window holds the size the desktop gave it (maximised, snapped, full
+    /// screen), and so shows a frame of another size in its middle.
+    held: bool,
     /// Where actions go while the watch runs.
     actions: Option<Sender<ActionRequest>>,
     next_request: u32,
@@ -525,7 +555,11 @@ impl IRawElementProviderFragmentRoot_Impl for RootProvider_Impl {
         let Some(epoch) = state.tree.epoch() else {
             return none();
         };
-        let (tx, ty) = from_screen((x, y), state.geometry(client), origin);
+        let (tx, ty) = from_screen(
+            (x, y),
+            state.geometry(client),
+            state.frame_origin(origin, client),
+        );
         match state.tree.hit(tx, ty) {
             Some(id) => Ok(node_of(&self.shared, epoch, id)),
             None => none(),
@@ -665,7 +699,10 @@ impl IRawElementProviderFragment_Impl for NodeProvider_Impl {
 
     fn BoundingRectangle(&self) -> windows::core::Result<UiaRect> {
         let (origin, client) = self.shared.client();
-        let geometry = self.shared.lock().geometry(client);
+        let (geometry, origin) = {
+            let state = self.shared.lock();
+            (state.geometry(client), state.frame_origin(origin, client))
+        };
         let bounds = self.with_node(|_, node| node.bounds)?;
         let rect = to_screen(bounds, geometry, origin);
         Ok(UiaRect {
@@ -941,6 +978,8 @@ pub struct AccessibilityWindow {
     task_size: (u32, u32),
     /// How large the window shows each task pixel (window pixels per task pixels).
     scale: (u32, u32),
+    /// Whether the window holds the size the desktop gave it.
+    held: bool,
     /// The icon's cell while the title bar shows the back arrow in it.
     back: Option<ClientRect>,
     /// Where the back button's Back goes.
@@ -973,8 +1012,18 @@ impl AccessibilityWindow {
             logger,
             task_size,
             scale: (1, 1),
+            held: false,
             back: None,
             input,
+        }
+    }
+
+    /// The window holds the size the desktop gave it (maximised, snapped, full screen), so a
+    /// frame of another size is in its middle, or takes the size of its frames again.
+    pub fn set_held(&mut self, held: bool) {
+        self.held = held;
+        if let Some(shared) = &self.shared {
+            shared.lock().held = held;
         }
     }
 
@@ -1027,6 +1076,7 @@ impl AccessibilityWindow {
                 tree: Tree::new(),
                 task_size,
                 scale: self.scale,
+                held: self.held,
                 actions: None,
                 next_request: 0,
                 pending: Vec::new(),
