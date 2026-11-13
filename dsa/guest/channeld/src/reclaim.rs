@@ -436,6 +436,36 @@ impl Reclaimer {
         self.trim_kb / 1024
     }
 
+    /// The size of each of a full reclaim's four zram steps for `reason`, with `tasks` tasks
+    /// open, in MiB: 0 when the reclaim is to take page cache only.
+    ///
+    /// Clean page cache goes before anonymous memory is compressed. A full reclaim drops the
+    /// clean cache first; it moves anonymous memory to zram only when that is what is left:
+    ///
+    /// - With no task open (the idle reclaim, the last app closing), half of it, as
+    ///   [`reclaim_step_mib`] says: no app is in use, and zram keeps it in a third of its size.
+    /// - With tasks open, the anonymous memory is the open apps' and the system's, which they
+    ///   read straight back from zram. An app closing or cache filling memory takes the cache
+    ///   only. A host short of memory gets the cache first too, and the anonymous memory only
+    ///   once the cache is down to the apps' working set. On the owner's PC, with three apps
+    ///   open and the host short, each reclaim moved half the anonymous memory to zram and left
+    ///   the cache: 552 MiB of the apps' memory sat swapped out beside 686 MiB of page cache.
+    pub fn anonymous_step_mib(&self, reason: Reason, tasks: usize, memory: &MemInfo) -> u64 {
+        let anonymous = match reason {
+            Reason::Gradual => false,
+            Reason::Idle => true,
+            Reason::AppClosed | Reason::MostlyCache => tasks == 0,
+            Reason::HostShort => {
+                tasks == 0 || memory.droppable_kb() < self.target_kb + self.policy.min_trim_kb
+            }
+        };
+        if anonymous {
+            reclaim_step_mib(memory)
+        } else {
+            0
+        }
+    }
+
     /// What to do the moment an app's last window has closed and its processes have exited,
     /// with `tasks` tasks still open. It never waits. An app that opened a moment ago keeps
     /// its own working set: the trim then takes page cache only, above the floor, so the new

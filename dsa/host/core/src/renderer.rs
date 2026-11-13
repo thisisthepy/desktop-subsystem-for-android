@@ -259,6 +259,65 @@ impl RendererProcessMemory {
     }
 }
 
+/// Some memory of the renderer's, in KiB, and how many allocations it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Allocations {
+    pub kb: u64,
+    pub count: u32,
+}
+
+/// The renderer's live GPU allocations by owner and kind: the same memory as
+/// [`RendererMemory`], split by whose device it is on.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RendererOwners {
+    /// On the renderer's own device: the color buffer behind every gralloc buffer (task
+    /// windows' buffers, hardware bitmaps, decoded video frames) and the task windows'
+    /// textures. GPU-only, CPU-mapped and imported, in that order.
+    pub renderer: [Allocations; 3],
+    /// On the guest processes' own devices: what each allocates through Vulkan itself (its
+    /// images, buffers and the copies of its host-visible memory). In the same order.
+    pub guests: [Allocations; 3],
+    /// How many guest devices hold memory, and what the ones that hold the most hold, in KiB,
+    /// largest first.
+    pub guest_devices: u32,
+    pub largest_guest_devices_kb: Vec<u64>,
+}
+
+/// The log line that says whose the renderer's GPU memory is, in MiB: what the color buffers
+/// and window textures take against what the guest processes allocate themselves, so a log
+/// from a real machine says which of them to make smaller.
+pub fn renderer_owners_line(owners: &RendererOwners) -> String {
+    let kinds = |of: &[Allocations; 3]| {
+        format!(
+            "GPU-only {} MiB in {}, CPU-mapped {} MiB in {}, imported {} MiB in {}",
+            mib(of[0].kb),
+            of[0].count,
+            mib(of[1].kb),
+            of[1].count,
+            mib(of[2].kb),
+            of[2].count
+        )
+    };
+    let largest: Vec<String> = owners
+        .largest_guest_devices_kb
+        .iter()
+        .filter(|kb| **kb > 0)
+        .map(|kb| mib(*kb).to_string())
+        .collect();
+    let largest = if largest.is_empty() {
+        "none holds any".to_string()
+    } else {
+        format!("the largest hold {} MiB", largest.join(", "))
+    };
+    format!(
+        "graphics renderer by owner: color buffers and window textures: {}; {} guest devices: \
+         {} ({largest})",
+        kinds(&owners.renderer),
+        owners.guest_devices,
+        kinds(&owners.guests),
+    )
+}
+
 /// The log line that says what the renderer process holds, beside the window manager's own
 /// breakdown, in MiB.
 pub fn renderer_line(memory: Option<&RendererProcessMemory>) -> String {

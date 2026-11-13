@@ -157,6 +157,17 @@ class HostGraphicsBuildTests(unittest.TestCase):
         self.assertEqual(backend.count("dsa_gfx_memory_process_ended();"), 2)
         self.assertIn("dsa_gfx_memory.cpp", CMAKE_FILE.read_text(encoding="utf-8"))
 
+    def test_nfr1_the_renderer_says_whose_its_vulkan_memory_is(self):
+        header = (HERE / "dsa_gfx_backend.h").read_text(encoding="utf-8")
+        self.assertIn("dsa_gfx_get_memory_owners(dsa_gfx_memory_owners* owners)", header)
+        source = (HERE / "dsa_gfx_memory.cpp").read_text(encoding="utf-8")
+        owners = source[source.index("dsa_gfx_get_memory_owners(dsa_gfx_memory_owners* out)"):]
+        # The renderer's own device (its color buffers and window textures) against every guest
+        # process's device, read under the same lock as the count.
+        self.assertIn("const VkDevice own = emu ? emu->getDevice() : VK_NULL_HANDLE;", owners)
+        self.assertIn("if (key.first == own) {", owners)
+        self.assertIn("std::lock_guard<std::mutex> lock(s_mutex);", owners)
+
     def test_fr4_only_the_region_a_frame_fills_is_copied(self):
         source = (HERE / "dsa_gfx_display.cpp").read_text(encoding="utf-8")
         # The guest's buffers keep their size while a window is resized; the display's size

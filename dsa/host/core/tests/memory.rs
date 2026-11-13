@@ -900,6 +900,52 @@ fn nfr2_the_window_manager_gives_memory_back_as_soon_as_no_window_is_open() {
 }
 
 #[test]
+fn nfr2_the_window_manager_gives_back_what_the_last_video_left_while_windows_stay_shown() {
+    use dsa_host_core::memory::{IDLE_TRIM_DELAY, LET_GO_TRIM_DELAY};
+    let start = Instant::now();
+    let mut trim = IdleTrim::new(IDLE_TRIM_DELAY, start);
+    trim.sync(&[opened(1), opened(2), opened(3)], start);
+    // The windows animate (no quiet trim) while a video plays and then closes.
+    assert!(!trim.spare_due(start));
+    let closed = start + Duration::from_secs(60);
+    trim.let_go(closed);
+    assert!(!trim.spare_due(closed + LET_GO_TRIM_DELAY - Duration::from_secs(1)));
+    assert!(trim.spare_due(closed + LET_GO_TRIM_DELAY));
+    // Once only for each let-go.
+    assert!(!trim.spare_due(closed + LET_GO_TRIM_DELAY + Duration::from_secs(1)));
+    assert!(LET_GO_TRIM_DELAY <= Duration::from_secs(10));
+}
+
+#[test]
+fn nfr2_shown_windows_that_keep_drawing_still_get_a_give_back_every_round() {
+    use dsa_host_core::memory::{IDLE_TRIM_DELAY, IDLE_TRIM_REPEAT};
+    let start = Instant::now();
+    let mut trim = IdleTrim::new(IDLE_TRIM_DELAY, start);
+    trim.sync(&[opened(1)], start);
+    assert!(!trim.spare_due(start));
+    assert!(!trim.spare_due(start + IDLE_TRIM_REPEAT - Duration::from_secs(1)));
+    assert!(trim.spare_due(start + IDLE_TRIM_REPEAT));
+    assert!(!trim.spare_due(start + IDLE_TRIM_REPEAT + Duration::from_secs(1)));
+    assert!(trim.spare_due(start + IDLE_TRIM_REPEAT * 2));
+}
+
+#[test]
+fn nfr2_with_no_window_shown_the_idle_give_back_takes_what_a_video_let_go() {
+    use dsa_host_core::memory::{IDLE_TRIM_DELAY, LET_GO_TRIM_DELAY};
+    let start = Instant::now();
+    let mut trim = IdleTrim::new(IDLE_TRIM_DELAY, start);
+    // Before the idle give-back has run, it takes it: no second give-back.
+    trim.let_go(start);
+    assert!(!trim.spare_due(start + LET_GO_TRIM_DELAY));
+    assert!(trim.due(start + LET_GO_TRIM_DELAY));
+    // After it ran, the next one is minutes away: the let-go gets its own.
+    let later = start + Duration::from_secs(30);
+    trim.let_go(later);
+    assert!(trim.spare_due(later + LET_GO_TRIM_DELAY));
+    assert!(!trim.spare_due(later + LET_GO_TRIM_DELAY * 2));
+}
+
+#[test]
 fn nfr2_a_still_screen_gets_the_gpu_driver_trim_within_seconds() {
     use dsa_host_core::memory::QUIET_TRIM_DELAY;
     assert!(QUIET_TRIM_DELAY <= Duration::from_secs(5));
@@ -929,6 +975,29 @@ fn nfr2_the_window_managers_committed_memory_is_broken_down_by_owner() {
     );
     let unknown = CommittedMemory::default();
     assert!(committed_line(&unknown).contains("(largest allocations none MiB)"));
+}
+
+#[test]
+fn nfr1_the_renderers_gpu_memory_is_logged_by_whose_device_it_is_on() {
+    use dsa_host_core::renderer::{renderer_owners_line, Allocations, RendererOwners};
+    let at = |mib: u64, count: u32| Allocations {
+        kb: mib * MIB,
+        count,
+    };
+    let owners = RendererOwners {
+        renderer: [at(300, 120), at(0, 0), at(159, 126)],
+        guests: [at(104, 49), at(116, 56), at(0, 0)],
+        guest_devices: 10,
+        largest_guest_devices_kb: vec![60 * MIB, 40 * MIB, 20 * MIB, 0],
+    };
+    assert_eq!(
+        renderer_owners_line(&owners),
+        "graphics renderer by owner: color buffers and window textures: GPU-only 300 MiB in \
+         120, CPU-mapped 0 MiB in 0, imported 159 MiB in 126; 10 guest devices: GPU-only 104 \
+         MiB in 49, CPU-mapped 116 MiB in 56, imported 0 MiB in 0 (the largest hold 60, 40, 20 \
+         MiB)"
+    );
+    assert!(renderer_owners_line(&RendererOwners::default()).ends_with("(none holds any)"));
 }
 
 #[test]

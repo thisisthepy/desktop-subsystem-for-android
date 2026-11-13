@@ -645,3 +645,73 @@ fn nfr2_an_idle_reclaim_moves_half_the_anonymous_memory_to_zram_not_a_fixed_giga
     // A guest with almost none still gets a step init can write.
     assert_eq!(reclaim_step_mib(&MemInfo::default()), 1);
 }
+
+/// The owner's PC: three apps open, the host short, 686 MiB of page cache and 458 MiB of app
+/// memory.
+fn three_apps_open() -> MemInfo {
+    MemInfo {
+        mem_total_kb: 1971 * MIB,
+        mem_free_kb: 376 * MIB,
+        cached_kb: 686 * MIB,
+        shmem_kb: 13 * MIB,
+        anon_pages_kb: 458 * MIB,
+        ..MemInfo::default()
+    }
+}
+
+#[test]
+fn nfr2_a_host_short_of_memory_with_apps_open_gets_the_page_cache_before_any_app_memory() {
+    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
+    reclaimer.host_short(true);
+    let memory = three_apps_open();
+    let reason = reclaimer.decide_under(secs(60), 3, &memory, false);
+    assert_eq!(reason, Some(Reason::HostShort));
+    // 673 MiB of cache above a 256 MiB working set: the cache goes, and no app memory.
+    assert_eq!(
+        reclaimer.anonymous_step_mib(Reason::HostShort, 3, &memory),
+        0
+    );
+    // Once the cache is down to the apps' working set, the shortage takes app memory too.
+    let at_working_set = MemInfo {
+        cached_kb: 280 * MIB,
+        ..three_apps_open()
+    };
+    assert_eq!(
+        reclaimer.anonymous_step_mib(Reason::HostShort, 3, &at_working_set),
+        458 / 8
+    );
+}
+
+#[test]
+fn nfr2_with_apps_open_a_full_reclaim_takes_page_cache_only() {
+    let reclaimer = Reclaimer::new(ReclaimPolicy::default());
+    let memory = three_apps_open();
+    // An app closing while others stay, and cache filling memory: their memory is in use.
+    assert_eq!(
+        reclaimer.anonymous_step_mib(Reason::AppClosed, 2, &memory),
+        0
+    );
+    assert_eq!(
+        reclaimer.anonymous_step_mib(Reason::MostlyCache, 2, &memory),
+        0
+    );
+    assert_eq!(reclaimer.anonymous_step_mib(Reason::Gradual, 2, &memory), 0);
+}
+
+#[test]
+fn nfr2_with_no_app_open_the_reclaim_moves_half_the_app_memory_to_zram_after_the_cache() {
+    let reclaimer = Reclaimer::new(ReclaimPolicy::default());
+    let memory = three_apps_open();
+    for reason in [
+        Reason::Idle,
+        Reason::AppClosed,
+        Reason::MostlyCache,
+        Reason::HostShort,
+    ] {
+        assert_eq!(
+            reclaimer.anonymous_step_mib(reason, 0, &memory),
+            458 / 8,
+            "{reason:?}"
+        );
+    }
+}

@@ -378,10 +378,9 @@ mod daemon {
     #[cfg(target_os = "android")]
     fn reclaim_idle_memory(router: Arc<Router>) {
         use dsa_guest_channeld::reclaim::{
-            file_refaults_kb, memory_pressure, package_running, reclaim_step_mib, MemInfo,
-            ReadFailures, Reason, ReclaimPolicy, Reclaimer, CHECK_INTERVAL, EXIT_POLL,
-            EXIT_WAIT_LIMIT, RECLAIM_PROPERTY, RECLAIM_STEP_PROPERTY, TRIM_PROPERTY,
-            TRIM_SIZE_PROPERTY,
+            file_refaults_kb, memory_pressure, package_running, MemInfo, ReadFailures, Reason,
+            ReclaimPolicy, Reclaimer, CHECK_INTERVAL, EXIT_POLL, EXIT_WAIT_LIMIT, RECLAIM_PROPERTY,
+            RECLAIM_STEP_PROPERTY, TRIM_PROPERTY, TRIM_SIZE_PROPERTY,
         };
         // The command lines of the guest's processes, for whether a closed app's are gone.
         fn command_lines(failures: &mut ReadFailures) -> Vec<String> {
@@ -491,10 +490,17 @@ mod daemon {
                     }
                     TRIM_PROPERTY
                 } else {
-                    let step = reclaim_step_mib(&memory).to_string();
+                    // 0 while tasks are open, unless the host is short and the cache is already
+                    // down to their working set: init drops the cache and moves nothing to zram.
+                    let step = reclaimer
+                        .anonymous_step_mib(reason, tasks, &memory)
+                        .to_string();
                     if let Err(why) = set_property(RECLAIM_STEP_PROPERTY, &step) {
                         say!("could not size the reclaim: {why}");
                         continue;
+                    }
+                    if step == "0" {
+                        say!("the reclaim takes page cache only; no app memory goes to zram");
                     }
                     RECLAIM_PROPERTY
                 };

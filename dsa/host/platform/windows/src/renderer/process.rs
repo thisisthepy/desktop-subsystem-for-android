@@ -394,6 +394,10 @@ pub fn run(args: &[String]) -> ! {
                 }
                 let report = memory(&adapter).to_report(asked.request);
                 link.send(Body::MemoryReport(report));
+                // Whose the GPU memory is, for the window manager's log beside the report.
+                if let Some(owners) = adapter.counted_owners() {
+                    link.note(&dsa_host_core::renderer::renderer_owners_line(&owners));
+                }
             }
             Body::Stop(_) => break,
             _ => {}

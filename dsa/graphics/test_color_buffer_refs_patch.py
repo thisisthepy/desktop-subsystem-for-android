@@ -10,7 +10,8 @@ empty ColorBuffer: every thumbnail, ad and avatar in YouTube was an empty grey b
 
 Now the reference also lasts while the process still has the buffer's descriptors open
 (include/dsa_color_buffer_refs.h, tested by tests/color_buffer_refs_test.cpp), and the ones the
-process let go of are closed at a submit, at most once a second."""
+process let go of are closed at a submit or as one of its Vulkan objects on a buffer goes, at most
+once a second."""
 
 import re
 import unittest
@@ -68,6 +69,20 @@ class ColorBufferRefsPatchTests(unittest.TestCase):
         self.assertIn("rcEnc->rcCloseColorBuffer(rcEnc, closed.hostHandle);", text)
         header = HEADER.read_text(encoding="utf-8")
         self.assertIn("static constexpr uint64_t kSweepIntervalNs = 1000000000ULL;", header)
+
+    def test_nfr2_a_process_that_stops_submitting_still_closes_what_it_let_go_of(self):
+        # A window in the background submits nothing: the sweep also runs as its Vulkan objects
+        # go (the memory that imported a buffer, a window image), after the reference that
+        # object held is closed, and outside the references' lock.
+        added, _ = file_hunks(PATCH, GRALLOC)
+        calls = [i for i, line in enumerate(added) if line.strip() == "closeReleasedBuffers();"]
+        self.assertEqual(len(calls), 2)
+        closes = [i for i, line in enumerate(added) if line.strip() == "closeHostHandle(closed);"]
+        self.assertEqual(len(closes), 2)
+        for close, call in zip(closes, calls):
+            self.assertLess(close, call)
+        release = added.index("void MinigbmGralloc::closeHostHandle(const dsa::ColorBufferRefs::Closed& closed) {")
+        self.assertLess(calls[0], release)
 
     def test_nfr1_every_gralloc_offers_the_sweep_and_only_minigbm_does_it(self):
         added, _ = file_hunks(PATCH, INTERFACE)
