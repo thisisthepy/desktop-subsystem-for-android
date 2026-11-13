@@ -843,6 +843,89 @@ fn fr17_korean_has_the_paragraphs_of_the_english() {
     );
 }
 
+/// The page files: the ones that build a settings page, or a part of one, from groups and
+/// rows. The log page is a list of log lines, not of settings rows, and lays itself out.
+fn page_sources() -> Vec<(String, String)> {
+    let ui = crate_dir().join("src/ui");
+    let mut pages: Vec<(String, String)> = std::fs::read_dir(&ui)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.file_name().is_some_and(|n| n != "common.rs"))
+        .map(|p| {
+            let name = p.file_name().unwrap().to_string_lossy().into_owned();
+            (name, std::fs::read_to_string(&p).unwrap())
+        })
+        .filter(|(_, code)| code.contains("Page::new()") || code.contains("&Rc<Page>"))
+        .collect();
+    pages.sort();
+    pages
+}
+
+#[test]
+fn fr17_pages_take_their_rows_and_spacing_from_the_shared_helpers() {
+    let pages = page_sources();
+    assert!(
+        ["apps.rs", "backup.rs", "status.rs", "system.rs"]
+            .iter()
+            .all(|name| pages.iter().any(|(page, _)| page == name)),
+        "the settings pages were not found: {:?}",
+        pages.iter().map(|(name, _)| name).collect::<Vec<_>>()
+    );
+    // The rows a page may not build itself: common.rs makes each of them, so every row has the
+    // same title handling and the spacing libadwaita gives it.
+    let rows = [
+        "adw::ActionRow::",
+        "adw::SwitchRow::",
+        "adw::ComboRow::",
+        "adw::EntryRow::",
+        "adw::ExpanderRow::",
+        "adw::SpinRow::",
+        "adw::PasswordEntryRow::",
+        "adw::ButtonRow::",
+    ];
+    // What sets a widget's own spacing around it or inside it.
+    let spacing = [
+        "set_margin_",
+        ".margin_top(",
+        ".margin_bottom(",
+        ".margin_start(",
+        ".margin_end(",
+        "padding",
+    ];
+    let mut found = Vec::new();
+    for (name, code) in &pages {
+        for (number, line) in code.lines().enumerate() {
+            if line.trim_start().starts_with("//") {
+                continue;
+            }
+            for mark in rows.iter().chain(spacing.iter()) {
+                if line.contains(mark) {
+                    found.push(format!("{name}:{}: {}", number + 1, line.trim()));
+                }
+            }
+        }
+    }
+    assert!(
+        found.is_empty(),
+        "a page builds a row or sets spacing itself; use the helpers in src/ui/common.rs:\n{}",
+        found.join("\n")
+    );
+    let common = std::fs::read_to_string(crate_dir().join("src/ui/common.rs")).unwrap();
+    for helper in [
+        "pub fn action_row(",
+        "pub fn property_row(",
+        "pub fn value_row(",
+        "pub fn button_row(",
+        "pub fn link_row(",
+        "pub fn command_row(",
+        "pub fn entry_row(",
+        "pub fn expander_row(",
+        "pub fn heading_block(",
+    ] {
+        assert!(common.contains(helper), "src/ui/common.rs has no {helper}");
+    }
+}
+
 #[test]
 fn fr17_text_never_names_another_platform() {
     for text in shown_strings() {

@@ -17,8 +17,7 @@ pub fn identity(ctx: &Shared) -> gtk::Widget {
     let page = Rc::new(Page::new());
     // This computer: its name large, its maker and model under it, as GNOME's About shows the
     // device.
-    let banner = gtk::Box::new(gtk::Orientation::Vertical, 4);
-    banner.set_margin_bottom(6);
+    let banner = heading_block();
     let computer_name = gtk::Label::builder()
         .xalign(0.0)
         .selectable(true)
@@ -47,12 +46,7 @@ pub fn identity(ctx: &Shared) -> gtk::Widget {
         crate::model::ABOUT_KEYS
             .iter()
             .map(|key| {
-                let row = adw::ActionRow::builder()
-                    .title(view::identity_label(key))
-                    .subtitle_selectable(true)
-                    .use_markup(false)
-                    .build();
-                row.add_css_class("property");
+                let row = property_row(&view::identity_label(key));
                 specs.add(&row);
                 (*key, row)
             })
@@ -93,10 +87,7 @@ pub fn identity(ctx: &Shared) -> gtk::Widget {
         keys.iter()
             .zip(origins.iter())
             .map(|(key, (_, origin))| {
-                let row = adw::EntryRow::builder()
-                    .title(view::identity_label(key))
-                    .use_markup(false)
-                    .build();
+                let row = entry_row(&view::identity_label(key));
                 row.add_suffix(origin);
                 if key.starts_with("fingerprint") {
                     print.add(&row);
@@ -547,11 +538,10 @@ pub fn advanced(ctx: &Shared) -> gtk::Widget {
         tr("On by default. The folders chosen below show in Android's shared storage, for Android apps to open and save files.\nApps need Android's storage permission, and can do only what your own account may do."),
     );
     files.add(&file_sharing.row);
-    let folders_row = adw::ExpanderRow::builder()
-        .title(tr("Shared folders"))
-        .subtitle(tr("A folder you clear is taken away from Android at once."))
-        .use_markup(false)
-        .build();
+    let folders_row = expander_row(
+        &tr("Shared folders"),
+        &tr("A folder you clear is taken away from Android at once."),
+    );
     let folders: Vec<(&'static str, Switch)> = crate::model::ALL_FOLDERS
         .iter()
         .map(|folder| {
@@ -874,12 +864,9 @@ fn developer(ctx: &Shared, page: &Rc<Page>) -> adw::PreferencesGroup {
         &tr("Connect adb"),
         &format!("adb connect 127.0.0.1:{}", crate::model::DEFAULT_ADB_PORT),
     );
-    let port = adw::EntryRow::builder()
-        .title(tr("Port"))
-        .show_apply_button(true)
-        .input_purpose(gtk::InputPurpose::Digits)
-        .use_markup(false)
-        .build();
+    let port = entry_row(&tr("Port"));
+    port.set_show_apply_button(true);
+    port.set_input_purpose(gtk::InputPurpose::Digits);
     // Shows what the service now keeps; every row follows it.
     let show: Rc<dyn Fn(Result<Settings, crate::api::Failure>)> = {
         let (page, settings, switches) = (page.clone(), settings.clone(), switches.clone());

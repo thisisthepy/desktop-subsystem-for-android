@@ -183,11 +183,7 @@ fn app_row(
     system_forced_available: bool,
     reload: Hook,
 ) -> adw::ExpanderRow {
-    let row = adw::ExpanderRow::builder()
-        .title(app.label.as_str())
-        .subtitle(view::app_detail(app))
-        .use_markup(false)
-        .build();
+    let row = expander_row(&app.label, &view::app_detail(app));
     row.add_prefix(&png_image(&app.icon_png, "application-x-executable", 32));
 
     let open = button(&tr("Open"));

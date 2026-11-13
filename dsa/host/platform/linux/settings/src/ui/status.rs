@@ -907,11 +907,7 @@ fn program_progress(ctx: &Shared, program: &adw::PreferencesGroup) {
 pub fn about(ctx: &Shared) -> gtk::Widget {
     let page = Rc::new(Page::new());
     let product = group("", None);
-    let header = adw::ActionRow::builder()
-        .title("Desktop Subsystem for Android™")
-        .subtitle("Thisisthepy")
-        .use_markup(false)
-        .build();
+    let header = action_row("Desktop Subsystem for Android™", "Thisisthepy");
     header.add_prefix(&{
         let image = gtk::Image::from_icon_name(crate::APP_ID);
         image.set_pixel_size(48);
