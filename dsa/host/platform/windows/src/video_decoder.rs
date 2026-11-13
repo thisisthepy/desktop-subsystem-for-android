@@ -73,7 +73,8 @@ pub use system::{probe_here, MediaFoundationDecoders};
 
 #[cfg(windows)]
 mod system {
-    use std::sync::OnceLock;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex, OnceLock, Weak};
 
     use dsa_host_core::video::{Codec, CodecSupport, Packet, Picture, VideoDecoder, VideoDecoders};
     use dsa_host_core::video_layout::{
@@ -90,15 +91,16 @@ mod system {
         D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_CREATE_DEVICE_VIDEO_SUPPORT, D3D11_SDK_VERSION,
         D3D11_TEXTURE2D_DESC,
     };
-    use windows::Win32::Graphics::Dxgi::IDXGIAdapter;
+    use windows::Win32::Graphics::Dxgi::{IDXGIAdapter, IDXGIDevice3};
     use windows::Win32::Media::MediaFoundation::{
         IMF2DBuffer, IMFActivate, IMFDXGIBuffer, IMFDXGIDeviceManager, IMFMediaType, IMFSample,
-        IMFTransform, MFCreateDXGIDeviceManager, MFCreateMediaType, MFCreateMemoryBuffer,
-        MFCreateSample, MFMediaType_Video, MFStartup, MFTEnumEx, MFVideoArea, MFVideoFormat_AV1,
-        MFVideoFormat_H264, MFVideoFormat_HEVC, MFVideoFormat_NV12, MFVideoFormat_P010,
-        MFVideoFormat_VP90, MFSTARTUP_NOSOCKET, MFT_CATEGORY_VIDEO_DECODER,
+        IMFShutdown, IMFTransform, MFCreateDXGIDeviceManager, MFCreateMediaType,
+        MFCreateMemoryBuffer, MFCreateSample, MFMediaType_Video, MFShutdown, MFStartup, MFTEnumEx,
+        MFVideoArea, MFVideoFormat_AV1, MFVideoFormat_H264, MFVideoFormat_HEVC, MFVideoFormat_NV12,
+        MFVideoFormat_P010, MFVideoFormat_VP90, MFSTARTUP_NOSOCKET, MFT_CATEGORY_VIDEO_DECODER,
         MFT_ENUM_FLAG_SORTANDFILTER, MFT_ENUM_FLAG_SYNCMFT, MFT_MESSAGE_COMMAND_DRAIN,
         MFT_MESSAGE_COMMAND_FLUSH, MFT_MESSAGE_NOTIFY_BEGIN_STREAMING,
+        MFT_MESSAGE_NOTIFY_END_OF_STREAM, MFT_MESSAGE_NOTIFY_END_STREAMING,
         MFT_MESSAGE_NOTIFY_START_OF_STREAM, MFT_MESSAGE_SET_D3D_MANAGER, MFT_OUTPUT_DATA_BUFFER,
         MFT_OUTPUT_STREAM_PROVIDES_SAMPLES, MFT_REGISTER_TYPE_INFO, MF_E_NOTACCEPTING,
         MF_E_TRANSFORM_NEED_MORE_INPUT, MF_E_TRANSFORM_STREAM_CHANGE, MF_MT_FRAME_SIZE,
@@ -121,22 +123,97 @@ mod system {
         }
     }
 
-    fn started() -> Result<(), String> {
-        static STARTED: OnceLock<Result<(), String>> = OnceLock::new();
-        STARTED
-            .get_or_init(|| {
-                // SAFETY: Media Foundation's startup, once for the process.
-                unsafe { MFStartup(MF_VERSION, MFSTARTUP_NOSOCKET) }
-                    .map_err(|error| format!("Media Foundation did not start: {error}"))
-            })
-            .clone()
-    }
-
     /// A Direct3D 11 device on the default GPU with video support, and the device manager a
     /// decoder takes it through.
     struct Gpu {
-        _device: ID3D11Device,
+        device: ID3D11Device,
         manager: IMFDXGIDeviceManager,
+    }
+
+    /// What every open decoder shares: Media Foundation, started, and one GPU device. It lives
+    /// as long as a decoder holds it, and no longer: once the last decoder closes, the device
+    /// goes, with every surface, sample pool and staging texture the decoders made on it, and
+    /// Media Foundation is shut down, so a video played and closed leaves nothing behind. A
+    /// device per decoder, as before, made the driver keep its pools once for each decoder
+    /// that ran at once.
+    struct Platform {
+        gpu: Option<Gpu>,
+    }
+
+    // SAFETY: the device is multithread protected and the device manager is free threaded;
+    // both are used through their own locks.
+    unsafe impl Send for Platform {}
+    // SAFETY: as above.
+    unsafe impl Sync for Platform {}
+
+    impl Platform {
+        fn new() -> Result<Platform, String> {
+            // SAFETY: Media Foundation's startup, which counts; each Platform shuts it down
+            // once when it goes.
+            unsafe { MFStartup(MF_VERSION, MFSTARTUP_NOSOCKET) }
+                .map_err(|error| format!("Media Foundation did not start: {error}"))?;
+            match gpu() {
+                Ok(gpu) => Ok(Platform { gpu: Some(gpu) }),
+                Err(why) => {
+                    // SAFETY: pairs the startup above.
+                    let _ = unsafe { MFShutdown() };
+                    Err(why)
+                }
+            }
+        }
+
+        fn manager(&self) -> &IMFDXGIDeviceManager {
+            &self
+                .gpu
+                .as_ref()
+                .expect("a live platform has its device")
+                .manager
+        }
+
+        /// Whether a GPU reset removed the device, so no new decoder can use it.
+        fn removed(&self) -> bool {
+            self.gpu
+                .as_ref()
+                // SAFETY: a plain query of a live device.
+                .is_none_or(|gpu| unsafe { gpu.device.GetDeviceRemovedReason() }.is_err())
+        }
+
+        /// The platform the open decoders share, or a new one when none is open (or the one
+        /// they share lost its device to a GPU reset).
+        fn shared(slot: &Mutex<Weak<Platform>>) -> Result<Arc<Platform>, String> {
+            let mut slot = slot.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(platform) = slot.upgrade().filter(|p| !p.removed()) {
+                return Ok(platform);
+            }
+            let platform = Arc::new(Platform::new()?);
+            *slot = Arc::downgrade(&platform);
+            Ok(platform)
+        }
+    }
+
+    impl Drop for Platform {
+        fn drop(&mut self) {
+            if let Some(gpu) = self.gpu.take() {
+                // SAFETY: plain calls on a device nothing else uses now. Direct3D destroys
+                // released resources when the context next flushes, and the driver keeps
+                // pools beyond live resources until trimmed; both go before the device does.
+                unsafe {
+                    if let Ok(context) = gpu.device.GetImmediateContext() {
+                        context.ClearState();
+                        context.Flush();
+                    }
+                    if let Ok(dxgi) = gpu.device.cast::<IDXGIDevice3>() {
+                        dxgi.Trim();
+                    }
+                }
+                // The manager holds the device, so it goes first.
+                let Gpu { device, manager } = gpu;
+                drop(manager);
+                drop(device);
+            }
+            // SAFETY: pairs the startup in `new`, after everything made with it is released.
+            let _ = unsafe { MFShutdown() };
+        }
     }
 
     fn gpu() -> Result<Gpu, String> {
@@ -174,14 +251,45 @@ mod system {
         // SAFETY: the device and the token the manager gave.
         unsafe { manager.ResetDevice(&device, token) }
             .map_err(|e| format!("the device manager did not take the device: {e}"))?;
-        Ok(Gpu {
-            _device: device,
-            manager,
-        })
+        Ok(Gpu { device, manager })
+    }
+
+    /// A decoder transform and the activation object it came from. Going, it is taken out of
+    /// streaming, made to let go of the GPU's device manager, and shut down, as Media
+    /// Foundation asks of an activated object: a transform only released can keep its
+    /// surfaces, its sample pool and its hold on the device until the process ends.
+    struct Transform {
+        transform: IMFTransform,
+        activate: IMFActivate,
+    }
+
+    impl std::ops::Deref for Transform {
+        type Target = IMFTransform;
+        fn deref(&self) -> &IMFTransform {
+            &self.transform
+        }
+    }
+
+    impl Drop for Transform {
+        fn drop(&mut self) {
+            // SAFETY: plain Media Foundation calls on a transform no other thread uses; each
+            // may fail on a transform that never streamed, which changes nothing.
+            unsafe {
+                let t = &self.transform;
+                let _ = t.ProcessMessage(MFT_MESSAGE_COMMAND_FLUSH, 0);
+                let _ = t.ProcessMessage(MFT_MESSAGE_NOTIFY_END_OF_STREAM, 0);
+                let _ = t.ProcessMessage(MFT_MESSAGE_NOTIFY_END_STREAMING, 0);
+                let _ = t.ProcessMessage(MFT_MESSAGE_SET_D3D_MANAGER, 0);
+                if let Ok(shutdown) = t.cast::<IMFShutdown>() {
+                    let _ = shutdown.Shutdown();
+                }
+                let _ = self.activate.ShutdownObject();
+            }
+        }
     }
 
     /// The first decoder transform for `codec`, in the order Windows ranks them.
-    fn transform(codec: Codec) -> Result<IMFTransform, String> {
+    fn transform(codec: Codec) -> Result<Transform, String> {
         let input = MFT_REGISTER_TYPE_INFO {
             guidMajorType: MFMediaType_Video,
             guidSubtype: subtype(codec),
@@ -208,7 +316,12 @@ mod system {
             if found.is_none() {
                 if let Some(activate) = activate {
                     // SAFETY: a valid activation object.
-                    found = unsafe { activate.ActivateObject::<IMFTransform>() }.ok();
+                    found = unsafe { activate.ActivateObject::<IMFTransform>() }
+                        .ok()
+                        .map(|transform| Transform {
+                            transform,
+                            activate,
+                        });
                 }
             }
         }
@@ -345,8 +458,9 @@ mod system {
     /// One decoder on the GPU.
     struct MediaFoundationDecoder {
         codec: Codec,
-        decoder: IMFTransform,
-        _gpu: Gpu,
+        /// Declared before the platform, so it goes first: the transform holds the device.
+        decoder: Transform,
+        _platform: Arc<Platform>,
         output: Output,
         /// The size the guest opened the stream with, and the sizes the stream's own headers
         /// gave (VP9, AV1), by packet, for decoders that report no display area.
@@ -361,10 +475,15 @@ mod system {
     unsafe impl Send for MediaFoundationDecoder {}
 
     impl MediaFoundationDecoder {
-        fn open(codec: Codec, width: u32, height: u32) -> Result<MediaFoundationDecoder, String> {
+        fn open(
+            codec: Codec,
+            width: u32,
+            height: u32,
+            shared: &Mutex<Weak<Platform>>,
+        ) -> Result<MediaFoundationDecoder, String> {
             // SAFETY: this thread's COM, which it keeps for its life.
             let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
-            started()?;
+            let platform = Platform::shared(shared)?;
             let decoder = transform(codec)?;
             // SAFETY: plain Media Foundation calls.
             let aware = unsafe { decoder.GetAttributes() }
@@ -376,10 +495,12 @@ mod system {
                     codec.name()
                 ));
             }
-            let gpu = gpu()?;
-            // SAFETY: the manager outlives the decoder (both are kept together).
+            // SAFETY: the manager outlives the decoder (the decoder holds the platform).
             unsafe {
-                decoder.ProcessMessage(MFT_MESSAGE_SET_D3D_MANAGER, gpu.manager.as_raw() as usize)
+                decoder.ProcessMessage(
+                    MFT_MESSAGE_SET_D3D_MANAGER,
+                    platform.manager().as_raw() as usize,
+                )
             }
             .map_err(|e| format!("the {} decoder did not take the GPU: {e}", codec.name()))?;
             let input = video_type(&subtype(codec), width, height)?;
@@ -399,7 +520,7 @@ mod system {
             Ok(MediaFoundationDecoder {
                 codec,
                 decoder,
-                _gpu: gpu,
+                _platform: platform,
                 output,
                 opened: (width, height),
                 stream: StreamSizes::default(),
@@ -618,10 +739,17 @@ mod system {
     ///
     /// Nothing is loaded until the guest first asks what it can decode; then a child process
     /// finds out (see [`PROBE_ARGUMENT`](super::PROBE_ARGUMENT)) and the answer is kept. A
-    /// decoder is made only when the guest opens one, and freed when it closes.
+    /// decoder is made only when the guest opens one, and freed when it closes; the GPU device
+    /// and Media Foundation that the open decoders share go with the last of them.
     pub struct MediaFoundationDecoders {
         supported: OnceLock<Vec<CodecSupport>>,
         log: Box<dyn Fn(&str) + Send + Sync>,
+        /// What the open decoders share, while any is open.
+        platform: Mutex<Weak<Platform>>,
+        /// A decoder was opened since the last time every one closed.
+        opened: AtomicBool,
+        /// Told once every decoder has closed and what they shared is gone.
+        let_go: Box<dyn Fn() + Send + Sync>,
     }
 
     /// How long the probe may take before it is given up, and no format is offered.
@@ -631,8 +759,9 @@ mod system {
     /// `dsa-wm --probe-video` runs.
     pub fn probe_here() -> String {
         let mut out = String::new();
+        let shared = Mutex::new(Weak::new());
         for codec in super::ALL_CODECS {
-            let result = MediaFoundationDecoder::open(codec, 1280, 720).map(drop);
+            let result = MediaFoundationDecoder::open(codec, 1280, 720, &shared).map(drop);
             out.push_str(&super::probe_line(codec, &result));
             out.push('\n');
         }
@@ -647,11 +776,19 @@ mod system {
 
     impl MediaFoundationDecoders {
         /// Decoders that find their formats when first asked. `log` takes a line for each
-        /// format then.
-        pub fn lazy(log: Box<dyn Fn(&str) + Send + Sync>) -> MediaFoundationDecoders {
+        /// format then. `let_go` is called each time the last open decoder has closed and
+        /// the device and Media Foundation they shared are released, so the caller can give
+        /// back the memory that freed.
+        pub fn lazy(
+            log: Box<dyn Fn(&str) + Send + Sync>,
+            let_go: Box<dyn Fn() + Send + Sync>,
+        ) -> MediaFoundationDecoders {
             MediaFoundationDecoders {
                 supported: OnceLock::new(),
                 log,
+                platform: Mutex::new(Weak::new()),
+                opened: AtomicBool::new(false),
+                let_go,
             }
         }
 
@@ -688,9 +825,35 @@ mod system {
             width: u32,
             height: u32,
         ) -> Result<Box<dyn VideoDecoder>, String> {
+            self.opened.store(true, Ordering::SeqCst);
             Ok(Box::new(MediaFoundationDecoder::open(
-                codec, width, height,
+                codec,
+                width,
+                height,
+                &self.platform,
             )?))
+        }
+
+        fn all_closed(&self) {
+            // A connection that only asked what the host decodes opened nothing to let go.
+            if !self.opened.swap(false, Ordering::SeqCst) {
+                return;
+            }
+            // A decoder opened since the last connection ended keeps what it shares.
+            let alive = self
+                .platform
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .strong_count()
+                > 0;
+            if alive {
+                self.opened.store(true, Ordering::SeqCst);
+                return;
+            }
+            (self.log)(
+                "video: the last decoder closed; its GPU device and Media Foundation were let go",
+            );
+            (self.let_go)();
         }
     }
 }

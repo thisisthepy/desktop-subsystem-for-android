@@ -900,6 +900,52 @@ fn nfr2_the_window_manager_gives_memory_back_as_soon_as_no_window_is_open() {
 }
 
 #[test]
+fn nfr2_the_window_manager_gives_back_what_the_last_video_left_while_windows_stay_shown() {
+    use dsa_host_core::memory::{IDLE_TRIM_DELAY, LET_GO_TRIM_DELAY};
+    let start = Instant::now();
+    let mut trim = IdleTrim::new(IDLE_TRIM_DELAY, start);
+    trim.sync(&[opened(1), opened(2), opened(3)], start);
+    // The windows animate (no quiet trim) while a video plays and then closes.
+    assert!(!trim.spare_due(start));
+    let closed = start + Duration::from_secs(60);
+    trim.let_go(closed);
+    assert!(!trim.spare_due(closed + LET_GO_TRIM_DELAY - Duration::from_secs(1)));
+    assert!(trim.spare_due(closed + LET_GO_TRIM_DELAY));
+    // Once only for each let-go.
+    assert!(!trim.spare_due(closed + LET_GO_TRIM_DELAY + Duration::from_secs(1)));
+    assert!(LET_GO_TRIM_DELAY <= Duration::from_secs(10));
+}
+
+#[test]
+fn nfr2_shown_windows_that_keep_drawing_still_get_a_give_back_every_round() {
+    use dsa_host_core::memory::{IDLE_TRIM_DELAY, IDLE_TRIM_REPEAT};
+    let start = Instant::now();
+    let mut trim = IdleTrim::new(IDLE_TRIM_DELAY, start);
+    trim.sync(&[opened(1)], start);
+    assert!(!trim.spare_due(start));
+    assert!(!trim.spare_due(start + IDLE_TRIM_REPEAT - Duration::from_secs(1)));
+    assert!(trim.spare_due(start + IDLE_TRIM_REPEAT));
+    assert!(!trim.spare_due(start + IDLE_TRIM_REPEAT + Duration::from_secs(1)));
+    assert!(trim.spare_due(start + IDLE_TRIM_REPEAT * 2));
+}
+
+#[test]
+fn nfr2_with_no_window_shown_the_idle_give_back_takes_what_a_video_let_go() {
+    use dsa_host_core::memory::{IDLE_TRIM_DELAY, LET_GO_TRIM_DELAY};
+    let start = Instant::now();
+    let mut trim = IdleTrim::new(IDLE_TRIM_DELAY, start);
+    // Before the idle give-back has run, it takes it: no second give-back.
+    trim.let_go(start);
+    assert!(!trim.spare_due(start + LET_GO_TRIM_DELAY));
+    assert!(trim.due(start + LET_GO_TRIM_DELAY));
+    // After it ran, the next one is minutes away: the let-go gets its own.
+    let later = start + Duration::from_secs(30);
+    trim.let_go(later);
+    assert!(trim.spare_due(later + LET_GO_TRIM_DELAY));
+    assert!(!trim.spare_due(later + LET_GO_TRIM_DELAY * 2));
+}
+
+#[test]
 fn nfr2_a_still_screen_gets_the_gpu_driver_trim_within_seconds() {
     use dsa_host_core::memory::QUIET_TRIM_DELAY;
     assert!(QUIET_TRIM_DELAY <= Duration::from_secs(5));

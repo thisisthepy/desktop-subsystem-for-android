@@ -362,3 +362,114 @@ fn pr4_each_packet_reaches_the_decoder_with_its_presentation_time() {
     let times: Vec<i64> = times.lock().unwrap().iter().map(|(_, t)| *t).collect();
     assert_eq!(times, [33_333, 99_999, 66_666]);
 }
+
+/// Decoders that record when each decoder is dropped and when the host says every one is
+/// closed.
+struct ReleasedDecoders {
+    events: Arc<Mutex<Vec<String>>>,
+}
+
+struct ReleasedDecoder {
+    events: Arc<Mutex<Vec<String>>>,
+}
+
+impl VideoDecoder for ReleasedDecoder {
+    fn decode(&mut self, _: Packet) -> Result<Vec<Picture>, String> {
+        Ok(Vec::new())
+    }
+    fn drain(&mut self) -> Result<Vec<Picture>, String> {
+        Ok(Vec::new())
+    }
+    fn flush(&mut self) {}
+}
+
+impl Drop for ReleasedDecoder {
+    fn drop(&mut self) {
+        self.events.lock().unwrap().push("dropped".into());
+    }
+}
+
+impl VideoDecoders for ReleasedDecoders {
+    fn capabilities(&self) -> Vec<CodecSupport> {
+        FakeDecoders {
+            log: Arc::default(),
+        }
+        .capabilities()
+    }
+    fn open(&self, _: Codec, _: u32, _: u32) -> Result<Box<dyn VideoDecoder>, String> {
+        self.events.lock().unwrap().push("opened".into());
+        Ok(Box::new(ReleasedDecoder {
+            events: Arc::clone(&self.events),
+        }))
+    }
+    fn all_closed(&self) {
+        self.events.lock().unwrap().push("all closed".into());
+    }
+}
+
+/// Waits until `events` holds `count` entries, or the wait runs out.
+fn wait_for(events: &Mutex<Vec<String>>, count: usize) -> Vec<String> {
+    let deadline = std::time::Instant::now() + WAIT;
+    loop {
+        let now = events.lock().unwrap().clone();
+        if now.len() >= count || std::time::Instant::now() > deadline {
+            return now;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn nfr2_the_platform_hears_once_the_last_decoder_closed_so_it_lets_its_device_go() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let (listener, connector) = memory::pair();
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let decoders: Arc<dyn VideoDecoders> = Arc::new(ReleasedDecoders {
+        events: Arc::clone(&events),
+    });
+    let stop = Arc::new(AtomicBool::new(false));
+    let host = {
+        let stop = Arc::clone(&stop);
+        thread::spawn(move || {
+            dsa_host_core::video::serve(
+                Box::new(listener),
+                decoders,
+                "dsa-host test".into(),
+                stop,
+                Arc::new(|_: &str| {}),
+            )
+        })
+    };
+    let mut guests = Vec::new();
+    for _ in 0..2 {
+        let mut guest = connector.clone().connect(WAIT).expect("connects");
+        send(
+            guest.as_mut(),
+            Body::Hello(local_hello(Role::GuestVideo, "dsa-codec2 test")),
+        );
+        open(guest.as_mut(), VideoCodec::H264, 1280, 720);
+        assert!(matches!(next(guest.as_mut()), Body::VideoDecoderOpened(o) if o.ok));
+        guests.push(guest);
+    }
+    assert_eq!(wait_for(&events, 2), ["opened", "opened"]);
+
+    // One video closes while the other still plays: the platform keeps what it shares.
+    guests[0].close();
+    assert_eq!(wait_for(&events, 3), ["opened", "opened", "dropped"]);
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(
+        events.lock().unwrap().len(),
+        3,
+        "{:?}",
+        events.lock().unwrap()
+    );
+
+    // The last one closes: its decoder is gone first, then the platform hears it.
+    guests[1].close();
+    assert_eq!(
+        wait_for(&events, 5),
+        ["opened", "opened", "dropped", "dropped", "all closed"]
+    );
+    stop.store(true, Ordering::Relaxed);
+    host.join().unwrap();
+}

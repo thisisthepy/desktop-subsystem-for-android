@@ -141,6 +141,9 @@ pub struct Compositor {
     /// Binds the video port, where the guest's codec HAL has its streams decoded. None in
     /// tests, which have no GPU decoders.
     bind_video: Option<BindFn>,
+    /// Set when the last video decoder closed and its device was let go, so the idle trim
+    /// gives back the memory that freed.
+    video_let_go: Arc<AtomicBool>,
     /// Binds the sensor port, where the guest's sensors HAL reads this computer's sensors.
     /// None in tests, which read no sensors.
     bind_sensors: Option<BindFn>,
@@ -315,6 +318,7 @@ impl Compositor {
             renderer,
             tracker: Arc::new(StreamTracker::new()),
             vm_id_slot: VmIdSlot::default(),
+            video_let_go: Arc::new(AtomicBool::new(false)),
             local_api_connector,
             bind_command: Some(bind_command),
             bind_process_pipe: Some(bind_process_pipe),
@@ -357,6 +361,7 @@ impl Compositor {
             renderer,
             tracker: Arc::new(StreamTracker::new()),
             vm_id_slot: VmIdSlot::default(),
+            video_let_go: Arc::new(AtomicBool::new(false)),
             local_api_connector,
             bind_command: Some(bind_command),
             bind_process_pipe: Some(bind_process_pipe),
@@ -768,6 +773,7 @@ impl Compositor {
         let listener = VmBoundListener::new(Arc::clone(&self.vm_id_slot), bind);
         let stop = Arc::clone(stop);
         let logger = self.logger.clone();
+        let let_go = Arc::clone(&self.video_let_go);
         thread::Builder::new()
             .name("dsa-wm-video".into())
             .spawn(move || {
@@ -777,9 +783,11 @@ impl Compositor {
                     }
                 });
                 let probe_log = Arc::clone(&log);
-                let decoders = crate::video_decoder::MediaFoundationDecoders::lazy(Box::new(
-                    move |line: &str| probe_log(line),
-                ));
+                let decoders = crate::video_decoder::MediaFoundationDecoders::lazy(
+                    Box::new(move |line: &str| probe_log(line)),
+                    // The trim gives back what the decoders freed a few seconds later.
+                    Box::new(move || let_go.store(true, Ordering::SeqCst)),
+                );
                 let build = format!("dsa-wm {}", crate::VERSION);
                 dsa_host_core::video::serve(
                     Box::new(listener),
@@ -1490,6 +1498,7 @@ impl Compositor {
             installed_tx = Some(tx);
         }
         let trim_idle = Arc::clone(&idle);
+        let trim_let_go = Arc::clone(&self.video_let_go);
         let trim_stop = Arc::clone(&manager_stop);
         let trim_logger = self.logger.clone();
         let trimmer = thread::Builder::new()
@@ -1501,6 +1510,7 @@ impl Compositor {
                     trim_gpu,
                     trim_renderer,
                     quiet_for,
+                    trim_let_go,
                     trim_stop,
                     trim_logger,
                 )
