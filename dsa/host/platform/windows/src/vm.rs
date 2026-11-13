@@ -10,7 +10,9 @@
 //! - on Windows builds that can take it, small backing pages and 64 KiB fault clusters
 //!   (`BackingPageSize`, `FaultClusterSizeShift`, `DirectMapFaultClusterSizeShift`). Without
 //!   them one touched guest page can commit far more than itself on the host, and a freed
-//!   128 KiB block need not free anything there;
+//!   128 KiB block need not free anything there. The guest's kernel is told the cluster
+//!   (`page_reporting.fault_cluster_order`), so it reports again the free pages the host backs
+//!   again together with a page the guest touches;
 //! - on x86_64, the kernel booted directly (`LinuxKernelDirect`), straight into Android's
 //!   init. Hyper-V on ARM64 has no direct Linux boot, so there, as WSL does, the VM's UEFI
 //!   firmware starts the kernel's EFI stub from a folder it reads over VMBus (`VmbFs`), and
@@ -199,7 +201,9 @@ impl NetworkAdapter {
 pub const BOOT_MEMORY_CMDLINE: &str = dsa_host_core::memory::GUEST_BOOT_MEMORY_CMDLINE;
 
 /// The fault cluster for fine-grained memory, as a power of two of 4 KiB pages: 64 KiB. Free
-/// page reporting's order must be at least this, which its least value, 5, is.
+/// page reporting may report pieces smaller than it (order 0 reports every free 4 KiB page);
+/// the guest is told the cluster (`page_reporting.fault_cluster_order`), so free pages the
+/// host backs again with a neighbour in their cluster are reported again.
 const FAULT_CLUSTER_SHIFT: u32 = 4;
 
 /// The HCS modify request that sets a running VM's memory to `mb` MiB, rounded down to the
@@ -387,10 +391,15 @@ impl AndroidVmConfig {
 
     /// The kernel command line for a guest of `arch`.
     pub fn full_kernel_cmdline_for(&self, arch: GuestArch) -> String {
+        let fault_cluster = if self.fine_grained_memory {
+            FAULT_CLUSTER_SHIFT as u8
+        } else {
+            0
+        };
         let mut cmdline = format!(
-            "{} panic=-1 page_reporting.page_reporting_order={}",
+            "{} panic=-1 {}",
             arch.console_cmdline(),
-            self.page_reporting_order
+            dsa_host_core::memory::page_reporting_cmdline(self.page_reporting_order, fault_cluster)
         );
         cmdline.push(' ');
         cmdline.push_str(BOOT_MEMORY_CMDLINE);

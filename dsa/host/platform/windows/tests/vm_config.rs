@@ -246,6 +246,41 @@ fn nfr2_the_vm_faults_and_frees_memory_in_small_pieces_where_the_build_can() {
 }
 
 #[test]
+fn nfr2_the_guest_is_told_the_fault_cluster_and_compacts_only_for_whole_block_reporting() {
+    // Small backing pages with 64 KiB fault clusters, reporting every free 4 KiB page: the
+    // guest reports again the free pages Hyper-V backs again with a neighbour, and does not
+    // compact, which would only move memory into pages Hyper-V had taken back.
+    let mut fine = config();
+    fine.fine_grained_memory = true;
+    fine.page_reporting_order = 0;
+    let cmdline = fine.full_kernel_cmdline_for(GuestArch::X86_64);
+    assert!(
+        cmdline
+            .contains("page_reporting.page_reporting_order=0 page_reporting.fault_cluster_order=4"),
+        "{cmdline}"
+    );
+    assert!(!cmdline.contains("memory_compaction"), "{cmdline}");
+    // The same words reach the ARM64 firmware's boot entry.
+    let arm = fine.full_kernel_cmdline_for(GuestArch::Arm64);
+    assert!(
+        arm.contains("page_reporting.fault_cluster_order=4"),
+        "{arm}"
+    );
+
+    // Large backing pages, reporting 2 MiB blocks: no cluster to tell, and compaction
+    // gathers the blocks.
+    let mut blocks = config();
+    blocks.page_reporting_order = 9;
+    let cmdline = blocks.full_kernel_cmdline_for(GuestArch::X86_64);
+    assert!(!cmdline.contains("fault_cluster_order"), "{cmdline}");
+    assert!(
+        cmdline
+            .contains("page_reporting.page_reporting_order=9 androidboot.dsa.memory_compaction=on"),
+        "{cmdline}"
+    );
+}
+
+#[test]
 fn nfr2_fine_grained_memory_is_only_used_on_builds_with_the_teardown_fix() {
     assert!(fine_grained_memory_supported(26100, 0));
     assert!(fine_grained_memory_supported(26300, 0));
