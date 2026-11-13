@@ -2606,6 +2606,21 @@ class GuestMemoryTests(unittest.TestCase):
             )
             self.assertIn("(allow vendor_init dsa_sysfs_page_reporting (file (write open getattr)))", policy)
 
+    def test_nfr2_the_agent_may_read_what_free_page_reporting_gave_back(self):
+        # The agent's memory report carries the kernel's counts; only it may read them, and
+        # nothing may write them.
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp), channeld=True) as archive:
+            policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+            for name in ["reported_kb", "reported_total_kb", "refaulted_total_kb"]:
+                self.assertIn(
+                    f'(genfscon sysfs "/module/page_reporting/parameters/{name}" '
+                    '(u object_r dsa_sysfs_page_reporting_stats ((s0) (s0))))',
+                    policy,
+                )
+            readers = re.findall(r"\(allow (\S+) dsa_sysfs_page_reporting_stats \(file \(([^)]*)\)\)\)", policy)
+            self.assertEqual(sorted(readers), [("platform_app", "read open getattr"),
+                                               ("system_app", "read open getattr")])
+
     def test_nfr2_the_reclaims_compact_only_where_the_host_takes_back_whole_blocks(self):
         # At reporting order 0 every free page goes back as it is, and compaction would copy
         # pages into free pages the host had taken back. The host asks for compaction on the

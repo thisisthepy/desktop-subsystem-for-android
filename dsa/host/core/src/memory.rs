@@ -98,6 +98,40 @@ pub struct GuestMemory {
     /// Google Play services' processes; `None` when none runs (or the Google apps are not
     /// installed).
     pub google_play: Option<GooglePlayMemory>,
+    /// How free page reporting is doing; `None` when the guest could not read it.
+    pub page_reporting: Option<PageReporting>,
+}
+
+/// Free page reporting, in KiB, as the guest's kernel counts it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PageReporting {
+    /// The free memory marked reported now: the host has taken it back.
+    pub free_reported_kb: u64,
+    /// The memory reported to the host since boot.
+    pub reported_total_kb: u64,
+    /// Reported free memory the host took back in since boot with a neighbour in its fault
+    /// cluster, which the guest then reported again.
+    pub refaulted_total_kb: u64,
+    /// How fast memory went back between the report before and this one, in KiB a minute:
+    /// the growth of `reported_total_kb` over the time between them. `None` for the first
+    /// report, or when the guest restarted between the two.
+    pub reported_kb_per_minute: Option<u64>,
+}
+
+impl PageReporting {
+    /// The report's counters, `None` when the guest sent none (all 0).
+    fn from_counts(
+        free_reported_kb: u64,
+        reported_total_kb: u64,
+        refaulted_total_kb: u64,
+    ) -> Option<PageReporting> {
+        (reported_total_kb > 0).then_some(PageReporting {
+            free_reported_kb,
+            reported_total_kb,
+            refaulted_total_kb,
+            reported_kb_per_minute: None,
+        })
+    }
 }
 
 /// What the guest's kernel itself holds, in KiB, from /proc/meminfo, and the memory it was
@@ -298,6 +332,11 @@ impl GuestMemory {
         });
         GuestMemory {
             google_play,
+            page_reporting: PageReporting::from_counts(
+                memory.free_reported_kb,
+                memory.reported_total_kb,
+                memory.refaulted_total_kb,
+            ),
             swap_pss_kb: memory.swap_pss_kb,
             mem_total_kb: memory.mem_total_kb,
             mem_free_kb: memory.mem_free_kb,
@@ -364,6 +403,30 @@ impl GuestMemory {
             }
         }
         memory
+    }
+
+    /// This report with how fast memory went back to the host since `before`, a report the
+    /// guest sent `elapsed` earlier ([`PageReporting::reported_kb_per_minute`]). A count lower
+    /// than before's means the guest restarted in between, and gives no rate; so does a gap
+    /// under a second, which says nothing about a rate.
+    pub fn following(mut self, before: &GuestMemory, elapsed: Duration) -> GuestMemory {
+        if let (Some(now), Some(then)) = (self.page_reporting.as_mut(), before.page_reporting) {
+            let secs = elapsed.as_secs();
+            now.reported_kb_per_minute = (secs >= 1
+                && now.reported_total_kb >= then.reported_total_kb)
+                .then(|| (now.reported_total_kb - then.reported_total_kb) * 60 / secs);
+        }
+        self
+    }
+
+    /// Free memory the VM still holds as the guest sees it, in KiB: what is free less what the
+    /// host has taken back: free blocks below the reporting order and pages freed since the
+    /// last reporting pass (the per-CPU lists' free pages are outside MemFree, so not here).
+    /// Reported pages the host took back in without the guest knowing do not show here;
+    /// [`MemorySnapshot::vm_beyond_guest_kb`] shows them. `None` without the guest's counts.
+    pub fn free_not_reported_kb(&self) -> Option<u64> {
+        self.page_reporting
+            .map(|r| self.mem_free_kb.saturating_sub(r.free_reported_kb))
     }
 
     /// What the kernel reserved at boot, before MemTotal: its code and data, the page
@@ -438,10 +501,43 @@ impl MemorySnapshot {
                     play,
                     report.age.as_secs()
                 ));
+                if let Some(r) = g.page_reporting {
+                    line.push_str(&format!(
+                        "; free {} MiB, {} back on the host, {} reported since boot",
+                        mib(g.mem_free_kb),
+                        mib(r.free_reported_kb),
+                        mib(r.reported_total_kb)
+                    ));
+                }
             }
         }
         line
     }
+}
+
+/// What `dsa memory` says of free page reporting: how much of the guest's free memory the host
+/// has back, how much it has not, how much went back since boot and how fast lately, and how
+/// much the host took back in with a neighbour and was reported again.
+pub fn page_reporting_line(g: &GuestMemory) -> String {
+    let (Some(r), Some(not_reported)) = (g.page_reporting, g.free_not_reported_kb()) else {
+        return "free page reporting: Android does not say what it reported (an older kernel \
+                or image)"
+            .to_string();
+    };
+    let rate = r
+        .reported_kb_per_minute
+        .map_or("no rate until the next report".to_string(), |kb| {
+            format!("{} MiB a minute since the report before", mib(kb))
+        });
+    format!(
+        "free page reporting: {} of {} MiB free is back on the host, {} MiB not yet; {} MiB \
+         reported since boot ({rate}); {} MiB taken back in with a neighbour and reported again",
+        mib(r.free_reported_kb),
+        mib(g.mem_free_kb),
+        mib(not_reported),
+        mib(r.reported_total_kb),
+        mib(r.refaulted_total_kb),
+    )
 }
 
 /// KiB to whole MiB, rounded to nearest.
@@ -536,6 +632,7 @@ impl fmt::Display for MemorySnapshot {
                 mib(beyond)
             )?;
         }
+        writeln!(f, "  {}", page_reporting_line(g))?;
         writeln!(
             f,
             "  swap {} of {} MiB used; zram holds {} MiB in {} MiB",
@@ -628,6 +725,16 @@ pub fn snapshot_to_wire(snapshot: &MemorySnapshot) -> types::Memory {
                 cma_total_kb: g.kernel.cma_total_kb,
                 hugetlb_kb: g.kernel.hugetlb_kb,
                 mem_online_kb: g.kernel.mem_online_kb,
+                free_reported_kb: g.page_reporting.map_or(0, |r| r.free_reported_kb),
+                reported_total_kb: g.page_reporting.map_or(0, |r| r.reported_total_kb),
+                refaulted_total_kb: g.page_reporting.map_or(0, |r| r.refaulted_total_kb),
+                reported_kb_per_minute: g
+                    .page_reporting
+                    .and_then(|r| r.reported_kb_per_minute)
+                    .unwrap_or(0),
+                reported_rate_known: g
+                    .page_reporting
+                    .is_some_and(|r| r.reported_kb_per_minute.is_some()),
             }
         }),
         host: snapshot
@@ -679,6 +786,17 @@ pub fn snapshot_from_wire(memory: types::Memory) -> MemorySnapshot {
                     processes: g.google_play_processes,
                     pss_kb: g.google_play_pss_kb,
                     swap_pss_kb: g.google_play_swap_pss_kb,
+                }),
+                page_reporting: PageReporting::from_counts(
+                    g.free_reported_kb,
+                    g.reported_total_kb,
+                    g.refaulted_total_kb,
+                )
+                .map(|r| PageReporting {
+                    reported_kb_per_minute: g
+                        .reported_rate_known
+                        .then_some(g.reported_kb_per_minute),
+                    ..r
                 }),
                 kernel: KernelMemory {
                     slab_unreclaimable_kb: g.slab_unreclaimable_kb,

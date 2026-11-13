@@ -350,6 +350,9 @@ fn report() -> control::GuestMemory {
         cma_total_kb: 0,
         hugetlb_kb: 0,
         mem_online_kb: 4200 * MIB,
+        free_reported_kb: 2000 * MIB,
+        reported_total_kb: 9000 * MIB,
+        refaulted_total_kb: 300 * MIB,
     }
 }
 
@@ -454,6 +457,33 @@ fn nfr1_the_session_keeps_the_guests_last_memory_report_until_it_stops() {
 }
 
 #[test]
+fn nfr2_the_session_works_out_how_fast_memory_goes_back_from_two_reports() {
+    let mut setup = setup();
+    send(&mut setup.agent, Body::GuestMemory(report()));
+    let first = wait_for_report(&setup.session);
+    assert_eq!(
+        first.memory.page_reporting.unwrap().reported_kb_per_minute,
+        None
+    );
+    // A rate needs at least a second between the two reports.
+    thread::sleep(Duration::from_millis(1100));
+    let mut next = report();
+    next.reported_total_kb += 60 * MIB;
+    send(&mut setup.agent, Body::GuestMemory(next));
+    let deadline = Instant::now() + WAIT;
+    let rate = loop {
+        let report = wait_for_report(&setup.session);
+        if let Some(rate) = report.memory.page_reporting.unwrap().reported_kb_per_minute {
+            break rate;
+        }
+        assert!(Instant::now() < deadline, "the second report never arrived");
+        thread::sleep(Duration::from_millis(5));
+    };
+    // 60 MiB in a bit over a second: at most 60 MiB a second, well above 0.
+    assert!(rate > 0 && rate <= 3600 * MIB, "{rate}");
+}
+
+#[test]
 fn nfr1_dsa_memory_asks_the_guest_and_shows_it_beside_the_host_processes() {
     let mut setup = setup();
     let api = &mut setup.api;
@@ -517,7 +547,8 @@ fn nfr1_the_log_line_sums_the_host_and_says_where_the_guests_memory_goes() {
         "memory: host 900 MiB (vm 600, window manager 120, graphics renderer 80, 2 app windows \
          100); guest 2048/4096 MiB used, cache 910, apps 700, swap 100 (zram 30), processes 440 \
          MiB (350 resident, 90 compressed in zram), Google Play services 51 MiB (15 resident, 36 \
-         compressed in zram), 42 s ago"
+         compressed in zram), 42 s ago; free 2048 MiB, 2000 back on the host, 9000 reported since \
+         boot"
     );
     let no_guest = MemorySnapshot {
         guest: None,
@@ -559,6 +590,80 @@ fn nfr1_the_report_dsa_memory_prints_names_every_part() {
     ] {
         assert!(text.contains(part), "{part:?} missing from:\n{text}");
     }
+}
+
+#[test]
+fn nfr2_dsa_memory_says_how_much_free_memory_is_back_on_the_host_and_how_fast_it_went() {
+    let first = GuestMemory::from_control(report());
+    let reporting = first.page_reporting.expect("the guest sent its counts");
+    assert_eq!(reporting.free_reported_kb, 2000 * MIB);
+    assert_eq!(
+        reporting.reported_kb_per_minute, None,
+        "no report before it"
+    );
+    // MemFree is 2048 MiB, 2000 of it back on the host.
+    assert_eq!(first.free_not_reported_kb(), Some(48 * MIB));
+
+    // Two minutes later 600 MiB more went back: 300 MiB a minute.
+    let mut later = report();
+    later.reported_total_kb += 600 * MIB;
+    let later = GuestMemory::from_control(later).following(&first, Duration::from_secs(120));
+    assert_eq!(
+        later.page_reporting.unwrap().reported_kb_per_minute,
+        Some(300 * MIB)
+    );
+    let text = MemorySnapshot {
+        guest: Some(GuestMemoryReport {
+            memory: later.clone(),
+            age: Duration::from_secs(1),
+        }),
+        host: Vec::new(),
+    }
+    .to_string();
+    let line = "free page reporting: 2000 of 2048 MiB free is back on the host, 48 MiB not yet; \
+                9600 MiB reported since boot (300 MiB a minute since the report before); 300 MiB \
+                taken back in with a neighbour and reported again";
+    assert!(text.contains(line), "{line:?} missing from:\n{text}");
+
+    // A count lower than before's is a guest that restarted: no rate across the restart.
+    let restarted = GuestMemory::from_control(report()).following(&later, Duration::from_secs(60));
+    assert_eq!(
+        restarted.page_reporting.unwrap().reported_kb_per_minute,
+        None
+    );
+
+    // The rate crosses the local API.
+    let snapshot = MemorySnapshot {
+        guest: Some(GuestMemoryReport {
+            memory: later,
+            age: Duration::from_secs(3),
+        }),
+        host: Vec::new(),
+    };
+    assert_eq!(snapshot_from_wire(snapshot_to_wire(&snapshot)), snapshot);
+}
+
+#[test]
+fn nfr2_an_older_guest_without_reporting_counts_is_said_to_be_so() {
+    let mut older = report();
+    older.free_reported_kb = 0;
+    older.reported_total_kb = 0;
+    older.refaulted_total_kb = 0;
+    let memory = GuestMemory::from_control(older);
+    assert_eq!(memory.page_reporting, None);
+    assert_eq!(memory.free_not_reported_kb(), None);
+    let text = MemorySnapshot {
+        guest: Some(GuestMemoryReport {
+            memory,
+            age: Duration::from_secs(1),
+        }),
+        host: Vec::new(),
+    }
+    .to_string();
+    assert!(
+        text.contains("free page reporting: Android does not say what it reported"),
+        "{text}"
+    );
 }
 
 #[test]
