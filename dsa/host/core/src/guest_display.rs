@@ -1,14 +1,24 @@
 //! The size of the guest's one display, chosen from the user's monitors when the VM starts.
 //!
-//! A task window's client area is one guest pixel per pixel, and a task cannot be larger than
-//! the guest's display, so the display has to be at least as large as the largest window the
-//! user can make. The display is square, as long on each side as the longest side of any
-//! monitor: a monitor turned to portrait while Android runs then still fits, without a
-//! restart. What a task's frames cost follows the task's own size, not this one.
+//! A task cannot be larger than the guest's display, so the display has to be at least as
+//! large, in guest pixels, as the largest window the user can make. A task that follows its
+//! monitor's density is drawn one guest pixel per window pixel. A task that keeps the main
+//! monitor's density (every app starts at it) is drawn at the main monitor's scale wherever
+//! its window is, so on a monitor of a lower scale it needs more guest pixels than the monitor
+//! has: a 2560 pixel wide monitor at 125% beside a main monitor at 200% holds a window 4096
+//! guest pixels wide. So a monitor's size in guest pixels is the larger of its physical size
+//! and its physical size times the main monitor's DPI over its own ([`Monitor::guest_side`]).
 //!
-//! The display's size cannot change while Android runs. A monitor larger than the display
-//! that appears later caps its windows at the display's size, shown 1:1 and centred when
-//! maximised, until the next start of Android.
+//! The display is square, as long on each side as the longest such side of any monitor: a
+//! monitor turned to portrait while Android runs then still fits, without a restart. What a
+//! task's frames cost follows the task's own size, not this one. It is never longer than
+//! [`MAX_SIDE`].
+//!
+//! The display's size cannot change while Android runs. On a monitor larger than the display,
+//! whether past [`MAX_SIDE`] or plugged in later, a window the user drags is kept at what the
+//! display holds, and a maximised, snapped or full screen window keeps the size the desktop
+//! gives it and shows the largest frame Android draws in it, 1:1 and centred, or for a task
+//! that keeps its density scaled to fit. That lasts until the next start of Android.
 //!
 //! The display's density is the main monitor's, as a task's window gives it
 //! ([`density_for_dpi`]): 130 dpi at a scale of 100%, 196 at 150%. Every app starts at the
@@ -48,7 +58,9 @@ pub fn font_scale(text_scale_percent: u32) -> f32 {
 /// The shortest side the display has, whatever the monitors.
 pub const MIN_SIDE: u32 = 1920;
 
-/// The longest side the display has: 4K. A longer monitor caps its windows here.
+/// The longest side the display has: 4K. A longer monitor caps its windows here. A task
+/// window's texture and the guest's buffers for a task grow with the task up to this size,
+/// so a longer side would cost memory for every window that grows that far.
 pub const MAX_SIDE: u32 = 3840;
 
 /// The kernel command line words that set the display's size. Android's `ro.boot` properties
@@ -110,13 +122,82 @@ pub fn parse_density_record(text: &str) -> Option<u32> {
     (1..=MAX_RECORDED_DPI).contains(&dpi).then_some(dpi)
 }
 
-/// The display for these monitors, each a width and height in physical pixels. `None` when
-/// there is no usable monitor among them, which leaves the size the image names.
-pub fn display_for(monitors: &[(u32, u32)]) -> Option<(u32, u32)> {
+/// One of the user's monitors, as the user's session records it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Monitor {
+    /// Its size in physical pixels.
+    pub width: u32,
+    pub height: u32,
+    /// Its DPI (96 is 100%), when known.
+    pub dpi: Option<u32>,
+    /// Whether it is the main monitor, whose density every app starts at.
+    pub main: bool,
+}
+
+impl Monitor {
+    /// A monitor of `width` by `height` physical pixels whose scale is not known.
+    pub fn sized(width: u32, height: u32) -> Monitor {
+        Monitor {
+            width,
+            height,
+            dpi: None,
+            main: false,
+        }
+    }
+
+    /// A monitor of `width` by `height` physical pixels at `dpi`.
+    pub fn at_dpi(width: u32, height: u32, dpi: u32) -> Monitor {
+        Monitor {
+            dpi: Some(dpi),
+            ..Monitor::sized(width, height)
+        }
+    }
+
+    /// The same monitor, as the main one.
+    pub fn as_main(self) -> Monitor {
+        Monitor { main: true, ..self }
+    }
+
+    /// Whether it has a size at all.
+    fn usable(&self) -> bool {
+        self.width > 0 && self.height > 0
+    }
+
+    /// Its longest side in guest pixels when the main monitor is at `main_dpi`: its physical
+    /// side, which a task that follows its density fills one to one, or that side times
+    /// `main_dpi` over its own DPI, which a task drawn at the main monitor's density fills on
+    /// it, whichever is longer. The physical side alone when either DPI is unknown.
+    pub fn guest_side(&self, main_dpi: Option<u32>) -> u32 {
+        let physical = self.width.max(self.height);
+        match (main_dpi, self.dpi) {
+            (Some(main), Some(own)) if own > 0 && main > own => {
+                let scaled = (u64::from(physical) * u64::from(main)).div_ceil(u64::from(own));
+                scaled.min(u64::from(u32::MAX)) as u32
+            }
+            _ => physical,
+        }
+    }
+}
+
+impl From<(u32, u32)> for Monitor {
+    fn from((width, height): (u32, u32)) -> Monitor {
+        Monitor::sized(width, height)
+    }
+}
+
+/// The display for these monitors: a square as long as the longest side any of them has in
+/// guest pixels ([`Monitor::guest_side`], at the DPI of the one marked main), within
+/// [`MIN_SIDE`] and [`MAX_SIDE`]. `None` when there is no usable monitor among them, which
+/// leaves the size the image names.
+pub fn display_for(monitors: &[Monitor]) -> Option<(u32, u32)> {
+    let main_dpi = monitors
+        .iter()
+        .find(|monitor| monitor.main && monitor.usable())
+        .and_then(|monitor| monitor.dpi);
     let longest = monitors
         .iter()
-        .filter(|(width, height)| *width > 0 && *height > 0)
-        .map(|(width, height)| *width.max(height))
+        .filter(|monitor| monitor.usable())
+        .map(|monitor| monitor.guest_side(main_dpi))
         .max()?;
     let side = longest.clamp(MIN_SIDE, MAX_SIDE);
     Some((side, side))
@@ -125,7 +206,7 @@ pub fn display_for(monitors: &[(u32, u32)]) -> Option<(u32, u32)> {
 /// The display when the monitors may be unknown: [`display_for`] the ones there are, and
 /// otherwise the smallest square. The image's own default is a landscape 1920 by 1080, which
 /// would cap every window's height at 1080 pixels, so it is never left in place.
-pub fn display_or_smallest(monitors: Option<&[(u32, u32)]>) -> (u32, u32) {
+pub fn display_or_smallest(monitors: Option<&[Monitor]>) -> (u32, u32) {
     monitors
         .and_then(display_for)
         .unwrap_or((MIN_SIDE, MIN_SIDE))
@@ -149,21 +230,55 @@ pub fn with_display_size(cmdline: &str, size: (u32, u32)) -> String {
     words.join(" ")
 }
 
-/// The text a user's session records its monitors in, one `<width>x<height>` a line.
-pub fn record_text(monitors: &[(u32, u32)]) -> String {
+/// The word that marks the main monitor in a record.
+const MAIN_WORD: &str = "main";
+
+/// The text a user's session records its monitors in, one a line: `<width>x<height>`, then
+/// `@<dpi>` when its DPI is known, then ` main` for the main monitor.
+pub fn record_text(monitors: &[Monitor]) -> String {
     monitors
         .iter()
-        .map(|(width, height)| format!("{width}x{height}\n"))
+        .map(|monitor| {
+            let mut line = format!("{}x{}", monitor.width, monitor.height);
+            if let Some(dpi) = monitor.dpi {
+                line.push_str(&format!("@{dpi}"));
+            }
+            if monitor.main {
+                line.push(' ');
+                line.push_str(MAIN_WORD);
+            }
+            line.push('\n');
+            line
+        })
         .collect()
 }
 
 /// The monitors in a record. The user's own session writes it, so anything that is not a
-/// size is skipped, and [`display_for`] bounds what the rest can do.
-pub fn parse_record(text: &str) -> Vec<(u32, u32)> {
+/// size is skipped, a DPI that no monitor has is unknown, and [`display_for`] bounds what the
+/// rest can do. A record written before monitors carried their DPI (`<width>x<height>` alone)
+/// gives monitors of unknown scale, which count at their physical size.
+pub fn parse_record(text: &str) -> Vec<Monitor> {
     text.lines()
         .filter_map(|line| {
-            let (width, height) = line.trim().split_once('x')?;
-            Some((width.parse().ok()?, height.parse().ok()?))
+            let mut words = line.split_whitespace();
+            let size = words.next()?;
+            let main = words.any(|word| word == MAIN_WORD);
+            let (size, dpi) = match size.split_once('@') {
+                Some((size, dpi)) => (
+                    size,
+                    dpi.parse::<u32>()
+                        .ok()
+                        .filter(|dpi| (1..=MAX_RECORDED_DPI).contains(dpi)),
+                ),
+                None => (size, None),
+            };
+            let (width, height) = size.split_once('x')?;
+            Some(Monitor {
+                width: width.parse().ok()?,
+                height: height.parse().ok()?,
+                dpi,
+                main,
+            })
         })
         .take(MAX_RECORDED)
         .collect()
@@ -173,33 +288,83 @@ pub fn parse_record(text: &str) -> Vec<(u32, u32)> {
 mod tests {
     use super::*;
 
+    fn sized(sizes: &[(u32, u32)]) -> Vec<Monitor> {
+        sizes.iter().copied().map(Monitor::from).collect()
+    }
+
     #[test]
     fn fr4_the_display_holds_the_largest_monitor_in_both_directions() {
-        assert_eq!(display_for(&[(2880, 1800)]), Some((2880, 2880)));
-        assert_eq!(display_for(&[(1800, 2880)]), Some((2880, 2880)));
+        assert_eq!(display_for(&sized(&[(2880, 1800)])), Some((2880, 2880)));
+        assert_eq!(display_for(&sized(&[(1800, 2880)])), Some((2880, 2880)));
         assert_eq!(
-            display_for(&[(1920, 1080), (1440, 2560)]),
+            display_for(&sized(&[(1920, 1080), (1440, 2560)])),
             Some((2560, 2560))
         );
     }
 
     #[test]
     fn fr4_the_display_is_never_below_1920_or_above_3840() {
-        assert_eq!(display_for(&[(1280, 720)]), Some((1920, 1920)));
-        assert_eq!(display_for(&[(7680, 4320)]), Some((3840, 3840)));
+        assert_eq!(display_for(&sized(&[(1280, 720)])), Some((1920, 1920)));
+        assert_eq!(display_for(&sized(&[(7680, 4320)])), Some((3840, 3840)));
     }
 
     #[test]
     fn fr4_without_known_monitors_the_display_is_still_square_so_height_is_not_capped_at_1080() {
         assert_eq!(display_or_smallest(None), (1920, 1920));
         assert_eq!(display_or_smallest(Some(&[])), (1920, 1920));
-        assert_eq!(display_or_smallest(Some(&[(2560, 1440)])), (2560, 2560));
+        assert_eq!(
+            display_or_smallest(Some(&sized(&[(2560, 1440)]))),
+            (2560, 2560)
+        );
     }
 
     #[test]
     fn fr4_no_usable_monitor_leaves_the_size_the_image_names() {
         assert_eq!(display_for(&[]), None);
-        assert_eq!(display_for(&[(0, 0), (1920, 0)]), None);
+        assert_eq!(display_for(&sized(&[(0, 0), (1920, 0)])), None);
+    }
+
+    #[test]
+    fn fr4_the_display_is_sized_in_guest_pixels_for_monitors_of_mixed_scales() {
+        // A main monitor at 200% and two at 125%: a task drawn at the main monitor's density
+        // takes 192 / 120 = 1.6 guest pixels per pixel of a 125% monitor, so a window
+        // maximised there needs 4096 guest pixels across. That is past the cap, so the display
+        // is as large as it may be, not the main monitor's 2880.
+        let monitors = [
+            Monitor::at_dpi(2880, 1800, 192).as_main(),
+            Monitor::at_dpi(2560, 1440, 120),
+            Monitor::at_dpi(2560, 1440, 120),
+        ];
+        assert_eq!(monitors[1].guest_side(Some(192)), 4096);
+        let (side, _) = display_for(&monitors).unwrap();
+        assert!(side >= 3840 || side == MAX_SIDE, "{side}");
+        assert_eq!(display_for(&monitors), Some((MAX_SIDE, MAX_SIDE)));
+        // Below the cap the guest side itself is the display: 1920 at 100% beside a 150%
+        // main monitor is 2880 guest pixels.
+        assert_eq!(
+            display_for(&[
+                Monitor::at_dpi(1920, 1080, 144).as_main(),
+                Monitor::at_dpi(1920, 1080, 96),
+            ]),
+            Some((2880, 2880))
+        );
+        // A monitor at a higher scale than the main one still holds a window that follows its
+        // own density one to one, so it keeps its physical size.
+        assert_eq!(
+            display_for(&[
+                Monitor::at_dpi(1920, 1080, 96).as_main(),
+                Monitor::at_dpi(3840, 2160, 192),
+            ]),
+            Some((3840, 3840))
+        );
+        // Without a main monitor's DPI the scales say nothing, and the physical sizes count.
+        assert_eq!(
+            display_for(&[
+                Monitor::at_dpi(2880, 1800, 192),
+                Monitor::at_dpi(2560, 1440, 120),
+            ]),
+            Some((2880, 2880))
+        );
     }
 
     #[test]
@@ -268,15 +433,44 @@ mod tests {
 
     #[test]
     fn fr4_a_record_of_monitors_reads_back() {
-        let monitors = [(2880, 1800), (1080, 1920)];
+        let monitors = [
+            Monitor::at_dpi(2880, 1800, 192).as_main(),
+            Monitor::at_dpi(2560, 1440, 120),
+            Monitor::sized(1080, 1920),
+        ];
+        assert_eq!(
+            record_text(&monitors),
+            "2880x1800@192 main\n2560x1440@120\n1080x1920\n"
+        );
         assert_eq!(parse_record(&record_text(&monitors)), monitors);
+    }
+
+    #[test]
+    fn fr4_a_record_written_before_monitors_carried_their_scale_still_reads() {
+        // What 0.2.4-dev.1 and earlier wrote: physical sizes alone.
+        let old = "2880x1800\n2560x1440\n2560x1440\n";
+        assert_eq!(
+            parse_record(old),
+            sized(&[(2880, 1800), (2560, 1440), (2560, 1440)])
+        );
+        // It sizes the display as it always did, until the session writes a new record.
+        assert_eq!(display_for(&parse_record(old)), Some((2880, 2880)));
     }
 
     #[test]
     fn fr4_a_damaged_record_gives_only_what_is_a_size() {
         assert_eq!(
             parse_record("junk\n1920x1080\nx\n-1x5\n99999999999x1\n"),
-            [(1920, 1080)]
+            sized(&[(1920, 1080)])
+        );
+        // A DPI no monitor has is unknown, and the size still counts.
+        assert_eq!(
+            parse_record("1920x1080@0\n1920x1080@99999 main\n1920x1080@x\n"),
+            [
+                Monitor::sized(1920, 1080),
+                Monitor::sized(1920, 1080).as_main(),
+                Monitor::sized(1920, 1080),
+            ]
         );
     }
 }
