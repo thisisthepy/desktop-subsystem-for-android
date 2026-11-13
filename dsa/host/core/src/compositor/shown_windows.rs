@@ -10,11 +10,12 @@ use std::collections::BTreeSet;
 
 use crate::tasks::TaskRequest;
 
-/// The minimized task windows, and the last word the guest was given.
+/// The minimized task windows, and the last words the guest was given.
 #[derive(Debug, Default)]
 pub struct ShownWindows {
     minimized: BTreeSet<i32>,
     told: Option<bool>,
+    told_tasks: Option<Vec<i32>>,
 }
 
 impl ShownWindows {
@@ -44,6 +45,23 @@ impl ShownWindows {
     /// as when the service may have restarted and lost it.
     pub fn retell(&mut self) {
         self.told = None;
+        self.told_tasks = None;
+    }
+
+    /// Given the tasks that have a window now, the request to send when which of them are
+    /// shown changed since the guest was last told, or it was never told: the guest keeps less
+    /// memory for a minimized task's app. Sent before [`update`](Self::update)'s, so a guest
+    /// that wakes for a shown window already knows which one it is.
+    pub fn update_tasks(&mut self, windows: &[i32]) -> Option<TaskRequest> {
+        self.minimized.retain(|task_id| windows.contains(task_id));
+        let mut task_ids = self.shown_among(windows);
+        task_ids.sort_unstable();
+        task_ids.dedup();
+        if self.told_tasks.as_ref() == Some(&task_ids) {
+            return None;
+        }
+        self.told_tasks = Some(task_ids.clone());
+        Some(TaskRequest::TasksShown { task_ids })
     }
 
     /// Given the tasks that have a window now, the request to send when whether any window
@@ -108,5 +126,30 @@ mod tests {
         assert_eq!(windows.update(&[1]), shown(true));
         windows.retell();
         assert_eq!(windows.update(&[1]), shown(true));
+    }
+
+    fn tasks(task_ids: &[i32]) -> Option<TaskRequest> {
+        Some(TaskRequest::TasksShown {
+            task_ids: task_ids.to_vec(),
+        })
+    }
+
+    #[test]
+    fn nfr2_the_guest_is_told_which_task_windows_are_shown() {
+        let mut windows = ShownWindows::new();
+        assert_eq!(windows.update_tasks(&[2, 1]), tasks(&[1, 2]));
+        assert_eq!(windows.update_tasks(&[1, 2]), None);
+        // Minimizing one of two windows changes no word on whether any is shown, but it does
+        // change which are.
+        windows.reported(1, false);
+        assert_eq!(windows.update_tasks(&[1, 2]), tasks(&[2]));
+        assert_eq!(windows.update(&[1, 2]), shown(true));
+        windows.reported(1, true);
+        assert_eq!(windows.update_tasks(&[1, 2]), tasks(&[1, 2]));
+        // A closed window is no longer shown.
+        assert_eq!(windows.update_tasks(&[2]), tasks(&[2]));
+        // And the word is said again after the service comes back.
+        windows.retell();
+        assert_eq!(windows.update_tasks(&[2]), tasks(&[2]));
     }
 }

@@ -176,6 +176,15 @@ pub struct SetWindowsShown {
     #[prost(bool, tag = "1")]
     pub shown: bool,
 }
+/// Says which tasks of the caller's Android have their window shown: open and not minimized.
+/// The window manager sends it on each change. The caller's Android keeps less memory for an
+/// app whose windows are all minimized. The service keeps the latest value while the Android is
+/// not running, for its next start.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SetTasksShown {
+    #[prost(int32, repeated, tag = "1")]
+    pub task_ids: ::prost::alloc::vec::Vec<i32>,
+}
 /// Says whether the caller's window manager can turn the host's three- and four-finger touch
 /// gestures off (Settings.touch_gestures_off): `state` is "unsupported", "available" or
 /// "failed", and `problem` says why while it is "failed". The window manager sends it when
@@ -2996,7 +3005,7 @@ pub struct Request {
     pub id: u64,
     #[prost(
         oneof = "request::Body",
-        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 25, 26, 22, 23, 24, 27, 29, 30, 31, 46, 32, 33, 34, 28, 35, 36, 39, 38, 45, 70, 71, 37, 120, 121, 200, 72, 73, 74, 80, 81, 41, 42, 43, 44, 300, 301, 302, 303, 90, 310, 320, 321, 322, 330, 331, 332, 400, 401, 402, 340, 341, 350, 620, 470, 471, 472, 473, 640, 641, 642, 643, 644, 645, 646, 647, 648, 660, 661, 680, 681, 700, 701, 702"
+        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 47, 21, 25, 26, 22, 23, 24, 27, 29, 30, 31, 46, 32, 33, 34, 28, 35, 36, 39, 38, 45, 70, 71, 37, 120, 121, 200, 72, 73, 74, 80, 81, 41, 42, 43, 44, 300, 301, 302, 303, 90, 310, 320, 321, 322, 330, 331, 332, 400, 401, 402, 340, 341, 350, 620, 470, 471, 472, 473, 640, 641, 642, 643, 644, 645, 646, 647, 648, 660, 661, 680, 681, 700, 701, 702"
     )]
     pub body: ::core::option::Option<request::Body>,
 }
@@ -3038,6 +3047,8 @@ pub mod request {
         SetSettings(super::SetSettings),
         #[prost(message, tag = "20")]
         SetWindowsShown(super::SetWindowsShown),
+        #[prost(message, tag = "47")]
+        SetTasksShown(super::SetTasksShown),
         #[prost(message, tag = "21")]
         FreezeSession(super::FreezeSession),
         #[prost(message, tag = "25")]

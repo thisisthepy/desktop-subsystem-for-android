@@ -83,6 +83,8 @@ pub struct FakeAndroid {
     /// Each word on whether any task window is shown, in order. Taken in every state, as a
     /// session takes it.
     pub shown: Mutex<Vec<bool>>,
+    /// Each word on which tasks have their window shown, in order. Taken in every state too.
+    pub tasks_shown: Mutex<Vec<Vec<i32>>>,
     /// Each word on whether it may be frozen when idle, in order.
     pub freeze_when_idle: Mutex<Vec<bool>>,
     /// Each word on whether web links open in it, in order.
@@ -253,6 +255,7 @@ impl FakeAndroid {
             keys: Mutex::new(Vec::new()),
             text: Mutex::new(Vec::new()),
             shown: Mutex::new(Vec::new()),
+            tasks_shown: Mutex::new(Vec::new()),
             freeze_when_idle: Mutex::new(Vec::new()),
             links_in_android: Mutex::new(Vec::new()),
             developer_mode: Mutex::new(Vec::new()),
@@ -973,6 +976,10 @@ impl UserAndroid for FakeAndroid {
             self.shown.lock().unwrap().push(shown);
             return Ok(());
         }
+        if let TaskRequest::TasksShown { task_ids } = &request {
+            self.tasks_shown.lock().unwrap().push(task_ids.clone());
+            return Ok(());
+        }
         if self.state() != SessionState::Active {
             return Err(TaskRequestError::NotRunning(format!(
                 "Android is {}, not running",
@@ -1194,6 +1201,10 @@ macro_rules! host_api_conformance {
         #[test]
         fn fr10_the_word_on_shown_windows_reaches_the_callers_android_in_any_state() {
             $crate::host_api_conformance::windows_shown_reaches_the_caller(&mut || $make);
+        }
+        #[test]
+        fn nfr2_the_shown_tasks_reach_the_callers_android_in_any_state() {
+            $crate::host_api_conformance::tasks_shown_reaches_the_caller(&mut || $make);
         }
         #[test]
         fn fr10_freezing_reaches_the_callers_android_only_while_it_runs() {
@@ -1921,6 +1932,27 @@ pub fn windows_shown_reaches_the_caller(make: MakeLocal<'_>) {
         .expect("the word while running");
     let android = androids.of(&user).unwrap();
     assert_eq!(*android.shown.lock().unwrap(), vec![false, true]);
+    assert!(android.requests.lock().unwrap().is_empty());
+}
+
+pub fn tasks_shown_reaches_the_caller(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    let mut client = connect(&mut *connector);
+    // Taken while the Android is stopped, for its next start.
+    client
+        .request(&TaskRequest::TasksShown { task_ids: vec![3] })
+        .expect("the word while stopped");
+    client.start().unwrap();
+    client
+        .set_tasks_shown(&[3, 5])
+        .expect("the word while running");
+    let android = androids.of(&user).unwrap();
+    assert_eq!(
+        *android.tasks_shown.lock().unwrap(),
+        vec![vec![3], vec![3, 5]]
+    );
     assert!(android.requests.lock().unwrap().is_empty());
 }
 

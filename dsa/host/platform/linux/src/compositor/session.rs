@@ -829,6 +829,9 @@ impl Main {
     }
 
     fn after_changes(&mut self) {
+        if let Some(request) = self.shown.update_tasks(&self.windows.windows()) {
+            self.request(request);
+        }
         if let Some(request) = self.shown.update(&self.windows.windows()) {
             self.request(request);
         }
