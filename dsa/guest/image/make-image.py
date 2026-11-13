@@ -4397,7 +4397,15 @@ PINNER_OVERLAY_INTEGERS = {
     "config_pinnerWebviewPinBytes": 0,
     "config_pinnerMaxPinnedMemoryPercentage": 0,
 }
+# The navigation bar band along each task's bottom edge is the gesture navigation one
+# (NAVIGATION_BAR_DIMENS: 24 dp), so the navigation mode is gestural too (2, as AOSP's gesture
+# navigation overlay sets it). Left at three-button (0), the framework drew its contrast scrim
+# behind the band of an edge-to-edge app: a translucent white bar under YouTube's dark Shorts
+# player and under the Play Store's and FLO's bottom bars. A gesture phone draws no scrim, so
+# the band shows the app's own colour.
+NAVIGATION_MODE_GESTURAL = 2
 FRAMEWORK_OVERLAY_INTEGERS = {"config_tapTimeoutMillis": 0, "config_customizedMaxCachedProcesses": 8,
+                              "config_navBarInteractionMode": NAVIGATION_MODE_GESTURAL,
                               **PINNER_OVERLAY_INTEGERS}
 # The user's aspect ratio override of an app, which Settings offers on the app's aspect ratio
 # page and a task window's system menu opens. The window manager applies the override only
