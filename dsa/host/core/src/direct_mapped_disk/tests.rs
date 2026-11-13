@@ -513,6 +513,30 @@ fn nfr1_the_produced_system_disk_matches_the_hash_the_image_names() {
 }
 
 #[test]
+fn nfr1_the_system_disk_is_described_and_made_from_a_vhdx_like_the_images() {
+    // The image ships system.vhdx as qemu-img writes it, with a 4-byte logical sector size
+    // item among its metadata; the release tool describes the copy from it and the host
+    // makes the copy from it.
+    let dir = scratch("vhdx");
+    let disk = system_disk();
+    let vhdx = crate::vhdx::test_image::vhdx_like_qemu_img(&disk, MIB);
+    let path = dir.join("system.vhdx");
+    fs::write(&path, &vhdx).unwrap();
+    let mut from_vhdx = crate::vhdx::open_disk(&path).unwrap();
+    assert_eq!(from_vhdx.len(), disk.len() as u64);
+    let described = describe(from_vhdx.as_mut(), &keep()).unwrap();
+    let mut raw = RawDisk::new(Cursor::new(disk)).unwrap();
+    assert_eq!(described, describe(&mut raw, &keep()).unwrap());
+    assert!(described.is_usable());
+    let store = Store::new(dir.join("copies"));
+    let ready = store
+        .produce("1", &path, &described, &keep(), &mut nothing, &|| false)
+        .unwrap();
+    assert_eq!(sha256_of(&ready.path, described.bytes), described.sha256);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn nfr1_a_tampered_system_disk_copy_is_rejected_and_made_again() {
     let dir = scratch("tampered");
     let (source, expected) = image(&dir);
