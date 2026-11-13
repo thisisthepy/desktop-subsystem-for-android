@@ -9,7 +9,7 @@
         <!-- One value: its name and what it is for, the box, and what is wrong with what is
              typed. An empty box shows what Android reports without a change. -->
         <DataTemplate x:Key="FieldCard">
-            <ui:CardControl Margin="0,0,0,4">
+            <ui:CardControl>
                 <ui:CardControl.Header>
                     <StackPanel>
                         <TextBlock Text="{Binding Label}" Style="{StaticResource CardTitle}" />
@@ -47,7 +47,7 @@
                              Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,2,0,0"
                              AutomationProperties.Name="{l:Text Identity_model}" />
                 </StackPanel>
-                <ui:CardExpander x:Name="SpecsCard" IsExpanded="True" Icon="{ui:SymbolIcon Info24}" Margin="0,0,0,4">
+                <ui:CardExpander x:Name="SpecsCard" IsExpanded="True" Icon="{ui:SymbolIcon Info24}">
                     <ui:CardExpander.Header>
                         <Grid>
                             <Grid.ColumnDefinitions>
@@ -80,16 +80,16 @@
 
                 <!-- What Android reports to apps, which can be changed. -->
                 <TextBlock Text="{l:Text IdentityAndroidHeader.Text}" Style="{StaticResource SectionHeader}" />
-                <TextBlock Text="{l:Text IdentityIntro.Text}" Style="{StaticResource Note}" />
+                <TextBlock Text="{l:Text IdentityIntro.Text}" Style="{StaticResource PageIntro}" />
 
                 <ProgressBar IsIndeterminate="True" Margin="0,8,0,0"
                              Visibility="{Binding IsBusy, Converter={StaticResource Visible}}" />
                 <ui:InfoBar Title="{l:Text IdentityWarning.Title}" Message="{l:Text IdentityWarning.Message}"
-                            Severity="Warning" IsClosable="False" IsOpen="True" Margin="0,8,0,0" />
+                            Severity="Warning" IsClosable="False" IsOpen="True" />
                 <ui:InfoBar Title="{l:Text SettingsErrorBar.Title}" Severity="Error" IsClosable="False"
-                            IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" Margin="0,0,0,4" />
+                            IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" />
                 <ui:InfoBar Title="{l:Text IdentityDoneBar.Title}" Severity="Success" IsClosable="False"
-                            IsOpen="{Binding HasMessage, Mode=OneWay}" Message="{Binding Message, Mode=OneWay}" Margin="0,0,0,4" />
+                            IsOpen="{Binding HasMessage, Mode=OneWay}" Message="{Binding Message, Mode=OneWay}" />
 
                 <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
                     <ui:Button Content="{l:Text IdentitySaveButton.Content}" Appearance="Primary" Icon="{ui:SymbolIcon Save24}"
@@ -105,7 +105,7 @@
                 <l:RowList ItemsSource="{Binding Names, Mode=OneWay}" ItemTemplate="{StaticResource FieldCard}" />
 
                 <TextBlock Text="{l:Text IdentityFingerprintHeader.Text}" Style="{StaticResource SectionHeader}" />
-                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Fingerprint24}">
+                <ui:CardControl Icon="{ui:SymbolIcon Fingerprint24}">
                     <ui:CardControl.Header>
                         <StackPanel>
                             <TextBlock Text="{l:Text IdentityPreview.Text}" Style="{StaticResource CardTitle}" />
