@@ -18,6 +18,9 @@ const MIB: u64 = 1024 * KIB;
 const FILE_SIGNATURE: &[u8; 8] = b"vhdxfile";
 const HEADER_OFFSETS: [u64; 2] = [64 * KIB, 128 * KIB];
 const REGION_TABLE_OFFSETS: [u64; 2] = [192 * KIB, 256 * KIB];
+/// The metadata table at the start of the metadata region, and the most entries it holds.
+const METADATA_TABLE_SIZE: u64 = 64 * KIB;
+const METADATA_MAX_ENTRIES: usize = 2047;
 
 /// The region table's entries for the block allocation table and the metadata.
 pub const BAT_REGION: &str = "2DC27766-F623-4200-9D64-115E9BFD4A08";
@@ -78,6 +81,39 @@ pub struct Layout {
     pub blocks: Vec<Option<u64>>,
 }
 
+/// The bytes of the metadata item `id` in the metadata region `meta`, which must hold at
+/// least `size` bytes: 8 for the file parameters and the virtual disk size, 4 for the
+/// logical sector size.
+///
+/// An item's offset counts from the start of the region and its data lies after the 64 KiB
+/// table, wholly inside the region. An item that starts inside the table, runs past the
+/// region's end or is too short for its value is refused.
+fn metadata_item<'a>(meta: &'a [u8], id: &str, size: u64) -> io::Result<&'a [u8]> {
+    let entries = u16_at(meta, 10) as usize;
+    for i in 0..entries.min(METADATA_MAX_ENTRIES) {
+        let entry = &meta[32 + i * 32..32 + (i + 1) * 32];
+        if entry[0..16] != guid_bytes(id) {
+            continue;
+        }
+        let (at, len) = (u64::from(u32_at(entry, 16)), u64::from(u32_at(entry, 20)));
+        if len < size {
+            return Err(invalid(format!(
+                "the VHDX metadata item {id} is {len} bytes, too short for its {size}-byte value"
+            )));
+        }
+        let end = at.checked_add(len).filter(|end| *end <= meta.len() as u64);
+        return match end {
+            Some(end) if at >= METADATA_TABLE_SIZE => Ok(&meta[at as usize..end as usize]),
+            _ => Err(invalid(format!(
+                "the VHDX metadata item {id} lies outside its region (offset {at}, {len} bytes, \
+                 in a region of {} bytes whose first {METADATA_TABLE_SIZE} are the table)",
+                meta.len()
+            ))),
+        };
+    }
+    Err(invalid(format!("the VHDX lacks the metadata item {id}")))
+}
+
 /// Reads the layout of the VHDX in `file`.
 pub fn layout(file: &mut (impl Read + Seek)) -> io::Result<Layout> {
     if read_at(file, 0, 8)? != FILE_SIGNATURE {
@@ -123,38 +159,23 @@ pub fn layout(file: &mut (impl Read + Seek)) -> io::Result<Layout> {
     }
     let (bat_at, bat_len) = bat.ok_or_else(|| invalid("the VHDX has no allocation table"))?;
     let (meta_at, meta_len) = metadata.ok_or_else(|| invalid("the VHDX has no metadata"))?;
-    if meta_len > 64 * MIB || bat_len > 1024 * MIB {
+    // The metadata region starts with its 64 KiB table, so a shorter one holds no items.
+    if !(METADATA_TABLE_SIZE..=64 * MIB).contains(&meta_len) || bat_len > 1024 * MIB {
         return Err(invalid("the VHDX regions are not plausible"));
     }
     let meta = read_at(file, meta_at, meta_len as usize)?;
     if &meta[0..8] != b"metadata" {
         return Err(invalid("the VHDX metadata table has no signature"));
     }
-    let item = |id: &str| -> io::Result<&[u8]> {
-        let entries = u16_at(&meta, 10) as usize;
-        for i in 0..entries {
-            let Some(entry) = meta.get(32 + i * 32..32 + (i + 1) * 32) else {
-                break;
-            };
-            if entry[0..16] == guid_bytes(id) {
-                let (at, len) = (u32_at(entry, 16) as usize, u32_at(entry, 20) as usize);
-                return meta
-                    .get(at..at + len)
-                    .filter(|item| item.len() >= 8)
-                    .ok_or_else(|| invalid("a VHDX metadata item lies outside its region"));
-            }
-        }
-        Err(invalid(format!("the VHDX lacks the metadata item {id}")))
-    };
-    let parameters = item(FILE_PARAMETERS)?;
+    let parameters = metadata_item(&meta, FILE_PARAMETERS, 8)?;
     let block_size = u64::from(u32_at(parameters, 0));
     if u32_at(parameters, 4) & 2 != 0 {
         return Err(invalid(
             "the VHDX is a differencing disk, which needs its parent",
         ));
     }
-    let virtual_size = u64_at(item(VIRTUAL_DISK_SIZE)?, 0);
-    let logical_sector_size = u64::from(u32_at(item(LOGICAL_SECTOR_SIZE)?, 0));
+    let virtual_size = u64_at(metadata_item(&meta, VIRTUAL_DISK_SIZE, 8)?, 0);
+    let logical_sector_size = u64::from(u32_at(metadata_item(&meta, LOGICAL_SECTOR_SIZE, 4)?, 0));
     if !(MIB..=256 * MIB).contains(&block_size)
         || !block_size.is_power_of_two()
         || ![512, 4096].contains(&logical_sector_size)
@@ -290,4 +311,208 @@ pub fn open_disk(path: &std::path::Path) -> io::Result<Box<dyn ReadAt + Send>> {
     } else {
         Box::new(RawDisk::new(file)?)
     })
+}
+
+/// Dynamic VHDX files laid out as the image build's `qemu-img convert -O vhdx` writes them.
+#[cfg(test)]
+pub(crate) mod test_image {
+    use super::*;
+
+    /// The Page83 data and physical sector size items qemu-img also writes.
+    const PAGE_83_DATA: &str = "BECA12AB-B2E6-4523-93EF-C309E000C746";
+    const PHYSICAL_SECTOR_SIZE: &str = "CDA348C7-445D-4471-9CC9-E9885251C556";
+
+    pub(crate) const METADATA_AT: usize = 3 * MIB as usize;
+    pub(crate) const METADATA_LEN: usize = MIB as usize;
+    const BAT_AT: usize = 2 * MIB as usize;
+    const PAYLOAD_AT: usize = 4 * MIB as usize;
+
+    fn put(file: &mut [u8], at: usize, bytes: &[u8]) {
+        file[at..at + bytes.len()].copy_from_slice(bytes);
+    }
+
+    /// Sets metadata table entry `index`: the item, its offset from the region's start and
+    /// its length.
+    pub(crate) fn set_item(file: &mut [u8], index: usize, id: &str, at: u32, len: u32) {
+        let entry = METADATA_AT + 32 + index * 32;
+        put(file, entry, &guid_bytes(id));
+        put(file, entry + 16, &at.to_le_bytes());
+        put(file, entry + 20, &len.to_le_bytes());
+    }
+
+    /// `disk` in a dynamic VHDX of `block_size` blocks, as qemu-img writes it: two headers
+    /// (the second one current), two region tables naming a 1 MiB allocation table at 2 MiB
+    /// and a 1 MiB metadata region at 3 MiB, and five metadata items packed from the end of
+    /// the table: file parameters (8 bytes), virtual disk size (8), Page83 data (16), logical
+    /// sector size (4) and physical sector size (4). Blocks of zeroes are left out.
+    pub(crate) fn vhdx_like_qemu_img(disk: &[u8], block_size: usize) -> Vec<u8> {
+        let blocks = disk.len().div_ceil(block_size);
+        let mut file = vec![0u8; PAYLOAD_AT];
+        put(&mut file, 0, FILE_SIGNATURE);
+        for (i, at) in HEADER_OFFSETS.into_iter().enumerate() {
+            let at = at as usize;
+            put(&mut file, at, b"head");
+            put(
+                &mut file,
+                at + 8,
+                &(0x85b1_b0cd_u64 + i as u64).to_le_bytes(),
+            );
+        }
+        for at in REGION_TABLE_OFFSETS {
+            let at = at as usize;
+            put(&mut file, at, b"regi");
+            put(&mut file, at + 8, &2u32.to_le_bytes());
+            for (i, (id, region)) in [(BAT_REGION, BAT_AT), (METADATA_REGION, METADATA_AT)]
+                .into_iter()
+                .enumerate()
+            {
+                let entry = at + 16 + i * 32;
+                put(&mut file, entry, &guid_bytes(id));
+                put(&mut file, entry + 16, &(region as u64).to_le_bytes());
+                put(&mut file, entry + 24, &(MIB as u32).to_le_bytes());
+            }
+        }
+        put(&mut file, METADATA_AT, b"metadata");
+        put(&mut file, METADATA_AT + 10, &5u16.to_le_bytes());
+        let items: [(&str, Vec<u8>, u32); 5] = [
+            (
+                FILE_PARAMETERS,
+                [(block_size as u32).to_le_bytes(), 0u32.to_le_bytes()].concat(),
+                4,
+            ),
+            (
+                VIRTUAL_DISK_SIZE,
+                (disk.len() as u64).to_le_bytes().to_vec(),
+                6,
+            ),
+            (PAGE_83_DATA, [0x5au8; 16].to_vec(), 6),
+            (LOGICAL_SECTOR_SIZE, 512u32.to_le_bytes().to_vec(), 6),
+            (PHYSICAL_SECTOR_SIZE, 512u32.to_le_bytes().to_vec(), 6),
+        ];
+        let mut offset = METADATA_TABLE_SIZE as usize;
+        for (i, (id, value, flags)) in items.iter().enumerate() {
+            set_item(&mut file, i, id, offset as u32, value.len() as u32);
+            put(
+                &mut file,
+                METADATA_AT + 32 + i * 32 + 24,
+                &flags.to_le_bytes(),
+            );
+            put(&mut file, METADATA_AT + offset, value);
+            offset += value.len();
+        }
+        for block in 0..blocks {
+            let data = &disk[block * block_size..((block + 1) * block_size).min(disk.len())];
+            if data.iter().all(|&b| b == 0) {
+                continue;
+            }
+            let at = file.len();
+            file.resize(at + block_size, 0);
+            put(&mut file, at, data);
+            let entry = PAYLOAD_FULLY_PRESENT | ((at as u64 / MIB) << 20);
+            put(&mut file, BAT_AT + block * 8, &entry.to_le_bytes());
+        }
+        file
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_image::*;
+    use super::*;
+    use std::io::Cursor;
+
+    /// A 3 MiB disk whose first and last blocks hold data and whose middle block is zeroes.
+    fn disk() -> Vec<u8> {
+        let mut disk = vec![0u8; 3 * MIB as usize];
+        disk[..MIB as usize].fill(0xa5);
+        disk[2 * MIB as usize + 100] = 0x5a;
+        disk
+    }
+
+    fn opens(file: Vec<u8>) -> io::Result<Layout> {
+        layout(&mut Cursor::new(file))
+    }
+
+    #[test]
+    fn nfr1_a_vhdx_laid_out_like_the_image_build_writes_it_opens() {
+        let disk = disk();
+        let file = vhdx_like_qemu_img(&disk, MIB as usize);
+        let found = opens(file.clone()).unwrap();
+        assert_eq!(found.virtual_size, disk.len() as u64);
+        assert_eq!(found.block_size, MIB);
+        assert_eq!(found.logical_sector_size, 512);
+        assert_eq!(found.blocks, vec![Some(4 * MIB), None, Some(5 * MIB)]);
+        let mut virtual_disk = VirtualDisk::new(Cursor::new(file)).unwrap();
+        let mut read = vec![0u8; disk.len()];
+        virtual_disk.read_exact_at(0, &mut read).unwrap();
+        assert_eq!(read, disk);
+    }
+
+    #[test]
+    fn nfr1_metadata_items_at_the_edges_of_their_region_are_read() {
+        // The logical sector size right after the table, and the file parameters in the
+        // region's last 8 bytes.
+        let mut file = vhdx_like_qemu_img(&disk(), MIB as usize);
+        let first = METADATA_TABLE_SIZE as u32;
+        let last = (METADATA_LEN - 8) as u32;
+        set_item(&mut file, 3, LOGICAL_SECTOR_SIZE, first, 4);
+        file[METADATA_AT + first as usize..][..4].copy_from_slice(&4096u32.to_le_bytes());
+        set_item(&mut file, 0, FILE_PARAMETERS, last, 8);
+        file[METADATA_AT + last as usize..][..8]
+            .copy_from_slice(&[(2 * MIB as u32).to_le_bytes(), 0u32.to_le_bytes()].concat());
+        let found = opens(file).unwrap();
+        assert_eq!(found.logical_sector_size, 4096);
+        assert_eq!(found.block_size, 2 * MIB);
+        assert_eq!(found.virtual_size, 3 * MIB);
+    }
+
+    #[test]
+    fn nfr5_a_metadata_item_outside_its_region_is_refused() {
+        let outside = |at: u32, len: u32| {
+            let mut file = vhdx_like_qemu_img(&disk(), MIB as usize);
+            set_item(&mut file, 1, VIRTUAL_DISK_SIZE, at, len);
+            opens(file).unwrap_err().to_string()
+        };
+        // One byte past the region's end, and wholly past it.
+        assert!(outside((METADATA_LEN - 7) as u32, 8).contains("outside its region"));
+        assert!(outside(METADATA_LEN as u32, 8).contains("outside its region"));
+        // Inside the table, before the first byte an item may use.
+        assert!(outside(METADATA_TABLE_SIZE as u32 - 4, 8).contains("outside its region"));
+        assert!(outside(0, 8).contains("outside its region"));
+        // An offset and a length whose sum does not fit in 32 bits.
+        assert!(outside(u32::MAX, 8).contains("outside its region"));
+        assert!(outside(METADATA_TABLE_SIZE as u32, u32::MAX).contains("outside its region"));
+    }
+
+    #[test]
+    fn nfr5_a_metadata_item_too_short_for_its_value_is_refused() {
+        let mut file = vhdx_like_qemu_img(&disk(), MIB as usize);
+        set_item(
+            &mut file,
+            3,
+            LOGICAL_SECTOR_SIZE,
+            METADATA_TABLE_SIZE as u32,
+            2,
+        );
+        assert!(opens(file).unwrap_err().to_string().contains("too short"));
+        let mut empty = vhdx_like_qemu_img(&disk(), MIB as usize);
+        set_item(&mut empty, 0, FILE_PARAMETERS, 0, 0);
+        assert!(opens(empty).unwrap_err().to_string().contains("too short"));
+    }
+
+    #[test]
+    fn nfr5_a_metadata_region_too_small_for_its_table_is_refused() {
+        for len in [0u32, 8, METADATA_TABLE_SIZE as u32 - 1] {
+            let mut file = vhdx_like_qemu_img(&disk(), MIB as usize);
+            for at in REGION_TABLE_OFFSETS {
+                // The metadata region's entry is the second; its length is at byte 24.
+                let entry = at as usize + 16 + 32 + 24;
+                file[entry..entry + 4].copy_from_slice(&len.to_le_bytes());
+            }
+            assert!(opens(file)
+                .unwrap_err()
+                .to_string()
+                .contains("not plausible"));
+        }
+    }
 }
