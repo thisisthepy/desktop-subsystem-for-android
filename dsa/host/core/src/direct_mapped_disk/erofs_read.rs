@@ -5,16 +5,17 @@
 //!
 //! - `FLAT_PLAIN`: the data in whole blocks from `raw_blkaddr`;
 //! - `FLAT_INLINE`: the same, the last block's part kept right after the inode;
-//! - `CHUNK_BASED`: a table after the inode names each chunk's first block;
+//! - `CHUNK_BASED`: a table after the inode names each chunk's first block, in any order;
 //! - `COMPRESSED_FULL` and `COMPRESSED_COMPACT`: logical clusters of one block, each a head
 //!   (where an extent starts, and the physical cluster it is decompressed from) or not, in
 //!   8-byte entries or in packs of 4-byte and 2-byte entries. A physical cluster is LZ4, or
-//!   stored as it is (`PLAIN`, possibly interlaced), one block or more (big clusters), and the
-//!   file's last one may be kept inline after the indexes (tail packing).
+//!   stored as it is (`PLAIN`, possibly interlaced), one block or more (big clusters), shared
+//!   between extents (deduplication), and the file's last one may be kept inline after the
+//!   indexes (tail packing) or in the packed inode (fragments, the whole file or its tail).
 //!
 //! What the build does not use, and this reader cannot reproduce faithfully, is refused with
 //! the reason: other block sizes, extra devices, long extended attribute name prefixes,
-//! fragments, and algorithms other than LZ4.
+//! compression advice it does not know, and algorithms other than LZ4.
 
 use super::ReadAt;
 
@@ -24,6 +25,8 @@ pub const BLOCK_BITS: u8 = 12;
 pub const BLOCK: u64 = 1 << BLOCK_BITS;
 
 const INCOMPAT_ZERO_PADDING: u32 = 0x1;
+/// Fragments (and deduplication, which shares the bit): the superblock names a packed inode.
+const INCOMPAT_FRAGMENTS: u32 = 0x20;
 /// Every incompatible feature this reader knows: zero padding, compression configurations
 /// and big clusters, chunked files, the second head type, tail packing, fragments and
 /// deduplication, and long xattr name prefixes (which it then refuses when an image has any).
@@ -57,6 +60,8 @@ const ADVISE_BIG_PCLUSTER_2: u16 = 0x4;
 const ADVISE_INLINE_PCLUSTER: u16 = 0x8;
 const ADVISE_INTERLACED_PCLUSTER: u16 = 0x10;
 const ADVISE_FRAGMENT_PCLUSTER: u16 = 0x20;
+/// Every compression advice bit above; others (such as encoded extents) are refused.
+const ADVISE_KNOWN: u16 = 0x3f;
 const COMPRESSION_LZ4: u8 = 0;
 
 /// How many blocks the reader keeps for the metadata it reads again and again.
@@ -87,6 +92,8 @@ pub struct Super {
     pub uuid: [u8; 16],
     pub volume_name: [u8; 16],
     pub feature_incompat: u32,
+    /// The inode that keeps other files' fragments, when the file system has one.
+    pub packed_nid: Option<u64>,
 }
 
 /// One extended attribute: its name's prefix index (`security.` is 6) and the rest.
@@ -154,6 +161,10 @@ struct Zmap {
     advise: u16,
     algorithms: [u8; 2],
     idata_size: u16,
+    /// Where the file's tail is in the packed inode (the low 32 bits).
+    fragment: Option<u64>,
+    /// Where the whole file is in the packed inode.
+    whole_fragment: Option<u64>,
     /// The first index: after the map header.
     ebase: u64,
     compact: bool,
@@ -208,6 +219,10 @@ impl<'a> Reader<'a> {
                 uuid,
                 volume_name,
                 feature_incompat: incompat,
+                packed_nid: match u64_at(&sb, 96) {
+                    nid if nid != 0 && incompat & INCOMPAT_FRAGMENTS != 0 => Some(nid),
+                    _ => None,
+                },
             },
             cache: vec![None; CACHE_BLOCKS],
         })
@@ -215,6 +230,16 @@ impl<'a> Reader<'a> {
 
     /// Reads `buf.len()` bytes at `offset`, small reads through the block cache.
     fn read(&mut self, offset: u64, buf: &mut [u8]) -> Result<(), String> {
+        let past = offset
+            .checked_add(buf.len() as u64)
+            .is_none_or(|end| end > self.dev.len());
+        if past {
+            return Err(format!(
+                "a read of {} bytes at {offset} runs past the file system's {} bytes",
+                buf.len(),
+                self.dev.len()
+            ));
+        }
         if buf.len() as u64 > 2 * BLOCK {
             return self
                 .dev
@@ -258,9 +283,12 @@ impl<'a> Reader<'a> {
     /// The inode `nid`, with its extended attributes.
     pub fn inode(&mut self, nid: u64) -> Result<Inode, String> {
         let iloc = self.iloc(nid);
-        let head = self.bytes(iloc, 64)?;
+        let mut head = self.bytes(iloc, 32)?;
         let format = u16_at(&head, 0);
         let extended = format & 1 == 1;
+        if extended {
+            head = self.bytes(iloc, 64)?;
+        }
         let layout = ((format >> 1) & 7) as u8;
         if format >> 4 != 0 {
             return Err(format!(
@@ -401,37 +429,59 @@ impl<'a> Reader<'a> {
         inode: &Inode,
         sink: &mut dyn FnMut(&[u8]) -> Result<(), String>,
     ) -> Result<(), String> {
+        self.range(inode, 0, inode.size, false, sink)
+    }
+
+    /// Gives `sink` the file's bytes from `from` to `to`, in pieces. `packed` says the file is
+    /// the packed inode, which cannot keep its own data as a fragment of itself.
+    fn range(
+        &mut self,
+        inode: &Inode,
+        from: u64,
+        to: u64,
+        packed: bool,
+        sink: &mut dyn FnMut(&[u8]) -> Result<(), String>,
+    ) -> Result<(), String> {
+        if from > to || to > inode.size {
+            return Err(format!(
+                "inode {} is read at {from}..{to}, past its {} bytes",
+                inode.nid, inode.size
+            ));
+        }
+        if from == to {
+            return Ok(());
+        }
         match inode.layout {
-            LAYOUT_FLAT_PLAIN => self.flat(inode, inode.size, sink),
+            LAYOUT_FLAT_PLAIN => self.blocks_from(inode.raw, from, to - from, sink),
             LAYOUT_FLAT_INLINE => {
                 let full = inode.size.div_ceil(BLOCK).saturating_sub(1) * BLOCK;
-                self.flat(inode, full, sink)?;
-                let tail = inode.size - full;
-                if (inode.ibody_end % BLOCK) + tail > BLOCK {
-                    return Err(format!("inode {}'s inline data crosses a block", inode.nid));
+                if from < full {
+                    self.blocks_from(inode.raw, from, to.min(full) - from, sink)?;
                 }
-                let data = self.bytes(inode.ibody_end, tail as usize)?;
-                sink(&data)
+                if to > full {
+                    let tail = inode.size - full;
+                    if (inode.ibody_end % BLOCK) + tail > BLOCK {
+                        return Err(format!("inode {}'s inline data crosses a block", inode.nid));
+                    }
+                    let skip = from.max(full) - full;
+                    let data = self.bytes(inode.ibody_end + skip, (to - full - skip) as usize)?;
+                    sink(&data)?;
+                }
+                Ok(())
             }
-            LAYOUT_CHUNK_BASED => self.chunked(inode, sink),
-            LAYOUT_COMPRESSED_FULL | LAYOUT_COMPRESSED_COMPACT => self.compressed(inode, sink),
+            LAYOUT_CHUNK_BASED => self.chunked(inode, from, to, sink),
+            LAYOUT_COMPRESSED_FULL | LAYOUT_COMPRESSED_COMPACT => {
+                self.compressed(inode, from, to, packed, sink)
+            }
             other => Err(format!("inode {} has the data layout {other}", inode.nid)),
         }
     }
 
-    /// `len` bytes of whole blocks from the inode's first block (none read for a hole).
-    fn flat(
-        &mut self,
-        inode: &Inode,
-        len: u64,
-        sink: &mut dyn FnMut(&[u8]) -> Result<(), String>,
-    ) -> Result<(), String> {
-        self.blocks_from(inode.raw, len, sink)
-    }
-
+    /// `len` bytes from `skip` bytes into the blocks from `blkaddr` (zeros for a hole).
     fn blocks_from(
         &mut self,
         blkaddr: u32,
+        skip: u64,
         len: u64,
         sink: &mut dyn FnMut(&[u8]) -> Result<(), String>,
     ) -> Result<(), String> {
@@ -443,7 +493,7 @@ impl<'a> Reader<'a> {
             if blkaddr == NULL_ADDR {
                 buf[..take].fill(0);
             } else {
-                let at = u64::from(blkaddr) * BLOCK + done;
+                let at = u64::from(blkaddr) * BLOCK + skip + done;
                 self.read(at, &mut buf[..take])?;
             }
             sink(&buf[..take])?;
@@ -452,9 +502,13 @@ impl<'a> Reader<'a> {
         Ok(())
     }
 
+    /// A chunked file: each chunk's blocks are wherever its table entry says, in any order,
+    /// shared with other chunks or files, or a hole.
     fn chunked(
         &mut self,
         inode: &Inode,
+        from: u64,
+        to: u64,
         sink: &mut dyn FnMut(&[u8]) -> Result<(), String>,
     ) -> Result<(), String> {
         let format = inode.raw & 0xffff;
@@ -472,8 +526,7 @@ impl<'a> Reader<'a> {
         let indexes = format & 0x20 != 0;
         let unit = if indexes { 8 } else { 4 };
         let table = align(inode.ibody_end, unit);
-        let count = inode.size.div_ceil(chunk);
-        for i in 0..count {
+        for i in from / chunk..to.div_ceil(chunk) {
             let entry = self.bytes(table + i * unit, unit as usize)?;
             let blkaddr = if indexes {
                 if u16_at(&entry, 0) != 0 || u16_at(&entry, 2) != 0 {
@@ -486,8 +539,10 @@ impl<'a> Reader<'a> {
             } else {
                 u32_at(&entry, 0)
             };
-            let len = (inode.size - i * chunk).min(chunk);
-            self.blocks_from(blkaddr, len, sink)?;
+            let chunk_start = i * chunk;
+            let start = from.max(chunk_start);
+            let end = to.min(chunk_start + chunk);
+            self.blocks_from(blkaddr, start - chunk_start, end - start, sink)?;
         }
         Ok(())
     }
@@ -496,53 +551,79 @@ impl<'a> Reader<'a> {
         let at = align(inode.ibody_end, 8);
         let header = self.bytes(at, 8)?;
         let clusterbits = header[7];
+        let ebase = at + 8;
+        let total = inode.size.div_ceil(BLOCK);
+        let mut z = Zmap {
+            advise: 0,
+            algorithms: [header[6] & 15, header[6] >> 4],
+            idata_size: 0,
+            fragment: None,
+            whole_fragment: None,
+            ebase,
+            compact: inode.layout == LAYOUT_COMPRESSED_COMPACT,
+            total,
+            compacted_4b_initial: 0,
+            compacted_2b: 0,
+        };
         if clusterbits & 0x80 != 0 {
-            return Err(format!(
-                "inode {} is kept whole in the packed inode (fragments)",
-                inode.nid
-            ));
+            // The whole file is in the packed inode, from the offset the header's other bits
+            // give, and there are no indexes.
+            z.whole_fragment = Some(u64_at(&header, 0) ^ (1 << 63));
+            return Ok(z);
         }
         let advise = u16_at(&header, 4);
-        if advise & ADVISE_FRAGMENT_PCLUSTER != 0 {
-            return Err(format!("inode {} keeps its tail as a fragment", inode.nid));
+        if advise & !ADVISE_KNOWN != 0 {
+            return Err(format!(
+                "inode {} has compression advice {:#x} this host does not know",
+                inode.nid,
+                advise & !ADVISE_KNOWN
+            ));
         }
-        if clusterbits & 7 != 0 {
+        if clusterbits != 0 {
             return Err(format!(
                 "inode {} has logical clusters larger than a block",
                 inode.nid
             ));
         }
-        let compact = inode.layout == LAYOUT_COMPRESSED_COMPACT;
+        let inline = advise & ADVISE_INLINE_PCLUSTER != 0;
+        if advise & ADVISE_FRAGMENT_PCLUSTER != 0 {
+            if inline {
+                return Err(format!(
+                    "inode {} keeps its tail both inline and as a fragment",
+                    inode.nid
+                ));
+            }
+            // The low 32 bits of the tail's place in the packed inode; full indexes keep the
+            // high 32 bits in the tail's head.
+            z.fragment = Some(u64::from(u32_at(&header, 0)));
+        }
+        if inline {
+            z.idata_size = u16_at(&header, 2);
+        }
         let big1 = advise & ADVISE_BIG_PCLUSTER_1 != 0;
         let big2 = advise & ADVISE_BIG_PCLUSTER_2 != 0;
-        if compact && big1 != big2 {
+        if z.compact && big1 != big2 {
             return Err(format!(
                 "inode {} has compact indexes with one big cluster type only",
                 inode.nid
             ));
         }
-        let ebase = at + 8;
-        let total = inode.size.div_ceil(BLOCK);
         // Up to the next 32-byte boundary, or none when the indexes start on one.
         let compacted_4b_initial = ((32 - ebase % 32) / 4) % 8;
-        let compacted_2b = if advise & ADVISE_COMPACTED_2B != 0 && compacted_4b_initial < total {
+        z.compacted_2b = if advise & ADVISE_COMPACTED_2B != 0 && compacted_4b_initial < total {
             (total - compacted_4b_initial) / 16 * 16
         } else {
             0
         };
-        Ok(Zmap {
-            advise,
-            algorithms: [header[6] & 15, header[6] >> 4],
-            idata_size: u16_at(&header, 2),
-            ebase,
-            compact,
-            total,
-            compacted_4b_initial,
-            compacted_2b,
-        })
+        z.compacted_4b_initial = compacted_4b_initial;
+        z.advise = advise;
+        Ok(z)
     }
 
     fn lcluster(&mut self, z: &Zmap, lcn: u64) -> Result<Lcluster, String> {
+        if lcn >= z.total {
+            return Err("a cluster index past the file's end".into());
+        }
         if !z.compact {
             let pos = z.ebase + lcn * 8;
             let entry = self.bytes(pos, 8)?;
@@ -666,122 +747,208 @@ impl<'a> Reader<'a> {
         Ok(out)
     }
 
+    /// `len` bytes at `offset` in the packed inode, where fragments are kept.
+    fn fragment(
+        &mut self,
+        inode: &Inode,
+        offset: u64,
+        len: u64,
+        packed: bool,
+        sink: &mut dyn FnMut(&[u8]) -> Result<(), String>,
+    ) -> Result<(), String> {
+        if packed {
+            return Err("the packed inode keeps its own data as a fragment".into());
+        }
+        let nid = self.sb.packed_nid.ok_or_else(|| {
+            format!(
+                "inode {} keeps data in a packed inode the file system does not have",
+                inode.nid
+            )
+        })?;
+        let packed_inode = self.inode(nid)?;
+        let end = offset
+            .checked_add(len)
+            .filter(|&end| end <= packed_inode.size)
+            .ok_or_else(|| {
+                format!(
+                    "inode {}'s fragment at {offset} runs past the packed inode's {} bytes",
+                    inode.nid, packed_inode.size
+                )
+            })?;
+        self.range(&packed_inode, offset, end, true, sink)
+    }
+
+    /// A compressed file's bytes from `from` to `to`.
+    ///
+    /// Each head cluster starts an extent at its offset into the cluster, and the extent runs
+    /// to where the next head starts, or to the file's end. The physical clusters the heads
+    /// name can be anywhere: in any order, shared by extents of this file or of others (a
+    /// deduplicated extent uses the start of another's cluster), inline after the indexes, or
+    /// a fragment in the packed inode. A head may also start at or after the file's end: the
+    /// build writes one for the last cluster to close the file's last extent, and no byte of
+    /// the file is in it.
     fn compressed(
         &mut self,
         inode: &Inode,
+        from: u64,
+        to: u64,
+        packed: bool,
         sink: &mut dyn FnMut(&[u8]) -> Result<(), String>,
     ) -> Result<(), String> {
-        if inode.size == 0 {
-            return Ok(());
-        }
+        let nid = inode.nid;
         let z = self.zmap(inode)?;
-        let mut clusters = Vec::with_capacity(z.total as usize);
-        for lcn in 0..z.total {
-            clusters.push(self.lcluster(&z, lcn)?);
+        if let Some(offset) = z.whole_fragment {
+            let at = offset
+                .checked_add(from)
+                .ok_or("a fragment offset overflows")?;
+            return self.fragment(inode, at, to - from, packed, sink);
         }
-        let tail_data = clusters.last().expect("at least one cluster").next;
-        let heads: Vec<u64> = (0..z.total)
-            .filter(|&lcn| clusters[lcn as usize].kind != LCLUSTER_NONHEAD)
-            .collect();
-        let start_of = |lcn: u64| lcn * BLOCK + u64::from(clusters[lcn as usize].clusterofs);
-        if heads.first() != Some(&0) || start_of(0) != 0 {
-            return Err(format!(
-                "inode {}'s first cluster does not start its data",
-                inode.nid
-            ));
-        }
-        let big1 = z.advise & ADVISE_BIG_PCLUSTER_1 != 0;
-        let big2 = z.advise & ADVISE_BIG_PCLUSTER_2 != 0;
-        let zero_padding = self.sb.feature_incompat & INCOMPAT_ZERO_PADDING != 0;
-        let mut written = 0u64;
-        for (k, &lcn) in heads.iter().enumerate() {
-            let head = clusters[lcn as usize];
-            let start = start_of(lcn);
-            let end = heads.get(k + 1).map_or(inode.size, |&next| start_of(next));
-            if start != written || end <= start || end > inode.size {
+        let start_of = |lcn: u64, c: &Lcluster| lcn * BLOCK + u64::from(c.clusterofs);
+        // The extent holding `from` starts at the last head at or before it.
+        let mut lcn = from / BLOCK;
+        let mut head = self.lcluster(&z, lcn)?;
+        while head.kind == LCLUSTER_NONHEAD || start_of(lcn, &head) > from {
+            if lcn == 0 {
                 return Err(format!(
-                    "inode {}'s extents do not follow each other",
-                    inode.nid
+                    "inode {nid}'s first cluster does not start its data"
                 ));
             }
-            let last = k + 1 == heads.len();
-            let (input_at, input) = if last && z.advise & ADVISE_INLINE_PCLUSTER != 0 {
-                let len = u64::from(z.idata_size);
-                if len == 0 || tail_data % BLOCK + len > BLOCK {
-                    return Err(format!("inode {}'s inline tail is corrupt", inode.nid));
+            lcn -= 1;
+            head = self.lcluster(&z, lcn)?;
+        }
+        // The tail's inline cluster follows the indexes up to the last cluster's.
+        let tail_data = self.lcluster(&z, z.total - 1)?.next;
+        let mut start = start_of(lcn, &head);
+        loop {
+            let mut next = lcn + 1;
+            let mut next_head = None;
+            while next < z.total {
+                let c = self.lcluster(&z, next)?;
+                if c.kind != LCLUSTER_NONHEAD {
+                    next_head = Some(c);
+                    break;
                 }
-                (tail_data, self.bytes(tail_data, len as usize)?)
+                next += 1;
+            }
+            let end = next_head
+                .as_ref()
+                .map_or(inode.size, |c| start_of(next, c).min(inode.size));
+            if end <= start {
+                return Err(format!("inode {nid}'s extents do not follow each other"));
+            }
+            let want = to.min(end) - start;
+            let out = self.extent(inode, &z, lcn, &head, start, end, want, tail_data, packed)?;
+            let skip = from.saturating_sub(start) as usize;
+            sink(&out[skip..])?;
+            match next_head {
+                Some(c) if end < to => {
+                    lcn = next;
+                    head = c;
+                    start = end;
+                }
+                _ => return Ok(()),
+            }
+        }
+    }
+
+    /// The first `want` bytes of the extent from `start` to `end` that the head `lcn` starts.
+    #[allow(clippy::too_many_arguments)]
+    fn extent(
+        &mut self,
+        inode: &Inode,
+        z: &Zmap,
+        lcn: u64,
+        head: &Lcluster,
+        start: u64,
+        end: u64,
+        want: u64,
+        tail_data: u64,
+        packed: bool,
+    ) -> Result<Vec<u8>, String> {
+        let nid = inode.nid;
+        let tail = end == inode.size;
+        if let (true, Some(low)) = (tail, z.fragment) {
+            let high = if z.compact { 0 } else { head.pblk << 32 };
+            let mut out = Vec::with_capacity(want as usize);
+            self.fragment(inode, low | high, want, packed, &mut |piece| {
+                out.extend_from_slice(piece);
+                Ok(())
+            })?;
+            return Ok(out);
+        }
+        let (input_at, input) = if tail && z.advise & ADVISE_INLINE_PCLUSTER != 0 {
+            let len = u64::from(z.idata_size);
+            if len == 0 || tail_data % BLOCK + len > BLOCK {
+                return Err(format!("inode {nid}'s inline tail is corrupt"));
+            }
+            (tail_data, self.bytes(tail_data, len as usize)?)
+        } else {
+            let big = if head.kind == LCLUSTER_HEAD1 {
+                z.advise & ADVISE_BIG_PCLUSTER_1 != 0
             } else {
-                let big = if head.kind == LCLUSTER_HEAD1 {
-                    big1
-                } else {
-                    big2
-                };
-                let blocks = if !big || (lcn + 1) * BLOCK >= inode.size {
+                z.advise & ADVISE_BIG_PCLUSTER_2 != 0
+            };
+            let blocks = if !big || (lcn + 1) * BLOCK >= inode.size {
+                1
+            } else {
+                let next = self.lcluster(z, lcn + 1)?;
+                if next.kind != LCLUSTER_NONHEAD {
                     1
                 } else {
-                    match clusters.get(lcn as usize + 1) {
-                        Some(next) if next.kind != LCLUSTER_NONHEAD => 1,
-                        Some(next) => match next.cblkcnt {
-                            Some(count) if count > 0 => u64::from(count),
-                            _ => {
-                                return Err(format!(
-                                    "inode {}'s big cluster has no block count",
-                                    inode.nid
-                                ))
-                            }
-                        },
-                        None => 1,
+                    match next.cblkcnt {
+                        Some(count) if count > 0 => u64::from(count),
+                        _ => return Err(format!("inode {nid}'s big cluster has no block count")),
                     }
-                };
-                let at = head.pblk * BLOCK;
-                (at, self.bytes(at, (blocks * BLOCK) as usize)?)
+                }
             };
-            let mut out = vec![0u8; (end - start) as usize];
-            match head.kind {
-                LCLUSTER_PLAIN => {
-                    if out.len() > input.len() {
-                        return Err(format!(
-                            "inode {}'s stored cluster is shorter than its extent",
-                            inode.nid
-                        ));
-                    }
-                    if z.advise & ADVISE_INTERLACED_PCLUSTER != 0 {
-                        // The first part, to the end of its block, is at the input's end.
-                        let first = ((BLOCK - start % BLOCK) as usize).min(out.len());
-                        let from = input.len() - first;
-                        out[..first].copy_from_slice(&input[from..]);
-                        let rest = out.len() - first;
-                        out[first..].copy_from_slice(&input[..rest]);
-                    } else {
-                        let len = out.len();
-                        out.copy_from_slice(&input[..len]);
-                    }
+            let at = head.pblk * BLOCK;
+            (at, self.bytes(at, (blocks * BLOCK) as usize)?)
+        };
+        match head.kind {
+            LCLUSTER_PLAIN => {
+                let len = (end - start) as usize;
+                if len > input.len() {
+                    return Err(format!(
+                        "inode {nid}'s stored cluster is shorter than its extent"
+                    ));
                 }
-                LCLUSTER_HEAD1 | LCLUSTER_HEAD2 => {
-                    let algorithm = z.algorithms[usize::from(head.kind == LCLUSTER_HEAD2)];
-                    if algorithm != COMPRESSION_LZ4 {
-                        return Err(format!(
-                            "inode {} is compressed with algorithm {algorithm}, not LZ4",
-                            inode.nid
-                        ));
-                    }
-                    let mut from = 0usize;
-                    if zero_padding {
-                        let window = input.len().min((BLOCK - input_at % BLOCK) as usize);
-                        from = input[..window]
-                            .iter()
-                            .position(|&b| b != 0)
-                            .ok_or_else(|| format!("inode {} has an empty cluster", inode.nid))?;
-                    }
-                    super::lz4::decode_into(&input[from..], &mut out)
-                        .map_err(|e| format!("inode {}: {e}", inode.nid))?;
+                let mut out = vec![0u8; len];
+                if z.advise & ADVISE_INTERLACED_PCLUSTER != 0 {
+                    // The first part, to the end of its block, is at the input's end.
+                    let first = ((BLOCK - start % BLOCK) as usize).min(len);
+                    let from = input.len() - first;
+                    out[..first].copy_from_slice(&input[from..]);
+                    let rest = len - first;
+                    out[first..].copy_from_slice(&input[..rest]);
+                } else {
+                    out.copy_from_slice(&input[..len]);
                 }
-                other => return Err(format!("inode {} has the cluster type {other}", inode.nid)),
+                out.truncate(want as usize);
+                Ok(out)
             }
-            sink(&out)?;
-            written = end;
+            LCLUSTER_HEAD1 | LCLUSTER_HEAD2 => {
+                let algorithm = z.algorithms[usize::from(head.kind == LCLUSTER_HEAD2)];
+                if algorithm != COMPRESSION_LZ4 {
+                    return Err(format!(
+                        "inode {nid} is compressed with algorithm {algorithm}, not LZ4"
+                    ));
+                }
+                let mut from = 0usize;
+                if self.sb.feature_incompat & INCOMPAT_ZERO_PADDING != 0 {
+                    let window = input.len().min((BLOCK - input_at % BLOCK) as usize);
+                    from = input[..window]
+                        .iter()
+                        .position(|&b| b != 0)
+                        .ok_or_else(|| format!("inode {nid} has an empty cluster"))?;
+                }
+                // Decoding stops once the bytes wanted are out: a deduplicated extent uses
+                // only the start of its cluster.
+                let mut out = vec![0u8; want as usize];
+                super::lz4::decode_into(&input[from..], &mut out)
+                    .map_err(|e| format!("inode {nid}: {e}"))?;
+                Ok(out)
+            }
+            other => Err(format!("inode {nid} has the cluster type {other}")),
         }
-        Ok(())
     }
 }
