@@ -26,7 +26,10 @@
 // only when none of them is still open as the same file. A descriptor number the process
 // reuses for another file no longer counts. Checking costs one fstat for each descriptor of
 // each buffer with no holder, at most once a second, so what the process let go of is closed
-// within about a second of a later check.
+// within about a second of a later check. A check runs at each submit and each time one of the
+// process's Vulkan objects on a buffer goes: an app in the background submits nothing, but its
+// window images and the memory of its caches go as it is hidden and trimmed, and the buffers it
+// let go of before then close with them instead of staying on the host until it draws again.
 //
 // The host keeps the ColorBuffer's memory for as long as the app keeps the buffer, as a
 // device's GPU memory does for its gralloc buffers, and frees it when the app frees the
