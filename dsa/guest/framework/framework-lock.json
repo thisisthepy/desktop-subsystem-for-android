@@ -1390,7 +1390,8 @@
             "compat/libgenfslabelsversion"
           ],
           "exclude": [
-            "Android.bp"
+            "Android.bp",
+            "compat/Android.bp"
           ]
         },
         {
@@ -2890,7 +2891,8 @@
             "compat/libgenfslabelsversion"
           ],
           "exclude": [
-            "Android.bp"
+            "Android.bp",
+            "compat/Android.bp"
           ]
         },
         {
