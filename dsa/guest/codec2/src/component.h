@@ -34,6 +34,7 @@
 #include "decoder_interface.h"
 #include "host_link.h"
 #include "output_buffer.h"
+#include "output_gate.h"
 
 namespace dsa::codec2 {
 
@@ -92,7 +93,13 @@ class Component : public c2aidl::BnComponent {
     void decodeError(const std::string& error);
     // Finishes `work` with `output` (an empty output when null), then tells the framework.
     void finish(c2aidl::Work work, AHardwareBuffer* output, uint32_t width, uint32_t height, bool eos);
-    AHardwareBuffer* allocate(uint32_t width, uint32_t height);
+    // A buffer for a picture that arrived with `ticket`, once its consumer has stopped reading
+    // it; null when none came in time or the gate closed. `from` is the surface's allocator
+    // it came from, when it did.
+    AHardwareBuffer* allocate(uint32_t width, uint32_t height, uint64_t ticket,
+                              std::shared_ptr<c2aidl::IGraphicBufferAllocator>* from);
+    // Gives back a buffer that will not go out, so its surface can hand it out again.
+    void discard(AHardwareBuffer* buffer, const std::shared_ptr<c2aidl::IGraphicBufferAllocator>& from);
     void closeHost();
 
     const DecoderInfo mInfo;
@@ -112,11 +119,14 @@ class Component : public c2aidl::BnComponent {
     uint32_t mHeight = 0;
     std::map<int64_t, Pool> mPools;
     int64_t mNextPoolId = 0x100;
-    // Moves on at every flush, stop and reset, which ends a picture's wait for a buffer.
-    std::atomic<uint64_t> mAllocateEpoch{0};
-    // Allocation failures in a row, so one on every picture does not flood the log. Used on
-    // the host link's thread only.
+    // Closes at every flush, stop and reset, which ends a picture's waits for its buffer. A
+    // flush and a stop close it under mLock, so a picture that takes its work from mPending
+    // under mLock with the gate open is never one the flush hands back as well.
+    OutputGate mGate;
+    // Allocation and write failures in a row, so one on every picture does not flood the log.
+    // Used on the host link's thread only.
     FailureThrottle mAllocateFailures;
+    FailureThrottle mWriteFailures;
 };
 
 }  // namespace dsa::codec2
