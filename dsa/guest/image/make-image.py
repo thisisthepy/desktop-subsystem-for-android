@@ -1065,8 +1065,11 @@ def build_overlay(aapt2, framework_res, sources, apk):
     compiled = sources / "compiled.zip"
     run(aapt2, "compile", "--dir", sources / "res", "-o", compiled)
     assets = ["-A", sources / "assets"] if (sources / "assets").is_dir() else []
+    # An overlay's value for a narrower configuration has to stay even when it equals the
+    # wider one: the target's own value there (navigation_bar_height at sw900dp) would win
+    # over the overlay's default. aapt2 drops such values by default.
     run(aapt2, "link", "-o", apk, "--manifest", sources / "AndroidManifest.xml", "-I", framework_res,
-        *assets, compiled)
+        "--no-resource-deduping", *assets, compiled)
     return apk
 
 
@@ -5348,7 +5351,10 @@ def recompile_precompiled_sepolicy(otatools, cil_map, vendor_version, genfs_vers
             res = subprocess.run(cmd, capture_output=True, text=True)
             if res.returncode == 0 and out_policy.exists():
                 return out_policy.read_bytes()
-            print(f"secilc failed (code {res.returncode}): {res.stderr}")
+            # init compiles the same CIL at boot when the precompiled policy does not match, and
+            # would fail the same way, so an image that fails here would not boot.
+            raise SystemExit(f"the SELinux policy does not compile (secilc code {res.returncode}), "
+                             f"so Android would not boot: {res.stderr.strip()}")
         except Exception as e:
             print(f"Could not execute secilc: {e}")
         return None
