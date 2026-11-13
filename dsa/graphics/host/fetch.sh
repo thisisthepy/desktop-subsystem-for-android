@@ -38,7 +38,7 @@ checkout() {
 checkout https://android.googlesource.com/platform/hardware/google/gfxstream \
     "$gfxstream_dir" "$gfxstream_revision"
 # The host patches, as fetch.ps1 lists them: 0002, 0003 and 0008 patch Mesa for the guest.
-for number in 0001 0004 0005 0006 0007 0009 0010 0011 0012 0013 0014 0015 0016 0017 0018 0019 0020 0021 0022 0023 0024 0025 0026 0027 0028 0029; do
+for number in 0001 0004 0005 0006 0007 0009 0010 0011 0012 0013 0014 0015 0016 0017 0018 0019 0020 0021 0022 0023 0024 0025 0026 0027 0028 0029 0030; do
     for patch in "$patch_dir"/"$number"-*.patch; do
         echo "Applying patch: $(basename "$patch")"
         if ! git -C "$gfxstream_dir" apply --recount "$patch"; then

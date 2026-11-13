@@ -75,11 +75,14 @@ pub use system::{probe_here, MediaFoundationDecoders};
 mod system {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex, OnceLock, Weak};
+    use std::time::Instant;
 
-    use dsa_host_core::video::{Codec, CodecSupport, Packet, Picture, VideoDecoder, VideoDecoders};
+    use dsa_host_core::video::{
+        Codec, CodecSupport, DecoderReport, Packet, Picture, VideoDecoder, VideoDecoders,
+    };
     use dsa_host_core::video_layout::{
-        chroma_start_row, picture_from_surface_area, rows_from_length, stream_frame_size,
-        visible_area, Area, Size, StreamSizes, SurfaceFormat,
+        chroma_start_row, mapped_chroma_row, picture_from_surface_area, rows_from_length,
+        staging_rows, stream_frame_size, visible_area, Area, Size, StreamSizes, SurfaceFormat,
     };
     use windows::core::{Interface, GUID};
     use windows::Win32::Foundation::HMODULE;
@@ -87,9 +90,13 @@ mod system {
         D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_11_1,
     };
     use windows::Win32::Graphics::Direct3D11::{
-        D3D11CreateDevice, ID3D11Device, ID3D11Multithread, ID3D11Texture2D,
-        D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_CREATE_DEVICE_VIDEO_SUPPORT, D3D11_SDK_VERSION,
-        D3D11_TEXTURE2D_DESC,
+        D3D11CreateDevice, ID3D11Device, ID3D11Multithread, ID3D11Texture2D, D3D11_BOX,
+        D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_CREATE_DEVICE_VIDEO_SUPPORT,
+        D3D11_MAPPED_SUBRESOURCE, D3D11_MAP_READ, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC,
+        D3D11_USAGE_STAGING,
+    };
+    use windows::Win32::Graphics::Dxgi::Common::{
+        DXGI_FORMAT, DXGI_FORMAT_NV12, DXGI_FORMAT_P010, DXGI_SAMPLE_DESC,
     };
     use windows::Win32::Graphics::Dxgi::{IDXGIAdapter, IDXGIDevice3};
     use windows::Win32::Media::MediaFoundation::{
@@ -160,6 +167,11 @@ mod system {
                     Err(why)
                 }
             }
+        }
+
+        /// The device the decoders decode on, which pictures are read back through.
+        fn device(&self) -> Option<&ID3D11Device> {
+            self.gpu.as_ref().map(|gpu| &gpu.device)
         }
 
         fn manager(&self) -> &IMFDXGIDeviceManager {
@@ -437,6 +449,34 @@ mod system {
         })
     }
 
+    /// The texture a decoded sample's first buffer is, and which of its subresources holds the
+    /// picture (a decoder's surfaces are often one texture array), when it is one.
+    fn sample_texture(sample: &IMFSample) -> Option<(ID3D11Texture2D, u32)> {
+        // SAFETY: plain Media Foundation calls on interfaces the sample holds.
+        unsafe {
+            let buffer = sample.GetBufferByIndex(0).ok()?;
+            let dxgi = buffer.cast::<IMFDXGIBuffer>().ok()?;
+            let mut texture: Option<ID3D11Texture2D> = None;
+            dxgi.GetResource(
+                &ID3D11Texture2D::IID,
+                (&mut texture as *mut Option<ID3D11Texture2D>).cast(),
+            )
+            .ok()?;
+            let index = dxgi.GetSubresourceIndex().ok()?;
+            Some((texture?, index))
+        }
+    }
+
+    /// The texture a picture is copied into to be read: made once for a surface size and
+    /// format, and used for every picture of that size, so no picture makes one (Media
+    /// Foundation's own lock of a surface did).
+    struct Staging {
+        texture: ID3D11Texture2D,
+        width: u32,
+        rows: u32,
+        format: DXGI_FORMAT,
+    }
+
     /// The height of the texture a decoded sample's first buffer is, when it is one.
     fn texture_rows(sample: &IMFSample) -> Option<usize> {
         // SAFETY: plain Media Foundation and Direct3D calls on interfaces the sample holds.
@@ -460,7 +500,7 @@ mod system {
         codec: Codec,
         /// Declared before the platform, so it goes first: the transform holds the device.
         decoder: Transform,
-        _platform: Arc<Platform>,
+        platform: Arc<Platform>,
         output: Output,
         /// The size the guest opened the stream with, and the sizes the stream's own headers
         /// gave (VP9, AV1), by packet, for decoders that report no display area.
@@ -468,6 +508,10 @@ mod system {
         stream: StreamSizes,
         provides_samples: bool,
         sample_size: u32,
+        /// The texture pictures are read back through, once one was needed.
+        staging: Option<Staging>,
+        /// What the reads back took since the stream's numbers were last logged.
+        report: DecoderReport,
     }
 
     // SAFETY: the transform and the device are free threaded (the device is made
@@ -520,12 +564,14 @@ mod system {
             Ok(MediaFoundationDecoder {
                 codec,
                 decoder,
-                _platform: platform,
+                platform,
                 output,
                 opened: (width, height),
                 stream: StreamSizes::default(),
                 provides_samples: info.dwFlags & MFT_OUTPUT_STREAM_PROVIDES_SAMPLES.0 as u32 != 0,
                 sample_size: info.cbSize,
+                staging: None,
+                report: DecoderReport::default(),
             })
         }
 
@@ -617,11 +663,141 @@ mod system {
             )
         }
 
-        fn read(&self, sample: &IMFSample) -> Result<Option<Picture>, String> {
+        /// The staging texture for a surface of `width` by `rows` rows (already aligned, see
+        /// [`staging_rows`]) in `format`: the one made before when it fits, else a new one.
+        fn staging_for(
+            &mut self,
+            width: u32,
+            rows: u32,
+            format: DXGI_FORMAT,
+        ) -> Option<ID3D11Texture2D> {
+            if let Some(staging) = &self.staging {
+                if staging.width == width && staging.rows == rows && staging.format == format {
+                    return Some(staging.texture.clone());
+                }
+            }
+            // A new size lets the old texture go first.
+            self.staging = None;
+            let device = self.platform.device()?;
+            let desc = D3D11_TEXTURE2D_DESC {
+                Width: width,
+                Height: rows,
+                MipLevels: 1,
+                ArraySize: 1,
+                Format: format,
+                SampleDesc: DXGI_SAMPLE_DESC {
+                    Count: 1,
+                    Quality: 0,
+                },
+                Usage: D3D11_USAGE_STAGING,
+                BindFlags: 0,
+                CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
+                MiscFlags: 0,
+            };
+            let mut texture = None;
+            // SAFETY: a plain Direct3D call; the out pointer is a local.
+            unsafe { device.CreateTexture2D(&desc, None, Some(&mut texture)) }.ok()?;
+            let texture = texture?;
+            self.staging = Some(Staging {
+                texture: texture.clone(),
+                width,
+                rows,
+                format,
+            });
+            Some(texture)
+        }
+
+        /// Reads the picture in `area` of the sample's texture through the staging texture:
+        /// the area is copied to the staging texture's corner, whose height is whole aligned
+        /// rows, so its chroma plane starts where its height says on every driver (see
+        /// [`staging_rows`]). `None` when the sample is not a texture this can read, and the
+        /// caller reads it through Media Foundation's lock instead.
+        fn read_staged(&mut self, sample: &IMFSample, id: u64, area: Area) -> Option<Picture> {
+            let (texture, index) = sample_texture(sample)?;
+            let mut desc = D3D11_TEXTURE2D_DESC::default();
+            // SAFETY: a plain query of a live texture.
+            unsafe { texture.GetDesc(&mut desc) };
+            let format = match desc.Format {
+                DXGI_FORMAT_NV12 => SurfaceFormat::Nv12,
+                DXGI_FORMAT_P010 => SurfaceFormat::P010,
+                _ => return None,
+            };
+            let (right, bottom) = area.reach();
+            if right > desc.Width || bottom > desc.Height {
+                return None;
+            }
+            let rows = staging_rows(desc.Height as usize) as u32;
+            let staging = self.staging_for(desc.Width, rows, desc.Format)?;
+            let device = self.platform.device()?;
+            // SAFETY: plain Direct3D calls on live textures of the decoder's device, which is
+            // multithread protected; the mapping is read within its length and unmapped
+            // before it goes.
+            unsafe {
+                let context = device.GetImmediateContext().ok()?;
+                let reach = D3D11_BOX {
+                    left: 0,
+                    top: 0,
+                    front: 0,
+                    right,
+                    bottom,
+                    back: 1,
+                };
+                context.CopySubresourceRegion(
+                    &staging,
+                    0,
+                    0,
+                    0,
+                    0,
+                    &texture,
+                    index,
+                    Some(&reach as *const _),
+                );
+                let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+                context
+                    .Map(&staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
+                    .ok()?;
+                let pitch = mapped.RowPitch as usize;
+                let chroma = mapped_chroma_row(rows as usize, pitch, mapped.DepthPitch as usize);
+                let len = pitch * (chroma + chroma.div_ceil(2));
+                let picture = if mapped.pData.is_null() || pitch == 0 {
+                    None
+                } else {
+                    let bytes = std::slice::from_raw_parts(mapped.pData as *const u8, len);
+                    picture_from_surface_area(id, bytes, format, pitch, chroma, area)
+                };
+                context.Unmap(&staging, 0);
+                self.report.surface = Some(format!(
+                    "{}x{} {format:?} (array slice {index}), read through {}x{rows}, pitch \
+                     {pitch}, mapped size {}, chroma at row {chroma}; picture {}x{} at {},{}",
+                    desc.Width,
+                    desc.Height,
+                    desc.Width,
+                    mapped.DepthPitch,
+                    area.width,
+                    area.height,
+                    area.left,
+                    area.top,
+                ));
+                picture
+            }
+        }
+
+        fn read(&mut self, sample: &IMFSample) -> Result<Option<Picture>, String> {
+            let started = Instant::now();
+            let picture = self.read_unclocked(sample);
+            self.report.readback += started.elapsed();
+            self.report.readbacks += 1;
+            picture
+        }
+
+        fn read_unclocked(&mut self, sample: &IMFSample) -> Result<Option<Picture>, String> {
             let format = self.output.format;
             // SAFETY: a plain Media Foundation call.
             let id = unsafe { sample.GetSampleTime() }.map_err(|e| e.to_string())? as u64;
             let area = self.shown(id);
+            if let Some(picture) = self.read_staged(sample, id, area) {
+                return Ok(Some(picture));
+            }
             // The rows the picture reaches down to, its offset included.
             let bottom = (area.top + area.height) as usize;
             let coded_rows = self.output.coded.1 as usize;
@@ -646,6 +822,11 @@ mod system {
                     let bytes = std::slice::from_raw_parts(data, len);
                     let picture = picture_from_surface_area(id, bytes, format, pitch, rows, area);
                     let _ = two_d.Unlock2D();
+                    self.report.surface = Some(format!(
+                        "read through Media Foundation's lock, pitch {pitch}, chroma at row \
+                         {rows}; picture {}x{} at {},{}",
+                        area.width, area.height, area.left, area.top,
+                    ));
                     return Ok(picture);
                 }
                 let mut data = std::ptr::null_mut();
@@ -732,6 +913,10 @@ mod system {
             unsafe {
                 let _ = self.decoder.ProcessMessage(MFT_MESSAGE_COMMAND_FLUSH, 0);
             }
+        }
+
+        fn take_report(&mut self) -> DecoderReport {
+            std::mem::take(&mut self.report)
         }
     }
 

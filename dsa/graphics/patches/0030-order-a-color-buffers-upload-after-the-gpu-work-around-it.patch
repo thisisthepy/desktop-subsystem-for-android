@@ -1,0 +1,92 @@
+Subject: Order a ColorBuffer's upload after the GPU work around it
+
+A guest CPU's picture (a video decoder's frame, a camera's) reaches its ColorBuffer through
+updateColorBufferFromBytesLocked: a transition to the transfer layout, the copies, and a
+transition back. Neither transition was ordered with the copy. The first one's second scope was
+the host stage and the last one's first scope too, and a copy runs in the transfer stage, so
+either transition could run beside a copy; nor did anything order the copy after an earlier
+frame that was still sampling the image on the same queue. On the owner's PC (Intel Arc) a
+video's YUV pictures showed blocks of green and purple along their top rows, the rows copied
+first, and flickered green.
+
+Now the first transition waits for every earlier use of the image on the queue and finishes
+before the copy (all commands to transfer), and the last one waits for the copy and makes its
+writes visible to every later use (transfer to all commands), with a memory barrier in its
+place when the image stays in the transfer layout.
+
+diff --git a/host/vulkan/VkCommonOperations.cpp b/host/vulkan/VkCommonOperations.cpp
+--- a/host/vulkan/VkCommonOperations.cpp
++++ b/host/vulkan/VkCommonOperations.cpp
+@@ -4237,11 +4237,17 @@
+         if (first) {
+             mDebugUtilsHelper.cmdBeginDebugLabel(
+                 mCommandBuffer, "updateColorBufferFromBytes(ColorBuffer:%d)", colorBufferHandle);
++            // After every earlier use of the image on this queue, and finished before the copy
++            // writes: a transition that ran beside the copy (its second scope was the host
++            // stage, which the copy is not in), or a copy that ran while an earlier frame was
++            // still sampling the image, left blocks of the old picture or garbage in the rows
++            // copied first. A guest CPU's YUV pictures showed it as green and purple blocks
++            // along their top rows.
+             const VkImageMemoryBarrier toTransferDstImageBarrier = {
+                 .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                 .pNext = nullptr,
+-                .srcAccessMask = 0,
+-                .dstAccessMask = VK_ACCESS_HOST_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
++                .srcAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
++                .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+                 .oldLayout = currentLayout,
+                 .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                 .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+@@ -4256,8 +4262,8 @@
+                         .layerCount = 1,
+                     },
+             };
+-            vk->vkCmdPipelineBarrier(mCommandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+-                                     VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 0, nullptr, 1,
++            vk->vkCmdPipelineBarrier(mCommandBuffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
++                                     VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1,
+                                      &toTransferDstImageBarrier);
+         } else {
+             cmdAfterEarlierCopies(vk, mCommandBuffer);
+@@ -4269,12 +4275,15 @@
+                                    groups[group].data());
+ 
+         if (last) {
++            // After the copy has written, and visible to every later use: the transition back
++            // ran beside the last copy before (its first scope was the host stage), and could
++            // leave the plane copied last half written.
+             if (colorBufferInfo->currentLayout != VK_IMAGE_LAYOUT_UNDEFINED) {
+                 const VkImageMemoryBarrier toCurrentLayoutImageBarrier = {
+                     .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                     .pNext = nullptr,
+-                    .srcAccessMask = VK_ACCESS_HOST_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
+-                    .dstAccessMask = VK_ACCESS_NONE_KHR,
++                    .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
++                    .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
+                     .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                     .newLayout = colorBufferInfo->currentLayout,
+                     .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+@@ -4289,10 +4298,21 @@
+                             .layerCount = 1,
+                         },
+                 };
+-                vk->vkCmdPipelineBarrier(mCommandBuffer, VK_PIPELINE_STAGE_HOST_BIT,
+-                                         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0,
++                vk->vkCmdPipelineBarrier(mCommandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
++                                         VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0,
+                                          nullptr, 1, &toCurrentLayoutImageBarrier);
+             } else {
++                // The image stays in the transfer layout, as the host now records; what the
++                // copy wrote is made visible to every later use all the same.
++                const VkMemoryBarrier written = {
++                    .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
++                    .pNext = nullptr,
++                    .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
++                    .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
++                };
++                vk->vkCmdPipelineBarrier(mCommandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
++                                         VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 1, &written, 0,
++                                         nullptr, 0, nullptr);
+                 colorBufferInfo->currentLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+             }
+             mDebugUtilsHelper.cmdEndDebugLabel(mCommandBuffer);

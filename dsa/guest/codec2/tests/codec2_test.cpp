@@ -17,10 +17,12 @@
 #include <thread>
 #include <vector>
 
+#include "arrival_queue.h"
 #include "config_rules.h"
 #include "output_buffer.h"
 #include "output_gate.h"
 #include "picture_copy.h"
+#include "picture_stats.h"
 #include "send_queue.h"
 #include "test_main.h"
 #include "video_messages.h"
@@ -466,6 +468,218 @@ TEST(fr26_a_full_send_queue_waits_for_room_and_a_close_ends_the_wait) {
     queue.close();
     sender.join();
     EXPECT_TRUE(!pushed.load());
+}
+
+
+namespace {
+
+// A YV12 buffer as minigbm allocates one for a surface: one allocation, the luma rows
+// `ALIGN(width, 32)` bytes apart, then the Cr plane, then the Cb plane, each chroma row
+// `ALIGN(lumaStride / 2, 16)` bytes apart, for `rows` rows (which may be more than the
+// picture's). Every byte starts as zero, which reads as green.
+struct GrallocYv12 {
+    uint32_t width, rows, yStride, cStride;
+    size_t crOffset, cbOffset;
+    std::vector<uint8_t> memory;
+    GrallocYv12(uint32_t w, uint32_t r)
+        : width(w),
+          rows(r),
+          yStride((w + 31) & ~31u),
+          cStride(((((w + 31) & ~31u) / 2) + 15) & ~15u),
+          crOffset(static_cast<size_t>(yStride) * r),
+          cbOffset(crOffset + static_cast<size_t>(cStride) * ((r + 1) / 2)),
+          memory(cbOffset + static_cast<size_t>(cStride) * ((r + 1) / 2), 0) {}
+    // As AHardwareBuffer_lockPlanes gives them: Y, Cb, Cr.
+    YuvPlanes planes() {
+        return {{memory.data(), 1, yStride}, {memory.data() + cbOffset, 1, cStride}, {memory.data() + crOffset, 1, cStride}};
+    }
+    uint8_t y(uint32_t row, uint32_t x) const { return memory[static_cast<size_t>(row) * yStride + x]; }
+    uint8_t cb(uint32_t row, uint32_t x) const { return memory[cbOffset + static_cast<size_t>(row) * cStride + x]; }
+    uint8_t cr(uint32_t row, uint32_t x) const { return memory[crOffset + static_cast<size_t>(row) * cStride + x]; }
+};
+
+// An NV12 picture whose every row says which row it is: luma `row % 200 + 16`, chroma Cb
+// `crow % 100 + 50`, Cr `crow % 100 + 150`. A picture written a row off, or with its chroma
+// taken from the wrong rows, does not match.
+std::vector<uint8_t> rowNumberedNv12(uint32_t width, uint32_t height) {
+    const uint32_t stride = width + (width & 1);
+    const uint32_t chromaRows = (height + 1) / 2;
+    std::vector<uint8_t> nv12(static_cast<size_t>(stride) * (height + chromaRows));
+    for (uint32_t row = 0; row < height; ++row) {
+        std::fill_n(nv12.begin() + static_cast<size_t>(row) * stride, stride, static_cast<uint8_t>(row % 200 + 16));
+    }
+    for (uint32_t row = 0; row < chromaRows; ++row) {
+        uint8_t* line = nv12.data() + static_cast<size_t>(stride) * (height + row);
+        for (uint32_t x = 0; x + 1 < stride; x += 2) {
+            line[x] = static_cast<uint8_t>(row % 100 + 50);
+            line[x + 1] = static_cast<uint8_t>(row % 100 + 150);
+        }
+    }
+    return nv12;
+}
+
+// Checks every sample of `buffer` against the row-numbered picture of `width` by `height`,
+// the rows past the picture repeating its last. Returns the first wrong place, or "".
+std::string firstWrongSample(const GrallocYv12& buffer, uint32_t width, uint32_t height) {
+    for (uint32_t row = 0; row < buffer.rows; ++row) {
+        const uint32_t from = std::min(row, height - 1);
+        for (uint32_t x = 0; x < buffer.width; ++x) {
+            if (buffer.y(row, x) != static_cast<uint8_t>(from % 200 + 16)) {
+                return "luma row " + std::to_string(row) + " column " + std::to_string(x);
+            }
+        }
+    }
+    for (uint32_t row = 0; row < (buffer.rows + 1) / 2; ++row) {
+        const uint32_t from = std::min(row, (height + 1) / 2 - 1);
+        for (uint32_t x = 0; x < (buffer.width + 1) / 2; ++x) {
+            if (buffer.cb(row, x) != static_cast<uint8_t>(from % 100 + 50) ||
+                buffer.cr(row, x) != static_cast<uint8_t>(from % 100 + 150)) {
+                return "chroma row " + std::to_string(row) + " column " + std::to_string(x);
+            }
+        }
+    }
+    (void)width;
+    return "";
+}
+
+#define EXPECT_ALL_SAMPLES(buffer, width, height)                                      \
+    do {                                                                               \
+        const std::string wrong = firstWrongSample(buffer, width, height);             \
+        if (!wrong.empty()) ::dsa::test::fail(__FILE__, __LINE__, "wrong at " + wrong); \
+    } while (0)
+
+WriteResult writeInto(GrallocYv12& buffer, const std::vector<uint8_t>& nv12, uint32_t width, uint32_t height) {
+    return writePicture(
+        nv12.data(), nv12.size(), width, height, width + (width & 1), BufferSize{buffer.width, buffer.rows},
+        [&buffer](YuvPlanes* planes, uint32_t* count) {
+            *planes = buffer.planes();
+            *count = 3;
+            return true;
+        },
+        [] { return true; });
+}
+
+}  // namespace
+
+TEST(fr26_a_portrait_short_fills_its_gralloc_yv12_buffer_from_its_top_row) {
+    // A 360x640 Shorts picture: minigbm's luma rows are 384 bytes and its chroma rows 192, so
+    // stride and width differ, and every row from the first must be the picture's own.
+    GrallocYv12 buffer(360, 640);
+    const std::vector<uint8_t> nv12 = rowNumberedNv12(360, 640);
+    EXPECT_TRUE(writeInto(buffer, nv12, 360, 640) == WriteResult::Written);
+    EXPECT_ALL_SAMPLES(buffer, 360, 640);
+    EXPECT_EQ(buffer.y(0, 0), 16);
+    EXPECT_EQ(buffer.cb(0, 0), 50);
+    EXPECT_EQ(buffer.cr(0, 0), 150);
+}
+
+TEST(fr26_a_picture_in_a_taller_buffer_keeps_its_rows_and_chroma_planes) {
+    // A 640x360 picture in a buffer an allocator made 368 rows tall: the chroma planes start
+    // after the buffer's rows, not the picture's, and the 8 rows past the picture repeat its
+    // last row rather than staying zero (green).
+    GrallocYv12 buffer(640, 368);
+    const std::vector<uint8_t> nv12 = rowNumberedNv12(640, 360);
+    EXPECT_TRUE(writeInto(buffer, nv12, 640, 360) == WriteResult::Written);
+    EXPECT_ALL_SAMPLES(buffer, 640, 360);
+}
+
+TEST(fr26_pictures_wait_in_order_while_the_one_before_waits_for_its_buffer) {
+    ArrivalQueue queue(3, 1 << 20);
+    const auto picture = [](uint64_t index) {
+        Frame frame;
+        frame.frameIndex = index;
+        frame.nv12.assign(100, static_cast<char>(index));
+        return Arrival{HostMessage{frame}, 0, std::chrono::steady_clock::now()};
+    };
+    // The reader puts three without waiting for the writer.
+    const auto start = std::chrono::steady_clock::now();
+    for (uint64_t i = 1; i <= 3; ++i) {
+        EXPECT_TRUE(queue.push(picture(i)));
+    }
+    EXPECT_TRUE(std::chrono::steady_clock::now() - start < std::chrono::milliseconds(500));
+    EXPECT_EQ(queue.size(), 3u);
+    // A fourth waits for room, which the writer makes by taking the oldest.
+    std::atomic<bool> pushed{false};
+    std::thread reader([&] { pushed = queue.push(picture(4)); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    EXPECT_TRUE(!pushed.load());
+    Arrival taken;
+    EXPECT_TRUE(queue.pop(&taken));
+    reader.join();
+    EXPECT_TRUE(pushed.load());
+    EXPECT_EQ(std::get<Frame>(taken.message).frameIndex, 1u);
+    for (uint64_t i = 2; i <= 4; ++i) {
+        EXPECT_TRUE(queue.pop(&taken));
+        EXPECT_EQ(std::get<Frame>(taken.message).frameIndex, i);
+    }
+    // A stop wakes a writer that waits, and takes nothing more; a start opens it again.
+    std::atomic<bool> popped{true};
+    std::thread writer([&] { popped = queue.pop(&taken); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    queue.close();
+    writer.join();
+    EXPECT_TRUE(!popped.load());
+    EXPECT_TRUE(!queue.push(picture(5)));
+    queue.open();
+    EXPECT_TRUE(queue.push(picture(6)));
+    EXPECT_TRUE(queue.pop(&taken));
+    EXPECT_EQ(std::get<Frame>(taken.message).frameIndex, 6u);
+}
+
+TEST(fr26_waiting_pictures_are_bounded_by_their_bytes) {
+    ArrivalQueue queue(8, 250);
+    const auto picture = [](size_t bytes) {
+        Frame frame;
+        frame.nv12.assign(bytes, 0);
+        return Arrival{HostMessage{frame}, 0, std::chrono::steady_clock::now()};
+    };
+    // One picture larger than the bound still goes, alone.
+    EXPECT_TRUE(queue.push(picture(1000)));
+    std::atomic<bool> pushed{false};
+    std::thread reader([&] { pushed = queue.push(picture(100)); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    EXPECT_TRUE(!pushed.load());
+    Arrival taken;
+    EXPECT_TRUE(queue.pop(&taken));
+    reader.join();
+    EXPECT_TRUE(pushed.load());
+    // An error carries no picture and takes no bytes.
+    EXPECT_TRUE(queue.push(picture(100)));
+    EXPECT_TRUE(queue.push(Arrival{HostMessage{DecodeError{"bad"}}, 0, std::chrono::steady_clock::now()}));
+    EXPECT_EQ(queue.size(), 3u);
+}
+
+TEST(fr26_a_decoders_numbers_go_to_the_log_every_few_seconds) {
+    using namespace std::chrono;
+    PictureStats stats(seconds(5));
+    const auto start = steady_clock::now();
+    std::string line;
+    // Nothing has happened: nothing to say.
+    EXPECT_TRUE(!stats.report(start + seconds(10), 0, &line));
+    for (int i = 0; i < 150; ++i) {
+        const auto at = start + milliseconds(33 * i);
+        stats.received(at);
+        if (i == 0) {
+            stats.dropped(at, Drop::Flushed);
+        } else if (i == 1) {
+            stats.dropped(at, Drop::NoBuffer);
+        } else {
+            PictureTimes times;
+            times.queued = milliseconds(2);
+            times.buffer = milliseconds(12);
+            times.write = milliseconds(1);
+            times.handOff = microseconds(500);
+            stats.shown(at, times);
+        }
+    }
+    EXPECT_TRUE(!stats.report(start + seconds(4), 2, &line));
+    EXPECT_TRUE(stats.report(start + seconds(5), 2, &line));
+    EXPECT_EQ(line,
+              std::string("over 5.0 s: 150 pictures from the host (30.0/s), 148 shown (29.6/s), 2 dropped (1 flushed, "
+                          "1 with no buffer, 0 not written); average ms: queued 2.00, buffer wait 12.00, write 1.00, "
+                          "hand-off 0.50; 2 waiting"));
+    // A new count starts from the report.
+    EXPECT_TRUE(!stats.report(start + seconds(6), 0, &line));
 }
 
 int main(int argc, char** argv) {
