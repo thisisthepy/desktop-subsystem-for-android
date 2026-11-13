@@ -312,6 +312,11 @@ class FakeActions : TaskActions {
         captionBoundingRects += boundingRects
         return insetsTaken
     }
+
+    /** The framework's status bar height at each density; 0 for any other. */
+    var statusBarHeights = mapOf<Int, Int>()
+
+    override fun statusBarHeight(densityDpi: Int): Int = statusBarHeights[densityDpi] ?: 0
 }
 
 class FakeWindowing(var acceptAfter: Int = 0) : WindowingControl {
