@@ -1664,6 +1664,23 @@ pub struct GuestMemory {
     pub google_play_pss_kb: u64,
     #[prost(uint64, tag = "27")]
     pub google_play_swap_pss_kb: u64,
+    /// Free page reporting, as the control channel's GuestMemory says: the free memory the host
+    /// has taken back now, the memory reported since boot, and the reported free memory the
+    /// host took back in again with a neighbour since boot. All 0 when the guest could not read
+    /// them.
+    #[prost(uint64, tag = "28")]
+    pub free_reported_kb: u64,
+    #[prost(uint64, tag = "29")]
+    pub reported_total_kb: u64,
+    #[prost(uint64, tag = "30")]
+    pub refaulted_total_kb: u64,
+    /// How fast memory went back to the host between the report before this one and this one,
+    /// in KiB a minute, when reported_rate_known is set: the growth of reported_total_kb over
+    /// the time between the two.
+    #[prost(uint64, tag = "31")]
+    pub reported_kb_per_minute: u64,
+    #[prost(bool, tag = "32")]
+    pub reported_rate_known: bool,
 }
 /// One host process that runs the caller's Android: its VM's memory process, the window
 /// manager, an app window.

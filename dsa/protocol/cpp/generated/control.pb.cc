@@ -1383,6 +1383,9 @@ PROTOBUF_CONSTEXPR GuestMemory::GuestMemory(
   , /*decltype(_impl_.swap_pss_kb_)*/uint64_t{0u}
   , /*decltype(_impl_.google_play_pss_kb_)*/uint64_t{0u}
   , /*decltype(_impl_.google_play_swap_pss_kb_)*/uint64_t{0u}
+  , /*decltype(_impl_.free_reported_kb_)*/uint64_t{0u}
+  , /*decltype(_impl_.reported_total_kb_)*/uint64_t{0u}
+  , /*decltype(_impl_.refaulted_total_kb_)*/uint64_t{0u}
   , /*decltype(_impl_.google_play_processes_)*/0u
   , /*decltype(_impl_._cached_size_)*/{}} {}
 struct GuestMemoryDefaultTypeInternal {
@@ -30169,6 +30172,9 @@ GuestMemory::GuestMemory(const GuestMemory& from)
     , decltype(_impl_.swap_pss_kb_){}
     , decltype(_impl_.google_play_pss_kb_){}
     , decltype(_impl_.google_play_swap_pss_kb_){}
+    , decltype(_impl_.free_reported_kb_){}
+    , decltype(_impl_.reported_total_kb_){}
+    , decltype(_impl_.refaulted_total_kb_){}
     , decltype(_impl_.google_play_processes_){}
     , /*decltype(_impl_._cached_size_)*/{}};
 
@@ -30209,6 +30215,9 @@ inline void GuestMemory::SharedCtor(
     , decltype(_impl_.swap_pss_kb_){uint64_t{0u}}
     , decltype(_impl_.google_play_pss_kb_){uint64_t{0u}}
     , decltype(_impl_.google_play_swap_pss_kb_){uint64_t{0u}}
+    , decltype(_impl_.free_reported_kb_){uint64_t{0u}}
+    , decltype(_impl_.reported_total_kb_){uint64_t{0u}}
+    , decltype(_impl_.refaulted_total_kb_){uint64_t{0u}}
     , decltype(_impl_.google_play_processes_){0u}
     , /*decltype(_impl_._cached_size_)*/{}
   };
@@ -30464,6 +30473,30 @@ const char* GuestMemory::_InternalParse(const char* ptr, ::_pbi::ParseContext* c
         } else
           goto handle_unusual;
         continue;
+      // uint64 free_reported_kb = 27;
+      case 27:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 216)) {
+          _impl_.free_reported_kb_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint64 reported_total_kb = 28;
+      case 28:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 224)) {
+          _impl_.reported_total_kb_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // uint64 refaulted_total_kb = 29;
+      case 29:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 232)) {
+          _impl_.refaulted_total_kb_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
       default:
         goto handle_unusual;
     }  // switch
@@ -30651,6 +30684,24 @@ uint8_t* GuestMemory::_InternalSerialize(
     target = ::_pbi::WireFormatLite::WriteUInt64ToArray(26, this->_internal_google_play_swap_pss_kb(), target);
   }
 
+  // uint64 free_reported_kb = 27;
+  if (this->_internal_free_reported_kb() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(27, this->_internal_free_reported_kb(), target);
+  }
+
+  // uint64 reported_total_kb = 28;
+  if (this->_internal_reported_total_kb() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(28, this->_internal_reported_total_kb(), target);
+  }
+
+  // uint64 refaulted_total_kb = 29;
+  if (this->_internal_refaulted_total_kb() != 0) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(29, this->_internal_refaulted_total_kb(), target);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -30814,6 +30865,27 @@ size_t GuestMemory::ByteSizeLong() const {
         this->_internal_google_play_swap_pss_kb());
   }
 
+  // uint64 free_reported_kb = 27;
+  if (this->_internal_free_reported_kb() != 0) {
+    total_size += 2 +
+      ::_pbi::WireFormatLite::UInt64Size(
+        this->_internal_free_reported_kb());
+  }
+
+  // uint64 reported_total_kb = 28;
+  if (this->_internal_reported_total_kb() != 0) {
+    total_size += 2 +
+      ::_pbi::WireFormatLite::UInt64Size(
+        this->_internal_reported_total_kb());
+  }
+
+  // uint64 refaulted_total_kb = 29;
+  if (this->_internal_refaulted_total_kb() != 0) {
+    total_size += 2 +
+      ::_pbi::WireFormatLite::UInt64Size(
+        this->_internal_refaulted_total_kb());
+  }
+
   // uint32 google_play_processes = 24;
   if (this->_internal_google_play_processes() != 0) {
     total_size += 2 +
@@ -30914,6 +30986,15 @@ void GuestMemory::MergeFrom(const GuestMemory& from) {
   }
   if (from._internal_google_play_swap_pss_kb() != 0) {
     _this->_internal_set_google_play_swap_pss_kb(from._internal_google_play_swap_pss_kb());
+  }
+  if (from._internal_free_reported_kb() != 0) {
+    _this->_internal_set_free_reported_kb(from._internal_free_reported_kb());
+  }
+  if (from._internal_reported_total_kb() != 0) {
+    _this->_internal_set_reported_total_kb(from._internal_reported_total_kb());
+  }
+  if (from._internal_refaulted_total_kb() != 0) {
+    _this->_internal_set_refaulted_total_kb(from._internal_refaulted_total_kb());
   }
   if (from._internal_google_play_processes() != 0) {
     _this->_internal_set_google_play_processes(from._internal_google_play_processes());
