@@ -1388,9 +1388,6 @@
           "commit": "43e4494a5a78317819dcc2766a11927c12ef3dfd",
           "cone": [
             "compat/libgenfslabelsversion"
-          ],
-          "exclude": [
-            "Android.bp"
           ]
         },
         {
@@ -2888,9 +2885,6 @@
           "commit": "e066568e98d86db31a9346d30977f3632fa7073c",
           "cone": [
             "compat/libgenfslabelsversion"
-          ],
-          "exclude": [
-            "Android.bp"
           ]
         },
         {
