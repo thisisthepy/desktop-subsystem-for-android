@@ -2592,8 +2592,9 @@ class GuestMemoryTests(unittest.TestCase):
             again = trigger.index("write /sys/module/page_reporting/parameters/rereport 1")
             self.assertLess(trigger.index("write /proc/sys/vm/compact_memory 1"), again)
             self.assertLess(again, trigger.index("setprop vendor.dsa.memory.reclaim 0"))
-            # The last action, which runs whether or not the host asked for compaction.
-            last = trigger[trigger.rindex("on property:"):]
+            # The last of the three, which runs whether or not the host asked for compaction.
+            reclaim = trigger[:trigger.index("on property:vendor.dsa.memory.writeback=1")]
+            last = reclaim[reclaim.rindex("on property:"):]
             self.assertTrue(last.startswith(
                 "on property:vendor.dsa.memory.reclaim=1 && property:sys.boot_completed=1\n"), last)
             self.assertIn("rereport 1", last)
