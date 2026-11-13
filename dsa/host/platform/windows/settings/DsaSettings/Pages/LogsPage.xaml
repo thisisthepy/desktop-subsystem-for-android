@@ -30,9 +30,9 @@
 
         <StackPanel Grid.Row="2">
             <ui:InfoBar Title="{l:Text LogsErrorBar.Title}" Severity="Error" IsClosable="False"
-                        IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" Margin="0,0,0,4" />
+                        IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" />
             <ui:InfoBar Title="{l:Text LogsStatusBar.Title}" Severity="Informational" IsClosable="False"
-                        IsOpen="{Binding HasStatus, Mode=OneWay}" Message="{Binding Status, Mode=OneWay}" Margin="0,0,0,4" />
+                        IsOpen="{Binding HasStatus, Mode=OneWay}" Message="{Binding Status, Mode=OneWay}" />
         </StackPanel>
 
         <Grid Grid.Row="3" Margin="0,8,0,8">
