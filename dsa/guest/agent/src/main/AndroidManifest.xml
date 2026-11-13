@@ -46,6 +46,11 @@
     <uses-permission android:name="android.permission.INJECT_EVENTS" />
     <!-- Hearing the Escapes no app takes (key gesture events), which become Back. -->
     <uses-permission android:name="android.permission.MANAGE_KEY_GESTURES" />
+    <!--
+      Being the status bar the window manager reports the system bars' live appearance to,
+      which the host's caption buttons follow: the guest has no SystemUI to be it.
+    -->
+    <uses-permission android:name="android.permission.STATUS_BAR_SERVICE" />
     <!-- Reading the label and launcher activity of any app. -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
     <!--

@@ -96,10 +96,12 @@ pub enum ToHost {
         task_id: i32,
         editor: crate::ime::ImeEditor,
     },
-    /// The tone of the window's caption buttons, which follows the app's status bar.
+    /// The tone of the window's caption buttons, which follows the app's status bar; `None`
+    /// when the app expressed nothing, so the window reads it from the pixels under its band.
+    /// On the wire, `None` is the tone left unspecified.
     CaptionTone {
         task_id: i32,
-        tone: CaptionTone,
+        tone: Option<CaptionTone>,
     },
     /// How the window is shown, and whether the user may resize it.
     Mode {
@@ -1083,8 +1085,9 @@ pub fn to_wire(message: &ToHost) -> Body {
         ToHost::CaptionTone { task_id, tone } => {
             use dsa_protocol::window_host::types::{CaptionTone as WireTone, SetCaptionTone};
             let tone = match tone {
-                CaptionTone::DarkGlyphs => WireTone::DarkGlyphs,
-                CaptionTone::LightGlyphs => WireTone::LightGlyphs,
+                Some(CaptionTone::DarkGlyphs) => WireTone::DarkGlyphs,
+                Some(CaptionTone::LightGlyphs) => WireTone::LightGlyphs,
+                None => WireTone::Unspecified,
             };
             Body::SetCaptionTone(SetCaptionTone {
                 task_id,
@@ -1224,10 +1227,12 @@ pub fn to_host_from_wire(body: &Body) -> Option<ToHost> {
             use dsa_protocol::window_host::types::CaptionTone as WireTone;
             ToHost::CaptionTone {
                 task_id: set.task_id,
-                // A tone this build does not know reads as the default, dark glyphs.
+                // An unspecified tone, or one this build does not know, says nothing: the
+                // window reads the tone from its pixels.
                 tone: match set.tone() {
-                    WireTone::LightGlyphs => CaptionTone::LightGlyphs,
-                    WireTone::DarkGlyphs | WireTone::Unspecified => CaptionTone::DarkGlyphs,
+                    WireTone::LightGlyphs => Some(CaptionTone::LightGlyphs),
+                    WireTone::DarkGlyphs => Some(CaptionTone::DarkGlyphs),
+                    WireTone::Unspecified => None,
                 },
             }
         }
@@ -1989,11 +1994,15 @@ mod tests {
             },
             ToHost::CaptionTone {
                 task_id: 8,
-                tone: CaptionTone::LightGlyphs,
+                tone: Some(CaptionTone::LightGlyphs),
             },
             ToHost::CaptionTone {
                 task_id: 9,
-                tone: CaptionTone::DarkGlyphs,
+                tone: None,
+            },
+            ToHost::CaptionTone {
+                task_id: 9,
+                tone: Some(CaptionTone::DarkGlyphs),
             },
             ToHost::CaptionMode {
                 task_id: 10,

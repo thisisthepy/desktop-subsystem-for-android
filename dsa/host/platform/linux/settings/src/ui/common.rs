@@ -127,6 +127,43 @@ pub fn action_row(title: &str, subtitle: &str) -> adw::ActionRow {
     row
 }
 
+/// A row that shows a property: its name as the title and its value under it, which can be
+/// selected and copied.
+pub fn property_row(title: &str) -> adw::ActionRow {
+    let row = action_row(title, "");
+    row.set_subtitle_selectable(true);
+    row.add_css_class("property");
+    row
+}
+
+/// A row with a box to type a value in.
+pub fn entry_row(title: &str) -> adw::EntryRow {
+    adw::EntryRow::builder()
+        .title(title)
+        .use_markup(false)
+        .build()
+}
+
+/// A row that opens to show more rows under it.
+pub fn expander_row(title: &str, subtitle: &str) -> adw::ExpanderRow {
+    let row = adw::ExpanderRow::builder()
+        .title(title)
+        .use_markup(false)
+        .build();
+    if !subtitle.is_empty() {
+        row.set_subtitle(subtitle);
+    }
+    row
+}
+
+/// A block of text at the top of a group, such as a device's name over its maker, spaced from
+/// the rows below it as GNOME's About shows the device.
+pub fn heading_block() -> gtk::Box {
+    let block = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    block.set_margin_bottom(6);
+    block
+}
+
 /// A row that shows a value on its right, which can be selected and copied.
 pub fn value_row(title: &str, value: &str) -> (adw::ActionRow, gtk::Label) {
     let row = action_row(title, "");
@@ -166,7 +203,7 @@ pub fn copy_button(source: &gtk::Label) -> gtk::Button {
 /// A row that shows one command in monospaced, selectable text, with a copy button that
 /// copies exactly that command.
 pub fn command_row(command: &str) -> (adw::ActionRow, gtk::Label) {
-    let row = adw::ActionRow::new();
+    let row = action_row("", "");
     let label = gtk::Label::builder()
         .label(command)
         .selectable(true)
