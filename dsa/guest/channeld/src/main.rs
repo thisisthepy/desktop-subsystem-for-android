@@ -469,6 +469,21 @@ mod daemon {
             // What Android reads back while it boots and settles is not an app's working set.
             reclaimer.booted(read_property("vendor.dsa.boot_completed") == "1");
             let learnt_before = reclaimer.learns_working_set();
+            // Nor is what an app reads while it starts; a minimized task keeps less cache.
+            let launching_before = reclaimer.launching();
+            reclaimer.tasks_seen(start.elapsed(), tasks, router.tasks_shown());
+            if reclaimer.launching() != launching_before {
+                say!(
+                    "{}",
+                    if reclaimer.launching() {
+                        "an app is starting: what it reads back for the next minute does not \
+                         raise the working set target"
+                    } else {
+                        "the app has started: evicted page cache read back raises the working \
+                         set target again"
+                    }
+                );
+            }
             if let Some(refaults) = vmstat
                 .ok()
                 .and_then(|text| file_refaults_kb(&text, page_kb))
