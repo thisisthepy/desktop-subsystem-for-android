@@ -466,11 +466,21 @@ mod daemon {
             ) {
                 say!("{line}");
             }
+            // What Android reads back while it boots and settles is not an app's working set.
+            reclaimer.booted(read_property("vendor.dsa.boot_completed") == "1");
+            let learnt_before = reclaimer.learns_working_set();
             if let Some(refaults) = vmstat
                 .ok()
                 .and_then(|text| file_refaults_kb(&text, page_kb))
             {
                 reclaimer.refaults(refaults);
+            }
+            if reclaimer.learns_working_set() != learnt_before {
+                say!(
+                    "Android has settled after its boot: evicted page cache read back now raises \
+                     the working set target (now {} MiB)",
+                    reclaimer.working_set_target_kb() / 1024
+                );
             }
             let reason = if app_closed {
                 reclaimer.app_closed(start.elapsed(), tasks, &memory)
