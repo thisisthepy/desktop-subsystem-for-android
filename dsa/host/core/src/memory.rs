@@ -1190,12 +1190,23 @@ pub struct IdleTrim {
     repeat: Duration,
     /// The current quiet stretch (windows shown, no new frame) has had its trim.
     quiet_trimmed: bool,
+    /// When the process last let go of something large (its video decoders), not yet
+    /// followed by a give-back.
+    let_go_at: Option<Instant>,
+    /// When the windows shown last had their periodic give-back, while some are shown.
+    shown_trim_at: Option<Instant>,
 }
 
 /// How long shown windows must go without a new frame before the window manager gives back the
 /// GPU driver's spare memory. An app that shows a still screen draws nothing; one that is
 /// animating never reaches it, so nothing it renders waits for memory the driver let go.
 pub const QUIET_TRIM_DELAY: Duration = Duration::from_secs(5);
+
+/// How long after the process let go of something large (the last video decoder closed) it
+/// gives back the free memory that left behind. A few seconds, so a video that ends and the
+/// next one that opens at once (autoplay, a change of quality) do not trim between them;
+/// short enough that the memory is back before anyone looks.
+pub const LET_GO_TRIM_DELAY: Duration = Duration::from_secs(5);
 
 impl IdleTrim {
     /// Starts idle, as at start-up, when no window is open yet.
@@ -1209,7 +1220,56 @@ impl IdleTrim {
             last_trim: None,
             repeat: IDLE_TRIM_REPEAT,
             quiet_trimmed: false,
+            let_go_at: None,
+            shown_trim_at: None,
         }
+    }
+
+    /// Takes in that the process let go of something large, such as its video decoders once
+    /// the last video closed. Their memory goes back to the heaps and the GPU driver, which
+    /// keep it committed for the next allocation, so it stays the process's until a
+    /// give-back ([`spare_due`](Self::spare_due)) returns it.
+    pub fn let_go(&mut self, now: Instant) {
+        self.let_go_at = Some(now);
+    }
+
+    /// Whether to give back the heaps' free memory and the GPU driver's spare memory now
+    /// while windows may be shown (the working set stays, so shown windows lose nothing):
+    /// [`LET_GO_TRIM_DELAY`] after the process let go of something large, and every
+    /// [`IDLE_TRIM_REPEAT`] while windows are shown, whether or not their frames keep
+    /// coming. Windows that animate never get the quiet trim ([`quiet_due`](Self::quiet_due)),
+    /// so without the round the memory any freed allocation left behind would stay for as
+    /// long as an animating window is open. With no window shown the idle give-back
+    /// ([`due`](Self::due)) covers both.
+    pub fn spare_due(&mut self, now: Instant) -> bool {
+        let shown = !self.open.is_empty() && !self.all_hidden;
+        let let_go = self
+            .let_go_at
+            .is_some_and(|at| now.saturating_duration_since(at) >= LET_GO_TRIM_DELAY);
+        if !shown {
+            // The idle give-back takes everything; the round starts again with a shown window.
+            self.shown_trim_at = None;
+            if !let_go {
+                return false;
+            }
+            self.let_go_at = None;
+            // Once the idle give-back has run it runs again only every repeat, so the memory
+            // let go since goes back now rather than then; before it has run, it takes it.
+            return self.trimmed;
+        }
+        let round = match self.shown_trim_at {
+            Some(at) => now.saturating_duration_since(at) >= self.repeat,
+            None => {
+                self.shown_trim_at = Some(now);
+                false
+            }
+        };
+        if let_go || round {
+            self.let_go_at = None;
+            self.shown_trim_at = Some(now);
+            return true;
+        }
+        false
     }
 
     /// Takes in a change to the guest's tasks. `None` says the tasks are unknown (the service

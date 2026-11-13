@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use dsa_host_core::compositor::{GraphicsRenderer, GraphicsStreamKind};
 use dsa_host_core::memory::RendererMemory;
-use dsa_host_core::renderer::{device_resets, RendererProcessMemory};
+use dsa_host_core::renderer::{device_resets, Allocations, RendererOwners, RendererProcessMemory};
 use dsa_protocol::renderer::types::DeviceState;
 use dsa_transport::{Connection, FrameSender};
 
@@ -78,6 +78,42 @@ struct MemoryStats {
 }
 
 type GetMemoryStatsFn = unsafe extern "C" fn(*mut MemoryStats) -> c_int;
+
+/// The renderer's allocations by owner, as `dsa_gfx_memory_owners` lays it out: by kind
+/// (GPU-only, CPU-mapped, imported), on its own device and on the guests' devices.
+#[repr(C)]
+#[derive(Default)]
+struct MemoryOwners {
+    renderer_bytes: [u64; 3],
+    guest_bytes: [u64; 3],
+    largest_guest_device_bytes: [u64; 4],
+    renderer_count: [u32; 3],
+    guest_count: [u32; 3],
+    guest_devices: u32,
+    /// Keeps the layout of the backend's struct; never read.
+    _reserved: u32,
+}
+
+type GetMemoryOwnersFn = unsafe extern "C" fn(*mut MemoryOwners) -> c_int;
+
+fn renderer_owners(owners: &MemoryOwners) -> RendererOwners {
+    let kinds = |bytes: &[u64; 3], counts: &[u32; 3]| {
+        std::array::from_fn(|kind| Allocations {
+            kb: bytes[kind] / 1024,
+            count: counts[kind],
+        })
+    };
+    RendererOwners {
+        renderer: kinds(&owners.renderer_bytes, &owners.renderer_count),
+        guests: kinds(&owners.guest_bytes, &owners.guest_count),
+        guest_devices: owners.guest_devices,
+        largest_guest_devices_kb: owners
+            .largest_guest_device_bytes
+            .iter()
+            .map(|bytes| bytes / 1024)
+            .collect(),
+    }
+}
 
 fn renderer_memory(stats: &MemoryStats) -> RendererMemory {
     RendererMemory {
@@ -283,6 +319,11 @@ pub trait GfxBackend: Send + Sync {
         None
     }
 
+    /// The same memory by whose device it is on. `None` from a backend that cannot say.
+    fn memory_owners(&self) -> Option<RendererOwners> {
+        None
+    }
+
     /// Makes every Vulkan device of the renderer act lost, as a GPU reset leaves them, for a
     /// test. Returns whether the backend could.
     fn simulate_device_loss(&self) -> bool {
@@ -344,6 +385,8 @@ pub struct NativeBackend {
     fn_forget_display: Option<unsafe extern "C" fn(u32)>,
     /// Absent from a backend built before the renderer counted its memory.
     fn_get_memory_stats: Option<GetMemoryStatsFn>,
+    /// Absent from a backend built before the renderer said whose its memory is.
+    fn_get_memory_owners: Option<GetMemoryOwnersFn>,
     /// Absent from a backend built before it survived a GPU reset.
     fn_simulate_device_loss: Option<unsafe extern "C" fn() -> c_int>,
     fn_device_generation: Option<unsafe extern "C" fn() -> u64>,
@@ -397,6 +440,8 @@ impl NativeBackend {
             let fn_forget_display = Self::get_symbol(handle, b"dsa_gfx_forget_display\0").ok();
             let fn_get_memory_stats: Option<GetMemoryStatsFn> =
                 Self::get_symbol(handle, b"dsa_gfx_get_memory_stats\0").ok();
+            let fn_get_memory_owners: Option<GetMemoryOwnersFn> =
+                Self::get_symbol(handle, b"dsa_gfx_get_memory_owners\0").ok();
             let fn_simulate_device_loss =
                 Self::get_symbol(handle, b"dsa_gfx_simulate_device_loss\0").ok();
             let fn_device_generation =
@@ -432,6 +477,7 @@ impl NativeBackend {
                     fn_get_gpu_info,
                     fn_forget_display,
                     fn_get_memory_stats,
+                    fn_get_memory_owners,
                     fn_simulate_device_loss,
                     fn_device_generation,
                     fn_device_losses,
@@ -597,6 +643,16 @@ impl GfxBackend for NativeBackend {
             return None;
         }
         Some(renderer_memory(&stats))
+    }
+
+    fn memory_owners(&self) -> Option<RendererOwners> {
+        let get_memory_owners = self.fn_get_memory_owners?;
+        let mut owners = MemoryOwners::default();
+        // SAFETY: `owners` has the layout the backend fills.
+        if unsafe { get_memory_owners(&mut owners) } != 0 {
+            return None;
+        }
+        Some(renderer_owners(&owners))
     }
 
     fn simulate_device_loss(&self) -> bool {
@@ -823,6 +879,13 @@ impl GfxstreamAdapter {
     /// What the renderer holds in memory, as it counts it; `None` when it cannot say.
     pub fn counted_memory(&self) -> Option<RendererMemory> {
         self.backend.as_ref().and_then(|backend| backend.memory())
+    }
+
+    /// The same memory by whose device it is on; `None` when it cannot say.
+    pub fn counted_owners(&self) -> Option<RendererOwners> {
+        self.backend
+            .as_ref()
+            .and_then(|backend| backend.memory_owners())
     }
 
     /// Whether the graphics backend is available and ready to serve streams.
@@ -1396,5 +1459,27 @@ mod tests {
         // The layout matches the backend's `dsa_gfx_memory_stats`: four 64-bit sizes, then
         // three counts and the process count.
         assert_eq!(std::mem::size_of::<MemoryStats>(), 48);
+    }
+
+    #[test]
+    fn nfr1_the_renderers_memory_is_read_by_owner() {
+        let owners = MemoryOwners {
+            renderer_bytes: [300 << 20, 0, 159 << 20],
+            guest_bytes: [104 << 20, 116 << 20, 0],
+            largest_guest_device_bytes: [60 << 20, 40 << 20, 0, 0],
+            renderer_count: [120, 0, 126],
+            guest_count: [49, 56, 0],
+            guest_devices: 10,
+            _reserved: 0,
+        };
+        let read = renderer_owners(&owners);
+        assert_eq!(read.renderer[0].kb, 300 * 1024);
+        assert_eq!(read.renderer[2].count, 126);
+        assert_eq!(read.guests[1].kb, 116 * 1024);
+        assert_eq!(read.guest_devices, 10);
+        assert_eq!(read.largest_guest_devices_kb, [60 * 1024, 40 * 1024, 0, 0]);
+        // The layout matches the backend's `dsa_gfx_memory_owners`: ten 64-bit sizes, then
+        // six counts, the device count and a spare.
+        assert_eq!(std::mem::size_of::<MemoryOwners>(), 112);
     }
 }

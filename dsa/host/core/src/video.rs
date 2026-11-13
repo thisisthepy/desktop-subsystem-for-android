@@ -151,6 +151,12 @@ pub trait VideoDecoders: Send + Sync {
     /// Opens a decoder for `codec`, for a stream of about `width` by `height` (0 when not
     /// known).
     fn open(&self, codec: Codec, width: u32, height: u32) -> Result<Box<dyn VideoDecoder>, String>;
+    /// Every connection has ended and every decoder is closed. A platform whose decoders
+    /// share a device or a media library lets it go here, since nothing uses it until the
+    /// guest opens a decoder again: a host that kept them would hold the memory a video
+    /// played with for as long as it runs. Called by [`serve`] each time the last running
+    /// connection ends; a decoder may open again at any moment after.
+    fn all_closed(&self) {}
 }
 
 /// Why a connection ended.
@@ -388,6 +394,8 @@ pub fn serve_connection(
 /// Accepts connections on `listener` until `stop` is set, and runs each on a thread of its
 /// own, at most [`MAX_DECODERS`] at once. `log` takes a line for each connection that ends on
 /// an error. A listener that fails (the guest's VM went away) is tried again a second later.
+/// Each time the last running connection ends, its decoder already closed, `decoders` hears
+/// it ([`VideoDecoders::all_closed`]).
 pub fn serve(
     mut listener: Box<dyn Listener>,
     decoders: Arc<dyn VideoDecoders>,
@@ -429,7 +437,10 @@ pub fn serve(
                 if let VideoEnd::Failed(why) = end {
                     log(&format!("video: a decoder ended: {why}"));
                 }
-                counter.fetch_sub(1, Ordering::SeqCst);
+                // The connection's decoder was dropped when serve_connection returned.
+                if counter.fetch_sub(1, Ordering::SeqCst) == 1 {
+                    decoders.all_closed();
+                }
             });
         if spawned.is_err() {
             running.fetch_sub(1, Ordering::SeqCst);

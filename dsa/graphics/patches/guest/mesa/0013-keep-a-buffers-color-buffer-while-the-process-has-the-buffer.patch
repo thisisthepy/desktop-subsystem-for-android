@@ -1,7 +1,7 @@
 diff --git a/src/gfxstream/guest/android/GrallocMinigbm.cpp b/src/gfxstream/guest/android/GrallocMinigbm.cpp
 --- a/src/gfxstream/guest/android/GrallocMinigbm.cpp
 +++ b/src/gfxstream/guest/android/GrallocMinigbm.cpp
-@@ -110,46 +110,54 @@
+@@ -110,46 +110,57 @@
  void MinigbmGralloc::release(AHardwareBuffer* ahb) {
      if (ahb) {
          const native_handle_t* handle = AHardwareBuffer_getNativeHandle(ahb);
@@ -28,6 +28,9 @@ diff --git a/src/gfxstream/guest/android/GrallocMinigbm.cpp b/src/gfxstream/gues
 +                closed = mColorBufferRefs.drop(bufferId);
              }
 +            closeHostHandle(closed);
++            // A process in the background submits nothing, so the buffers it let go of since
++            // its last submit close here, as its Vulkan objects go, rather than never.
++            closeReleasedBuffers();
          }
 -        AHardwareBuffer_release(ahb);
      }
@@ -82,7 +85,7 @@ diff --git a/src/gfxstream/guest/android/GrallocMinigbm.cpp b/src/gfxstream/gues
  }
  
  uint32_t MinigbmGralloc::holdHostHandle(const native_handle_t* handle) {
-@@ -160,10 +168,8 @@
+@@ -160,10 +171,8 @@
      }
      cros_gralloc_handle const* cros_handle = reinterpret_cast<cros_gralloc_handle const*>(handle);
      std::lock_guard<std::mutex> lock(mColorBufferMutex);
@@ -95,7 +98,7 @@ diff --git a/src/gfxstream/guest/android/GrallocMinigbm.cpp b/src/gfxstream/gues
      return hostHandle;
  }
  
-@@ -171,24 +177,16 @@
+@@ -171,24 +180,18 @@
      if (hostHandle == 0 || mDevice) {
          return;
      }
@@ -121,10 +124,12 @@ diff --git a/src/gfxstream/guest/android/GrallocMinigbm.cpp b/src/gfxstream/gues
 +        closed = mColorBufferRefs.drop(bufferId);
      }
 +    closeHostHandle(closed);
++    // As in release: a window's images go when its app goes to the background.
++    closeReleasedBuffers();
  }
  
  int MinigbmGralloc::lock(AHardwareBuffer* ahb, uint8_t** ptr) {
-@@ -233,14 +231,16 @@
+@@ -233,14 +236,16 @@
      // ColorBuffer, so its handle is derived from the buffer ID the allocator writes into
      // the gralloc handle (dsa_shared_color_buffer.h). The first process to use the buffer
      // creates the ColorBuffer with that handle; the others open it. Each process holds one
@@ -146,7 +151,7 @@ diff --git a/src/gfxstream/guest/android/GrallocMinigbm.cpp b/src/gfxstream/gues
          }
      }
  
-@@ -270,7 +270,9 @@
+@@ -270,7 +275,9 @@
      {
          std::lock_guard<std::mutex> lock(mColorBufferMutex);
          // Another thread may have opened it meanwhile: this process keeps one reference.
