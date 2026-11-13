@@ -38,7 +38,7 @@ pub fn identity(ctx: &Shared) -> gtk::Widget {
     page.add(&banner_group);
     let specs = group(
         &tr("Device specifications"),
-        Some(&tr("These follow this computer and are read again each time Android starts, so a renamed computer is followed from the next start. Android's own Settings shows the device name and the chip; the model name is shown only here, as Android's Settings has no place for it.")),
+        Some(&tr("These follow this computer and are read again each time Android starts.\nAndroid's Settings shows the device name and the chip.\nThe model name shows only here, as Android's Settings has no place for it.")),
     );
     let copy = gtk::Button::with_label(&tr("Copy"));
     copy.add_css_class("flat");
@@ -62,11 +62,11 @@ pub fn identity(ctx: &Shared) -> gtk::Widget {
 
     let intro = group(
         &tr("What Android reports"),
-        Some(&tr("The names and build fingerprint Android reports to apps. Leave a box empty to keep the value shown in it. Android reads these when it starts, so a change applies from its next start.")),
+        Some(&tr("The names and build fingerprint Android reports to apps. Leave a box empty to keep the value shown.\nChanges apply from the next start of Android.")),
     );
     let warning = action_row(
         &tr("Apps may notice"),
-        &tr("Changing the model or the fingerprint can change how apps behave: some check the device before they run, and payment and integrity checks may fail."),
+        &tr("Changing the model or the fingerprint can change how apps behave.\nSome check the device before they run, and payment and integrity checks may fail."),
     );
     warning.add_prefix(&gtk::Image::from_icon_name("dialog-warning-symbolic"));
     intro.add(&warning);
@@ -284,7 +284,7 @@ pub fn identity(ctx: &Shared) -> gtk::Widget {
             confirm(
                 &ctx,
                 &tr("Reset the device identity?"),
-                &tr("Every value goes back to its default: this computer's, or DSA's own where the computer does not say. It applies from the next start of Android."),
+                &tr("Every value goes back to its default: this computer's, or DSA's own where the computer does not say.\n\nIt applies from the next start of Android."),
                 &tr("Reset to defaults"),
                 true,
                 move || {
@@ -370,7 +370,7 @@ pub fn network(ctx: &Shared) -> gtk::Widget {
     // `certificates` replaces each time the service answers.
     let certificates = Rows::new(group(
         &tr("Trusted certificates"),
-        Some(&tr("Root certificates that you or an administrator added to this computer, such as a company's or a security program's. The certificates that come with the system are not listed; Android has its own.")),
+        Some(&tr("Root certificates you or an administrator added to this computer, such as a company's or a security program's.\nThe system's own certificates are not listed: Android has its own.")),
     ));
     let certificate_switch: Rc<RefCell<Option<Switch>>> = Rc::default();
     let show: Rc<dyn Fn(Result<Settings, crate::api::Failure>)> = Rc::new({
@@ -415,7 +415,7 @@ pub fn network(ctx: &Shared) -> gtk::Widget {
         let (ctx, show, slot) = (ctx.clone(), show.clone(), switch.clone());
         Switch::new(
             &tr("Advanced networking"),
-            &tr("Off by default. When on, Android joins this computer's network as a device of its own: other devices on the network can reach Android apps, and Android apps can reach them directly. Programs on this computer can always reach a server in Android at the address above."),
+            &tr("Off by default. When on, Android joins this computer's network as a device of its own.\nOther devices on the network and Android apps can then reach each other directly.\nPrograms on this computer can always reach a server in Android at the address above."),
             move |on| {
                 let (show, slot) = (show.clone(), slot.clone());
                 request(&ctx, move |c| c.switch("advanced-networking", on), move |r| {
@@ -436,7 +436,7 @@ pub fn network(ctx: &Shared) -> gtk::Widget {
         let (ctx, show, slot) = (ctx.clone(), show.clone(), certificate_switch.clone());
         Switch::new(
             &tr("Trust certificates added to this computer"),
-            &tr("On by default. When on, Android apps trust the root certificates listed below as they trust Android's own, so sites and servers that this computer trusts open in Android too. The change applies at once."),
+            &tr("On by default. Android apps trust the certificates listed below as they trust Android's own.\nSites and servers this computer trusts then open in Android too. The change applies at once."),
             move |on| {
                 let (show, slot) = (show.clone(), slot.clone());
                 request(&ctx, move |c| c.set_host_certificates(on), move |r| {
@@ -544,7 +544,7 @@ pub fn advanced(ctx: &Shared) -> gtk::Widget {
     let file_sharing = user_switch(
         "file-sharing",
         tr("Share folders with Android"),
-        tr("On by default: the folders chosen below show in Android's shared storage, so Android apps can open and save files there. Android apps reach them only with Android's storage permission, and they can do only what your own account may do."),
+        tr("On by default. The folders chosen below show in Android's shared storage, for Android apps to open and save files.\nApps need Android's storage permission, and can do only what your own account may do."),
     );
     files.add(&file_sharing.row);
     let folders_row = adw::ExpanderRow::builder()
@@ -578,7 +578,7 @@ pub fn advanced(ctx: &Shared) -> gtk::Widget {
     files.add(&folders_row);
     let android_files = link_row(
         &tr("Android files"),
-        &tr("Opens Android's shared storage in the file manager: the files Android apps saved, such as photos and downloads. Android starts if it is not running. DSA Files in the app grid does the same."),
+        &tr("Opens Android's shared storage in the file manager: the files Android apps saved, such as photos.\nAndroid starts if it is not running. DSA Files in the app grid does the same."),
     );
     files.add(&android_files);
     // A row of its own, so the text wraps inside the group like the other rows.
@@ -602,7 +602,7 @@ pub fn advanced(ctx: &Shared) -> gtk::Widget {
     let links = user_switch(
         "links-in-android",
         tr("Open web links in Android apps"),
-        tr("Off by default: a web link you tap in an Android app opens in your default browser on this computer. On, it opens in an Android app, as on a phone. A link an installed app has verified as its own opens in that app either way."),
+        tr("Off by default: a web link you tap in an Android app opens in your default browser on this computer.\nOn, it opens in an Android app, as on a phone.\nA link an installed app has verified as its own opens in that app either way."),
     );
     files.add(&links.row);
     page.add(&files);
@@ -612,7 +612,7 @@ pub fn advanced(ctx: &Shared) -> gtk::Widget {
     let arm = user_switch(
         "arm-translation",
         tr("Run apps built only for ARM"),
-        tr("Many Android apps contain code only for ARM processors. They install and run here only through an ARM translator. Android uses the open source translator that comes with it, unless you install another ARM translation package (dsa arm-translation install) or Google's translator. This switch decides whether Android uses a translator at all; it applies from the next start of Android. Only 64-bit ARM apps (arm64-v8a) can run."),
+        tr("Many Android apps have code only for ARM processors. They run here only through an ARM translator.\nAndroid uses its own open source translator, unless you install another (dsa arm-translation install) or Google's.\nOff, Android uses no translator at all. Changes apply from the next start of Android.\nOnly 64-bit ARM apps (arm64-v8a) can run."),
     );
     arm_group.add(&arm.row);
     let (arm_status_row, arm_status) = value_row(&tr("Status"), "");
@@ -700,13 +700,13 @@ pub fn advanced(ctx: &Shared) -> gtk::Widget {
     let clipboard = user_switch(
         "clipboard",
         tr("Share the clipboard with Android"),
-        tr("On by default: text you copy on this computer can be pasted in Android apps, and text copied in Android can be pasted on this computer. Images stay where they were copied."),
+        tr("On by default: text copied on this computer can be pasted in Android apps, and the other way round.\nImages stay where they were copied."),
     );
     developer_group.add(&clipboard.row);
     let freeze = user_switch(
         "freeze",
         tr("Freeze Android when idle"),
-        tr("Off by default: an idle Android dozes and still receives notifications. Frozen, it uses no CPU but receives nothing until you open an app."),
+        tr("Off by default: an idle Android dozes and still receives notifications.\nFrozen, it uses no CPU but receives nothing until you open an app."),
     );
     developer_group.add(&freeze.row);
     page.add(&developer_group);
@@ -714,12 +714,12 @@ pub fn advanced(ctx: &Shared) -> gtk::Widget {
     // Root access: it applies to every user of the computer, from the next start of Android.
     let root_group = group(
         &tr("Root access"),
-        Some(&tr("This applies to every user of this computer, so changing it asks for an administrator's permission. Choose each app's level under Apps.")),
+        Some(&tr("This applies to every user of this computer, so changing it asks for an administrator's permission.\nChoose each app's level under Apps.")),
     );
     let root_elevation = machine_switch(
         "root-elevation",
         tr("Let Android apps ask for root"),
-        tr("An app you allow under Apps can run commands as root once an administrator of this computer approves, as sudo does. Off by default. The Android image, its build properties and SELinux stay as they are."),
+        tr("Off by default. An app you allow under Apps can run commands as root once an administrator approves, as with sudo.\nThe Android image, its build properties and SELinux stay as they are."),
     );
     root_group.add(&root_elevation.row);
     let root_restart = action_row(
@@ -745,18 +745,18 @@ pub fn advanced(ctx: &Shared) -> gtk::Widget {
     // Diagnostics: they apply to every user of the computer.
     let diagnostics = group(
         &tr("Diagnostics"),
-        Some(&tr("The traces go to the DSA logs below and make them grow, so turn them on only to report a problem. They apply to every user of this computer, so changing them asks for an administrator's permission.")),
+        Some(&tr("The traces make the DSA logs below grow, so turn them on only to report a problem.\nThey apply to every user of this computer, so changing them asks for an administrator's permission.")),
     );
     let input_trace = machine_switch(
         "input-trace",
         tr("Input trace"),
-        tr("Every DSA process writes when each touch, click and key reaches it, so the delay from your input to the picture can be measured. Off by default."),
+        tr("Every DSA process records when each touch, click and key reaches it, to measure the delay to the picture.\nOff by default."),
     );
     diagnostics.add(&input_trace.row);
     let resize_trace = machine_switch(
         "resize-trace",
         tr("Resize trace"),
-        tr("Every DSA process writes each stage of each window resize, to find where a resize is slow or flickers. Off by default."),
+        tr("Every DSA process records each stage of each window resize, to find where it is slow or flickers.\nOff by default."),
     );
     diagnostics.add(&resize_trace.row);
     page.add(&diagnostics);
@@ -806,7 +806,7 @@ pub fn advanced(ctx: &Shared) -> gtk::Widget {
     let reset_group = group(&tr("Reset"), None);
     let (reset_row, reset) = button_row(
         &tr("Reset Android's data"),
-        &tr("Erases every app you installed, your accounts and the data of every app, so Android starts as it was first installed. The Android image and these settings stay."),
+        &tr("Erases every app you installed, your accounts and every app's data. Android starts as it was first installed.\nThe Android image and these settings stay."),
         &tr("Reset"),
     );
     reset.add_css_class("destructive-action");
@@ -819,7 +819,7 @@ pub fn advanced(ctx: &Shared) -> gtk::Widget {
             confirm(
                 &ctx,
                 &tr("Reset Android's data?"),
-                &tr("This erases every app you installed in Android, the accounts you signed in to and the data of every app. Android stops now, and its next start is as it was first installed. The Android image and DSA's settings stay. This cannot be undone."),
+                &tr("This erases from Android:\n• every app you installed\n• the accounts you signed in to\n• the data of every app\n\nAndroid stops now. Its next start is as it was first installed.\n\nThe Android image and DSA's settings stay.\n\nThis cannot be undone."),
                 &tr("Reset"),
                 true,
                 move || {
@@ -917,13 +917,13 @@ fn developer(ctx: &Shared, page: &Rc<Page>) -> adw::PreferencesGroup {
     let developer = user_switch(
         "developer-mode",
         tr("Developer mode"),
-        tr("Off by default. When on, adb on this computer can connect to Android without asking in Android, through a port only this computer can reach. Turn it off when you are done."),
+        tr("Off by default. When on, adb on this computer connects to Android without asking in Android.\nThe port is reachable only from this computer. Turn it off when you are done."),
     );
     developer_group.add(&developer.row);
     let auto_connect = user_switch(
         "adb-auto-connect",
         tr("Connect adb automatically"),
-        tr("On by default. While developer mode is on, Android shows up in adb devices and Android Studio without running adb connect. If you run adb disconnect, it stays off until the adb server restarts."),
+        tr("On by default. While developer mode is on, Android shows in adb devices and Android Studio without adb connect.\nAfter adb disconnect, it stays off until the adb server restarts."),
     );
     developer_group.add(&auto_connect.row);
     developer_group.add(&auto_connect_state);
@@ -996,7 +996,7 @@ struct GoogleArm {
 fn google_arm_rows(arm_group: &adw::PreferencesGroup) -> GoogleArm {
     let (get_row, get) = button_row(
         &tr("Google's ARM translator"),
-        &tr("Gets the ARM translator from the Android emulator image Google offers for this Android version and installs it as a translation package. DSA does not include or pass on Google's translator: your computer downloads the image from Google, under Google's Android SDK License, keeps only the translator and deletes the rest (about 2 GB). Nothing is downloaded until you agree. A package built from another translator, such as Digitalis, does the same job."),
+        &tr("Installs the ARM translator from the Android emulator image Google offers for this Android version.\nDownloads about 2 GB from Google, under Google's Android SDK License, and keeps only the translator.\nNothing is downloaded until you agree. DSA does not include or pass on Google's translator.\nA package built from another translator, such as Digitalis, does the same job."),
         &tr("Get"),
     );
     get.add_css_class("suggested-action");
@@ -1069,7 +1069,7 @@ impl GoogleArm {
 fn google_play(ctx: &Shared, page: &Rc<Page>) {
     let gapps_group = group(
         &tr("Google Play"),
-        Some(&tr("Google Play services and the Play Store are not part of DSA. When you ask, DSA downloads LiteGapps Core, a public package of Google's apps, and installs it in your Android. Without it, the rest of DSA works as before.")),
+        Some(&tr("Google Play services and the Play Store are not part of DSA.\nWhen you ask, DSA downloads LiteGapps Core, a public package of Google's apps, and installs it in your Android.\nWithout it, the rest of DSA works as before.")),
     );
     let (status_row, status) = value_row(&tr("Status"), "");
     gapps_group.add(&status_row);
@@ -1084,7 +1084,7 @@ fn google_play(ctx: &Shared, page: &Rc<Page>) {
     gapps_group.add(&restart);
     let (install_row, install) = button_row(
         &tr("Install Google Play"),
-        &tr("Downloads LiteGapps Core for your Android version from the LiteGapps project, about 120 to 260 MB, checks it and installs it in your Android. Android starts if it is not running. Google Play is there from the next start of Android."),
+        &tr("Downloads LiteGapps Core for your Android version (about 120 to 260 MB) from the LiteGapps project, checks it and installs it.\nAndroid starts if it is not running. Google Play is there from the next start of Android."),
         &tr("Install"),
     );
     install.add_css_class("suggested-action");
@@ -1098,12 +1098,12 @@ fn google_play(ctx: &Shared, page: &Rc<Page>) {
     gapps_group.add(&remove_row);
     let terms = link_row(
         &tr("Google's terms"),
-        &tr("Google's apps belong to Google and follow Google's terms. DSA does not distribute them: it downloads the public LiteGapps package when you ask."),
+        &tr("Google's apps belong to Google and follow Google's terms.\nDSA does not distribute them: it downloads the public LiteGapps package when you ask."),
     );
     gapps_group.add(&terms);
     let register = link_row(
         &tr("Register this device with Google"),
-        &tr("Google has not certified this Android, so Google may refuse to sign you in until you register it. Open Google's registration page, sign in with your Google account and enter the Android ID below."),
+        &tr("Google has not certified this Android, so Google may refuse to sign you in until you register it.\nOpen Google's registration page, sign in with your Google account and enter the Android ID below."),
     );
     gapps_group.add(&register);
     let (id_row, id) = value_row(&tr("Android ID"), "");
@@ -1204,7 +1204,7 @@ fn google_play(ctx: &Shared, page: &Rc<Page>) {
 fn widevine(ctx: &Shared, page: &Rc<Page>) {
     let group_ = group(
         &tr("Protected content"),
-        Some(&tr("Widevine lets streaming apps play protected video. DSA does not include or pass on Google's Widevine: when you ask, your computer downloads the Android emulator image Google offers for this Android version, takes out only the Widevine module unchanged and deletes the rest.")),
+        Some(&tr("Widevine lets streaming apps play protected video.\nDSA does not include or pass on Widevine. When you ask, your computer takes it unchanged from Google's emulator image.")),
     );
     let (status_row, status) = value_row(&tr("Status"), "");
     group_.add(&status_row);
@@ -1223,7 +1223,7 @@ fn widevine(ctx: &Shared, page: &Rc<Page>) {
     group_.add(&quality);
     let (install_row, install) = button_row(
         &tr("Get Widevine"),
-        &tr("Downloads about 2 GB from Google, under Google's Android SDK License, and keeps only Widevine. Nothing is downloaded until you agree. Widevine is there from the next start of Android."),
+        &tr("Downloads about 2 GB from Google, under Google's Android SDK License, and keeps only Widevine.\nNothing is downloaded until you agree. Widevine is there from the next start of Android."),
         &tr("Get"),
     );
     install.add_css_class("suggested-action");

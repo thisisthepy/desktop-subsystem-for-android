@@ -622,7 +622,8 @@ fn fr17_the_log_page_filters_pauses_and_keeps_the_newest_lines() {
 }
 
 /// Every string literal the pages show: one with a letter that has a space or starts with a
-/// capital, and is not a format string or a name in capitals.
+/// capital, and is not a format string or a name in capitals. A `\n` in a literal is the line
+/// break it stands for; a literal with any other escape is not read.
 fn shown_strings() -> Vec<String> {
     let src = crate_dir().join("src");
     let mut files = vec![src.join("view.rs"), src.join("pages.rs")];
@@ -643,6 +644,8 @@ fn shown_strings() -> Vec<String> {
             parts.next();
             while let Some(literal) = parts.next() {
                 parts.next();
+                let literal = literal.replace("\\n", "\n");
+                let literal = literal.as_str();
                 let shown = literal.chars().any(|c| c.is_ascii_alphabetic())
                     && literal.chars().count() >= 2
                     && !literal.starts_with('-')
@@ -758,6 +761,86 @@ fn fr17_every_string_is_translated_into_korean() {
     );
     let linguas = std::fs::read_to_string(crate_dir().join("po/LINGUAS")).unwrap();
     assert!(linguas.lines().any(|l| l.trim() == "ko"));
+}
+
+/// The most columns one paragraph (the text between two line breaks) of a shown string may
+/// take, in English and in Korean alike. A longer one is a wall of text in a row or a dialog.
+const PARAGRAPH_COLUMNS: usize = 140;
+
+/// How many columns `text` takes on screen: an East Asian wide character, such as a Hangul
+/// syllable, takes two and every other character one. A placeholder counts as written.
+fn columns(text: &str) -> usize {
+    text.chars()
+        .map(|c| match u32::from(c) {
+            0x1100..=0x115F
+            | 0x2E80..=0xA4CF
+            | 0xAC00..=0xD7A3
+            | 0xF900..=0xFAFF
+            | 0xFF00..=0xFF60 => 2,
+            _ => 1,
+        })
+        .sum()
+}
+
+/// The paragraphs of `text` that take more than [`PARAGRAPH_COLUMNS`].
+fn long_paragraphs(text: &str) -> Vec<(usize, String)> {
+    text.split('\n')
+        .map(|paragraph| (columns(paragraph), paragraph.to_string()))
+        .filter(|(width, _)| *width > PARAGRAPH_COLUMNS)
+        .collect()
+}
+
+#[test]
+fn fr17_no_paragraph_of_a_shown_string_is_too_long() {
+    let ko = catalogue(&crate_dir().join("po/ko.po"));
+    let mut english: Vec<String> = ko.keys().filter(|id| !id.is_empty()).cloned().collect();
+    english.extend(shown_strings());
+    let mut too_long = Vec::new();
+    for text in &english {
+        for (width, paragraph) in long_paragraphs(text) {
+            too_long.push(format!("English, {width} columns: {paragraph}"));
+        }
+    }
+    for (id, korean) in &ko {
+        if id.is_empty() {
+            continue;
+        }
+        for (width, paragraph) in long_paragraphs(korean) {
+            too_long.push(format!("Korean, {width} columns: {paragraph}"));
+        }
+    }
+    assert!(
+        too_long.is_empty(),
+        "these paragraphs take more than {PARAGRAPH_COLUMNS} columns; break them into short \
+         paragraphs or lines:\n{}",
+        too_long.join("\n")
+    );
+}
+
+#[test]
+fn fr17_korean_has_the_paragraphs_of_the_english() {
+    let ko = catalogue(&crate_dir().join("po/ko.po"));
+    let mut differ = Vec::new();
+    for (english, korean) in &ko {
+        if english.is_empty() {
+            continue;
+        }
+        let breaks = |text: &str| text.matches('\n').count();
+        let blank_lines = |text: &str| text.matches("\n\n").count();
+        let bullets = |text: &str| text.lines().filter(|l| l.starts_with("• ")).count();
+        if korean.is_empty()
+            || breaks(english) != breaks(korean)
+            || blank_lines(english) != blank_lines(korean)
+            || bullets(english) != bullets(korean)
+        {
+            differ.push(format!("{english:?}\n  {korean:?}"));
+        }
+    }
+    assert!(
+        differ.is_empty(),
+        "the Korean of these does not break into the same paragraphs, lines and list items:\n{}",
+        differ.join("\n")
+    );
 }
 
 #[test]

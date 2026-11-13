@@ -20,7 +20,7 @@ pub fn apps(ctx: &Shared) -> gtk::Widget {
 
     let manage = group(
         "",
-        Some(&tr("The Android apps installed on this computer. Open an app, change its permissions, storage and notifications in App info, or uninstall an app you installed. Android starts when you open this page.")),
+        Some(&tr("The Android apps on this computer. Open them, change them in App info, or uninstall the ones you installed.\nAndroid starts when you open this page.")),
     );
     let manage_row = link_row(
         &tr("Manage apps"),
@@ -98,7 +98,7 @@ pub fn apps(ctx: &Shared) -> gtk::Widget {
                 rows.note(&tr("No app matches your search."));
             }
             if view::root_unavailable(all) {
-                rows.note(&tr("Root access is off for this computer, so no app can use su. An administrator turns it on under Advanced, and then you choose each app's level here."));
+                rows.note(&tr("Root access is off for this computer, so no app can use su.\nAn administrator turns it on under Advanced. Then you choose each app's level here."));
             }
             for app in shown {
                 let window = windows.borrow().get(&app.package).cloned();
@@ -559,7 +559,7 @@ fn switch_abi(
                             &ctx2,
                             &trf("Erase {0}'s data?", &[&label]),
                             &trf(
-                                "Android cannot change how {0} runs and keep its data. Installing it again erases its data: sign-ins, settings and files it keeps for itself.",
+                                "Android cannot change how {0} runs and keep its data.\n\nInstalling it again erases its data: sign-ins, settings and files it keeps for itself.",
                                 &[&label],
                             ),
                             &tr("Erase and install again"),
@@ -587,7 +587,7 @@ pub fn background(ctx: &Shared) -> gtk::Widget {
     let page = Rc::new(Page::new());
     let intro = group(
         &tr("Apps"),
-        Some(&tr("These Android apps keep running after their windows close, because they play music, download files, keep a VPN on or do other work in the background. Each also has an indicator in the top bar. Stopping an app ends what it is doing and frees the memory it used.")),
+        Some(&tr("These Android apps keep running after their windows close, to play music, download files, keep a VPN on or do other work.\nEach also has an indicator in the top bar.\nStopping an app ends what it is doing and frees the memory it used.")),
     );
     let refresh = gtk::Button::from_icon_name("view-refresh-symbolic");
     refresh.set_tooltip_text(Some(&tr("Refresh")));
@@ -729,7 +729,7 @@ pub fn widgets(ctx: &Shared) -> gtk::Widget {
     let page = Rc::new(Page::new());
     let placed = group(
         &tr("On your desktop"),
-        Some(&tr("Place the widgets your Android apps offer on your desktop. Each widget gets a window of its own. Drag the band along its top to move it, and its edges to resize it. Right-click a widget to resize or remove it. Android starts when you open this page.")),
+        Some(&tr("Place the widgets your Android apps offer on your desktop. Each widget gets a window of its own.\nDrag the band along its top to move it, and its edges to resize it.\nRight-click a widget to resize or remove it. Android starts when you open this page.")),
     );
     let refresh = gtk::Button::from_icon_name("view-refresh-symbolic");
     refresh.set_tooltip_text(Some(&tr("Refresh")));

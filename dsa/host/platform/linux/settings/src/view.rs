@@ -480,7 +480,7 @@ pub fn root_group_note(app: &App, apps: &[App]) -> Option<String> {
         .collect::<Vec<_>>()
         .join(", ");
     Some(trf(
-        "Shares its user ID with {0}. Android cannot tell these apps apart, so their root access is one setting: changing it here changes it for all of them, and if any of them is set to Not allowed, none of them can use su.",
+        "Shares its user ID with {0}, so Android cannot tell them apart.\nTheir root access is one setting: a change here applies to all of them.\nIf any of them is set to Not allowed, none of them can use su.",
         &[&names],
     ))
 }
@@ -561,9 +561,9 @@ pub fn dpi_scaling_index(window: Option<&AppWindow>) -> usize {
 pub fn dpi_scaling_subtitle(window: Option<&AppWindow>, system_forced_available: bool) -> String {
     let scaling = window.map(|w| w.dpi_scaling).unwrap_or_default();
     if scaling == DpiScaling::SystemForced && !system_forced_available {
-        tr("System (forced) gives the app the new scale without restarting it, even if it does not say it handles one. It is not available yet: it needs a change to Android's framework that this build does not have, so until then it works like System.")
+        tr("System (forced) gives the app the new scale without a restart, even if it does not say it handles one.\nIt is not available yet: this build lacks the change to Android it needs. Until then it works like System.")
     } else {
-        tr("App: the app redraws at the new scale, and text stays sharp; for an app that does not say it handles this, Android recreates its screen and restores its state, so it may redraw briefly when it moves. System: the app keeps its scale and DSA scales its window to the same physical size; text can look a little blurry. Automatic picks App for apps that say they handle it, and System for the others. Automatic and System never restart the app.")
+        tr("App: the app redraws at the new scale, and text stays sharp.\nAn app that does not say it handles this is recreated with its state kept, so it may redraw briefly.\nSystem: DSA scales the window to the same physical size. Text can look a little blurry.\nAutomatic picks App for apps that say they handle it, and System for the others.\nAutomatic and System never restart the app.")
     }
 }
 
@@ -663,7 +663,7 @@ pub struct RootView {
 pub fn root_view(app: &App) -> RootView {
     let index = ROOT_LEVELS.iter().position(|level| *level == app.root);
     let subtitle = match (index, app.root.as_str()) {
-        (Some(_), _) => tr("Not allowed hides su from the app. Ask each time asks an administrator for each request, then not again for 15 minutes. Remember approves without asking, and choosing it needs an administrator's approval."),
+        (Some(_), _) => tr("Not allowed hides su from the app.\nAsk each time asks an administrator for each request, then not again for 15 minutes.\nRemember approves without asking. Choosing it needs an administrator's approval."),
         (None, "unavailable") => {
             tr("Root access is off for this computer. An administrator turns it on under Advanced.")
         }
@@ -701,7 +701,7 @@ pub fn root_next(label: &str, outcome: &Outcome) -> Result<String, String> {
             &[label],
         ),
         _ => trf(
-            "{0} now asks an administrator of this computer each time it uses su. If it could not see su before, it sees it from the next start of Android.",
+            "{0} now asks an administrator each time it uses su. If it could not see su before, it sees it from the next start of Android.",
             &[label],
         ),
     })
@@ -749,8 +749,8 @@ pub fn install_reason(status: &str) -> String {
         "encrypted-bundle" => "the bundle is encrypted, so its APKs cannot be read. Get the app as an APK, or as a newer bundle.",
         "split-signature-mismatch" => "a split APK of the bundle is signed with another key than its base APK, so Android would refuse it.",
         "invalid-bundle" => "the bundle is not one app that Android can install.",
-        "unsupported-abi" => "the app's native code is none that DSA's Android runs, which runs 64-bit code only: x86_64, and arm64-v8a through ARM translation. Get the app's x86_64 or arm64-v8a build.",
-        "translation-off" => "the app runs only as ARM code (arm64-v8a), and ARM translation is not on. Turn it on under ARM apps, restart Android, and install the app again.",
+        "unsupported-abi" => "the app has no 64-bit code that DSA's Android runs: x86_64, or arm64-v8a through ARM translation. Get one of those builds.",
+        "translation-off" => "the app has only ARM code (arm64-v8a), and ARM translation is off. Turn it on under ARM apps, restart Android and install it again.",
         _ => "Android did not install the app.",
     })
 }
@@ -798,7 +798,7 @@ pub fn arm_default_text(arm: &ArmTranslation) -> Option<String> {
         license.clone()
     };
     Some(trf(
-        "{0} {1} ({2}) comes with this Android and is used unless you install another translator. Going back to it removes the package installed in its place, from the next start of Android.",
+        "{0} {1} ({2}) comes with this Android. It is used unless you install another translator.\nGoing back to it removes the package that replaced it, from the next start of Android.",
         &[name, version, &license],
     ))
 }
@@ -820,7 +820,7 @@ pub fn arm_abis(arm: &ArmTranslation) -> String {
 /// from, and the terms the user accepts.
 pub fn arm_google_notice() -> String {
     trf(
-        "DSA downloads the Android emulator image for this Android version from Google's SDK repository ({0}) and takes out only its ARM translator. The translator is Google's software, offered under the Android SDK License ({1}); by downloading it you accept those terms. DSA does not ship or pass it on. The image is about 2 GB and is deleted afterwards. The translator works from the next start of Android.",
+        "DSA downloads Google's Android emulator image for this Android version and takes out only its ARM translator.\n\n• Source: Google's SDK repository ({0})\n• Size: about 2 GB, deleted afterwards\n• Licence: the Android SDK License ({1}). By downloading, you accept its terms.\n\nThe translator is Google's software. DSA does not ship or pass it on.\n\nThe translator works from the next start of Android.",
         &[
             crate::model::GOOGLE_ARM_SOURCE,
             crate::model::GOOGLE_ARM_TERMS_URL,
@@ -916,7 +916,7 @@ pub fn widevine_status(widevine: &crate::model::Widevine) -> String {
 /// from, and the terms the user accepts.
 pub fn widevine_notice() -> String {
     trf(
-        "DSA downloads the Android emulator image for this Android version from Google's SDK repository ({0}) and takes out only its Widevine module, unchanged. Widevine is Google's software, offered under the Android SDK License ({1}); by downloading it you accept those terms. DSA does not ship or pass it on. The image is about 2 GB and is deleted afterwards. Widevine works from the next start of Android.",
+        "DSA downloads Google's Android emulator image for this Android version and takes out only its Widevine module, unchanged.\n\n• Source: Google's SDK repository ({0})\n• Size: about 2 GB, deleted afterwards\n• Licence: the Android SDK License ({1}). By downloading, you accept its terms.\n\nWidevine is Google's software. DSA does not ship or pass it on.\n\nWidevine here is security level L3, so streaming services send standard definition (SD) at most.\n\nWidevine works from the next start of Android.",
         &[
             crate::model::WIDEVINE_SOURCE,
             crate::model::WIDEVINE_TERMS_URL,
@@ -927,7 +927,7 @@ pub fn widevine_notice() -> String {
 /// What the protected content item always says: L3 is standard definition at most, and where
 /// to watch in high definition.
 pub fn widevine_quality() -> String {
-    tr("Widevine here is security level L3, so streaming services send standard definition (SD) at most. To watch in high definition, use this computer's own browser or app.")
+    tr("Widevine here is security level L3, so streaming services send standard definition (SD) at most.\nTo watch in high definition, use this computer's own browser or app.")
 }
 
 /// What the protected content item says while the module is taken from Google's image.
@@ -973,7 +973,7 @@ pub fn backup_busy_text(job: BackupJob) -> String {
 /// What the backup switch says under its title: what backup keeps, and while it is off, what
 /// earlier backups are still kept.
 pub fn backup_switch_subtitle(backup: Option<&Backup>) -> String {
-    let what = tr("Keeps a second copy of your Android apps' user data on this computer, encrypted, so it can be restored after a data reset or on another computer. Off until you turn it on.");
+    let what = tr("Keeps an encrypted second copy of your Android apps' user data on this computer.\nIt can be restored after a data reset or on another computer. Off until you turn it on.");
     match backup {
         Some(backup) if !backup.enabled && backup.has_backups_kept() => format!(
             "{what}\n{}",
@@ -989,7 +989,7 @@ pub fn backup_switch_subtitle(backup: Option<&Backup>) -> String {
 /// What the question says when backup is turned off while backups are kept.
 pub fn backup_delete_question(backup: &Backup) -> String {
     trf(
-        "The backups of {0} apps ({1}) are still kept on this computer. Delete them and their key as well, or keep them for a later restore?",
+        "The backups of {0} apps ({1}) are still kept on this computer.\n\nDelete them and their key as well, or keep them for a later restore?",
         &[&backup.packages.to_string(), &size_bytes(backup.size)],
     )
 }
@@ -1011,8 +1011,8 @@ pub fn key_protection_text(key: &KeyProtection) -> String {
         KeyProtectionShown::NotYet => {
             tr("Android's keys get their protection the first time Android starts.")
         }
-        KeyProtectionShown::Tpm => tr("Sealed by this computer's TPM. A copy of Android's disk cannot open the apps' keys or Android's encrypted storage anywhere else."),
-        KeyProtectionShown::Keyring => tr("Kept by your keyring only, because this computer has no TPM 2.0 that can be used. Once one works, DSA seals the keys with it."),
+        KeyProtectionShown::Tpm => tr("Sealed by this computer's TPM.\nA copy of Android's disk cannot open the apps' keys or Android's encrypted storage anywhere else."),
+        KeyProtectionShown::Keyring => tr("Kept by your keyring only, because this computer has no TPM 2.0 that can be used.\nOnce one works, DSA seals the keys with it."),
         KeyProtectionShown::Other => trf("Protected by {0}.", &[&key.description]),
     }
 }
@@ -1049,12 +1049,12 @@ pub fn backup_result(job: BackupJob, backup: &Backup) -> String {
 
 /// What the question before a restore says: what it installs and what it replaces.
 pub fn backup_restore_warning() -> String {
-    tr("Apps in the backup that Android does not have are installed, and the data of every app in the backup is replaced with the backup's. What those apps saved since the backup is lost. Android starts if it is not running.")
+    tr("Apps in the backup that Android does not have are installed.\n\nThe data of every app in the backup is replaced with the backup's. What those apps saved since the backup is lost.\n\nAndroid starts if it is not running.")
 }
 
 /// What the recovery key dialog says under its title.
 pub fn backup_key_advice() -> String {
-    tr("Write this key down and keep it somewhere safe, away from this computer. Anyone with it can read the backup. Without it, the backup cannot be opened on another computer or after this computer's keyring is lost.")
+    tr("Write this key down and keep it somewhere safe, away from this computer.\n\nAnyone with it can read the backup.\n\nWithout it, the backup cannot be opened on another computer or after this computer's keyring is lost.")
 }
 
 /// Why a recovery key was not used, from the service's reason; empty is no key at all.
