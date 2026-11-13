@@ -257,6 +257,20 @@ pub fn maximized_position(start: i32, area: i32, outer: i32, border: i32) -> i32
     start + (area - outer) / 2
 }
 
+/// The outer size a maximised task window takes on a monitor whose work area is `work`
+/// pixels, when the borders a maximised window hangs off the work area's edges add up to
+/// `frame` pixels in each direction: its client area is the whole work area, and never the
+/// whole monitor. The taskbar stays visible, and the guest is asked for the work area's size.
+///
+/// Windows does not give a task window that size by itself. It proposes a maximised size
+/// measured on the primary monitor, and the client area of a window whose title bar is drawn
+/// in its client area can come out as large as the monitor, under the taskbar. So the window
+/// keeps every maximised size to this one, on its own monitor: on a monitor smaller than the
+/// primary one, a size measured on the primary would also reach past its screen's edge.
+pub fn maximized_outer(work: (i32, i32), frame: (i32, i32)) -> (i32, i32) {
+    ((work.0 + frame.0).max(1), (work.1 + frame.1).max(1))
+}
+
 /// What the window system is doing with a window when a size is proposed for it, as far as
 /// whose size it is goes ([`size_is_held`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -990,6 +1004,68 @@ mod tests {
         }));
         // Restored to its own size.
         assert!(!held(SizeProposal::default()));
+    }
+
+    #[test]
+    fn fr4_a_maximised_window_asks_the_guest_for_its_work_area_not_its_whole_monitor() {
+        // A 2880x1800 monitor at 200% whose taskbar takes 96 pixels: the work area is
+        // 2880x1704, and a maximised window hangs 13 pixels of border off each edge.
+        let frame = (26, 26);
+        let outer = maximized_outer((2880, 1704), frame);
+        assert_eq!(outer, (2906, 1730));
+        // Its client area is the work area, so the taskbar stays visible.
+        let client = ((outer.0 - frame.0) as u32, (outer.1 - frame.1) as u32);
+        assert_eq!(client, (2880, 1704));
+        // The guest is asked for that size, not the monitor's 2880x1800.
+        let mut settings = task(1041, 1495, 262);
+        settings.max_width = 2880;
+        settings.max_height = 2880;
+        let mut sizing = WindowSizing::new(&settings);
+        assert_eq!(
+            sizing.view_resized(client, Instant::now()),
+            live_resize(2880, 1704)
+        );
+        // Its client area starts at the work area's corner.
+        assert_eq!(maximized_position(0, 2880, outer.0, 13), -13);
+        assert_eq!(maximized_position(0, 1704, outer.1, 13), -13);
+    }
+
+    #[test]
+    fn fr4_a_window_maximised_on_a_monitor_smaller_than_the_primary_stays_on_its_screen() {
+        // A 2048x1152 monitor whose work area is 2048x1104, beside a larger primary one, at
+        // 100%: the window fills its own work area, 2064x1120 with its borders, whatever size
+        // Windows measured on the primary monitor.
+        assert_eq!(maximized_outer((2048, 1104), (16, 16)), (2064, 1120));
+        // On a 4K monitor it fills that work area as well: the guest's largest frame is shown
+        // in it, and the window does not shrink to it.
+        assert_eq!(maximized_outer((3840, 2112), (16, 16)), (3856, 2128));
+        // A work area of nothing still gives a window.
+        assert_eq!(maximized_outer((0, 0), (0, 0)), (1, 1));
+    }
+
+    #[test]
+    fn fr4_a_maximised_window_holds_its_size_even_at_its_restored_size() {
+        // The restored-size bookkeeping (a proposal of the window's restored size) never lets
+        // a maximised window go: only a restore does, which is no longer maximised.
+        for off_normal_size in [false, true] {
+            for user_sizing in [false, true] {
+                for host_sizing in [false, true] {
+                    let proposal = SizeProposal {
+                        maximized: true,
+                        fills_monitor: false,
+                        user_sizing,
+                        host_sizing,
+                        off_normal_size,
+                    };
+                    assert!(size_is_held(proposal), "{proposal:?}");
+                }
+            }
+        }
+        // Restored to its restored size, it takes its frames' size again.
+        assert!(!size_is_held(SizeProposal {
+            host_sizing: true,
+            ..SizeProposal::default()
+        }));
     }
 
     #[test]
