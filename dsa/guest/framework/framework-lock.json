@@ -211,7 +211,10 @@
           "url": "https://android.googlesource.com/platform/external/elfutils",
           "commit": "93591ccb588e3a9819dee6431d94ea5fa2e03875",
           "cone": [
-            "lib"
+            "bionic-fixup",
+            "include",
+            "lib",
+            "libelf"
           ]
         },
         {
@@ -264,6 +267,11 @@
             "src/truetype",
             "src/type1"
           ]
+        },
+        {
+          "path": "external/gemmlowp",
+          "url": "https://android.googlesource.com/platform/external/gemmlowp",
+          "commit": "9304d9b673e827202f9526913d161e3cb49a1560"
         },
         {
           "path": "external/giflib",
@@ -501,6 +509,7 @@
             "protos",
             "src/android_internal",
             "src/android_sdk/jni",
+            "src/android_sdk/nativehelper",
             "src/android_sdk/perfetto_sdk_for_jni",
             "src/android_stats",
             "src/base",
@@ -813,7 +822,15 @@
           "url": "https://android.googlesource.com/platform/external/tensorflow",
           "commit": "559b803b1a79a96c84abbfacb5eea9c622a06543",
           "cone": [
-            "tensorflow/lite"
+            "tensorflow/core/kernels",
+            "tensorflow/core/lib/bfloat16",
+            "tensorflow/core/lib/random",
+            "tensorflow/core/platform",
+            "tensorflow/core/public",
+            "tensorflow/lite",
+            "tensorflow/tsl/platform",
+            "third_party/eigen3",
+            "third_party/fft2d"
           ]
         },
         {
@@ -920,10 +937,13 @@
             "core/java/android/companion/virtual/flags",
             "core/java/android/companion/virtualnative",
             "core/java/android/content/res",
+            "core/java/android/database/sqlite",
             "core/java/android/hardware/flags",
             "core/java/android/os",
+            "core/java/android/permission",
             "core/java/android/text/flags",
             "core/java/android/view/accessibility/flags",
+            "core/java/android/window/flags",
             "core/jni",
             "libs/androidfw",
             "libs/content",
@@ -1031,6 +1051,7 @@
           "url": "https://android.googlesource.com/platform/hardware/interfaces",
           "commit": "aa229558cbf04bc997ed27465c5e7ad497123d1b",
           "cone": [
+            "camera/common/1.0",
             "camera/device/3.2",
             "cas/1.0",
             "cas/native/1.0",
@@ -1382,6 +1403,7 @@
           "url": "https://android.googlesource.com/platform/system/memory/libmeminfo",
           "commit": "49326ec942a00db8994f2dc69796ea28c99643e1",
           "cone": [
+            "include",
             "libdmabufinfo"
           ]
         },
@@ -1400,7 +1422,8 @@
           "url": "https://android.googlesource.com/platform/system/netd",
           "commit": "8d4a0b7420e67cec340dc37a88815d99a16abfa7",
           "cone": [
-            "client"
+            "client",
+            "include"
           ]
         },
         {
@@ -1679,7 +1702,10 @@
           "url": "https://android.googlesource.com/platform/external/elfutils",
           "commit": "219c3a368b121307f2e05593cee89b8591cc40b9",
           "cone": [
-            "lib"
+            "bionic-fixup",
+            "include",
+            "lib",
+            "libelf"
           ]
         },
         {
@@ -1732,6 +1758,11 @@
             "src/truetype",
             "src/type1"
           ]
+        },
+        {
+          "path": "external/gemmlowp",
+          "url": "https://android.googlesource.com/platform/external/gemmlowp",
+          "commit": "9304d9b673e827202f9526913d161e3cb49a1560"
         },
         {
           "path": "external/giflib",
@@ -1969,6 +2000,7 @@
             "protos",
             "src/android_internal",
             "src/android_sdk/jni",
+            "src/android_sdk/nativehelper",
             "src/android_sdk/perfetto_sdk_for_jni",
             "src/android_stats",
             "src/base",
@@ -2338,7 +2370,15 @@
           "url": "https://android.googlesource.com/platform/external/tensorflow",
           "commit": "d6bfb0bfab3e7565df0be176c3ebaa45ff9000ec",
           "cone": [
-            "tensorflow/lite"
+            "tensorflow/core/kernels",
+            "tensorflow/core/lib/bfloat16",
+            "tensorflow/core/lib/random",
+            "tensorflow/core/platform",
+            "tensorflow/core/public",
+            "tensorflow/lite",
+            "tensorflow/tsl/platform",
+            "third_party/eigen3",
+            "third_party/fft2d"
           ]
         },
         {
@@ -2447,9 +2487,12 @@
             "core/java/android/companion/virtual/flags",
             "core/java/android/companion/virtualnative",
             "core/java/android/content/res",
+            "core/java/android/database/sqlite",
             "core/java/android/hardware/flags",
             "core/java/android/os",
+            "core/java/android/permission",
             "core/java/android/text/flags",
+            "core/java/android/tracing",
             "core/java/android/view/accessibility/flags",
             "core/java/android/window/flags",
             "core/jni",
@@ -2553,6 +2596,7 @@
           "url": "https://android.googlesource.com/platform/hardware/interfaces",
           "commit": "0162af698935100a590b7359581ac8b1b80693e5",
           "cone": [
+            "camera/common/1.0",
             "camera/device/3.2",
             "cas/1.0",
             "cas/native/1.0",
@@ -2748,7 +2792,11 @@
           "url": "https://android.googlesource.com/platform/system/chre",
           "commit": "17b4a35a8c2b9f27e7f1b382b7d714aced928ce4",
           "cone": [
-            "data_flow"
+            "data_flow",
+            "platform/include",
+            "platform/shared/public_std_atomic_ref",
+            "variant/googletest/include",
+            "variant/include"
           ]
         },
         {
@@ -2908,6 +2956,7 @@
           "url": "https://android.googlesource.com/platform/system/memory/libmeminfo",
           "commit": "d59c960b1fb93377bf68664918031ea5fe709f89",
           "cone": [
+            "include",
             "libdmabufinfo"
           ]
         },
@@ -2926,7 +2975,8 @@
           "url": "https://android.googlesource.com/platform/system/netd",
           "commit": "43c893c7f33de178d6edaf5be49aed0794b3a917",
           "cone": [
-            "client"
+            "client",
+            "include"
           ]
         },
         {

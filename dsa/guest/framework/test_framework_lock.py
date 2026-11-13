@@ -495,6 +495,48 @@ class NinjaInputsTests(unittest.TestCase):
             self.assertNotIn("cone", legacy)
             self.assertNotIn("patterns", legacy)
 
+    def test_fr32_what_libandroid_runtime_links_is_fetched(self):
+        # Framework build 43377022889 passed the analysis and the input check, then stopped in
+        # ninja on libraries libandroid_runtime links: headers beside sources the cones left out
+        # (libnetd_client's and libandroid_net's NetdClient.h, libmeminfo's include, perfetto's
+        # JNIHelp.h, libbpf's libelf.h, contexthub_data_flow's chre/platform/atomic_ref.h), a
+        # HIDL interface's dependency (camera.device@3.2 on camera.common@1.0), a project
+        # libtflite_static includes by path (external/gemmlowp), and aconfig declarations
+        # whose flag files were not fetched ("production library contains no production
+        # flags", or the file named as missing). libtflite_static's own sources, which that
+        # run never reached, include TensorFlow's core, TSL and third_party headers.
+        both = {
+            "external/elfutils": ["bionic-fixup", "include", "lib", "libelf"],
+            "external/perfetto": ["src/android_sdk/nativehelper"],
+            "external/tensorflow": ["tensorflow/core/kernels", "tensorflow/core/lib/bfloat16",
+                                    "tensorflow/core/lib/random", "tensorflow/core/platform",
+                                    "tensorflow/core/public", "tensorflow/lite",
+                                    "tensorflow/tsl/platform", "third_party/eigen3",
+                                    "third_party/fft2d"],
+            "frameworks/base": ["core/java/android/database/sqlite", "core/java/android/permission",
+                                "core/java/android/window/flags"],
+            "hardware/interfaces": ["camera/common/1.0", "camera/device/3.2"],
+            "system/memory/libmeminfo": ["include"],
+            "system/netd": ["client", "include"],
+        }
+        only = {
+            "android16": {},
+            "android17": {
+                "frameworks/base": ["core/java/android/tracing"],
+                "system/chre": ["platform/include", "platform/shared/public_std_atomic_ref",
+                                "variant/googletest/include", "variant/include"],
+            },
+        }
+        for version in framework_lock.load()["versions"]:
+            projects = {p["path"]: p for p in version["projects"]}
+            for wanted in (both, only[version["android"]]):
+                for path, folders in wanted.items():
+                    for folder in folders:
+                        self.assertIn(folder, projects[path]["cone"], f"{version['android']} {path}")
+            gemmlowp = projects["external/gemmlowp"]
+            self.assertNotIn("cone", gemmlowp)
+            self.assertNotIn("patterns", gemmlowp)
+
     def test_nfr5_boringssls_go_build_tools_are_fetched(self):
         # bssl_inject_hash and the Go packages it uses, which the fifth run stopped on.
         lock = framework_lock.load()
