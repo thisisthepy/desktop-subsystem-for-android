@@ -338,6 +338,25 @@ fn fr14_an_image_that_boots_is_kept_and_older_images_removed() {
 }
 
 #[test]
+fn fr14_a_finished_boot_keeps_the_image_on_trial_only_when_it_booted_that_image() {
+    let (store, root, _) = staged_store();
+    // A boot of the previous image says nothing about the new one.
+    assert!(!store.confirm_booted("16.0.1").unwrap());
+    let state = store.state().unwrap();
+    assert_eq!(state.current.version, "16.0.2");
+    assert!(state.on_trial);
+    assert!(root.join("images/16.0.1").exists());
+
+    // A boot of the image on trial keeps it, once.
+    assert!(store.confirm_booted("16.0.2").unwrap());
+    let state = store.state().unwrap();
+    assert!(!state.on_trial);
+    assert_eq!(state.previous.map(|p| p.version).as_deref(), Some("16.0.1"));
+    assert!(!store.confirm_booted("16.0.2").unwrap(), "kept already");
+    assert!(!store.state().unwrap().on_trial);
+}
+
+#[test]
 fn fr14_nothing_new_is_staged_while_an_image_is_on_trial() {
     let (store, _, mut manifest) = staged_store();
     let third = image("16.0.3", 16, 3, b"third");

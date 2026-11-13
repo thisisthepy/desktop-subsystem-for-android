@@ -74,8 +74,9 @@ pub fn install_from_folder(
     let before = store.state()?;
     if before.on_trial {
         return Err(UpdateError::Refused(format!(
-            "{} has not finished its first boot yet; start Android once so it is kept or \
-             undone, then install again",
+            "{} is still on trial: it is kept once Android has finished starting from it, and \
+             undone if it cannot start. Start Android (dsa start), wait until it has started, \
+             then install again",
             before.current.version
         )));
     }
