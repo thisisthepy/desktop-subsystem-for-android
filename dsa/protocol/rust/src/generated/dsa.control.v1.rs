@@ -1436,6 +1436,19 @@ pub struct GuestMemory {
     pub google_play_pss_kb: u64,
     #[prost(uint64, tag = "26")]
     pub google_play_swap_pss_kb: u64,
+    /// Free page reporting, as the guest's kernel counts it: the free memory marked reported
+    /// now, which the host has taken back (mem_free_kb less it is free memory the VM still
+    /// holds); the memory reported to the host since boot, whose growth between two reports is
+    /// how fast freed memory goes back; and the reported free memory the host took back in again
+    /// since boot because a page beside it in the host's fault cluster was used, which the guest
+    /// then reported again. All 0 when the guest cannot read them (reported_total_kb is never 0
+    /// once reporting runs, since the first pass after boot reports every free page).
+    #[prost(uint64, tag = "27")]
+    pub free_reported_kb: u64,
+    #[prost(uint64, tag = "28")]
+    pub reported_total_kb: u64,
+    #[prost(uint64, tag = "29")]
+    pub refaulted_total_kb: u64,
 }
 /// From the agent to the guest's control daemon, on each connection to it: the agent has
 /// subscribed and takes the host's frames. It stops at the daemon, which tells the host with

@@ -16244,6 +16244,9 @@ class GuestMemory final :
     kSwapPssKbFieldNumber = 23,
     kGooglePlayPssKbFieldNumber = 25,
     kGooglePlaySwapPssKbFieldNumber = 26,
+    kFreeReportedKbFieldNumber = 27,
+    kReportedTotalKbFieldNumber = 28,
+    kRefaultedTotalKbFieldNumber = 29,
     kGooglePlayProcessesFieldNumber = 24,
   };
   // repeated .dsa.control.v1.ProcessMemory top_processes = 14;
@@ -16480,6 +16483,33 @@ class GuestMemory final :
   void _internal_set_google_play_swap_pss_kb(uint64_t value);
   public:
 
+  // uint64 free_reported_kb = 27;
+  void clear_free_reported_kb();
+  uint64_t free_reported_kb() const;
+  void set_free_reported_kb(uint64_t value);
+  private:
+  uint64_t _internal_free_reported_kb() const;
+  void _internal_set_free_reported_kb(uint64_t value);
+  public:
+
+  // uint64 reported_total_kb = 28;
+  void clear_reported_total_kb();
+  uint64_t reported_total_kb() const;
+  void set_reported_total_kb(uint64_t value);
+  private:
+  uint64_t _internal_reported_total_kb() const;
+  void _internal_set_reported_total_kb(uint64_t value);
+  public:
+
+  // uint64 refaulted_total_kb = 29;
+  void clear_refaulted_total_kb();
+  uint64_t refaulted_total_kb() const;
+  void set_refaulted_total_kb(uint64_t value);
+  private:
+  uint64_t _internal_refaulted_total_kb() const;
+  void _internal_set_refaulted_total_kb(uint64_t value);
+  public:
+
   // uint32 google_play_processes = 24;
   void clear_google_play_processes();
   uint32_t google_play_processes() const;
@@ -16522,6 +16552,9 @@ class GuestMemory final :
     uint64_t swap_pss_kb_;
     uint64_t google_play_pss_kb_;
     uint64_t google_play_swap_pss_kb_;
+    uint64_t free_reported_kb_;
+    uint64_t reported_total_kb_;
+    uint64_t refaulted_total_kb_;
     uint32_t google_play_processes_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   };
@@ -53131,6 +53164,66 @@ inline void GuestMemory::_internal_set_google_play_swap_pss_kb(uint64_t value) {
 inline void GuestMemory::set_google_play_swap_pss_kb(uint64_t value) {
   _internal_set_google_play_swap_pss_kb(value);
   // @@protoc_insertion_point(field_set:dsa.control.v1.GuestMemory.google_play_swap_pss_kb)
+}
+
+// uint64 free_reported_kb = 27;
+inline void GuestMemory::clear_free_reported_kb() {
+  _impl_.free_reported_kb_ = uint64_t{0u};
+}
+inline uint64_t GuestMemory::_internal_free_reported_kb() const {
+  return _impl_.free_reported_kb_;
+}
+inline uint64_t GuestMemory::free_reported_kb() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.GuestMemory.free_reported_kb)
+  return _internal_free_reported_kb();
+}
+inline void GuestMemory::_internal_set_free_reported_kb(uint64_t value) {
+  
+  _impl_.free_reported_kb_ = value;
+}
+inline void GuestMemory::set_free_reported_kb(uint64_t value) {
+  _internal_set_free_reported_kb(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.GuestMemory.free_reported_kb)
+}
+
+// uint64 reported_total_kb = 28;
+inline void GuestMemory::clear_reported_total_kb() {
+  _impl_.reported_total_kb_ = uint64_t{0u};
+}
+inline uint64_t GuestMemory::_internal_reported_total_kb() const {
+  return _impl_.reported_total_kb_;
+}
+inline uint64_t GuestMemory::reported_total_kb() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.GuestMemory.reported_total_kb)
+  return _internal_reported_total_kb();
+}
+inline void GuestMemory::_internal_set_reported_total_kb(uint64_t value) {
+  
+  _impl_.reported_total_kb_ = value;
+}
+inline void GuestMemory::set_reported_total_kb(uint64_t value) {
+  _internal_set_reported_total_kb(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.GuestMemory.reported_total_kb)
+}
+
+// uint64 refaulted_total_kb = 29;
+inline void GuestMemory::clear_refaulted_total_kb() {
+  _impl_.refaulted_total_kb_ = uint64_t{0u};
+}
+inline uint64_t GuestMemory::_internal_refaulted_total_kb() const {
+  return _impl_.refaulted_total_kb_;
+}
+inline uint64_t GuestMemory::refaulted_total_kb() const {
+  // @@protoc_insertion_point(field_get:dsa.control.v1.GuestMemory.refaulted_total_kb)
+  return _internal_refaulted_total_kb();
+}
+inline void GuestMemory::_internal_set_refaulted_total_kb(uint64_t value) {
+  
+  _impl_.refaulted_total_kb_ = value;
+}
+inline void GuestMemory::set_refaulted_total_kb(uint64_t value) {
+  _internal_set_refaulted_total_kb(value);
+  // @@protoc_insertion_point(field_set:dsa.control.v1.GuestMemory.refaulted_total_kb)
 }
 
 // -------------------------------------------------------------------
