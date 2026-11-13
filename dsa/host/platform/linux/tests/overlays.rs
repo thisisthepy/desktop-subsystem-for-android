@@ -1688,6 +1688,75 @@ fn cached_limit_problems(adb: &Adb, dir: &Path, boot: &str, problems: &mut Vec<S
     }
 }
 
+/// The files `dumpsys pinner` lists as locked in memory, with their pinned bytes, leaving out
+/// those it lists with none.
+fn pinned_files(dump: &str) -> Vec<(String, u64)> {
+    dump.lines()
+        .filter_map(|line| {
+            let (file, rest) = line.trim().split_once(" pinned:")?;
+            let bytes: u64 = rest.split_whitespace().next()?.parse().ok()?;
+            (bytes > 0).then(|| (file.to_string(), bytes))
+        })
+        .collect()
+}
+
+/// What is wrong with the memory the pinner service holds: the image turns it off, because
+/// locked pages are neither reclaimed nor compressed, so the host could never get them back.
+fn pinned_memory_problems(adb: &Adb, dir: &Path, boot: &str, problems: &mut Vec<String>) {
+    match adb.shell("dumpsys pinner") {
+        Ok(dump) => {
+            let _ = std::fs::write(dir.join(format!("pinner-{boot}.txt")), &dump);
+            let pinned = pinned_files(&dump);
+            if !pinned.is_empty() {
+                let total: u64 = pinned.iter().map(|(_, bytes)| bytes).sum();
+                let files: Vec<String> = pinned
+                    .iter()
+                    .map(|(file, bytes)| format!("{file} ({} KiB)", bytes >> 10))
+                    .collect();
+                problems.push(format!(
+                    "{boot}: the pinner service locks {} KiB in memory, which no reclaim can give \
+                     back to the host: {}",
+                    total >> 10,
+                    files.join(", ")
+                ));
+            }
+        }
+        Err(why) => problems.push(format!("{boot}: reading dumpsys pinner: {why}")),
+    }
+}
+
+#[test]
+fn nfr1_the_files_the_pinner_service_locks_are_read_from_its_dump() {
+    // Android 17's dump with its default configuration: the home app (the agent) and WebView.
+    let dump = "Pinner Configs:\n   Total Pinner quota: 10% of total device memory\n   \
+                Max Home App Pin Bytes (without deps): 62914560 (60.00 MB)\n\nPinned Files:\n\
+                Home uid=10109 active=true\n  \
+                /system_ext/priv-app/DsaAgent/DsaAgent.apk pinned:4194304 bytes (4.00 MB) pinlist:false\n  \
+                /system_ext/priv-app/DsaAgent/oat/x86_64/DsaAgent.odex pinned:2097152 bytes (2.00 MB) pinlist:false (Dependency)\n\
+                Total Pinned = 6291456 (6.00 MB) [App=4194304 (4.00 MB), Dependencies=2097152 (2.00 MB)]\n\n\
+                \nGroup:webview\n  /product/app/webview/webview.apk pinned: 20971520 bytes (20.00 MB) pinlist:false\n\
+                Total Pinned = 20971520 (20.00 MB) [Main=20971520 (20.00 MB), Dependencies=0 (0.00 MB)]\n";
+    assert_eq!(
+        pinned_files(dump),
+        vec![
+            (
+                "/system_ext/priv-app/DsaAgent/DsaAgent.apk".to_string(),
+                4194304
+            ),
+            (
+                "/system_ext/priv-app/DsaAgent/oat/x86_64/DsaAgent.odex".to_string(),
+                2097152
+            ),
+            ("/product/app/webview/webview.apk".to_string(), 20971520),
+        ]
+    );
+    // With the image's configuration nothing is listed, and a file pinned with no bytes is
+    // nothing held.
+    let off = "Pinner Configs:\n   Total Pinner quota: 0% of total device memory\n\nPinned Files:\n\n\
+               \nGroup:system\n  /system/framework/framework.jar pinned: 0 bytes (0.00 MB) pinlist:false\n";
+    assert_eq!(pinned_files(off), Vec::<(String, u64)>::new());
+}
+
 #[test]
 fn nfr2_the_cached_process_limit_is_read_as_the_activity_manager_applies_it() {
     // Android 17 on the owner's PC: the setting said 8, the activity manager applied 1024.
@@ -2211,6 +2280,7 @@ fn fr25_fr32_the_translation_and_google_apps_images_are_laid_over_the_booted_sys
     }
     log_problems(&adb, &dir, "first boot", &mut problems);
     cached_limit_problems(&adb, &dir, "first boot", &mut problems);
+    pinned_memory_problems(&adb, &dir, "first boot", &mut problems);
     // An ARM app, after the boot's log is read: the probe clears the log to read its own start.
     arm_app_run_problems(&adb, &probe, &dir, &mut problems);
     // What Google Play compares each app's manifest with, which the Google apps do not change.
@@ -2376,6 +2446,8 @@ fn fr25_fr32_the_translation_and_google_apps_images_are_laid_over_the_booted_sys
     gapps_boot_problems(&adb, &dir, &mut problems);
     log_problems(&adb, &dir, "second boot", &mut problems);
     cached_limit_problems(&adb, &dir, "second boot", &mut problems);
+    // With Google Play, which may write the device configuration the pinner also reads.
+    pinned_memory_problems(&adb, &dir, "second boot", &mut problems);
     play_services_problems(&adb, &gms_probe, &dir, &mut problems);
 
     // The service's own copy of the guest log, across both boots.
@@ -2929,7 +3001,8 @@ fn kernel_memory_report(adb: &Adb, dir: &Path) -> Result<Vec<String>, String> {
 }
 
 /// system_server's memory: its `dumpsys meminfo` (`memory-system-server.txt`, with ART's
-/// details), its threads, the services it lists (`memory-services.txt`), the ART heap
+/// details), its threads, the services it lists (`memory-services.txt`), what it holds locked
+/// in memory (`memory-pinner.txt`, with the kernel's locked page count), the ART heap
 /// settings, and a heap dump when the build allows one (`memory-system-server.hprof`; a user
 /// build refuses it, and the report says what it answered).
 fn system_server_memory(adb: &Adb, dir: &Path) -> (String, serde_json::Value) {
@@ -2956,6 +3029,13 @@ fn system_server_memory(adb: &Adb, dir: &Path) -> (String, serde_json::Value) {
     // The features decide which services system_server starts.
     let features = adb.shell("pm list features").unwrap_or_default();
     let _ = std::fs::write(dir.join("memory-features.txt"), &features);
+    // What system_server holds locked in memory (none, with the image's pinner settings), and
+    // the kernel's count of locked and unevictable pages.
+    let pinner = adb.shell("dumpsys pinner").unwrap_or_default();
+    let locked = adb
+        .shell("grep -E '^(Mlocked|Unevictable):' /proc/meminfo")
+        .unwrap_or_default();
+    let _ = std::fs::write(dir.join("memory-pinner.txt"), format!("{locked}\n{pinner}"));
     let heap_settings = memory_check::heap_settings(&adb.shell("getprop").unwrap_or_default());
     let heap_dump = if pid.is_empty() {
         "system_server was not found".to_string()

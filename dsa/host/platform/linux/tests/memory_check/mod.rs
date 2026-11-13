@@ -950,7 +950,8 @@ pub fn system_server_report(s: &SystemServer<'_>) -> (String, serde_json::Value)
     (md, json)
 }
 
-/// The ART heap settings in a `getprop`'s output, as `<name>=<value>` lines.
+/// The ART heap settings in a `getprop`'s output, as `<name>=<value>` lines: the heap's sizes
+/// and free space, and the factor a foreground process's free space is multiplied by.
 pub fn heap_settings(getprop: &str) -> String {
     getprop
         .lines()
@@ -958,7 +959,8 @@ pub fn heap_settings(getprop: &str) -> String {
             let (name, value) = line.trim().split_once("]: [")?;
             let name = name.strip_prefix('[')?;
             let value = value.strip_suffix(']')?;
-            name.starts_with("dalvik.vm.heap")
+            (name.starts_with("dalvik.vm.heap")
+                || name == "dalvik.vm.foreground-heap-growth-multiplier")
                 .then(|| format!("{name}={value}"))
         })
         .collect::<Vec<_>>()

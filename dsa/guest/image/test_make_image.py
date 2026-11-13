@@ -3747,7 +3747,8 @@ class TouchLatencyTests(unittest.TestCase):
         # config_tapTimeoutMillis (100 ms) instead of calling it on the press.
         self.assertEqual(
             make_image.FRAMEWORK_OVERLAY_INTEGERS,
-            {"config_tapTimeoutMillis": 0, "config_customizedMaxCachedProcesses": 8},
+            {"config_tapTimeoutMillis": 0, "config_customizedMaxCachedProcesses": 8,
+             **make_image.PINNER_OVERLAY_INTEGERS},
         )
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -8169,7 +8170,8 @@ class MultiArchAbiTests(unittest.TestCase):
         script = (Path(make_image.__file__).parent / "check-image.py").read_text()
         self.assertIn("apk_edits_left(services, code=make_image.SERVICES_ABI_CODE)", script)
         self.assertEqual(make_image.SERVICES_CODE,
-                         {**make_image.SERVICES_INSETS_CODE, **make_image.SERVICES_ABI_CODE})
+                         {**make_image.SERVICES_INSETS_CODE, **make_image.SERVICES_ABI_CODE,
+                          **make_image.SERVICES_WEBVIEW_ZYGOTE_CODE})
 
     def test_fr25_the_guest_lists_x86_64_first_and_no_32_bit_abi(self):
         self.assertEqual(guest_64_bit_abis("on"), ["x86_64", "arm64-v8a"])
@@ -8208,6 +8210,220 @@ class MultiArchAbiTests(unittest.TestCase):
 
     def test_fr25_an_app_without_native_code_installs_without_an_abi(self):
         self.assertIsNone(multi_arch_abi(set(), guest_64_bit_abis("on")))
+
+
+SYSTEM_IMPL_ENSURE_ZYGOTE = "Lcom/android/server/webkit/SystemImpl;->ensureZygoteStarted"
+START_ZYGOTE_WHEN_READY = "Lcom/android/server/webkit/WebViewUpdateServiceImpl2;->startZygoteWhenReady"
+
+
+def webview_service_dex(inlined=False):
+    """WebView's update service in services.jar as d8 compiles Android 16's and 17's, cut down
+    to the calls that start the WebView zygote: startZygoteWhenReady waits for the RELRO files,
+    then asks the system interface to start the zygote, whose ensureZygoteStarted only calls
+    WebViewZygote.getProcess. With `inlined`, R8 has put that call into startZygoteWhenReady."""
+    methods = [
+        ("Lcom/android/server/webkit/SystemImpl;", "ensureZygoteStarted", "V"),
+        ("Landroid/webkit/WebViewZygote;", "getProcess", "L"),
+        ("Lcom/android/server/webkit/WebViewUpdateServiceImpl2;", "startZygoteWhenReady", "V"),
+        ("Lcom/android/server/webkit/WebViewUpdateServiceImpl2;", "waitForAndGetProvider", "L"),
+        ("Lcom/android/server/webkit/SystemInterface;", "ensureZygoteStarted", "V"),
+    ]
+    ensure = bytes.fromhex("71000100 0000" "0e00")  # invoke-static {}, getProcess; return-void
+    when_ready = (
+        "70100300 0100"  # invoke-direct {v1}, waitForAndGetProvider
+        "0c00"  # move-result-object v0 (the provider, unused)
+        + ("71000100 0000" if inlined else "72100400 0000")  # getProcess, or the interface's call
+        + "0e00"  # return-void
+    )
+    return dex_file(methods, {0: (1, ensure), 2: (2, bytes.fromhex(when_ready))})
+
+
+def manifest(*components):
+    """A compiled manifest with these components inside its application: (tag, name,
+    [actions]), each action in an intent filter of its own component."""
+    return compiled_xml(("manifest", [(ANDROID_NS, "package", "com.example")], [
+        ("application", [], [
+            (tag, [(ANDROID_NS, "name", name)],
+             [("intent-filter", [], [("action", [(ANDROID_NS, "name", action)], [])
+                                     for action in actions])] if actions else [])
+            for tag, name, actions in components
+        ]),
+    ]))
+
+
+def manifest_components(axml):
+    """The (tag, name) of each element with a name in a compiled manifest, in order."""
+    strings = make_image.xml_strings(axml, 8)
+    found = []
+    offset = 8
+    while offset < len(axml):
+        chunk_type, header_size, size = struct.unpack_from("<HHI", axml, offset)
+        if chunk_type == make_image.XML_START_ELEMENT:
+            tag, attributes = make_image._xml_element(axml, offset, header_size, strings)
+            if "name" in attributes and tag != "action":
+                found.append((tag, attributes["name"]))
+        offset += size
+    return found
+
+
+BOOT = "android.intent.action.BOOT_COMPLETED"
+DYNSYSTEM_APK = "SYSTEM/priv-app/DynamicSystemInstallationService/DynamicSystemInstallationService.apk"
+DIAGNOSTICS_APK = "SYSTEM/priv-app/DeviceDiagnostics/DeviceDiagnostics.apk"
+# The components of Android 17's two apps that matter here, from their manifests.
+DYNSYSTEM_MANIFEST = manifest(
+    ("service", ".DynamicSystemInstallationService", []),
+    ("activity", ".VerificationActivity", ["android.os.image.action.START_INSTALL"]),
+    ("receiver", ".BootCompletedReceiver", [BOOT]),
+)
+DIAGNOSTICS_MANIFEST = manifest(
+    ("provider", "com.android.devicediagnostics.GetStatusContentProvider", []),
+    ("activity", "com.android.devicediagnostics.MainActivity", ["android.intent.action.MAIN"]),
+    ("receiver", "com.android.devicediagnostics.BootCompleteReceiver", [BOOT]),
+)
+
+
+def _apk(files):
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as archive:
+        for name, data in files.items():
+            info = zipfile.ZipInfo(name, date_time=(2026, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            archive.writestr(info, data)
+    return out.getvalue()
+
+
+class SlimSystemServerTests(unittest.TestCase):
+    """What system_server and the boot hold that a desktop guest never uses."""
+
+    def test_nfr1_nothing_is_locked_in_memory_by_the_pinner_service(self):
+        # PinnerService locked up to 60 MiB of the home app's APK (the agent's) and 20 MiB of
+        # WebView's, each with its compiled code on top, which no reclaim could take back.
+        self.assertEqual(make_image.PINNER_OVERLAY_INTEGERS, {
+            "config_pinnerHomePinBytes": 0,
+            "config_pinnerWebviewPinBytes": 0,
+            "config_pinnerMaxPinnedMemoryPercentage": 0,
+        })
+        for name, value in make_image.PINNER_OVERLAY_INTEGERS.items():
+            self.assertEqual(make_image.FRAMEWORK_OVERLAY_INTEGERS[name], value)
+            self.assertIn(f"integer/{name}", make_image.framework_overlaid())
+        with tempfile.TemporaryDirectory() as tmp:
+            make_image.framework_overlay_sources(Path(tmp))
+            values = (Path(tmp) / "res/values/dsa.xml").read_text()
+        for name in make_image.PINNER_OVERLAY_INTEGERS:
+            self.assertIn(f'<integer name="{name}">0</integer>', values)
+        # The agent stays the home app; only its pages are no longer locked.
+        agent = (Path(__file__).parent.parent / "agent/src/main/AndroidManifest.xml").read_text()
+        self.assertIn("android.intent.category.HOME", agent)
+
+    def test_nfr1_foreground_heaps_keep_less_free_space_without_lowering_their_limits(self):
+        # ART multiplies a foreground heap's free space by this plus one: 3 by default, 2 here.
+        for vendor in (False, True):
+            props = make_image.edit_props(
+                "dalvik.vm.foreground-heap-growth-multiplier=2.0\ndalvik.vm.heapgrowthlimit=192m\n",
+                vendor=vendor).splitlines()
+            self.assertIn("dalvik.vm.foreground-heap-growth-multiplier=1.0", props)
+            self.assertNotIn("dalvik.vm.foreground-heap-growth-multiplier=2.0", props)
+            self.assertIn("dalvik.vm.heapgrowthlimit=192m", props)
+            self.assertIn("dalvik.vm.heapmaxfree=4m", props)
+        # ART refuses a multiplier outside 0.1 to 5.
+        self.assertTrue(0.1 <= float(make_image.MEMORY_PROPS["dalvik.vm.foreground-heap-growth-multiplier"]) <= 5)
+
+    def test_nfr1_system_server_starts_no_isolated_compilation_service_without_kvm(self):
+        props = make_image.edit_props("ro.config.isolated_compilation_enabled=true\n").splitlines()
+        self.assertIn("ro.config.isolated_compilation_enabled=false", props)
+        self.assertNotIn("ro.config.isolated_compilation_enabled=true", props)
+        # The system and product files carry it. The vendor file leaves it out: the system
+        # build.prop is read first, and a read-only property keeps its first value.
+        vendor = make_image.edit_props("ro.config.isolated_compilation_enabled=true\n", vendor=True)
+        self.assertNotIn("isolated_compilation_enabled", vendor)
+
+    def test_nfr1_the_webview_zygote_starts_with_the_first_renderer_not_at_boot(self):
+        dex = webview_service_dex()
+        self.assertEqual(make_image.dex_callers(dex, make_image.WEBVIEW_ZYGOTE_START), [SYSTEM_IMPL_ENSURE_ZYGOTE])
+        edited, changed = make_image.edit_dex(dex, make_image.SERVICES_CODE)
+        self.assertEqual(changed, [SYSTEM_IMPL_ENSURE_ZYGOTE])
+        self.assertEqual(make_image.dex_callers(edited, make_image.WEBVIEW_ZYGOTE_START), [])
+        self.assertEqual(dex_calls(edited, SYSTEM_IMPL_ENSURE_ZYGOTE), [])
+        # The method keeps its size and returns; the caller still waits for the RELRO files.
+        self.assertEqual(dex_code(edited, SYSTEM_IMPL_ENSURE_ZYGOTE), bytes(6) + bytes.fromhex("0e00"))
+        self.assertIn("Lcom/android/server/webkit/WebViewUpdateServiceImpl2;->waitForAndGetProvider",
+                      dex_calls(edited, START_ZYGOTE_WHEN_READY))
+        self.assertEqual(len(edited), len(dex))
+        self.assertEqual(make_image.edit_dex(edited, make_image.SERVICES_CODE)[1], [])
+
+    def test_nfr1_the_webview_zygote_call_is_skipped_where_r8_inlined_it(self):
+        dex = webview_service_dex(inlined=True)
+        self.assertEqual(make_image.dex_callers(dex, make_image.WEBVIEW_ZYGOTE_START),
+                         [SYSTEM_IMPL_ENSURE_ZYGOTE, START_ZYGOTE_WHEN_READY])
+        edited, changed = make_image.edit_dex(dex, make_image.SERVICES_CODE)
+        self.assertEqual(sorted(changed), [SYSTEM_IMPL_ENSURE_ZYGOTE, START_ZYGOTE_WHEN_READY])
+        self.assertEqual(make_image.dex_callers(edited, make_image.WEBVIEW_ZYGOTE_START), [])
+
+    def test_nfr1_the_edited_services_jar_starts_no_webview_zygote_and_stays_aligned(self):
+        jar = jar_of(webview_service_dex())
+        self.assertEqual(make_image.jar_callers(jar, make_image.WEBVIEW_ZYGOTE_START), [SYSTEM_IMPL_ENSURE_ZYGOTE])
+        edited = make_image.edit_services_jar(jar, make_image.SERVICES_JAR)
+        self.assertEqual(make_image.jar_callers(edited, make_image.WEBVIEW_ZYGOTE_START), [])
+        self.assertEqual(make_image.apk_edits_left(edited, code=make_image.SERVICES_CODE), [])
+        self.assertEqual(make_image.zip_misaligned(edited), [])
+        script = (Path(make_image.__file__).parent / "check-image.py").read_text()
+        self.assertIn("jar_callers(services, make_image.WEBVIEW_ZYGOTE_START)", script)
+        # WebView itself stays: its feature, its package and its update service.
+        features = (Path(__file__).parent / "unavailable-features.xml").read_text()
+        self.assertNotIn("android.software.webview", features)
+        self.assertNotIn("webview", [app.lower() for app in make_image.REMOVED_APPS])
+
+    def test_nfr1_a_receiver_that_only_starts_an_app_at_boot_is_removed(self):
+        edited, removed = make_image.remove_boot_receivers(DYNSYSTEM_MANIFEST)
+        self.assertEqual(removed, [".BootCompletedReceiver"])
+        self.assertEqual(manifest_components(edited), [
+            ("service", ".DynamicSystemInstallationService"),
+            ("activity", ".VerificationActivity"),
+        ])
+        self.assertEqual(struct.unpack_from("<I", edited, 4)[0], len(edited))
+        # Applied again, nothing changes.
+        self.assertEqual(make_image.remove_boot_receivers(edited), (edited, []))
+
+    def test_nfr1_a_receiver_that_answers_more_than_the_boot_stays(self):
+        both = manifest(("receiver", ".Alerts", [BOOT, "android.provider.Telephony.SMS_CB_RECEIVED"]),
+                        ("receiver", ".Locale", ["android.intent.action.LOCALE_CHANGED"]))
+        edited, removed = make_image.remove_boot_receivers(both)
+        self.assertEqual(removed, [])
+        self.assertEqual(manifest_components(edited), [("receiver", ".Alerts"), ("receiver", ".Locale")])
+        with self.assertRaises(ValueError):
+            make_image.remove_boot_receivers(b"\x02\x00\x0c\x00" + b"\0" * 8)
+
+    def test_nfr1_the_dsu_installer_and_trade_in_diagnostics_no_longer_start_at_every_boot(self):
+        self.assertEqual(make_image.BOOT_RECEIVER_FREE_APKS,
+                         ["/DynamicSystemInstallationService.apk", "/DeviceDiagnostics.apk"])
+        published = {DYNSYSTEM_APK: _apk({"AndroidManifest.xml": DYNSYSTEM_MANIFEST, "classes.dex": b"dex"}),
+                     DIAGNOSTICS_APK: _apk({"AndroidManifest.xml": DIAGNOSTICS_MANIFEST, "classes.dex": b"dex"})}
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "target-files.zip"
+            with zipfile.ZipFile(source, "w") as archive:
+                for name, data in published.items():
+                    archive.writestr(name, data)
+            make_image.modify(source, root / "modified.zip")
+            with zipfile.ZipFile(root / "modified.zip") as archive:
+                files = {name: archive.read(name) for name in archive.namelist()}
+        for name, before in published.items():
+            # The apps stay in the image, with their code; only the boot receiver goes.
+            self.assertIn(name, files)
+            self.assertTrue(make_image.boot_receivers_left(before))
+            self.assertEqual(make_image.boot_receivers_left(files[name]), [])
+            with zipfile.ZipFile(io.BytesIO(files[name])) as apk:
+                self.assertEqual(apk.read("classes.dex"), b"dex")
+                components = manifest_components(apk.read("AndroidManifest.xml"))
+            self.assertFalse(any(tag == "receiver" for tag, _ in components))
+            self.assertTrue(any(tag == "activity" for tag, _ in components))
+        for app in ("DynamicSystemInstallationService", "DeviceDiagnostics"):
+            self.assertNotIn(app, make_image.REMOVED_APPS)
+
+    def test_nfr1_check_image_refuses_an_app_that_still_starts_at_boot(self):
+        script = (Path(make_image.__file__).parent / "check-image.py").read_text()
+        self.assertIn("make_image.boot_receivers_left(z.read(name))", script)
+        self.assertIn("make_image.BOOT_RECEIVER_FREE_APKS", script)
 
 
 if __name__ == "__main__":

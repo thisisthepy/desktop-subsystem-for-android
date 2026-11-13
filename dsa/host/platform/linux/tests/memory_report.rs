@@ -480,11 +480,11 @@ fn nfr1_system_servers_threads_services_and_heap_settings_are_reported() {
         listed_services(services),
         ["accessibility", "account", "activity"]
     );
-    let getprop =
-        "[dalvik.vm.heapmaxfree]: [8m]\n[dalvik.vm.heapsize]: [512m]\n[dalvik.vm.usejit]: [true]\n";
+    let getprop = "[dalvik.vm.foreground-heap-growth-multiplier]: [1.0]\n\
+                   [dalvik.vm.heapmaxfree]: [8m]\n[dalvik.vm.heapsize]: [512m]\n[dalvik.vm.usejit]: [true]\n";
     assert_eq!(
         heap_settings(getprop),
-        "dalvik.vm.heapmaxfree=8m\ndalvik.vm.heapsize=512m"
+        "dalvik.vm.foreground-heap-growth-multiplier=1.0\ndalvik.vm.heapmaxfree=8m\ndalvik.vm.heapsize=512m"
     );
     let (md, json) = system_server_report(&SystemServer {
         meminfo: SYSTEM_SERVER_MEMINFO,

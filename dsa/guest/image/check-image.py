@@ -243,10 +243,24 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
         if left:
             problems.append(f"{make_image.SERVICES_JAR} still has {'; '.join(left)}, so Android refuses a "
                             "multiArch app with arm64-v8a code only even while ARM translation is on")
+        # The WebView zygote starts with the first WebView renderer, so nothing in services.jar
+        # starts it at boot.
+        callers = make_image.jar_callers(services, make_image.WEBVIEW_ZYGOTE_START)
+        if callers:
+            problems.append(f"{make_image.SERVICES_JAR} still starts the WebView zygote from "
+                            f"{', '.join(callers)}, so it holds its memory from boot whether or not an "
+                            "app uses WebView")
         misaligned = make_image.zip_misaligned(services)
         if misaligned:
             problems.append(f"{make_image.SERVICES_JAR} stores {', '.join(misaligned)} unaligned, so "
                             "system_server copies them into memory")
+    # The system apps that had nothing to do at boot are not started by it.
+    for name in names:
+        if name.endswith(tuple(make_image.BOOT_RECEIVER_FREE_APKS)):
+            left = make_image.boot_receivers_left(z.read(name))
+            if left:
+                problems.append(f"{name} still starts at every boot ({', '.join(map(str, left))}) and "
+                                "stays as a cached process")
     # The system apps users open, compiled when the image was made: each odex must be there,
     # made for the APK's own (edited, signed) dex and the guest's boot image, or ART drops it
     # and the app runs interpreted again.
