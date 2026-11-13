@@ -978,6 +978,29 @@ fn nfr2_the_window_managers_committed_memory_is_broken_down_by_owner() {
 }
 
 #[test]
+fn nfr1_the_renderers_gpu_memory_is_logged_by_whose_device_it_is_on() {
+    use dsa_host_core::renderer::{renderer_owners_line, Allocations, RendererOwners};
+    let at = |mib: u64, count: u32| Allocations {
+        kb: mib * MIB,
+        count,
+    };
+    let owners = RendererOwners {
+        renderer: [at(300, 120), at(0, 0), at(159, 126)],
+        guests: [at(104, 49), at(116, 56), at(0, 0)],
+        guest_devices: 10,
+        largest_guest_devices_kb: vec![60 * MIB, 40 * MIB, 20 * MIB, 0],
+    };
+    assert_eq!(
+        renderer_owners_line(&owners),
+        "graphics renderer by owner: color buffers and window textures: GPU-only 300 MiB in \
+         120, CPU-mapped 0 MiB in 0, imported 159 MiB in 126; 10 guest devices: GPU-only 104 \
+         MiB in 49, CPU-mapped 116 MiB in 56, imported 0 MiB in 0 (the largest hold 60, 40, 20 \
+         MiB)"
+    );
+    assert!(renderer_owners_line(&RendererOwners::default()).ends_with("(none holds any)"));
+}
+
+#[test]
 fn nfr5_the_renderers_memory_is_logged_under_its_own_process() {
     use dsa_host_core::memory::{HeldMemory, RendererMemory};
     use dsa_host_core::renderer::{renderer_line, RendererProcessMemory};

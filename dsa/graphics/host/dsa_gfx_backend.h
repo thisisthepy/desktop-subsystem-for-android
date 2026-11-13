@@ -271,6 +271,33 @@ typedef struct dsa_gfx_memory_stats {
 /* Fills `stats`. Returns 0 on success, -1 when the renderer is not running. */
 DSA_GFX_EXPORT int dsa_gfx_get_memory_stats(dsa_gfx_memory_stats* stats);
 
+/* The kinds of dsa_gfx_memory_stats, as the arrays below index them. */
+#define DSA_GFX_MEMORY_DEVICE_LOCAL 0
+#define DSA_GFX_MEMORY_HOST_VISIBLE 1
+#define DSA_GFX_MEMORY_IMPORTED 2
+#define DSA_GFX_MEMORY_KINDS 3
+/* How many of the guest devices that hold the most the owners name. */
+#define DSA_GFX_MEMORY_LARGEST_DEVICES 4
+
+/* The same live allocations by owner, so a log says whose the renderer's GPU memory is: the
+ * renderer's own device (the color buffer behind every gralloc buffer: window buffers, hardware
+ * bitmaps, decoded video frames, and the task windows' textures imported from Direct3D), and
+ * the guest processes' devices (what each guest process allocates through Vulkan itself: its
+ * images and buffers, and the copies of its host-visible memory), each by kind; how many guest
+ * devices hold memory, and the bytes of the ones that hold the most, largest first. */
+typedef struct dsa_gfx_memory_owners {
+    uint64_t renderer_bytes[DSA_GFX_MEMORY_KINDS];
+    uint64_t guest_bytes[DSA_GFX_MEMORY_KINDS];
+    uint64_t largest_guest_device_bytes[DSA_GFX_MEMORY_LARGEST_DEVICES];
+    uint32_t renderer_count[DSA_GFX_MEMORY_KINDS];
+    uint32_t guest_count[DSA_GFX_MEMORY_KINDS];
+    uint32_t guest_devices;
+    uint32_t reserved;
+} dsa_gfx_memory_owners;
+
+/* Fills `owners`. Returns 0 on success, -1 when the renderer is not running. */
+DSA_GFX_EXPORT int dsa_gfx_get_memory_owners(dsa_gfx_memory_owners* owners);
+
 #ifdef __cplusplus
 }
 #endif
