@@ -8238,6 +8238,60 @@ def webview_service_dex(inlined=False):
     return dex_file(methods, {0: (1, ensure), 2: (2, bytes.fromhex(when_ready))})
 
 
+def manifest(*components):
+    """A compiled manifest with these components inside its application: (tag, name,
+    [actions]), each action in an intent filter of its own component."""
+    return compiled_xml(("manifest", [(ANDROID_NS, "package", "com.example")], [
+        ("application", [], [
+            (tag, [(ANDROID_NS, "name", name)],
+             [("intent-filter", [], [("action", [(ANDROID_NS, "name", action)], [])
+                                     for action in actions])] if actions else [])
+            for tag, name, actions in components
+        ]),
+    ]))
+
+
+def manifest_components(axml):
+    """The (tag, name) of each element with a name in a compiled manifest, in order."""
+    strings = make_image.xml_strings(axml, 8)
+    found = []
+    offset = 8
+    while offset < len(axml):
+        chunk_type, header_size, size = struct.unpack_from("<HHI", axml, offset)
+        if chunk_type == make_image.XML_START_ELEMENT:
+            tag, attributes = make_image._xml_element(axml, offset, header_size, strings)
+            if "name" in attributes and tag != "action":
+                found.append((tag, attributes["name"]))
+        offset += size
+    return found
+
+
+BOOT = "android.intent.action.BOOT_COMPLETED"
+DYNSYSTEM_APK = "SYSTEM/priv-app/DynamicSystemInstallationService/DynamicSystemInstallationService.apk"
+DIAGNOSTICS_APK = "SYSTEM/priv-app/DeviceDiagnostics/DeviceDiagnostics.apk"
+# The components of Android 17's two apps that matter here, from their manifests.
+DYNSYSTEM_MANIFEST = manifest(
+    ("service", ".DynamicSystemInstallationService", []),
+    ("activity", ".VerificationActivity", ["android.os.image.action.START_INSTALL"]),
+    ("receiver", ".BootCompletedReceiver", [BOOT]),
+)
+DIAGNOSTICS_MANIFEST = manifest(
+    ("provider", "com.android.devicediagnostics.GetStatusContentProvider", []),
+    ("activity", "com.android.devicediagnostics.MainActivity", ["android.intent.action.MAIN"]),
+    ("receiver", "com.android.devicediagnostics.BootCompleteReceiver", [BOOT]),
+)
+
+
+def _apk(files):
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as archive:
+        for name, data in files.items():
+            info = zipfile.ZipInfo(name, date_time=(2026, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            archive.writestr(info, data)
+    return out.getvalue()
+
+
 class SlimSystemServerTests(unittest.TestCase):
     """What system_server and the boot hold that a desktop guest never uses."""
 
@@ -8318,6 +8372,58 @@ class SlimSystemServerTests(unittest.TestCase):
         features = (Path(__file__).parent / "unavailable-features.xml").read_text()
         self.assertNotIn("android.software.webview", features)
         self.assertNotIn("webview", [app.lower() for app in make_image.REMOVED_APPS])
+
+    def test_nfr1_a_receiver_that_only_starts_an_app_at_boot_is_removed(self):
+        edited, removed = make_image.remove_boot_receivers(DYNSYSTEM_MANIFEST)
+        self.assertEqual(removed, [".BootCompletedReceiver"])
+        self.assertEqual(manifest_components(edited), [
+            ("service", ".DynamicSystemInstallationService"),
+            ("activity", ".VerificationActivity"),
+        ])
+        self.assertEqual(struct.unpack_from("<I", edited, 4)[0], len(edited))
+        # Applied again, nothing changes.
+        self.assertEqual(make_image.remove_boot_receivers(edited), (edited, []))
+
+    def test_nfr1_a_receiver_that_answers_more_than_the_boot_stays(self):
+        both = manifest(("receiver", ".Alerts", [BOOT, "android.provider.Telephony.SMS_CB_RECEIVED"]),
+                        ("receiver", ".Locale", ["android.intent.action.LOCALE_CHANGED"]))
+        edited, removed = make_image.remove_boot_receivers(both)
+        self.assertEqual(removed, [])
+        self.assertEqual(manifest_components(edited), [("receiver", ".Alerts"), ("receiver", ".Locale")])
+        with self.assertRaises(ValueError):
+            make_image.remove_boot_receivers(b"\x02\x00\x0c\x00" + b"\0" * 8)
+
+    def test_nfr1_the_dsu_installer_and_trade_in_diagnostics_no_longer_start_at_every_boot(self):
+        self.assertEqual(make_image.BOOT_RECEIVER_FREE_APKS,
+                         ["/DynamicSystemInstallationService.apk", "/DeviceDiagnostics.apk"])
+        published = {DYNSYSTEM_APK: _apk({"AndroidManifest.xml": DYNSYSTEM_MANIFEST, "classes.dex": b"dex"}),
+                     DIAGNOSTICS_APK: _apk({"AndroidManifest.xml": DIAGNOSTICS_MANIFEST, "classes.dex": b"dex"})}
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "target-files.zip"
+            with zipfile.ZipFile(source, "w") as archive:
+                for name, data in published.items():
+                    archive.writestr(name, data)
+            make_image.modify(source, root / "modified.zip")
+            with zipfile.ZipFile(root / "modified.zip") as archive:
+                files = {name: archive.read(name) for name in archive.namelist()}
+        for name, before in published.items():
+            # The apps stay in the image, with their code; only the boot receiver goes.
+            self.assertIn(name, files)
+            self.assertTrue(make_image.boot_receivers_left(before))
+            self.assertEqual(make_image.boot_receivers_left(files[name]), [])
+            with zipfile.ZipFile(io.BytesIO(files[name])) as apk:
+                self.assertEqual(apk.read("classes.dex"), b"dex")
+                components = manifest_components(apk.read("AndroidManifest.xml"))
+            self.assertFalse(any(tag == "receiver" for tag, _ in components))
+            self.assertTrue(any(tag == "activity" for tag, _ in components))
+        for app in ("DynamicSystemInstallationService", "DeviceDiagnostics"):
+            self.assertNotIn(app, make_image.REMOVED_APPS)
+
+    def test_nfr1_check_image_refuses_an_app_that_still_starts_at_boot(self):
+        script = (Path(make_image.__file__).parent / "check-image.py").read_text()
+        self.assertIn("make_image.boot_receivers_left(z.read(name))", script)
+        self.assertIn("make_image.BOOT_RECEIVER_FREE_APKS", script)
 
 
 if __name__ == "__main__":

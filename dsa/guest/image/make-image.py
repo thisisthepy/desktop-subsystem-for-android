@@ -2601,6 +2601,105 @@ def edit_settings_apk(data, name):
                     controllers=SETTINGS_CONTROLLERS_WITHOUT_BLUETOOTH, theme_attributes=SETTINGS_TITLE_EXPANDED)
 
 
+# System apps that started at every boot to find they had nothing to do, and then stayed as
+# cached processes until the activity manager needed the room: each answered BOOT_COMPLETED
+# with a receiver of its own. Their receivers for the boot go from their manifests; the apps
+# stay, and start as before when the user or another app opens them.
+# - DynamicSystemInstallationService (com.android.dynsystem, two processes, 4.5 MiB of PSS
+#   each in an image test): its receiver starts its service at boot only to post a
+#   notification while a Dynamic System Update image (a GSI booted from /data) is running, and
+#   the service stops itself otherwise. DSA boots its own image from the host and has no
+#   SystemUI to show that notification. Developer options' DSU loader still starts the app.
+# - DeviceDiagnostics (com.android.devicediagnostics, 4.7 MiB): the trade-in diagnostics a
+#   phone runs for a store before resale (screen, touch, battery and attestation checks). Its
+#   receiver resumes a trade-in evaluation after a reboot; a PC's VM is never traded in. The
+#   app and its status provider stay for Settings' entry.
+BOOT_RECEIVER_FREE_APKS = ["/DynamicSystemInstallationService.apk", "/DeviceDiagnostics.apk"]
+BOOT_ACTIONS = {"android.intent.action.BOOT_COMPLETED", "android.intent.action.LOCKED_BOOT_COMPLETED"}
+
+
+def _xml_element(axml, offset, header_size, strings):
+    """The tag of the compiled XML start element at `offset`, and its attributes that hold a
+    string, by name (in any namespace)."""
+    _, name, attribute_start, attribute_size, attribute_count = struct.unpack_from(
+        "<IIHHH", axml, offset + header_size)
+    attributes = {}
+    for i in range(attribute_count):
+        at = offset + header_size + attribute_start + i * attribute_size
+        _, attribute, raw, _, _, data_type, data = struct.unpack_from("<IIIHBBI", axml, at)
+        index = raw if raw != XML_NO_INDEX else (data if data_type == XML_TYPE_STRING else None)
+        if index is not None:
+            attributes[strings[attribute]] = strings[index]
+    return strings[name], attributes
+
+
+def remove_boot_receivers(axml):
+    """Removes from a compiled manifest each <receiver> whose intent filters name only the boot
+    actions (BOOT_ACTIONS), with everything inside it. A receiver that also answers another
+    action stays. Returns the new manifest and the names of the receivers it removed."""
+    file_type, file_header, _ = struct.unpack_from("<HHI", axml, 0)
+    if file_type != XML_FILE:
+        raise ValueError("not a compiled Android XML file")
+    strings = []
+    kept = [axml[:file_header]]
+    removed = []
+    receiver = None
+    offset = file_header
+    while offset < len(axml):
+        chunk_type, header_size, size = struct.unpack_from("<HHI", axml, offset)
+        chunk = axml[offset:offset + size]
+        offset += size
+        if chunk_type == XML_STRING_POOL:
+            strings = xml_strings(axml, offset - size)
+        if receiver is None:
+            if chunk_type == XML_START_ELEMENT:
+                tag, attributes = _xml_element(axml, offset - size, header_size, strings)
+                if tag == "receiver":
+                    receiver = {"chunks": [chunk], "depth": 1, "name": attributes.get("name"), "actions": set()}
+                    continue
+            kept.append(chunk)
+            continue
+        receiver["chunks"].append(chunk)
+        if chunk_type == XML_START_ELEMENT:
+            receiver["depth"] += 1
+            tag, attributes = _xml_element(axml, offset - size, header_size, strings)
+            if tag == "action" and "name" in attributes:
+                receiver["actions"].add(attributes["name"])
+        elif chunk_type == XML_END_ELEMENT:
+            receiver["depth"] -= 1
+            if receiver["depth"] == 0:
+                if receiver["actions"] and receiver["actions"] <= BOOT_ACTIONS:
+                    removed.append(receiver["name"])
+                else:
+                    kept += receiver["chunks"]
+                receiver = None
+    result = b"".join(kept)
+    return result[:4] + struct.pack("<I", len(result)) + result[8:], removed
+
+
+def edit_boot_receivers(data, name):
+    """An APK without the receivers that only start it at boot (remove_boot_receivers). Prints
+    each one; returns the APK as it was when it has none."""
+    with zipfile.ZipFile(io.BytesIO(data)) as apk:
+        manifest, removed = remove_boot_receivers(apk.read("AndroidManifest.xml"))
+        if not removed:
+            return data
+        for receiver in removed:
+            print(f"removing the boot receiver {receiver} from {name}", flush=True)
+        out = io.BytesIO()
+        # Each entry keeps its compression; signing aligns the stored ones again.
+        with zipfile.ZipFile(out, "w") as edited_apk:
+            for info in apk.infolist():
+                edited_apk.writestr(info, manifest if info.filename == "AndroidManifest.xml" else apk.read(info))
+    return out.getvalue()
+
+
+def boot_receivers_left(data):
+    """The receivers of an APK that only start it at boot."""
+    with zipfile.ZipFile(io.BytesIO(data)) as apk:
+        return remove_boot_receivers(apk.read("AndroidManifest.xml"))[1]
+
+
 ZIP_ALIGNMENT_EXTRA = 0xD935  # zipalign's alignment extra field: a 16-bit alignment, then padding
 
 
@@ -5762,6 +5861,8 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                     data = edit_wifi_rc(data.decode()).encode()
                 elif name.endswith(SETTINGS_APK):
                     data = edit_settings_apk(data, name)
+                elif name.endswith(tuple(BOOT_RECEIVER_FREE_APKS)):
+                    data = edit_boot_receivers(data, name)
                 elif name == SERVICES_JAR:
                     data = edit_services_jar(data, name)
                 elif name in PERMISSION_APEXES:

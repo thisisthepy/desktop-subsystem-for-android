@@ -254,6 +254,13 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
         if misaligned:
             problems.append(f"{make_image.SERVICES_JAR} stores {', '.join(misaligned)} unaligned, so "
                             "system_server copies them into memory")
+    # The system apps that had nothing to do at boot are not started by it.
+    for name in names:
+        if name.endswith(tuple(make_image.BOOT_RECEIVER_FREE_APKS)):
+            left = make_image.boot_receivers_left(z.read(name))
+            if left:
+                problems.append(f"{name} still starts at every boot ({', '.join(map(str, left))}) and "
+                                "stays as a cached process")
     # The system apps users open, compiled when the image was made: each odex must be there,
     # made for the APK's own (edited, signed) dex and the guest's boot image, or ART drops it
     # and the app runs interpreted again.
