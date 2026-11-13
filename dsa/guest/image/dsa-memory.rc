@@ -12,12 +12,16 @@
 # the same order (dsa-channeld.rc). Reading one swapped page reads only that page: zram has no seek to save by reading ahead, and
 # the neighbours would be resident again for nothing.
 #
-# Free page reporting hands back only whole free blocks of its order (up to 2 MiB). Memory an
-# app frees is scattered in small pieces among pages still in use, and until they gather into
-# whole blocks none of it goes back. The kernel compacts in the background whenever free
-# memory is more fragmented than this setting allows; 40, twice its default, has it gather
-# free pages sooner, so more of them reach the host without waiting for the control daemon's
-# reclaim.
+# Free page reporting hands back only whole free blocks of its order. Where the host takes back
+# only 2 MiB or 128 KiB blocks (the host then puts androidboot.dsa.memory_compaction=on on the
+# command line), memory an app frees is scattered in small pieces among pages still in use,
+# and until they gather into whole blocks none of it goes back. The kernel compacts in the
+# background whenever free memory is more fragmented than this setting allows; 40, twice its
+# default, has it gather free pages sooner, so more of them reach the host without waiting for
+# the control daemon's reclaim. Where the host takes back every free 4 KiB page (order 0, on
+# recent Windows, Linux and macOS), background compaction is off: every free page goes back as
+# it is, and compaction would only copy pages into free pages the host had taken back, which
+# it then backs again. The kernel still compacts when an allocation needs contiguous memory.
 #
 # zram compresses with LZ4, fast enough for every swap. zstd, its second compressor, compresses
 # what stays in zram again during the idle reclaim (dsa-channeld.rc), about a fifth smaller. It
@@ -54,9 +58,13 @@ on boot
     setprop vendor.dsa.memory.writeback_age ${ro.boot.dsa.zram_writeback_age:-1800}
     write /proc/sys/vm/swappiness 60
     write /proc/sys/vm/page-cluster 0
-    write /proc/sys/vm/compaction_proactiveness 40
+    write /proc/sys/vm/compaction_proactiveness 0
     write /proc/sys/vm/vfs_cache_pressure 200
     write /proc/sys/vm/percpu_pagelist_high_fraction 1048576
+
+# After the action above: both run on boot, in the order they are written.
+on boot && property:ro.boot.dsa.memory_compaction=on
+    write /proc/sys/vm/compaction_proactiveness 40
 
 # The apps that see the computer's memory as the device's (Google Play: the Play Store and Play
 # services). Google Play gives a device under 8 GB a build of Chrome whose browser is 32-bit,

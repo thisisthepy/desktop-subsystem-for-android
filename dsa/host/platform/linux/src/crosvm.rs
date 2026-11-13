@@ -275,9 +275,10 @@ impl VmConfig {
         // The boot-time memory settings are the Windows host's, so the guest kernel sets aside
         // as little here as there, and the CI's memory measurement on this host reads the same
         // kernel costs a Windows user's guest has.
+        // crosvm takes back each reported range by itself, so there is no fault cluster.
         let mut cmdline = format!(
-            "panic=-1 sysrq_always_enabled=1 page_reporting.page_reporting_order={} {} {}",
-            self.page_reporting_order,
+            "panic=-1 sysrq_always_enabled=1 {} {} {}",
+            dsa_host_core::memory::page_reporting_cmdline(self.page_reporting_order, 0),
             MEMORY_HOTPLUG_CMDLINE,
             dsa_host_core::memory::GUEST_BOOT_MEMORY_CMDLINE
         );
@@ -722,6 +723,28 @@ mod tests {
         }
         assert_eq!(value_of(&args, "--mem"), ["size=2048"]);
         assert!(value_of(&args, "--init-mem").is_empty());
+    }
+
+    #[test]
+    fn nfr2_the_guest_compacts_only_when_it_reports_whole_blocks() {
+        // At order 9 compaction gathers free pages into the 2 MiB blocks reporting hands back;
+        // at order 0 every free page goes back as it is, and compaction would only move memory
+        // into pages the host had already taken back.
+        let blocks = config().full_kernel_cmdline();
+        assert!(
+            blocks.contains("androidboot.dsa.memory_compaction=on"),
+            "{blocks}"
+        );
+        let mut every_page = config();
+        every_page.page_reporting_order = 0;
+        let cmdline = every_page.full_kernel_cmdline();
+        assert!(
+            cmdline.contains("page_reporting.page_reporting_order=0"),
+            "{cmdline}"
+        );
+        assert!(!cmdline.contains("memory_compaction"), "{cmdline}");
+        // crosvm returns each reported range by itself: no fault cluster to tell the guest.
+        assert!(!cmdline.contains("fault_cluster_order"), "{cmdline}");
     }
 
     #[test]

@@ -255,8 +255,9 @@ pub struct HostConfig {
     #[serde(default)]
     pub user_sid: Option<String>,
     /// Free page reporting granularity as a page order: 9 (2 MiB) works on every Windows
-    /// build; 5 (128 KiB) returns memory more finely on recent builds. By default, 5 on
-    /// Windows 11 and later and 9 before.
+    /// build; 0 (4 KiB) returns every free page on builds that back the VM in small pages.
+    /// By default, 0 on those builds and 9 on the others ([`page_reporting_order_for_build`]).
+    /// Above 0 the guest also compacts its memory, so free pages form whole blocks.
     #[serde(default = "default_page_reporting_order")]
     pub page_reporting_order: u8,
     /// The vsock port the guest's channel daemon connects to.

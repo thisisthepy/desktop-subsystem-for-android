@@ -450,6 +450,41 @@ class AndroidKernelConfigTests(unittest.TestCase):
         self.assertLess(names.index("page-reporting-no-delay.patch"),
                         names.index("page-reporting-rereport.patch"))
 
+    def test_nfr2_the_guest_says_how_much_free_memory_the_host_has_back(self):
+        # Read-only parameters for the agent's memory report: the free memory marked reported
+        # now (counted from the free lists when read) and the memory reported since boot. A
+        # write is refused rather than reaching a missing set operation.
+        patch = (PATCHES / "page-reporting-stats.patch").read_text()
+        self.assertIn("+++ b/mm/page_reporting.c", patch)
+        self.assertIn("+module_param_cb(reported_kb, &page_reporting_reported_ops, NULL, 0444);", patch)
+        self.assertIn("+module_param_cb(reported_total_kb, &page_reporting_reported_total_ops, NULL, 0444);",
+                      patch)
+        self.assertIn("+\t\tatomic_long_add(1UL << order, &page_reporting_reported_pages);", patch)
+        self.assertIn("+\treturn -EPERM;", patch)
+        names = sorted(p.name for p in PATCHES.glob("*.patch"))
+        self.assertLess(names.index("page-reporting-rereport.patch"),
+                        names.index("page-reporting-stats.patch"))
+
+    def test_nfr2_free_pages_the_host_backs_again_with_a_neighbour_are_reported_again(self):
+        # Hyper-V faults guest memory in 64 KiB clusters. When the allocator hands out a reported
+        # block smaller than the cluster the host names (page_reporting.fault_cluster_order), the
+        # free blocks in the rest of the cluster lose their reported mark and the next pass
+        # reports them again. Off (0) unless the host sets it.
+        patch = (PATCHES / "page-reporting-taken-clusters.patch").read_text()
+        for path in ["mm/page_alloc.c", "mm/page_reporting.c", "mm/page_reporting.h"]:
+            self.assertIn(f"+++ b/{path}", patch)
+        self.assertIn("+\tbool reported = page_reported(page);", patch)
+        self.assertIn("+\tif (reported)\n+\t\tpage_reporting_taken(zone, page, high);", patch)
+        self.assertIn("+\tif (order < page_reporting_fault_cluster_order)", patch)
+        self.assertIn("+unsigned int page_reporting_fault_cluster_order __read_mostly;", patch)
+        self.assertIn("+module_param_cb(fault_cluster_order, &page_reporting_fault_cluster_ops,", patch)
+        self.assertIn("+\t\t\t__ClearPageReported(p);", patch)
+        self.assertIn("+module_param_cb(refaulted_total_kb, &page_reporting_refaulted_total_ops, NULL, 0444);",
+                      patch)
+        names = sorted(p.name for p in PATCHES.glob("*.patch"))
+        self.assertLess(names.index("page-reporting-stats.patch"),
+                        names.index("page-reporting-taken-clusters.patch"))
+
     def test_nfr1_cold_zram_pages_can_be_written_to_a_backing_file_by_age(self):
         # Writeback by age needs the access time; compressing a page again with zstd must not
         # reset it, or every recompressed page would look unused since boot.
