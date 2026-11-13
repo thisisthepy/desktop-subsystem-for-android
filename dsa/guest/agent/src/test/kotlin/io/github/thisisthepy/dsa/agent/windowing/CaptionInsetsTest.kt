@@ -55,6 +55,49 @@ class CaptionInsetsTest {
     }
 
     @Test
+    fun fr22_a_new_task_gets_its_top_inset_before_its_window_says_how_high_the_title_bar_is() {
+        // At 262 dpi the framework's status bar is the title bar of a 200% monitor, 58 px.
+        actions.statusBarHeights = mapOf(262 to 58)
+        val at = TaskBounds(100, 40, 900, 1040)
+
+        // Told of the task, before its window has opened: the band it is expected to have.
+        insets.update(mapOf(7 to at), awaiting = mapOf(7 to 262))
+        assertEquals(listOf(7 to TaskBounds(-reach, 40, reach, 98)), actions.captionInsets)
+
+        // Nothing new while it waits.
+        insets.update(mapOf(7 to at), awaiting = mapOf(7 to 262))
+        assertEquals(1, actions.captionInsets.size)
+
+        // The window's own height replaces it, and the task stops waiting.
+        insets.setHeight(7, 60, at)
+        assertEquals(7 to TaskBounds(-reach, 40, reach, 100), actions.captionInsets.last())
+        insets.update(mapOf(7 to at), awaiting = mapOf(7 to 262))
+        assertEquals(2, actions.captionInsets.size)
+
+        // A window that fills the screen has no title bar: the host's 0 stands.
+        insets.setHeight(7, 0, at)
+        insets.update(mapOf(7 to at), awaiting = mapOf(7 to 262))
+        assertEquals(3, actions.captionInsets.size)
+        assertEquals(7 to null, actions.captionInsets.last())
+    }
+
+    @Test
+    fun fr22_an_expected_inset_is_taken_back_when_the_task_fills_the_screen_first() {
+        actions.statusBarHeights = mapOf(262 to 58)
+        val at = TaskBounds(0, 0, 800, 600)
+        insets.update(mapOf(4 to at), awaiting = mapOf(4 to 262))
+        actions.captionInsets.clear()
+
+        // It left the freeform windowing mode before its window opened: no title bar to expect.
+        insets.update(mapOf(4 to at))
+        assertEquals(listOf<Pair<Int, TaskBounds?>>(4 to null), actions.captionInsets)
+
+        // A density the framework has no status bar height for expects nothing.
+        insets.update(mapOf(5 to at), awaiting = mapOf(5 to 999))
+        assertEquals(1, actions.captionInsets.size)
+    }
+
+    @Test
     fun fr22_an_inset_the_framework_refused_is_tried_again_and_logged_once() {
         actions.insetsTaken = false
         insets.setHeight(7, 31, TaskBounds(0, 0, 400, 300))

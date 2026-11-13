@@ -92,6 +92,13 @@ interface TaskActions {
      * has no way to give a task an inset, or refused.
      */
     fun setCaptionInset(taskId: Int, frame: TaskBounds?, boundingRects: List<TaskBounds> = emptyList()): Boolean
+
+    /**
+     * The status bar's height, in pixels, that an app drawing at [densityDpi] reads from the
+     * framework's resources. The image sets it to the host window's title bar at the monitor
+     * scale that density belongs to. 0 when it cannot be read.
+     */
+    fun statusBarHeight(densityDpi: Int): Int = 0
 }
 
 /** Which of Android Settings' pages of an app to open. */

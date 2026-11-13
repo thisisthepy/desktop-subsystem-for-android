@@ -1095,7 +1095,14 @@ class Agent(
         pastFirstScreen = placedTasks.filter { it.canGoBack }.map { it.taskId }.toSet()
         val reported = reporter.reported
         val told = reported.mapNotNull { taskId -> reporter.reportedBounds(taskId)?.let { taskId to it } }.toMap()
-        captions.update(told, placedTasks.filter { it.transparentCaption }.map { it.taskId }.toSet())
+        // A task's band is given as soon as the host is told of it, before its window has
+        // opened and said how high its title bar is, so the app's first screen lays out below it.
+        val titled = placedTasks.filter { it.taskId in told && !it.fullscreen && !it.pictureInPicture }
+        captions.update(
+            told,
+            placedTasks.filter { it.transparentCaption }.map { it.taskId }.toSet(),
+            awaiting = titled.associate { it.taskId to it.densityDpi },
+        )
         if (told != taskBounds) {
             taskBounds = told
             inputScheduler.post { pointer.retainTasks(reported) }
