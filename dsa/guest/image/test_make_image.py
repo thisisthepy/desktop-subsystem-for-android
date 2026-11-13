@@ -1467,6 +1467,12 @@ class ImageLayoutTests(unittest.TestCase):
                 self.assertIn("(allow surfaceflinger platform_app (fd (use)))", policy)
                 self.assertIn("(allow surfaceflinger platform_app (fifo_file (write getattr)))", policy)
 
+    def test_fr22_the_navigation_mode_is_gestural_like_the_bands_height(self):
+        # Three-button mode draws a contrast scrim behind an edge-to-edge app's band: the
+        # white bar that stayed under YouTube's Shorts player on the owner's PC.
+        self.assertEqual(make_image.FRAMEWORK_OVERLAY_INTEGERS["config_navBarInteractionMode"], 2)
+        self.assertIn("integer/config_navBarInteractionMode", make_image.framework_overlaid())
+
     def test_fr22_an_overlay_keeps_a_narrower_value_equal_to_its_default(self):
         # The framework's own navigation_bar_height at sw900dp would win over an overlay
         # whose identical sw900dp value aapt2 had dropped as redundant.

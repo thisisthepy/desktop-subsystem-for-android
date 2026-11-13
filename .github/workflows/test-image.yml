@@ -915,18 +915,29 @@ jobs:
       # itself, so the download stays the size it is (GitHub takes 2 GiB a file). image.json
       # records the hash the host checks that disk against, made here exactly as the host makes
       # it, and the hash of the disk as it is, which hosts that attach raw disks check their copy
-      # against; the signed list covers both through image.json's own hash. An image this
-      # cannot describe boots without the mode, so a failure here warns and does not stop it.
+      # against; the signed list covers both through image.json's own hash. An image that
+      # declares the mode but whose disk cannot be described would boot every host on SCSI, so
+      # that fails the check. Only an image with no direct_mapped entry at all is meant to go
+      # without the mode.
       - name: Record the hashes of the system disk the host makes
         if: env.BOOT_IMAGE == 'true'
         working-directory: dsa
         run: |
           cargo build -q --release -p dsa-host-core --bin dsa-release
           dir="$(echo target/image/*/)"
+          if ! jq -e 'has("direct_mapped")' "$dir/image.json" > /dev/null; then
+            echo "::notice::the image declares no direct-mapped mode, so it has no system disk for it"
+            exit 0
+          fi
           if ! target/release/dsa-release direct-mapped "$dir"; then
-            echo "::warning::the direct-mapped system disk could not be described; the image boots without the direct-mapped mode"
+            echo "::error::the image declares the direct-mapped mode, but its system disk could not be described, so it would boot without the mode"
+            exit 1
           fi
           jq '{direct_mapped, system_disk_raw}' "$dir/image.json"
+          if ! jq -e '.direct_mapped.system_disk and .system_disk_raw' "$dir/image.json" > /dev/null; then
+            echo "::error::image.json lacks direct_mapped.system_disk or system_disk_raw after dsa-release direct-mapped"
+            exit 1
+          fi
 
       # The copies the host makes of the image's erofs partitions, beside the originals: each
       # copy passes erofs-utils' own check, and the two extract to the same files, modes and
