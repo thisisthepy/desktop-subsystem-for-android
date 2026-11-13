@@ -1111,7 +1111,10 @@
         {
           "path": "packages/modules/DnsResolver",
           "url": "https://android.googlesource.com/platform/packages/modules/DnsResolver",
-          "commit": "278cc346b4a2afd88e9b1155b716ebcb50dff8ca"
+          "commit": "278cc346b4a2afd88e9b1155b716ebcb50dff8ca",
+          "exclude": [
+            "apex/Android.bp"
+          ]
         },
         {
           "path": "packages/modules/StatsD",
@@ -2625,7 +2628,10 @@
         {
           "path": "packages/modules/DnsResolver",
           "url": "https://android.googlesource.com/platform/packages/modules/DnsResolver",
-          "commit": "0aeaf9d222ec761b9e0443a01c7a06590b9d1b4f"
+          "commit": "0aeaf9d222ec761b9e0443a01c7a06590b9d1b4f",
+          "exclude": [
+            "apex/Android.bp"
+          ]
         },
         {
           "path": "packages/modules/StatsD",
