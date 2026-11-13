@@ -564,6 +564,237 @@ fn fr14_a_new_image_on_a_disk_from_other_keys_is_neither_blamed_nor_kept() {
     );
 }
 
+/// A user's Android over `store` whose guest's daemon the test plays, followed as the
+/// service follows it. The daemon's console says the agent was refused for the disk's signing
+/// keys, so a trial that does not get ready is undecided rather than undone.
+fn undecided_android(
+    store: &Arc<ImageStore>,
+) -> (
+    Arc<UpdatingAndroid>,
+    memory::MemoryConnector,
+    Arc<Mutex<Option<BootSecret>>>,
+) {
+    let (listener, connector) = memory::pair();
+    let secret = Arc::new(Mutex::new(None));
+    let session = Arc::new(Session::new(
+        StoreLauncher {
+            store: Arc::clone(store),
+            broken: Vec::new(),
+            other_keys: true,
+            secret: Arc::clone(&secret),
+            boots: Default::default(),
+        },
+        Box::new(listener),
+        ControlHandshake::new("test host", WAIT),
+        SessionConfig {
+            connect_timeout: WAIT,
+            stop_timeout: WAIT,
+            agent_timeout: Duration::from_millis(100),
+            ..SessionConfig::default()
+        },
+    ));
+    let android = Arc::new(UpdatingAndroid {
+        session,
+        store: Arc::clone(store),
+        notices: Arc::new(UpdateNotices::default()),
+        boot_timeout: WAIT,
+        trial_running: Arc::new(AtomicBool::new(false)),
+        rollback: Default::default(),
+        image_restart: Default::default(),
+    });
+    dsa_host_core::update::service::follow_waiting_image(&android, Duration::from_millis(50));
+    (android, connector, secret)
+}
+
+/// Plays the daemon of the boot after `last`: it connects with that boot's secret and says
+/// Android finished booting, and whether the agent connected. Returns the connection, which
+/// is held as long as the boot lasts, and the boot's secret.
+fn daemon_of_next_boot(
+    connector: &mut memory::MemoryConnector,
+    secret: &Mutex<Option<BootSecret>>,
+    last: Option<&BootSecret>,
+    agent_connected: bool,
+) -> (Box<dyn dsa_transport::Connection>, BootSecret) {
+    let deadline = Instant::now() + WAIT;
+    let boot_secret = loop {
+        if let Some(boot_secret) = secret.lock().unwrap().clone() {
+            if last != Some(&boot_secret) {
+                break boot_secret;
+            }
+        }
+        assert!(Instant::now() < deadline, "the guest was not started");
+        thread::sleep(Duration::from_millis(5));
+    };
+    let mut daemon = connector.connect(WAIT).unwrap();
+    guest_connect(
+        &mut *daemon,
+        &local_hello(Role::Guest, "daemon"),
+        &boot_secret,
+        WAIT,
+    )
+    .unwrap();
+    say_booted(&mut *daemon, agent_connected);
+    (daemon, boot_secret)
+}
+
+fn say_booted(daemon: &mut dyn dsa_transport::Connection, agent_connected: bool) {
+    daemon
+        .send(&dsa_protocol::encode(&dsa_protocol::control::Envelope {
+            body: Some(dsa_protocol::control::envelope::Body::GuestBoot(
+                dsa_protocol::control::GuestBoot {
+                    boot_completed: true,
+                    agent_connected,
+                },
+            )),
+        }))
+        .unwrap();
+}
+
+fn alert_keys(android: &UpdatingAndroid) -> Vec<String> {
+    android
+        .untold_update_alerts("alice")
+        .iter()
+        .map(|alert| alert.key())
+        .collect()
+}
+
+#[test]
+fn fr14_an_undecided_trial_image_is_kept_once_android_finishes_starting_from_it() {
+    let store = fresh_store();
+    check(
+        &store,
+        &server(&[16], &[("16.0.2", 16, 2)], &key()),
+        "mem://list.json",
+        &trusted(),
+    )
+    .unwrap();
+    let (android, mut connector, secret) = undecided_android(&store);
+    android.start();
+    let (mut daemon, _) = daemon_of_next_boot(&mut connector, &secret, None, false);
+    let notice = wait_for_notice(&android);
+    assert!(notice.contains("16.0.2 is kept on trial"), "{notice}");
+    assert!(store.state().unwrap().on_trial, "undecided so far");
+
+    // The guest the trial left running gets ready later: its agent connects. No trial runs
+    // any more, and the boot still keeps the image.
+    say_booted(&mut *daemon, true);
+    assert!(android.session.wait_for(SessionState::Active, WAIT));
+    wait_until("the image is kept", || !store.state().unwrap().on_trial);
+    let state = store.state().unwrap();
+    assert_eq!(state.current.version, "16.0.2");
+    assert_eq!(state.previous.map(|p| p.version).as_deref(), Some("16.0.1"));
+    assert!(state.failed.is_empty());
+    wait_until("the user is told", || {
+        android.update_notice().as_deref() == Some("Android was updated to 16.0.2")
+    });
+    assert_eq!(alert_keys(&android), ["dsa:update:android:applied:16.0.2"]);
+    drop(daemon);
+}
+
+#[test]
+fn fr14_a_trial_image_booted_without_a_trial_is_kept_once_android_finishes_starting() {
+    let store = fresh_store();
+    check(
+        &store,
+        &server(&[16], &[("16.0.2", 16, 2)], &key()),
+        "mem://list.json",
+        &trusted(),
+    )
+    .unwrap();
+    let (android, mut connector, secret) = undecided_android(&store);
+    android.start();
+    let (daemon, first_boot) = daemon_of_next_boot(&mut connector, &secret, None, false);
+    let notice = wait_for_notice(&android);
+    assert!(notice.contains("16.0.2 is kept on trial"), "{notice}");
+
+    // The guest stops, and the session is started again without the updating Android, as
+    // a host tool or a request for Android's files starts it: no trial runs for this boot.
+    android.session.stop();
+    assert!(android.session.wait_for(SessionState::Stopped, WAIT));
+    drop(daemon);
+    android.session.start();
+    let (daemon, _) = daemon_of_next_boot(&mut connector, &secret, Some(&first_boot), true);
+    assert!(android.session.wait_for(SessionState::Active, WAIT));
+    wait_until("the image is kept", || !store.state().unwrap().on_trial);
+    assert_eq!(store.state().unwrap().current.version, "16.0.2");
+    wait_until("the user is told", || {
+        android.update_notice().as_deref() == Some("Android was updated to 16.0.2")
+    });
+    assert_eq!(alert_keys(&android), ["dsa:update:android:applied:16.0.2"]);
+    drop(daemon);
+}
+
+#[test]
+fn fr14_a_finished_boot_of_an_image_not_on_trial_changes_nothing() {
+    // Android runs the kept image, and a new one is downloaded meanwhile: a boot that
+    // completes is of the old image, and says nothing about the new one.
+    let store = fresh_store();
+    let (android, boots, done) = dozing_android(&store);
+    android.image_auto_restart(false);
+    android.start();
+    assert!(android.session.wait_for(SessionState::Dozing, WAIT));
+    let before = store.state().unwrap();
+    assert!(!before.on_trial);
+    thread::sleep(Duration::from_millis(300));
+    assert_eq!(
+        store.state().unwrap(),
+        before,
+        "a kept image stays as it is"
+    );
+    assert_eq!(android.update_notice(), None);
+    assert!(alert_keys(&android).is_empty());
+
+    download_new_image(&store, &android);
+    thread::sleep(Duration::from_millis(500));
+    let state = store.state().unwrap();
+    assert_eq!(state.current.version, "16.0.2");
+    assert!(
+        state.on_trial,
+        "the new image has not booted, so it is not kept"
+    );
+    assert!(
+        store.has_image("16.0.1"),
+        "the previous image is not removed"
+    );
+    assert_eq!(*boots.lock().unwrap(), ["16.0.1"]);
+    assert_eq!(alert_keys(&android), ["dsa:update:android:ready:16.0.2"]);
+    done.store(true, Ordering::Relaxed);
+}
+
+#[test]
+fn fr14_a_trial_image_that_does_not_boot_is_still_undone_while_boots_are_followed() {
+    let store = fresh_store();
+    check(
+        &store,
+        &server(&[16], &[("16.0.2", 16, 2)], &key()),
+        "mem://list.json",
+        &trusted(),
+    )
+    .unwrap();
+    let (android, done) = updating_android(&store, &["16.0.2"]);
+    let android = Arc::new(android);
+    dsa_host_core::update::service::follow_waiting_image(&android, Duration::from_millis(10));
+    android.start();
+    let notice = wait_for_notice(&android);
+    assert!(
+        notice.starts_with("Android 16.0.2 did not start")
+            && notice.contains("Android 16.0.1 is in use again"),
+        "{notice}"
+    );
+    assert!(android.session.wait_for(SessionState::Active, WAIT));
+    thread::sleep(Duration::from_millis(200));
+    let state = store.state().unwrap();
+    assert_eq!(state.current.version, "16.0.1");
+    assert!(!state.on_trial);
+    assert_eq!(state.failed, ["16.0.2"]);
+    assert_eq!(
+        android.update_notice(),
+        Some(notice),
+        "the previous image booting is not taken for the new one"
+    );
+    done.store(true, Ordering::Relaxed);
+}
+
 #[test]
 fn fr14_a_check_says_which_image_it_downloads_before_it_starts() {
     let store = store_without_an_image();
