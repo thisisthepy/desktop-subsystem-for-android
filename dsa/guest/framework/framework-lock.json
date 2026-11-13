@@ -500,6 +500,8 @@
             "include",
             "protos",
             "src/android_internal",
+            "src/android_sdk/jni",
+            "src/android_sdk/perfetto_sdk_for_jni",
             "src/android_stats",
             "src/base",
             "src/ipc",
@@ -982,6 +984,7 @@
           "url": "https://android.googlesource.com/platform/frameworks/native",
           "commit": "fcbde2bcff56ca1d7bec9cabf8bdca5e288bf103",
           "cone": [
+            "aidl/android/hardware/display",
             "aidl/binder",
             "aidl/gui",
             "headers",
@@ -1965,6 +1968,8 @@
             "include",
             "protos",
             "src/android_internal",
+            "src/android_sdk/jni",
+            "src/android_sdk/perfetto_sdk_for_jni",
             "src/android_stats",
             "src/base",
             "src/ipc",
@@ -2499,6 +2504,7 @@
           "url": "https://android.googlesource.com/platform/frameworks/native",
           "commit": "ae266dcb706d083868578cfedce381ef44488a07",
           "cone": [
+            "aidl/android/hardware/display",
             "aidl/binder",
             "aidl/gui",
             "headers",
