@@ -8247,6 +8247,15 @@ class SlimSystemServerTests(unittest.TestCase):
         # ART refuses a multiplier outside 0.1 to 5.
         self.assertTrue(0.1 <= float(make_image.MEMORY_PROPS["dalvik.vm.foreground-heap-growth-multiplier"]) <= 5)
 
+    def test_nfr1_system_server_starts_no_isolated_compilation_service_without_kvm(self):
+        props = make_image.edit_props("ro.config.isolated_compilation_enabled=true\n").splitlines()
+        self.assertIn("ro.config.isolated_compilation_enabled=false", props)
+        self.assertNotIn("ro.config.isolated_compilation_enabled=true", props)
+        # The system and product files carry it. The vendor file leaves it out: the system
+        # build.prop is read first, and a read-only property keeps its first value.
+        vendor = make_image.edit_props("ro.config.isolated_compilation_enabled=true\n", vendor=True)
+        self.assertNotIn("isolated_compilation_enabled", vendor)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -513,6 +513,16 @@ MEMORY_PROPS = {
     "dalvik.vm.foreground-heap-growth-multiplier": "1.0",
 }
 
+# Isolated compilation recompiles the system server's and the boot image's code inside a
+# protected VM of Android's own virtualization framework, which needs KVM in the guest. A
+# Hyper-V guest has none, so the service system_server starts for it, and the daily job it
+# schedules to start composd and the VM manager, could never complete. Without the property,
+# system_server does not start the service; on-device compilation by odrefresh, which needs no
+# VM, is unchanged.
+SERVICE_PROPS = {
+    "ro.config.isolated_compilation_enabled": "false",
+}
+
 # The density of the freeform display every task window lives on, by default: a 100% monitor's.
 # The host replaces it on the kernel command line at each boot with the density of the user's
 # main monitor (196 at 150%: Android's desktop dp is 1/117.23 inch and a host pixel at 100%
@@ -2604,7 +2614,7 @@ def permission_controller_edits():
 # vendor_init, and the platform's policy gives vendor_init no right to set these: each line
 # was refused, and logged as a denial, on every boot. The system build.prop sets them.
 # adbd's listening address and the USB configuration are the system's to set too.
-VENDOR_FORBIDDEN_PROPS = {*USER_PROPS, *ADB_PROPS, "sys.use_memfd"}
+VENDOR_FORBIDDEN_PROPS = {*USER_PROPS, *ADB_PROPS, "sys.use_memfd", *SERVICE_PROPS}
 VENDOR_PROP_FILES = {"VENDOR/build.prop", "ODM/etc/build.prop"}
 
 # The build's own fingerprint is AOSP's, and it stays the same however often DSA's image
@@ -2757,7 +2767,8 @@ def edit_props(text, codec2=False, vendor=False, build_tag=None, product=False, 
     `build_tag`, the incremental version and the fingerprints carry it. With `product`, it ends
     with the imports of the identity the user chose. With `network`, it is the vendor build.prop
     that chooses how the VM's network adapter reaches Android (NETWORK_PROPS)."""
-    props_to_apply = {**USER_PROPS, **ADB_PROPS, **GRAPHICS_PROPS, **MEMORY_PROPS, **LOADER_PROPS, **FRP_PROPS,
+    props_to_apply = {**USER_PROPS, **ADB_PROPS, **GRAPHICS_PROPS, **MEMORY_PROPS, **SERVICE_PROPS,
+                      **LOADER_PROPS, **FRP_PROPS,
                       **LOG_PROPS, **(CODEC2_PROPS if codec2 else {}), **(NETWORK_PROPS if network else {})}
     if vendor:
         props_to_apply = {k: v for k, v in props_to_apply.items() if k not in VENDOR_FORBIDDEN_PROPS}
