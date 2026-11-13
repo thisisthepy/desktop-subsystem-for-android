@@ -18,9 +18,9 @@ It takes the pinned target_files, otatools and dexpreopt_tools (fetch.sh downloa
    (dexpreopt_tools.zip), against the guest's boot image, so they do not run interpreted, and
    compiles again, with its own filter, any app the published build shipped compiled whose
    dex no longer matches its odex (PREBUILT_OAT_RECORD), and services.jar, whose window
-   manager it edits so a freeform window gets its status bar inset (SERVICES_INSETS_CODE) and
-   whose package manager it edits so an app with arm64-v8a code only installs while ARM
-   translation is on (SERVICES_ABI_CODE);
+   manager it edits so a freeform window gets its status bar and navigation bar insets
+   (SERVICES_INSETS_CODE) and whose package manager it edits so an app with arm64-v8a code
+   only installs while ARM translation is on (SERVICES_ABI_CODE);
 6. builds the images, and lays them out on the template of a user's Android disk.
 
 The results go to dsa/target/image/<version>/:
@@ -284,150 +284,33 @@ SETTINGS_CODE_WITHOUT_BLUETOOTH = {
     ],
 }
 
-# Room below the last row of the lists in Settings, the permission screens and Files, about
-# what a phone's navigation bar leaves there. A DSA window has no navigation bar, and the
-# guest reports no bottom inset, which is the only space these lists keep below their last
-# row, so it sat on the window's bottom edge. The space is the list's own padding with
-# clipToPadding off, so rows still scroll to the edge and only the end of the list stops
-# short of it; nothing tells apps there is a navigation bar.
-LIST_BOTTOM_MARGIN_DP = 24
-ANDROID_PADDING_BOTTOM = 0x010100D9  # android:paddingBottom
-
-# Settings code that sets the list padding itself, over the layout's (the Settings overlay
-# gives its preference lists the room above), edited in Settings.apk's dex files:
-#
-# - Android 16's home page (TopLevelSettings.onCreateRecyclerView) calls
-#   setPadding(mPaddingHorizontal, 0, mPaddingHorizontal, 0) on its list. That build never
-#   sets mPaddingHorizontal (its two pane padding is compiled out), so the call only drops
-#   the layout's bottom padding: the list's style pads it 0 on each side and the layout 0 on
-#   top. The call is skipped, and the list keeps the layout's room below its last row.
-# - Android 17's home page pads its list's bottom by dashboard_padding_bottom only when
-#   isRunningInFreeformWindow, which asks whether the window shows a caption bar. A DSA
-#   window is a freeform window whose caption the host draws, outside the guest, so the
-#   method says so, and Android's own padding applies; the Settings overlay sets it to
-#   LIST_BOTTOM_MARGIN_DP like the other lists. Android 17 reads nothing else from that dimen.
-SETTINGS_CODE_LIST_MARGIN = {
-    "Lcom/android/settings/homepage/TopLevelSettings;->onCreateRecyclerView": [
-        ("skip call", "Landroid/view/ViewGroup;->setPadding"),
-    ],
-    "Lcom/android/settings/homepage/TopLevelSettings;->isRunningInFreeformWindow": ("return true", None),
-}
-SETTINGS_HOME_PADDING_DIMEN = "dashboard_padding_bottom"
-# Settings' All apps list sets no padding in code, and its layout none: the list gets room
-# below its last row in the compiled layout itself. An overlay could not reach it without
-# copying the whole ConstraintLayout and naming each of its ids and attributes.
-SETTINGS_LIST_DIMENSIONS = {
-    "res/layout/manage_applications_apps.xml": [
-        ("androidx.recyclerview.widget.RecyclerView", ANDROID_PADDING_BOTTOM, LIST_BOTTOM_MARGIN_DP),
-    ],
+# Settings code that pads its home list's bottom itself, edited in Settings.apk's dex files.
+# Android 17's home page (TopLevelSettings.setPaddingHorizontal) pads its list's bottom by
+# dashboard_padding_bottom (16 dp) when isRunningInFreeformWindow, which asks whether the
+# window shows a caption bar. That padding stands in for the navigation bar inset Android's
+# own desktop windows lack. A DSA window shows the agent's caption bar inset, so the method
+# said yes, but the task also has the navigation bar inset a gesture navigation phone gives,
+# which SettingsLib's EdgeToEdgeUtils already pads the page by: the list would end 40 dp above
+# the window's bottom edge, where every other Settings list ends 24 dp above it. The method
+# says no, so the inset alone keeps the end of the list clear, as on a phone. Android 16's
+# home page has no such method, and nothing changes there.
+SETTINGS_CODE_FREEFORM_PADDING = {
+    "Lcom/android/settings/homepage/TopLevelSettings;->isRunningInFreeformWindow": ("return false", None),
 }
 
-# PermissionController lists its rows in androidx.preference's preference_recyclerview with
-# paddingBottom 0dp, as Settings did. It declares <overlayable>, so idmap2 lets no overlay
-# replace that layout; the compiled layout in the APK is edited instead. The app lives in the
-# permission APEX, which is unpacked, edited and packed again before signing (see
-# edit_permission_apex).
+# PermissionController lives in the permission APEX, which is unpacked, edited and packed
+# again before signing (see edit_permission_apex).
 PERMISSION_CONTROLLER_APK = "PermissionController.apk"
-PERMISSION_CONTROLLER_DIMENSIONS = {
-    "res/layout/preference_recyclerview.xml": [
-        ("androidx.recyclerview.widget.RecyclerView", ANDROID_PADDING_BOTTOM, LIST_BOTTOM_MARGIN_DP),
-    ],
-}
 PERMISSION_APEXES = ["SYSTEM/apex/com.android.permission.apex", "SYSTEM/apex/com.android.permission.capex"]
-
-
-def float_bits(value):
-    """The 32 bits of a float, as const/high16 loads them."""
-    return struct.unpack("<I", struct.pack("<f", value))[0]
-
-
-# Files (DocumentsUI) sets its list's padding in code: on Android 16 the bottom is the height
-# of the bar below the list (getSaveLayoutHeight: the save bar, or with Material 3 the
-# breadcrumb and save bar), and 0 where the window has none, as in wide windows. That method
-# now returns at least LIST_BOTTOM_MARGIN_DP in pixels for the display's density, rounded as
-# getDimensionPixelSize rounds. Android 17's list keeps 48 dp of its own
-# (list_container_padding_bottom) and has no such method.
-DOCUMENTSUI_APK = "/priv-app/DocumentsUI/DocumentsUI.apk"
-_DOCS = "Lcom/android/documentsui"
-
-
-def _documentsui_bar_height(bar, label):
-    """Android 16's lookup of the bar below the list, in getSaveLayoutHeight: its height, or
-    0 (v1) when the window has no such bar."""
-    return [
-        f"invoke-virtual {{v2}}, {_DOCS}/dirlist/DirectoryFragment;->getBaseActivity",
-        "move-result-object v2",
-        f"sget v0, {_DOCS}/R$id;->{bar}",
-        f"invoke-static {{v0}}, {_DOCS}/util/Material3Config;->getRes",
-        "move-result v0",
-        "invoke-virtual {v2, v0}, Landroidx/appcompat/app/AppCompatActivity;->findViewById",
-        "move-result-object v2",
-        f"if-nez v2, :{label}",
-        "return v1",
-        f":{label}",
-        "invoke-virtual {v2}, Landroid/view/View;->getHeight",
-        "move-result v2",
-        "return v2",
-    ]
-
-
-DOCUMENTSUI_CODE = {
-    f"{_DOCS}/dirlist/DirectoryFragment;->getSaveLayoutHeight": ("replace code", {
-        # Android 16 (BP4A.251205.006), as d8 compiled it: this is v2.
-        "old": [
-            f"invoke-static {{}}, {_DOCS}/util/FlagUtils;->isUseMaterial3FlagEnabled",
-            "move-result v0",
-            "const/4 v1, 0",
-            "if-eqz v0, :legacy",
-            *_documentsui_bar_height("bottom_container", "bottom"),
-            ":legacy",
-            *_documentsui_bar_height("container_save", "save"),
-        ],
-        # The same bar, then the larger of its height and the margin: this is v3.
-        "registers": 4,
-        "new": [
-            f"invoke-static {{}}, {_DOCS}/util/FlagUtils;->isUseMaterial3FlagEnabled",
-            "move-result v0",
-            "if-eqz v0, :legacy",
-            f"sget v0, {_DOCS}/R$id;->bottom_container",
-            "goto :find",
-            ":legacy",
-            f"sget v0, {_DOCS}/R$id;->container_save",
-            ":find",
-            f"invoke-static {{v0}}, {_DOCS}/util/Material3Config;->getRes",
-            "move-result v0",
-            f"invoke-virtual {{v3}}, {_DOCS}/dirlist/DirectoryFragment;->getBaseActivity",
-            "move-result-object v1",
-            "invoke-virtual {v1, v0}, Landroidx/appcompat/app/AppCompatActivity;->findViewById",
-            "move-result-object v1",
-            "const/4 v2, 0",
-            "if-eqz v1, :margin",
-            "invoke-virtual {v1}, Landroid/view/View;->getHeight",
-            "move-result v2",
-            ":margin",
-            "invoke-virtual {v3}, Landroidx/fragment/app/Fragment;->getResources",
-            "move-result-object v0",
-            "invoke-virtual {v0}, Landroid/content/res/Resources;->getDisplayMetrics",
-            "move-result-object v0",
-            "iget v0, v0, Landroid/util/DisplayMetrics;->density",
-            f"const/high16 v1, {float_bits(LIST_BOTTOM_MARGIN_DP):#x}",
-            "mul-float/2addr v0, v1",
-            f"const/high16 v1, {float_bits(0.5):#x}",
-            "add-float/2addr v0, v1",
-            "float-to-int v0, v0",
-            "if-ge v2, v0, :bar",
-            "return v0",
-            ":bar",
-            "return v2",
-        ],
-    }),
-}
 
 # The host window's title bar is Android's status bar. A task's window draws its caption over
 # the task's top band, and the agent gives the task status bar and caption bar inset sources
 # as high as that band. An app that draws edge to edge then lays out below the band as it lays
 # out below a phone's status bar, and draws its own status bar background under the caption;
-# an app that does not gets the status bar background Android draws for it there.
+# an app that does not gets the status bar background Android draws for it there. Along the
+# task's bottom edge the agent gives navigation bar and tappable element sources 24 dp high,
+# the inset a gesture navigation phone's navigation bar gives, so phone apps keep their bottom
+# bars and the ends of their lists clear of the window's bottom edge.
 #
 # Android hands a window in a floating windowing mode (freeform, as every DSA task is, or
 # picture-in-picture) only its caption bar and IME insets: InsetsPolicy's
@@ -435,13 +318,17 @@ DOCUMENTSUI_CODE = {
 # the rest. The status bar source the agent gives the task never reached its app, so an app
 # that pads its toolbar by its status bar inset, as most edge-to-edge apps do (FLO's player
 # screen, for one), got 0 and drew its toolbar under the caption, its buttons under the
-# window's close button. The call that names the kept types names systemBars() instead
-# (status bars, navigation bars and the caption bar), so the app receives the status bar
-# source too, and with it the inset a phone gives it. The guest has no navigation bar and no
-# system UI of its own, so the only system bar sources are the ones the agent gives tasks.
-# Only the first call after isFloating changes: Android 16 and 17 have no other caption bar
-# call before it, and a later Android that tests a source's type against captionBar() before
-# it keeps that test.
+# window's close button, and the navigation bar band would have been dropped the same way. The
+# call that names the kept types names all() instead, so the app receives every source the
+# agent gives its task, with the insets a phone gives it: status bars, navigation bars and the
+# caption bar (systemBars() would do for those), and the tappable element, which no narrower
+# type names beside them. The guest has no navigation bar, no status bar and no system UI of
+# its own, and its display no cutout, so the only other source is the IME's, which a floating
+# window now keeps whether or not it is the IME's target, as Android 15 and earlier kept it. The
+# host's keyboard shows no view in the guest, so that source is never visible and insets no
+# window; a keyboard app the user installs insets the windows behind it too. Only the first call
+# after isFloating changes: Android 16 and 17 have no other caption bar call before it, and a
+# later Android that tests a source's type against captionBar() before it keeps that test.
 #
 # services.jar is compiled ahead of time (services.odex, .vdex and .art beside it), for its
 # dex: the edited jar is compiled again with the published build's filter, class loader
@@ -451,7 +338,7 @@ SERVICES_INSETS_CODE = {
     "Lcom/android/server/wm/InsetsPolicy;->enforceInsetsPolicyForTarget": ("replace call", {
         "after": "Landroid/app/WindowConfiguration;->isFloating",
         "old": "Landroid/view/WindowInsets$Type;->captionBar",
-        "new": "Landroid/view/WindowInsets$Type;->systemBars",
+        "new": "Landroid/view/WindowInsets$Type;->all",
     }),
 }
 
@@ -1307,6 +1194,7 @@ def framework_overlay_sources(dest, record=None):
         f"res/layout/{TOAST_LAYOUT}.xml": toast_layout(),
         f"res/drawable/{TOAST_FRAME}.xml": toast_frame(),
         **status_bar_overlay_files(),
+        **navigation_bar_overlay_files(),
     })
     write_overlay_record(dest, record)
 
@@ -1318,6 +1206,7 @@ def framework_overlaid():
             + [f"bool/{name}" for name in FRAMEWORK_OVERLAY_BOOLEANS]
             + [f"string/{name}" for name in FRAMEWORK_OVERLAY_STRINGS]
             + [f"dimen/{name}" for name in STATUS_BAR_DIMENS]
+            + [f"dimen/{name}" for name in NAVIGATION_BAR_DIMENS]
             + FRAMEWORK_DESIGN_OVERLAID)
 
 
@@ -1329,27 +1218,23 @@ def build_framework_overlay(aapt2, framework_res, work, record=None):
     return build_overlay(aapt2, framework_res, sources, sources / "DsaFrameworkOverlay.apk")
 
 
-def settings_overlay_sources(dest, home_padding=False, record=None):
-    """Writes the Settings overlay's manifest, its resource map, its back button drawables,
-    its preference list layout and the design's resources (cards, large titles, the home
-    page) into `dest`, with `home_padding` the home list's bottom padding
-    (SETTINGS_HOME_PADDING_DIMEN), for a Settings that has it, and what it was built against
-    when `record` says."""
+def settings_overlay_sources(dest, record=None):
+    """Writes the Settings overlay's manifest, its resource map, its back button drawables
+    and the design's resources (cards, large titles, the home page) into `dest`, and what it
+    was built against when `record` says."""
     write_overlay_files(dest, {
-        **settings_overlay_files(home_padding),
-        f"res/xml/{SETTINGS_OVERLAY_MAP}.xml": overlay_map(settings_overlay_map(home_padding)),
+        **settings_overlay_files(),
+        f"res/xml/{SETTINGS_OVERLAY_MAP}.xml": overlay_map(settings_overlay_map()),
     })
     write_overlay_record(dest, record)
 
 
-def settings_overlay_map(home_padding=False):
+def settings_overlay_map():
     """What the Settings overlay replaces ("type/name" in Settings) and with which of its own
     resources. The ids and attributes map onto themselves: nothing reads their values, and
     the map makes the framework rewrite the overlay layouts' references to them into
     Settings' ids."""
     mapping = {name: name for name in SETTINGS_OVERLAID}
-    if home_padding:
-        mapping[f"dimen/{SETTINGS_HOME_PADDING_DIMEN}"] = f"dimen/{SETTINGS_HOME_PADDING_DIMEN}"
     mapping.update({f"drawable/{name}": f"drawable/{name}" for name in SETTINGS_CARDS})
     mapping["dimen/settingslib_preference_corner_radius"] = "dimen/settingslib_preference_corner_radius"
     mapping[f"style/{SETTINGS_TITLE_THEME}"] = "style/DsaAppBarTheme"
@@ -1362,7 +1247,7 @@ def settings_overlay_map(home_padding=False):
     return mapping
 
 
-def settings_overlay_files(home_padding=False):
+def settings_overlay_files():
     """The Settings overlay's manifest and resource files, by their path in its sources.
 
     The drawables and values SettingsLib keeps in -v36 folders are here in the same folders:
@@ -1371,12 +1256,8 @@ def settings_overlay_files(home_padding=False):
     files = {
         "AndroidManifest.xml": overlay_manifest(SETTINGS_OVERLAY_PACKAGE, SETTINGS_OVERLAY_TARGET,
                                                 resource_map=True),
-        f"res/layout/{SETTINGS_LIST_LAYOUT}.xml": settings_preference_list(),
         "res/values/dsa.xml": resources_xml(
-            [f'<attr name="{SETTINGS_LIST_STYLE_ATTR}" format="reference" />', *SETTINGS_HOME_ATTRS.values(),
-             '<attr name="expanded" format="boolean" />']
-            + ([f'<dimen name="{SETTINGS_HOME_PADDING_DIMEN}">{SETTINGS_LIST_BOTTOM_MARGIN_DP}dp</dimen>']
-               if home_padding else [])),
+            [*SETTINGS_HOME_ATTRS.values(), '<attr name="expanded" format="boolean" />']),
         "res/values-v36/dsa_design.xml": resources_xml(
             [f'<dimen name="settingslib_preference_corner_radius">{DESIGN_CORNER_DP}dp</dimen>']
             + [design_style(ours, "", f"{size}dp") for ours, size in SETTINGS_TITLE_STYLES.values()]),
@@ -1575,30 +1456,6 @@ def settings_home_layout(large_title):
     )
 
 
-def settings_preference_list():
-    """The RecyclerView every preference screen in Settings lists its rows in.
-
-    androidx.preference's own layout, with room below the last row. Settings takes the space
-    under a list from the navigation bar alone: SettingsLib's EdgeToEdgeUtils pads the
-    content view by the system bar inset, and the list's own bottom padding is 0. A DSA
-    window has no navigation bar, so the last row met the window's bottom edge. The padding
-    is inside the list (clipToPadding is false), so rows still scroll to the edge and only
-    the end of the list stops short of it. The id and the style attribute are Settings' own:
-    the resource map rewrites the overlay's references to them to Settings' ids."""
-    return (
-        '<?xml version="1.0" encoding="utf-8"?>\n'
-        '<androidx.recyclerview.widget.RecyclerView\n'
-        '    xmlns:android="http://schemas.android.com/apk/res/android"\n'
-        '    android:id="@+id/recycler_view"\n'
-        '    android:layout_width="match_parent"\n'
-        '    android:layout_height="match_parent"\n'
-        '    android:paddingTop="0dp"\n'
-        f'    android:paddingBottom="{SETTINGS_LIST_BOTTOM_MARGIN_DP}dp"\n'
-        '    android:clipToPadding="false"\n'
-        f'    style="?attr/{SETTINGS_LIST_STYLE_ATTR}" />\n'
-    )
-
-
 def settings_back_icon(theme):
     """The toolbar back icon with its circle centred in the 56 dp navigation button.
 
@@ -1629,11 +1486,11 @@ def settings_back_icon(theme):
     )
 
 
-def build_settings_overlay(aapt2, framework_res, work, home_padding=False, record=None):
+def build_settings_overlay(aapt2, framework_res, work, record=None):
     """Builds the Settings overlay APK (unsigned; signing gives it the platform key)."""
     sources = work / "settings-overlay"
     shutil.rmtree(sources, ignore_errors=True)
-    settings_overlay_sources(sources, home_padding, record)
+    settings_overlay_sources(sources, record)
     return build_overlay(aapt2, framework_res, sources, sources / "DsaSettingsOverlay.apk")
 
 
@@ -1704,12 +1561,12 @@ def build_design_overlay(aapt2, framework_res, work, apk, record=None):
     return build_overlay(aapt2, framework_res, sources, sources / apk)
 
 
-def overlaid_resources(apk, home_padding=False):
+def overlaid_resources(apk):
     """The resources ("type/name") the overlay file `apk` replaces in the package it overlays."""
     if apk == "DsaFrameworkOverlay.apk":
         return framework_overlaid()
     if apk == "DsaSettingsOverlay.apk":
-        return list(settings_overlay_map(home_padding))
+        return list(settings_overlay_map())
     return list(design_overlay_resources(apk)[1])
 
 
@@ -1748,6 +1605,7 @@ ARSC_TYPE_DIMENSION = 0x05
 ARSC_UNIT_DIP = 1
 BASE_DENSITY = 160  # the density at which a dp is one pixel
 ARSC_CONFIG_DENSITY = 14  # where the density sits in a type chunk's configuration
+ARSC_CONFIG_SMALLEST_WIDTH = 30  # where the smallest screen width in dp sits there
 
 
 def complex_dimension(data):
@@ -1760,10 +1618,17 @@ def complex_dimension(data):
 def arsc_dimensions(table):
     """{(name, density): (value, unit)} of each dimension a compiled resource table defines,
     by the density of its configuration (0 where it has none)."""
+    return {(name, density): value for name, density, _, value in arsc_dimension_entries(table)}
+
+
+def arsc_dimension_entries(table):
+    """(name, density, smallest width, (value, unit)) of each dimension a compiled resource
+    table defines, in each configuration: the configuration's density and smallest screen width
+    in dp (each 0 where it has none)."""
     chunk_type, header_size, _ = struct.unpack_from("<HHI", table, 0)
     if chunk_type != ARSC_TABLE:
         raise ValueError("not a compiled resource table")
-    found = {}
+    found = []
     offset = header_size
     while offset < len(table):
         chunk_type, header_size, size = struct.unpack_from("<HHI", table, offset)
@@ -1777,6 +1642,9 @@ def arsc_dimensions(table):
                 if kind == ARSC_TYPE:
                     type_id, flags, _, count, entries_start = struct.unpack_from("<BBHII", table, child + 8)
                     density = struct.unpack_from("<H", table, child + 20 + ARSC_CONFIG_DENSITY)[0]
+                    config_size = struct.unpack_from("<I", table, child + 20)[0]
+                    smallest_width = (struct.unpack_from("<H", table, child + 20 + ARSC_CONFIG_SMALLEST_WIDTH)[0]
+                                      if config_size >= ARSC_CONFIG_SMALLEST_WIDTH + 2 else 0)
                     if types[type_id - 1] == "dimen":
                         for _, entry in _arsc_entry_offsets(table, child + child_header, flags, count):
                             at = child + entries_start + entry
@@ -1787,7 +1655,7 @@ def arsc_dimensions(table):
                                 key = struct.unpack_from("<I", table, at + 4)[0]
                                 data_type, data = struct.unpack_from("<BI", table, at + first + 3)
                             if data_type == ARSC_TYPE_DIMENSION:
-                                found[(keys[key], density)] = complex_dimension(data)
+                                found.append((keys[key], density, smallest_width, complex_dimension(data)))
                 child += child_size
         offset += size
     return found
@@ -1810,6 +1678,26 @@ def status_bar_overlay_problems(table):
             elif value[1] != ARSC_UNIT_DIP or int(value[0] * (density or BASE_DENSITY) / BASE_DENSITY + 0.5) != wanted:
                 problems.append(f"{name} is {value[0]:g} (unit {value[1]}) at {density or 'any'} dpi, not "
                                 f"the title bar's {wanted} px there")
+    return problems
+
+
+def navigation_bar_overlay_problems(table):
+    """What is wrong with the navigation bar heights of the framework overlay's resource
+    table: each NAVIGATION_BAR_DIMENS value must be there for every smallest width the
+    framework gives it a value of its own at (NAVIGATION_BAR_SMALLEST_WIDTHS), and be
+    NAVIGATION_BAR_HEIGHT_DP in dp in every configuration it has."""
+    entries = arsc_dimension_entries(table)
+    problems = []
+    for name in NAVIGATION_BAR_DIMENS:
+        values = [(sw, density, value) for found, density, sw, value in entries if found == name]
+        for sw in NAVIGATION_BAR_SMALLEST_WIDTHS:
+            if not any(found_sw == sw and density == 0 for found_sw, density, _ in values):
+                problems.append(f"{name} has no value for {f'a smallest width of {sw} dp' if sw else 'any width'}")
+        for sw, density, (dp, unit) in sorted(values):
+            if unit != ARSC_UNIT_DIP or dp != NAVIGATION_BAR_HEIGHT_DP:
+                where = f"sw{sw}dp" if sw else "any width"
+                problems.append(f"{name} is {dp:g} (unit {unit}) at {where}"
+                                f"{f' and {density} dpi' if density else ''}, not {NAVIGATION_BAR_HEIGHT_DP} dp")
     return problems
 
 
@@ -1970,17 +1858,17 @@ def system_overlay_targets(z, otatools, work, env):
     return tables
 
 
-def system_overlay_sources(dest, apk, home_padding=False, record=None):
+def system_overlay_sources(dest, apk, record=None):
     """Writes the sources of the system screen overlay file `apk` into `dest`."""
     if apk == "DsaFrameworkOverlay.apk":
         framework_overlay_sources(dest, record)
     elif apk == "DsaSettingsOverlay.apk":
-        settings_overlay_sources(dest, home_padding, record)
+        settings_overlay_sources(dest, record)
     else:
         design_overlay_sources(dest, apk, record)
 
 
-def build_system_overlays(aapt2, framework_res, work, tables, home_padding=False):
+def build_system_overlays(aapt2, framework_res, work, tables):
     """Builds every system screen overlay against `framework_res`, each first checked against
     the resource table of the package it overlays (`tables`, by overlay file): an overlay
     that would replace a resource the package lacks was written for another build, and the
@@ -1991,7 +1879,7 @@ def build_system_overlays(aapt2, framework_res, work, tables, home_padding=False
     unlinkable = []
     for overlay in SYSTEM_OVERLAYS:
         apk = overlay["apk"]
-        missing = missing_overlaid(overlaid_resources(apk, home_padding), tables[apk])
+        missing = missing_overlaid(overlaid_resources(apk), tables[apk])
         if missing:
             raise ValueError(f"{apk} replaces {', '.join(missing)}, which {overlay['target']} in this "
                              "image does not have: the overlay was written for another build of it")
@@ -2000,15 +1888,14 @@ def build_system_overlays(aapt2, framework_res, work, tables, home_padding=False
         # all, where aapt2 would stop at the first.
         sources = Path(work) / "overlay-references" / Path(apk).stem
         shutil.rmtree(sources, ignore_errors=True)
-        system_overlay_sources(sources, apk, home_padding)
+        system_overlay_sources(sources, apk)
         unlinkable += [f"{apk}: {problem}" for problem in framework_reference_problems(sources, framework_table)]
         shutil.rmtree(sources, ignore_errors=True)
     if unlinkable:
         raise ValueError("the overlays name framework resources that cannot be linked against this image's "
                          "framework-res:\n  " + "\n  ".join(unlinkable))
     framework_overlay = build_framework_overlay(aapt2, framework_res, work, records["DsaFrameworkOverlay.apk"])
-    settings_overlay = build_settings_overlay(aapt2, framework_res, work, home_padding,
-                                              records["DsaSettingsOverlay.apk"])
+    settings_overlay = build_settings_overlay(aapt2, framework_res, work, records["DsaSettingsOverlay.apk"])
     others = {apk: build_design_overlay(aapt2, framework_res, work, apk, records[apk]) for apk in DESIGN_OVERLAYS}
     return framework_overlay, settings_overlay, others
 
@@ -2047,19 +1934,15 @@ def system_overlay_problems(names, read):
             if found:
                 problems.append(f"{path}: {'; '.join(found)}, so an app that pads by the status bar's height "
                                 "does not line up with the window's title bar")
+            if table is not None and not found:
+                try:
+                    found = navigation_bar_overlay_problems(table)
+                except (ValueError, IndexError, struct.error):
+                    found = ["its resource table cannot be read"]
+                if found:
+                    problems.append(f"{path}: {'; '.join(found)}, so an app that pads by the navigation bar's "
+                                    "height keeps another space at its bottom than its navigation bar inset")
     return problems
-
-
-def settings_has_home_padding(apk):
-    """Whether a Settings.apk pads its home list by SETTINGS_HOME_PADDING_DIMEN (Android 17's
-    does; Android 16's has no such dimen, and an overlay of it would only log a warning)."""
-    field = f"Lcom/android/settings/R$dimen;->{SETTINGS_HOME_PADDING_DIMEN}"
-    with zipfile.ZipFile(io.BytesIO(apk)) as z:
-        for dex in (n for n in z.namelist() if re.fullmatch(r"classes\d*\.dex", n)):
-            content = z.read(dex)
-            if content[:4] == b"dex\n" and field in dex_ids(content)[2]:
-                return True
-    return False
 
 
 def find_aapt2():
@@ -2639,12 +2522,11 @@ def edit_apk(data, name, code=None, controllers=None, dimensions=None, theme_att
 
 def edit_settings_apk(data, name):
     """Settings.apk without the preferences, and the code, that need the Bluetooth service,
-    with room below the last row of the lists that set their own padding, and with its pages'
-    large titles opening expanded or folded as the Settings overlay's theme says
-    (SETTINGS_TITLE_EXPANDED)."""
-    return edit_apk(data, name, code={**SETTINGS_CODE_WITHOUT_BLUETOOTH, **SETTINGS_CODE_LIST_MARGIN},
-                    controllers=SETTINGS_CONTROLLERS_WITHOUT_BLUETOOTH, dimensions=SETTINGS_LIST_DIMENSIONS,
-                    theme_attributes=SETTINGS_TITLE_EXPANDED)
+    with its home list padded by the navigation bar inset alone (SETTINGS_CODE_FREEFORM_PADDING),
+    and with its pages' large titles opening expanded or folded as the Settings overlay's theme
+    says (SETTINGS_TITLE_EXPANDED)."""
+    return edit_apk(data, name, code={**SETTINGS_CODE_WITHOUT_BLUETOOTH, **SETTINGS_CODE_FREEFORM_PADDING},
+                    controllers=SETTINGS_CONTROLLERS_WITHOUT_BLUETOOTH, theme_attributes=SETTINGS_TITLE_EXPANDED)
 
 
 ZIP_ALIGNMENT_EXTRA = 0xD935  # zipalign's alignment extra field: a 16-bit alignment, then padding
@@ -2686,29 +2568,24 @@ def zip_misaligned(data, alignment=4):
 
 
 def edit_services_jar(data, name):
-    """services.jar with InsetsPolicy giving a freeform window its status bar inset
-    (SERVICES_INSETS_CODE) and the package manager taking every 64-bit ABI the guest lists for
+    """services.jar with InsetsPolicy giving a freeform window its status bar and navigation
+    bar insets (SERVICES_INSETS_CODE) and the package manager taking every 64-bit ABI the guest lists for
     a multiArch app (SERVICES_ABI_CODE), its stored dex files aligned again. Returns the jar as
     it was when it already has the edits."""
     edited = edit_apk(data, name, code=SERVICES_CODE)
     return data if edited is data else aligned_zip(edited)
 
 
-def edit_documentsui_apk(data, name):
-    """DocumentsUI.apk (Files) with room below its list's last row in windows that have no bar
-    below the list."""
-    return edit_apk(data, name, code=DOCUMENTSUI_CODE)
-
-
 def edit_permission_controller_apk(data, name):
-    """PermissionController.apk with room below the last row of its preference lists, and
-    those lists grouped in cards with Settings' corners."""
+    """PermissionController.apk with its preference lists grouped in cards with Settings'
+    corners."""
     return edit_apk(data, name, dimensions=permission_controller_edits())
 
 
 def permission_controller_edits():
-    """The compiled XML edits PermissionController.apk gets: its lists' room and its cards."""
-    return {**PERMISSION_CONTROLLER_DIMENSIONS, **PERMISSION_CONTROLLER_CARDS}
+    """The compiled XML edits PermissionController.apk gets: its cards. Its lists keep the
+    room below their last row from the navigation bar inset, as Settings' do."""
+    return dict(PERMISSION_CONTROLLER_CARDS)
 
 
 # Properties the vendor and odm build.prop files may not set. init reads those two files as
@@ -4349,11 +4226,25 @@ FRAMEWORK_OVERLAY_INTEGERS = {"config_tapTimeoutMillis": 0, "config_customizedMa
 # service version. The agent is the geocode provider only without Google Play: these values
 # name it, and the Google apps overlay (GAPPS_FRAMEWORK_OVERLAY) names Google's geocoder instead
 # on a boot with the Google apps image.
+#
+# The navigation bar band along each task's bottom edge (see NAVIGATION_BAR_DIMENS) is
+# transparent, as on a gesture navigation phone, so an app's own background reaches the
+# window's bottom edge. An app that does not draw behind the navigation bar gets the
+# background Android draws for it there (DecorView's navigation bar colour view), in the
+# navigation bar colour its theme or code sets. With none set, Android paints it black
+# (navigation_bar_compatible) unless config_navBarDefaultTransparent says the default is
+# transparent, and over a transparent colour it draws a translucent scrim for contrast unless
+# config_navBarNeedsScrim says the bar needs none. AOSP's gesture navigation overlay sets both
+# the way they are here, so the band shows the app's window background, not a black or grey
+# strip. An app that sets a navigation bar colour of its own gets that colour there, as on a
+# gesture navigation phone; one targeting Android 15 or later always draws behind the bar.
 FRAMEWORK_OVERLAY_BOOLEANS = {
     "config_appCompatUserAppAspectRatioSettingsIsEnabled": True,
     "config_checkWallpaperAtBoot": False,
     "config_enableNetworkLocationOverlay": False,
     "config_enableGeocoderOverlay": False,
+    "config_navBarDefaultTransparent": True,
+    "config_navBarNeedsScrim": False,
 }
 # The device configurator: the package the framework lets write DeviceConfig, Android's server
 # flags (WRITE_DEVICE_CONFIG and WRITE_ALLOWLISTED_DEVICE_CONFIG are "configurator"
@@ -4431,6 +4322,32 @@ def status_bar_overlay_files():
     return files
 
 
+# The host has no Android navigation bar, but the agent gives every task a navigation bar inset
+# 24 dp high along its bottom edge, as AOSP's gesture navigation overlay gives a phone
+# (navigation_bar_height 24dp), because phone apps lay out their bottom bars and the ends of
+# their lists for one. Apps that take the navigation bar's height from the framework's
+# resources rather than from their insets read these, so they are 24 dp too. Android sets
+# them to 48 dp, and to 56 dp from a smallest width of 900 dp, which the guest's display has:
+# the device reported 56 dp while the inset was 0. The overlay gives each a value in both of
+# those configurations, so neither of Android's is used. navigation_bar_frame_height (and its
+# landscape value) is what Android's window manager lays the navigation bar window out at, and
+# apps read it as the bar's height as well.
+NAVIGATION_BAR_HEIGHT_DP = 24
+NAVIGATION_BAR_DIMENS = ["navigation_bar_height", "navigation_bar_height_landscape",
+                         "navigation_bar_frame_height", "navigation_bar_frame_height_landscape"]
+# The smallest widths framework-res gives navigation_bar_height a value of its own at (0: any).
+NAVIGATION_BAR_SMALLEST_WIDTHS = [0, 900]
+
+
+def navigation_bar_overlay_files():
+    """The framework overlay's navigation bar height values: {path: XML}, one values folder
+    for each of NAVIGATION_BAR_SMALLEST_WIDTHS."""
+    xml = resources_xml([f'<dimen name="{name}">{NAVIGATION_BAR_HEIGHT_DP}dp</dimen>'
+                         for name in NAVIGATION_BAR_DIMENS])
+    return {f"res/values{f'-sw{sw}dp' if sw else ''}/dsa_navigation_bar.xml": xml
+            for sw in NAVIGATION_BAR_SMALLEST_WIDTHS}
+
+
 FRAMEWORK_OVERLAY_APKCERTS = (
     'name="DsaFrameworkOverlay.apk" certificate="build/make/target/product/security/platform.x509.pem" '
     'private_key="build/make/target/product/security/platform.pk8" partition="vendor"'
@@ -4449,27 +4366,17 @@ SETTINGS_OVERLAY_PACKAGE = "io.github.thisisthepy.dsa.overlay.settings"
 SETTINGS_OVERLAY_TARGET = "com.android.settings"
 SETTINGS_BACK_ICON = "settingslib_expressive_icon_back"
 SETTINGS_BACK_INSET_DP = 8
-# The same overlay gives Settings' preference lists room below their last row, about what a
-# phone's navigation bar leaves there. A DSA window has no navigation bar and the guest
-# reports no bottom inset, and that inset is the only space Settings keeps under a list, so
-# the last row sat on the window's bottom edge. The space is the list's own, like an app's
-# content margin; nothing tells apps there is a navigation bar. The home page
-# (TopLevelSettings) sets its list's padding in code, which replaces this layout's: on Android
-# 16 that call is skipped, and Android 17 takes the padding it gives a freeform window from
-# dashboard_padding_bottom, which this overlay sets too (SETTINGS_CODE_LIST_MARGIN).
-SETTINGS_LIST_LAYOUT = "preference_recyclerview"
-SETTINGS_LIST_STYLE_ATTR = "preferenceFragmentListStyle"
-SETTINGS_LIST_BOTTOM_MARGIN_DP = LIST_BOTTOM_MARGIN_DP
+# Settings' lists keep the room a phone's navigation bar leaves below their last row from the
+# navigation bar inset alone (SettingsLib's EdgeToEdgeUtils pads the content view by it), and
+# every task has that inset, 24 dp, so the overlay leaves their layouts as they are.
+#
 # The overlay names what it replaces in a resource map (android:resourcesMap) instead of by
-# matching names. Only then does the framework rewrite the overlay layout's references to
-# its own id and attribute into Settings' ids, which the code and the theme look up. The
-# id and the attribute map onto themselves: nothing reads their values.
+# matching names. Only then does the framework rewrite the overlay layouts' references to
+# their own ids and attributes into Settings' ids, which the code and the theme look up. The
+# ids and the attributes map onto themselves: nothing reads their values.
 SETTINGS_OVERLAY_MAP = "dsa_overlay"
 SETTINGS_OVERLAID = [
     f"drawable/{SETTINGS_BACK_ICON}",
-    f"layout/{SETTINGS_LIST_LAYOUT}",
-    "id/recycler_view",
-    f"attr/{SETTINGS_LIST_STYLE_ATTR}",
 ]
 # SettingsLib's arrow (packages/SettingsLib/CollapsingToolbarBaseActivity, Android 16).
 SETTINGS_BACK_ARROW = (
@@ -4522,13 +4429,14 @@ FRAMEWORK_RES = "SYSTEM/framework/framework-res.apk"
 SYSTEM_OVERLAYS = [
     {"apk": "DsaFrameworkOverlay.apk", "package": FRAMEWORK_OVERLAY_PACKAGE, "target": "android",
      "target_apk": FRAMEWORK_RES,
-     "without": "a press on a list row shows only after the 100 ms tap timeout, and the framework's "
-                "dialogs, toasts and colours keep Android's own look"},
+     "without": "a press on a list row shows only after the 100 ms tap timeout, the framework's "
+                "dialogs, toasts and colours keep Android's own look, apps that pad by the status or "
+                "navigation bar heights do not line up with the window, and a strip shows along the "
+                "bottom of apps that do not draw behind the navigation bar"},
     {"apk": "DsaSettingsOverlay.apk", "package": SETTINGS_OVERLAY_PACKAGE, "target": SETTINGS_OVERLAY_TARGET,
      "target_apk": "/priv-app/Settings/Settings.apk",
-     "without": "Settings' back button shows its hover and ripple 8 dp left of its circle, the last row "
-                "of a Settings list sits on the window's bottom edge, and Settings has no large title "
-                "or rounded cards"},
+     "without": "Settings' back button shows its hover and ripple 8 dp left of its circle, and Settings "
+                "has no large title or rounded cards"},
     {"apk": "DsaDocumentsUiOverlay.apk", "package": "io.github.thisisthepy.dsa.overlay.documentsui",
      "target": "com.android.documentsui", "target_apk": "/priv-app/DocumentsUI/DocumentsUI.apk",
      "without": "Files keeps its old look instead of the rounded one"},
@@ -5760,8 +5668,6 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                     data = edit_wifi_rc(data.decode()).encode()
                 elif name.endswith(SETTINGS_APK):
                     data = edit_settings_apk(data, name)
-                elif name.endswith(DOCUMENTSUI_APK):
-                    data = edit_documentsui_apk(data, name)
                 elif name == SERVICES_JAR:
                     data = edit_services_jar(data, name)
                 elif name in PERMISSION_APEXES:
@@ -6054,11 +5960,11 @@ COMPILED_APPS = [
     "PRODUCT/app/webview/webview.apk",
     AGENT_APK,
 ]
-# The apps whose dex make-image.py edits (edit_settings_apk, edit_documentsui_apk), compiled
-# after the edits with the rest. dex2oat verifies every method as it compiles, and refuses an
-# edited app with a method the verifier rejects outright: ART would throw a VerifyError
-# instead of running it, and the app would close the moment that class loads.
-EDITED_APPS = [SETTINGS_APP, "SYSTEM/priv-app/DocumentsUI/DocumentsUI.apk"]
+# The apps whose dex make-image.py edits (edit_settings_apk), compiled after the edits with
+# the rest. dex2oat verifies every method as it compiles, and refuses an edited app with a
+# method the verifier rejects outright: ART would throw a VerifyError instead of running it,
+# and the app would close the moment that class loads.
+EDITED_APPS = [SETTINGS_APP]
 # What differs between the guest architectures DSA makes images for: the kernel's file
 # format and name, ART's instruction set and its variant, and the ELF machine number of a
 # binary built for the guest. arm64 is 64-bit only: the guest runs no 32-bit ARM code.
@@ -6631,7 +6537,7 @@ def apk_edits_left(apk, code=None, controllers=None, dimensions=None, theme_attr
 
 def permission_controller_problems(signed, otatools, work, env):
     """What is wrong with PermissionController in a signed target_files: its lists without
-    the room below their last row, looked for in the permission APEX the image ships."""
+    their cards' corners, looked for in the permission APEX the image ships."""
     with zipfile.ZipFile(signed) as z:
         found = [n for n in PERMISSION_APEXES if n in z.namelist()]
         if not found:
@@ -6645,8 +6551,7 @@ def permission_controller_problems(signed, otatools, work, env):
         left = apk_edits_left(apk.read_bytes(), dimensions=permission_controller_edits())
         if left:
             problems.append(f"{found[0]}:{apk.relative_to(payload).as_posix()} still has {'; '.join(left)}, "
-                            "so the last row of its lists sits on the window's edge, or its cards keep "
-                            "corners of their own")
+                            "so its cards keep corners of their own")
     shutil.rmtree(folder, ignore_errors=True)
     return problems
 
@@ -7112,10 +7017,9 @@ def main():
         framework_res = work / "framework-res.apk"
         with zipfile.ZipFile(target_files) as z:
             framework_res.write_bytes(z.read(FRAMEWORK_RES))
-            home_padding = SETTINGS_APP in z.namelist() and settings_has_home_padding(z.read(SETTINGS_APP))
             tables = system_overlay_targets(z, otatools, work, env)
         framework_overlay, settings_overlay, design_overlays = build_system_overlays(
-            aapt2, framework_res, work, tables, home_padding)
+            aapt2, framework_res, work, tables)
     else:
         print("no aapt2, so the image has none of the system screen overlays", flush=True)
 
