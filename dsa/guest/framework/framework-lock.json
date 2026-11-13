@@ -570,6 +570,8 @@
             "crates/codespan-reporting",
             "crates/const-oid",
             "crates/coset",
+            "crates/crossbeam-queue",
+            "crates/crossbeam-utils",
             "crates/der",
             "crates/der_derive",
             "crates/displaydoc",
@@ -605,6 +607,7 @@
             "crates/libc",
             "crates/libloading",
             "crates/litemap",
+            "crates/lock_api",
             "crates/log",
             "crates/memchr",
             "crates/memmap2",
@@ -614,6 +617,8 @@
             "crates/nom",
             "crates/once_cell",
             "crates/openssl-macros",
+            "crates/parking_lot",
+            "crates/parking_lot_core",
             "crates/paste",
             "crates/pkcs1",
             "crates/pkcs8",
@@ -634,12 +639,14 @@
             "crates/rustix",
             "crates/rustversion",
             "crates/ryu",
+            "crates/scopeguard",
             "crates/sec1",
             "crates/serde",
             "crates/serde_derive",
             "crates/serde_json",
             "crates/shlex",
             "crates/skrifa",
+            "crates/smallvec",
             "crates/spki",
             "crates/stable_deref_trait",
             "crates/static_assertions",
@@ -909,6 +916,7 @@
             "api",
             "cmds/idmap2",
             "core/java/android/companion/virtual/flags",
+            "core/java/android/companion/virtualnative",
             "core/java/android/content/res",
             "core/java/android/hardware/flags",
             "core/java/android/os",
@@ -1050,6 +1058,8 @@
             "media/c2/aidl/android/hardware/media/c2",
             "media/omx/1.0",
             "memtrack/1.0",
+            "memtrack/aidl/aidl_api/android.hardware.memtrack",
+            "memtrack/aidl/android/hardware/memtrack",
             "power/1.0",
             "power/1.1",
             "power/1.2",
@@ -1092,6 +1102,10 @@
             "bpf/headers",
             "bpf/syscall_wrappers",
             "staticlibs/netd/libnetdutils"
+          ],
+          "exclude": [
+            "staticlibs/Android.bp",
+            "staticlibs/netd/Android.bp"
           ]
         },
         {
@@ -1236,7 +1250,8 @@
           "commit": "8266ce79ba801eb1cb71f123651ab083ad1c1044",
           "cone": [
             "media",
-            "suspend/1.0/default"
+            "suspend/1.0/default",
+            "suspend/aidl"
           ]
         },
         {
@@ -2067,6 +2082,8 @@
             "crates/codespan-reporting",
             "crates/const-oid",
             "crates/coset",
+            "crates/crossbeam-queue",
+            "crates/crossbeam-utils",
             "crates/der",
             "crates/der_derive",
             "crates/displaydoc",
@@ -2100,9 +2117,12 @@
             "crates/itertools",
             "crates/itoa",
             "crates/lazy_static",
+            "crates/libbpf-rs",
+            "crates/libbpf-sys",
             "crates/libc",
             "crates/libloading",
             "crates/litemap",
+            "crates/lock_api",
             "crates/log",
             "crates/memchr",
             "crates/memmap2",
@@ -2112,6 +2132,8 @@
             "crates/nom",
             "crates/once_cell",
             "crates/openssl-macros",
+            "crates/parking_lot",
+            "crates/parking_lot_core",
             "crates/paste",
             "crates/pkcs1",
             "crates/pkcs8",
@@ -2133,6 +2155,7 @@
             "crates/rustversion",
             "crates/ryu",
             "crates/same-file",
+            "crates/scopeguard",
             "crates/sec1",
             "crates/serde",
             "crates/serde_core",
@@ -2140,6 +2163,7 @@
             "crates/serde_json",
             "crates/shlex",
             "crates/skrifa",
+            "crates/smallvec",
             "crates/spin",
             "crates/spki",
             "crates/stable_deref_trait",
@@ -2156,6 +2180,7 @@
             "crates/unicode-bidi",
             "crates/unicode-ident",
             "crates/unicode-width",
+            "crates/vsprintf",
             "crates/walkdir",
             "crates/which",
             "crates/writeable",
@@ -2412,6 +2437,7 @@
             "cmds/idmap2",
             "core/java/android/app/privatecompute",
             "core/java/android/companion/virtual/flags",
+            "core/java/android/companion/virtualnative",
             "core/java/android/content/res",
             "core/java/android/hardware/flags",
             "core/java/android/os",
@@ -2524,6 +2550,8 @@
             "common/aidl",
             "common/fmq/aidl",
             "common/support",
+            "contexthub/aidl/aidl_api/android.hardware.contexthub",
+            "contexthub/aidl/android/hardware/contexthub",
             "drm/1.0",
             "drm/1.1",
             "drm/1.2",
@@ -2544,6 +2572,8 @@
             "media/c2/aidl/aidl_api/android.hardware.media.c2",
             "media/c2/aidl/android/hardware/media/c2",
             "media/omx/1.0",
+            "memtrack/aidl/aidl_api/android.hardware.memtrack",
+            "memtrack/aidl/android/hardware/memtrack",
             "power/1.0",
             "power/1.1",
             "power/1.2",
@@ -2586,6 +2616,10 @@
             "bpf/headers",
             "bpf/syscall_wrappers",
             "staticlibs/netd/libnetdutils"
+          ],
+          "exclude": [
+            "staticlibs/Android.bp",
+            "staticlibs/netd/Android.bp"
           ]
         },
         {
@@ -2737,7 +2771,7 @@
           "commit": "9c3469aa3d4aeec5b2bc8e8ae8fdb4437dab4edb",
           "cone": [
             "media",
-            "suspend/aidl/default"
+            "suspend/aidl"
           ]
         },
         {
@@ -2937,6 +2971,14 @@
           "commit": "31327c70da147fdc069598c4a5fd075aea8d3312",
           "cone": [
             "libunwindstack"
+          ]
+        },
+        {
+          "path": "system/zygote",
+          "url": "https://android.googlesource.com/platform/system/zygote",
+          "commit": "c24023080df0bdb5988c1e0c641d494574a97c40",
+          "cone": [
+            "zygote-messages"
           ]
         },
         {
