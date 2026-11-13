@@ -19,8 +19,9 @@ It takes the pinned target_files, otatools and dexpreopt_tools (fetch.sh downloa
    compiles again, with its own filter, any app the published build shipped compiled whose
    dex no longer matches its odex (PREBUILT_OAT_RECORD), and services.jar, whose window
    manager it edits so a freeform window gets its status bar and navigation bar insets
-   (SERVICES_INSETS_CODE) and whose package manager it edits so an app with arm64-v8a code
-   only installs while ARM translation is on (SERVICES_ABI_CODE);
+   (SERVICES_INSETS_CODE), whose package manager it edits so an app with arm64-v8a code
+   only installs while ARM translation is on (SERVICES_ABI_CODE), and whose WebView service it
+   edits so the WebView zygote starts with the first renderer (SERVICES_WEBVIEW_ZYGOTE_CODE);
 6. builds the images, and lays them out on the template of a user's Android disk.
 
 The results go to dsa/target/image/<version>/:
@@ -385,7 +386,24 @@ SERVICES_ABI_CODE = {
         ],
     }),
 }
-SERVICES_CODE = {**SERVICES_INSETS_CODE, **SERVICES_ABI_CODE}
+# The WebView zygote starts the first time an app needs a WebView renderer, not at boot.
+# WebViewUpdateService started it on a background thread as soon as WebView's RELRO files were
+# made (SystemImpl.ensureZygoteStarted, which only calls WebViewZygote.getProcess), so a boot
+# with no app that shows web content still held the zygote, 5 to 7 MiB of PSS, for the whole
+# session. The call is skipped; WebViewZygote.getProcess, which the activity manager calls to
+# start each renderer (Process.startWebView), starts the zygote when there is none and keeps
+# it from then on, as before. The first WebView of a boot then waits for the zygote's start
+# and its preload of WebView, a few hundred milliseconds once; every later one is as quick as
+# before. A provider change stops and restarts the zygote the same way. R8 may have inlined
+# ensureZygoteStarted into its caller, so the call is skipped there too; check-image refuses a
+# services.jar that still calls getProcess from anywhere.
+WEBVIEW_ZYGOTE_START = "Landroid/webkit/WebViewZygote;->getProcess"
+SERVICES_WEBVIEW_ZYGOTE_CODE = {
+    "Lcom/android/server/webkit/SystemImpl;->ensureZygoteStarted": ("skip call", WEBVIEW_ZYGOTE_START),
+    "Lcom/android/server/webkit/WebViewUpdateServiceImpl2;->startZygoteWhenReady": (
+        "skip call", WEBVIEW_ZYGOTE_START),
+}
+SERVICES_CODE = {**SERVICES_INSETS_CODE, **SERVICES_ABI_CODE, **SERVICES_WEBVIEW_ZYGOTE_CODE}
 # The jars whose dex make-image.py edits, compiled again after the edit like EDITED_APPS.
 EDITED_JARS = [SERVICES_JAR]
 # The profile services.jar was compiled with: frameworks/base's services/art-profile and
@@ -2389,6 +2407,38 @@ def _method_index(refs, name):
     return found[0]
 
 
+def dex_callers(dex, target):
+    """The methods a dex file defines that call the method `target` ("Lclass;->name")."""
+    defined, refs = dex_methods(dex)
+    indexes = [i for i, ref in enumerate(refs) if ref == target]
+    if not indexes:
+        return []
+    needles = [struct.pack("<H", i) for i in indexes]
+
+    def calls(code_off):
+        count = struct.unpack_from("<I", dex, code_off + 12)[0]
+        code = dex[code_off + 16:code_off + 16 + 2 * count]
+        # Most methods never name the index: only those that do are decoded.
+        if not any(needle in code for needle in needles):
+            return False
+        return any(op in DEX_INVOKES and struct.unpack_from("<H", dex, at + 2)[0] in indexes
+                   for at, op in dex_instructions(dex, code_off))
+
+    return sorted(method for method, codes in defined.items() for code_off, _ in codes if calls(code_off))
+
+
+def jar_callers(jar, target):
+    """The methods in a jar's or an APK's dex files that call the method `target`."""
+    callers = set()
+    with zipfile.ZipFile(io.BytesIO(jar)) as z:
+        for name in z.namelist():
+            if re.fullmatch(r"classes\d*\.dex", name):
+                dex = z.read(name)
+                if dex[:4] == b"dex\n":
+                    callers.update(dex_callers(dex, target))
+    return sorted(callers)
+
+
 def edit_dex(dex, edits):
     """Applies {"Lclass;->method": edit, or a list of edits} to a dex file. An edit is
     ("return false", None) or ("return true", None), which makes a method that returns a
@@ -2591,9 +2641,10 @@ def zip_misaligned(data, alignment=4):
 
 def edit_services_jar(data, name):
     """services.jar with InsetsPolicy giving a freeform window its status bar and navigation
-    bar insets (SERVICES_INSETS_CODE) and the package manager taking every 64-bit ABI the guest lists for
-    a multiArch app (SERVICES_ABI_CODE), its stored dex files aligned again. Returns the jar as
-    it was when it already has the edits."""
+    bar insets (SERVICES_INSETS_CODE), the package manager taking every 64-bit ABI the guest lists for
+    a multiArch app (SERVICES_ABI_CODE) and the WebView zygote starting with the first renderer
+    rather than at boot (SERVICES_WEBVIEW_ZYGOTE_CODE), its stored dex files aligned again.
+    Returns the jar as it was when it already has the edits."""
     edited = edit_apk(data, name, code=SERVICES_CODE)
     return data if edited is data else aligned_zip(edited)
 

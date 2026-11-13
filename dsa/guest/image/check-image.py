@@ -243,6 +243,13 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
         if left:
             problems.append(f"{make_image.SERVICES_JAR} still has {'; '.join(left)}, so Android refuses a "
                             "multiArch app with arm64-v8a code only even while ARM translation is on")
+        # The WebView zygote starts with the first WebView renderer, so nothing in services.jar
+        # starts it at boot.
+        callers = make_image.jar_callers(services, make_image.WEBVIEW_ZYGOTE_START)
+        if callers:
+            problems.append(f"{make_image.SERVICES_JAR} still starts the WebView zygote from "
+                            f"{', '.join(callers)}, so it holds its memory from boot whether or not an "
+                            "app uses WebView")
         misaligned = make_image.zip_misaligned(services)
         if misaligned:
             problems.append(f"{make_image.SERVICES_JAR} stores {', '.join(misaligned)} unaligned, so "

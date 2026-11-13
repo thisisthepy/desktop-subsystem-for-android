@@ -8170,7 +8170,8 @@ class MultiArchAbiTests(unittest.TestCase):
         script = (Path(make_image.__file__).parent / "check-image.py").read_text()
         self.assertIn("apk_edits_left(services, code=make_image.SERVICES_ABI_CODE)", script)
         self.assertEqual(make_image.SERVICES_CODE,
-                         {**make_image.SERVICES_INSETS_CODE, **make_image.SERVICES_ABI_CODE})
+                         {**make_image.SERVICES_INSETS_CODE, **make_image.SERVICES_ABI_CODE,
+                          **make_image.SERVICES_WEBVIEW_ZYGOTE_CODE})
 
     def test_fr25_the_guest_lists_x86_64_first_and_no_32_bit_abi(self):
         self.assertEqual(guest_64_bit_abis("on"), ["x86_64", "arm64-v8a"])
@@ -8209,6 +8210,32 @@ class MultiArchAbiTests(unittest.TestCase):
 
     def test_fr25_an_app_without_native_code_installs_without_an_abi(self):
         self.assertIsNone(multi_arch_abi(set(), guest_64_bit_abis("on")))
+
+
+SYSTEM_IMPL_ENSURE_ZYGOTE = "Lcom/android/server/webkit/SystemImpl;->ensureZygoteStarted"
+START_ZYGOTE_WHEN_READY = "Lcom/android/server/webkit/WebViewUpdateServiceImpl2;->startZygoteWhenReady"
+
+
+def webview_service_dex(inlined=False):
+    """WebView's update service in services.jar as d8 compiles Android 16's and 17's, cut down
+    to the calls that start the WebView zygote: startZygoteWhenReady waits for the RELRO files,
+    then asks the system interface to start the zygote, whose ensureZygoteStarted only calls
+    WebViewZygote.getProcess. With `inlined`, R8 has put that call into startZygoteWhenReady."""
+    methods = [
+        ("Lcom/android/server/webkit/SystemImpl;", "ensureZygoteStarted", "V"),
+        ("Landroid/webkit/WebViewZygote;", "getProcess", "L"),
+        ("Lcom/android/server/webkit/WebViewUpdateServiceImpl2;", "startZygoteWhenReady", "V"),
+        ("Lcom/android/server/webkit/WebViewUpdateServiceImpl2;", "waitForAndGetProvider", "L"),
+        ("Lcom/android/server/webkit/SystemInterface;", "ensureZygoteStarted", "V"),
+    ]
+    ensure = bytes.fromhex("71000100 0000" "0e00")  # invoke-static {}, getProcess; return-void
+    when_ready = (
+        "70100300 0100"  # invoke-direct {v1}, waitForAndGetProvider
+        "0c00"  # move-result-object v0 (the provider, unused)
+        + ("71000100 0000" if inlined else "72100400 0000")  # getProcess, or the interface's call
+        + "0e00"  # return-void
+    )
+    return dex_file(methods, {0: (1, ensure), 2: (2, bytes.fromhex(when_ready))})
 
 
 class SlimSystemServerTests(unittest.TestCase):
@@ -8255,6 +8282,42 @@ class SlimSystemServerTests(unittest.TestCase):
         # build.prop is read first, and a read-only property keeps its first value.
         vendor = make_image.edit_props("ro.config.isolated_compilation_enabled=true\n", vendor=True)
         self.assertNotIn("isolated_compilation_enabled", vendor)
+
+    def test_nfr1_the_webview_zygote_starts_with_the_first_renderer_not_at_boot(self):
+        dex = webview_service_dex()
+        self.assertEqual(make_image.dex_callers(dex, make_image.WEBVIEW_ZYGOTE_START), [SYSTEM_IMPL_ENSURE_ZYGOTE])
+        edited, changed = make_image.edit_dex(dex, make_image.SERVICES_CODE)
+        self.assertEqual(changed, [SYSTEM_IMPL_ENSURE_ZYGOTE])
+        self.assertEqual(make_image.dex_callers(edited, make_image.WEBVIEW_ZYGOTE_START), [])
+        self.assertEqual(dex_calls(edited, SYSTEM_IMPL_ENSURE_ZYGOTE), [])
+        # The method keeps its size and returns; the caller still waits for the RELRO files.
+        self.assertEqual(dex_code(edited, SYSTEM_IMPL_ENSURE_ZYGOTE), bytes(6) + bytes.fromhex("0e00"))
+        self.assertIn("Lcom/android/server/webkit/WebViewUpdateServiceImpl2;->waitForAndGetProvider",
+                      dex_calls(edited, START_ZYGOTE_WHEN_READY))
+        self.assertEqual(len(edited), len(dex))
+        self.assertEqual(make_image.edit_dex(edited, make_image.SERVICES_CODE)[1], [])
+
+    def test_nfr1_the_webview_zygote_call_is_skipped_where_r8_inlined_it(self):
+        dex = webview_service_dex(inlined=True)
+        self.assertEqual(make_image.dex_callers(dex, make_image.WEBVIEW_ZYGOTE_START),
+                         [SYSTEM_IMPL_ENSURE_ZYGOTE, START_ZYGOTE_WHEN_READY])
+        edited, changed = make_image.edit_dex(dex, make_image.SERVICES_CODE)
+        self.assertEqual(sorted(changed), [SYSTEM_IMPL_ENSURE_ZYGOTE, START_ZYGOTE_WHEN_READY])
+        self.assertEqual(make_image.dex_callers(edited, make_image.WEBVIEW_ZYGOTE_START), [])
+
+    def test_nfr1_the_edited_services_jar_starts_no_webview_zygote_and_stays_aligned(self):
+        jar = jar_of(webview_service_dex())
+        self.assertEqual(make_image.jar_callers(jar, make_image.WEBVIEW_ZYGOTE_START), [SYSTEM_IMPL_ENSURE_ZYGOTE])
+        edited = make_image.edit_services_jar(jar, make_image.SERVICES_JAR)
+        self.assertEqual(make_image.jar_callers(edited, make_image.WEBVIEW_ZYGOTE_START), [])
+        self.assertEqual(make_image.apk_edits_left(edited, code=make_image.SERVICES_CODE), [])
+        self.assertEqual(make_image.zip_misaligned(edited), [])
+        script = (Path(make_image.__file__).parent / "check-image.py").read_text()
+        self.assertIn("jar_callers(services, make_image.WEBVIEW_ZYGOTE_START)", script)
+        # WebView itself stays: its feature, its package and its update service.
+        features = (Path(__file__).parent / "unavailable-features.xml").read_text()
+        self.assertNotIn("android.software.webview", features)
+        self.assertNotIn("webview", [app.lower() for app in make_image.REMOVED_APPS])
 
 
 if __name__ == "__main__":
