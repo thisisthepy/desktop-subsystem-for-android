@@ -38,13 +38,21 @@ on property:sys.boot_completed=1
 # of them (16384 pages) is compressed again each time, so one reclaim keeps init busy for a
 # fraction of a second and the rest follows in the next ones. A page already compressed again
 # is skipped, and one swapped back in leaves zram, so only what stays cold is ever recompressed.
-# zram's own compaction then frees the memory the old copies left in its pages. Then
-# compaction leaves whole blocks free, which free page reporting hands back to Hyper-V. Nothing
-# is lost: what left is read back when needed.
+# zram's own compaction then frees the memory the old copies left in its pages. Nothing is
+# lost: what left is read back when needed.
+# Then, on a host that takes back only whole blocks (2 MiB or 128 KiB; the host puts
+# androidboot.dsa.memory_compaction=on on the command line for those), compaction gathers the
+# free pages into whole blocks for free page reporting to hand back. A host that takes back
+# every free 4 KiB page gets them without it, and there compaction would only move memory: each
+# page it copies lands in a free page the host had already taken back, which the host backs
+# again before the page left behind is reported, so the VM's memory rose for the length of the
+# pass before it fell.
 # Last, every free page is reported to the host again (page_reporting.rereport, DSA's kernel):
 # Hyper-V backs a VM's memory in 64 KiB clusters, so a page the guest touches again brings its
-# reported free neighbours back with it, and the guest, which marked them reported, would never
-# offer them again; the per-CPU lists' free pages go to the free lists first.
+# reported free neighbours back with it, and a guest that marked them reported would not offer
+# them again until the kernel saw the page handed out (page_reporting.fault_cluster_order);
+# the per-CPU lists' free pages go to the free lists first.
+# The three actions share the trigger, so init runs them one after the other, in this order.
 # It waits for boot to finish, so a boot still under way does not swap out what it is using;
 # a request made before then stays set, and runs when boot completes.
 on property:vendor.dsa.memory.reclaim=1 && property:sys.boot_completed=1
@@ -56,7 +64,11 @@ on property:vendor.dsa.memory.reclaim=1 && property:sys.boot_completed=1
     write /sys/devices/virtual/block/zram0/idle all
     write /sys/devices/virtual/block/zram0/recompress "type=idle max_pages=16384"
     write /sys/devices/virtual/block/zram0/compact 1
+
+on property:vendor.dsa.memory.reclaim=1 && property:sys.boot_completed=1 && property:ro.boot.dsa.memory_compaction=on
     write /proc/sys/vm/compact_memory 1
+
+on property:vendor.dsa.memory.reclaim=1 && property:sys.boot_completed=1
     write /sys/module/page_reporting/parameters/rereport 1
     setprop vendor.dsa.memory.reclaim 0
 
@@ -90,12 +102,17 @@ on property:vendor.dsa.memory.writeback=1 && property:sys.boot_completed=1
 # pages of running apps and system_server stay. "swappiness=0" takes page cache only: app
 # memory moves to zram in the idle reclaim, not while an app is in use. The root's file is
 # root's, unlike those of the groups libprocessgroup makes, so init's vendor scripts can always
-# open it. The pages it frees are scattered among pages in use, and free page reporting hands
-# back only whole free blocks, so compaction then gathers them and they go back to the host at
-# once rather than whenever background compaction gets to them.
+# open it. The pages it frees are scattered among pages in use. On a host that takes back only
+# whole free blocks (androidboot.dsa.memory_compaction=on), compaction then gathers them and they
+# go back to the host at once rather than whenever background compaction gets to them; a host
+# that takes back every free page gets them as they are, without moving any memory.
 on property:vendor.dsa.memory.trim=1
     write /sys/fs/cgroup/memory.reclaim "${vendor.dsa.memory.trim_size}M swappiness=0"
+
+on property:vendor.dsa.memory.trim=1 && property:ro.boot.dsa.memory_compaction=on
     write /proc/sys/vm/compact_memory 1
+
+on property:vendor.dsa.memory.trim=1
     setprop vendor.dsa.memory.trim 0
 
 # Developer mode. dsa-channeld sets vendor.dsa.adb as the host says: 1 while the user's

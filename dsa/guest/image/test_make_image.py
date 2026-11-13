@@ -2611,10 +2611,17 @@ class GuestMemoryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp), channeld=True) as archive:
             rc = archive.read("VENDOR/etc/init/dsa-channeld.rc").decode()
             start = rc.index("on property:vendor.dsa.memory.reclaim=1 && property:sys.boot_completed=1")
-            trigger = rc[start:].split("\n\n")[0]
+            # The reclaim's three actions, which init runs one after the other.
+            trigger = rc[start:rc.index("on property:vendor.dsa.memory.trim=1")]
             again = trigger.index("write /sys/module/page_reporting/parameters/rereport 1")
             self.assertLess(trigger.index("write /proc/sys/vm/compact_memory 1"), again)
             self.assertLess(again, trigger.index("setprop vendor.dsa.memory.reclaim 0"))
+            # The last of the three, which runs whether or not the host asked for compaction.
+            reclaim = trigger[:trigger.index("on property:vendor.dsa.memory.writeback=1")]
+            last = reclaim[reclaim.rindex("on property:"):]
+            self.assertTrue(last.startswith(
+                "on property:vendor.dsa.memory.reclaim=1 && property:sys.boot_completed=1\n"), last)
+            self.assertIn("rereport 1", last)
             policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
             self.assertIn(
                 '(genfscon sysfs "/module/page_reporting/parameters/rereport" '
@@ -2622,6 +2629,38 @@ class GuestMemoryTests(unittest.TestCase):
                 policy,
             )
             self.assertIn("(allow vendor_init dsa_sysfs_page_reporting (file (write open getattr)))", policy)
+
+    def test_nfr2_the_reclaims_compact_only_where_the_host_takes_back_whole_blocks(self):
+        # At reporting order 0 every free page goes back as it is, and compaction would copy
+        # pages into free pages the host had taken back. The host asks for compaction on the
+        # command line where it takes back only whole blocks.
+        condition = "property:ro.boot.dsa.memory_compaction=on"
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp), channeld=True) as archive:
+            rc = archive.read("VENDOR/etc/init/dsa-channeld.rc").decode()
+            # Each action: its trigger line and its commands, the comments above it left out.
+            actions = []
+            for block in rc.split("\n\n"):
+                lines = [line for line in block.splitlines() if not line.startswith("#")]
+                if lines and lines[0].startswith("on "):
+                    actions.append(lines)
+            compacting = [lines for lines in actions if "    write /proc/sys/vm/compact_memory 1" in lines]
+            self.assertEqual(len(compacting), 2, compacting)
+            for lines in compacting:
+                self.assertTrue(lines[0].endswith(f" && {condition}"), lines[0])
+                self.assertEqual(lines[1:], ["    write /proc/sys/vm/compact_memory 1"])
+            reclaim = "on property:vendor.dsa.memory.reclaim=1 && property:sys.boot_completed=1"
+            trim = "on property:vendor.dsa.memory.trim=1"
+            self.assertEqual(sorted(lines[0] for lines in compacting),
+                             sorted([f"{reclaim} && {condition}", f"{trim} && {condition}"]))
+            # Each reclaim still ends by setting its property back, whatever the host asked.
+            ends = [lines for lines in actions if "    setprop vendor.dsa.memory.reclaim 0" in lines
+                    or "    setprop vendor.dsa.memory.trim 0" in lines]
+            self.assertEqual(sorted(lines[0] for lines in ends), sorted([reclaim, trim]))
+            # Compaction runs after what frees memory and before the reclaim is done.
+            self.assertLess(rc.index("compact 1\n"), rc.index(f"{reclaim} && {condition}"))
+            self.assertLess(rc.index(f"{reclaim} && {condition}"), rc.index("rereport 1"))
+            self.assertLess(rc.index(trim + "\n"), rc.index(f"{trim} && {condition}"))
+            self.assertLess(rc.index(f"{trim} && {condition}"), rc.index("setprop vendor.dsa.memory.trim 0"))
 
     def test_nfr2_the_reclaim_drops_clean_page_cache_before_it_compresses_app_memory(self):
         # Cache first: zram never takes an app's memory while cache that could simply go is
@@ -2640,9 +2679,16 @@ class GuestMemoryTests(unittest.TestCase):
             self.assertIn("write /proc/sys/vm/swappiness 60", memory_rc)
 
     def test_nfr1_free_memory_is_compacted_sooner_so_page_reporting_hands_it_back(self):
+        # Only where the host takes back whole blocks: there compaction gathers free pages into
+        # them. Where it takes back every page, background compaction is off.
         with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
             rc = archive.read("VENDOR/etc/init/dsa-memory.rc").decode()
-            self.assertIn("write /proc/sys/vm/compaction_proactiveness 40", rc)
+            boot = rc[rc.index("on boot\n"):].split("\n\n")[0]
+            self.assertIn("write /proc/sys/vm/compaction_proactiveness 0", boot)
+            blocks = rc.index("on boot && property:ro.boot.dsa.memory_compaction=on\n")
+            self.assertGreater(blocks, rc.index("on boot\n"))
+            self.assertEqual(rc[blocks:].split("\n\n")[0].splitlines()[1].strip(),
+                             "write /proc/sys/vm/compaction_proactiveness 40")
             policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
             self.assertIn(
                 '(genfscon proc "/sys/vm/compaction_proactiveness" (u object_r dsa_proc_vm_tunable',

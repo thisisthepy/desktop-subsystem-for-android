@@ -559,6 +559,10 @@ impl GuestLauncher for AndroidVmLauncher {
             .as_mut()
             .and_then(|properties| properties(&config));
         config.kernel_cmdline = format!("{} {}", config.kernel_cmdline, bootconfig::CMDLINE_FLAG);
+        // Before the console's header, which records the kernel command line: fine-grained
+        // memory tells the guest's kernel the host's fault cluster.
+        config.fine_grained_memory =
+            windows_build().is_some_and(|(build, ubr)| fine_grained_memory_supported(build, ubr));
         // The console is kept from here, so a boot whose files cannot be prepared is still
         // in the log with its reason.
         config.console_pipe = self.begin_console(&config);
@@ -576,8 +580,6 @@ impl GuestLauncher for AndroidVmLauncher {
         {
             config.hosting_process_name_suffix = Some(HOSTING_PROCESS_NAME_SUFFIX.into());
         }
-        config.fine_grained_memory =
-            windows_build().is_some_and(|(build, ubr)| fine_grained_memory_supported(build, ubr));
         // The guest kernel's last log of the boot before is on this disk; one that is missing
         // or damaged is made again, empty, and Android starts either way.
         if let Some(pstore) = &config.pstore_disk {

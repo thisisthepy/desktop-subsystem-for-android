@@ -741,6 +741,42 @@ pub fn summary_lines(androids: &dyn UserAndroids, host: &dyn HostMemory) -> Vec<
 pub const GUEST_BOOT_MEMORY_CMDLINE: &str = "swiotlb=2048 kfence.sample_interval=0 \
      dhash_entries=65536 ihash_entries=32768 thash_entries=16384 uhash_entries=1024";
 
+/// The kernel command line word that has the guest compact its memory after each reclaim
+/// and in the background (the image's `dsa-memory.rc` and `dsa-channeld.rc` read it as
+/// `ro.boot.dsa.memory_compaction`).
+pub const GUEST_COMPACTION_CMDLINE: &str = "androidboot.dsa.memory_compaction=on";
+
+/// The command line words for free page reporting at `order` (a page order: 0 is every
+/// 4 KiB page) on a host that faults guest memory in clusters of `fault_cluster_order`
+/// (0 for a host that backs each page by itself).
+///
+/// Compaction is asked for only when the order is above 0. Free page reporting hands back
+/// only whole free blocks of its order, so at 2 MiB (9) or 128 KiB (5) compaction is what
+/// gathers scattered free pages into blocks the host can take. At order 0 every free page is
+/// reported as it is, and compaction only moves memory: each page it copies lands in a free
+/// page the host had taken back, which the host backs again before the page it left is
+/// reported, so after each app closed the VM's memory rose for the length of a pass of the
+/// whole guest before it fell.
+///
+/// With a fault cluster above 0 (Hyper-V's 64 KiB with small backing pages), the guest's
+/// kernel takes the reported mark off the free pages that share a cluster with a reported
+/// page it hands out, so they are reported again (`page_reporting.fault_cluster_order`, a
+/// parameter of DSA's kernel). Without it the host backs them again with their neighbour and
+/// the guest never offers them a second time.
+pub fn page_reporting_cmdline(order: u8, fault_cluster_order: u8) -> String {
+    let mut words = format!("page_reporting.page_reporting_order={order}");
+    if fault_cluster_order > 0 {
+        words.push_str(&format!(
+            " page_reporting.fault_cluster_order={fault_cluster_order}"
+        ));
+    }
+    if order > 0 {
+        words.push(' ');
+        words.push_str(GUEST_COMPACTION_CMDLINE);
+    }
+    words
+}
+
 /// The least memory the host's own system keeps when the VM is sized to the host, in MiB.
 pub const HOST_RESERVE_MIN_MB: u64 = 2048;
 
