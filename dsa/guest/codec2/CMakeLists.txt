@@ -93,6 +93,8 @@ add_executable(dsa-codec2
     src/video_messages.cpp
     src/picture_copy.cpp
     src/output_buffer.cpp
+    src/output_gate.cpp
+    src/send_queue.cpp
     src/config_rules.cpp
     src/platform_support.cpp
     ${PLATFORM_SOURCES}

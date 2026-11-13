@@ -5,16 +5,23 @@
 // they stay in step with the host's, and the copy of a decoded picture into a guest buffer's
 // planes. The protocol folder is the only argument.
 
+#include <unistd.h>
+
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "config_rules.h"
 #include "output_buffer.h"
+#include "output_gate.h"
 #include "picture_copy.h"
+#include "send_queue.h"
 #include "test_main.h"
 #include "video_messages.h"
 
@@ -253,6 +260,212 @@ TEST(fr26_a_surface_mode_configure_takes_the_surfaces_pixel_format) {
     }
     EXPECT_EQ(kPixelFormatSurface, 0x22u);
     EXPECT_EQ(kPixelFormatFlexible, 0x23u);
+}
+
+// A buffer the writer is handed: YV12 planes of `width` by `height`, every sample 0xee until
+// written, with what the lock and the unlock should answer.
+struct FakeBuffer {
+    Yv12 planes;
+    bool lockOk = true;
+    uint32_t planeCount = 3;
+    bool unlockOk = true;
+    int locks = 0;
+    int unlocks = 0;
+    explicit FakeBuffer(uint32_t width, uint32_t height) : planes(width, height) {}
+    LockPlanes lock() {
+        return [this](YuvPlanes* out, uint32_t* count) {
+            ++locks;
+            if (!lockOk) {
+                return false;
+            }
+            *out = planes.planes();
+            *count = planeCount;
+            return true;
+        };
+    }
+    UnlockPlanes unlock() {
+        return [this] {
+            ++unlocks;
+            return unlockOk;
+        };
+    }
+};
+
+TEST(fr26_a_written_picture_fills_every_sample_of_a_larger_buffer) {
+    // An allocator may give a buffer larger than asked; nothing of it is left unwritten.
+    const std::vector<uint8_t> nv12 = flatNv12(6, 4, 81, 90, 240);
+    FakeBuffer buffer(8, 6);
+    const WriteResult result =
+        writePicture(nv12.data(), nv12.size(), 6, 4, 6, BufferSize{8, 6}, buffer.lock(), buffer.unlock());
+    EXPECT_TRUE(result == WriteResult::Written);
+    EXPECT_EQ(buffer.unlocks, 1);
+    for (uint32_t row = 0; row < 6; ++row) {
+        for (uint32_t x = 0; x < 8; ++x) {
+            EXPECT_EQ(buffer.planes.y[row * buffer.planes.yStride + x], 81);
+        }
+    }
+    for (uint32_t row = 0; row < 3; ++row) {
+        for (uint32_t x = 0; x < 4; ++x) {
+            EXPECT_EQ(buffer.planes.u[row * buffer.planes.chromaStride + x], 90);
+            EXPECT_EQ(buffer.planes.v[row * buffer.planes.chromaStride + x], 240);
+        }
+    }
+}
+
+TEST(fr26_a_buffer_that_cannot_be_locked_never_goes_out) {
+    // Before, the buffer went to the surface anyway: zeros (green) or an older picture.
+    const std::vector<uint8_t> nv12 = flatNv12(4, 2, 81, 90, 240);
+    FakeBuffer buffer(4, 2);
+    buffer.lockOk = false;
+    EXPECT_TRUE(writePicture(nv12.data(), nv12.size(), 4, 2, 4, BufferSize{4, 2}, buffer.lock(), buffer.unlock()) ==
+                WriteResult::NotLocked);
+    EXPECT_EQ(buffer.unlocks, 0);
+}
+
+TEST(fr26_a_picture_too_short_for_its_size_never_goes_out) {
+    const std::vector<uint8_t> nv12 = flatNv12(4, 2, 81, 90, 240);
+    FakeBuffer buffer(4, 2);
+    // One byte short of its chroma.
+    EXPECT_TRUE(writePicture(nv12.data(), nv12.size() - 1, 4, 2, 4, BufferSize{4, 2}, buffer.lock(),
+                             buffer.unlock()) == WriteResult::NotCopied);
+    // Locked, so unlocked again, and nothing written.
+    EXPECT_EQ(buffer.unlocks, 1);
+    EXPECT_EQ(buffer.planes.y, std::vector<uint8_t>(buffer.planes.y.size(), 0xee));
+}
+
+TEST(fr26_a_buffer_smaller_than_the_picture_is_not_written) {
+    const std::vector<uint8_t> nv12 = flatNv12(6, 4, 81, 90, 240);
+    FakeBuffer buffer(6, 4);
+    EXPECT_TRUE(writePicture(nv12.data(), nv12.size(), 6, 4, 6, BufferSize{4, 4}, buffer.lock(), buffer.unlock()) ==
+                WriteResult::WrongBuffer);
+    EXPECT_TRUE(writePicture(nv12.data(), nv12.size(), 6, 4, 6, BufferSize{6, 2}, buffer.lock(), buffer.unlock()) ==
+                WriteResult::WrongBuffer);
+    EXPECT_EQ(buffer.locks, 0);
+}
+
+TEST(fr26_a_buffer_whose_planes_do_not_fit_is_not_written) {
+    const std::vector<uint8_t> nv12 = flatNv12(4, 2, 81, 90, 240);
+    FakeBuffer twoPlanes(4, 2);
+    twoPlanes.planeCount = 2;
+    EXPECT_TRUE(writePicture(nv12.data(), nv12.size(), 4, 2, 4, BufferSize{4, 2}, twoPlanes.lock(),
+                             twoPlanes.unlock()) == WriteResult::BadPlanes);
+    EXPECT_EQ(twoPlanes.unlocks, 1);
+    // A lock whose rows are shorter than the buffer's width.
+    FakeBuffer narrow(4, 2);
+    narrow.planes.yStride = 3;
+    EXPECT_TRUE(writePicture(nv12.data(), nv12.size(), 4, 2, 4, BufferSize{4, 2}, narrow.lock(), narrow.unlock()) ==
+                WriteResult::BadPlanes);
+    EXPECT_EQ(narrow.planes.y, std::vector<uint8_t>(narrow.planes.y.size(), 0xee));
+}
+
+TEST(fr26_a_buffer_whose_unlock_failed_never_goes_out) {
+    const std::vector<uint8_t> nv12 = flatNv12(4, 2, 81, 90, 240);
+    FakeBuffer buffer(4, 2);
+    buffer.unlockOk = false;
+    EXPECT_TRUE(writePicture(nv12.data(), nv12.size(), 4, 2, 4, BufferSize{4, 2}, buffer.lock(), buffer.unlock()) ==
+                WriteResult::NotUnlocked);
+}
+
+TEST(fr26_a_picture_that_arrives_during_a_flush_is_dropped_at_once) {
+    OutputGate gate;
+    const uint64_t before = gate.ticket();
+    EXPECT_TRUE(gate.open(before));
+    gate.beginFlush();
+    // One that came before the flush, and one still on its way to the host's answer.
+    EXPECT_TRUE(!gate.open(before));
+    EXPECT_TRUE(!gate.open(gate.ticket()));
+    gate.endFlush();
+    // The stream after the flush goes out; the one before it never does.
+    EXPECT_TRUE(gate.open(gate.ticket()));
+    EXPECT_TRUE(!gate.open(before));
+    const uint64_t started = gate.ticket();
+    gate.stop();
+    EXPECT_TRUE(!gate.open(started));
+    EXPECT_TRUE(gate.open(gate.ticket()));
+}
+
+TEST(fr26_a_flush_ends_a_pictures_wait_for_a_buffer_at_once) {
+    // A surface whose buffers never come back: the waitable never becomes readable.
+    int fds[2];
+    EXPECT_EQ(pipe(fds), 0);
+    OutputGate gate;
+    const uint64_t ticket = gate.ticket();
+    const auto start = std::chrono::steady_clock::now();
+    std::thread flush([&gate] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        gate.beginFlush();
+    });
+    const WaitResult result = waitReadable(fds[0], start + std::chrono::seconds(10), gate, ticket);
+    flush.join();
+    const auto took = std::chrono::steady_clock::now() - start;
+    EXPECT_TRUE(result == WaitResult::Closed);
+    // Before, the wait lasted its full 2 s for each picture still queued, and the flush with it.
+    EXPECT_TRUE(took < std::chrono::seconds(1));
+    close(fds[0]);
+    close(fds[1]);
+}
+
+TEST(fr26_a_buffer_still_in_use_is_waited_for_and_then_given_up) {
+    int fds[2];
+    EXPECT_EQ(pipe(fds), 0);
+    OutputGate gate;
+    // Its release fence never signals: given up at the deadline, not written into.
+    EXPECT_TRUE(waitReadable(fds[0], std::chrono::steady_clock::now() + std::chrono::milliseconds(120), gate,
+                             gate.ticket()) == WaitResult::TimedOut);
+    // Once it signals, the buffer is free to write.
+    const char signal = 1;
+    EXPECT_EQ(write(fds[1], &signal, 1), 1);
+    EXPECT_TRUE(waitReadable(fds[0], std::chrono::steady_clock::now() + std::chrono::seconds(5), gate,
+                             gate.ticket()) == WaitResult::Ready);
+    close(fds[0]);
+    close(fds[1]);
+}
+
+TEST(fr26_a_packet_queues_without_waiting_for_the_host_to_read) {
+    // Nothing writes to the host: before, the framework's queue() call waited on the socket
+    // while the host waited for the guest to take a picture (8 s calls on the owner's PC).
+    SendQueue queue(1024);
+    const auto start = std::chrono::steady_clock::now();
+    for (int i = 0; i < 8; ++i) {
+        EXPECT_TRUE(queue.push(std::vector<uint8_t>(100, static_cast<uint8_t>(i))));
+    }
+    EXPECT_TRUE(std::chrono::steady_clock::now() - start < std::chrono::milliseconds(500));
+    EXPECT_EQ(queue.queuedBytes(), 800u);
+    // They leave in the order they came.
+    std::vector<uint8_t> frame;
+    for (int i = 0; i < 8; ++i) {
+        EXPECT_TRUE(queue.pop(&frame));
+        EXPECT_EQ(frame[0], static_cast<uint8_t>(i));
+    }
+    EXPECT_EQ(queue.queuedBytes(), 0u);
+}
+
+TEST(fr26_a_closed_send_queue_wakes_its_writer_and_takes_nothing_more) {
+    SendQueue queue(1024);
+    std::atomic<bool> popped{true};
+    std::thread writer([&] {
+        std::vector<uint8_t> frame;
+        popped = queue.pop(&frame);
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    queue.close();
+    writer.join();
+    EXPECT_TRUE(!popped.load());
+    EXPECT_TRUE(!queue.push({1, 2, 3}));
+}
+
+TEST(fr26_a_full_send_queue_waits_for_room_and_a_close_ends_the_wait) {
+    SendQueue queue(100);
+    EXPECT_TRUE(queue.push(std::vector<uint8_t>(80, 0)));
+    // A frame larger than the bound still goes when nothing waits.
+    SendQueue big(10);
+    EXPECT_TRUE(big.push(std::vector<uint8_t>(50, 0)));
+    std::atomic<bool> pushed{true};
+    std::thread sender([&] { pushed = queue.push(std::vector<uint8_t>(80, 1)); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    queue.close();
+    sender.join();
+    EXPECT_TRUE(!pushed.load());
 }
 
 int main(int argc, char** argv) {

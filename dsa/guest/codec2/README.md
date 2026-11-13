@@ -25,8 +25,20 @@ edge. The guest's gralloc has no NV12 buffer the composer may use, so a dequeue 
 buffer from an app's surface failed (`C2_CORRUPTED`) on every picture and no video reached
 the screen. While every buffer of the surface is shown or queued the allocator answers
 `C2_BLOCKING`, and the component waits on its waitable descriptor, up to 2 s, before it drops
-the picture; a flush or a stop ends the wait. A failure that repeats is logged once in a
-hundred.
+the picture; a flush or a stop ends the wait. A buffer that comes back is written only once its
+release fence signals (up to 1 s), so a picture never lands in a buffer the screen still shows.
+A picture goes out only in a buffer that holds all of it: a buffer that is too small, cannot
+be locked or unlocked, or a picture shorter than its size, ends the work with no output and
+gives the buffer back to the surface (`src/picture_copy.h`), rather than showing zeros (green)
+or an older picture. A failure that repeats is logged once in a hundred.
+
+Packets go to the host through a queue that a thread of the link's own writes
+(`src/send_queue.h`), so the framework's `queue()` call never waits on the host. The host
+decodes on one thread and reads no packet while the guest has not taken its last picture, and
+the app gives the surface's buffers back from the thread that calls `queue()`: when
+`queue()` wrote to the socket itself, each picture waited its full 2 s for a buffer and
+`queue()` took 8 s. A flush drops every picture that arrives before the host's answer without
+waiting for a buffer (`src/output_gate.h`), so the flush returns as soon as the host answers.
 
 The store asks the host which formats it decodes when it starts, and lists only those. The
 framework builds its list of codecs once a boot, so the first list waits up to 20 s for the
@@ -60,8 +72,9 @@ and to surfaces on screen that change partway, as a player and a feed of short v
 
 - `build.sh [scratch] [out]` fetches the pinned sources and builds `dsa-codec2` with the NDK.
 - `test.sh` builds and runs the rules on the build machine: the video port's messages against
-  the protocol vectors, the copy of a picture into a buffer's planes, and the output buffers'
-  format, size, crop and allocation failures.
+  the protocol vectors, the copy of a picture into a buffer's planes, the output buffers'
+  format, size, crop and allocation failures, the pictures that never go out, the waits a
+  flush ends, and the queue of packets to the host.
 
 `make-image.py --codec2 <out>/dsa-codec2` installs it with its init script, VINTF fragment,
 label (`mediacodec`), service label, `media_codecs_c2.xml` and `sepolicy/codec2.cil`.
