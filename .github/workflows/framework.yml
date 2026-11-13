@@ -1,10 +1,10 @@
-# Builds SurfaceFlinger, libhwui and libEGL with DSA's GPU device loss recovery,
-# libandroid_runtime, which gives Google Play the computer's memory, and DSA's KeyMint, whose root key of key blobs comes from the DSA host (the patches in
+# Builds SurfaceFlinger, libhwui and libEGL with DSA's GPU device loss recovery, and DSA's
+# KeyMint, whose root key of key blobs comes from the DSA host (the patches in
 # dsa/guest/framework/patches), for each Android version in dsa/guest/framework/framework-lock.json
 # and each guest architecture, and keeps them as the artifacts the image release lays over the
 # published build (make-image.py --framework).
 #
-# The image takes the framework files in place of the published build's, and the KeyMint
+# The image takes the three framework files in place of the published build's, and the KeyMint
 # in place of its KeyMint APEX, beside that build's own libraries, so each is built from the
 # exact source of the build the image is made from: the lock pins every project to the commit
 # the build's manifest names, and its release configuration, Clang and Rust. It runs on GitHub's
