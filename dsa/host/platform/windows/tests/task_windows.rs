@@ -1006,6 +1006,31 @@ fn window_and_work_area(hwnd: isize) -> (RECT, RECT) {
     (window, info.rcWork)
 }
 
+/// Checks that `hwnd` is maximised with its client area exactly on its monitor's work area:
+/// not the whole monitor, under the taskbar, and not its restored size. `when` says which step
+/// of the test it is.
+fn assert_fills_its_work_area(hwnd: isize, when: &str) {
+    assert_ne!(
+        unsafe { IsZoomed(hwnd as HWND) },
+        0,
+        "the window is no longer maximised {when}"
+    );
+    let (window, work) = window_and_work_area(hwnd);
+    let mut origin = POINT { x: 0, y: 0 };
+    unsafe { ClientToScreen(hwnd as HWND, &mut origin) };
+    let (width, height) = client_size(hwnd);
+    let client = (origin.x, origin.y, origin.x + width, origin.y + height);
+    assert_eq!(
+        client,
+        (work.left, work.top, work.right, work.bottom),
+        "{when}, the maximised window at {}x{}..{}x{} has its client area at {client:?}, not on the work area",
+        window.left,
+        window.top,
+        window.right,
+        window.bottom,
+    );
+}
+
 #[test]
 fn fr4_a_maximised_task_window_shows_its_task_1_to_1_without_a_new_texture_or_a_stray_size() {
     let presenter = Arc::new(CapturingPresenter::default());
@@ -1047,44 +1072,16 @@ fn fr4_a_maximised_task_window_shows_its_task_1_to_1_without_a_new_texture_or_a_
     wait_for("the maximised size to reach the guest", || {
         (resizes_since(&running, before, 1) == vec![(max, true)]).then_some(())
     });
-    // The window changes size only together with a frame of that size, which comes in the
-    // same texture.
+    // A maximised window holds the size the desktop gives it, its own monitor's work area,
+    // at once: the guest's frame, smaller than that, is shown in its middle 1:1, in the same
+    // texture, and the window does not shrink to it.
+    assert_fills_its_work_area(hwnd, "maximised");
     if let (Some(sink), Some(texture)) = (&sink, texture) {
-        assert_eq!(
-            client_size(hwnd),
-            normal,
-            "the window took a size it had no frame of"
-        );
         assert_eq!(sink.target(3, 1280, 720), Some(texture), "a new texture");
         sink.frame(3, max);
-        wait_for("the window to take the size of its frame", || {
-            (client_size(hwnd) == (max.0 as i32, max.1 as i32)).then_some(())
-        });
+        thread::sleep(Duration::from_millis(300));
+        assert_fills_its_work_area(hwnd, "after a frame of the guest's largest size");
     }
-    let (width, height) = client_size(hwnd);
-    assert_eq!(
-        (width as u32, height as u32),
-        max,
-        "a maximised window takes the most the guest can draw, and no more"
-    );
-    // Centred on the work area, not left in its corner.
-    let (window, work) = window_and_work_area(hwnd);
-    let off_centre = |start: i32, end: i32, work_start: i32, work_end: i32| {
-        ((start - work_start) - (work_end - end)).abs()
-    };
-    assert!(
-        off_centre(window.left, window.right, work.left, work.right) <= 1
-            && off_centre(window.top, window.bottom, work.top, work.bottom) <= 1,
-        "the maximised window at {}x{}..{}x{} is not centred on the work area {}x{}..{}x{}",
-        window.left,
-        window.top,
-        window.right,
-        window.bottom,
-        work.left,
-        work.top,
-        work.right,
-        work.bottom
-    );
 
     // Once the task has the size, it is reconfigured once, at that size.
     let mut maximised = clock.clone();
@@ -1099,9 +1096,10 @@ fn fr4_a_maximised_task_window_shows_its_task_1_to_1_without_a_new_texture_or_a_
         assert_eq!(sink.target(3, 1280, 720), Some(texture), "a new texture");
         sink.frame(3, max);
     }
-    // The window keeps its size: nothing larger than the guest draws, nothing of size zero.
+    // The window stays maximised on its work area, and the guest is asked for nothing larger
+    // than it draws, nor of size zero.
     thread::sleep(Duration::from_millis(300));
-    assert_eq!(client_size(hwnd), (max.0 as i32, max.1 as i32));
+    assert_fills_its_work_area(hwnd, "after the task was reconfigured");
     let asked = resizes_since(&running, 0, 1);
     let within = |((width, height), _): &((u32, u32), bool)| {
         (1..=max.0).contains(width) && (1..=max.1).contains(height)
@@ -1178,31 +1176,12 @@ fn fr4_a_window_maximised_with_a_guest_larger_than_its_monitor_fills_the_work_ar
         wait_for("the window to take the size of its frame", || {
             (client_size(hwnd) == (filled.0 as i32, filled.1 as i32)).then_some(())
         });
-        // Its client area is the work area, on the screen.
-        let (window, work) = window_and_work_area(hwnd);
-        let mut client = RECT {
-            left: 0,
-            top: 0,
-            right: 0,
-            bottom: 0,
-        };
-        unsafe { GetClientRect(hwnd as HWND, &mut client) };
-        let mut origin = POINT { x: 0, y: 0 };
-        unsafe { ClientToScreen(hwnd as HWND, &mut origin) };
-        assert_eq!(
-            (origin.x, origin.y),
-            (work.left, work.top),
-            "the maximised window at {}x{}..{}x{} does not fill the work area {}x{}..{}x{}",
-            window.left,
-            window.top,
-            window.right,
-            window.bottom,
-            work.left,
-            work.top,
-            work.right,
-            work.bottom
-        );
     }
+    // Its client area is the work area, on the screen, and stays there once the frame of that
+    // size is shown and the guest has had time to answer.
+    assert_fills_its_work_area(hwnd, "maximised");
+    thread::sleep(Duration::from_millis(1500));
+    assert_fills_its_work_area(hwnd, "1.5 s after the frame of its size");
     let asked = resizes_since(&running, before, 1);
     assert!(
         asked
