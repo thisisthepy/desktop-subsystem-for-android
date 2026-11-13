@@ -2,9 +2,14 @@
 #
 # Compressed swap: fstab.dsa declares a zram device of half the guest's memory. Idle apps'
 # pages are kept there compressed (about a third of their size) instead of resident, and the
-# memory they leave is free for page reporting to hand back to Hyper-V. Swapping to zram is
-# cheap, so the kernel is told to prefer it over dropping file pages it would read again.
-# Reading one swapped page reads only that page: zram has no seek to save by reading ahead, and
+# memory they leave is free for page reporting to hand back to Hyper-V. When the guest itself
+# runs short, the kernel takes clean page cache before it compresses app memory: swappiness 60,
+# the kernel's own default, weighs a file page as cheaper to take than an anonymous one. At 100
+# the two cost the same, and with the host short the guest had 552 MiB of the open apps' memory
+# in zram beside 686 MiB of page cache; every swapped page an app touches costs a fault and a
+# decompression, and the copy in zram stays the VM's memory, while a clean file page that goes
+# frees its whole page and costs one read only if it is used again. The daemon's reclaims follow
+# the same order (dsa-channeld.rc). Reading one swapped page reads only that page: zram has no seek to save by reading ahead, and
 # the neighbours would be resident again for nothing.
 #
 # Free page reporting hands back only whole free blocks of its order (up to 2 MiB). Memory an
@@ -47,7 +52,7 @@ on boot
     write /sys/devices/virtual/block/zram0/writeback_limit_enable 1
     setprop vendor.dsa.memory.writeback_after ${ro.boot.dsa.zram_writeback_after:-600}
     setprop vendor.dsa.memory.writeback_age ${ro.boot.dsa.zram_writeback_age:-1800}
-    write /proc/sys/vm/swappiness 100
+    write /proc/sys/vm/swappiness 60
     write /proc/sys/vm/page-cluster 0
     write /proc/sys/vm/compaction_proactiveness 40
     write /proc/sys/vm/vfs_cache_pressure 200

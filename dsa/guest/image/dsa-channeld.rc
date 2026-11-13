@@ -23,20 +23,24 @@ on property:sys.boot_completed=1
     setprop vendor.dsa.boot_completed 1
 
 # Handing idle memory back to the host. dsa-channeld sets this when no task is in use for a
-# while, or the guest holds mostly cache. A guest with memory to spare is never short, so the
-# kernel would never swap by itself: first it is asked to move cold pages to zram, a quarter at
-# a time because init does nothing else during a command. Writing to the root cgroup covers
-# every process, and "swappiness=200" prefers anonymous pages. vendor.dsa.memory.reclaim_step
-# says how many MiB each quarter takes: together half the anonymous memory, the coldest, so the
-# pages of the processes still running are not swapped out only to come straight back. What
-# zram holds is then compressed again with zstd (dsa-memory.rc names it), which takes about a
-# fifth less than LZ4: every page in zram is marked idle, and up to 64 MiB of them (16384
-# pages) is compressed again each time, so one reclaim keeps init busy for a fraction of a
-# second and the rest follows in the next ones. A page already compressed again is skipped,
-# and one swapped back in leaves zram, so only what stays cold is ever recompressed. zram's
-# own compaction then frees the memory the old copies left in its pages. Then the
-# clean page cache and the reclaimable kernel caches are dropped, and compaction leaves whole
-# blocks free, which free page reporting hands back to Hyper-V. Nothing is lost: what left is read back when needed.
+# while, an app closed, the host is short of memory, or the guest holds mostly cache. Clean page
+# cache goes first: the clean page cache no process maps and the reclaimable kernel caches are
+# dropped before any app memory is compressed, so zram never holds an app's memory beside cache
+# that could simply have gone. A guest with memory to spare is never short, so the kernel would
+# never swap by itself: next it is asked to move cold pages to zram, a quarter at a time because
+# init does nothing else during a command. Writing to the root cgroup covers every process, and
+# "swappiness=200" takes anonymous pages only. vendor.dsa.memory.reclaim_step says how many MiB
+# each quarter takes: with no app open, together half the anonymous memory, the coldest, so the
+# pages of the processes still running are not swapped out only to come straight back; with
+# apps open, 0 (nothing), unless the host is short and the cache is already down to the apps'
+# working set. What zram holds is then compressed again with zstd (dsa-memory.rc names it),
+# which takes about a fifth less than LZ4: every page in zram is marked idle, and up to 64 MiB
+# of them (16384 pages) is compressed again each time, so one reclaim keeps init busy for a
+# fraction of a second and the rest follows in the next ones. A page already compressed again
+# is skipped, and one swapped back in leaves zram, so only what stays cold is ever recompressed.
+# zram's own compaction then frees the memory the old copies left in its pages. Then
+# compaction leaves whole blocks free, which free page reporting hands back to Hyper-V. Nothing
+# is lost: what left is read back when needed.
 # Last, every free page is reported to the host again (page_reporting.rereport, DSA's kernel):
 # Hyper-V backs a VM's memory in 64 KiB clusters, so a page the guest touches again brings its
 # reported free neighbours back with it, and the guest, which marked them reported, would never
@@ -44,6 +48,7 @@ on property:sys.boot_completed=1
 # It waits for boot to finish, so a boot still under way does not swap out what it is using;
 # a request made before then stays set, and runs when boot completes.
 on property:vendor.dsa.memory.reclaim=1 && property:sys.boot_completed=1
+    write /proc/sys/vm/drop_caches 3
     write /sys/fs/cgroup/memory.reclaim "${vendor.dsa.memory.reclaim_step}M swappiness=200"
     write /sys/fs/cgroup/memory.reclaim "${vendor.dsa.memory.reclaim_step}M swappiness=200"
     write /sys/fs/cgroup/memory.reclaim "${vendor.dsa.memory.reclaim_step}M swappiness=200"
@@ -51,7 +56,6 @@ on property:vendor.dsa.memory.reclaim=1 && property:sys.boot_completed=1
     write /sys/devices/virtual/block/zram0/idle all
     write /sys/devices/virtual/block/zram0/recompress "type=idle max_pages=16384"
     write /sys/devices/virtual/block/zram0/compact 1
-    write /proc/sys/vm/drop_caches 3
     write /proc/sys/vm/compact_memory 1
     write /sys/module/page_reporting/parameters/rereport 1
     setprop vendor.dsa.memory.reclaim 0

@@ -2435,7 +2435,7 @@ class GuestMemoryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
             rc = archive.read("VENDOR/etc/init/dsa-memory.rc").decode()
             self.assertIn("swapon_all /vendor/etc/fstab.dsa", rc)
-            self.assertIn("write /proc/sys/vm/swappiness 100", rc)
+            self.assertIn("write /proc/sys/vm/swappiness 60", rc)
             self.assertIn("write /proc/sys/vm/page-cluster 0", rc)
             self.assertIn(
                 "(allow vendor_init proc_page_cluster (file (write open getattr)))",
@@ -2469,7 +2469,7 @@ class GuestMemoryTests(unittest.TestCase):
             self.assertLess(trigger.rindex("cgroup/memory.reclaim"), idle)
             self.assertLess(idle, again)
             self.assertLess(again, compact)
-            self.assertLess(compact, trigger.index("drop_caches"))
+            self.assertLess(compact, trigger.index("write /proc/sys/vm/compact_memory 1"))
             # The working set trim, which runs while apps are in use, leaves zram alone.
             trim = rc[rc.index("on property:vendor.dsa.memory.trim=1"):].split("\n\n")[0]
             self.assertNotIn("zram0", trim)
@@ -2582,6 +2582,22 @@ class GuestMemoryTests(unittest.TestCase):
                 policy,
             )
             self.assertIn("(allow vendor_init dsa_sysfs_page_reporting (file (write open getattr)))", policy)
+
+    def test_nfr2_the_reclaim_drops_clean_page_cache_before_it_compresses_app_memory(self):
+        # Cache first: zram never takes an app's memory while cache that could simply go is
+        # still there. Only the zram steps take anonymous memory (swappiness=200), and the
+        # daemon sizes them 0 while apps are open and the cache is above their working set.
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp), channeld=True) as archive:
+            rc = archive.read("VENDOR/etc/init/dsa-channeld.rc").decode()
+            start = rc.index("on property:vendor.dsa.memory.reclaim=1 && property:sys.boot_completed=1")
+            trigger = rc[start:].split("\n\n")[0]
+            drop = trigger.index("write /proc/sys/vm/drop_caches 3")
+            self.assertLess(drop, trigger.index("cgroup/memory.reclaim"))
+            self.assertEqual(trigger.count("drop_caches"), 1)
+            steps = re.findall(r'memory\.reclaim "([^"]*)"', trigger)
+            self.assertEqual(steps, ["${vendor.dsa.memory.reclaim_step}M swappiness=200"] * 4)
+            memory_rc = archive.read("VENDOR/etc/init/dsa-memory.rc").decode()
+            self.assertIn("write /proc/sys/vm/swappiness 60", memory_rc)
 
     def test_nfr1_free_memory_is_compacted_sooner_so_page_reporting_hands_it_back(self):
         with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
