@@ -3824,10 +3824,11 @@ class TouchLatencyTests(unittest.TestCase):
             self.assertIn("vendor/overlay/DsaSettingsOverlay.apk 0 0 644 capabilities=0x0", fs_config)
             self.assertEqual(fs_config.count("vendor/overlay 0 0 755"), 1)
 
-    def test_fr22_settings_lists_keep_room_below_their_last_row_without_a_navigation_bar(self):
-        # The window reports no bottom inset, and Settings' list keeps no space of its own:
-        # androidx.preference's preference_recyclerview has paddingBottom 0dp.
+    def test_fr22_settings_lists_take_the_room_below_their_last_row_from_the_navigation_bar_inset_alone(self):
+        # Every task has a 24 dp navigation bar inset, which SettingsLib's EdgeToEdgeUtils pads
+        # Settings' pages by, so the overlay gives Settings' lists no bottom margin of its own.
         ns = "{http://schemas.android.com/apk/res/android}"
+        self.assertFalse(hasattr(make_image, "LIST_BOTTOM_MARGIN_DP"))
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             make_image.settings_overlay_sources(root / "src")
@@ -3837,27 +3838,20 @@ class TouchLatencyTests(unittest.TestCase):
             resources_map = overlay.get(ns + "resourcesMap")
             self.assertTrue(resources_map.startswith("@xml/"))
 
-            listing = ET.fromstring((root / "src/res/layout/preference_recyclerview.xml").read_text())
-            self.assertEqual(listing.tag, "androidx.recyclerview.widget.RecyclerView")
-            self.assertGreaterEqual(int(listing.get(ns + "paddingBottom").removesuffix("dp")), 24)
-            self.assertEqual(listing.get(ns + "paddingTop"), "0dp")
-            # The rows scroll into the space, so only the end of the list stops short.
-            self.assertEqual(listing.get(ns + "clipToPadding"), "false")
-            self.assertEqual(listing.get(ns + "layout_height"), "match_parent")
-            # Settings' own id and list style, as in the layout this replaces.
-            self.assertEqual(listing.get(ns + "id"), "@+id/recycler_view")
-            self.assertEqual(listing.get("style"), "?attr/preferenceFragmentListStyle")
-
+            # androidx.preference's own list layout stands, with no padding of the overlay's.
+            self.assertFalse((root / "src/res/layout/preference_recyclerview.xml").exists())
             values = ET.fromstring((root / "src/res/values/dsa.xml").read_text())
-            self.assertIn("preferenceFragmentListStyle", [a.get("name") for a in values.findall("attr")])
+            self.assertNotIn("preferenceFragmentListStyle", [a.get("name") for a in values.findall("attr")])
+            self.assertEqual(values.findall("dimen"), [])
 
-            # Only a resource map makes the framework rewrite the overlay's references to its id
-            # and attribute into Settings' ids; matching by name does not.
             mapping = ET.fromstring((root / "src/res/xml" / (resources_map.removeprefix("@xml/") + ".xml")).read_text())
             items = {item.get("target"): item.get("value") for item in mapping.findall("item")}
             for target in ["layout/preference_recyclerview", "id/recycler_view",
-                           "attr/preferenceFragmentListStyle", "drawable/settingslib_expressive_icon_back"]:
-                self.assertEqual(items.get(target), "@" + target)
+                           "attr/preferenceFragmentListStyle", "dimen/dashboard_padding_bottom"]:
+                self.assertNotIn(target, items)
+            self.assertEqual(items.get("drawable/settingslib_expressive_icon_back"),
+                             "@drawable/settingslib_expressive_icon_back")
+        self.assertNotIn("dimen/dashboard_padding_bottom", make_image.settings_overlay_map())
 
     def test_fr5_the_settings_overlay_is_built_against_the_images_own_framework(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(make_image, "run") as run:
@@ -4497,8 +4491,7 @@ PREFERENCE_LIST_LAYOUT = (RECYCLER_VIEW, [("id", ANDROID_ID, TYPE_REFERENCE, 0x7
                                           ("clipToPadding", ANDROID_CLIP_TO_PADDING, TYPE_BOOLEAN, 0)], [])
 
 TOP_LEVEL_SETTINGS = "Lcom/android/settings/homepage/TopLevelSettings;"
-DOCUMENTS = "Lcom/android/documentsui"
-SAVE_LAYOUT_HEIGHT = f"{DOCUMENTS}/dirlist/DirectoryFragment;->getSaveLayoutHeight"
+FREEFORM_WINDOW = f"{TOP_LEVEL_SETTINGS}->isRunningInFreeformWindow"
 
 
 def top_level_settings_dex():
@@ -4537,130 +4530,23 @@ def top_level_settings_dex():
     return dex_file(methods, {0: (4, on_create_recycler_view), 4: (2, is_running_in_freeform_window)})
 
 
-DOCUMENTS_METHODS = [
-    (f"{DOCUMENTS}/dirlist/DirectoryFragment;", "getSaveLayoutHeight", "I"),
-    (f"{DOCUMENTS}/util/FlagUtils;", "isUseMaterial3FlagEnabled", "Z"),
-    (f"{DOCUMENTS}/dirlist/DirectoryFragment;", "getBaseActivity", "L"),
-    (f"{DOCUMENTS}/util/Material3Config;", "getRes", "II"),
-    ("Landroidx/appcompat/app/AppCompatActivity;", "findViewById", "LI"),
-    ("Landroid/view/View;", "getHeight", "I"),
-    ("Landroidx/fragment/app/Fragment;", "getResources", "L"),
-    ("Landroid/content/res/Resources;", "getDisplayMetrics", "L"),
-]
-DOCUMENTS_FIELDS = [
-    (f"{DOCUMENTS}/R$id;", "bottom_container", "I"),
-    (f"{DOCUMENTS}/R$id;", "container_save", "I"),
-    ("Landroid/util/DisplayMetrics;", "density", "F"),
-]
+def card_background(top_radius):
+    """SettingsLib's top group background, as PermissionController compiles it, whose top
+    corners are `top_radius` dp."""
+    return compiled_layout(("ripple", [], [("item", [], [("shape", [], [("corners", [
+        ("topLeftRadius", 0x010101A9, TYPE_DIMENSION, dp(top_radius)),
+        ("topRightRadius", 0x010101AA, TYPE_DIMENSION, dp(top_radius)),
+        ("bottomLeftRadius", 0x010101AB, TYPE_DIMENSION, dp(4)),
+        ("bottomRightRadius", 0x010101AC, TYPE_DIMENSION, dp(4))], [])])])]))
 
 
-def documentsui_dex(code=None):
-    """DirectoryFragment.getSaveLayoutHeight in Android 16's DocumentsUI.apk, as d8 compiled it:
-    the height of the bar below the list (the Material 3 bottom bar, or the save bar), or 0
-    without one."""
-    def bar(field):
-        return (
-            "6e100200 0200"  # invoke-virtual {v2}, getBaseActivity
-            "0c02"  # move-result-object v2
-            f"6000{field:02x}00"  # sget v0, the bar's id
-            "71100300 0000"  # invoke-static {v0}, Material3Config.getRes
-            "0a00"  # move-result v0
-            "6e200400 0200"  # invoke-virtual {v2, v0}, findViewById
-            "0c02"  # move-result-object v2
-            "39020300"  # if-nez v2, :bar
-            "0f01"  # return v1 (0)
-            "6e100500 0200"  # :bar invoke-virtual {v2}, getHeight
-            "0a02"  # move-result v2
-            "0f02"  # return v2
-        )
-    original = bytes.fromhex(
-        "71000100 0000"  # invoke-static {}, isUseMaterial3FlagEnabled
-        "0a00"  # move-result v0
-        "1201"  # const/4 v1, 0
-        "38001800"  # if-eqz v0, :legacy
-        + bar(0) + bar(1))
-    return dex_file(DOCUMENTS_METHODS, {0: (3, code or original)}, DOCUMENTS_FIELDS)
+CARD_TOP = "res/drawable-v36/settingslib_round_background_top.xml"
 
 
-def run_dalvik(dex, method, args, calls, statics):
-    """Runs a method of a dex file with the few instructions these edits use: `args` are its
-    arguments, `calls` gives what each method it calls returns ({"Lclass;->name": function}),
-    and `statics` each static field's value. Objects are dicts of their fields."""
-    defined, refs = make_image.dex_methods(dex)
-    _, _, fields = make_image.dex_ids(dex)
-    (code_off, _), = defined[method]
-    registers, ins = struct.unpack_from("<HH", dex, code_off)
-    (count,) = struct.unpack_from("<I", dex, code_off + 12)
-    code = struct.unpack_from(f"<{count}H", dex, code_off + 16)
-    v = [None] * (registers - ins) + list(args)
-    result, pc = None, 0
-
-    def f32(x):
-        return struct.unpack("<f", struct.pack("<f", x))[0]
-
-    def s16(x):
-        return x - 0x10000 if x & 0x8000 else x
-
-    while True:
-        unit = code[pc]
-        op, a, b, aa = unit & 0xFF, unit >> 8 & 0xF, unit >> 12, unit >> 8
-        if op == 0x00:
-            pc += 1
-        elif op in (0x0A, 0x0C):
-            v[aa], pc = result, pc + 1
-        elif op == 0x0F:
-            return v[aa]
-        elif op == 0x12:
-            v[a], pc = (b ^ 8) - 8, pc + 1
-        elif op == 0x15:
-            v[aa], pc = struct.unpack("<f", struct.pack("<I", code[pc + 1] << 16))[0], pc + 2
-        elif op == 0x28:
-            pc += aa - 0x100 if aa & 0x80 else aa
-        elif op == 0x35:
-            pc += s16(code[pc + 1]) if v[a] >= v[b] else 2
-        elif op in (0x38, 0x39):
-            zero = v[aa] in (0, None, False)
-            pc += s16(code[pc + 1]) if zero == (op == 0x38) else 2
-        elif op == 0x52:
-            v[a], pc = v[b][fields[code[pc + 1]].split("->")[1]], pc + 2
-        elif op == 0x60:
-            v[aa], pc = statics[fields[code[pc + 1]]], pc + 2
-        elif op in (0x6E, 0x71):
-            passed = [code[pc + 2] >> (4 * i) & 0xF for i in range(4)] + [a]
-            result = calls[refs[code[pc + 1]]](*[v[r] for r in passed[:b]])
-            pc += 3
-        elif op == 0x87:
-            v[a], pc = int(v[b]), pc + 1
-        elif op == 0xC6:
-            v[a], pc = f32(v[a] + v[b]), pc + 1
-        elif op == 0xC8:
-            v[a], pc = f32(v[a] * v[b]), pc + 1
-        else:
-            raise AssertionError(f"opcode {op:#x} is not one the edits use")
-
-
-def save_layout_height(dex, material3, bars, density):
-    """What getSaveLayoutHeight returns in a window whose bars ({id field: height}) are there,
-    on a display of `density`."""
-    ids = {f"{DOCUMENTS}/R$id;->bottom_container": 1, f"{DOCUMENTS}/R$id;->container_save": 2}
-    names = {1: "bottom_container", 2: "container_save"}
-    activity = {"bars": bars}
-    calls = {
-        f"{DOCUMENTS}/util/FlagUtils;->isUseMaterial3FlagEnabled": lambda: material3,
-        f"{DOCUMENTS}/dirlist/DirectoryFragment;->getBaseActivity": lambda this: activity,
-        f"{DOCUMENTS}/util/Material3Config;->getRes": lambda res: res,
-        "Landroidx/appcompat/app/AppCompatActivity;->findViewById": (
-            lambda act, res: {"height": act["bars"][names[res]]} if names[res] in act["bars"] else None),
-        "Landroid/view/View;->getHeight": lambda view: view["height"],
-        "Landroidx/fragment/app/Fragment;->getResources": lambda this: {"density": density},
-        "Landroid/content/res/Resources;->getDisplayMetrics": lambda res: {"density": res["density"]},
-    }
-    return run_dalvik(dex, SAVE_LAYOUT_HEIGHT, [{"fragment": True}], calls, ids)
-
-
-class ListBottomMarginTests(unittest.TestCase):
-    """The lists that set their own padding, or that no overlay may reach, keep room below
-    their last row in a window without a navigation bar."""
+class ListBottomRoomTests(unittest.TestCase):
+    """The lists in Settings, Files and the permission screens keep the room a phone's
+    navigation bar leaves below their last row from the 24 dp navigation bar inset every task
+    has, and from no margin of their own on top of it."""
 
     @staticmethod
     def apk(files):
@@ -4678,101 +4564,62 @@ class ListBottomMarginTests(unittest.TestCase):
             with zipfile.ZipFile(modified) as archive:
                 return {name: archive.read(name) for name in archive.namelist()}
 
-    def test_fr22_settings_home_list_on_android_16_keeps_the_room_its_layout_gives(self):
-        # TopLevelSettings.onCreateRecyclerView set the list's padding to (0, 0, 0, 0) over the
-        # layout's, which the Settings overlay gives 24 dp at the bottom.
-        self.assertIn(("skip call", "Landroid/view/ViewGroup;->setPadding"), make_image.SETTINGS_CODE_LIST_MARGIN[
-            f"{TOP_LEVEL_SETTINGS}->onCreateRecyclerView"])
+    def test_fr22_the_lists_have_no_bottom_margin_of_their_own(self):
+        # The margin stood in for the navigation bar inset the guest did not give; with it, the
+        # lists would end 48 dp above the window's bottom edge.
+        for name in ("LIST_BOTTOM_MARGIN_DP", "SETTINGS_CODE_LIST_MARGIN", "SETTINGS_HOME_PADDING_DIMEN",
+                     "SETTINGS_LIST_DIMENSIONS", "PERMISSION_CONTROLLER_DIMENSIONS", "DOCUMENTSUI_CODE"):
+            self.assertFalse(hasattr(make_image, name), name)
+        self.assertEqual(make_image.EDITED_APPS, [make_image.SETTINGS_APP])
+        # Android 16's home list keeps its own setPadding call, and the All apps list the
+        # layout Settings was built with.
         dex = top_level_settings_dex()
-        settings = self.modified({make_image.SETTINGS_APP: self.apk({"classes2.dex": dex})})[make_image.SETTINGS_APP]
-        with zipfile.ZipFile(io.BytesIO(settings)) as archive:
-            edited = archive.read("classes2.dex")
-        original = dex_code(dex, f"{TOP_LEVEL_SETTINGS}->onCreateRecyclerView")
-        code = dex_code(edited, f"{TOP_LEVEL_SETTINGS}->onCreateRecyclerView")
-        # Only the setPadding call (three code units, from unit 8) is gone; the scroll bar stays off.
-        self.assertEqual(code[:16], original[:16])
-        self.assertEqual(code[16:22], bytes(6))
-        self.assertEqual(code[22:], original[22:])
-        SettingsWithoutBluetoothTests.assert_dex_is_sealed(self, edited)
-        self.assertEqual(make_image.apk_edits_left(settings, code=make_image.SETTINGS_CODE_LIST_MARGIN), [])
-        self.assertNotEqual(make_image.apk_edits_left(self.apk({"classes2.dex": dex}),
-                                                      code=make_image.SETTINGS_CODE_LIST_MARGIN), [])
-
-    def test_fr22_settings_home_list_on_android_17_takes_its_freeform_padding_at_24_dp(self):
-        # Android 17 pads the home list's bottom by dashboard_padding_bottom (16 dp) only when
-        # the window shows a caption bar, which a DSA window's host draws outside the guest.
-        dex = top_level_settings_dex()
-        edited, changed = make_image.edit_dex(dex, make_image.SETTINGS_CODE_LIST_MARGIN)
-        self.assertIn(f"{TOP_LEVEL_SETTINGS}->isRunningInFreeformWindow", changed)
-        code = dex_code(edited, f"{TOP_LEVEL_SETTINGS}->isRunningInFreeformWindow")
-        self.assertEqual(code[:4], bytes.fromhex("12100f00"))  # const/4 v0, 1; return v0
-        self.assertEqual(make_image.edit_dex(edited, make_image.SETTINGS_CODE_LIST_MARGIN)[1], [])
-        ns = "{http://schemas.android.com/apk/res/android}"
-        for home_padding in (True, False):
-            with tempfile.TemporaryDirectory() as tmp:
-                root = Path(tmp)
-                make_image.settings_overlay_sources(root / "src", home_padding=home_padding)
-                values = ET.fromstring((root / "src/res/values/dsa.xml").read_text())
-                dimens = {d.get("name"): d.text for d in values.findall("dimen")}
-                manifest = ET.fromstring((root / "src/AndroidManifest.xml").read_text())
-                resources_map = manifest.find("overlay").get(ns + "resourcesMap").removeprefix("@xml/")
-                mapping = ET.fromstring((root / "src/res/xml" / (resources_map + ".xml")).read_text())
-                targets = [item.get("target") for item in mapping.findall("item")]
-            if home_padding:
-                self.assertEqual(dimens, {"dashboard_padding_bottom": "24dp"})
-                self.assertIn("dimen/dashboard_padding_bottom", targets)
-            else:
-                # Android 16's Settings has no such dimen, and idmap2 would warn on every boot.
-                self.assertEqual(dimens, {})
-                self.assertNotIn("dimen/dashboard_padding_bottom", targets)
-
-    def test_fr22_the_overlay_pads_the_home_list_only_for_a_settings_that_reads_the_dimen(self):
-        methods = [(TOP_LEVEL_SETTINGS, "setPaddingHorizontal", "VI")]
-        with_dimen = dex_file(methods, {0: (1, bytes.fromhex("0e00"))},
-                              [("Lcom/android/settings/R$dimen;", "dashboard_padding_bottom", "I")])
-        without = dex_file(methods, {0: (1, bytes.fromhex("0e00"))})
-        self.assertTrue(make_image.settings_has_home_padding(self.apk({"classes2.dex": with_dimen})))
-        self.assertFalse(make_image.settings_has_home_padding(self.apk({"classes2.dex": without})))
-
-    def test_fr22_settings_all_apps_list_keeps_room_below_its_last_row(self):
-        # manage_applications_apps' RecyclerView has no padding, and nothing sets it in code.
         layout = compiled_layout(ALL_APPS_LAYOUT)
-        settings = self.modified({make_image.SETTINGS_APP: self.apk({
-            "res/layout/manage_applications_apps.xml": layout})})[make_image.SETTINGS_APP]
-        with zipfile.ZipFile(io.BytesIO(settings)) as archive:
-            edited = archive.read("res/layout/manage_applications_apps.xml")
-        found = layout_attributes(edited)
-        self.assertEqual(found[1], (RECYCLER_VIEW, 1, [
-            ("id", TYPE_REFERENCE, 0x7F0A00DA),
-            ("paddingBottom", TYPE_DIMENSION, dp(24)),
-            ("visibility", TYPE_INT_DEC, 1),
-            ("clipToPadding", TYPE_BOOLEAN, 0),
-        ]))
-        # The other elements are as they were.
-        self.assertEqual(found[2], layout_attributes(layout)[2])
-        self.assertEqual(struct.unpack_from("<I", edited, 4)[0], len(edited))
-        self.assertEqual(make_image.set_xml_dimensions(edited, make_image.SETTINGS_LIST_DIMENSIONS[
-            "res/layout/manage_applications_apps.xml"])[1], 0)
-        self.assertEqual(make_image.apk_edits_left(settings, dimensions=make_image.SETTINGS_LIST_DIMENSIONS), [])
+        docs = "SYSTEM/priv-app/DocumentsUI/DocumentsUI.apk"
+        files = self.modified({
+            make_image.SETTINGS_APP: self.apk({"classes2.dex": dex, "res/layout/manage_applications_apps.xml": layout}),
+            docs: self.apk({"classes.dex": dex_file([("Lcom/android/documentsui/dirlist/DirectoryFragment;",
+                                                      "getSaveLayoutHeight", "I")], {0: (1, bytes.fromhex("1200" "0f00"))})}),
+        })
+        with zipfile.ZipFile(io.BytesIO(files[make_image.SETTINGS_APP])) as archive:
+            on_create = f"{TOP_LEVEL_SETTINGS}->onCreateRecyclerView"
+            self.assertEqual(dex_code(archive.read("classes2.dex"), on_create), dex_code(dex, on_create))
+            self.assertEqual(archive.read("res/layout/manage_applications_apps.xml"), layout)
+        # Files is not edited at all.
+        with zipfile.ZipFile(io.BytesIO(files[docs])) as archive:
+            self.assertEqual(dex_code(archive.read("classes.dex"), "Lcom/android/documentsui/dirlist/DirectoryFragment;->getSaveLayoutHeight"),
+                             bytes.fromhex("1200" "0f00"))
+        # PermissionController's list layout is as the app was built.
+        controller = self.apk({"res/layout/preference_recyclerview.xml": compiled_layout(PREFERENCE_LIST_LAYOUT)})
+        self.assertIs(make_image.edit_permission_controller_apk(controller, "PermissionController.apk"), controller)
+        self.assertNotIn("res/layout/preference_recyclerview.xml", make_image.permission_controller_edits())
+
+    def test_fr22_settings_home_list_on_android_17_is_padded_by_the_navigation_bar_inset_alone(self):
+        # Android 17 adds dashboard_padding_bottom (16 dp) to the home list's bottom when the
+        # window shows a caption bar, which a DSA task does: the method says it does not, so
+        # the list ends 24 dp above the window's bottom edge, as Settings' other lists do.
+        dex = top_level_settings_dex()
+        edited, changed = make_image.edit_dex(dex, make_image.SETTINGS_CODE_FREEFORM_PADDING)
+        self.assertEqual(changed, [FREEFORM_WINDOW])
+        self.assertEqual(dex_code(edited, FREEFORM_WINDOW)[:4], bytes.fromhex("12000f00"))  # const/4 v0, 0; return v0
+        on_create = f"{TOP_LEVEL_SETTINGS}->onCreateRecyclerView"
+        self.assertEqual(dex_code(edited, on_create), dex_code(dex, on_create))
+        SettingsWithoutBluetoothTests.assert_dex_is_sealed(self, edited)
+        self.assertEqual(make_image.edit_dex(edited, make_image.SETTINGS_CODE_FREEFORM_PADDING)[1], [])
+        settings = make_image.edit_settings_apk(self.apk({"classes2.dex": dex}), "Settings.apk")
+        self.assertEqual(make_image.apk_edits_left(settings, code=make_image.SETTINGS_CODE_FREEFORM_PADDING), [])
+        self.assertNotEqual(make_image.apk_edits_left(self.apk({"classes2.dex": dex}),
+                                                      code=make_image.SETTINGS_CODE_FREEFORM_PADDING), [])
+        # Android 16's Settings has no such method, and nothing changes there.
+        android16 = dex_file([(TOP_LEVEL_SETTINGS, "onCreateRecyclerView", "LLLL")], {0: (4, bytes.fromhex("1101"))})
+        self.assertEqual(make_image.edit_dex(android16, make_image.SETTINGS_CODE_FREEFORM_PADDING)[1], [])
+        # The Settings overlay pads nothing either.
+        self.assertNotIn("dimen/dashboard_padding_bottom", make_image.settings_overlay_map())
 
     def test_fr22_an_attribute_the_layout_never_names_is_refused(self):
         layout = compiled_layout((RECYCLER_VIEW, [("id", ANDROID_ID, TYPE_REFERENCE, 1)], []))
         with self.assertRaises(ValueError):
             make_image.set_xml_dimensions(layout, [(RECYCLER_VIEW, ANDROID_PADDING_BOTTOM, 24)])
-
-    def test_fr22_permission_controller_lists_keep_room_below_their_last_row(self):
-        # PermissionController's preference_recyclerview has paddingBottom 0dp, and the app's
-        # <overlayable> keeps any overlay from replacing it.
-        apk = self.apk({"res/layout/preference_recyclerview.xml": compiled_layout(PREFERENCE_LIST_LAYOUT)})
-        edited = make_image.edit_permission_controller_apk(apk, "PermissionController.apk")
-        with zipfile.ZipFile(io.BytesIO(edited)) as archive:
-            (tag, _, attrs), = layout_attributes(archive.read("res/layout/preference_recyclerview.xml"))
-        self.assertEqual(tag, RECYCLER_VIEW)
-        self.assertIn(("paddingBottom", TYPE_DIMENSION, dp(24)), attrs)
-        self.assertIn(("paddingTop", TYPE_DIMENSION, dp(0)), attrs)
-        self.assertIn(("clipToPadding", TYPE_BOOLEAN, 0), attrs)
-        self.assertEqual(make_image.apk_edits_left(edited, dimensions=make_image.PERMISSION_CONTROLLER_DIMENSIONS), [])
-        self.assertNotEqual(make_image.apk_edits_left(apk, dimensions=make_image.PERMISSION_CONTROLLER_DIMENSIONS), [])
 
     @staticmethod
     def fake_apex_tools(calls):
@@ -4822,8 +4669,8 @@ class ListBottomMarginTests(unittest.TestCase):
             with zipfile.ZipFile(io.BytesIO(apex.read("apex_payload.img"))) as payload:
                 return {n: payload.read(n) for n in payload.namelist()}, apex.read("apex_build_info.pb")
 
-    def test_fr22_the_permission_apex_is_packed_again_with_the_edited_controller(self):
-        controller = self.apk({"res/layout/preference_recyclerview.xml": compiled_layout(PREFERENCE_LIST_LAYOUT)})
+    def test_fr34_the_permission_apex_is_packed_again_with_the_edited_controller(self):
+        controller = self.apk({CARD_TOP: card_background(4)})
         capex = self.permission_capex(controller)
         name = "SYSTEM/apex/com.android.permission.capex"
         self.assertIn(name, make_image.PERMISSION_APEXES)
@@ -4846,78 +4693,26 @@ class ListBottomMarginTests(unittest.TestCase):
                     z.writestr(name, apex)
                 problems = make_image.permission_controller_problems(signed, Path(tmp) / "otatools", Path(tmp), {})
                 self.assertEqual(bool(problems), found, problems)
+                if found:
+                    self.assertIn("so its cards keep corners of their own", problems[0])
         self.assertEqual(build_info, b"build info")
         # apexer writes the manifest into the payload itself.
         self.assertNotIn("apex_manifest.pb", files)
         self.assertEqual(files["priv-app/SafetyCenterResources@BP4A/SafetyCenterResources.apk"], b"resources")
         with zipfile.ZipFile(io.BytesIO(files["priv-app/PermissionController@BP4A/PermissionController.apk"])) as apk:
-            (_, _, attrs), = layout_attributes(apk.read("res/layout/preference_recyclerview.xml"))
-        self.assertIn(("paddingBottom", TYPE_DIMENSION, dp(24)), attrs)
+            found_top = layout_attributes(apk.read(CARD_TOP))
+        self.assertIn(("topLeftRadius", TYPE_DIMENSION, dp(26)), found_top[3][2])
 
-    def test_fr22_without_otatools_the_permission_apex_is_left_as_it_is(self):
+    def test_fr34_without_otatools_the_permission_apex_is_left_as_it_is(self):
         capex = self.permission_capex(b"controller")
         with patch.object(make_image, "run") as run:
             self.assertEqual(make_image.edit_permission_apex(
                 capex, "SYSTEM/apex/com.android.permission.capex", None, Path(".")), capex)
         run.assert_not_called()
 
-    def test_fr22_files_on_android_16_keeps_room_below_its_list_without_a_bar_below_it(self):
-        # DirectoryFragment pads its list's bottom by getSaveLayoutHeight: the bar below the
-        # list, or 0 in a wide window that has none.
-        dex = documentsui_dex()
-        self.assertEqual(save_layout_height(dex, True, {}, 1.5), 0)
-        docs = "SYSTEM/priv-app/DocumentsUI/DocumentsUI.apk"
-        apk = self.modified({docs: self.apk({"classes.dex": dex})})[docs]
-        with zipfile.ZipFile(io.BytesIO(apk)) as archive:
-            edited = archive.read("classes.dex")
-        SettingsWithoutBluetoothTests.assert_dex_is_sealed(self, edited)
-        self.assertEqual(len(dex_code(edited, SAVE_LAYOUT_HEIGHT)), len(dex_code(dex, SAVE_LAYOUT_HEIGHT)))
-        for material3 in (True, False):
-            bar = "bottom_container" if material3 else "container_save"
-            with self.subTest(material3=material3):
-                # 24 dp, rounded as getDimensionPixelSize rounds.
-                self.assertEqual(save_layout_height(edited, material3, {}, 1.0), 24)
-                self.assertEqual(save_layout_height(edited, material3, {}, 1.5), 36)
-                self.assertEqual(save_layout_height(edited, material3, {}, 2.625), 63)
-                # A bar taller than the margin keeps the list above it.
-                self.assertEqual(save_layout_height(edited, material3, {bar: 120}, 1.5), 120)
-                self.assertEqual(save_layout_height(edited, material3, {bar: 0}, 1.5), 36)
-        self.assertEqual(make_image.edit_dex(edited, make_image.DOCUMENTSUI_CODE)[1], [])
-        self.assertEqual(make_image.apk_edits_left(apk, code=make_image.DOCUMENTSUI_CODE), [])
-
-    def test_fr22_a_files_app_built_from_other_sources_is_refused(self):
-        dex = documentsui_dex(code=bytes.fromhex("1200" "0f00" + "0000" * 49))
-        with self.assertRaises(ValueError):
-            make_image.edit_dex(dex, make_image.DOCUMENTSUI_CODE)
-        self.assertNotEqual(make_image.apk_edits_left(self.apk({"classes.dex": dex}),
-                                                      code=make_image.DOCUMENTSUI_CODE), [])
-
-    def test_fr22_dalvik_assembly_matches_what_d8_writes(self):
-        dex = documentsui_dex()
-        code, outs = make_image.assemble_dex([
-            "invoke-static {}, Lcom/android/documentsui/util/FlagUtils;->isUseMaterial3FlagEnabled",
-            "move-result v0",
-            "const/4 v1, 0",
-            "if-eqz v0, :next",
-            "sget v0, Lcom/android/documentsui/R$id;->container_save",
-            "invoke-virtual {v2, v0}, Landroidx/appcompat/app/AppCompatActivity;->findViewById",
-            ":next",
-            "const/high16 v1, 0x41c00000",
-            "if-ge v2, v0, :next",
-            "goto :next",
-        ], dex)
-        self.assertEqual(code, bytes.fromhex(
-            "71000100 0000" "0a00" "1201" "38000700" "60000100" "6e200400 0200"
-            "1501c041" "3502feff" "28fc"))
-        self.assertEqual(outs, 2)
-        with self.assertRaises(ValueError):
-            make_image.assemble_dex(["sget v0, Lcom/android/documentsui/R$id;->missing"], dex)
-
-    def test_fr22_check_image_rejects_lists_without_their_room(self):
+    def test_fr22_check_image_rejects_a_settings_home_list_padded_twice(self):
         check_script = Path(__file__).with_name("check-image.py")
-        settings = self.apk({"classes2.dex": top_level_settings_dex(),
-                             "res/layout/manage_applications_apps.xml": compiled_layout(ALL_APPS_LAYOUT)})
-        docs = self.apk({"classes.dex": documentsui_dex()})
+        settings = self.apk({"classes2.dex": top_level_settings_dex()})
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             img_dir = root / "image"
@@ -4927,22 +4722,16 @@ class ListBottomMarginTests(unittest.TestCase):
             (img_dir / "image.json").write_text(json.dumps({"files": {}, "kernel_cmdline": ""}))
             (img_dir / "initrd.img").write_bytes(gzip.compress(b""))
             outputs = []
-            for settings_apk, docs_apk in [(settings, docs), (make_image.edit_settings_apk(settings, "Settings.apk"),
-                                                              make_image.edit_documentsui_apk(docs, "DocumentsUI.apk"))]:
+            for settings_apk in [settings, make_image.edit_settings_apk(settings, "Settings.apk")]:
                 with zipfile.ZipFile(img_dir / "signed-target_files.zip", "w") as archive:
                     archive.writestr("SYSTEM/build.prop", "ro.debuggable=0\n")
                     archive.writestr("META/apkcerts.txt", "")
                     archive.writestr(make_image.SETTINGS_APP, settings_apk)
-                    archive.writestr("SYSTEM/priv-app/DocumentsUI/DocumentsUI.apk", docs_apk)
                 outputs.append(subprocess.run([sys.executable, str(check_script), str(img_dir), str(keys_dir)],
                                               capture_output=True, text=True).stdout)
-        self.assertIn("TopLevelSettings;->onCreateRecyclerView", outputs[0])
-        self.assertIn("manage_applications_apps.xml", outputs[0])
-        self.assertIn("getSaveLayoutHeight", outputs[0])
-        # The list room check's own problem; the missing Settings overlay is reported in
-        # words of its own, which also name the window's bottom edge.
-        self.assertIn("so the last row of its list sits on the window's bottom edge", outputs[0])
-        self.assertNotIn("so the last row of its list sits on the window's bottom edge", outputs[1])
+        self.assertIn("TopLevelSettings;->isRunningInFreeformWindow", outputs[0])
+        self.assertIn("so its home list ends higher above the window's bottom edge than its other lists", outputs[0])
+        self.assertNotIn("so its home list ends higher above", outputs[1])
 
 
 def string_pool(strings):
@@ -5055,19 +4844,19 @@ FRAMEWORK_PRIVATE_CHECKED = {
 }
 
 
-def overlay_framework_references(apk, home_padding=False):
+def overlay_framework_references(apk):
     """What the sources of the system screen overlay file `apk` name of the framework (see
     make_image.framework_references)."""
     with tempfile.TemporaryDirectory() as tmp:
-        make_image.system_overlay_sources(Path(tmp), apk, home_padding)
+        make_image.system_overlay_sources(Path(tmp), apk)
         return make_image.framework_references(tmp)
 
 
-def linkable_framework_table(home_padding=False, overlaid=()):
+def linkable_framework_table(overlaid=()):
     """A framework-res table every system screen overlay links against: everything they name
     there, public, and `overlaid` ("type/name")."""
     named = {name for apk in make_image.SYSTEM_OVERLAY_FILES
-             for name, _ in overlay_framework_references(apk, home_padding).values()}
+             for name, _ in overlay_framework_references(apk).values()}
     return table_of(sorted(named | set(overlaid)), public=named)
 
 
@@ -5076,22 +4865,25 @@ def complex_dp(dp):
     return (round(dp * (1 << 15)) << 8) | (2 << 4) | make_image.ARSC_UNIT_DIP
 
 
-def status_bar_table(heights, names=None):
-    """A compiled resource table of dimens: each of `names` (the status bar heights) in every
-    density of `heights` ({density: dp}, 0 for the values without a density), and in the
-    values without a density the highest of them unless `heights` gives one."""
-    names = names or make_image.STATUS_BAR_DIMENS
-    heights = dict(heights)
-    heights.setdefault(0, max(heights.values()))
+def dimens_table(configs):
+    """A compiled resource table of dimens in dp: one type chunk for each of `configs`, a list
+    of (density, smallest width in dp, {name: dp}), each 0 where the configuration has none."""
+    names = sorted({name for _, _, values in configs for name in values})
     type_pool, key_pool = string_pool(["dimen"]), string_pool(names)
     spec_body = struct.pack("<BBHI", 1, 0, 0, len(names)) + bytes(4 * len(names))
     chunks = struct.pack("<HHI", make_image.ARSC_TYPE_SPEC, 16, 8 + len(spec_body)) + spec_body
-    for density, dp in sorted(heights.items()):
-        entries = b"".join(struct.pack("<HHI", 8, 0, i) + struct.pack("<HBBI", 8, 0, 0x05, complex_dp(dp))
-                           for i in range(len(names)))
-        array = b"".join(struct.pack("<I", 16 * i) for i in range(len(names)))
+    for density, smallest_width, values in configs:
+        entries, offsets = b"", []
+        for i, name in enumerate(names):
+            if name not in values:
+                offsets.append(make_image.ARSC_NO_ENTRY)
+                continue
+            offsets.append(len(entries))
+            entries += struct.pack("<HHI", 8, 0, i) + struct.pack("<HBBI", 8, 0, 0x05, complex_dp(values[name]))
+        array = b"".join(struct.pack("<I", offset) for offset in offsets)
         config = bytearray(struct.pack("<I", 64) + bytes(60))
         struct.pack_into("<H", config, make_image.ARSC_CONFIG_DENSITY, density)
+        struct.pack_into("<H", config, make_image.ARSC_CONFIG_SMALLEST_WIDTH, smallest_width)
         header_size = 8 + 12 + len(config)
         body = struct.pack("<BBHII", 1, 0, 0, len(names), header_size + len(array)) + bytes(config) + array + entries
         chunks += struct.pack("<HHI", make_image.ARSC_TYPE, header_size, 8 + len(body)) + body
@@ -5102,6 +4894,36 @@ def status_bar_table(heights, names=None):
     package = struct.pack("<HHI", 0x0200, 288, 8 + len(package_body)) + package_body
     globals_pool = string_pool(["x"])
     return struct.pack("<HHII", 0x0002, 12, 12 + len(globals_pool) + len(package), 1) + globals_pool + package
+
+
+def status_bar_configs(heights, names=None):
+    """The configurations of status bar heights: each of `names` (the status bar heights) in
+    every density of `heights` ({density: dp}, 0 for the values without a density), and in the
+    values without a density the highest of them unless `heights` gives one."""
+    names = names or make_image.STATUS_BAR_DIMENS
+    heights = dict(heights)
+    heights.setdefault(0, max(heights.values()))
+    return [(density, 0, {name: dp for name in names}) for density, dp in sorted(heights.items())]
+
+
+def navigation_bar_configs(dp=24, smallest_widths=None):
+    """The configurations of navigation bar heights: each of make_image.NAVIGATION_BAR_DIMENS
+    at `dp` for each of `smallest_widths` (the framework's by default)."""
+    widths = make_image.NAVIGATION_BAR_SMALLEST_WIDTHS if smallest_widths is None else smallest_widths
+    return [(0, sw, {name: dp for name in make_image.NAVIGATION_BAR_DIMENS}) for sw in widths]
+
+
+def status_bar_table(heights, names=None):
+    """A compiled resource table of the status bar heights alone (see status_bar_configs)."""
+    return dimens_table(status_bar_configs(heights, names))
+
+
+def framework_overlay_table(heights=None, navigation=None):
+    """The framework overlay's compiled dimens: the status bar heights (the title bar's by
+    default) and the navigation bar heights (24 dp at the framework's widths by default)."""
+    heights = make_image.status_bar_heights() if heights is None else heights
+    navigation = navigation_bar_configs() if navigation is None else navigation
+    return dimens_table(status_bar_configs(heights) + navigation)
 
 
 def apk_with_table(table, files=None):
@@ -5135,11 +4957,10 @@ class SystemScreenDesignTests(unittest.TestCase):
             return {path.relative_to(root).as_posix(): path.read_text()
                     for path in root.rglob("*") if path.is_file()}
 
-    def every_overlay(self, home_padding=False):
+    def every_overlay(self):
         return {
             "DsaFrameworkOverlay.apk": self.sources(make_image.framework_overlay_sources),
-            "DsaSettingsOverlay.apk": self.sources(
-                lambda root: make_image.settings_overlay_sources(root, home_padding=home_padding)),
+            "DsaSettingsOverlay.apk": self.sources(make_image.settings_overlay_sources),
             **{apk: self.sources(lambda root, apk=apk: make_image.design_overlay_sources(root, apk))
                for apk in make_image.DESIGN_OVERLAYS},
         }
@@ -5194,14 +5015,13 @@ class SystemScreenDesignTests(unittest.TestCase):
     def test_fr34_the_overlays_name_only_framework_resources_checked_in_android_16_and_17(self):
         # The image's build links each overlay against its framework-res and stops at the first
         # resource that is missing or private; this catches one before an image is made.
-        for home_padding in (False, True):
-            for apk in make_image.SYSTEM_OVERLAY_FILES:
-                for text, (name, needs_public) in overlay_framework_references(apk, home_padding).items():
-                    checked = FRAMEWORK_PUBLIC_CHECKED | (set() if needs_public else FRAMEWORK_PRIVATE_CHECKED)
-                    self.assertIn(name, checked,
-                                  f"{apk} names {text}, which no one checked is "
-                                  f"{'public' if needs_public else 'there'} in the framework-res of "
-                                  "Android 16 and 17")
+        for apk in make_image.SYSTEM_OVERLAY_FILES:
+            for text, (name, needs_public) in overlay_framework_references(apk).items():
+                checked = FRAMEWORK_PUBLIC_CHECKED | (set() if needs_public else FRAMEWORK_PRIVATE_CHECKED)
+                self.assertIn(name, checked,
+                              f"{apk} names {text}, which no one checked is "
+                              f"{'public' if needs_public else 'there'} in the framework-res of "
+                              "Android 16 and 17")
 
     def test_fr34_every_overlay_s_framework_references_are_checked_before_any_is_linked(self):
         tables = {apk: table_of(make_image.overlaid_resources(apk)) for apk in make_image.SYSTEM_OVERLAY_FILES}
@@ -5247,15 +5067,13 @@ class SystemScreenDesignTests(unittest.TestCase):
                 self.assertEqual(targets, set(make_image.overlaid_resources(apk)), apk)
 
     def test_fr34_the_overlays_are_built_against_the_images_framework_res_and_each_app(self):
-        home_padding = True
-        tables = {apk: table_of(make_image.overlaid_resources(apk, home_padding))
-                  for apk in make_image.SYSTEM_OVERLAY_FILES}
+        tables = {apk: table_of(make_image.overlaid_resources(apk)) for apk in make_image.SYSTEM_OVERLAY_FILES}
         tables["DsaFrameworkOverlay.apk"] = linkable_framework_table(
-            home_padding, make_image.overlaid_resources("DsaFrameworkOverlay.apk"))
+            make_image.overlaid_resources("DsaFrameworkOverlay.apk"))
         with tempfile.TemporaryDirectory() as tmp, patch.object(make_image, "run") as run:
             root = Path(tmp)
             framework, settings, others = make_image.build_system_overlays(
-                Path("/sdk/aapt2"), root / "framework-res.apk", root, tables, home_padding)
+                Path("/sdk/aapt2"), root / "framework-res.apk", root, tables)
             self.assertEqual(set(others), set(make_image.DESIGN_OVERLAYS))
             links = [call.args for call in run.call_args_list if call.args[1] == "link"]
             self.assertEqual(len(links), len(make_image.SYSTEM_OVERLAYS))
@@ -5297,7 +5115,7 @@ class SystemScreenDesignTests(unittest.TestCase):
             record = make_image.overlay_record(overlay["target"], framework_table or own,
                                                own if overlay["target"] == "android" else app)
             if overlay["apk"] != without:
-                table = status_bar_table(make_image.status_bar_heights()) if overlay["target"] == "android" \
+                table = framework_overlay_table() if overlay["target"] == "android" \
                     else b"overlay"
                 files[f"VENDOR/overlay/{overlay['apk']}"] = apk_with_table(
                     table, {make_image.SYSTEM_OVERLAY_RECORD: json.dumps(record)})
@@ -5338,6 +5156,28 @@ class SystemScreenDesignTests(unittest.TestCase):
         problems = make_image.system_overlay_problems(list(files), files.__getitem__)
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("cannot be read", problems[0])
+
+    def test_fr22_check_image_rejects_a_framework_overlay_whose_navigation_bar_is_not_24_dp(self):
+        names, read = self.image()
+        files = {name: read(name) for name in names}
+        path = make_image.FRAMEWORK_OVERLAY_APK
+        with zipfile.ZipFile(io.BytesIO(files[path])) as apk:
+            record = apk.read(make_image.SYSTEM_OVERLAY_RECORD)
+        for navigation, wanted in [
+            # Android's own values: 48 dp, and 56 dp from a smallest width of 900 dp.
+            ([(0, 0, {name: 48 for name in make_image.NAVIGATION_BAR_DIMENS}),
+              (0, 900, {name: 56 for name in make_image.NAVIGATION_BAR_DIMENS})],
+             "navigation_bar_height is 56 (unit 1) at sw900dp, not 24 dp"),
+            # 24 dp without a value for the guest display's width, where Android's 56 dp stands.
+            (navigation_bar_configs(smallest_widths=[0]),
+             "navigation_bar_frame_height has no value for a smallest width of 900 dp"),
+        ]:
+            files[path] = apk_with_table(framework_overlay_table(navigation=navigation),
+                                         {make_image.SYSTEM_OVERLAY_RECORD: record})
+            problems = make_image.system_overlay_problems(list(files), files.__getitem__)
+            self.assertEqual(len(problems), 1, problems)
+            self.assertIn("keeps another space at its bottom than its navigation bar inset", problems[0])
+            self.assertIn(wanted, problems[0])
 
     def test_fr34_check_image_rejects_an_overlay_that_does_not_say_what_it_was_built_against(self):
         names, read = self.image()
@@ -5447,7 +5287,7 @@ class SystemScreenDesignTests(unittest.TestCase):
         # The app bar reads it from the theme, where SettingsLib's layout says false.
         layout = compiled_layout((APP_BAR, [("id", ANDROID_ID, TYPE_REFERENCE, 0x7F0A00CB),
                                             ("expanded", APP_EXPANDED, TYPE_BOOLEAN, 0)], []))
-        apk = ListBottomMarginTests.apk({SETTINGS_TITLE_LAYOUT: layout})
+        apk = ListBottomRoomTests.apk({SETTINGS_TITLE_LAYOUT: layout})
         edited = make_image.edit_settings_apk(apk, "Settings.apk")
         with zipfile.ZipFile(io.BytesIO(edited)) as archive:
             found = layout_attributes(archive.read(SETTINGS_TITLE_LAYOUT))
@@ -5492,7 +5332,7 @@ class SystemScreenDesignTests(unittest.TestCase):
                        ("bottomLeftRadius", 0x010101AB, TYPE_DIMENSION, dp(4)),
                        ("bottomRightRadius", 0x010101AC, TYPE_DIMENSION, dp(4))])
         center = corners([("radius", 0x010101A8, TYPE_DIMENSION, dp(4))])
-        apk = ListBottomMarginTests.apk({"res/drawable-v36/settingslib_round_background_top.xml": top,
+        apk = ListBottomRoomTests.apk({"res/drawable-v36/settingslib_round_background_top.xml": top,
                                          "res/drawable-v36/settingslib_round_background_center.xml": center})
         edited = make_image.edit_permission_controller_apk(apk, "PermissionController.apk")
         with zipfile.ZipFile(io.BytesIO(edited)) as archive:
@@ -5570,7 +5410,7 @@ class SystemScreenDesignTests(unittest.TestCase):
         self.assertEqual(frame.find("corners").get(NS + "radius"), "26dp")
 
     def test_fr34_the_overlays_use_no_samsung_name_or_artwork(self):
-        for apk, files in self.every_overlay(home_padding=True).items():
+        for apk, files in self.every_overlay().items():
             for path, text in files.items():
                 for word in ("one ui", "oneui", "samsung", "sec-roboto", "samsungone"):
                     self.assertNotIn(word, text.lower(), f"{apk}:{path}")
@@ -5662,8 +5502,10 @@ class PublishedOdexTests(unittest.TestCase):
         # verifies the edited methods as it compiles them.
         for apk in make_image.EDITED_APPS:
             self.assertIn(apk, make_image.COMPILED_APPS)
-        self.assertIn("SYSTEM/priv-app/DocumentsUI/DocumentsUI.apk", make_image.EDITED_APPS)
         self.assertIn(make_image.SETTINGS_APP, make_image.EDITED_APPS)
+        # Files is still compiled, as an app users open, but its dex is no longer edited.
+        self.assertIn("SYSTEM/priv-app/DocumentsUI/DocumentsUI.apk", make_image.COMPILED_APPS)
+        self.assertNotIn("SYSTEM/priv-app/DocumentsUI/DocumentsUI.apk", make_image.EDITED_APPS)
 
     def test_fr5_check_rejects_a_published_odex_that_is_gone_or_no_longer_matches(self):
         good = self.record(self.published(PUBLISHED_KEYCHAIN))
@@ -7873,6 +7715,7 @@ class HostCertificatesImageTests(KeyMintKeyImageTests):
 INSETS_POLICY = "Lcom/android/server/wm/InsetsPolicy;->enforceInsetsPolicyForTarget"
 CAPTION_BAR = "Landroid/view/WindowInsets$Type;->captionBar"
 SYSTEM_BARS = "Landroid/view/WindowInsets$Type;->systemBars"
+ALL_TYPES = "Landroid/view/WindowInsets$Type;->all"
 IS_FLOATING = "Landroid/app/WindowConfiguration;->isFloating"
 
 
@@ -7888,6 +7731,8 @@ def services_dex(caption_test_before=False, floating=True):
         ("Lcom/android/server/wm/ConfigurationContainer;", "getWindowingMode", "I"),
         ("Landroid/app/WindowConfiguration;", "isFloating", "ZI"),
         ("Landroid/view/WindowInsets$Type;", "ime", "I"),
+        # Called elsewhere in the dex, as in services.jar.
+        ("Landroid/view/WindowInsets$Type;", "all", "I"),
     ]
     code = ""
     if caption_test_before:
@@ -7926,17 +7771,22 @@ class CaptionIsStatusBarTests(unittest.TestCase):
     """The host window's title bar is Android's status bar: an app that pads by its status bar
     inset, or by the framework's status bar height, keeps its content below the title bar."""
 
-    def test_fr22_a_freeform_window_receives_its_status_bar_inset(self):
+    def test_fr22_a_freeform_window_receives_its_status_bar_and_navigation_bar_insets(self):
         # Android keeps only the caption bar (and the IME) of a floating window's insets, so
         # the status bar source the agent gives a task never reached its app, and an app that
-        # pads by its status bar inset drew its toolbar under the title bar.
+        # pads by its status bar inset drew its toolbar under the title bar. The navigation
+        # bar and tappable element sources along the task's bottom edge were dropped the same
+        # way; all() keeps every one of them (systemBars() has no tappable element).
         self.assertEqual(dex_calls(services_dex(), INSETS_POLICY)[-2:], [CAPTION_BAR, "Landroid/view/WindowInsets$Type;->ime"])
+        self.assertEqual(make_image.SERVICES_INSETS_CODE[INSETS_POLICY][1]["new"], ALL_TYPES)
         edited, changed = make_image.edit_dex(services_dex(), make_image.SERVICES_CODE)
         self.assertEqual(changed, [INSETS_POLICY])
         calls = dex_calls(edited, INSETS_POLICY)
         self.assertEqual(calls[calls.index(IS_FLOATING) + 1:],
-                         [SYSTEM_BARS, "Landroid/view/WindowInsets$Type;->ime"])
+                         [ALL_TYPES, "Landroid/view/WindowInsets$Type;->ime"])
         self.assertNotIn(CAPTION_BAR, calls)
+        # The test of the types a window provides itself, before isFloating, is untouched.
+        self.assertEqual(calls[0], SYSTEM_BARS)
         # Only the method the instruction names changes: the file is as long, the code as long.
         self.assertEqual(len(edited), len(services_dex()))
         self.assertEqual(len(dex_code(edited, INSETS_POLICY)), len(dex_code(services_dex(), INSETS_POLICY)))
@@ -7950,7 +7800,7 @@ class CaptionIsStatusBarTests(unittest.TestCase):
         self.assertEqual(changed, [INSETS_POLICY])
         calls = dex_calls(edited, INSETS_POLICY)
         self.assertEqual(calls[0], CAPTION_BAR)
-        self.assertEqual(calls[calls.index(IS_FLOATING) + 1], SYSTEM_BARS)
+        self.assertEqual(calls[calls.index(IS_FLOATING) + 1], ALL_TYPES)
 
     def test_fr22_an_insets_policy_built_from_other_sources_stops_the_image(self):
         with self.assertRaisesRegex(ValueError, "built from other sources"):
@@ -8066,6 +7916,56 @@ class CaptionIsStatusBarTests(unittest.TestCase):
         phone = {density: 24 for density in make_image.status_bar_heights()}
         problems = make_image.status_bar_overlay_problems(status_bar_table(phone))
         self.assertIn("status_bar_height is 24 (unit 1) at 262 dpi, not the title bar's 58 px there", problems)
+
+    def test_fr22_the_navigation_bar_heights_are_24_dp_at_every_density(self):
+        # The device reported navigation_bar_height 56 dp (Android's from a smallest width of
+        # 900 dp) while the task's inset was 0; both are a gesture navigation phone's 24 dp now.
+        self.assertEqual(make_image.NAVIGATION_BAR_HEIGHT_DP, 24)
+        self.assertIn("navigation_bar_height", make_image.NAVIGATION_BAR_DIMENS)
+        self.assertIn("navigation_bar_frame_height", make_image.NAVIGATION_BAR_DIMENS)
+        files = make_image.navigation_bar_overlay_files()
+        self.assertEqual(set(files), {"res/values/dsa_navigation_bar.xml", "res/values-sw900dp/dsa_navigation_bar.xml"})
+        for name in make_image.NAVIGATION_BAR_DIMENS:
+            self.assertIn(f"dimen/{name}", make_image.framework_overlaid())
+            for path, text in files.items():
+                self.assertIn(f'<dimen name="{name}">24dp</dimen>', text, path)
+        # A dp value with no density of its own: every density reads 24 dp, in the pixels the
+        # agent's inset has there (130 dpi at 100%, 196 at 150%, 262 at 200%).
+        status = make_image.status_bar_overlay_files()
+        for name in make_image.NAVIGATION_BAR_DIMENS:
+            self.assertFalse(any(name in text for text in status.values()), name)
+        self.assertEqual([int(24 * d / 160 + 0.5) for d in (130, 196, 262)], [20, 29, 39])
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_image.framework_overlay_sources(root / "src")
+            for path, text in files.items():
+                self.assertEqual((root / "src" / path).read_text(), text)
+        self.assertEqual(make_image.navigation_bar_overlay_problems(framework_overlay_table()), [])
+
+    def test_fr22_check_image_rejects_navigation_bar_heights_that_are_not_24_dp(self):
+        self.assertEqual(make_image.navigation_bar_overlay_problems(dimens_table(navigation_bar_configs())), [])
+        problems = make_image.navigation_bar_overlay_problems(dimens_table(navigation_bar_configs(dp=48)))
+        self.assertIn("navigation_bar_height is 48 (unit 1) at any width, not 24 dp", problems)
+        problems = make_image.navigation_bar_overlay_problems(dimens_table(navigation_bar_configs(smallest_widths=[900])))
+        self.assertIn("navigation_bar_height has no value for any width", problems)
+        problems = make_image.navigation_bar_overlay_problems(status_bar_table(make_image.status_bar_heights()))
+        self.assertIn("navigation_bar_frame_height has no value for a smallest width of 900 dp", problems)
+
+    def test_fr22_the_navigation_bar_background_is_transparent(self):
+        # An app that does not draw behind the navigation bar gets Android's background for it
+        # there: black where its theme names no colour, and a scrim over a transparent one. As
+        # AOSP's gesture navigation overlay sets them, neither is drawn, and the band shows the
+        # app's own window background.
+        self.assertIs(make_image.FRAMEWORK_OVERLAY_BOOLEANS["config_navBarDefaultTransparent"], True)
+        self.assertIs(make_image.FRAMEWORK_OVERLAY_BOOLEANS["config_navBarNeedsScrim"], False)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_image.framework_overlay_sources(root / "src")
+            values = (root / "src/res/values/dsa.xml").read_text()
+        self.assertIn('<bool name="config_navBarDefaultTransparent">true</bool>', values)
+        self.assertIn('<bool name="config_navBarNeedsScrim">false</bool>', values)
+        for name in ("config_navBarDefaultTransparent", "config_navBarNeedsScrim"):
+            self.assertIn(f"bool/{name}", make_image.framework_overlaid())
 
     def test_fr22_check_image_checks_services_jar(self):
         script = (Path(make_image.__file__).parent / "check-image.py").read_text()

@@ -15,6 +15,7 @@ import android.provider.Settings
 import android.view.Display
 import android.view.WindowInsets
 import io.github.thisisthepy.dsa.agent.Log
+import io.github.thisisthepy.dsa.agent.requests.InsetGiven
 import io.github.thisisthepy.dsa.agent.requests.ResizeOutcome
 import io.github.thisisthepy.dsa.agent.requests.SettingsPage
 import io.github.thisisthepy.dsa.agent.requests.TaskActions
@@ -350,9 +351,74 @@ class AndroidTaskActions(
     }
 
     /**
+     * Gives the task inset sources of the navigation bar and the tappable element types
+     * covering [frame], or removes them when [frame] is null, in one window container
+     * transaction, as [setCaptionInset] gives the top band. The guest has no navigation bar
+     * of its own; the band is the 24 dp a gesture navigation phone's navigation bar insets an
+     * app by, so phone apps keep their bottom bars and the ends of their lists clear of the
+     * window's bottom edge. The image's window manager passes these types to a freeform window
+     * (make-image.py's SERVICES_INSETS_CODE), which stock Android drops. Where the framework
+     * takes a size from the task's edges, the band is given as one along the task's bottom
+     * edge, which the window manager keeps there through each resize; otherwise as [frame].
+     * The sources do not force their insets to be consumed, and nothing draws in the band: the
+     * image makes the navigation bar background transparent.
+     */
+    override fun setNavigationBarInset(taskId: Int, frame: TaskBounds?): InsetGiven = try {
+        val token = taskToken(taskId)
+        if (token == null) {
+            InsetGiven.REFUSED
+        } else {
+            val tokenClass = Class.forName("android.window.WindowContainerToken")
+            val transactionClass = Class.forName("android.window.WindowContainerTransaction")
+            val transaction = transactionClass.getConstructor().newInstance()
+            var follows = true
+            for ((index, type) in navigationBarSources()) {
+                if (frame == null) {
+                    transactionClass.getMethod(
+                        "removeInsetsSource",
+                        tokenClass,
+                        android.os.IBinder::class.java,
+                        Int::class.javaPrimitiveType,
+                        Int::class.javaPrimitiveType,
+                    ).invoke(transaction, token, insetsOwner, index, type)
+                } else {
+                    val form = addInsetsSource(transactionClass, transaction, token, index, type, frame, null, bottom = true)
+                    if (form !is InsetsSourceForm.Size) follows = false
+                }
+            }
+            when {
+                !commit(transactionClass, transaction) -> InsetGiven.REFUSED
+                follows -> InsetGiven.FOLLOWS_TASK
+                else -> InsetGiven.AT_FRAME
+            }
+        }
+    } catch (e: ReflectiveOperationException) {
+        warnNoInsets(e)
+        InsetGiven.REFUSED
+    } catch (e: LinkageError) {
+        warnNoInsets(e)
+        InsetGiven.REFUSED
+    } catch (e: RuntimeException) {
+        warnNoInsets(e)
+        InsetGiven.REFUSED
+    }
+
+    /**
+     * The navigation bar band's sources: each one's index among the sources [insetsOwner]
+     * gives a task, and its type. The indices follow the caption band's (0 and 1), so no two
+     * sources of the owner share an index.
+     */
+    private fun navigationBarSources() = listOf(
+        2 to WindowInsets.Type.navigationBars(),
+        3 to WindowInsets.Type.tappableElement(),
+    )
+
+    /**
      * WindowContainerTransaction.addInsetsSource in whichever form this framework has: with
      * bounding rectangles and flags (Android 15 and later), with bounding rectangles, or with
-     * the frame alone. [boundingRects] go where the form takes them; no flags are given.
+     * the frame alone. [boundingRects] go where the form takes them; no flags are given. A
+     * band along the task's [bottom] edge prefers the form that takes a size from the task's
+     * edges (see [InsetsSourceForm]). Returns the form it called.
      */
     private fun addInsetsSource(
         transactionClass: Class<*>,
@@ -362,14 +428,16 @@ class AndroidTaskActions(
         type: Int,
         frame: TaskBounds,
         boundingRects: Array<Rect>?,
-    ) {
+        bottom: Boolean = false,
+    ): InsetsSourceForm {
         val methods = transactionClass.methods.filter { it.name == "addInsetsSource" }
-        val form = InsetsSourceForm.choose(methods.map { m -> m.parameterTypes.map { it.typeName } })
+        val form = InsetsSourceForm.choose(methods.map { m -> m.parameterTypes.map { it.typeName } }, preferSize = bottom)
             ?: throw NoSuchMethodException("WindowContainerTransaction.addInsetsSource")
-        // A frame in display pixels, or the same band as a size from the task's top edge.
+        // A frame in display pixels, or the same band as a size from the task's top or bottom edge.
+        val height = frame.bottom - frame.top
         val area: Any = when (form) {
             is InsetsSourceForm.Frame -> Rect(frame.left, frame.top, frame.right, frame.bottom)
-            is InsetsSourceForm.Size -> Insets.of(0, frame.bottom - frame.top, 0, 0)
+            is InsetsSourceForm.Size -> if (bottom) Insets.of(0, 0, 0, height) else Insets.of(0, height, 0, 0)
         }
         val count = when (form) {
             is InsetsSourceForm.Frame -> form.parameterCount
@@ -381,6 +449,7 @@ class AndroidTaskActions(
             else -> arrayOf(token, insetsOwner, index, type, area)
         }
         methods[form.index].invoke(transaction, *args)
+        return form
     }
 
     /** The status bar heights read so far, by density. */
