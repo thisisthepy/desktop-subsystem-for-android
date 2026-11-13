@@ -11,7 +11,7 @@
 # .scratch/kernel/<tag>/src (or DSA_KERNEL_SRC). The tarball holds:
 #   linux/        the WSL kernel source at the tag, as fetched (no build output)
 #   dsa-kernel/   this directory: wsl-kernel.tag, every configuration fragment, patches/,
-#                 build.sh
+#                 build.sh, apply-patches.sh
 #   config        the merged .config the kernel was built with, when given
 #   README        how to rebuild the shipped kernel (bzImage or Image) from the above
 set -euo pipefail
@@ -58,8 +58,8 @@ mkdir -p "$stage/kernel-source"
 # only, so the archive is the upstream source and dsa-kernel/patches holds the changes.
 git -C "$src" archive --format=tar --prefix=linux/ HEAD | tar -x -C "$stage/kernel-source"
 mkdir -p "$stage/kernel-source/dsa-kernel"
-cp -R "$kernel_dir/wsl-kernel.tag" "$kernel_dir"/*.config "$kernel_dir/build.sh" "$kernel_dir/patches" \
-    "$stage/kernel-source/dsa-kernel/"
+cp -R "$kernel_dir/wsl-kernel.tag" "$kernel_dir"/*.config "$kernel_dir/build.sh" \
+    "$kernel_dir/apply-patches.sh" "$kernel_dir/patches" "$stage/kernel-source/dsa-kernel/"
 if [[ -n "$config" ]]; then
     cp "$config" "$stage/kernel-source/config"
 fi

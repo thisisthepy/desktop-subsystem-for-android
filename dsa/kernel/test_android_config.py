@@ -2,6 +2,8 @@
 
 import os
 import re
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -11,6 +13,7 @@ ARM64_CONFIG = Path(__file__).with_name("android-arm64.config")
 VIRTIO_CONFIG = Path(__file__).with_name("virtio.config")
 PATCHES = Path(__file__).with_name("patches")
 BUILD = Path(__file__).with_name("build.sh")
+APPLY = Path(__file__).with_name("apply-patches.sh")
 
 
 def fragment_lines(path):
@@ -691,6 +694,71 @@ class AndroidKernelConfigTests(unittest.TestCase):
         body = [line[1:] for line in patch if line[:1] in (" ", "+") and "obj-" in line]
         self.assertLess(body.index("obj-$(CONFIG_HYPERV_VSOCKETS) += hv_sock.o"),
                         body.index("obj-$(CONFIG_VIRTIO_VSOCKETS) += vmw_vsock_virtio_transport.o"))
+
+    def test_fr1_a_stacked_patch_series_applies_again_to_the_tree_it_patched(self):
+        # CI runs build.sh twice in one job (configure, then build). The page_reporting
+        # patches stack on mm/page_reporting.c, so once a later one rewrites the lines an
+        # earlier one left, the earlier one no longer reverses alone, and a check made one
+        # patch at a time tried to apply it again and failed.
+        self.assertIn('"$kernel_dir/apply-patches.sh" --reset "$src"', BUILD.read_text())
+        self.assertNotIn("apply --reverse --check", BUILD.read_text())
+        scratch = Path(__file__).resolve().parents[2] / ".scratch"
+        scratch.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=scratch, prefix="kernel-patch-test.") as work:
+            work = Path(work)
+            src, patches = work / "src", work / "patches"
+            src.mkdir()
+            patches.mkdir()
+            env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
+                       GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
+
+            def git(*args, check=True):
+                return subprocess.run(["git", "-C", str(src), *args], env=env, check=check,
+                                      capture_output=True, text=True)
+
+            lines = [f"line {i}\n" for i in range(12)]
+            source = src / "page_reporting.c"
+            source.write_text("".join(lines))
+            git("init", "-q")
+            git("add", ".")
+            git("commit", "-q", "-m", "tag")
+            lines[5] = "line 5, first patch\n"
+            source.write_text("".join(lines))
+            (patches / "a-first.patch").write_text(git("diff").stdout)
+            git("add", ".")
+            lines[6] = "line 6, second patch\n"
+            source.write_text("".join(lines))
+            (src / "added.c").write_text("added\n")
+            git("add", "-N", "added.c")
+            (patches / "b-second.patch").write_text(git("diff").stdout)
+            git("reset", "-q", "--hard")
+            (src / "added.c").unlink(missing_ok=True)
+            patched = "".join(lines)
+
+            def apply(*flags):
+                return subprocess.run(["bash", str(APPLY), *flags, str(src)], check=False,
+                                      capture_output=True, text=True,
+                                      env=dict(env, DSA_KERNEL_PATCHES=str(patches)))
+
+            for _ in range(2):
+                result = apply("--reset")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(source.read_text(), patched)
+                self.assertEqual((src / "added.c").read_text(), "added\n")
+            # The second run wrote nothing, and the first patch alone no longer reverses.
+            self.assertIn("0 written", result.stderr)
+            self.assertNotEqual(git("apply", "--reverse", "--check",
+                                    str(patches / "a-first.patch"), check=False).returncode, 0)
+
+            # A file the series does not explain is kept unless the caller owns the tree.
+            source.write_text("edited\n")
+            result = apply()
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("page_reporting.c has changes the patches do not make", result.stderr)
+            self.assertEqual(source.read_text(), "edited\n")
+            result = apply("--reset")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(source.read_text(), patched)
 
     def test_fr27_no_patch_touches_x86_only_code(self):
         # The same patches apply to both architectures' builds.

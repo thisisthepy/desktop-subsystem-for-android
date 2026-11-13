@@ -88,12 +88,14 @@ if [[ ! -f "$src/Makefile" ]]; then
     git -C "$src" checkout -q FETCH_HEAD
 fi
 
-shopt -s nullglob
-for patch in "$kernel_dir"/patches/*.patch; do
-    if ! git -C "$src" apply --reverse --check "$patch" >/dev/null 2>&1; then
-        git -C "$src" apply "$patch"
-    fi
-done
+# Every run leaves the tree as the tag plus the whole series (CI runs this script twice in one
+# job: configure, then build). A checkout of the user's own (DSA_KERNEL_SRC) is never
+# overwritten; one this script fetched is brought to the current series.
+if [[ -n "${DSA_KERNEL_SRC:-}" ]]; then
+    "$kernel_dir/apply-patches.sh" "$src"
+else
+    "$kernel_dir/apply-patches.sh" --reset "$src"
+fi
 
 # An out-of-tree build needs a source tree with no configuration of its own; an older
 # checkout that was built in place has one.
