@@ -176,9 +176,19 @@ fn nfr1_what_the_apps_read_back_right_after_a_full_reclaim_does_not_raise_the_ta
     assert_eq!(reclaimer.working_set_target_kb(), 320 * MIB);
 }
 
+/// A policy that lets one task keep up to 1 GiB of page cache, as before the allowance for each
+/// task was lowered, for the tests of how a working set learnt high comes back down.
+fn wide() -> ReclaimPolicy {
+    ReclaimPolicy {
+        keep_cache_max_kb: 1024 * MIB,
+        task_cache_kb: 768 * MIB,
+        ..ReclaimPolicy::default()
+    }
+}
+
 #[test]
 fn nfr1_a_working_set_learnt_high_comes_down_by_half_with_each_trim_nobody_reads_back() {
-    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
+    let mut reclaimer = Reclaimer::new(wide());
     reclaimer.refaults(0);
     // A trim of 1000 MiB came straight back: the working set was 1 GiB, the most it may be.
     assert_eq!(
@@ -279,7 +289,7 @@ fn nfr2_boot_settling_ends_after_five_minutes_however_busy_the_guest_stays() {
 /// A reclaimer past the boot whose one open app's trim of 500 MiB came back 400 MiB, followed
 /// by one quiet look: its working set floor and target are 656 MiB.
 fn learnt_high() -> Reclaimer {
-    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
+    let mut reclaimer = Reclaimer::new(wide());
     reclaimer.refaults(0);
     assert_eq!(
         reclaimer.decide_under(secs(60), 1, &memory(1000, 756), false),
@@ -436,7 +446,7 @@ fn nfr1_quiet_refaults_let_the_target_fall_back_but_never_below_its_floor() {
     for step in 1..=20 {
         reclaimer.refaults(step * 20 * MIB);
     }
-    assert_eq!(reclaimer.working_set_target_kb(), 1024 * MIB);
+    assert_eq!(reclaimer.working_set_target_kb(), 768 * MIB);
     for _ in 0..30 {
         reclaimer.refaults(400 * MIB);
     }
@@ -885,4 +895,150 @@ fn nfr2_with_no_app_open_the_reclaim_moves_half_the_app_memory_to_zram_after_the
             "{reason:?}"
         );
     }
+}
+
+/// One look of the daemon at `t` seconds: the tasks in use and how many are shown, the refault
+/// count in MiB, then the decision.
+fn look(
+    reclaimer: &mut Reclaimer,
+    t: u64,
+    in_use: usize,
+    shown: usize,
+    refaults_mib: u64,
+    memory: &MemInfo,
+) -> Option<Reason> {
+    reclaimer.tasks_seen(secs(t), in_use, shown);
+    reclaimer.refaults(refaults_mib * MIB);
+    reclaimer.decide_under(secs(t), in_use, memory, false)
+}
+
+/// A guest whose Play Store window opened at 5 s and read 80 MiB of evicted files back on every
+/// look of its first minute, leaving 842 MiB of page cache; at 65 s, its launch over, the first
+/// look trims all of that above the floor. Returns the refault count, in MiB.
+fn launched(reclaimer: &mut Reclaimer) -> u64 {
+    assert_eq!(look(reclaimer, 0, 0, 0, 0, &memory(3000, 100)), None);
+    let launch = memory(1800, 842);
+    let mut refaults = 0;
+    for t in (5..=60).step_by(5) {
+        refaults += 80;
+        // Its reads hold the trim back, so it does not read its files twice.
+        assert_eq!(look(reclaimer, t, 1, 1, refaults, &launch), None, "{t} s");
+        assert!(reclaimer.launching(), "{t} s");
+        assert_eq!(reclaimer.working_set_target_kb(), 256 * MIB, "{t} s");
+    }
+    assert_eq!(
+        look(reclaimer, 65, 1, 1, refaults, &launch),
+        Some(Reason::Gradual)
+    );
+    assert!(!reclaimer.launching());
+    assert_eq!(reclaimer.trim_mib(), 842 - 256);
+    refaults
+}
+
+#[test]
+fn nfr2_launch_refaults_do_not_raise_the_working_set_target() {
+    // The owner's PC, 0.2.4-dev.11: 30 s after the Play Store opened, its launch reads had
+    // raised the target to some 800 MiB, and 842 MiB of page cache stayed.
+    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
+    launched(&mut reclaimer);
+    assert_eq!(reclaimer.working_set_target_kb(), 256 * MIB);
+}
+
+#[test]
+fn nfr2_steady_refaults_after_the_launch_still_raise_the_target_within_the_cap() {
+    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
+    let mut refaults = launched(&mut reclaimer);
+    let in_use = memory(2400, 300);
+    // In steady use the app reads 50 MiB of what the trim took back on each look.
+    refaults += 50;
+    assert_eq!(look(&mut reclaimer, 70, 1, 1, refaults, &in_use), None);
+    assert_eq!(reclaimer.working_set_target_kb(), 320 * MIB);
+    for t in [75, 80, 85] {
+        refaults += 50;
+        assert_eq!(look(&mut reclaimer, t, 1, 1, refaults, &in_use), None);
+    }
+    // One shown task keeps at most 192 MiB above the floor.
+    assert_eq!(reclaimer.working_set_target_kb(), (256 + 192) * MIB);
+}
+
+/// The working set target, in MiB, after `looks` looks that each read 20 MiB back, with
+/// `in_use` tasks (at least one) of which `shown` are shown.
+fn target_after_refaults(in_use: usize, shown: usize, looks: u64) -> u64 {
+    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
+    reclaimer.tasks_seen(secs(0), in_use, shown);
+    assert_eq!(
+        reclaimer.decide_under(secs(0), in_use, &memory(3000, 200), false),
+        None
+    );
+    for step in 0..=looks {
+        reclaimer.tasks_seen(secs(5 * step), in_use, shown);
+        reclaimer.refaults(step * 20 * MIB);
+    }
+    reclaimer.working_set_target_kb() / MIB
+}
+
+#[test]
+fn nfr2_each_task_in_use_may_keep_a_little_page_cache_up_to_a_cap() {
+    // The floor, 192 MiB for each shown task, and 768 MiB however many are open.
+    assert_eq!(target_after_refaults(1, 1, 20), 256 + 192);
+    assert_eq!(target_after_refaults(2, 2, 20), 256 + 2 * 192);
+    assert_eq!(target_after_refaults(3, 3, 20), 768);
+    assert_eq!(target_after_refaults(5, 5, 20), 768);
+}
+
+#[test]
+fn nfr2_a_minimized_task_counts_less_than_a_shown_one() {
+    // A minimized task may keep 64 MiB above the floor, a shown one 192.
+    assert_eq!(target_after_refaults(1, 0, 20), 256 + 64);
+    assert_eq!(target_after_refaults(2, 1, 20), 256 + 192 + 64);
+
+    let mut reclaimer = Reclaimer::new(ReclaimPolicy::default());
+    reclaimer.tasks_seen(secs(0), 1, 1);
+    assert_eq!(
+        reclaimer.decide_under(secs(0), 1, &memory(3000, 200), false),
+        None
+    );
+    for step in 0..=10 {
+        reclaimer.tasks_seen(secs(5 * step), 1, 1);
+        reclaimer.refaults(step * 20 * MIB);
+    }
+    assert_eq!(reclaimer.working_set_target_kb(), 448 * MIB);
+    // Its window is minimized: the cache it may keep comes down at once, and what is above it
+    // goes back on the same look, before the host lets the guest doze.
+    reclaimer.tasks_seen(secs(55), 1, 0);
+    assert_eq!(reclaimer.working_set_target_kb(), 320 * MIB);
+    reclaimer.refaults(208 * MIB);
+    assert_eq!(
+        reclaimer.decide_under(secs(55), 1, &memory(2600, 448), false),
+        Some(Reason::Gradual)
+    );
+    assert_eq!(reclaimer.trim_mib(), 448 - 320);
+    // Shown again, it is not a launch: what it reads back of that trim raises the floor and the
+    // target again, up to a shown task's allowance.
+    reclaimer.tasks_seen(secs(60), 1, 1);
+    assert!(!reclaimer.launching());
+    reclaimer.refaults(248 * MIB);
+    assert_eq!(reclaimer.working_set_target_kb(), (320 + 40 + 64) * MIB);
+}
+
+#[test]
+fn nfr2_the_router_counts_the_shown_tasks() {
+    let (to_host, _host) = mpsc::channel();
+    let router = Router::new(to_host, |_| Err("no agent here".to_string()));
+    for task_id in [1, 2] {
+        router
+            .from_guest(
+                Peer(10),
+                frame(Body::TaskUpdated(TaskUpdated {
+                    task_id,
+                    package_name: format!("org.example.app{task_id}"),
+                    ..Default::default()
+                })),
+            )
+            .unwrap();
+    }
+    // Until the host says which windows it shows, every task in use counts as shown.
+    assert_eq!(router.tasks_shown(), 2);
+    router.from_host(&frame(Body::ScreenState(ScreenState { on: false })));
+    assert_eq!(router.tasks_shown(), 0);
 }

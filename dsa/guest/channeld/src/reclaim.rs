@@ -32,8 +32,12 @@
 //! that returns soon after a trim was in use, so the target rises; while none returns, it falls
 //! back to its floor, and the floor itself halves its way back down after each quiet stretch.
 //! What Android reads back while it boots and settles is the boot's own work, not an app's
-//! working set, so it is not counted ([`Reclaimer::booted`]); and with no task in use there is
-//! no app to keep cache for, so the target stays at its floor.
+//! working set, so it is not counted ([`Reclaimer::booted`]). Nor is what an app reads back in
+//! the first minute after its task appears ([`ReclaimPolicy::launch_settle`]): its APK, its
+//! compiled code and the Google Play services files it starts with are read once, not over and
+//! over. With no task in use there is no app to keep cache for, so the target stays at its
+//! floor; each task whose window is shown may raise it by a little, and a minimized one by less
+//! ([`Reclaimer::tasks_seen`]).
 //!
 //! This module is the decision alone, so it runs and is tested on any platform; the daemon
 //! applies it on Android by setting [`RECLAIM_PROPERTY`], which the image's init script acts on.
@@ -225,7 +229,9 @@ pub struct ReclaimPolicy {
     /// apps. It is where the working set target starts and the lowest it goes.
     pub keep_cache_kb: u64,
     /// The most the working set target rises to, in KiB, however often evicted files are read
-    /// back.
+    /// back and however many tasks are in use. 768 MiB is the floor and the allowance of nearly
+    /// three shown tasks ([`ReclaimPolicy::task_cache_kb`]): beyond that, an app's files are
+    /// cheaper to read again than to keep from the host.
     pub keep_cache_max_kb: u64,
     /// The least cache above the working set target worth a trim, in KiB.
     pub min_trim_kb: u64,
@@ -243,11 +249,28 @@ pub struct ReclaimPolicy {
     /// The least time between two reclaims while the host is short of memory. The second also
     /// waits for [`ReclaimPolicy::idle_growth_kb`] to come back since the first.
     pub host_short_gap: Duration,
-    /// How much the working set target may rise above `keep_cache_kb` for each task in use, in
-    /// KiB, up to `keep_cache_max_kb`. With no task in use the target stays at `keep_cache_kb`:
-    /// what is read back then is the system's background work, and keeping cache for it is what
-    /// left some 650 MiB of page cache in an idle guest on the owner's PC.
+    /// How much the working set target may rise above `keep_cache_kb` for each task in use
+    /// whose window is shown, in KiB, up to `keep_cache_max_kb`. With no task in use the target
+    /// stays at `keep_cache_kb`: what is read back then is the system's background work, and
+    /// keeping cache for it is what left some 650 MiB of page cache in an idle guest on the
+    /// owner's PC.
+    ///
+    /// 192 MiB is about three times what an app in steady use was measured to read back: on the
+    /// owner's PC (v0.2.2), with only the Play Store shown, a trim of about 100 MiB came back 60 %
+    /// within 20 s, so the Play Store's steady working set sat some 60 MiB above the floor. The
+    /// 768 MiB this was before let launch-time reads keep 800 MiB of page cache for one window
+    /// (0.2.4-dev.11), where 0.2.4-dev.3 had worked with 414 MiB.
     pub task_cache_kb: u64,
+    /// The same for a task in use whose window is minimized, in KiB. It draws nothing and reads
+    /// little, so it keeps a third of a shown task's allowance; when it is shown again, what it
+    /// reads back raises the target again.
+    pub minimized_task_cache_kb: u64,
+    /// How long after a task appears the refaults are not counted toward the working set. A
+    /// starting app reads its APK, its compiled code (odex, vdex) and Google Play services'
+    /// files, nearly all of it once: on the owner's PC (0.2.4-dev.11) those reads raised the
+    /// target to 800 MiB with only the Play Store shown, and the cache was kept. Refaults still
+    /// hold the trim back meanwhile, so the starting app is not made to read its files twice.
+    pub launch_settle: Duration,
 }
 
 impl Default for ReclaimPolicy {
@@ -261,13 +284,15 @@ impl Default for ReclaimPolicy {
             idle_growth_kb: 64 * 1024,
             trim_gap: Duration::ZERO,
             keep_cache_kb: 256 * 1024,
-            keep_cache_max_kb: 1024 * 1024,
+            keep_cache_max_kb: 768 * 1024,
             min_trim_kb: 64 * 1024,
             max_trim_kb: u64::MAX,
             settle_after: Duration::from_secs(30),
             refault_limit_kb: 16 * 1024,
             host_short_gap: Duration::from_secs(60),
-            task_cache_kb: 768 * 1024,
+            task_cache_kb: 192 * 1024,
+            minimized_task_cache_kb: 64 * 1024,
+            launch_settle: Duration::from_secs(60),
         }
     }
 }
@@ -319,6 +344,14 @@ pub struct Reclaimer {
     /// Looks in a row in which little evicted cache came back, toward the next step down of the
     /// floor ([`WORKING_SET_DECAY_LOOKS`]).
     quiet_looks: u32,
+    /// The tasks in use at the last [`Reclaimer::tasks_seen`], and how many of them had their
+    /// window shown. `None` until the daemon says: every task in use then counts as shown.
+    seen_tasks: Option<usize>,
+    shown_tasks: Option<usize>,
+    /// Until when the refaults are an app's launch, not its working set.
+    launch_until: Option<Duration>,
+    /// Whether the last [`Reclaimer::tasks_seen`] fell inside that launch.
+    launching: bool,
 }
 
 /// Where Android is in its boot, as the working set sees it.
@@ -388,7 +421,42 @@ impl Reclaimer {
             host_short_reclaimed: false,
             boot: Boot::Settled,
             quiet_looks: 0,
+            seen_tasks: None,
+            shown_tasks: None,
+            launch_until: None,
+            launching: false,
         }
+    }
+
+    /// Takes in, on every look and before [`Reclaimer::refaults`], the tasks in use (as the
+    /// decision is given them) and how many of them have their window shown on the host; the
+    /// rest are minimized.
+    ///
+    /// A task that appears starts a launch of [`ReclaimPolicy::launch_settle`]: its reads then
+    /// hold the trim back but do not raise the working set target, and a trim judged across it
+    /// is not judged at all, since what came back is the new app's first reads. A daemon that
+    /// starts with tasks already open sees no launch.
+    ///
+    /// A shown task may raise the target by [`ReclaimPolicy::task_cache_kb`], a minimized one by
+    /// [`ReclaimPolicy::minimized_task_cache_kb`]; when a window is minimized, the target and its
+    /// floor come down to that at once.
+    pub fn tasks_seen(&mut self, now: Duration, in_use: usize, shown: usize) {
+        if self.seen_tasks.is_some_and(|last| in_use > last) {
+            self.launch_until = Some(now.saturating_add(self.policy.launch_settle));
+            self.trim_mark = None;
+            self.quiet_looks = 0;
+        }
+        self.seen_tasks = Some(in_use);
+        self.shown_tasks = Some(shown.min(in_use));
+        self.launching = self.launch_until.is_some_and(|until| now < until);
+        if let Some(tasks) = self.last_tasks {
+            self.cap_to_tasks(tasks);
+        }
+    }
+
+    /// Whether the refaults now are an app's launch ([`Reclaimer::tasks_seen`]).
+    pub fn launching(&self) -> bool {
+        self.launching
     }
 
     /// Takes in whether Android has finished booting (`sys.boot_completed`), on every look. A
@@ -417,13 +485,18 @@ impl Reclaimer {
         self.quiet_looks = 0;
     }
 
-    /// Holds the target and its floor to what `tasks` tasks in use may keep: `keep_cache_kb`
-    /// and [`ReclaimPolicy::task_cache_kb`] for each, so with none in use, the floor.
+    /// Holds the target and its floor to what `tasks` tasks in use may keep: `keep_cache_kb`,
+    /// [`ReclaimPolicy::task_cache_kb`] for each shown and
+    /// [`ReclaimPolicy::minimized_task_cache_kb`] for each minimized, so with none in use, the
+    /// floor.
     fn cap_to_tasks(&mut self, tasks: usize) {
         let p = self.policy;
+        let shown = self.shown_tasks.map_or(tasks, |shown| shown.min(tasks));
+        let minimized = tasks - shown;
         let cap = p
             .keep_cache_kb
-            .saturating_add(p.task_cache_kb.saturating_mul(tasks as u64))
+            .saturating_add(p.task_cache_kb.saturating_mul(shown as u64))
+            .saturating_add(p.minimized_task_cache_kb.saturating_mul(minimized as u64))
             .min(p.keep_cache_max_kb)
             .max(p.keep_cache_kb);
         self.floor_kb = self.floor_kb.min(cap);
@@ -442,13 +515,14 @@ impl Reclaimer {
     /// back, took cache no app used, so the floor steps down toward `keep_cache_kb`: half the
     /// way, at least `min_trim_kb`. A fixed 64 MiB a step took a floor learnt at 1 GiB more than
     /// ten trims to come back down while the apps that needed it were long gone. A trim while
-    /// Android boots is not judged: what comes back then is the boot reading its files.
+    /// Android boots is not judged: what comes back then is the boot reading its files. Nor is
+    /// one while an app launches, for the same reason.
     fn mark_trim(&mut self, took_kb: u64) {
         self.quiet_looks = 0;
         if self.trim_mark.take().is_some() {
             self.step_floor_down();
         }
-        if self.boot != Boot::Settled {
+        if self.boot != Boot::Settled || self.launching {
             return;
         }
         if let Some(refaults_kb) = self.last_refaults_kb {
@@ -475,8 +549,9 @@ impl Reclaimer {
     /// a trim none of the looks found a quarter of back, or after [`WORKING_SET_DECAY_LOOKS`]
     /// quiet looks in a row.
     ///
-    /// While Android boots and settles ([`Reclaimer::booted`]) nothing is counted, and the
-    /// target never rises above what the tasks in use may keep ([`ReclaimPolicy::task_cache_kb`]).
+    /// While Android boots and settles ([`Reclaimer::booted`]) and while an app launches
+    /// ([`Reclaimer::tasks_seen`]) nothing is counted, and the target never rises above what the
+    /// tasks in use may keep ([`ReclaimPolicy::task_cache_kb`]).
     pub fn refaults(&mut self, total_kb: u64) {
         let grown = self
             .last_refaults_kb
@@ -508,6 +583,12 @@ impl Reclaimer {
         let Some(grown) = grown else {
             return;
         };
+        if self.launching {
+            // An app starting reads its files once: hold the trim while it does, so it does
+            // not read them twice, but keep nothing for it.
+            self.refaulting = grown >= p.refault_limit_kb;
+            return;
+        }
         let mut learnt = false;
         if let Some(mark) = self.trim_mark {
             let back = total_kb.saturating_sub(mark.refaults_kb);

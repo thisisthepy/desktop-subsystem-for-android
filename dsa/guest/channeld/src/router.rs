@@ -179,6 +179,9 @@ struct State {
     apps: BTreeMap<String, Vec<u8>>,
     /// The host said no task window is shown: open tasks are minimized, and the guest dozes.
     screen_off: bool,
+    /// The tasks whose window the host last said it shows (open and not minimized), or `None`
+    /// until it says.
+    shown_tasks: Option<std::collections::BTreeSet<i32>>,
     /// The host said it is short of memory.
     host_memory_low: bool,
     next_id: u64,
@@ -628,6 +631,26 @@ impl Router {
         } else {
             self.task_count()
         }
+    }
+
+    /// How many of the tasks in use have their window shown on the host: open and not
+    /// minimized. Until the host says which windows it shows, every task in use counts as shown.
+    pub fn tasks_shown(&self) -> usize {
+        let state = self.lock();
+        if state.screen_off {
+            return 0;
+        }
+        state
+            .tasks
+            .iter()
+            .filter(|(_, task)| task.updated.is_some())
+            .filter(|(id, _)| {
+                state
+                    .shown_tasks
+                    .as_ref()
+                    .is_none_or(|shown| shown.contains(id))
+            })
+            .count()
     }
 
     /// Whether the host last said it is short of memory.
