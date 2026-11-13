@@ -30,7 +30,7 @@ type SwitchHandler = Rc<RefCell<Option<Rc<dyn Fn(bool)>>>>;
 pub fn backup(ctx: &Shared, page: &Rc<Page>) {
     let backup_group = group(
         &tr("Backup"),
-        Some(&tr("DSA keeps an encrypted backup of your Android apps' data in a folder of your home folder, so the apps and their data can come back after Android's data is reset, or on another computer. The key that opens it is kept in your keyring.")),
+        Some(&tr("DSA keeps an encrypted backup of your Android apps' data in a folder of your home folder.\nThe apps and their data can come back after Android's data is reset, or on another computer.\nThe key that opens it is kept in your keyring.")),
     );
     // The switch's changes are handled once the rest of the section exists.
     let switched: SwitchHandler = Rc::default();
@@ -441,7 +441,7 @@ fn ask_recovery_key(ctx: &Shared, then: impl Fn(String) + 'static) {
     let dialog = adw::MessageDialog::new(
         Some(&ctx.window),
         Some(&tr("Use a recovery key")),
-        Some(&tr("Enter the recovery key of the backup folder, as it was written down. Spaces, dashes and capitals do not matter. A key that does not open the folder is refused, and the key kept now stays.")),
+        Some(&tr("Enter the recovery key of the backup folder, as it was written down.\n\nSpaces, dashes and capitals do not matter.\n\nA key that does not open the folder is refused, and the key kept now stays.")),
     );
     let entry = gtk::Entry::builder().hexpand(true).build();
     entry.add_css_class("monospace");
