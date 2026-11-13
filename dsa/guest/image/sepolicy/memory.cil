@@ -70,6 +70,21 @@
 (genfscon sysfs "/module/page_reporting/parameters/rereport" (u object_r dsa_sysfs_page_reporting ((s0) (s0))))
 (allow vendor_init dsa_sysfs_page_reporting (file (write open getattr)))
 
+; The agent reports how free page reporting is doing with the rest of the guest's memory: the
+; free memory the host has back now, the memory reported since boot, and the reported memory
+; the host took back in with a neighbour (read-only parameters DSA's kernel adds). They are
+; plain sysfs otherwise, which no app may read; a type of their own opens these three files to
+; the agent alone, for reading.
+(type dsa_sysfs_page_reporting_stats)
+(roletype object_r dsa_sysfs_page_reporting_stats)
+(typeattributeset fs_type (dsa_sysfs_page_reporting_stats))
+(typeattributeset sysfs_type (dsa_sysfs_page_reporting_stats))
+(genfscon sysfs "/module/page_reporting/parameters/reported_kb" (u object_r dsa_sysfs_page_reporting_stats ((s0) (s0))))
+(genfscon sysfs "/module/page_reporting/parameters/reported_total_kb" (u object_r dsa_sysfs_page_reporting_stats ((s0) (s0))))
+(genfscon sysfs "/module/page_reporting/parameters/refaulted_total_kb" (u object_r dsa_sysfs_page_reporting_stats ((s0) (s0))))
+(allow system_app dsa_sysfs_page_reporting_stats (file (read open getattr)))
+(allow platform_app dsa_sysfs_page_reporting_stats (file (read open getattr)))
+
 ; The agent reports how much compressed swap holds (zram's mm_stat) with the rest of the
 ; guest's memory.
 (allow system_app sysfs_zram (dir (search)))

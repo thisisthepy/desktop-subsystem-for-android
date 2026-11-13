@@ -1033,8 +1033,17 @@ impl Shared {
             .clone()
     }
 
+    /// Keeps the guest's latest memory report. A report that follows one from the same boot
+    /// says how fast memory went back to the host in between ([`GuestMemory::following`]).
     fn set_guest_memory(&self, memory: Option<(GuestMemory, Instant)>) {
-        *self.guest_memory.lock().unwrap_or_else(|e| e.into_inner()) = memory;
+        let mut kept = self.guest_memory.lock().unwrap_or_else(|e| e.into_inner());
+        *kept = match (memory, kept.take()) {
+            (Some((memory, at)), Some((before, then))) => Some((
+                memory.following(&before, at.saturating_duration_since(then)),
+                at,
+            )),
+            (memory, _) => memory,
+        };
     }
 
     fn set_vm_memory_mb(&self, mb: Option<u64>) {

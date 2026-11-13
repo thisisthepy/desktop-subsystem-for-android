@@ -3157,6 +3157,12 @@ pub fn describe_settings(report: &SettingsReport) -> String {
 /// processes cost: resident pages, plus what zram holds of theirs at its measured compression,
 /// never the swapped-out size their PSS counts. `compressed_kb` is null when zram's
 /// compression could not be measured. `google_play` is null while none of its processes runs.
+///
+/// `page_reporting` is null when Android's kernel does not say what it reported. Otherwise it
+/// has the free memory the host has back now and the free memory it does not, the memory
+/// reported since boot, how fast it went back since the report before (`reported_kb_per_minute`,
+/// null for the first report), and the reported free memory the host took back in with a
+/// neighbour and the guest reported again.
 pub fn memory_json(memory: &MemorySnapshot) -> Value {
     fn share(share: &dsa_host_core::memory::MemoryShare) -> Value {
         json!({
@@ -3207,6 +3213,13 @@ pub fn memory_json(memory: &MemorySnapshot) -> Value {
                 "unaccounted_kb": guest.unaccounted_kb(),
                 "reserved_at_boot_kb": guest.reserved_at_boot_kb(),
             },
+            "page_reporting": guest.page_reporting.map(|r| json!({
+                "free_reported_kb": r.free_reported_kb,
+                "free_not_reported_kb": guest.free_not_reported_kb(),
+                "reported_total_kb": r.reported_total_kb,
+                "reported_kb_per_minute": r.reported_kb_per_minute,
+                "refaulted_total_kb": r.refaulted_total_kb,
+            })),
             "age_seconds": report.age.as_secs(),
             "top_processes": guest.top_processes.iter().map(|p| {
                 let cost = guest.process_share(p);
