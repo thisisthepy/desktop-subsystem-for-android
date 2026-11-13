@@ -383,6 +383,35 @@ class AndroidTaskActions(
         methods[form.index].invoke(transaction, *args)
     }
 
+    /** The status bar heights read so far, by density. */
+    private val statusBarHeights = HashMap<Int, Int>()
+
+    /**
+     * Reads the framework's status_bar_height at [densityDpi], as an app drawing at that
+     * density reads it: the system configuration with only its density changed. The image's
+     * framework overlay sets it to the title bar's height in pixels at each density Android
+     * draws at on a monitor scale.
+     */
+    override fun statusBarHeight(densityDpi: Int): Int {
+        if (densityDpi <= 0) return 0
+        statusBarHeights[densityDpi]?.let { return it }
+        val height = try {
+            val system = android.content.res.Resources.getSystem()
+            val id = system.getIdentifier("status_bar_height", "dimen", "android")
+            if (id == 0) {
+                0
+            } else {
+                val config = Configuration(system.configuration).apply { this.densityDpi = densityDpi }
+                context.createConfigurationContext(config).resources.getDimensionPixelSize(id)
+            }
+        } catch (e: RuntimeException) {
+            log.warn("could not read the status bar height at $densityDpi dpi", e)
+            0
+        }
+        statusBarHeights[densityDpi] = height
+        return height
+    }
+
     private fun warnNoInsets(error: Throwable) {
         if (warnedNoInsets) return
         warnedNoInsets = true

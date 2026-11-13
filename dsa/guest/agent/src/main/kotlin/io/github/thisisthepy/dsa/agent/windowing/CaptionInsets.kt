@@ -32,6 +32,17 @@ import io.github.thisisthepy.dsa.agent.tasks.TaskBounds
  * given again when the task's left or right edge moves. The app's controls in the rest of the
  * band ([controls]) take the pointer on the host.
  *
+ * The host can only say how high the band is once it has opened the task's window, which is
+ * after the task's app has started and laid out its first screen. Many apps read their status
+ * bar inset when a screen is created and never again (YouTube's home screen, for one), so a
+ * band that arrived only then left such a screen's toolbar under the caption for as long as
+ * the screen lived, while screens opened later sat below it. A task the host has not yet said
+ * anything of ([update]'s `awaiting`) is therefore given a band at once, as high as the status
+ * bar the framework's resources give at the task's density
+ * ([TaskActions.statusBarHeight]), which the image sets to the title bar at that density's
+ * monitor scale. The host's own height replaces it when it comes, by at most a few pixels on
+ * a monitor of another scale.
+ *
  * Not thread safe: the agent calls it from one thread.
  */
 class CaptionInsets(
@@ -45,6 +56,9 @@ class CaptionInsets(
     private data class Given(val frame: TaskBounds, val boundingRects: List<TaskBounds>)
 
     private val bands = HashMap<Int, Band>()
+
+    /** The bands given to tasks the host has not said anything of yet. */
+    private val expected = HashMap<Int, Band>()
 
     /** The tasks whose apps draw their own title bar. */
     private val drawing = HashSet<Int>()
@@ -60,20 +74,32 @@ class CaptionInsets(
      */
     fun setHeight(taskId: Int, height: Int, bounds: TaskBounds?, startWidth: Int = 0, endWidth: Int = 0) {
         bands[taskId] = Band(height, startWidth.coerceAtLeast(0), endWidth.coerceAtLeast(0))
+        expected.remove(taskId)
         apply(taskId, bounds)
     }
 
     /**
      * The tasks the host was told about, where they are now, and those of them whose apps draw
      * their own title bar. Forgets the tasks that ended.
+     *
+     * [awaiting] holds the tasks whose windows will have a title bar, with the density each
+     * draws at: one the host has not said anything of yet gets the band expected at that
+     * density until the host does. A task left out (it fills the screen, or is in
+     * picture-in-picture) keeps no expected band.
      */
-    fun update(bounds: Map<Int, TaskBounds>, appDrawn: Set<Int> = emptySet()) {
+    fun update(bounds: Map<Int, TaskBounds>, appDrawn: Set<Int> = emptySet(), awaiting: Map<Int, Int> = emptyMap()) {
         bands.keys.retainAll(bounds.keys)
+        expected.keys.retainAll(bounds.keys)
         applied.keys.retainAll(bounds.keys)
         drawing.clear()
         drawing.addAll(appDrawn intersect bounds.keys)
+        for (taskId in bounds.keys) {
+            if (taskId in bands) continue
+            val height = awaiting[taskId]?.let(actions::statusBarHeight) ?: 0
+            if (height > 0) expected[taskId] = Band(height, 0, 0) else expected.remove(taskId)
+        }
         for ((taskId, at) in bounds) {
-            if (taskId in bands) apply(taskId, at)
+            if (taskId in bands || taskId in expected || applied[taskId] != null) apply(taskId, at)
         }
     }
 
@@ -92,9 +118,11 @@ class CaptionInsets(
     }
 
     private fun apply(taskId: Int, bounds: TaskBounds?) {
-        val band = bands[taskId] ?: return
+        val band = bands[taskId] ?: expected[taskId]
+        // An expected band that was withdrawn is taken away again.
+        if (band == null && applied[taskId] == null) return
         if (bounds == null || bounds.isEmpty()) return
-        val given = if (band.height > 0) given(bounds, band, taskId in drawing) else null
+        val given = if (band != null && band.height > 0) given(bounds, band, taskId in drawing) else null
         if (taskId in applied && applied[taskId] == given) return
         if (given == null && taskId !in applied) {
             applied[taskId] = null

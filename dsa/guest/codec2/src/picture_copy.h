@@ -9,6 +9,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 
 namespace dsa::codec2 {
 
@@ -37,5 +38,39 @@ bool copyNv12(const uint8_t* nv12, size_t size, uint32_t width, uint32_t height,
 // ever zero (which shows as green). False, copying nothing, when the buffer is smaller.
 bool copyNv12(const uint8_t* nv12, size_t size, uint32_t width, uint32_t height, uint32_t stride,
               const YuvPlanes& planes, uint32_t bufferWidth, uint32_t bufferHeight);
+
+// How writing a picture into an output buffer went. Only a buffer that is `Written` holds the
+// picture; any other goes back to its allocator unseen, because a buffer of the surface that
+// was not written holds zeros (green) or an older picture.
+enum class WriteResult {
+    Written,
+    // The buffer is smaller than the picture.
+    WrongBuffer,
+    // The buffer could not be locked for writing.
+    NotLocked,
+    // The lock gave fewer than three planes, or rows too short for the buffer's width.
+    BadPlanes,
+    // The picture is shorter than its size says.
+    NotCopied,
+    // The unlock failed, so the writes may not have reached the buffer.
+    NotUnlocked,
+};
+
+// The size of a buffer the allocator gave.
+struct BufferSize {
+    uint32_t width = 0;
+    uint32_t height = 0;
+};
+
+// Locks a buffer for writing: true with its planes and how many there are.
+using LockPlanes = std::function<bool(YuvPlanes* planes, uint32_t* planeCount)>;
+// Unlocks it again: true when the writes reached the buffer.
+using UnlockPlanes = std::function<bool()>;
+
+// Writes the `width` by `height` NV12 picture in `nv12` into a buffer of `buffer`'s size,
+// every sample of it (past the picture, the picture's edge). A buffer that was locked is
+// always unlocked.
+WriteResult writePicture(const uint8_t* nv12, size_t size, uint32_t width, uint32_t height, uint32_t stride,
+                         const BufferSize& buffer, const LockPlanes& lock, const UnlockPlanes& unlock);
 
 }  // namespace dsa::codec2

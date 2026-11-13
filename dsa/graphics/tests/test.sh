@@ -51,6 +51,11 @@ mkdir -p "$out"
     "$here/cpu_upload_test.cpp" -o "$out/cpu_upload_test"
 "$out/cpu_upload_test"
 
+# How long a process keeps a gralloc buffer's host ColorBuffer open (guest/mesa 0013).
+"$cxx" -std=c++17 -O2 -Wall -Wextra -Werror -I"$here/../include" \
+    "$here/color_buffer_refs_test.cpp" -o "$out/color_buffer_refs_test"
+"$out/color_buffer_refs_test"
+
 "$cxx" -std=c++17 -O2 -Wall -Wextra -Werror -I"$here/../include" \
     "$here/spare_pages_test.cpp" -o "$out/spare_pages_test"
 "$out/spare_pages_test"
