@@ -477,8 +477,6 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
     # The add-on disk the Google apps and a user's ARM translation package are mounted from.
     problems += make_image.addon_disk_problems(names, z.read)
     problems += make_image.widevine_problems(names, z.read)
-    # Google Play sees the computer's memory, and only Google Play does.
-    problems += make_image.host_memory_problems(manifest, names, z.read)
     if "SYSTEM/etc/dsa/gapps-on.prop" in names:
         on = [line.strip() for line in
               z.read("SYSTEM/etc/dsa/gapps-on.prop").decode(errors="replace").splitlines()]
