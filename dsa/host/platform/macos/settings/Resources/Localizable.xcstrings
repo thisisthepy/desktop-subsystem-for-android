@@ -1027,13 +1027,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Android restarts into Android {0}. Its app windows close; open the apps again once it has started."
+            "value": "Android restarts into Android {0}.\n\nIts app windows close. Open the apps again once it has started."
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "Android {0}(으)로 다시 시작합니다. 앱 창이 닫히며, 시작이 끝나면 앱을 다시 열면 됩니다."
+            "value": "Android {0}(으)로 다시 시작합니다.\n\n앱 창이 닫힙니다. 시작이 끝나면 앱을 다시 여세요."
           }
         }
       }
@@ -1146,13 +1146,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Android {0} is older than the Android {1} that runs now, and Android cannot read data a newer version wrote. Moving erases the Android data of every user of this computer: every app they installed, the accounts they signed in to and the data of every app. Each user's Android then starts as it was first installed. DSA's settings stay. This cannot be undone."
+            "value": "Android {0} is older than the Android {1} that runs now, and cannot read the data a newer version wrote.\n\nMoving erases the Android data of every user of this Mac:\n• every app they installed\n• the accounts they signed in to\n• the data of every app\n\nEach user's Android then starts as it was first installed. DSA's settings stay.\n\nThis cannot be undone."
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "Android {0}은(는) 지금 실행 중인 Android {1}보다 오래된 버전이고, Android는 더 새 버전이 쓴 데이터를 읽지 못합니다. 옮기면 이 컴퓨터 모든 사용자의 Android 데이터가 지워집니다: 설치한 모든 앱, 로그인한 계정, 모든 앱의 데이터입니다. 각 사용자의 Android는 처음 설치한 상태로 시작합니다. DSA 설정은 그대로 남습니다. 되돌릴 수 없습니다."
+            "value": "Android {0}은(는) 지금 실행 중인 Android {1}보다 오래된 버전이라, 더 새 버전이 쓴 데이터를 읽지 못합니다.\n\n옮기면 이 Mac 모든 사용자의 Android 데이터가 지워집니다.\n• 설치한 모든 앱\n• 로그인한 계정\n• 모든 앱의 데이터\n\n각 사용자의 Android는 처음 설치한 상태로 시작합니다. DSA 설정은 그대로 남습니다.\n\n되돌릴 수 없습니다."
           }
         }
       }
@@ -1486,13 +1486,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Android {0} is downloaded and used the next time Android starts. Your apps and their data move along. Moving back later erases the data."
+            "value": "Android {0} is downloaded and used from the next start of Android.\n\nYour apps and their data move along. Moving back later erases the data."
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "Android {0}을(를) 내려받아 다음에 Android가 시작될 때부터 씁니다. 앱과 데이터는 함께 옮겨집니다. 나중에 되돌리면 데이터가 지워집니다."
+            "value": "Android {0}을(를) 내려받아 다음에 Android가 시작될 때부터 씁니다.\n\n앱과 데이터는 함께 옮겨집니다. 나중에 되돌리면 데이터가 지워집니다."
           }
         }
       }
@@ -2812,13 +2812,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "DSA downloads the Android emulator image for this Android version from Google's SDK repository ({0}) and takes out only its ARM translator. The translator is Google's software, offered under the Android SDK License ({1}); by downloading it you accept those terms. DSA does not ship or pass it on. The image is about 2 GB and is deleted afterwards. The translator works from the next start of Android."
+            "value": "DSA downloads Google's Android emulator image for this Android version and takes out only its ARM translator.\n\n• Size: about 2 GB, deleted afterwards\n• From: {0}\n• Terms: Android SDK License, {1}\n\nThe translator is Google's software. By downloading it you accept those terms. DSA does not ship or pass it on.\n\nThe translator works from the next start of Android."
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "DSA가 Google의 SDK 저장소({0})에서 이 Android 버전용 Android 에뮬레이터 이미지를 받고, 그 안의 ARM 번역기만 꺼냅니다. 번역기는 Google의 소프트웨어이며 Android SDK 라이선스({1})에 따라 제공됩니다. 받으면 그 약관에 동의하는 것입니다. DSA는 번역기를 싣거나 다시 배포하지 않습니다. 이미지는 약 2GB이며 다 쓰면 지웁니다. 번역기는 Android를 다음에 시작할 때부터 동작합니다."
+            "value": "DSA가 이 Android 버전용 Google Android 에뮬레이터 이미지를 받아, 그 안의 ARM 번역기만 꺼냅니다.\n\n• 크기: 약 2GB, 다 쓰면 지웁니다\n• 출처: {0}\n• 약관: Android SDK 라이선스, {1}\n\n번역기는 Google의 소프트웨어입니다. 받으면 그 약관에 동의하는 것입니다. DSA는 번역기를 싣거나 다시 배포하지 않습니다.\n\n번역기는 Android를 다음에 시작할 때부터 동작합니다."
           }
         }
       }
@@ -5436,13 +5436,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Every value goes back to its default: this Mac's, or DSA's own where the Mac does not say. It applies from the next start of Android."
+            "value": "Every value goes back to its default.\n\nThe default is this Mac's value, or DSA's own where the Mac does not say.\n\nIt applies from the next start of Android."
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "모든 값이 기본값으로 돌아갑니다. 기본값은 이 Mac의 정보이고, Mac이 알려 주지 않는 값은 DSA의 값입니다. Android를 다음에 시작할 때부터 적용됩니다."
+            "value": "모든 값이 기본값으로 돌아갑니다.\n\n기본값은 이 Mac의 정보이고, Mac이 알려 주지 않는 값은 DSA의 값입니다.\n\nAndroid를 다음에 시작할 때부터 적용됩니다."
           }
         }
       }
@@ -8003,13 +8003,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "This erases every app you installed in Android, the accounts you signed in to and the data of every app. Android stops now, and its next start is as it was first installed. The Android image and DSA's settings stay. This cannot be undone."
+            "value": "This erases Android's data:\n• every app you installed\n• the accounts you signed in to\n• the data of every app\n\nAndroid stops now and next starts as it was first installed. The Android image and DSA's settings stay.\n\nThis cannot be undone."
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "Android에 설치한 모든 앱, 로그인한 계정, 모든 앱의 데이터가 지워집니다. Android는 지금 멈추고, 다음에 시작할 때 처음 설치했을 때의 상태가 됩니다. Android 이미지와 DSA 설정은 그대로 남습니다. 되돌릴 수 없습니다."
+            "value": "Android의 데이터가 지워집니다.\n• 설치한 모든 앱\n• 로그인한 계정\n• 모든 앱의 데이터\n\nAndroid는 지금 멈추고, 다음에 시작할 때 처음 설치한 상태가 됩니다. Android 이미지와 DSA 설정은 남습니다.\n\n되돌릴 수 없습니다."
           }
         }
       }
@@ -8207,13 +8207,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The windows of Android apps close for a moment. Android and its apps keep running."
+            "value": "The windows of Android apps close for a moment.\n\nAndroid and its apps keep running."
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "Android 앱 창이 잠시 닫힙니다. Android와 앱은 계속 실행됩니다."
+            "value": "Android 앱 창이 잠시 닫힙니다.\n\nAndroid와 앱은 계속 실행됩니다."
           }
         }
       }
@@ -8870,13 +8870,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "DSA stops every user's Android and installs the newest version. The DSA service restarts when setup is done."
+            "value": "DSA stops every user's Android and installs the newest version.\n\nThe DSA service restarts when setup is done."
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "DSA가 모든 사용자의 Android를 종료하고 최신 버전을 설치합니다. 설치가 끝나면 DSA 서비스가 다시 시작합니다."
+            "value": "DSA가 모든 사용자의 Android를 종료하고 최신 버전을 설치합니다.\n\n설치가 끝나면 DSA 서비스가 다시 시작합니다."
           }
         }
       }
@@ -9499,13 +9499,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Android cannot change how {0} runs and keep its data. Installing it again erases its data: sign-ins, settings and files it keeps for itself."
+            "value": "Android cannot change how {0} runs and keep its data.\n\nInstalling it again erases its sign-ins, its settings and the files it keeps for itself."
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "Android가 데이터를 지킨 채 {0}의 실행 방식을 바꿀 수 없습니다. 다시 설치하면 로그인, 설정, 앱이 보관한 파일 같은 데이터가 지워집니다."
+            "value": "Android가 데이터를 지킨 채 {0}의 실행 방식을 바꿀 수 없습니다.\n\n다시 설치하면 로그인, 설정, 앱이 보관한 파일 같은 데이터가 지워집니다."
           }
         }
       }
@@ -9992,13 +9992,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "This installs the apps of the backup that Android does not have and replaces the data of every app in the backup with the backup's. What those apps saved since the backup is lost."
+            "value": "Restoring changes the apps in Android:\n• Apps in the backup that Android does not have are installed.\n• The data of every app in the backup is replaced with the backup's.\n\nWhat those apps saved since the backup is lost."
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "백업에 있지만 Android에 없는 앱을 설치하고, 백업에 있는 모든 앱의 데이터를 백업의 데이터로 바꿉니다. 백업 이후 그 앱들이 저장한 내용은 사라집니다."
+            "value": "복원하면 Android의 앱이 바뀝니다.\n• 백업에 있지만 Android에 없는 앱을 설치합니다.\n• 백업에 있는 모든 앱의 데이터를 백업의 데이터로 바꿉니다.\n\n백업 이후 그 앱들이 저장한 내용은 사라집니다."
           }
         }
       }
@@ -10128,13 +10128,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Write this key down and keep it somewhere safe. Without it, the backup cannot be restored on another computer, and anyone who has it can read the backup."
+            "value": "Write this key down and keep it somewhere safe.\n\nWithout it, the backup cannot be restored on another computer. Anyone who has it can read the backup."
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "이 키를 적어 안전한 곳에 보관하세요. 이 키가 없으면 다른 컴퓨터에서 백업을 복원할 수 없고, 이 키를 가진 사람은 누구나 백업을 읽을 수 있습니다."
+            "value": "이 키를 적어 안전한 곳에 보관하세요.\n\n이 키가 없으면 다른 컴퓨터에서 백업을 복원할 수 없습니다. 이 키를 가진 사람은 누구나 백업을 읽을 수 있습니다."
           }
         }
       }
@@ -10179,13 +10179,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Enter the recovery key you wrote down for the backup folder. DSA then reads that backup with it, and you can restore from it."
+            "value": "Enter the recovery key you wrote down for the backup folder.\n\nDSA then reads that backup with it, and you can restore from it."
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "백업 폴더용으로 적어 둔 복구 키를 넣으세요. 그러면 DSA가 이 키로 백업을 읽고, 그 백업에서 복원할 수 있습니다."
+            "value": "백업 폴더용으로 적어 둔 복구 키를 넣으세요.\n\n그러면 DSA가 이 키로 백업을 읽고, 그 백업에서 복원할 수 있습니다."
           }
         }
       }
@@ -10332,13 +10332,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The backups of {0} apps ({1}) are still kept on this Mac. Delete them and their key as well, or keep them for a later restore?"
+            "value": "The backups of {0} apps ({1}) are still kept on this Mac.\n\nDelete them and their key as well, or keep them for a later restore?"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "앱 {0}개의 백업({1})이 이 Mac에 아직 남아 있습니다. 백업과 그 키도 삭제할까요, 나중에 복원하도록 남겨 둘까요?"
+            "value": "앱 {0}개의 백업({1})이 이 Mac에 아직 남아 있습니다.\n\n백업과 그 키도 삭제할까요, 나중에 복원하도록 남겨 둘까요?"
           }
         }
       }
@@ -10901,8 +10901,8 @@
     "Widevine_Notice": {
       "extractionState": "manual",
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "DSA downloads the Android emulator image for this Android version from Google's SDK repository ({0}) and takes out only its Widevine module, unchanged. Widevine is Google's software, offered under the Android SDK License ({1}); by downloading it you accept those terms. DSA does not ship or pass it on. The image is about 2 GB and is deleted afterwards. Widevine works from the next start of Android." } },
-        "ko": { "stringUnit": { "state": "translated", "value": "DSA가 Google의 SDK 저장소({0})에서 이 Android 버전용 Android 에뮬레이터 이미지를 받고, 그 안의 Widevine 모듈만 바꾸지 않고 꺼냅니다. Widevine은 Google의 소프트웨어이며 Android SDK 라이선스({1})에 따라 제공됩니다. 받으면 그 약관에 동의하는 것입니다. DSA는 이를 싣거나 다시 배포하지 않습니다. 이미지는 약 2GB이며 다 쓰면 지웁니다. Widevine은 Android를 다음에 시작할 때부터 동작합니다." } }
+        "en": { "stringUnit": { "state": "translated", "value": "DSA downloads Google's Android emulator image for this Android version and takes out only its Widevine module, unchanged.\n\n• Size: about 2 GB, deleted afterwards\n• From: {0}\n• Terms: Android SDK License, {1}\n\nWidevine is Google's software. By downloading it you accept those terms. DSA does not ship or pass it on.\n\nWidevine here is security level L3, so streaming services send standard definition (SD) at most.\n\nWidevine works from the next start of Android." } },
+        "ko": { "stringUnit": { "state": "translated", "value": "DSA가 이 Android 버전용 Google Android 에뮬레이터 이미지를 받아, 그 안의 Widevine 모듈만 바꾸지 않고 꺼냅니다.\n\n• 크기: 약 2GB, 다 쓰면 지웁니다\n• 출처: {0}\n• 약관: Android SDK 라이선스, {1}\n\nWidevine은 Google의 소프트웨어입니다. 받으면 그 약관에 동의하는 것입니다. DSA는 이를 싣거나 다시 배포하지 않습니다.\n\n여기의 Widevine은 보안 수준 L3이라, 스트리밍 서비스는 표준 화질(SD)까지만 보냅니다.\n\nWidevine은 Android를 다음에 시작할 때부터 동작합니다." } }
       }
     },
     "Widevine_Quality": {
