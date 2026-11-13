@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <utility>
 
 #include "log.h"
 
@@ -184,9 +185,9 @@ void HostDecoder::write() {
 void HostDecoder::read() {
     std::vector<uint8_t> frame;
     while (!mClosed.load() && readFrame(mFd, &frame)) {
-        const HostMessage message = decodeHostFrame(frame.data(), frame.size());
+        HostMessage message = decodeHostFrame(frame.data(), frame.size());
         if (!mClosed.load()) {
-            mOnMessage(message);
+            mOnMessage(std::move(message));
         }
     }
     if (!mClosed.load()) {

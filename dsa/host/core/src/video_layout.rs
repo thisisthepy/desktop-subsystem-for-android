@@ -68,6 +68,37 @@ pub fn rows_from_length(len: usize, pitch: usize) -> Option<usize> {
     (rows + rows.div_ceil(2) == total).then_some(rows)
 }
 
+/// The rows a picture read out of a decoder's surface is copied into first, a multiple of
+/// [`STAGING_ROW_ALIGNMENT`].
+///
+/// A surface the CPU reads is mapped as the GPU's driver lays it out, and some drivers start a
+/// mapped 4:2:0 surface's chroma plane after its height rounded up to their own alignment, not
+/// after its height: a 640x360 surface had its chroma at row 368 or 384. Read from row 360, the
+/// first chroma rows were the luma padding below the picture, and the picture's top rows
+/// showed as blocks of green and purple. A staging surface whose height is already a multiple
+/// of every such alignment has its chroma where its height says.
+pub fn staging_rows(rows: usize) -> usize {
+    rows.max(1).div_ceil(STAGING_ROW_ALIGNMENT) * STAGING_ROW_ALIGNMENT
+}
+
+/// The alignment of a staging surface's height (see [`staging_rows`]): larger than any GPU
+/// rounds a surface's rows to.
+pub const STAGING_ROW_ALIGNMENT: usize = 64;
+
+/// The row a mapped staging surface of `rows` rows has its chroma plane at, given the mapping's
+/// row pitch and the size the mapping says the surface has (its depth pitch, 0 when the driver
+/// gives none).
+///
+/// The size wins when it is that of a 4:2:0 surface of at least `rows` luma rows: a driver
+/// that padded the surface further says so there. Any other size (only the luma plane, a size
+/// rounded up to a page, none) says nothing about the chroma, and `rows` stands.
+pub fn mapped_chroma_row(rows: usize, row_pitch: usize, mapped_size: usize) -> usize {
+    match rows_from_length(mapped_size, row_pitch) {
+        Some(luma) if luma >= rows && luma <= rows.saturating_mul(2) => luma,
+        _ => rows,
+    }
+}
+
 /// A rectangle of a decoder's surface: where it starts and its size, in luma samples.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Area {
@@ -78,6 +109,14 @@ pub struct Area {
 }
 
 impl Area {
+    /// The rectangle from the surface's corner to this area's far edges, rounded up to whole
+    /// chroma pairs: what a copy out of the surface has to take for this area to be in it.
+    pub fn reach(&self) -> Size {
+        let right = self.left + self.width;
+        let bottom = self.top + self.height;
+        (right + (right & 1), bottom + (bottom & 1))
+    }
+
     /// The `size` at the surface's corner.
     pub fn at_corner(size: Size) -> Area {
         Area {

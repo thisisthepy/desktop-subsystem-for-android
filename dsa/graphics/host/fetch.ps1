@@ -78,7 +78,9 @@ git -C $GfxstreamDir clean -fdx
 # 0027 each render thread's read buffer stays twice the largest batch its guest thread ever sent.
 # Without 0028 its Vulkan reply buffer stays twice the largest reply it ever sent. Without 0029 a
 # ColorBuffer asked for while the device is being made again after a GPU reset ends the guest's
-# stream as a fatal error, instead of failing that one call.
+# stream as a fatal error, instead of failing that one call. Without 0030 the upload of what a
+# guest CPU wrote (a video's pictures) is not ordered with its layout transitions or with an
+# earlier frame still sampling the image, and the rows copied first show blocks of other data.
 # A patch that does not apply stops the fetch.
 $PatchDir = Join-Path $RepoRoot "dsa/graphics/patches"
 $Patches = @(Get-ChildItem -Path $PatchDir -Filter "0001-*.patch") +
@@ -106,7 +108,8 @@ $Patches = @(Get-ChildItem -Path $PatchDir -Filter "0001-*.patch") +
     @(Get-ChildItem -Path $PatchDir -Filter "0026-*.patch") +
     @(Get-ChildItem -Path $PatchDir -Filter "0027-*.patch") +
     @(Get-ChildItem -Path $PatchDir -Filter "0028-*.patch") +
-    @(Get-ChildItem -Path $PatchDir -Filter "0029-*.patch")
+    @(Get-ChildItem -Path $PatchDir -Filter "0029-*.patch") +
+    @(Get-ChildItem -Path $PatchDir -Filter "0030-*.patch")
 foreach ($Patch in $Patches) {
     Write-Host "Applying patch: $($Patch.Name)"
     git -C $GfxstreamDir apply --recount $Patch.FullName

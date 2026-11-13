@@ -31,7 +31,8 @@ std::optional<std::vector<CodecSupport>> queryCapabilities();
 
 class HostDecoder {
    public:
-    using MessageHandler = std::function<void(const HostMessage&)>;
+    // Takes each message as it comes, on the reading thread.
+    using MessageHandler = std::function<void(HostMessage)>;
 
     ~HostDecoder();
 

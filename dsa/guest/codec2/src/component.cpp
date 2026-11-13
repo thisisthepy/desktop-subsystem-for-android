@@ -71,6 +71,17 @@ constexpr auto kAllocatePoll = std::chrono::milliseconds(50);
 constexpr auto kFenceWait = std::chrono::seconds(1);
 // How long a flush waits for the host's answer.
 constexpr auto kFlushWait = std::chrono::seconds(2);
+// The host's pictures that may wait for the component's own thread: enough that the host
+// decodes on while one picture waits for a buffer of the app's surface, and few, since each
+// is a decoded frame in memory (345 KiB at 640x360; at 4096x2304, the byte bound lets two).
+constexpr size_t kWaitingPictures = 4;
+constexpr size_t kWaitingBytes = 32 * 1024 * 1024;
+
+using Clock = std::chrono::steady_clock;
+
+std::chrono::microseconds since(Clock::time_point from, Clock::time_point to) {
+    return std::chrono::duration_cast<std::chrono::microseconds>(to - from);
+}
 
 ndk::ScopedAStatus status(c2_status_t error) { return ndk::ScopedAStatus::fromServiceSpecificError(error); }
 
@@ -207,9 +218,52 @@ Component::Component(const DecoderInfo& info, const std::shared_ptr<C2ComponentI
       mIntf(intf),
       mParams(params),
       mListener(listener),
-      mInterface(ndk::SharedRefBase::make<ComponentInterface>(intf)) {}
+      mInterface(ndk::SharedRefBase::make<ComponentInterface>(intf)),
+      mArrivals(std::make_shared<ArrivalQueue>(kWaitingPictures, kWaitingBytes)) {}
 
-Component::~Component() { closeHost(); }
+Component::~Component() {
+    {
+        std::lock_guard<std::mutex> lock(mLock);
+        mGate.stop();
+    }
+    mArrivals->close();
+    closeHost();
+    stopWorker();
+}
+
+void Component::startWorker() {
+    if (mWorker.joinable()) {
+        return;
+    }
+    mArrivals->open();
+    std::weak_ptr<Component> self = ref<Component>();
+    std::shared_ptr<ArrivalQueue> arrivals = mArrivals;
+    mWorker = std::thread([self, arrivals] {
+        Arrival arrival;
+        while (arrivals->pop(&arrival)) {
+            std::shared_ptr<Component> component = self.lock();
+            if (!component) {
+                return;
+            }
+            component->handle(arrival);
+        }
+    });
+}
+
+void Component::stopWorker() {
+    // Wakes the thread whether it waits for a message or, through a closed gate, for a buffer.
+    mArrivals->close();
+    if (!mWorker.joinable()) {
+        return;
+    }
+    if (mWorker.get_id() == std::this_thread::get_id()) {
+        // The component's last reference went on its own thread, which ends once it finds
+        // the queue closed.
+        mWorker.detach();
+    } else {
+        mWorker.join();
+    }
+}
 
 void Component::closeHost() {
     std::unique_ptr<HostDecoder> host;
@@ -254,11 +308,13 @@ ndk::ScopedAStatus Component::start() {
     }
     std::string error;
     std::weak_ptr<Component> self = ref<Component>();
+    // The thread that takes the host's pictures runs before the host can send one.
+    startWorker();
     mHost = HostDecoder::open(
         mInfo.codec, mParams->width(), mParams->height(),
-        [self](const HostMessage& message) {
+        [self](HostMessage message) {
             if (auto component = self.lock()) {
-                component->onHostMessage(message);
+                component->onHostMessage(std::move(message));
             }
         },
         &error);
@@ -321,19 +377,49 @@ ndk::ScopedAStatus Component::queue(const WorkBundle& bundle) {
     return ndk::ScopedAStatus::ok();
 }
 
-void Component::onHostMessage(const HostMessage& message) {
+void Component::onHostMessage(HostMessage message) {
+    const Clock::time_point now = Clock::now();
+    const uint64_t ticket = mGate.ticket();
     if (const auto* frame = std::get_if<Frame>(&message)) {
-        if (frame->endOfStream) {
-            endOfStream(*frame);
-        } else {
-            picture(*frame);
+        if (!frame->endOfStream) {
+            mStats.received(now);
+            if (!mGate.open(ticket)) {
+                // A flush is waiting for the host's answer, and this picture is of the stream
+                // before it: its work goes back with the flushed ones.
+                mStats.dropped(now, Drop::Flushed);
+                return;
+            }
         }
     } else if (std::holds_alternative<Flushed>(message)) {
+        // Taken at once: the flush waits for it, and the pictures before it are dropped by
+        // the component's own thread as it comes to them, their tickets being stale.
         std::lock_guard<std::mutex> lock(mLock);
         mFlushDone = true;
         mFlushed.notify_all();
-    } else if (const auto* error = std::get_if<DecodeError>(&message)) {
+        return;
+    } else if (!std::holds_alternative<DecodeError>(message)) {
+        return;
+    }
+    // Waits while the queue is full, which holds the host back; a stop ends the wait.
+    mArrivals->push(Arrival{std::move(message), ticket, now});
+}
+
+void Component::handle(Arrival& arrival) {
+    if (auto* frame = std::get_if<Frame>(&arrival.message)) {
+        if (frame->endOfStream) {
+            endOfStream(*frame);
+        } else {
+            picture(*frame, arrival.ticket, arrival.arrived);
+        }
+    } else if (const auto* error = std::get_if<DecodeError>(&arrival.message)) {
         decodeError(error->error);
+    }
+}
+
+void Component::logStats() {
+    std::string line;
+    if (mStats.report(Clock::now(), mArrivals->size(), &line)) {
+        CODEC_LOGI("%s %ux%u %s", mInfo.name, mLastWidth, mLastHeight, line.c_str());
     }
 }
 
@@ -461,17 +547,25 @@ AHardwareBuffer* Component::allocate(uint32_t width, uint32_t height, uint64_t t
     return buffer;
 }
 
-void Component::picture(const Frame& frame) {
-    const uint64_t ticket = mGate.ticket();
+void Component::picture(const Frame& frame, uint64_t ticket, Clock::time_point arrived) {
+    const Clock::time_point begun = Clock::now();
+    mLastWidth = frame.width;
+    mLastHeight = frame.height;
     if (!mGate.open(ticket)) {
-        // A flush is waiting for the host's answer, and this picture is of the stream before
-        // it: its work goes back with the flushed ones. Waiting for a buffer here would hold
-        // the flush up by as long.
+        // A flush, a stop or a reset came after it: its work goes back with the flushed ones.
+        // Waiting for a buffer here would hold the flush up by as long.
+        mStats.dropped(begun, Drop::Flushed);
+        logStats();
         return;
     }
+    PictureTimes times;
+    times.queued = since(arrived, begun);
     const PictureSize bufferSize = bufferSizeFor(frame.width, frame.height);
     std::shared_ptr<IGraphicBufferAllocator> from;
     AHardwareBuffer* buffer = allocate(bufferSize.width, bufferSize.height, ticket, &from);
+    const Clock::time_point allocated = Clock::now();
+    times.buffer = since(begun, allocated);
+    const bool gotBuffer = buffer != nullptr;
     if (buffer != nullptr) {
         // The buffer's own size, which an allocator may make larger than asked: every sample
         // of it is written, so none is left as zeros (green) or as an older picture.
@@ -512,6 +606,8 @@ void Component::picture(const Frame& frame) {
             mWriteFailures.reset();
         }
     }
+    const Clock::time_point copied = Clock::now();
+    times.write = since(allocated, copied);
     std::optional<Work> work;
     {
         std::lock_guard<std::mutex> lock(mLock);
@@ -535,6 +631,8 @@ void Component::picture(const Frame& frame) {
     }
     if (!work) {
         discard(buffer, from);
+        mStats.dropped(copied, Drop::Flushed);
+        logStats();
         return;
     }
     // Without a buffer that holds the whole picture the work finishes with no output, rather
@@ -543,6 +641,16 @@ void Component::picture(const Frame& frame) {
     if (buffer != nullptr) {
         AHardwareBuffer_release(buffer);
     }
+    const Clock::time_point handed = Clock::now();
+    if (buffer != nullptr) {
+        times.handOff = since(copied, handed);
+        mStats.shown(handed, times);
+    } else if (!mGate.open(ticket)) {
+        mStats.dropped(handed, Drop::Flushed);
+    } else {
+        mStats.dropped(handed, gotBuffer ? Drop::NotWritten : Drop::NoBuffer);
+    }
+    logStats();
 }
 
 void Component::endOfStream(const Frame& frame) {
@@ -699,7 +807,11 @@ ndk::ScopedAStatus Component::stop() {
         std::lock_guard<std::mutex> lock(mLock);
         mGate.stop();
     }
+    // Ends a reader's wait for room in the queue, then the reader, then the thread that
+    // writes the pictures.
+    mArrivals->close();
     closeHost();
+    stopWorker();
     std::lock_guard<std::mutex> lock(mLock);
     mPending.clear();
     return ndk::ScopedAStatus::ok();
@@ -710,7 +822,9 @@ ndk::ScopedAStatus Component::reset() {
         std::lock_guard<std::mutex> lock(mLock);
         mGate.stop();
     }
+    mArrivals->close();
     closeHost();
+    stopWorker();
     std::lock_guard<std::mutex> lock(mLock);
     mPending.clear();
     mPools.clear();

@@ -3,9 +3,9 @@
 
 use dsa_host_core::video::Codec;
 use dsa_host_core::video_layout::{
-    av1_frame_size, chroma_start_row, picture_from_surface, picture_from_surface_area,
-    rows_from_length, stream_frame_size, visible_area, visible_size, vp9_frame_size, Area,
-    StreamSizes, SurfaceFormat,
+    av1_frame_size, chroma_start_row, mapped_chroma_row, picture_from_surface,
+    picture_from_surface_area, rows_from_length, staging_rows, stream_frame_size, visible_area,
+    visible_size, vp9_frame_size, Area, StreamSizes, SurfaceFormat,
 };
 
 const Y: u8 = 81;
@@ -42,6 +42,79 @@ fn fr26_the_chroma_plane_starts_after_the_surfaces_own_rows() {
     assert_eq!(chroma_start_row(None, 0, 240), 240);
     // A surface height smaller than the picture is not one.
     assert_eq!(chroma_start_row(Some(120), 256, 240), 256);
+}
+
+#[test]
+fn fr26_a_staging_surface_is_a_whole_number_of_aligned_rows() {
+    assert_eq!(staging_rows(360), 384);
+    assert_eq!(staging_rows(368), 384);
+    assert_eq!(staging_rows(640), 640);
+    assert_eq!(staging_rows(1088), 1088);
+    assert_eq!(staging_rows(1), 64);
+    assert_eq!(staging_rows(0), 64);
+}
+
+#[test]
+fn fr26_a_mapping_that_says_it_is_taller_moves_the_chroma() {
+    let pitch = 640;
+    // A 4:2:0 mapping of exactly the staging rows.
+    assert_eq!(mapped_chroma_row(384, pitch, pitch * 576), 384);
+    // A driver that padded the luma plane further says so in the mapping's size.
+    assert_eq!(mapped_chroma_row(384, pitch, pitch * (448 + 224)), 448);
+    // Sizes that say nothing about the chroma: only the luma plane, none, a page-rounded one,
+    // and one that would put the chroma before the staging rows.
+    assert_eq!(mapped_chroma_row(384, pitch, pitch * 384), 384);
+    assert_eq!(mapped_chroma_row(384, pitch, 0), 384);
+    assert_eq!(mapped_chroma_row(384, pitch, pitch * 576 + 4096), 384);
+    assert_eq!(mapped_chroma_row(384, pitch, pitch * 540), 384);
+    assert_eq!(mapped_chroma_row(384, 0, pitch * 576), 384);
+}
+
+#[test]
+fn fr26_the_top_rows_keep_their_colour_when_the_driver_pads_the_surface() {
+    // A 640x360 picture in a 360-row surface whose driver maps it with its chroma at row 384,
+    // the padding rows below the picture holding what the decoder left there.
+    let (width, height, pitch, padded) = (640usize, 360usize, 640usize, 384usize);
+    let mut data = surface(width, height, pitch, padded);
+    for row in height..padded {
+        for x in 0..width {
+            data[row * pitch + x] = if (x / 16 + row) % 2 == 0 { 16 } else { 235 };
+        }
+    }
+    // Read as the surface's own height says, the first chroma rows are that padding: the
+    // picture's top 48 rows showed as blocks of green and purple.
+    let wrong = picture_from_surface(1, &data, SurfaceFormat::Nv12, pitch, height, 640, 360)
+        .expect("a picture");
+    let wrong_chroma = chroma_of(&wrong.nv12, 640, 360);
+    assert!(wrong_chroma[..640].iter().any(|&c| c != U && c != V));
+    // Read through a staging surface of whole aligned rows, every chroma row is the picture's.
+    let rows = mapped_chroma_row(staging_rows(height), pitch, data.len());
+    assert_eq!(rows, padded);
+    let picture = picture_from_surface(1, &data, SurfaceFormat::Nv12, pitch, rows, 640, 360)
+        .expect("a picture");
+    let chroma = chroma_of(&picture.nv12, 640, 360);
+    assert_eq!(chroma.len(), 640 * 180);
+    for (i, pair) in chroma.chunks(2).enumerate() {
+        assert_eq!(
+            pair,
+            [U, V],
+            "chroma pair {i} (row {}) is not the picture's",
+            i / 320
+        );
+    }
+    assert!(picture.nv12[..640 * 360].iter().all(|&y| y == Y));
+}
+
+#[test]
+fn fr26_a_copy_reaches_the_far_edges_of_the_area_in_whole_pairs() {
+    assert_eq!(Area::at_corner((640, 360)).reach(), (640, 360));
+    let cropped = Area {
+        left: 2,
+        top: 4,
+        width: 425,
+        height: 239,
+    };
+    assert_eq!(cropped.reach(), (428, 244));
 }
 
 #[test]
