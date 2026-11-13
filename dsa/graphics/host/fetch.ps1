@@ -81,6 +81,9 @@ git -C $GfxstreamDir clean -fdx
 # stream as a fatal error, instead of failing that one call. Without 0030 the upload of what a
 # guest CPU wrote (a video's pictures) is not ordered with its layout transitions or with an
 # earlier frame still sampling the image, and the rows copied first show blocks of other data.
+# Without 0031 that upload never releases the image to the guest, which reads it through an image
+# of its own: on a GPU that compresses what a copy writes (Intel Arc) a video's pictures show
+# rows of green, purple and yellow blocks where they are flat.
 # A patch that does not apply stops the fetch.
 $PatchDir = Join-Path $RepoRoot "dsa/graphics/patches"
 $Patches = @(Get-ChildItem -Path $PatchDir -Filter "0001-*.patch") +
@@ -109,7 +112,8 @@ $Patches = @(Get-ChildItem -Path $PatchDir -Filter "0001-*.patch") +
     @(Get-ChildItem -Path $PatchDir -Filter "0027-*.patch") +
     @(Get-ChildItem -Path $PatchDir -Filter "0028-*.patch") +
     @(Get-ChildItem -Path $PatchDir -Filter "0029-*.patch") +
-    @(Get-ChildItem -Path $PatchDir -Filter "0030-*.patch")
+    @(Get-ChildItem -Path $PatchDir -Filter "0030-*.patch") +
+    @(Get-ChildItem -Path $PatchDir -Filter "0031-*.patch")
 foreach ($Patch in $Patches) {
     Write-Host "Applying patch: $($Patch.Name)"
     git -C $GfxstreamDir apply --recount $Patch.FullName
