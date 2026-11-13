@@ -564,17 +564,57 @@ fn vendor_apex(partition: &Path) -> Result<(Option<NamedApex>, Option<String>), 
     } else {
         "vendor/"
     };
+    // Android 16's images name the file after the module; Android 17's add the module's
+    // version (com.google.android.widevine-15027108-cp2a.apex). The manifest inside says which
+    // module it is, and is checked once the file is out; the file is kept under the plain name.
     let mut apex = None;
-    for name in [format!("{MODULE}.apex"), format!("{MODULE}.capex")] {
-        if let Some(data) = fs.file(&format!("{root}apex/{name}"))? {
-            apex = Some((name, data));
-            break;
+    let mut names: Vec<String> = fs
+        .list(&format!("{root}apex"))?
+        .into_iter()
+        .filter(|(name, folder)| !folder && apex_file_kind(name).is_some())
+        .map(|(name, _)| name)
+        .collect();
+    names.sort_by_key(|name| (apex_file_kind(name) != Some(ApexFile::Plain), name.clone()));
+    if let Some(found) = names.into_iter().next() {
+        if let Some(data) = fs.file(&format!("{root}apex/{found}"))? {
+            let extension = if found.ends_with(".capex") {
+                "capex"
+            } else {
+                "apex"
+            };
+            apex = Some((format!("{MODULE}.{extension}"), data));
         }
     }
     let build = fs
         .file(&format!("{root}build.prop"))?
         .map(|data| String::from_utf8_lossy(&data).into_owned());
     Ok((apex, build))
+}
+
+/// How a file in a vendor image's `apex` folder names Widevine's module.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApexFile {
+    /// `com.google.android.widevine.apex` (or `.capex`).
+    Plain,
+    /// The module's name, a dash and its version: `com.google.android.widevine-15027108-cp2a.apex`.
+    Versioned,
+}
+
+/// Whether `name` is the file of Widevine's module in a vendor image, and how it is named.
+/// Another module whose name starts the same (`com.google.android.widevinex.apex`) is not.
+pub fn apex_file_kind(name: &str) -> Option<ApexFile> {
+    let stem = name
+        .strip_suffix(".apex")
+        .or_else(|| name.strip_suffix(".capex"))?;
+    if stem == MODULE {
+        return Some(ApexFile::Plain);
+    }
+    let version = stem.strip_prefix(MODULE)?.strip_prefix('-')?;
+    let plain = !version.is_empty()
+        && version
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.');
+    plain.then_some(ApexFile::Versioned)
 }
 
 /// Downloads `image` into the new folder `work`, checks it against Google's list and against
@@ -835,6 +875,30 @@ mod tests {
         let _ = fs::remove_dir_all(&folder);
         write_repository(&folder, images).unwrap();
         folder.display().to_string()
+    }
+
+    #[test]
+    fn fr37_android_17s_versioned_apex_file_is_widevines() {
+        // Google's Android 17 x86_64 image (x86_64-37.0_r08) keeps the module as
+        // vendor/apex/com.google.android.widevine-15027108-cp2a.apex.
+        let versioned = format!("{MODULE}-15027108-cp2a.apex");
+        assert_eq!(apex_file_kind(&versioned), Some(ApexFile::Versioned));
+        assert_eq!(
+            apex_file_kind(&format!("{MODULE}.apex")),
+            Some(ApexFile::Plain)
+        );
+        assert_eq!(
+            apex_file_kind(&format!("{MODULE}.capex")),
+            Some(ApexFile::Plain)
+        );
+        assert_eq!(
+            apex_file_kind(&format!("{MODULE}-1.capex")),
+            Some(ApexFile::Versioned)
+        );
+        assert_eq!(apex_file_kind("com.google.android.widevinex.apex"), None);
+        assert_eq!(apex_file_kind(&format!("{MODULE}-.apex")), None);
+        assert_eq!(apex_file_kind(&format!("{MODULE}-1/../x.apex")), None);
+        assert_eq!(apex_file_kind("com.android.hardware.cas.apex"), None);
     }
 
     #[test]
