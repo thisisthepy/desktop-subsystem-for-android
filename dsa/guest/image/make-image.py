@@ -39,7 +39,8 @@ The results go to dsa/target/image/<version>/:
   start while the user has installed no package of their own.
 
 With --framework, the system partition carries the patched SurfaceFlinger, libhwui and libEGL
-that recover from a GPU device loss, in place of the build's own (FRAMEWORK_FILES), and
+that recover from a GPU device loss, and libandroid_runtime, which gives Google Play the
+computer's memory, in place of the build's own (FRAMEWORK_FILES), and
 image.json describes them under "framework". When the framework build has DSA's KeyMint
 (KEYMINT_FILES), whose root key of key blobs comes from the host, the vendor partition carries it
 in place of the KeyMint APEX, which the image then does not select.
@@ -3880,7 +3881,7 @@ def framework_problems(description, build_id, android_major, arch, read):
 
 def framework_names(files):
     """The files a framework build must have, given the names its framework.json lists: the
-    framework's three, and the KeyMint's when it has any of them (a build from before the KeyMint
+    framework's (FRAMEWORK_FILES), and the KeyMint's when it has any of them (a build from before the KeyMint
     has none)."""
     if any(name in KEYMINT_FILES for name in files):
         return FRAMEWORK_FILES + KEYMINT_FILES
@@ -3999,6 +4000,75 @@ def addon_disk_problems(names, read):
         if path in names and f"mount erofs {image} " not in read(path).decode(errors="replace"):
             problems.append(f"{rc_name} never mounts {image}, so that add-on is not taken from the "
                             "add-on disk")
+    return problems
+
+
+# Google Play sees the computer's memory as the device's memory: it hands a device under 8 GB a
+# Chrome whose browser is 32-bit, which this 64-bit only guest cannot start, and the VM, which
+# starts small and grows, is not the computer. The host passes the computer's memory in the
+# bootconfig (kernel.dsa_host_memory.total_kb); dsa-channeld names the Play Store's and Play
+# services' uids in HOST_MEMORY_PROPERTY, and init writes them to the kernel's list. The kernel
+# then shows those apps the computer's memory in /proc/meminfo and sysinfo(), and the framework's
+# libandroid_runtime answers their ActivityManager.getMemoryInfo with it. Only init may write the
+# list and only the daemon may set the property, so no app can name itself.
+HOST_MEMORY_UIDS = "/sys/module/dsa_host_memory/parameters/uids"
+
+
+def host_memory_action():
+    """The init action that hands the daemon's list of apps to the kernel."""
+    return (f"on property:{HOST_MEMORY_PROPERTY}=*\n"
+            f"    write {HOST_MEMORY_UIDS} ${{{HOST_MEMORY_PROPERTY}}}")
+
+
+HOST_MEMORY_RULES = {
+    '(genfscon sysfs "/module/dsa_host_memory" (u object_r dsa_sysfs_host_memory ((s0) (s0))))':
+        "the kernel's list of apps is plain sysfs, which init may not write",
+    "(allow vendor_init dsa_sysfs_host_memory (file (write open getattr)))":
+        "init cannot hand the kernel the apps the daemon names",
+    "(allow system_server dsa_sysfs_host_memory (file (read open getattr)))":
+        "system_server cannot read the computer's memory or the apps, so Play's totalMem stays the VM's",
+    "(allow dsa_channeld dsa_host_memory_prop (property_service (set)))":
+        "dsa-channeld cannot name the Play Store and Play services",
+}
+# The framework's JNI library carries the change that answers getMemoryInfo for the named apps.
+HOST_MEMORY_FRAMEWORK_FILE = "SYSTEM/lib64/libandroid_runtime.so"
+
+
+def host_memory_problems(manifest, names, read):
+    """The problems with how an image shows Google Play the computer's memory, given image.json,
+    the names in its target files and a function that reads one: init hands the daemon's list of
+    apps to the kernel, the property has its type, the policy lets only init write the list,
+    only the daemon set the property and system_server read both parameters, and the patched
+    libandroid_runtime is the framework build's."""
+    problems = []
+    rc = read(MEMORY_RC).decode(errors="replace") if MEMORY_RC in names else ""
+    if host_memory_action() not in rc.replace("\r\n", "\n"):
+        problems.append(f"{MEMORY_RC} does not hand {HOST_MEMORY_PROPERTY} to the kernel ({HOST_MEMORY_UIDS}), "
+                        "so Google Play sees the VM's memory and gets a 32-bit Chrome")
+    contexts = (read(VENDOR_PROPERTY_CONTEXTS).decode(errors="replace").splitlines()
+                if VENDOR_PROPERTY_CONTEXTS in names else [])
+    if HOST_MEMORY_PROPERTY_CONTEXT not in contexts:
+        problems.append(f"{VENDOR_PROPERTY_CONTEXTS} does not give {HOST_MEMORY_PROPERTY} its type, so "
+                        "dsa-channeld cannot set it")
+    policy_name = "SYSTEM/etc/selinux/plat_sepolicy.cil"
+    policy = read(policy_name).decode(errors="replace") if policy_name in names else ""
+    for rule, why in HOST_MEMORY_RULES.items():
+        if rule not in policy:
+            problems.append(f"the SELinux policy lacks {rule}: {why}")
+    writers = re.findall(r"\(allow\s+(\S+)\s+dsa_sysfs_host_memory\s+\(\s*file\s+\([^)]*\b(?:write|append)\b",
+                         policy)
+    for subject in sorted(set(writers) - {"vendor_init"}):
+        problems.append(f"{subject} may write the kernel's list of apps that see the computer's memory, "
+                        "which only init may")
+    setters = re.findall(r"\(allow\s+(\S+)\s+dsa_host_memory_prop\s+\(\s*property_service\s+\([^)]*\bset\b",
+                         policy)
+    for subject in sorted(set(setters) - {"dsa_channeld"}):
+        problems.append(f"{subject} may name the apps that see the computer's memory, which only "
+                        "dsa-channeld may")
+    framework = (manifest.get("framework") or {}).get("files") or {}
+    if framework and HOST_MEMORY_FRAMEWORK_FILE not in framework:
+        problems.append(f"the framework build has no {HOST_MEMORY_FRAMEWORK_FILE}, so Google Play's "
+                        "ActivityManager totalMem stays the VM's")
     return problems
 
 
@@ -4228,6 +4298,10 @@ ROOT_ELEVATION_PROPERTY_CONTEXT = f"{ROOT_ELEVATION_PROPERTY} u:object_r:dsa_roo
 # query to the daemon's stub, or stop doing so, to match (channeld.cil).
 DNS_PROPERTY = "vendor.dsa.dns"
 DNS_PROPERTY_CONTEXT = f"{DNS_PROPERTY} u:object_r:dsa_dns_prop:s0 exact enum on off"
+# dsa-channeld names the apps that see the computer's memory as the device's (Google Play) in
+# this, from the package manager's list, and dsa-memory.rc hands it to the kernel (memory.cil).
+HOST_MEMORY_PROPERTY = "vendor.dsa.host_memory.uids"
+HOST_MEMORY_PROPERTY_CONTEXT = f"{HOST_MEMORY_PROPERTY} u:object_r:dsa_host_memory_prop:s0 exact string"
 DNS_REDIRECT_SERVICE = "service dsa_dns_redirect /vendor/bin/dsa-channeld --dns-redirect"
 DNS_REDIRECT_TRIGGER = f"on property:{DNS_PROPERTY}=*"
 # Root elevation's su client. It is a system file, where an app's PATH and the kernel's su
@@ -4842,6 +4916,8 @@ def update_vendor_property_contexts(text):
         lines.append(ROOT_ELEVATION_PROPERTY_CONTEXT)
     if not any(line.split()[:1] == [DNS_PROPERTY] for line in lines):
         lines.append(DNS_PROPERTY_CONTEXT)
+    if not any(line.split()[:1] == [HOST_MEMORY_PROPERTY] for line in lines):
+        lines.append(HOST_MEMORY_PROPERTY_CONTEXT)
     for name, context in GAPPS_COMPILE_PROPERTY_CONTEXTS.items():
         if not any(line.split()[:1] == [name] for line in lines):
             lines.append(context)
