@@ -19,8 +19,9 @@ It takes the pinned target_files, otatools and dexpreopt_tools (fetch.sh downloa
    compiles again, with its own filter, any app the published build shipped compiled whose
    dex no longer matches its odex (PREBUILT_OAT_RECORD), and services.jar, whose window
    manager it edits so a freeform window gets its status bar and navigation bar insets
-   (SERVICES_INSETS_CODE) and whose package manager it edits so an app with arm64-v8a code
-   only installs while ARM translation is on (SERVICES_ABI_CODE);
+   (SERVICES_INSETS_CODE), whose package manager it edits so an app with arm64-v8a code
+   only installs while ARM translation is on (SERVICES_ABI_CODE), and whose WebView service it
+   edits so the WebView zygote starts with the first renderer (SERVICES_WEBVIEW_ZYGOTE_CODE);
 6. builds the images, and lays them out on the template of a user's Android disk.
 
 The results go to dsa/target/image/<version>/:
@@ -385,7 +386,24 @@ SERVICES_ABI_CODE = {
         ],
     }),
 }
-SERVICES_CODE = {**SERVICES_INSETS_CODE, **SERVICES_ABI_CODE}
+# The WebView zygote starts the first time an app needs a WebView renderer, not at boot.
+# WebViewUpdateService started it on a background thread as soon as WebView's RELRO files were
+# made (SystemImpl.ensureZygoteStarted, which only calls WebViewZygote.getProcess), so a boot
+# with no app that shows web content still held the zygote, 5 to 7 MiB of PSS, for the whole
+# session. The call is skipped; WebViewZygote.getProcess, which the activity manager calls to
+# start each renderer (Process.startWebView), starts the zygote when there is none and keeps
+# it from then on, as before. The first WebView of a boot then waits for the zygote's start
+# and its preload of WebView, a few hundred milliseconds once; every later one is as quick as
+# before. A provider change stops and restarts the zygote the same way. R8 may have inlined
+# ensureZygoteStarted into its caller, so the call is skipped there too; check-image refuses a
+# services.jar that still calls getProcess from anywhere.
+WEBVIEW_ZYGOTE_START = "Landroid/webkit/WebViewZygote;->getProcess"
+SERVICES_WEBVIEW_ZYGOTE_CODE = {
+    "Lcom/android/server/webkit/SystemImpl;->ensureZygoteStarted": ("skip call", WEBVIEW_ZYGOTE_START),
+    "Lcom/android/server/webkit/WebViewUpdateServiceImpl2;->startZygoteWhenReady": (
+        "skip call", WEBVIEW_ZYGOTE_START),
+}
+SERVICES_CODE = {**SERVICES_INSETS_CODE, **SERVICES_ABI_CODE, **SERVICES_WEBVIEW_ZYGOTE_CODE}
 # The jars whose dex make-image.py edits, compiled again after the edit like EDITED_APPS.
 EDITED_JARS = [SERVICES_JAR]
 # The profile services.jar was compiled with: frameworks/base's services/art-profile and
@@ -490,6 +508,14 @@ DROPPED_PROPS = {"persist.adb.tcp.port", "service.adb.tcp.port"}
 # a millisecond, on a desktop's processor. The limits on how far a heap may grow stay as they
 # are, so no app has less memory to work with.
 #
+# Those processes are also the ones ART counts as in the foreground, where it multiplies the
+# free space it keeps after a collection by the foreground heap growth multiplier, plus one it
+# adds for its concurrent compacting collectors: 2 + 1 by default, so system_server could keep
+# 12 MiB free rather than 4. At 1 the factor is 2 (1 + 1), up to 8 MiB, which still leaves the
+# app on screen twice the room a background process gets between collections; system_server
+# and the other foreground heaps keep up to 4 MiB less each. Low-memory Android devices go
+# further, to 1 in all.
+#
 # ro.config.low_ram is not set, whatever it would save: it turns off multi-window, and every
 # task here is a freeform window.
 MEMORY_PROPS = {
@@ -502,6 +528,17 @@ MEMORY_PROPS = {
     "dalvik.vm.heaptargetutilization": "0.75",
     "dalvik.vm.heapminfree": "512k",
     "dalvik.vm.heapmaxfree": "4m",
+    "dalvik.vm.foreground-heap-growth-multiplier": "1.0",
+}
+
+# Isolated compilation recompiles the system server's and the boot image's code inside a
+# protected VM of Android's own virtualization framework, which needs KVM in the guest. A
+# Hyper-V guest has none, so the service system_server starts for it, and the daily job it
+# schedules to start composd and the VM manager, could never complete. Without the property,
+# system_server does not start the service; on-device compilation by odrefresh, which needs no
+# VM, is unchanged.
+SERVICE_PROPS = {
+    "ro.config.isolated_compilation_enabled": "false",
 }
 
 # The density of the freeform display every task window lives on, by default: a 100% monitor's.
@@ -2370,6 +2407,38 @@ def _method_index(refs, name):
     return found[0]
 
 
+def dex_callers(dex, target):
+    """The methods a dex file defines that call the method `target` ("Lclass;->name")."""
+    defined, refs = dex_methods(dex)
+    indexes = [i for i, ref in enumerate(refs) if ref == target]
+    if not indexes:
+        return []
+    needles = [struct.pack("<H", i) for i in indexes]
+
+    def calls(code_off):
+        count = struct.unpack_from("<I", dex, code_off + 12)[0]
+        code = dex[code_off + 16:code_off + 16 + 2 * count]
+        # Most methods never name the index: only those that do are decoded.
+        if not any(needle in code for needle in needles):
+            return False
+        return any(op in DEX_INVOKES and struct.unpack_from("<H", dex, at + 2)[0] in indexes
+                   for at, op in dex_instructions(dex, code_off))
+
+    return sorted(method for method, codes in defined.items() for code_off, _ in codes if calls(code_off))
+
+
+def jar_callers(jar, target):
+    """The methods in a jar's or an APK's dex files that call the method `target`."""
+    callers = set()
+    with zipfile.ZipFile(io.BytesIO(jar)) as z:
+        for name in z.namelist():
+            if re.fullmatch(r"classes\d*\.dex", name):
+                dex = z.read(name)
+                if dex[:4] == b"dex\n":
+                    callers.update(dex_callers(dex, target))
+    return sorted(callers)
+
+
 def edit_dex(dex, edits):
     """Applies {"Lclass;->method": edit, or a list of edits} to a dex file. An edit is
     ("return false", None) or ("return true", None), which makes a method that returns a
@@ -2532,6 +2601,105 @@ def edit_settings_apk(data, name):
                     controllers=SETTINGS_CONTROLLERS_WITHOUT_BLUETOOTH, theme_attributes=SETTINGS_TITLE_EXPANDED)
 
 
+# System apps that started at every boot to find they had nothing to do, and then stayed as
+# cached processes until the activity manager needed the room: each answered BOOT_COMPLETED
+# with a receiver of its own. Their receivers for the boot go from their manifests; the apps
+# stay, and start as before when the user or another app opens them.
+# - DynamicSystemInstallationService (com.android.dynsystem, two processes, 4.5 MiB of PSS
+#   each in an image test): its receiver starts its service at boot only to post a
+#   notification while a Dynamic System Update image (a GSI booted from /data) is running, and
+#   the service stops itself otherwise. DSA boots its own image from the host and has no
+#   SystemUI to show that notification. Developer options' DSU loader still starts the app.
+# - DeviceDiagnostics (com.android.devicediagnostics, 4.7 MiB): the trade-in diagnostics a
+#   phone runs for a store before resale (screen, touch, battery and attestation checks). Its
+#   receiver resumes a trade-in evaluation after a reboot; a PC's VM is never traded in. The
+#   app and its status provider stay for Settings' entry.
+BOOT_RECEIVER_FREE_APKS = ["/DynamicSystemInstallationService.apk", "/DeviceDiagnostics.apk"]
+BOOT_ACTIONS = {"android.intent.action.BOOT_COMPLETED", "android.intent.action.LOCKED_BOOT_COMPLETED"}
+
+
+def _xml_element(axml, offset, header_size, strings):
+    """The tag of the compiled XML start element at `offset`, and its attributes that hold a
+    string, by name (in any namespace)."""
+    _, name, attribute_start, attribute_size, attribute_count = struct.unpack_from(
+        "<IIHHH", axml, offset + header_size)
+    attributes = {}
+    for i in range(attribute_count):
+        at = offset + header_size + attribute_start + i * attribute_size
+        _, attribute, raw, _, _, data_type, data = struct.unpack_from("<IIIHBBI", axml, at)
+        index = raw if raw != XML_NO_INDEX else (data if data_type == XML_TYPE_STRING else None)
+        if index is not None:
+            attributes[strings[attribute]] = strings[index]
+    return strings[name], attributes
+
+
+def remove_boot_receivers(axml):
+    """Removes from a compiled manifest each <receiver> whose intent filters name only the boot
+    actions (BOOT_ACTIONS), with everything inside it. A receiver that also answers another
+    action stays. Returns the new manifest and the names of the receivers it removed."""
+    file_type, file_header, _ = struct.unpack_from("<HHI", axml, 0)
+    if file_type != XML_FILE:
+        raise ValueError("not a compiled Android XML file")
+    strings = []
+    kept = [axml[:file_header]]
+    removed = []
+    receiver = None
+    offset = file_header
+    while offset < len(axml):
+        chunk_type, header_size, size = struct.unpack_from("<HHI", axml, offset)
+        chunk = axml[offset:offset + size]
+        offset += size
+        if chunk_type == XML_STRING_POOL:
+            strings = xml_strings(axml, offset - size)
+        if receiver is None:
+            if chunk_type == XML_START_ELEMENT:
+                tag, attributes = _xml_element(axml, offset - size, header_size, strings)
+                if tag == "receiver":
+                    receiver = {"chunks": [chunk], "depth": 1, "name": attributes.get("name"), "actions": set()}
+                    continue
+            kept.append(chunk)
+            continue
+        receiver["chunks"].append(chunk)
+        if chunk_type == XML_START_ELEMENT:
+            receiver["depth"] += 1
+            tag, attributes = _xml_element(axml, offset - size, header_size, strings)
+            if tag == "action" and "name" in attributes:
+                receiver["actions"].add(attributes["name"])
+        elif chunk_type == XML_END_ELEMENT:
+            receiver["depth"] -= 1
+            if receiver["depth"] == 0:
+                if receiver["actions"] and receiver["actions"] <= BOOT_ACTIONS:
+                    removed.append(receiver["name"])
+                else:
+                    kept += receiver["chunks"]
+                receiver = None
+    result = b"".join(kept)
+    return result[:4] + struct.pack("<I", len(result)) + result[8:], removed
+
+
+def edit_boot_receivers(data, name):
+    """An APK without the receivers that only start it at boot (remove_boot_receivers). Prints
+    each one; returns the APK as it was when it has none."""
+    with zipfile.ZipFile(io.BytesIO(data)) as apk:
+        manifest, removed = remove_boot_receivers(apk.read("AndroidManifest.xml"))
+        if not removed:
+            return data
+        for receiver in removed:
+            print(f"removing the boot receiver {receiver} from {name}", flush=True)
+        out = io.BytesIO()
+        # Each entry keeps its compression; signing aligns the stored ones again.
+        with zipfile.ZipFile(out, "w") as edited_apk:
+            for info in apk.infolist():
+                edited_apk.writestr(info, manifest if info.filename == "AndroidManifest.xml" else apk.read(info))
+    return out.getvalue()
+
+
+def boot_receivers_left(data):
+    """The receivers of an APK that only start it at boot."""
+    with zipfile.ZipFile(io.BytesIO(data)) as apk:
+        return remove_boot_receivers(apk.read("AndroidManifest.xml"))[1]
+
+
 ZIP_ALIGNMENT_EXTRA = 0xD935  # zipalign's alignment extra field: a 16-bit alignment, then padding
 
 
@@ -2572,9 +2740,10 @@ def zip_misaligned(data, alignment=4):
 
 def edit_services_jar(data, name):
     """services.jar with InsetsPolicy giving a freeform window its status bar and navigation
-    bar insets (SERVICES_INSETS_CODE) and the package manager taking every 64-bit ABI the guest lists for
-    a multiArch app (SERVICES_ABI_CODE), its stored dex files aligned again. Returns the jar as
-    it was when it already has the edits."""
+    bar insets (SERVICES_INSETS_CODE), the package manager taking every 64-bit ABI the guest lists for
+    a multiArch app (SERVICES_ABI_CODE) and the WebView zygote starting with the first renderer
+    rather than at boot (SERVICES_WEBVIEW_ZYGOTE_CODE), its stored dex files aligned again.
+    Returns the jar as it was when it already has the edits."""
     edited = edit_apk(data, name, code=SERVICES_CODE)
     return data if edited is data else aligned_zip(edited)
 
@@ -2595,7 +2764,7 @@ def permission_controller_edits():
 # vendor_init, and the platform's policy gives vendor_init no right to set these: each line
 # was refused, and logged as a denial, on every boot. The system build.prop sets them.
 # adbd's listening address and the USB configuration are the system's to set too.
-VENDOR_FORBIDDEN_PROPS = {*USER_PROPS, *ADB_PROPS, "sys.use_memfd"}
+VENDOR_FORBIDDEN_PROPS = {*USER_PROPS, *ADB_PROPS, "sys.use_memfd", *SERVICE_PROPS}
 VENDOR_PROP_FILES = {"VENDOR/build.prop", "ODM/etc/build.prop"}
 
 # The build's own fingerprint is AOSP's, and it stays the same however often DSA's image
@@ -2748,7 +2917,8 @@ def edit_props(text, codec2=False, vendor=False, build_tag=None, product=False, 
     `build_tag`, the incremental version and the fingerprints carry it. With `product`, it ends
     with the imports of the identity the user chose. With `network`, it is the vendor build.prop
     that chooses how the VM's network adapter reaches Android (NETWORK_PROPS)."""
-    props_to_apply = {**USER_PROPS, **ADB_PROPS, **GRAPHICS_PROPS, **MEMORY_PROPS, **LOADER_PROPS, **FRP_PROPS,
+    props_to_apply = {**USER_PROPS, **ADB_PROPS, **GRAPHICS_PROPS, **MEMORY_PROPS, **SERVICE_PROPS,
+                      **LOADER_PROPS, **FRP_PROPS,
                       **LOG_PROPS, **(CODEC2_PROPS if codec2 else {}), **(NETWORK_PROPS if network else {})}
     if vendor:
         props_to_apply = {k: v for k, v in props_to_apply.items() if k not in VENDOR_FORBIDDEN_PROPS}
@@ -4211,7 +4381,24 @@ FRAMEWORK_OVERLAY_PACKAGE = "io.github.thisisthepy.dsa.overlay.framework"
 # (activity_manager/max_cached_processes, which the agent sets to the same value) and else from
 # this resource; the global setting activity_manager_constants no longer carries it. The
 # resource holds from the first boot, before the agent runs.
-FRAMEWORK_OVERLAY_INTEGERS = {"config_tapTimeoutMillis": 0, "config_customizedMaxCachedProcesses": 8}
+#
+# Nothing is pinned. system_server's PinnerService maps the home app (the agent, here) and
+# WebView into its own memory and locks them there with mlock: up to 60 MiB of the home app's
+# APK and 20 MiB of WebView's, each with its odex, vdex and app image on top, which only a
+# global limit of a tenth of the guest's memory bounds. It is meant to keep a phone's launcher
+# and WebView quick to start under memory pressure. Locked pages are neither reclaimed nor
+# compressed into zram, so the idle reclaim could not hand them back and the host kept them
+# for the whole session, and they counted in system_server's PSS. Unlocked, they are page
+# cache like any app's code: read back from the disk in a few milliseconds when the agent or
+# a WebView needs them again, and given back while Android idles. The global limit at 0 keeps
+# anything else (the camera or assistant pins a device may turn on) from pinning either.
+PINNER_OVERLAY_INTEGERS = {
+    "config_pinnerHomePinBytes": 0,
+    "config_pinnerWebviewPinBytes": 0,
+    "config_pinnerMaxPinnedMemoryPercentage": 0,
+}
+FRAMEWORK_OVERLAY_INTEGERS = {"config_tapTimeoutMillis": 0, "config_customizedMaxCachedProcesses": 8,
+                              **PINNER_OVERLAY_INTEGERS}
 # The user's aspect ratio override of an app, which Settings offers on the app's aspect ratio
 # page and a task window's system menu opens. The window manager applies the override only
 # while this flag is on, and Android leaves it off unless a device turns it on, as large
@@ -5674,6 +5861,8 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                     data = edit_wifi_rc(data.decode()).encode()
                 elif name.endswith(SETTINGS_APK):
                     data = edit_settings_apk(data, name)
+                elif name.endswith(tuple(BOOT_RECEIVER_FREE_APKS)):
+                    data = edit_boot_receivers(data, name)
                 elif name == SERVICES_JAR:
                     data = edit_services_jar(data, name)
                 elif name in PERMISSION_APEXES:

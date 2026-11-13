@@ -2943,3 +2943,56 @@ HWUI는 `SkiaOpenGLPipeline`으로 ANGLE 위에서 그리므로(R19) 위 표를 
 - `reported_kb`를 읽는 비용. 빈 블록이 많을 때 빈 목록 전체를 영역 잠금 아래에서 센다. 에이전트는 5분마다와 `dsa memory` 때만 읽는다.
 - 압축 정리를 끈 뒤 GPU, 네트워크처럼 연속 메모리를 쓰는 할당이 느려지지 않는지(커널 로그의 할당 실패, `/proc/vmstat`의 `compact_stall`).
 - Kernel test가 두 패치를 컴파일하는지, Image test가 SELinux enforcing에서 에이전트가 세 파일을 읽게 하는지(부팅 로그의 `avc`, `dsa memory`가 "does not say what it reported"를 적지 않는지).
+
+## R41. system_server와 부팅이 잡는 메모리 줄이기: 고정된 페이지, WebView zygote, 힙 여유, 부팅마다 뜨는 앱 (NFR-1, NFR-2)
+
+**기준.** 소유자 PC의 0.2.4-dev.5(Android 17 x86_64)에서 `system`(system_server)이 PSS 93-137 MiB(상주 78-132), 쉬는 안드로이드가 687 MiB를 쓴다는 측정에서 출발했다. 이 조사는 2026-11-13에 했고, 이 컴퓨터에서 이미지와 프레임워크를 빌드하거나 부팅하지 않았다. 읽은 것: 이미지 빌드가 고정한 frameworks/base 커밋(`94b4c163`, Android 17; `45034f06`, Android 16)의 `SystemServer.java`, `PinnerService.java`, `webkit/SystemImpl.java`, `WebViewUpdateServiceImpl2.java`, `WebViewZygote.java`, `Process.java`, `ProcessList.java`, `ZygoteInit.java`, `ZygoteConfig.java`, `core/jni/AndroidRuntime.cpp`, `core/res/res/values/config.xml`, ART main의 `runtime.cc`, `gc/heap.cc`, `parsed_options.cc`, Cuttlefish의 프레임워크 오버레이(고정 설정 없음), DynamicSystemInstallationService와 DeviceDiagnostics의 매니페스트, Android 16 published build(15581820)의 build.prop과 권한 파일, 11월 12일 develop의 Image test 메모리 측정(`memory-measurement`, Google Play와 설정 창 하나), 11월 5일에 만든 Android 16 서명 이미지(`.scratch/test-f5c7dbb`)의 APK와 `services.jar`. 이전 작업(R26의 기능 거두기, TeleService, 예제 HAL)은 다시 하지 않았다.
+
+**찾은 것.**
+
+1. PinnerService가 홈 앱과 WebView를 mlock으로 고정한다. AOSP 기본값은 홈 앱 APK 60 MiB(`config_pinnerHomePinBytes`), WebView APK 20 MiB(`config_pinnerWebviewPinBytes`)이고, 각 APK의 odex, vdex, 앱 이미지는 따로 고정되며 전체 한도(메모리의 10%, 4 GiB 게스트에서 약 400 MiB)만 받는다. Cuttlefish 오버레이는 이 값을 바꾸지 않는다. DSA의 홈 앱은 에이전트다(매니페스트의 `CATEGORY_HOME`). Android 16 서명 이미지에서 에이전트 APK는 4.2 MiB, WebView APK는 263 MiB(그중 20 MiB가 고정), WebView odex는 6.7 MiB다. 고정된 페이지는 system_server의 주소 공간에 매핑되어 그 PSS에 들고(측정의 `.apk mmap` 합 72.9 MiB), 회수도 zram 압축도 되지 않아 유휴 회수(`drop_caches` 포함)가 돌려주지 못한다. 쉬는 동안 메모리를 호스트가 돌려받아야 한다는 제약에 어긋난다.
+2. WebView zygote는 부팅 때 뜬다. `WebViewUpdateServiceImpl2.startZygoteWhenReady`가 RELRO를 기다린 뒤 `SystemImpl.ensureZygoteStarted`(본문은 `WebViewZygote.getProcess()` 하나)를 부른다. 렌더러를 시작할 때 활동 관리자가 부르는 `Process.startWebView`도 같은 `getProcess()`를 부르고, 이것은 zygote가 없으면 띄운다. 그래서 부팅 때의 호출만 빼면 첫 렌더러에서 뜬다(R26의 4는 services.jar를 고칠 길이 없어 남겨 둔 것이다. 지금은 `SERVICES_CODE`가 그 길이다). Android 16 `services.jar`에서 `getProcess`를 부르는 메서드는 `SystemImpl.ensureZygoteStarted` 하나였다(R8이 인라인하지 않았다). 측정의 `webview_zygote` PSS 5.0 MiB, 소유자 PC 6.9 MiB(R26).
+3. ART는 전경 프로세스의 힙 여유에 `ForegroundHeapGrowthMultiplier + 1`을 곱한다(`runtime.cc`, 기본 2.0이라 3). `heapmaxfree` 4m에서 system_server, 화면의 앱, 영구 프로세스는 GC 뒤 최대 12 MiB를 비워 둔다. 저메모리 기기는 1.0이다. 속성은 `dalvik.vm.foreground-heap-growth-multiplier`(허용 범위 0.1-5.0)다.
+4. 부팅 때 뜨고 할 일이 없는 앱. 측정의 `com.android.dynsystem`과 `com.android.dynsystem:dynsystem`(PSS 4.5 MiB씩), `com.android.devicediagnostics`(4.7 MiB). 모두 `BOOT_COMPLETED` 수신기 하나만으로 뜬다. dynsystem의 수신기는 DSU 이미지가 돌 때 알림을 띄우려 서비스를 시작하고, 서비스는 아니면 스스로 멈춘다. DeviceDiagnostics는 휴대전화 중고 매입의 진단(화면, 터치, 배터리, 인증)이고 수신기는 재부팅 뒤 매입 평가를 이어 간다.
+5. `ro.config.isolated_compilation_enabled=true`(Android 16 build.prop)로 system_server가 IsolatedCompilationService를 띄우고 매일 composd와 VM 관리자를 시작하는 작업을 건다. 보호 VM에는 게스트 안의 KVM이 있어야 하는데 Hyper-V 게스트에는 없다.
+
+**바꾼 것.**
+
+| 변경 | 무엇이 주나 | 기대(재지 않음) |
+|---|---|---|
+| 프레임워크 오버레이: `config_pinnerHomePinBytes` 0, `config_pinnerWebviewPinBytes` 0, `config_pinnerMaxPinnedMemoryPercentage` 0 | 고정된 에이전트 APK와 그 odex·vdex·앱 이미지, WebView APK 20 MiB와 odex 6.7 MiB. 잠긴 페이지가 보통의 페이지 캐시가 되어 쉬는 동안 돌아간다. 비용: 유휴 회수 뒤 에이전트나 WebView가 다시 쓰는 코드는 디스크에서 다시 읽는다(페이지마다 수 ms 안쪽). 앱 시작에서 에이전트가 하는 몫이 그만큼 늦을 수 있어 NFR-4로 확인한다 | 고정 약 31-37 MiB(에이전트 APK 4.2와 그 컴파일 결과물, WebView 20과 6.7)가 회수 가능해진다. system_server PSS는 그만큼 줄고(다른 프로세스와 나누는 몫 빼고) 유휴 회수 뒤 게스트 사용이 같은 만큼 준다 |
+| `services.jar`: `SystemImpl.ensureZygoteStarted`와(R8이 인라인했을 때를 위해) `startZygoteWhenReady`의 `WebViewZygote.getProcess` 호출을 nop으로. check-image는 services.jar 어디서든 그 호출이 남으면 거절한다 | WebView를 쓰는 앱이 없는 동안의 webview_zygote | 5-7 MiB PSS. 비용: 부팅 뒤 첫 WebView가 zygote 시작과 WebView 프리로드(수백 ms)를 한 번 기다린다. 렌더러는 비동기로 뜨므로 창의 첫 프레임(NFR-4)은 기다리지 않고 웹 내용이 그만큼 늦게 그려진다 |
+| `dalvik.vm.foreground-heap-growth-multiplier=1.0`(곱은 3에서 2) | 전경 힙의 GC 뒤 여유가 최대 12 MiB에서 8 MiB로 | system_server 0-4 MiB, 그 밖의 전경 힙마다 0-4 MiB. 비용: 전경 프로세스의 GC가 약 1.5배 잦다(동시 GC, 멈춤 1 ms 안). 성장 한도는 그대로 |
+| `ro.config.isolated_compilation_enabled=false`(vendor build.prop에는 쓰지 않는다) | IsolatedCompilationService와 매일의 composd 시도 | 1 MiB 안쪽과 깨어남. 기기 안의 odrefresh 컴파일은 VM이 필요 없어 그대로다 |
+| DynamicSystemInstallationService와 DeviceDiagnostics의 매니페스트에서 부팅 동작만 받는 수신기를 뺀다(`remove_boot_receivers`, 다른 동작도 받는 수신기는 남긴다). 앱은 남는다 | 부팅마다 뜨던 세 프로세스 | 약 13.7 MiB PSS(캐시 프로세스라 대부분 결국 zram이나 lmkd 몫이지만 그전까지 잡는다). 개발자 옵션의 DSU 로더와 설정의 진단 항목은 그대로 앱을 띄운다 |
+
+Android 16 서명 이미지의 두 APK에 수신기 빼기를 적용해 보니 각각 `.BootCompletedReceiver`(이름이 짧은 채로 컴파일됨)와 `com.android.devicediagnostics.BootCompleteReceiver`가 빠지고, `aapt2 dump xmltree`와 `dump badging`이 고친 매니페스트를 읽었다. 같은 이미지의 services.jar에 `SERVICES_CODE`를 적용하면 `getProcess`를 부르는 메서드가 남지 않았다.
+
+합: 고정 해제 31-37 MiB(회수 가능해짐), WebView zygote 5-7, 부팅 앱 약 14, 힙 여유 2-10, 합쳐 약 50-65 MiB를 기대한다. system_server 자체의 PSS 감소는 고정 해제와 힙 여유에서 오는 약 25-40 MiB로 본다.
+
+**살펴보고 바꾸지 않은 것과 그 까닭.**
+
+- 기능으로 서비스 끄기. 남은 기능 가운데 서비스를 가르는 것은 USB(`usb.host`, `usb.accessory`: 끄면 `UsbManager`가 null이라 그것을 부르는 앱이 죽고, 호스트가 USB 기기를 빌려주는 길도 막힌다), 인쇄, 백업, 동반 기기, 자동 완성, 자격 증명, PIP, 위젯(앱과 WSA가 쓰는 기능)뿐이다. 텔레포니, NFC, UWB, Thread, 블루투스, 생체 인증, 적외선, 컨텍스트 허브, Wi-Fi Direct·Aware·RTT, 기기 잠금은 이미 거뒀다. VR, 자동차, TV 입력, HDMI-CEC, 튜너, 방송 라디오는 기능이 없어 이미 뜨지 않는다. smartspace, 앱 예측, 검색 UI, 음악 인식, 앰비언트 컨텍스트, 배경 화면 효과, 콘텐츠 캡처, 번역은 패키지 이름 설정이 비어 있어 이미 뜨지 않는다.
+- 꿈(DreamManager), 색 표시(ColorDisplay), 트와일라잇은 조건 없이 시작한다. 끄려면 services.jar에서 시작 호출을 빼야 하는데, 그 서비스를 찾는 다른 서비스(전원, 디스플레이)가 null을 견디는지 확인하지 못했다.
+- `config_enableVirtualDeviceManager` 끄기. 아끼는 것이 작고, 동반 기기와 앱 스트리밍, 그리고 `VirtualDeviceManager`를 찾는 앱에 null이 간다.
+- `FEATURE_SLICES_DISABLED`로 SliceManagerService 끄기. 설정의 패널과 슬라이스를 쓰는 앱이 깨질 수 있고 아끼는 것은 작다.
+- `config.disable_networktime`. 호스트는 깨어날 때만 시각을 보내므로, 그 사이 게스트 시계는 NTP가 맞춘다.
+- `config.disable_systemtextclassifier`. 앱의 텍스트 선택(링크, 주소, 전화번호 인식)이 쓴다.
+- preloaded-classes 줄이기. 프리로드되는 클래스 대부분이 이미 부팅 이미지(`boot.art`)에 있고, zygote가 미리 올린 것은 모든 앱이 나눠 쓴다. 줄이면 앱마다 같은 것을 다시 올려 합은 는다(R26). 부팅 이미지는 프레임워크 빌드가 있어야 다시 만든다.
+- `ro.zygote.disable_gl_preload`. zygote가 미리 연 ANGLE과 그 재배치된 페이지를 앱이 COW로 나눠 쓰므로, 끄면 앱마다 자기 사본을 만든다.
+- USAP 풀. 이미 꺼져 있다(`dalvik.vm.usap_pool_enabled=false`, 측정에 `usap` 프로세스 없음). 장치 구성(`runtime_native.usap_pool_enabled`)이 속성보다 앞서므로 이미지로 막을 수도 없다. Play 서비스가 이 값을 켜는지는 PC에서 본다.
+- `dalvik.vm.madvise.vdexfile.size`와 `odexfile.size`(100 MiB). ART는 전경 프로세스에서만 미리 읽고 배경 프로세스는 건너뛴다(T 이후). 쉬는 동안의 메모리가 아니라 앱을 여는 시간과 맞바꾸는 값이라 두었다.
+- `dalvik.vm.minidebuginfo`. JIT 코드의 작은 디버그 정보로 크기는 작고, 네이티브 스택(툼스톤, ANR)의 Java 프레임을 읽는 데 쓴다.
+- `heapgrowthlimit`, `heapsize`(한도일 뿐 잡는 메모리가 아니다), `heapstartsize`(첫 GC 전까지만 의미가 있고, 배경으로 간 앱은 ART가 줄인다), JIT 코드 캐시 크기(system_server의 `dalvik-jit-code-cache` 크기를 smaps로 재기 전에는 정할 근거가 없다).
+- 셀 브로드캐스트 모듈(`com.android.cellbroadcastreceiver.module`, PSS 5.7 MiB). 모뎀과 TeleService가 없으니 받을 것이 없지만 APEX 안의 앱이라 APEX를 풀고 다시 묶고 서명해야 하고, 설정의 긴급 알림 항목이 그 패키지를 본다. 다음 후보다.
+- Health Connect 컨트롤러(5.7 MiB). 앱이 쓰는 Health Connect API의 화면이라 둔다.
+
+**PC에서 재야 할 것(같은 조건: Google Play 설치, 창 없음, 부팅 10분 뒤, 이 변경 앞뒤).**
+
+- `adb shell dumpsys pinner`(앞: 에이전트와 WebView 항목, 뒤: 비어 있음)와 `grep -E 'Mlocked|Unevictable' /proc/meminfo`.
+- `dumpsys meminfo -s system`의 TOTAL PSS와 `.apk mmap`, `.odex mmap`, Dalvik Heap.
+- `pidof webview_zygote`가 WebView를 쓰기 전에는 비어 있고, WebView를 쓰는 앱(로그인 화면 등)을 연 뒤 생기는지. 그 첫 화면이 열리는 시간.
+- `ps -A | grep -E 'dynsystem|devicediagnostics'`가 비어 있는지.
+- `dsa memory`의 게스트 사용과 유휴 회수 뒤 값, vmmem 상주.
+- 설정 앱과 앱 하나를 쓸 때 끊김이 늘지 않는지(GC가 잦아진 몫).
+- CI: Image test의 boot check가 `pinner-first boot.txt`, `pinner-second boot.txt`를 남기고 고정된 파일이 있으면 실패한다. 메모리 측정은 `memory-pinner.txt`와 힙 설정 줄에 곱을 더한다.
