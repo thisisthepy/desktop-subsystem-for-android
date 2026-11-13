@@ -3,8 +3,9 @@
 
 use dsa_host_core::video::Codec;
 use dsa_host_core::video_layout::{
-    av1_frame_size, chroma_start_row, picture_from_surface, rows_from_length, stream_frame_size,
-    visible_size, vp9_frame_size, SurfaceFormat,
+    av1_frame_size, chroma_start_row, picture_from_surface, picture_from_surface_area,
+    rows_from_length, stream_frame_size, visible_area, visible_size, vp9_frame_size, Area,
+    StreamSizes, SurfaceFormat,
 };
 
 const Y: u8 = 81;
@@ -125,6 +126,91 @@ fn fr26_the_visible_size_is_the_aperture_then_the_streams_own() {
         (426, 240)
     );
     assert_eq!(visible_size((640, 368), None, None), (640, 368));
+}
+
+#[test]
+fn fr26_a_picture_cropped_at_its_top_left_is_copied_from_its_offset() {
+    // A 4x2 picture at column 2, row 2 of an 8x6 surface whose other samples are padding (0).
+    let (pitch, rows) = (8, 6);
+    let mut data = vec![0u8; pitch * (rows + rows / 2)];
+    for row in 2..4 {
+        data[row * pitch + 2..row * pitch + 6].fill(Y);
+    }
+    // Chroma row 1 covers luma rows 2 and 3; columns 2..6 are pairs 1 and 2.
+    let chroma = (rows + 1) * pitch;
+    data[chroma + 2..chroma + 6].copy_from_slice(&[U, V, U, V]);
+    let area = visible_area(
+        (8, 6),
+        Some(Area {
+            left: 2,
+            top: 2,
+            width: 4,
+            height: 2,
+        }),
+        None,
+    );
+    assert_eq!((area.left, area.top, area.width, area.height), (2, 2, 4, 2));
+    let picture =
+        picture_from_surface_area(1, &data, SurfaceFormat::Nv12, pitch, rows, area).unwrap();
+    // Before, the size was taken at the corner: padding (green) along the top and left.
+    assert_eq!(picture.nv12, vec![Y, Y, Y, Y, Y, Y, Y, Y, U, V, U, V]);
+    // An area that starts off a chroma pair is moved onto one, keeping its other edges.
+    let odd = visible_area(
+        (8, 6),
+        Some(Area {
+            left: 3,
+            top: 1,
+            width: 3,
+            height: 3,
+        }),
+        None,
+    );
+    assert_eq!((odd.left, odd.top, odd.width, odd.height), (2, 0, 4, 4));
+    assert!(picture_from_surface_area(
+        1,
+        &data,
+        SurfaceFormat::Nv12,
+        pitch,
+        rows,
+        Area {
+            left: 3,
+            top: 2,
+            width: 4,
+            height: 2
+        }
+    )
+    .is_none());
+    // An area past the coded size is not believed.
+    let past = visible_area(
+        (8, 6),
+        Some(Area {
+            left: 6,
+            top: 0,
+            width: 4,
+            height: 2,
+        }),
+        Some((8, 4)),
+    );
+    assert_eq!((past.left, past.top, past.width, past.height), (0, 0, 8, 4));
+}
+
+#[test]
+fn fr26_a_pictures_size_follows_the_header_of_the_packet_it_came_from() {
+    // A stream changes size at packet 10 while the decoder still holds pictures of 4..9.
+    let mut sizes = StreamSizes::default();
+    assert_eq!(sizes.for_picture(3), None);
+    sizes.record(0, (1920, 1080));
+    sizes.record(10, (1280, 720));
+    // Before, every picture took the newest header: the old ones cut to 1280x720.
+    assert_eq!(sizes.for_picture(9), Some((1920, 1080)));
+    assert_eq!(sizes.for_picture(10), Some((1280, 720)));
+    assert_eq!(sizes.for_picture(42), Some((1280, 720)));
+    // Only the latest headers are kept.
+    for id in 100..200 {
+        sizes.record(id, (640, 360));
+    }
+    assert_eq!(sizes.for_picture(250), Some((640, 360)));
+    assert_eq!(sizes.for_picture(5), None);
 }
 
 /// Writes bits most significant first.

@@ -77,8 +77,8 @@ mod system {
 
     use dsa_host_core::video::{Codec, CodecSupport, Packet, Picture, VideoDecoder, VideoDecoders};
     use dsa_host_core::video_layout::{
-        chroma_start_row, picture_from_surface, rows_from_length, stream_frame_size, visible_size,
-        Size, SurfaceFormat,
+        chroma_start_row, picture_from_surface_area, rows_from_length, stream_frame_size,
+        visible_area, Area, Size, StreamSizes, SurfaceFormat,
     };
     use windows::core::{Interface, GUID};
     use windows::Win32::Foundation::HMODULE;
@@ -241,7 +241,7 @@ mod system {
 
     /// The display area an output type gives, when it gives one: the minimum display
     /// aperture, else the geometric or the pan and scan aperture.
-    fn aperture(media_type: &IMFMediaType) -> Option<Size> {
+    fn aperture(media_type: &IMFMediaType) -> Option<Area> {
         for key in [
             &MF_MT_MINIMUM_DISPLAY_APERTURE,
             &MF_MT_GEOMETRIC_APERTURE,
@@ -260,10 +260,15 @@ mod system {
                     Some(&mut len),
                 )
             };
-            // The area starts at the surface's corner: an offset one would need cropping
-            // this copy does not do, so only its size is taken.
+            // The area's offset is where the picture starts (a stream cropped at its top or
+            // left); its whole part, as cropping is in whole samples.
             if read.is_ok() && area.Area.cx > 0 && area.Area.cy > 0 {
-                return Some((area.Area.cx as u32, area.Area.cy as u32));
+                return Some(Area {
+                    left: area.OffsetX.value.max(0) as u32,
+                    top: area.OffsetY.value.max(0) as u32,
+                    width: area.Area.cx as u32,
+                    height: area.Area.cy as u32,
+                });
             }
         }
         None
@@ -274,7 +279,7 @@ mod system {
     struct Output {
         format: SurfaceFormat,
         coded: Size,
-        aperture: Option<Size>,
+        aperture: Option<Area>,
     }
 
     /// Chooses NV12 among the decoder's output types, else P010 (a 10-bit stream, whose
@@ -343,10 +348,10 @@ mod system {
         decoder: IMFTransform,
         _gpu: Gpu,
         output: Output,
-        /// The size the guest opened the stream with, and the size the stream's own headers
-        /// last gave (VP9, AV1), for decoders that report no display area.
+        /// The size the guest opened the stream with, and the sizes the stream's own headers
+        /// gave (VP9, AV1), by packet, for decoders that report no display area.
         opened: Size,
-        stream: Option<Size>,
+        stream: StreamSizes,
         provides_samples: bool,
         sample_size: u32,
     }
@@ -397,7 +402,7 @@ mod system {
                 _gpu: gpu,
                 output,
                 opened: (width, height),
-                stream: None,
+                stream: StreamSizes::default(),
                 provides_samples: info.dwFlags & MFT_OUTPUT_STREAM_PROVIDES_SAMPLES.0 as u32 != 0,
                 sample_size: info.cbSize,
             })
@@ -475,20 +480,29 @@ mod system {
             }
         }
 
-        /// The picture's visible size: the decoder's display area, else the size the stream's
-        /// own headers gave, else the size the guest opened the stream with when the coded
-        /// size is only that rounded up to the codec's blocks, else the coded size.
-        fn shown(&self) -> Size {
+        /// The visible area of the picture of packet `id`: the decoder's display area, else
+        /// the size the stream's own headers gave for that packet, else the size the guest
+        /// opened the stream with when the coded size is only that rounded up to the codec's
+        /// blocks, else the coded size.
+        fn shown(&self, id: u64) -> Area {
             let coded = self.output.coded;
             let opened = Some(self.opened).filter(|&(w, h)| {
                 w <= coded.0 && h <= coded.1 && coded.0 - w < 64 && coded.1 - h < 64
             });
-            visible_size(coded, self.output.aperture, self.stream.or(opened))
+            visible_area(
+                coded,
+                self.output.aperture,
+                self.stream.for_picture(id).or(opened),
+            )
         }
 
         fn read(&self, sample: &IMFSample) -> Result<Option<Picture>, String> {
             let format = self.output.format;
-            let (width, height) = self.shown();
+            // SAFETY: a plain Media Foundation call.
+            let id = unsafe { sample.GetSampleTime() }.map_err(|e| e.to_string())? as u64;
+            let area = self.shown(id);
+            // The rows the picture reaches down to, its offset included.
+            let bottom = (area.top + area.height) as usize;
             let coded_rows = self.output.coded.1 as usize;
             // The chroma plane follows the texture's own rows, which a driver may make taller
             // than the coded size (for the largest picture it expects). Taking it after the
@@ -496,7 +510,6 @@ mod system {
             let surface_rows = texture_rows(sample);
             // SAFETY: plain Media Foundation calls; the buffer is unlocked before it goes.
             unsafe {
-                let id = sample.GetSampleTime().map_err(|e| e.to_string())? as u64;
                 let buffer = sample
                     .ConvertToContiguousBuffer()
                     .map_err(|e| e.to_string())?;
@@ -507,11 +520,10 @@ mod system {
                         .Lock2D(&mut data, &mut pitch)
                         .map_err(|e| format!("cannot read the picture: {e}"))?;
                     let pitch = pitch.unsigned_abs() as usize;
-                    let rows = chroma_start_row(surface_rows, coded_rows, height as usize);
+                    let rows = chroma_start_row(surface_rows, coded_rows, bottom);
                     let len = pitch * (rows + rows.div_ceil(2));
                     let bytes = std::slice::from_raw_parts(data, len);
-                    let picture =
-                        picture_from_surface(id, bytes, format, pitch, rows, width, height);
+                    let picture = picture_from_surface_area(id, bytes, format, pitch, rows, area);
                     let _ = two_d.Unlock2D();
                     return Ok(picture);
                 }
@@ -524,15 +536,15 @@ mod system {
                     SurfaceFormat::Nv12 => 1,
                     SurfaceFormat::P010 => 2,
                 };
-                let pitch = self.output.coded.0.max(width) as usize * sample_bytes;
+                let pitch = self.output.coded.0.max(area.left + area.width) as usize * sample_bytes;
                 // A buffer in system memory is packed: its length says how many rows it has.
                 let rows = chroma_start_row(
                     surface_rows.or_else(|| rows_from_length(len as usize, pitch)),
                     coded_rows,
-                    height as usize,
+                    bottom,
                 );
                 let bytes = std::slice::from_raw_parts(data, len as usize);
-                let picture = picture_from_surface(id, bytes, format, pitch, rows, width, height);
+                let picture = picture_from_surface_area(id, bytes, format, pitch, rows, area);
                 let _ = buffer.Unlock();
                 Ok(picture)
             }
@@ -544,7 +556,7 @@ mod system {
             // A VP9 key frame or an AV1 sequence header gives the picture's size, which their
             // decoders may not report.
             if let Some(size) = stream_frame_size(self.codec, &packet.data) {
-                self.stream = Some(size);
+                self.stream.record(packet.id, size);
             }
             // VP9 and AV1 carry their configuration in the stream; the configuration Android
             // passes separately (AV1's codec configuration record) is not a frame.
