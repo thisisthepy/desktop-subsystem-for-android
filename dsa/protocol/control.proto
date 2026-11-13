@@ -1394,6 +1394,16 @@ message GuestMemory {
   uint32 google_play_processes = 24;
   uint64 google_play_pss_kb = 25;
   uint64 google_play_swap_pss_kb = 26;
+  // Free page reporting, as the guest's kernel counts it: the free memory marked reported
+  // now, which the host has taken back (mem_free_kb less it is free memory the VM still
+  // holds); the memory reported to the host since boot, whose growth between two reports is
+  // how fast freed memory goes back; and the reported free memory the host took back in again
+  // since boot because a page beside it in the host's fault cluster was used, which the guest
+  // then reported again. All 0 when the guest cannot read them (reported_total_kb is never 0
+  // once reporting runs, since the first pass after boot reports every free page).
+  uint64 free_reported_kb = 27;
+  uint64 reported_total_kb = 28;
+  uint64 refaulted_total_kb = 29;
 }
 
 // From the agent to the guest's control daemon, on each connection to it: the agent has

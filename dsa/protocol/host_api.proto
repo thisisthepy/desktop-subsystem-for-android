@@ -1543,6 +1543,18 @@ message GuestMemory {
   uint32 google_play_processes = 25;
   uint64 google_play_pss_kb = 26;
   uint64 google_play_swap_pss_kb = 27;
+  // Free page reporting, as the control channel's GuestMemory says: the free memory the host
+  // has taken back now, the memory reported since boot, and the reported free memory the
+  // host took back in again with a neighbour since boot. All 0 when the guest could not read
+  // them.
+  uint64 free_reported_kb = 28;
+  uint64 reported_total_kb = 29;
+  uint64 refaulted_total_kb = 30;
+  // How fast memory went back to the host between the report before this one and this one,
+  // in KiB a minute, when reported_rate_known is set: the growth of reported_total_kb over
+  // the time between the two.
+  uint64 reported_kb_per_minute = 31;
+  bool reported_rate_known = 32;
 }
 
 // One host process that runs the caller's Android: its VM's memory process, the window
