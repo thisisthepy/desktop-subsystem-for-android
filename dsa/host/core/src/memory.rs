@@ -407,14 +407,18 @@ impl GuestMemory {
 
     /// This report with how fast memory went back to the host since `before`, a report the
     /// guest sent `elapsed` earlier ([`PageReporting::reported_kb_per_minute`]). A count lower
-    /// than before's means the guest restarted in between, and gives no rate; so does a gap
-    /// under a second, which says nothing about a rate.
+    /// than before's means the guest restarted in between, and gives no rate. A report less
+    /// than a second after the one before says nothing about a rate, so it keeps that one's.
     pub fn following(mut self, before: &GuestMemory, elapsed: Duration) -> GuestMemory {
         if let (Some(now), Some(then)) = (self.page_reporting.as_mut(), before.page_reporting) {
             let secs = elapsed.as_secs();
-            now.reported_kb_per_minute = (secs >= 1
-                && now.reported_total_kb >= then.reported_total_kb)
-                .then(|| (now.reported_total_kb - then.reported_total_kb) * 60 / secs);
+            now.reported_kb_per_minute = if now.reported_total_kb < then.reported_total_kb {
+                None
+            } else if secs == 0 {
+                then.reported_kb_per_minute
+            } else {
+                Some((now.reported_total_kb - then.reported_total_kb) * 60 / secs)
+            };
         }
         self
     }
