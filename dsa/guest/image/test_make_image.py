@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 import zipfile
 import xml.etree.ElementTree as ET
 import zlib
@@ -1466,6 +1467,29 @@ class ImageLayoutTests(unittest.TestCase):
                 self.assertIn("(allow surfaceflinger platform_app (fd (use)))", policy)
                 self.assertIn("(allow surfaceflinger platform_app (fifo_file (write getattr)))", policy)
 
+    def test_fr22_an_overlay_keeps_a_narrower_value_equal_to_its_default(self):
+        # The framework's own navigation_bar_height at sw900dp would win over an overlay
+        # whose identical sw900dp value aapt2 had dropped as redundant.
+        calls = []
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(make_image, "run", lambda *a: calls.append(a)):
+            make_image.build_overlay("aapt2", "framework-res.apk", Path(tmp), Path(tmp) / "o.apk")
+        link = [c for c in calls if "link" in c]
+        self.assertTrue(link and "--no-resource-deduping" in link[0], calls)
+
+    def test_nfr5_a_policy_secilc_refuses_stops_the_image(self):
+        # init compiles the same CIL at boot and would fail the same way.
+        failed = subprocess.CompletedProcess([], 254, "", "Failed to resolve allow statement")
+        with tempfile.TemporaryDirectory() as tmp:
+            tools = Path(tmp) / "otatools"
+            (tools / "bin").mkdir(parents=True)
+            secilc = tools / "bin/secilc"
+            secilc.write_text("")
+            secilc.chmod(0o755)
+            with mock.patch.object(make_image.subprocess, "run", return_value=failed),                     mock.patch.object(make_image.os, "access", return_value=True),                     self.assertRaises(SystemExit) as stopped:
+                make_image.recompile_precompiled_sepolicy(
+                    tools, {"SYSTEM/etc/selinux/plat_sepolicy.cil": b"(type init)"}, "202404", "202404", work_dir=Path(tmp))
+        self.assertIn("would not boot", str(stopped.exception))
+
     def test_fr22_the_agent_may_find_the_status_bar_service(self):
         # The agent registers as the status bar, so the window manager reports the system
         # bars' live appearance to it, which the host's caption buttons follow.
@@ -1480,7 +1504,7 @@ class ImageLayoutTests(unittest.TestCase):
             make_image.modify(source, modified, agent=agent)
             with zipfile.ZipFile(modified) as archive:
                 policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
-                self.assertIn("(allow platform_app status_bar_service (service_manager (find)))", policy)
+                self.assertIn("(allow platform_app statusbar_service (service_manager (find)))", policy)
 
     def test_fr3_the_agent_is_signed_with_the_platform_key(self):
         # A platform app may use the framework interfaces the agent needs. sign_target_files_apks
