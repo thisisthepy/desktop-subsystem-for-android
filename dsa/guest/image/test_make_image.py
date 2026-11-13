@@ -3747,7 +3747,8 @@ class TouchLatencyTests(unittest.TestCase):
         # config_tapTimeoutMillis (100 ms) instead of calling it on the press.
         self.assertEqual(
             make_image.FRAMEWORK_OVERLAY_INTEGERS,
-            {"config_tapTimeoutMillis": 0, "config_customizedMaxCachedProcesses": 8},
+            {"config_tapTimeoutMillis": 0, "config_customizedMaxCachedProcesses": 8,
+             **make_image.PINNER_OVERLAY_INTEGERS},
         )
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -8208,6 +8209,30 @@ class MultiArchAbiTests(unittest.TestCase):
 
     def test_fr25_an_app_without_native_code_installs_without_an_abi(self):
         self.assertIsNone(multi_arch_abi(set(), guest_64_bit_abis("on")))
+
+
+class SlimSystemServerTests(unittest.TestCase):
+    """What system_server and the boot hold that a desktop guest never uses."""
+
+    def test_nfr1_nothing_is_locked_in_memory_by_the_pinner_service(self):
+        # PinnerService locked up to 60 MiB of the home app's APK (the agent's) and 20 MiB of
+        # WebView's, each with its compiled code on top, which no reclaim could take back.
+        self.assertEqual(make_image.PINNER_OVERLAY_INTEGERS, {
+            "config_pinnerHomePinBytes": 0,
+            "config_pinnerWebviewPinBytes": 0,
+            "config_pinnerMaxPinnedMemoryPercentage": 0,
+        })
+        for name, value in make_image.PINNER_OVERLAY_INTEGERS.items():
+            self.assertEqual(make_image.FRAMEWORK_OVERLAY_INTEGERS[name], value)
+            self.assertIn(f"integer/{name}", make_image.framework_overlaid())
+        with tempfile.TemporaryDirectory() as tmp:
+            make_image.framework_overlay_sources(Path(tmp))
+            values = (Path(tmp) / "res/values/dsa.xml").read_text()
+        for name in make_image.PINNER_OVERLAY_INTEGERS:
+            self.assertIn(f'<integer name="{name}">0</integer>', values)
+        # The agent stays the home app; only its pages are no longer locked.
+        agent = (Path(__file__).parent.parent / "agent/src/main/AndroidManifest.xml").read_text()
+        self.assertIn("android.intent.category.HOME", agent)
 
 
 if __name__ == "__main__":

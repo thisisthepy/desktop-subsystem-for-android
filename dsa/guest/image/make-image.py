@@ -4211,7 +4211,24 @@ FRAMEWORK_OVERLAY_PACKAGE = "io.github.thisisthepy.dsa.overlay.framework"
 # (activity_manager/max_cached_processes, which the agent sets to the same value) and else from
 # this resource; the global setting activity_manager_constants no longer carries it. The
 # resource holds from the first boot, before the agent runs.
-FRAMEWORK_OVERLAY_INTEGERS = {"config_tapTimeoutMillis": 0, "config_customizedMaxCachedProcesses": 8}
+#
+# Nothing is pinned. system_server's PinnerService maps the home app (the agent, here) and
+# WebView into its own memory and locks them there with mlock: up to 60 MiB of the home app's
+# APK and 20 MiB of WebView's, each with its odex, vdex and app image on top, which only a
+# global limit of a tenth of the guest's memory bounds. It is meant to keep a phone's launcher
+# and WebView quick to start under memory pressure. Locked pages are neither reclaimed nor
+# compressed into zram, so the idle reclaim could not hand them back and the host kept them
+# for the whole session, and they counted in system_server's PSS. Unlocked, they are page
+# cache like any app's code: read back from the disk in a few milliseconds when the agent or
+# a WebView needs them again, and given back while Android idles. The global limit at 0 keeps
+# anything else (the camera or assistant pins a device may turn on) from pinning either.
+PINNER_OVERLAY_INTEGERS = {
+    "config_pinnerHomePinBytes": 0,
+    "config_pinnerWebviewPinBytes": 0,
+    "config_pinnerMaxPinnedMemoryPercentage": 0,
+}
+FRAMEWORK_OVERLAY_INTEGERS = {"config_tapTimeoutMillis": 0, "config_customizedMaxCachedProcesses": 8,
+                              **PINNER_OVERLAY_INTEGERS}
 # The user's aspect ratio override of an app, which Settings offers on the app's aspect ratio
 # page and a task window's system menu opens. The window manager applies the override only
 # while this flag is on, and Android leaves it off unless a device turns it on, as large
