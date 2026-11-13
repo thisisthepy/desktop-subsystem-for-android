@@ -58,7 +58,9 @@ pub struct Window {
     /// A frame that waits for a free buffer.
     waiting: Option<Frame>,
     pub caption: CaptionState,
-    pub tone: CaptionTone,
+    /// The tone the app asked for; `None` when it expressed nothing, and the pixels under
+    /// the band decide ([`shown_tone`]).
+    pub tone: Option<CaptionTone>,
     pub pointer: PointerMapper,
     pub keys: KeyMapper,
     pub ime: TextInputV3,
@@ -73,8 +75,9 @@ pub struct Window {
     pub(crate) caption_layer: Option<super::gpu::CaptionLayer>,
     /// The GPU frame shown last, drawn again when the title bar changes.
     pub(crate) last_gpu: Option<(u32, crate::compositor::frames::GpuFrame)>,
-    /// The tone the caption glyphs are drawn in now: `tone`, unless the pixels under the band
-    /// call for the other ([`shown_tone`]).
+    /// The tone the caption glyphs are drawn in now: `tone` when the app asked for one, else
+    /// what the pixels under the band call for, and the fill's tone over a band the window
+    /// fills ([`shown_tone`]).
     shown_tone: CaptionTone,
     /// The band's fill and lightness over GPU frames, as sampled last, and when it was sampled.
     pub(crate) gpu_band: BandSample,
@@ -179,7 +182,7 @@ impl State {
                 last: None,
                 waiting: None,
                 caption: CaptionState::default(),
-                tone: CaptionTone::default(),
+                tone: None,
                 pointer: PointerMapper::new(task_id),
                 keys: KeyMapper::new(task_id),
                 ime: TextInputV3::new(task_id),

@@ -9,7 +9,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
-use super::caption::{caption_tone, CaptionBand, CaptionTone};
+use super::caption::{reported_tone, CaptionBand, CaptionTone};
 use super::window_mode::WindowMode;
 use super::window_sizing::{
     to_task_length, to_window_rect, Scale, ScalingMode, WindowSizing, BASE_DENSITY,
@@ -77,10 +77,14 @@ pub enum WindowChange {
         task_id: i32,
         editor: crate::ime::ImeEditor,
     },
-    /// The window's caption buttons take this tone, to stay readable over the app's status
-    /// bar. Comes with every window that opens, and whenever the app's status bar changes
-    /// tone.
-    CaptionTone { task_id: i32, tone: CaptionTone },
+    /// The tone the app asked its status bar's icons to take, which the window's caption
+    /// buttons take, or `None` when the app expressed nothing and the window reads the tone
+    /// from the pixels under its band ([`super::caption::shown_tone`]). Comes with every
+    /// window that opens, and whenever the app's status bar changes tone.
+    CaptionTone {
+        task_id: i32,
+        tone: Option<CaptionTone>,
+    },
     /// How the window is shown (as the app asks), and whether the user may resize it (as the
     /// user's settings for the app say). Comes with a window that opens unless it is an
     /// ordinary resizable one, and with every change.
@@ -145,9 +149,10 @@ pub fn fit_within(size: (u32, u32), area: (u32, u32)) -> (u32, u32) {
     (fit(width, max_width), fit(height, max_height))
 }
 
-/// The tone of the caption glyphs of `task`'s window.
-fn tone_of(task: &Task) -> CaptionTone {
-    caption_tone(task.status_bar, task.status_bar_color)
+/// The tone `task`'s app asked for the caption glyphs of its window; `None` when it
+/// expressed nothing.
+fn tone_of(task: &Task) -> Option<CaptionTone> {
+    reported_tone(task.status_bar, task.status_bar_color)
 }
 
 /// Whether `task`'s app draws its own title bar, and where its controls are in the band. The
@@ -1089,10 +1094,12 @@ mod tests {
         }
     }
 
+    /// The tone a window opens with for an app that expressed nothing about its status bar:
+    /// none, so the window reads it from its pixels.
     fn dark_glyphs(task_id: i32) -> WindowChange {
         WindowChange::CaptionTone {
             task_id,
-            tone: CaptionTone::DarkGlyphs,
+            tone: None,
         }
     }
 
@@ -1194,7 +1201,7 @@ mod tests {
                 opened(1, "Clock"),
                 WindowChange::CaptionTone {
                     task_id: 1,
-                    tone: CaptionTone::LightGlyphs
+                    tone: Some(CaptionTone::LightGlyphs)
                 }
             ]
         );
@@ -1204,11 +1211,43 @@ mod tests {
         light.status_bar = StatusBarAppearance::Light;
         assert_eq!(
             windows.apply(&TaskEvent::Updated(light.clone())),
-            vec![dark_glyphs(1)]
+            vec![WindowChange::CaptionTone {
+                task_id: 1,
+                tone: Some(CaptionTone::DarkGlyphs)
+            }]
         );
         // A new color with the same tone changes nothing.
         light.status_bar_color = 0xFF00_0000;
         assert!(windows.apply(&TaskEvent::Updated(light)).is_empty());
+    }
+
+    #[test]
+    fn fr22_a_change_of_appearance_alone_retones_the_window() {
+        // A tab switch: the guest reports the app's live appearance in a task update that
+        // changes nothing else (the task's description, its label and its bounds stay), and
+        // the window is told at once. An appearance the app withdraws hands the window back
+        // to its pixels.
+        use crate::tasks::StatusBarAppearance;
+        let mut windows = TaskWindows::new();
+        let plain = task(1, "Store", 720, 1280);
+        assert_eq!(
+            windows.apply(&TaskEvent::Updated(plain.clone())),
+            vec![opened(1, "Store"), dark_glyphs(1)]
+        );
+        for (appearance, tone) in [
+            (StatusBarAppearance::Light, Some(CaptionTone::DarkGlyphs)),
+            (StatusBarAppearance::Dark, Some(CaptionTone::LightGlyphs)),
+            (StatusBarAppearance::Light, Some(CaptionTone::DarkGlyphs)),
+            (StatusBarAppearance::Unspecified, None),
+        ] {
+            let mut now = plain.clone();
+            now.status_bar = appearance;
+            assert_eq!(
+                windows.apply(&TaskEvent::Updated(now)),
+                vec![WindowChange::CaptionTone { task_id: 1, tone }],
+                "{appearance:?}"
+            );
+        }
     }
 
     #[test]

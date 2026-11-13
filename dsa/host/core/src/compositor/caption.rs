@@ -13,10 +13,11 @@
 //!   area), and only the points below it reach the app. An app receives the band as a system
 //!   bar inset and keeps nothing it can be touched on there; sharing the band would make the
 //!   same point sometimes drag the window and sometimes press the app.
-//! - [`caption_tone`]: whether the buttons' glyphs are dark or light, from what the app told
-//!   the system about its status bar, and [`shown_tone`]: the tone actually drawn, from the
-//!   pixels of the app's frame under the band whenever they can be read ([`band_sample`]),
-//!   so the glyphs stay readable over what the app really draws there.
+//! - [`reported_tone`]: whether the buttons' glyphs are dark or light, from what the app told
+//!   the system about its status bar, as Android's own status bar takes its icons' tone, and
+//!   [`shown_tone`]: the tone actually drawn, which is the reported one whenever the app said
+//!   something, and otherwise comes from the pixels of the app's frame under the band
+//!   ([`band_sample`]), so the glyphs stay readable over what the app really draws there.
 //! - [`paint_buttons`]: the buttons as an image, in the tone and state they are in.
 //! - [`paint_title_bar`]: the whole band as an image: the app's icon and name at the left
 //!   (the platform lays the name out), the buttons at the right, and a fill when
@@ -44,26 +45,37 @@ pub enum CaptionTone {
     LightGlyphs,
 }
 
-/// The tone of a task window's caption glyphs: dark over a light status bar, light over a
-/// dark one. What the app said about its status bar's icons decides; when it said nothing the
-/// agent could read, the status bar's color does, if it set one; otherwise the glyphs are
-/// dark.
-pub fn caption_tone(appearance: StatusBarAppearance, status_bar_color: u32) -> CaptionTone {
+/// The tone of a task window's caption glyphs as the app asked for it: dark over a light
+/// status bar, light over a dark one. What the app said about its status bar's icons decides,
+/// as the guest's window manager reports it while the app changes it (the appearance of the
+/// window that controls the bars, screen by screen and tab by tab); when it said nothing, the
+/// status bar's color does, if it set an opaque one. `None` when the app expressed neither:
+/// the window then reads the tone from its pixels ([`shown_tone`]).
+pub fn reported_tone(
+    appearance: StatusBarAppearance,
+    status_bar_color: u32,
+) -> Option<CaptionTone> {
     match appearance {
-        StatusBarAppearance::Light => CaptionTone::DarkGlyphs,
-        StatusBarAppearance::Dark => CaptionTone::LightGlyphs,
+        StatusBarAppearance::Light => Some(CaptionTone::DarkGlyphs),
+        StatusBarAppearance::Dark => Some(CaptionTone::LightGlyphs),
         StatusBarAppearance::Unspecified => {
             let alpha = status_bar_color >> 24;
             if alpha < 0x80 {
-                return CaptionTone::DarkGlyphs;
+                return None;
             }
             if relative_luminance(status_bar_color) >= 0.5 {
-                CaptionTone::DarkGlyphs
+                Some(CaptionTone::DarkGlyphs)
             } else {
-                CaptionTone::LightGlyphs
+                Some(CaptionTone::LightGlyphs)
             }
         }
     }
+}
+
+/// [`reported_tone`], with dark glyphs when the app expressed nothing, as over a light title
+/// bar. It also gives the tone of a color the window fills the band with.
+pub fn caption_tone(appearance: StatusBarAppearance, status_bar_color: u32) -> CaptionTone {
+    reported_tone(appearance, status_bar_color).unwrap_or_default()
 }
 
 /// What a window read from the pixels of its app's frame under the title bar: the color to
@@ -109,18 +121,21 @@ pub fn band_luminance(band: &[u32]) -> Option<u16> {
 pub const LIGHT_GLYPHS_BELOW: u16 = 130;
 pub const DARK_GLYPHS_ABOVE: u16 = 240;
 
-/// The tone a window's caption glyphs are drawn in, given the tone the app's status bar
-/// reports (`reported`, from [`caption_tone`]), what the window last read from the app's
-/// frame under the band (`sample`), whether the app draws its own title bar (`app_drawn`,
-/// which is never filled over), and the tone shown now (`shown`).
+/// The tone a window's caption glyphs are drawn in, given the tone the app asked for
+/// (`reported`, from [`reported_tone`]; `None` when it expressed nothing), what the window
+/// last read from the app's frame under the band (`sample`), whether the app draws its own
+/// title bar (`app_drawn`, which is never filled over), and the tone shown now (`shown`).
 ///
-/// The pixels under the glyphs decide whenever they could be read, since an app that draws
-/// edge to edge often leaves its status bar transparent, or reports icons for a status bar it
-/// does not show, while its own header runs under the band. A band the window fills takes the
-/// tone of the fill. Between [`LIGHT_GLYPHS_BELOW`] and [`DARK_GLYPHS_ABOVE`] the shown tone
-/// stays. Only a frame that could not be sampled leaves the reported tone.
+/// A band the window fills takes the tone of the fill, since the glyphs stand on the window's
+/// own color there. Otherwise the app's word decides, whatever its pixels look like, as
+/// Android's status bar icons follow the app's appearance and never the content under them:
+/// an average over a header with light and dark parts picks the wrong side as often as the
+/// right one, and the app knows which side its bar is meant to be. Only an app that expressed
+/// nothing has its pixels read: below [`LIGHT_GLYPHS_BELOW`] the glyphs turn light, above
+/// [`DARK_GLYPHS_ABOVE`] dark, and between them the shown tone stays. A frame that could not
+/// be sampled then keeps the shown tone as well.
 pub fn shown_tone(
-    reported: CaptionTone,
+    reported: Option<CaptionTone>,
     sample: BandSample,
     app_drawn: bool,
     shown: CaptionTone,
@@ -128,8 +143,11 @@ pub fn shown_tone(
     if let Some(fill) = sample.fill.filter(|_| !app_drawn) {
         return caption_tone(StatusBarAppearance::Unspecified, fill);
     }
+    if let Some(reported) = reported {
+        return reported;
+    }
     match sample.luminance {
-        None => reported,
+        None => shown,
         Some(luminance) if luminance < LIGHT_GLYPHS_BELOW => CaptionTone::LightGlyphs,
         Some(luminance) if luminance > DARK_GLYPHS_ABOVE => CaptionTone::DarkGlyphs,
         Some(_) => shown,
@@ -1043,6 +1061,16 @@ mod tests {
         // A transparent status bar says nothing about what is behind it.
         assert_eq!(tone(0x0000_0000), CaptionTone::DarkGlyphs);
         assert_eq!(tone(0x10FF_FFFF), CaptionTone::DarkGlyphs);
+        // So the window is told the app expressed nothing, and reads its pixels.
+        assert_eq!(reported_tone(StatusBarAppearance::Unspecified, 0), None);
+        assert_eq!(
+            reported_tone(StatusBarAppearance::Unspecified, 0x10FF_FFFF),
+            None
+        );
+        assert_eq!(
+            reported_tone(StatusBarAppearance::Unspecified, 0xFF1F_1F1F),
+            Some(CaptionTone::LightGlyphs)
+        );
     }
 
     /// A band of samples across the middle of the title bar, all `color`, with the row under
@@ -1053,9 +1081,10 @@ mod tests {
 
     #[test]
     fn fr22_a_transparent_status_bar_over_a_light_header_gets_dark_glyphs() {
-        // An app that draws edge to edge: its status bar is transparent and says nothing, and
-        // its light header (the Play Store's Games and Apps tabs) runs under the band.
-        let reported = caption_tone(StatusBarAppearance::Unspecified, 0x0000_0000);
+        // An app that draws edge to edge and expressed nothing: its status bar is transparent,
+        // and its light header runs under the band.
+        let reported = reported_tone(StatusBarAppearance::Unspecified, 0x0000_0000);
+        assert_eq!(reported, None);
         for header in [0xFFFF_FFFF, 0xFFF8_F9FA, 0xFFE8_F0FE, 0xFFDA_E2FF] {
             let sample = sampled(header, header);
             assert_eq!(sample.fill, None, "the app draws the band");
@@ -1071,9 +1100,9 @@ mod tests {
 
     #[test]
     fn fr22_a_transparent_status_bar_over_a_dark_header_gets_light_glyphs() {
-        // The same app in a dark theme: nothing reported, so the flag alone would say dark.
-        let reported = caption_tone(StatusBarAppearance::Unspecified, 0x0000_0000);
-        assert_eq!(reported, CaptionTone::DarkGlyphs);
+        // The same app in a dark theme: nothing reported, so the pixels decide.
+        let reported = reported_tone(StatusBarAppearance::Unspecified, 0x0000_0000);
+        assert_eq!(reported, None);
         for header in [
             0xFF00_0000,
             0xFF1F_1F1F,
@@ -1094,9 +1123,9 @@ mod tests {
 
     #[test]
     fn fr22_a_dark_video_under_a_transparent_status_bar_gets_light_glyphs() {
-        // A full-bleed player (YouTube's Shorts) in the light theme: the app reports dark
-        // status bar icons, or nothing, and its dark video runs under the band, with a grey
-        // overlay here and there.
+        // A full-bleed player (YouTube's Shorts) in the light theme: while the player shows,
+        // the app asks for light status bar icons (a dark bar), or says nothing, and its dark
+        // video runs under the band, with a grey overlay here and there.
         let video = [
             0xFF10_1010,
             0xFF2A_1E18,
@@ -1110,53 +1139,146 @@ mod tests {
         let sample = band_sample(&video, &video);
         assert_eq!(sample.fill, None);
         for reported in [
-            caption_tone(StatusBarAppearance::Light, 0),
-            caption_tone(StatusBarAppearance::Unspecified, 0),
+            reported_tone(StatusBarAppearance::Dark, 0),
+            reported_tone(StatusBarAppearance::Unspecified, 0),
         ] {
-            assert_eq!(reported, CaptionTone::DarkGlyphs);
-            assert_eq!(
-                shown_tone(reported, sample, false, reported),
-                CaptionTone::LightGlyphs
-            );
+            for shown in [CaptionTone::DarkGlyphs, CaptionTone::LightGlyphs] {
+                assert_eq!(
+                    shown_tone(reported, sample, false, shown),
+                    CaptionTone::LightGlyphs
+                );
+            }
+        }
+    }
+
+    /// Every way a band can look that the window does not fill: light, dark, half and half
+    /// (a header with a light and a dark part, which an average gets wrong), not read yet.
+    fn unfilled_bands() -> Vec<BandSample> {
+        let half = [[0xFFFF_FFFF; 4], [0xFF10_1010; 4]].concat();
+        vec![
+            sampled(0xFFFF_FFFF, 0xFFFF_FFFF),
+            sampled(0xFF12_1212, 0xFF12_1212),
+            band_sample(&half, &half),
+            BandSample::default(),
+        ]
+    }
+
+    #[test]
+    fn fr22_an_explicit_light_status_bar_gives_dark_glyphs_even_over_dark_pixels() {
+        let says_light = reported_tone(StatusBarAppearance::Light, 0);
+        assert_eq!(says_light, Some(CaptionTone::DarkGlyphs));
+        let dark_header = sampled(0xFF12_1212, 0xFF12_1212);
+        assert_eq!(dark_header.fill, None, "the app draws the band");
+        for app_drawn in [false, true] {
+            for band in unfilled_bands() {
+                for shown in [CaptionTone::DarkGlyphs, CaptionTone::LightGlyphs] {
+                    assert_eq!(
+                        shown_tone(says_light, band, app_drawn, shown),
+                        CaptionTone::DarkGlyphs,
+                        "{band:?} while {shown:?} show"
+                    );
+                }
+            }
         }
     }
 
     #[test]
-    fn fr22_a_status_bar_flag_that_disagrees_with_the_pixels_gives_way_to_them() {
-        // Dark status bar icons asked for (light glyphs) over a light header, and the reverse.
-        let light_header = sampled(0xFFFF_FFFF, 0xFFFF_FFFF);
-        let dark_header = sampled(0xFF12_1212, 0xFF12_1212);
-        let says_dark = caption_tone(StatusBarAppearance::Dark, 0);
-        let says_light = caption_tone(StatusBarAppearance::Light, 0);
+    fn fr22_an_explicit_dark_status_bar_gives_light_glyphs_even_over_light_pixels() {
+        // The case of a dark header with light parts (a picture, a light tab): the app asked
+        // for light icons, and the average of its pixels must not turn the glyphs black.
+        let says_dark = reported_tone(StatusBarAppearance::Dark, 0);
+        assert_eq!(says_dark, Some(CaptionTone::LightGlyphs));
+        for app_drawn in [false, true] {
+            for band in unfilled_bands() {
+                for shown in [CaptionTone::DarkGlyphs, CaptionTone::LightGlyphs] {
+                    assert_eq!(
+                        shown_tone(says_dark, band, app_drawn, shown),
+                        CaptionTone::LightGlyphs,
+                        "{band:?} while {shown:?} show"
+                    );
+                }
+            }
+        }
+        // An opaque status bar color the app set is its word as well.
+        let says_by_color = reported_tone(StatusBarAppearance::Unspecified, 0xFF20_2124);
         assert_eq!(
-            shown_tone(says_dark, light_header, false, says_dark),
-            CaptionTone::DarkGlyphs
-        );
-        assert_eq!(
-            shown_tone(says_light, dark_header, false, says_light),
+            shown_tone(
+                says_by_color,
+                sampled(0xFFFF_FFFF, 0xFFFF_FFFF),
+                false,
+                CaptionTone::DarkGlyphs
+            ),
             CaptionTone::LightGlyphs
         );
-        // So do the glyphs over an app's own title bar, whose content fills the band.
-        assert_eq!(
-            shown_tone(says_dark, light_header, true, says_dark),
-            CaptionTone::DarkGlyphs
-        );
-        // A frame that could not be sampled leaves the flag: an empty band, or none read yet.
-        let empty = sampled(0x0000_0000, 0x0000_0000);
-        assert_eq!(empty, BandSample::default());
-        for reported in [says_dark, says_light] {
-            assert_eq!(shown_tone(reported, empty, false, says_light), reported);
-            assert_eq!(
-                shown_tone(reported, BandSample::default(), false, says_dark),
-                reported
-            );
+    }
+
+    #[test]
+    fn fr22_a_change_of_appearance_changes_the_tone_at_once() {
+        // A tab switch: the app's appearance goes from light to dark and back, and the glyphs
+        // follow on the next settle, over the same pixels, with no hysteresis in the way.
+        let band = sampled(0xFF80_8080, 0xFF80_8080);
+        let mut shown = CaptionTone::DarkGlyphs;
+        for (appearance, expected) in [
+            (StatusBarAppearance::Light, CaptionTone::DarkGlyphs),
+            (StatusBarAppearance::Dark, CaptionTone::LightGlyphs),
+            (StatusBarAppearance::Light, CaptionTone::DarkGlyphs),
+        ] {
+            shown = shown_tone(reported_tone(appearance, 0), band, false, shown);
+            assert_eq!(shown, expected, "{appearance:?}");
         }
-        // A band left empty above a toolbar takes the fill's tone, whatever the flag says.
+    }
+
+    #[test]
+    fn fr22_an_app_that_expressed_nothing_falls_back_to_its_pixels() {
+        let light_header = sampled(0xFFFF_FFFF, 0xFFFF_FFFF);
+        let dark_header = sampled(0xFF12_1212, 0xFF12_1212);
+        for shown in [CaptionTone::DarkGlyphs, CaptionTone::LightGlyphs] {
+            assert_eq!(
+                shown_tone(None, light_header, false, shown),
+                CaptionTone::DarkGlyphs
+            );
+            assert_eq!(
+                shown_tone(None, dark_header, false, shown),
+                CaptionTone::LightGlyphs
+            );
+            // So do the glyphs over an app's own title bar, whose content fills the band.
+            assert_eq!(
+                shown_tone(None, light_header, true, shown),
+                CaptionTone::DarkGlyphs
+            );
+            // A frame that could not be sampled keeps the tone shown: an empty band, or none
+            // read yet.
+            let empty = sampled(0x0000_0000, 0x0000_0000);
+            assert_eq!(empty, BandSample::default());
+            assert_eq!(shown_tone(None, empty, false, shown), shown);
+        }
+    }
+
+    #[test]
+    fn fr22_a_band_the_window_fills_takes_the_tone_of_the_fill() {
+        // A band left empty above a toolbar is painted in the toolbar's color, so the glyphs
+        // stand on that color whatever the app said.
         let filled = sampled(0x0000_0000, 0xFFFF_FFFF);
         assert_eq!(filled.fill, Some(0xFFFF_FFFF));
+        for reported in [
+            None,
+            reported_tone(StatusBarAppearance::Dark, 0),
+            reported_tone(StatusBarAppearance::Light, 0),
+        ] {
+            assert_eq!(
+                shown_tone(reported, filled, false, CaptionTone::LightGlyphs),
+                CaptionTone::DarkGlyphs
+            );
+        }
+        // An app that draws its own title bar is never filled over: its word stands.
         assert_eq!(
-            shown_tone(says_dark, filled, false, says_dark),
-            CaptionTone::DarkGlyphs
+            shown_tone(
+                reported_tone(StatusBarAppearance::Dark, 0),
+                filled,
+                true,
+                CaptionTone::DarkGlyphs
+            ),
+            CaptionTone::LightGlyphs
         );
     }
 
@@ -1167,7 +1289,7 @@ mod tests {
                 fill: None,
                 luminance: Some(luminance),
             };
-            shown_tone(CaptionTone::DarkGlyphs, sample, false, shown)
+            shown_tone(None, sample, false, shown)
         };
         // A header whose lightness wavers around the middle (an animation, a scrolled
         // picture) keeps the tone it has, whichever it is.
