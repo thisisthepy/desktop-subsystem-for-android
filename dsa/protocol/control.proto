@@ -737,6 +737,15 @@ message ScreenState {
   bool on = 1;
 }
 
+// Host to guest, to the control daemon: the tasks whose window the host shows now, open and
+// not minimized; every other task's window is minimized. Sent after the connection opens and
+// on each change. The daemon keeps less page cache for a minimized task's app than for a shown
+// one, since it draws nothing and reads few files; until it is told, every task counts as
+// shown.
+message TasksShown {
+  repeated int32 task_ids = 1;
+}
+
 // Host to guest: the host computer's power, which the agent makes the guest's battery state
 // match. Sent once after the connection opens, when the host knows it, and on each change.
 message PowerState {
@@ -3138,6 +3147,7 @@ message Envelope {
     ClockProbe clock_probe = 28;
     ClockAnswer clock_answer = 29;
     ScreenState screen_state = 40;
+    TasksShown tasks_shown = 46;
     PowerState power_state = 41;
     DisplayRefresh display_refresh = 407;
     PowerHint power_hint = 110;

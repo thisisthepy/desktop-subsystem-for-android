@@ -717,6 +717,11 @@ impl Router {
                 return;
             }
         }
+        if let Some(Body::TasksShown(shown)) = &body {
+            // For the daemon alone: the reclaim keeps less cache for a minimized task.
+            self.lock().shown_tasks = Some(shown.task_ids.iter().copied().collect());
+            return;
+        }
         let mut state = self.lock();
         match body {
             Some(Body::ScreenState(screen)) => state.screen_off = !screen.on,
@@ -740,6 +745,8 @@ impl Router {
         // again if it is short of memory.
         state.screen_off = false;
         state.host_memory_low = false;
+        // It says again which task windows it shows.
+        state.shown_tasks = None;
         let _ = self.to_host.send(state.boot_report());
         for frame in state.power_modes.values() {
             let _ = self.to_host.send(frame.clone());

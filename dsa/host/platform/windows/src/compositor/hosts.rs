@@ -1407,6 +1407,9 @@ impl Manager {
     /// tells the guest when whether any window is shown changed, so it can sleep or wake.
     fn publish(&mut self) {
         let windows = self.windows.windows();
+        if let Some(request) = self.shown.update_tasks(&windows) {
+            self.request(vec![request]);
+        }
         if let Some(request) = self.shown.update(&windows) {
             if let TaskRequest::WindowsShown { shown } = request {
                 self.setup
