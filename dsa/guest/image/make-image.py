@@ -490,6 +490,14 @@ DROPPED_PROPS = {"persist.adb.tcp.port", "service.adb.tcp.port"}
 # a millisecond, on a desktop's processor. The limits on how far a heap may grow stay as they
 # are, so no app has less memory to work with.
 #
+# Those processes are also the ones ART counts as in the foreground, where it multiplies the
+# free space it keeps after a collection by the foreground heap growth multiplier, plus one it
+# adds for its concurrent compacting collectors: 2 + 1 by default, so system_server could keep
+# 12 MiB free rather than 4. At 1 the factor is 2 (1 + 1), up to 8 MiB, which still leaves the
+# app on screen twice the room a background process gets between collections; system_server
+# and the other foreground heaps keep up to 4 MiB less each. Low-memory Android devices go
+# further, to 1 in all.
+#
 # ro.config.low_ram is not set, whatever it would save: it turns off multi-window, and every
 # task here is a freeform window.
 MEMORY_PROPS = {
@@ -502,6 +510,7 @@ MEMORY_PROPS = {
     "dalvik.vm.heaptargetutilization": "0.75",
     "dalvik.vm.heapminfree": "512k",
     "dalvik.vm.heapmaxfree": "4m",
+    "dalvik.vm.foreground-heap-growth-multiplier": "1.0",
 }
 
 # The density of the freeform display every task window lives on, by default: a 100% monitor's.

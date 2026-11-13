@@ -8234,6 +8234,19 @@ class SlimSystemServerTests(unittest.TestCase):
         agent = (Path(__file__).parent.parent / "agent/src/main/AndroidManifest.xml").read_text()
         self.assertIn("android.intent.category.HOME", agent)
 
+    def test_nfr1_foreground_heaps_keep_less_free_space_without_lowering_their_limits(self):
+        # ART multiplies a foreground heap's free space by this plus one: 3 by default, 2 here.
+        for vendor in (False, True):
+            props = make_image.edit_props(
+                "dalvik.vm.foreground-heap-growth-multiplier=2.0\ndalvik.vm.heapgrowthlimit=192m\n",
+                vendor=vendor).splitlines()
+            self.assertIn("dalvik.vm.foreground-heap-growth-multiplier=1.0", props)
+            self.assertNotIn("dalvik.vm.foreground-heap-growth-multiplier=2.0", props)
+            self.assertIn("dalvik.vm.heapgrowthlimit=192m", props)
+            self.assertIn("dalvik.vm.heapmaxfree=4m", props)
+        # ART refuses a multiplier outside 0.1 to 5.
+        self.assertTrue(0.1 <= float(make_image.MEMORY_PROPS["dalvik.vm.foreground-heap-growth-multiplier"]) <= 5)
+
 
 if __name__ == "__main__":
     unittest.main()
