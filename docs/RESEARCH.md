@@ -2910,3 +2910,36 @@ HWUI는 `SkiaOpenGLPipeline`으로 ANGLE 위에서 그리므로(R19) 위 표를 
 - CI의 첫 측정값. 이 변경의 develop 실행이 처음 남긴다. 측정이 끝나기 전에는 설정을 기본으로 켜지 않는다.
 - 호스트가 만드는 디스크 전부. 이 컴퓨터에서는 빌드도 시험도 하지 않았다(컴파일 확인만). 실제 Android 이미지의 erofs를 읽는 코드가 맞는지는 CI의 `fsck.erofs` 비교와 매핑된 부팅이 처음 보여 준다. 만드는 시간과 자리는 위의 추정이고, CI 러너의 값과 소유자 PC에서의 값은 아직 없다.
 - 결정이 남은 것: 매핑하는 파티션의 dm-verity를 포기하는 맞바꿈(위 3). 그때까지 설정은 기본으로 꺼져 있다.
+
+## R40. 쓰지 않는 메모리를 더 작은 조각으로, 더 빨리 돌려주기: 빈 페이지 보고의 남은 틈 (NFR-1, NFR-2)
+
+**목표.** 소유자 PC(0.2.4-dev.5)에서 `dsa memory`의 "the VM holds N MiB beyond what Android uses"는 유휴 때 0-8 MiB, 부하 뒤에는 더 컸다. vm 상주는 760-1490 MiB, 게스트 사용은 687-1595 MiB였고, 앱을 닫은 뒤 메모리가 천천히 돌아왔다. 0.2.5 메모리 단계(소유자 승인)로 수십 MiB를 더 작은 조각으로, 더 빨리 돌려준다.
+
+**방법.** 빌드하거나 실행하지 않았고 바탕 화면과 설치된 DSA는 건드리지 않았다. 고정 커널(`linux-msft-wsl-6.18.54.1`)의 `mm/page_reporting.c`, `mm/page_reporting.h`, `mm/page_alloc.c`, `mm/compaction.c`, `drivers/hv/hv_balloon.c`를 받아 읽었다(`.scratch/kernel-src/`). DSA의 패치를 차례로 적용하고 새 패치 둘을 `patch --fuzz=0`으로 원본에 적용해 결과가 같은지 확인했다. 컴파일과 시험은 CI가 한다.
+
+**찾은 것.**
+
+1. 보고 순서는 이미 가장 작다. Windows는 작은 백킹 페이지를 쓸 수 있는 빌드에서 0(4 KiB), 그 밖에는 9(2 MiB)이고(`page_reporting_order_for_build`), Linux(crosvm)와 macOS는 0이다. hv_balloon은 Hyper-V가 작은 범위를 거절하면 스스로 9로 돌아간다("Underlying Hyper-V does not support order less than 9"). 그래서 순서를 더 낮출 곳은 없다. 보고 한 번은 범위 최대 32개(`PAGE_REPORTING_CAPACITY`)를 hypercall 하나로 보낸다. 순서 0에서는 흩어진 4 KiB 조각마다 범위 하나이므로 범위 수가 늘지만, 묶음이 32개라 hypercall은 그 1/32이다.
+2. 지연도 이미 없다. `page-reporting-no-delay.patch`가 2초 지연을 0으로 했고, 한 번에 목록의 1/16만 처리하는 예산이 끝나면 곧바로 다음 패스가 돈다. dsa-channeld는 5초마다 보고, 앱이 닫히면 기다리지 않고 회수한다(PR #724의 순서: 깨끗한 페이지 캐시, 그다음 zram). 이 순서는 그대로 두었다.
+3. Hyper-V의 64 KiB 폴트 클러스터 때문에 생기는 틈이 남아 있었다. 할당자가 보고된 블록을 내주고 게스트가 그것을 쓰면 Hyper-V는 클러스터 전체(16 페이지)를 다시 들인다. 그 안의 다른 빈 블록도 다시 VM의 메모리가 되지만 게스트는 그것을 여전히 보고된 것으로 표시해 두고 다시 내놓지 않는다. 지금까지는 유휴 회수와 writeback 끝의 `rereport`만 이것을 돌려받았으므로, 앱을 쓰는 동안 이 몫이 쌓였다(R26의 "가설"). 할당 경로(`page_del_and_expand`)에서 보고된 블록이 나가는 순간을 알 수 있고, 그 블록이 클러스터보다 작으면 클러스터의 나머지 빈 블록은 버디 머리가 자기 순서에 맞춰 정렬되어 있으므로 페이지 16개를 한 번 훑으면 모두 찾는다. 나눠진 블록의 나머지(`expand`)는 원래 보고 표시가 없으므로 다음 패스가 보고한다.
+4. 순서 0에서 압축 정리(compaction)는 보고에 쓸모가 없고 해롭다. 모든 빈 페이지가 그대로 보고되므로 블록을 모을 필요가 없다. 반면 압축 정리는 페이지를 빈 페이지로 복사하는데, 그 빈 페이지는 대개 호스트가 이미 돌려받은 것이라 호스트가 다시 백킹하고(클러스터째), 떠난 페이지는 그다음에야 보고된다. 유휴 회수의 `compact_memory`와 작업 집합 다듬기의 `compact_memory`, 배경 압축 정리(`compaction_proactiveness` 40)가 모두 그렇다. 앱을 닫은 뒤 VM 메모리가 한 번 오른 뒤에야 내려간 까닭의 하나로 본다(재지 않았다).
+5. 게스트는 무엇을 보고했는지 내보이지 않았다. 호스트는 vm 상주와 게스트 사용의 차이만 보므로, 게스트가 아는 틈(아직 보고하지 않은 빈 메모리)과 게스트가 모르는 틈(보고했는데 호스트가 다시 들인 것)을 나눌 수 없었다.
+6. macOS의 Virtualization framework 풍선(`VZVirtioTraditionalMemoryBalloonDevice`)이 빈 페이지 보고를 받는지는 확인하지 못했다. 돌려주는 길은 공통 `MemoryGrowth`의 풍선 목표다. 압박이 없는 첫 보고에서, 마지막 변경 5초 뒤 사용량 더하기 여유(사용량의 1/3, 최소 768 MiB)로 줄인다. 바꾸지 않았다. 여유를 줄이는 것은 늘리고 줄이기가 흔들리는 비용과 맞바꿈이므로 따로 정한다.
+
+**바꾼 것.**
+
+1. 커널 `patches/page-reporting-stats.patch`: 읽기 전용 `page_reporting.reported_kb`(지금 보고된 것으로 표시된 빈 메모리, 읽을 때 빈 목록을 센다)와 `reported_total_kb`(부팅 뒤 보고한 양). 쓰기는 `-EPERM`으로 거절한다.
+2. 커널 `patches/page-reporting-taken-clusters.patch`: `page_reporting.fault_cluster_order`(기본 0, 꺼짐). 할당자가 보고된 블록을 내주고 그 블록이 클러스터보다 작으면 같은 클러스터의 빈 블록에서 보고 표시를 지우고 보고를 청한다. 그 양을 `refaulted_total_kb`가 센다. 할당 한 번에 `page_reported` 검사 하나가 더해지고(정적 키 뒤), 보고된 작은 블록이 나갈 때만 페이지 16개를 훑는다.
+3. 호스트: `dsa_host_core::memory::page_reporting_cmdline`이 순서, 클러스터(있을 때), `androidboot.dsa.memory_compaction=on`(순서가 0보다 클 때만)을 명령줄에 넣는다. Windows는 작은 백킹 페이지를 쓸 때 클러스터 4를 알린다. 콘솔 머리말이 명령줄을 적기 전에 `fine_grained_memory`를 정하도록 순서를 바꿨다. Linux는 crosvm이 범위마다 돌려받으므로 클러스터가 없고, 설정한 순서가 0보다 클 때만 압축 정리를 청한다. macOS는 순서 0이라 그대로다.
+4. 이미지: `dsa-channeld.rc`의 유휴 회수와 작업 집합 다듬기에서 `compact_memory`를 `ro.boot.dsa.memory_compaction=on` 조건이 붙은 따로의 동작으로 뺐다. 같은 트리거의 동작은 정의 순서대로 돌므로 순서는 "메모리를 푸는 것, (조건부) 압축 정리, `rereport`와 속성 되돌리기"다. `dsa-memory.rc`는 부팅 때 `compaction_proactiveness`를 0으로 하고, 같은 조건에서만 40으로 한다. 할당에 연속 메모리가 필요할 때의 압축 정리(kcompactd, 직접 압축)는 그대로 돈다.
+5. 측정: 에이전트가 세 값을 `GuestMemory`(제어 프로토콜의 27-29번)로 보내고, `memory.cil`이 그 세 파일을 에이전트만 읽게 한다. 세션이 같은 부팅의 두 보고에서 분당 보고량을 낸다. `dsa memory`는 "free page reporting: N of M MiB free is back on the host, K MiB not yet; T MiB reported since boot (R MiB a minute since the report before); F MiB taken back in with a neighbour and reported again"을 적고, `--json`은 `guest.page_reporting`에, 서비스 로그의 메모리 줄은 끝에 같은 것을 적는다. CI 메모리 측정의 두 표에도 "guest free"와 "guest free handed back to the host"를 더했다.
+
+**기대하는 절감(재지 않았다).** 앱을 쓰는 동안 클러스터로 다시 들어온 빈 페이지: R26이 vm private와 게스트 사용의 차이로 본 130-310 MiB 가운데 이 몫이 수십 MiB라면 그것이 앱을 쓰는 동안에도 돌아간다. 앱을 닫은 뒤의 압축 정리 한 번이 옮기던 페이지(게스트 사용의 수백 MiB)를 호스트가 잠깐 다시 백킹하던 봉우리와 그 시간이 없어진다. 배경 압축 정리가 쓰던 CPU도 없어진다. 비용은 클러스터를 다시 보고하는 hypercall(보고된 작은 블록이 나갈 때마다 최대 범위 15개)과, 할당에 큰 연속 블록이 필요할 때 압축 정리를 그때 하는 지연이다.
+
+**확인하지 못한 것(PC에서 잴 것).**
+
+- 위 수치 모두. 같은 이미지, 같은 앱으로 바꾸기 전(0.2.4-dev.5)과 뒤를 견준다. `dsa memory`를 앱을 연 채, 닫은 직후, 1분 뒤, 5분 뒤에 읽어 vm 상주와 private, "beyond what Android uses", 새 "free page reporting" 줄의 "not yet"과 "taken back in with a neighbour", 분당 보고량을 적는다. 앱을 닫은 뒤 vm 상주가 오르지 않고 바로 내려가는지, "beyond"가 부하 뒤에도 작게 남는지 본다.
+- `refaulted_total_kb`가 실제로 자라는지. 자라지 않으면 Hyper-V가 클러스터 안의 이웃을 들이지 않는다는 뜻이므로, 그때는 패치 2의 효과가 없고 R26의 가설도 틀린 것이다.
+- `reported_kb`를 읽는 비용. 빈 블록이 많을 때 빈 목록 전체를 영역 잠금 아래에서 센다. 에이전트는 5분마다와 `dsa memory` 때만 읽는다.
+- 압축 정리를 끈 뒤 GPU, 네트워크처럼 연속 메모리를 쓰는 할당이 느려지지 않는지(커널 로그의 할당 실패, `/proc/vmstat`의 `compact_stall`).
+- Kernel test가 두 패치를 컴파일하는지, Image test가 SELinux enforcing에서 에이전트가 세 파일을 읽게 하는지(부팅 로그의 `avc`, `dsa memory`가 "does not say what it reported"를 적지 않는지).

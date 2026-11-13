@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.os.Debug
 import io.github.thisisthepy.dsa.agent.memory.GooglePlayPackages
 import io.github.thisisthepy.dsa.agent.memory.MemorySource
+import io.github.thisisthepy.dsa.agent.memory.PageReporting
 import io.github.thisisthepy.dsa.agent.memory.ProcessPss
 import java.io.File
 
@@ -60,6 +61,22 @@ class AndroidMemorySource(context: Context) : MemorySource {
         val online = memory.listFiles { file -> file.name.startsWith("memory") }.orEmpty()
             .count { block -> runCatching { File(block, "online").readText().trim() == "1" }.getOrDefault(false) }
         return if (online == 0) null else online * blockBytes / 1024
+    }
+
+    /**
+     * DSA's kernel's free page reporting counts, in KiB; null on a kernel without them or when
+     * the policy hides them. Reading reported_kb walks the kernel's free lists, which the
+     * report's few-minute interval keeps rare.
+     */
+    override fun pageReporting(): PageReporting? {
+        val parameters = File("/sys/module/page_reporting/parameters")
+        fun read(name: String): Long? = runCatching { File(parameters, name).readText().trim().toLong() }.getOrNull()
+        val total = read("reported_total_kb") ?: return null
+        return PageReporting(
+            freeReportedKb = read("reported_kb") ?: 0,
+            reportedTotalKb = total,
+            refaultedTotalKb = read("refaulted_total_kb") ?: 0,
+        )
     }
 
     override fun processes(): List<ProcessPss> {

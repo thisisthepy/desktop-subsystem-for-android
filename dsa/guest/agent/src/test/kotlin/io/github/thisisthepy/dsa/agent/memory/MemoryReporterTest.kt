@@ -45,10 +45,13 @@ class FakeMemory : MemorySource {
         ProcessPss(901, "com.android.deskclock", 60_000),
     )
     var failProcesses = false
+    var reporting: PageReporting? = null
 
     override fun meminfo() = meminfoText
 
     override fun zramMmStat() = zram
+
+    override fun pageReporting() = reporting
 
     override fun processes(): List<ProcessPss> {
         if (failProcesses) throw SecurityException("no")
@@ -164,6 +167,27 @@ Hugepagesize:       2048 kB
         assertEquals(1, memoryReports().size)
         scheduler.advance(MemoryReporter.INTERVAL_MILLIS)
         assertEquals(2, memoryReports().size)
+    }
+
+    @Test
+    fun nfr2_the_report_says_what_free_page_reporting_gave_back_to_the_host() {
+        memory.reporting = PageReporting(freeReportedKb = 700_000, reportedTotalKb = 9_000_000, refaultedTotalKb = 12_000)
+        started()
+        daemon.deliver(Envelope.newBuilder().setRequestGuestMemory(RequestGuestMemory.getDefaultInstance()).build().toByteArray())
+        scheduler.runDue()
+
+        val report = memoryReports().single().guestMemory
+        assertEquals(700_000L, report.freeReportedKb)
+        assertEquals(9_000_000L, report.reportedTotalKb)
+        assertEquals(12_000L, report.refaultedTotalKb)
+    }
+
+    @Test
+    fun nfr2_a_kernel_without_reporting_counts_sends_zeros_which_the_host_reads_as_unknown() {
+        val report = guestMemory(MemInfo.parse(MEMINFO), null, emptyList())
+        assertEquals(0L, report.freeReportedKb)
+        assertEquals(0L, report.reportedTotalKb)
+        assertEquals(0L, report.refaultedTotalKb)
     }
 
     @Test
