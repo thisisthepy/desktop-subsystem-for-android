@@ -504,6 +504,9 @@ impl<P: Platform> Manager<P> {
             self.told_focused = focused;
             self.platform.focused(focused);
         }
+        if let Some(request) = self.shown.update_tasks(&windows) {
+            self.platform.request(request);
+        }
         if let Some(request) = self.shown.update(&windows) {
             self.platform.request(request);
         }

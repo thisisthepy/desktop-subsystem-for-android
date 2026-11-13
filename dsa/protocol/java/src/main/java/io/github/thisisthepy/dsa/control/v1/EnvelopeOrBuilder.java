@@ -371,6 +371,17 @@ public interface EnvelopeOrBuilder extends
   io.github.thisisthepy.dsa.control.v1.ScreenState getScreenState();
 
   /**
+   * <code>.dsa.control.v1.TasksShown tasks_shown = 46;</code>
+   * @return Whether the tasksShown field is set.
+   */
+  boolean hasTasksShown();
+  /**
+   * <code>.dsa.control.v1.TasksShown tasks_shown = 46;</code>
+   * @return The tasksShown.
+   */
+  io.github.thisisthepy.dsa.control.v1.TasksShown getTasksShown();
+
+  /**
    * <code>.dsa.control.v1.PowerState power_state = 41;</code>
    * @return Whether the powerState field is set.
    */

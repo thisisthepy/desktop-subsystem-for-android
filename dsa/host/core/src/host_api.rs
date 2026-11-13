@@ -5222,6 +5222,12 @@ impl HostApiService {
             Some(request::Body::SetWindowsShown(shown)) => {
                 self.request(peer, TaskRequest::WindowsShown { shown: shown.shown })
             }
+            Some(request::Body::SetTasksShown(shown)) => self.request(
+                peer,
+                TaskRequest::TasksShown {
+                    task_ids: shown.task_ids,
+                },
+            ),
             Some(request::Body::ReportTouchGestures(report)) => {
                 self.report_touch_gestures(peer, report)
             }
@@ -5285,6 +5291,7 @@ impl HostApiService {
                         | request::Body::SetTaskDensity(_)
                         | request::Body::SetTaskCaption(_)
                         | request::Body::SetWindowsShown(_)
+                        | request::Body::SetTasksShown(_)
                         | request::Body::FreezeSession(_)
                         | request::Body::GetSettings(_)
                         | request::Body::SetSettings(_)
@@ -7160,6 +7167,14 @@ impl HostApiClient {
         }))
     }
 
+    /// Says which tasks of the caller's Android have their window shown: open and not
+    /// minimized.
+    pub fn set_tasks_shown(&mut self, task_ids: &[i32]) -> Result<(), ClientError> {
+        self.done(request::Body::SetTasksShown(types::SetTasksShown {
+            task_ids: task_ids.to_vec(),
+        }))
+    }
+
     /// Tells the service whether the caller's window manager can turn the host's touch
     /// gestures off, which the settings then report.
     pub fn report_touch_gestures(&mut self, state: &TouchGesturesState) -> Result<(), ClientError> {
@@ -7810,6 +7825,7 @@ impl HostApiClient {
                 end_width,
             } => self.set_task_caption(*task_id, *height, *start_width, *end_width),
             TaskRequest::WindowsShown { shown } => self.set_windows_shown(*shown),
+            TaskRequest::TasksShown { task_ids } => self.set_tasks_shown(task_ids),
             TaskRequest::StopApp { package_name } => self.stop_app(package_name),
             TaskRequest::LaunchShortcut {
                 package_name,

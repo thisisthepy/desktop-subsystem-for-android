@@ -2487,6 +2487,40 @@ fn nfr2_a_host_short_of_memory_tells_the_guest_when_it_changes_and_when_the_agen
     assert_eq!(next_body(&mut agent), host_memory(true));
 }
 
+fn tasks_shown(task_ids: &[i32]) -> Body {
+    Body::TasksShown(dsa_protocol::control::TasksShown {
+        task_ids: task_ids.to_vec(),
+    })
+}
+
+/// The next body the guest is sent that says which task windows are shown.
+fn next_tasks_shown(daemon: &mut Box<dyn Connection>) -> Body {
+    loop {
+        let body = next_body(daemon);
+        if matches!(body, Body::TasksShown(_)) {
+            return body;
+        }
+    }
+}
+
+#[test]
+fn nfr2_the_guest_is_told_which_task_windows_are_shown_when_it_connects_and_on_each_change() {
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.windows_shown(true).unwrap();
+    // Said before the guest runs: told as soon as its control daemon connects.
+    session
+        .request(TaskRequest::TasksShown { task_ids: vec![3] })
+        .unwrap();
+    session.start();
+    let mut daemon = connect_daemon(&mut connector, &launcher);
+    assert_eq!(next_tasks_shown(&mut daemon), tasks_shown(&[3]));
+    // The same word again is not news; a minimized window is.
+    session.tasks_shown(vec![3]).unwrap();
+    session.tasks_shown(vec![]).unwrap();
+    assert_eq!(next_tasks_shown(&mut daemon), tasks_shown(&[]));
+}
+
 #[test]
 fn nfr2_the_host_is_short_of_memory_below_a_tenth_free_and_recovers_above_a_fifth() {
     use dsa_host_core::power::MemoryPressure;

@@ -7,7 +7,9 @@ use std::time::Duration;
 use dsa_guest_channeld::reclaim::{MemInfo, Reason, ReclaimPolicy, Reclaimer, RECLAIM_PROPERTY};
 use dsa_guest_channeld::router::{Peer, Router};
 use dsa_protocol::control::envelope::Body;
-use dsa_protocol::control::{Envelope, HostMemory, ScreenState, TaskRemoved, TaskUpdated};
+use dsa_protocol::control::{
+    Envelope, HostMemory, ScreenState, TaskRemoved, TaskUpdated, TasksShown,
+};
 
 const MIB: u64 = 1024;
 
@@ -1039,6 +1041,15 @@ fn nfr2_the_router_counts_the_shown_tasks() {
     }
     // Until the host says which windows it shows, every task in use counts as shown.
     assert_eq!(router.tasks_shown(), 2);
+    // The host minimized task 1's window; a task it names that has ended does not count.
+    router.from_host(&frame(Body::TasksShown(TasksShown {
+        task_ids: vec![2, 9],
+    })));
+    assert_eq!(router.tasks_shown(), 1);
+    assert_eq!(router.tasks_in_use(), 2);
     router.from_host(&frame(Body::ScreenState(ScreenState { on: false })));
     assert_eq!(router.tasks_shown(), 0);
+    // A host that connects again says again which windows it shows.
+    router.host_connected();
+    assert_eq!(router.tasks_shown(), 2);
 }
