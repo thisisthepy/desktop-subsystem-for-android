@@ -13,6 +13,13 @@ package io.github.thisisthepy.dsa.agent.windowing
  * Android 17 adds forms whose bounding rectangles are InsetsBoundingRect[] beside the Rect[]
  * ones. The agent gives bounding rectangles as Rect[], so only a form that takes Rect[] there
  * (or has no such parameter) is chosen. Types are named as Class.getTypeName names them.
+ *
+ * A source along the task's bottom edge prefers the size form ([choose]'s preferSize): its
+ * frame is the task's own bounds less that size, which the window manager works out again in
+ * the same layout as each resize, so the band stays on the task's bottom edge while the task
+ * is resized. A frame in display pixels is given again only after the agent has read the new
+ * bounds; until then the old frame sits inside or below the resized task, and the app's
+ * bottom inset would jump at each step of a resize.
  */
 sealed interface InsetsSourceForm {
     /** The index of this form in the list it was chosen from. */
@@ -29,14 +36,17 @@ sealed interface InsetsSourceForm {
         private const val RECTS = "android.graphics.Rect[]"
         private const val INSETS = "android.graphics.Insets"
 
-        /** The form to call among [forms], or null when none takes a frame or a size. */
-        fun choose(forms: List<List<String>>): InsetsSourceForm? {
+        /**
+         * The form to call among [forms], or null when none takes a frame or a size. A frame
+         * form is chosen over a size form unless [preferSize].
+         */
+        fun choose(forms: List<List<String>>, preferSize: Boolean = false): InsetsSourceForm? {
             fun candidates(kind: String) = forms.withIndex()
                 .filter { (_, types) -> types.size in 5..7 && types[4] == kind && (types.size < 6 || types[5] == RECTS) }
                 .maxByOrNull { (_, types) -> types.size }
-            candidates(RECT)?.let { (index, types) -> return Frame(index, types.size) }
-            candidates(INSETS)?.let { (index, types) -> return Size(index, types.size) }
-            return null
+            val frame = candidates(RECT)?.let { (index, types) -> Frame(index, types.size) }
+            val size = candidates(INSETS)?.let { (index, types) -> Size(index, types.size) }
+            return if (preferSize) size ?: frame else frame ?: size
         }
     }
 }

@@ -99,6 +99,29 @@ interface TaskActions {
      * scale that density belongs to. 0 when it cannot be read.
      */
     fun statusBarHeight(densityDpi: Int): Int = 0
+
+    /**
+     * Gives the task a bottom navigation bar inset covering [frame] (guest display pixels): a
+     * band along the task's bottom edge, as a gesture navigation phone's navigation bar. The
+     * task's app receives it as its navigation bar, system bar and tappable element inset. A
+     * null [frame] removes it. [InsetGiven.FOLLOWS_TASK] when the framework keeps the band on
+     * the task's bottom edge by itself, so a resize needs nothing new; [InsetGiven.AT_FRAME]
+     * when it stays at [frame] until it is given again; [InsetGiven.REFUSED] when the framework
+     * has no way to give a task an inset, or refused.
+     */
+    fun setNavigationBarInset(taskId: Int, frame: TaskBounds?): InsetGiven = InsetGiven.REFUSED
+}
+
+/** What became of an inset given to a task. */
+enum class InsetGiven {
+    /** The framework keeps the inset on the task's edge as the task is resized. */
+    FOLLOWS_TASK,
+
+    /** The inset stays where it was given until it is given again. */
+    AT_FRAME,
+
+    /** The framework could not give it, or refused. */
+    REFUSED,
 }
 
 /** Which of Android Settings' pages of an app to open. */
