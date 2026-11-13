@@ -1466,6 +1466,22 @@ class ImageLayoutTests(unittest.TestCase):
                 self.assertIn("(allow surfaceflinger platform_app (fd (use)))", policy)
                 self.assertIn("(allow surfaceflinger platform_app (fifo_file (write getattr)))", policy)
 
+    def test_fr22_the_agent_may_find_the_status_bar_service(self):
+        # The agent registers as the status bar, so the window manager reports the system
+        # bars' live appearance to it, which the host's caption buttons follow.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = self._target_files_with_system_ext(root)
+            with zipfile.ZipFile(source, "a") as archive:
+                archive.writestr("SYSTEM/etc/selinux/plat_sepolicy.cil", "(type platform_app)\n")
+            agent = root / "agent.apk"
+            agent.write_bytes(b"PK agent")
+            modified = root / "modified.zip"
+            make_image.modify(source, modified, agent=agent)
+            with zipfile.ZipFile(modified) as archive:
+                policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+                self.assertIn("(allow platform_app status_bar_service (service_manager (find)))", policy)
+
     def test_fr3_the_agent_is_signed_with_the_platform_key(self):
         # A platform app may use the framework interfaces the agent needs. sign_target_files_apks
         # signs each app with the key apkcerts.txt names, and refuses an app it names none for.

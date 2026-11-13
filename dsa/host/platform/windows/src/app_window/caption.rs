@@ -25,11 +25,12 @@
 //! buttons themselves are pressed here, on the non-client mouse messages, so Windows never
 //! draws its classic buttons over them.
 //!
-//! The glyphs are dark over a light band and light over a dark one. The presenter reads how
-//! light the app's pixels under the band are ([`WindowPresenter::on_band_colour`]), and they
-//! decide, since an app drawing edge to edge often leaves its status bar transparent or reports
-//! icons for a status bar it does not show; what the app's status bar reports
-//! (`ToHost::CaptionTone`) counts only until a frame has been read. Under a high contrast theme
+//! The glyphs are dark over a light band and light over a dark one. What the app asked its
+//! status bar's icons to be (`ToHost::CaptionTone`, from the appearance the guest's window
+//! manager reports as the app changes it) decides, as it does on Android's own status bar.
+//! Only when the app expressed nothing does the presenter's reading of how light the app's
+//! pixels under the band are ([`WindowPresenter::on_band_colour`]) decide. A band the window
+//! fills takes the tone of its fill. Under a high contrast theme
 //! the buttons take the theme's colors.
 //!
 //! At the left of the band the window draws the app's icon (the program's icon, which the
@@ -436,7 +437,8 @@ pub struct CaptionWindow {
     icon_look: Cell<Option<IconLook>>,
     /// The name as last laid out, and what it was laid out for: text, box and DPI.
     text: RefCell<Option<(TitleKey, Option<Vec<u8>>)>>,
-    tone: Cell<CaptionTone>,
+    /// The tone the app asked for; `None` while it expressed nothing, so the pixels decide.
+    tone: Cell<Option<CaptionTone>>,
     hovered: Cell<Option<CaptionButton>>,
     pressed: Cell<Option<CaptionButton>>,
     active: Cell<bool>,
@@ -483,7 +485,7 @@ impl CaptionWindow {
             icon: RefCell::new(None),
             icon_look: Cell::new(None),
             text: RefCell::new(None),
-            tone: Cell::new(CaptionTone::default()),
+            tone: Cell::new(None),
             hovered: Cell::new(None),
             pressed: Cell::new(None),
             active: Cell::new(true),
@@ -633,8 +635,9 @@ impl CaptionWindow {
         self.apply_tone(hwnd);
     }
 
-    /// The app's status bar calls for `tone`. The buttons take it, and the window's frame the
-    /// matching dark or light mode, unless the pixels under the band say otherwise.
+    /// The app's status bar calls for `tone`, or for nothing (`None`). The buttons take the
+    /// tone it calls for, and the window's frame the matching dark or light mode, unless the
+    /// window fills the band; while it calls for nothing, the pixels under the band decide.
     ///
     /// # Safety
     ///
@@ -642,7 +645,7 @@ impl CaptionWindow {
     pub unsafe fn set_tone(
         &self,
         hwnd: HWND,
-        tone: CaptionTone,
+        tone: Option<CaptionTone>,
         presenter: Option<&WindowPresenter>,
     ) {
         self.tone.set(tone);
@@ -652,8 +655,8 @@ impl CaptionWindow {
 
     /// What the presenter last read from the app's frame under the band: the band takes the
     /// fill (0xAARRGGBB), the app's top color, while the app leaves the band empty, or stays
-    /// transparent without one; the glyphs take the tone the fill, else the band's lightness,
-    /// calls for.
+    /// transparent without one; the glyphs take the tone the fill calls for, else the app's,
+    /// else the one the band's lightness calls for.
     ///
     /// # Safety
     ///
