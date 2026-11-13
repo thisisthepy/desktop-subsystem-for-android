@@ -278,7 +278,7 @@ impl ImageStore {
         let mut state = self.state()?;
         if state.on_trial {
             return Err(UpdateError::Refused(format!(
-                "{} has not finished its first boot yet",
+                "{} is still on trial: it is kept once Android has finished starting from it",
                 state.current.version
             )));
         }
@@ -444,6 +444,21 @@ impl ImageStore {
         self.write_state(&state)?;
         self.remove_others(&state);
         Ok(())
+    }
+
+    /// Records that Android finished booting from `version`, however that boot was started:
+    /// when `version` is the current image and on trial, it is kept as [`confirm`] keeps it.
+    /// Returns whether this kept it. A boot of any other image says nothing about the current
+    /// one, so it changes nothing.
+    ///
+    /// [`confirm`]: Self::confirm
+    pub fn confirm_booted(&self, version: &str) -> Result<bool, UpdateError> {
+        let state = self.state()?;
+        if !state.on_trial || state.current.version != version {
+            return Ok(false);
+        }
+        self.confirm()?;
+        Ok(true)
     }
 
     /// Goes back to the previous image after the current one failed to boot. The failed
