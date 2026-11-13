@@ -51,8 +51,8 @@ use dsa_host_core::compositor::task_windows::fit_within;
 use dsa_host_core::compositor::window_hosts::{FromHost, ToHost};
 use dsa_host_core::compositor::window_mode::{picture_in_picture_place, ModeState, WindowMode};
 use dsa_host_core::compositor::window_sizing::{
-    maximized_position, min_client_size, rescaled_rect, size_is_held, to_task_position,
-    to_task_size, to_window_position, SizeProposal,
+    maximized_outer, maximized_position, min_client_size, rescaled_rect, size_is_held,
+    to_task_position, to_task_size, to_window_position, SizeProposal,
 };
 use dsa_host_core::compositor::window_tasks::WindowTasks;
 use dsa_host_core::ime::ImeCursor;
@@ -793,6 +793,23 @@ unsafe extern "system" fn task_window_proc(
             // window's too, so a largest tracking size would keep it from filling its monitor.
             // A window the user drags larger than Android can draw keeps the size of the
             // largest frame Android draws instead (keep_to_frame).
+            //
+            // A maximised window fills its own monitor's work area and no more: left to
+            // Windows, its client area, which reaches under the title bar, could be the whole
+            // monitor, under the taskbar, and the guest would be asked for the monitor's size
+            // (maximized_outer). WM_WINDOWPOSCHANGING keeps it to that size as well.
+            if titled(data) {
+                if let Some(outer) = maximized_window_outer(hwnd, None) {
+                    info.ptMaxSize = POINT {
+                        x: outer.0,
+                        y: outer.1,
+                    };
+                    info.ptMaxTrackSize = POINT {
+                        x: info.ptMaxTrackSize.x.max(outer.0),
+                        y: info.ptMaxTrackSize.y.max(outer.1),
+                    };
+                }
+            }
             // Never smaller than Android gives this task, which its app may declare: the guest
             // would keep the task larger than the window, and no frame could show 1:1.
             let min = min_client_size(dpi, max, data.min_client.get());
@@ -813,6 +830,26 @@ unsafe extern "system" fn task_window_proc(
                 let normal = data.shown_mode.get() == WindowMode::Normal;
                 if !data.resizable.get() && user && normal {
                     pos.flags |= SWP_NOSIZE;
+                }
+            }
+            // A maximised window's client area is its own monitor's work area, whatever size
+            // was proposed, before the guest is asked for it below: never the whole monitor,
+            // under the taskbar, and never a size measured on another monitor.
+            if IsZoomed(hwnd) != 0
+                && IsIconic(hwnd) == 0
+                && pos.flags & SWP_NOSIZE == 0
+                && window_data(hwnd).is_some_and(titled)
+            {
+                let proposed = RECT {
+                    left: pos.x,
+                    top: pos.y,
+                    right: pos.x + pos.cx,
+                    bottom: pos.y + pos.cy,
+                };
+                let on = (pos.flags & SWP_NOMOVE == 0).then_some(&proposed);
+                if let Some((width, height)) = maximized_window_outer(hwnd, on) {
+                    pos.cx = width;
+                    pos.cy = height;
                 }
             }
             // DefWindowProc above has already kept the proposed size to WM_GETMINMAXINFO.
@@ -1310,6 +1347,21 @@ fn centred(monitor: &RECT, size: (u32, u32)) -> (i32, i32) {
         maximized_position(monitor.left, monitor.right - monitor.left, width, 0),
         maximized_position(monitor.top, monitor.bottom - monitor.top, height, 0),
     )
+}
+
+/// The outer size `hwnd` takes maximised: its client area is the work area of the monitor
+/// nearest `on` (where Windows proposes to put it), or of its own monitor without one, and its
+/// borders hang off the work area's edges. `None` when the monitor does not say.
+unsafe fn maximized_window_outer(hwnd: HWND, on: Option<&RECT>) -> Option<(i32, i32)> {
+    let work = match on {
+        Some(rect) => work_area(rect),
+        None => window_work_area(hwnd),
+    }?;
+    let dpi = GetDpiForWindow(hwnd).max(96);
+    Some(maximized_outer(
+        (work.right - work.left, work.bottom - work.top),
+        outer_size((0, 0), dpi, true),
+    ))
 }
 
 /// The borders (left, top) a maximised `hwnd` hangs off its work area's edges: those of its

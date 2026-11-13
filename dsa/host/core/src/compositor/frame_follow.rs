@@ -373,6 +373,38 @@ mod tests {
     }
 
     #[test]
+    fn fr4_a_maximised_window_stays_maximised_when_frames_of_its_size_or_its_restored_size_arrive()
+    {
+        // Settings at 1041x1495 is maximised on a 2880x1800 monitor whose work area is
+        // 2880x1704: the window's client area becomes the work area at once.
+        let mut follow = FrameFollow::new((1041, 1495));
+        assert_eq!(follow.frame_arrived((1041, 1495)), Arrival::Show);
+        follow.set_held(true);
+        assert_eq!(follow.size_for((2880, 1704)), None);
+        assert!(!follow.view_taken((2880, 1704)));
+        assert_eq!(follow.view(), (2880, 1704));
+        // Frames the app still draws at the restored size are shown in it, and none is kept
+        // for the window to take: a kept frame is what would move it back to that size.
+        assert_eq!(follow.frame_arrived((1041, 1495)), Arrival::Show);
+        assert_eq!(follow.kept(), None);
+        assert_eq!(follow.view(), (2880, 1704));
+        // The frame of the maximised size fills it.
+        assert_eq!(follow.frame_arrived((2880, 1704)), Arrival::Show);
+        assert_eq!(follow.shown(), Some((2880, 1704)));
+        assert_eq!(follow.view(), (2880, 1704));
+        // Windows proposes the maximised size again (a change of frame or of the work area):
+        // the window takes it as it is, and nothing claims a size for it.
+        assert_eq!(follow.size_for((2880, 1704)), None);
+        assert!(!follow.claimed());
+        // A frame of the restored size that the guest sends on its own is shown in it too.
+        assert_eq!(follow.frame_arrived((1041, 1495)), Arrival::Show);
+        assert_eq!(follow.kept(), None);
+        assert_eq!(follow.size_for((2880, 1704)), None);
+        assert!(!follow.view_taken((2880, 1704)));
+        assert_eq!(follow.view(), (2880, 1704));
+    }
+
+    #[test]
     fn fr4_a_dragged_window_takes_the_size_the_guest_keeps_the_task_at() {
         // A drag past what the guest's display holds: the window is never held, so it keeps the
         // size of the largest frame the guest draws rather than show it with a margin.
