@@ -17,8 +17,7 @@ struct WidevineSection: View {
             if vm.restartNeeded {
                 Banner(kind: .info, title: T("WidevineRestartBar.Title"), message: T("WidevineRestartBar.Message"))
             }
-            Text(vm.qualityText).font(.callout).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            Note(text: vm.qualityText)
             ButtonRow(title: T("WidevineInstallCard.Header"),
                       detail: vm.isInstalling ? T("WidevineInstalling.Text") : T("WidevineInstallCard.Description"),
                       action: T("WidevineInstallButton.Content"), enabled: vm.canInstall, busy: vm.isInstalling) {
