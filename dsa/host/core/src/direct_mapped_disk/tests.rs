@@ -301,6 +301,327 @@ fn nfr1_compressed_and_inline_erofs_files_read_as_their_data() {
     );
 }
 
+const PATTERN_D: &[u8; 16] = b"packed inode, 1.";
+const PATTERN_E: &[u8; 16] = b"packed inode, 2.";
+
+/// A 4-byte compact index pack: two entries (12-bit offset or delta, 2-bit type) and the
+/// block before the first head's cluster.
+fn pack4(first: (u16, u16), second: (u16, u16), base: u32) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(&(first.1 | first.0 << 12).to_le_bytes());
+    out.extend_from_slice(&(second.1 | second.0 << 12).to_le_bytes());
+    out.extend_from_slice(&base.to_le_bytes());
+    out
+}
+
+/// A full index entry: its advice (type, and the partial reference bit of deduplication),
+/// then its cluster offset and block, or its deltas.
+fn full_index(advise: u16, ofs: u16, blk: u32) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(&advise.to_le_bytes());
+    out.extend_from_slice(&ofs.to_le_bytes());
+    out.extend_from_slice(&blk.to_le_bytes());
+    out
+}
+
+/// A compressed map header: the fragment offset or inline size, advice, algorithms, cluster
+/// bits.
+fn map_header(first: u32, advise: u16, clusterbits: u8) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(&first.to_le_bytes());
+    out.extend_from_slice(&advise.to_le_bytes());
+    out.push(0);
+    out.push(clusterbits);
+    out
+}
+
+fn block_of(seed: u32) -> Vec<u8> {
+    (0..BLOCK as u32)
+        .map(|i| ((i * seed + 1) % 251) as u8)
+        .collect()
+}
+
+/// The packed inode's 6000 bytes: two extents, the second starting 500 bytes into cluster 1.
+fn packed_data() -> Vec<u8> {
+    [repeat(PATTERN_D, 4596), repeat(PATTERN_E, 1404)].concat()
+}
+
+/// An erofs with every data layout the build can make whose blocks do not follow each other:
+/// a head that only closes the last extent (as the build writes for most compressed files),
+/// deduplicated clusters shared in and between files and used in part, an inline tail, chunks
+/// out of order, repeated and missing, and fragments in a compressed packed inode, of the
+/// whole file and of its tail, with compact and full indexes. Each file's data by name.
+fn layouts_erofs() -> (Vec<u8>, BTreeMap<String, Vec<u8>>) {
+    // Blocks: 0 superblock, 1 inodes, 2 root folder, 3 the shared cluster of `closed`, 4
+    // unused, 5 `dedupe`'s first cluster, 6 and 7 chunks, 8 the clusters the fragment files
+    // share, 9 and 10 the packed inode's.
+    let mut image = vec![0u8; 11 * BLOCK as usize];
+    let meta = BLOCK as usize;
+    let mut at = 32;
+    let place = |image: &mut Vec<u8>, bytes: &[u8], at: &mut usize| -> u64 {
+        *at = align(*at, 32);
+        put(image, meta + *at, bytes);
+        let nid = (*at / 32) as u64;
+        *at += bytes.len();
+        nid
+    };
+    let mut want = BTreeMap::new();
+    let mut files = Vec::new();
+    // Each compact inode's indexes start 8 bytes past a 32-byte boundary, so the first six
+    // clusters have 4-byte entries.
+    let compact = |size: u32, header: Vec<u8>, indexes: &[Vec<u8>]| {
+        let mut inode = compact_inode(3, 0o100_644, 1, size, 0, 0);
+        inode.extend_from_slice(&header);
+        for pack in indexes {
+            inode.extend_from_slice(pack);
+        }
+        inode
+    };
+
+    // `closed`, like the build's APKs: one LZ4 extent over three clusters, and the last
+    // cluster's head at the file's end, which starts nothing.
+    let closed = compact(
+        9628,
+        map_header(0, 0, 0),
+        &[pack4((1, 0), (2, 1), 2), pack4((0, 1436), (0, 0), 3)],
+    );
+    files.push(("closed", place(&mut image, &closed, &mut at)));
+    want.insert("closed".to_string(), repeat(PATTERN_A, 9628));
+
+    // `dedupe`: full indexes with the partial reference bit; the first extent uses 5000 of
+    // block 5's 6000 bytes, the second the first 3000 of `closed`'s block, before it.
+    let mut dedupe = compact_inode(1, 0o100_644, 1, 8000, 0, 0);
+    dedupe.extend_from_slice(&map_header(0, 0, 0));
+    dedupe.extend_from_slice(&full_index(0x8001, 0, 5));
+    dedupe.extend_from_slice(&full_index(0x8001, 904, 3));
+    files.push(("dedupe", place(&mut image, &dedupe, &mut at)));
+    want.insert(
+        "dedupe".to_string(),
+        [repeat(PATTERN_B, 5000), repeat(PATTERN_A, 3000)].concat(),
+    );
+
+    // `inline`: the first extent shares `closed`'s block, the tail extent's LZ4 data follows
+    // the indexes, and a closing head ends it.
+    let tail = lz4_repeat(PATTERN_B, 4016);
+    let mut inline = compact(
+        8212,
+        map_header((tail.len() as u32) << 16, 0x8, 0),
+        &[pack4((1, 0), (1, 100), 2), pack4((0, 20), (0, 0), 4)],
+    );
+    inline.extend_from_slice(&tail);
+    files.push(("inline", place(&mut image, &inline, &mut at)));
+    want.insert(
+        "inline".to_string(),
+        [repeat(PATTERN_A, 4196), repeat(PATTERN_B, 4016)].concat(),
+    );
+
+    // `chunks`: one-block chunks at blocks 7, 6, a hole, and 7 again.
+    let mut chunks = compact_inode(4, 0o100_644, 1, 3 * 4096 + 100, 0, 0);
+    for blk in [7u32, 6, u32::MAX, 7] {
+        chunks.extend_from_slice(&blk.to_le_bytes());
+    }
+    files.push(("chunks", place(&mut image, &chunks, &mut at)));
+    let (b6, b7) = (block_of(3), block_of(5));
+    want.insert(
+        "chunks".to_string(),
+        [b7.clone(), b6.clone(), vec![0; 4096], b7[..100].to_vec()].concat(),
+    );
+    // `chunks8`: 8-byte chunk indexes, blocks 7 then 6.
+    let mut chunks8 = compact_inode(4, 0o100_644, 1, 8192, 0x20, 0);
+    for blk in [7u32, 6] {
+        chunks8.extend_from_slice(&[0, 0, 0, 0]);
+        chunks8.extend_from_slice(&blk.to_le_bytes());
+    }
+    files.push(("chunks8", place(&mut image, &chunks8, &mut at)));
+    want.insert("chunks8".to_string(), [b7.clone(), b6.clone()].concat());
+
+    // `whole`: all of it in the packed inode, across the packed inode's two extents.
+    let mut whole = compact_inode(3, 0o100_644, 1, 300, 0, 0);
+    whole.extend_from_slice(&(4500u64 | 1 << 63).to_le_bytes());
+    files.push(("whole", place(&mut image, &whole, &mut at)));
+    let packed = packed_data();
+    want.insert("whole".to_string(), packed[4500..4800].to_vec());
+
+    // `fragment`: compact indexes, the tail extent at 1000 in the packed inode.
+    let fragment = compact(
+        4596,
+        map_header(1000, 0x20, 0),
+        &[pack4((1, 0), (1, 200), 7)],
+    );
+    files.push(("fragment", place(&mut image, &fragment, &mut at)));
+    want.insert(
+        "fragment".to_string(),
+        [repeat(PATTERN_C, 4296), packed[1000..1300].to_vec()].concat(),
+    );
+    // `fragment_full`: full indexes, the first extent part of block 8, the tail at 5000.
+    let mut full = compact_inode(1, 0o100_644, 1, 4106, 0, 0);
+    full.extend_from_slice(&map_header(5000, 0x20, 0));
+    full.extend_from_slice(&full_index(0x8001, 0, 8));
+    full.extend_from_slice(&full_index(1, 0, 0));
+    files.push(("fragment_full", place(&mut image, &full, &mut at)));
+    want.insert(
+        "fragment_full".to_string(),
+        [repeat(PATTERN_C, 4096), packed[5000..5010].to_vec()].concat(),
+    );
+
+    // The packed inode: compact indexes, clusters at blocks 9 and 10. No folder names it.
+    let packed_inode = compact(6000, map_header(0, 0, 0), &[pack4((1, 0), (1, 500), 8)]);
+    let packed_nid = place(&mut image, &packed_inode, &mut at);
+
+    files.sort();
+    let root_entries = |root: u64| {
+        let mut entries = vec![(".", root, 2u8), ("..", root, 2)];
+        entries.extend(files.iter().map(|(name, nid)| (*name, *nid, 1u8)));
+        names(&entries)
+    };
+    let root_len = root_entries(0).len();
+    let root = place(
+        &mut image,
+        &compact_inode(0, S_IFDIR | 0o755, 2, root_len as u32, 2, 0),
+        &mut at,
+    );
+    assert!(at <= BLOCK as usize, "the fixture's inodes fit their block");
+    put(&mut image, 2 * BLOCK as usize, &root_entries(root));
+    let block = |n: usize| n * BLOCK as usize;
+    put(
+        &mut image,
+        block(3),
+        &padded_block(&lz4_repeat(PATTERN_A, 9628)),
+    );
+    put(
+        &mut image,
+        block(5),
+        &padded_block(&lz4_repeat(PATTERN_B, 6000)),
+    );
+    put(&mut image, block(6), &b6);
+    put(&mut image, block(7), &b7);
+    put(
+        &mut image,
+        block(8),
+        &padded_block(&lz4_repeat(PATTERN_C, 4296)),
+    );
+    put(
+        &mut image,
+        block(9),
+        &padded_block(&lz4_repeat(PATTERN_D, 4596)),
+    );
+    put(
+        &mut image,
+        block(10),
+        &padded_block(&lz4_repeat(PATTERN_E, 1404)),
+    );
+    let mut sb = [0u8; 128];
+    put(&mut sb, 0, &erofs_read::MAGIC.to_le_bytes());
+    sb[12] = 12;
+    put(&mut sb, 14, &(root as u16).to_le_bytes());
+    put(&mut sb, 16, &(files.len() as u64 + 2).to_le_bytes());
+    put(&mut sb, 24, &BUILD_TIME.to_le_bytes());
+    put(&mut sb, 36, &11u32.to_le_bytes());
+    put(&mut sb, 40, &1u32.to_le_bytes());
+    // Zero padding, chunked files, tail packing, fragments and deduplication.
+    put(&mut sb, 80, &(0x1u32 | 0x4 | 0x10 | 0x20).to_le_bytes());
+    put(&mut sb, 96, &packed_nid.to_le_bytes());
+    put(&mut image, 1024, &sb);
+    (image, want)
+}
+
+#[test]
+fn nfr1_files_whose_extents_do_not_follow_each_other_read_as_their_data() {
+    let (mut image, want) = layouts_erofs();
+    let mut dev = RawDisk::new(Cursor::new(&mut image)).unwrap();
+    let (tree, layouts) = tree_of(&mut dev);
+    for (name, data) in &want {
+        let got = &tree[&format!("/{name}")].5;
+        assert_eq!(got.len(), data.len(), "{name}'s size");
+        assert!(got == data, "{name}'s data");
+    }
+    // The packed inode is not a file of the tree.
+    assert_eq!(tree.len(), want.len() + 1);
+    for layout in [
+        erofs_read::LAYOUT_COMPRESSED_FULL,
+        erofs_read::LAYOUT_COMPRESSED_COMPACT,
+        erofs_read::LAYOUT_CHUNK_BASED,
+    ] {
+        assert!(layouts.contains(&layout), "layout {layout} is covered");
+    }
+}
+
+#[test]
+fn nfr1_the_uncompressed_copy_of_every_layout_holds_the_same_files() {
+    let (mut image, _) = layouts_erofs();
+    let mut dev = RawDisk::new(Cursor::new(&mut image)).unwrap();
+    let (tree, _) = tree_of(&mut dev);
+    let mut reader = Reader::new(&mut dev).unwrap();
+    let plan = erofs_write::plan(&mut reader).unwrap();
+    let mut copy = Vec::new();
+    erofs_write::write(&mut reader, &plan, &mut copy, &|| false).unwrap();
+    assert_eq!(copy.len() as u64, plan.bytes());
+    let mut copied = RawDisk::new(Cursor::new(copy)).unwrap();
+    let (copy_tree, layouts) = tree_of(&mut copied);
+    assert_eq!(copy_tree, tree);
+    assert!(layouts.iter().all(|&l| l == LAYOUT_FLAT_PLAIN));
+}
+
+/// The error the reader gives for the file `name` of `image`.
+fn read_error(image: &mut [u8], name: &str) -> String {
+    let mut dev = RawDisk::new(Cursor::new(image)).unwrap();
+    let mut reader = Reader::new(&mut dev).unwrap();
+    let root = reader.inode(reader.sb.root_nid).unwrap();
+    let entry = reader
+        .entries(&root)
+        .unwrap()
+        .into_iter()
+        .find(|e| e.name == name.as_bytes())
+        .unwrap();
+    let inode = reader.inode(entry.nid).unwrap();
+    reader.data(&inode, &mut |_| Ok(())).unwrap_err()
+}
+
+/// Where the inode of `name` is in `image`.
+fn inode_at(image: &mut [u8], name: &str) -> usize {
+    let mut dev = RawDisk::new(Cursor::new(image)).unwrap();
+    let mut reader = Reader::new(&mut dev).unwrap();
+    let root = reader.inode(reader.sb.root_nid).unwrap();
+    let nid = reader
+        .entries(&root)
+        .unwrap()
+        .into_iter()
+        .find(|e| e.name == name.as_bytes())
+        .unwrap()
+        .nid;
+    BLOCK as usize + nid as usize * 32
+}
+
+#[test]
+fn nfr1_a_cluster_or_fragment_outside_its_file_system_is_refused() {
+    // A fragment past the packed inode's end.
+    let (mut image, _) = layouts_erofs();
+    let at = inode_at(&mut image, "whole");
+    put(&mut image, at + 32, &(5800u64 | 1 << 63).to_le_bytes());
+    let error = read_error(&mut image, "whole");
+    assert!(error.contains("past the packed inode"), "{error}");
+
+    // A cluster past the file system's end.
+    let (mut image, _) = layouts_erofs();
+    let at = inode_at(&mut image, "dedupe");
+    put(&mut image, at + 32 + 8 + 4, &1000u32.to_le_bytes());
+    let error = read_error(&mut image, "dedupe");
+    assert!(error.contains("past the file system"), "{error}");
+
+    // A fragment without a packed inode.
+    let (mut image, _) = layouts_erofs();
+    put(&mut image, 1024 + 96, &0u64.to_le_bytes());
+    let error = read_error(&mut image, "fragment");
+    assert!(error.contains("packed inode"), "{error}");
+
+    // Compression advice this reader does not know.
+    let (mut image, _) = layouts_erofs();
+    let at = inode_at(&mut image, "closed");
+    put(&mut image, at + 32 + 4, &0x80u16.to_le_bytes());
+    let error = read_error(&mut image, "closed");
+    assert!(error.contains("advice"), "{error}");
+}
+
 /// The liblp metadata of a 4 MiB super partition: system_a at 1 MiB (1 MiB), odm_a at 2 MiB
 /// (4 KiB), system_b empty.
 fn super_partition(system: &[u8], odm: &[u8]) -> Vec<u8> {
