@@ -36,11 +36,7 @@ rm -rf "$device"
 mkdir -p "$device"
 cp "$here/device/AndroidProducts.mk" "$here/device/dsa_framework.mk" "$device/"
 cp "$here/device/$arch/BoardConfig.mk" "$device/"
-# The stand-in libsqlite only while the tree has no real one: libandroid_runtime needs
-# external/sqlite, and two modules of one name stop Soong's analysis.
-if [[ ! -e "$top/external/sqlite/dist/Android.bp" ]]; then
-  cp -r "$here/device/hosttools" "$device/"
-fi
+cp -r "$here/device/hosttools" "$device/"
 
 # Build files the tree takes in DSA's cut (stand-ins/common for every version, then
 # stand-ins/<android>): each upstream file declares modules over sources the sparse checkout

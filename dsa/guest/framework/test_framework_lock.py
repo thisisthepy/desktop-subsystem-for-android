@@ -115,9 +115,6 @@ class LockTests(unittest.TestCase):
             self.assertIn("external/protobuf", [p["path"] for p in version["projects"]])
         build = (REPO / ".github/scripts/framework/build.sh").read_text()
         self.assertIn('cp -r "$here/device/hosttools" "$device/"', build)
-        # With external/sqlite in the tree (libandroid_runtime needs it) its libsqlite is the
-        # real one, and the stand-in would define the module twice.
-        self.assertIn('if [[ ! -e "$top/external/sqlite/dist/Android.bp" ]]; then', build)
 
     def test_nfr5_modules_soong_analyses_find_their_sources_and_licenses(self):
         # Errors that missing dependencies do not excuse stopped the second and third Framework
