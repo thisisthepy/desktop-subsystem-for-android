@@ -27,6 +27,12 @@ fn main() -> ExitCode {
     }
 
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // The service starts this program again as a user, to reach that user's Secret Service.
+    if let [helper] = args.as_slice() {
+        if helper == dsa_host_linux::secret_service::HELPER_ARG {
+            return dsa_host_linux::secret_service::helper_main();
+        }
+    }
     let path = match args.as_slice() {
         [] => DEFAULT_CONFIG.to_string(),
         [serve] if serve == "serve" => DEFAULT_CONFIG.to_string(),

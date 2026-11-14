@@ -1,5 +1,7 @@
 //! Session start and stop, through the session's public API, over the in-memory transport.
 
+mod common;
+
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -271,7 +273,7 @@ fn connect_daemon(connector: &mut MemoryConnector, launcher: &FakeLauncher) -> B
         WAIT,
     )
     .expect("the host accepts the agent");
-    agent
+    Box::new(common::PastConnectSettings(agent))
 }
 
 #[test]
@@ -773,13 +775,69 @@ fn fr2_an_agent_from_a_different_protocol_definition_is_refused_and_the_guest_st
         ]
     );
     match &seen[2].reason {
-        Some(StopReason::HandshakeRejected(why)) => {
+        Some(StopReason::GuestFromOtherRelease(why)) => {
             assert!(why.contains("different protocol definition"), "{why}")
         }
-        other => panic!("expected HandshakeRejected, got {other:?}"),
+        other => panic!("expected GuestFromOtherRelease, got {other:?}"),
     }
     assert_eq!(launcher.processes(), 0);
     assert_eq!(agent.recv(Some(WAIT)), Err(TransportError::Closed));
+}
+
+#[test]
+fn fr2_an_agent_from_another_release_is_told_as_an_image_to_update() {
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.start();
+    let mut agent = connector.connect(WAIT).expect("the agent connects");
+    let mut hello = local_hello(Role::Guest, "dsa-channeld old");
+    hello.schema_hash = vec![0x5a; 32];
+    let _ = guest_connect(agent.as_mut(), &hello, &launcher.secret(), WAIT);
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+
+    let reason = session.last_reason().expect("a reason").to_string();
+    let mut lines = reason.lines();
+    let first = lines.next().unwrap_or_default();
+    assert!(
+        first.starts_with("Android's image was made for another release of DSA"),
+        "{reason}"
+    );
+    assert!(first.contains("`dsa update`"), "{reason}");
+    assert!(!first.contains("control.proto"), "{reason}");
+    let details = lines.next().unwrap_or_default();
+    assert!(details.starts_with("details: "), "{reason}");
+    assert!(
+        details.contains("different protocol definition"),
+        "{reason}"
+    );
+}
+
+#[test]
+fn fr2_a_newer_boot_that_is_up_forgets_why_the_one_before_it_stopped() {
+    // The boot before an update is refused for its old protocol definition...
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.start();
+    let mut agent = connector.connect(WAIT).expect("the agent connects");
+    let mut hello = local_hello(Role::Guest, "dsa-guestd old");
+    hello.schema_hash = vec![0x5a; 32];
+    let _ = guest_connect(agent.as_mut(), &hello, &launcher.secret(), WAIT);
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    assert!(matches!(
+        session.last_reason(),
+        Some(StopReason::GuestFromOtherRelease(_))
+    ));
+
+    // ...and the updated guest boots and connects. Its status shows no stop that is over.
+    session.start();
+    let _updated = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    assert_eq!(session.last_reason(), None);
+
+    // A stop of this boot is reported as before.
+    session.stop();
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    assert_eq!(session.last_reason(), Some(StopReason::Requested));
 }
 
 #[test]
@@ -1199,8 +1257,52 @@ fn nfr2_the_guest_memory_grows_when_its_daemon_says_it_is_short() {
         }),
     );
     wait_until("the memory is grown", || {
-        launcher.0.lock().unwrap().memory_sizes == vec![4608]
+        launcher.0.lock().unwrap().memory_sizes == vec![3712]
     });
+}
+
+#[test]
+fn nfr2_memory_ballooned_back_to_the_host_is_not_counted_as_reserved_by_the_kernel() {
+    let launcher = FakeLauncher::default();
+    launcher.0.lock().unwrap().memory_range = Some((2048, 16384));
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.start();
+    let mut agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    let pressure = |total_mb: u64, available_mb: u64| {
+        Body::GuestMemoryPressure(dsa_protocol::control::GuestMemoryPressure {
+            mem_total_kb: total_mb * 1024,
+            mem_available_kb: available_mb * 1024,
+            stall_centipercent: 0,
+        })
+    };
+    // Short: the VM grows by hot-add, to what the guest uses plus 768 MiB of headroom.
+    send_body(&mut agent, pressure(1950, 300));
+    wait_until("the memory is grown", || {
+        launcher.0.lock().unwrap().memory_sizes == vec![2560]
+    });
+    // Calm again after the cooldown: it is ballooned back to the base.
+    thread::sleep(Duration::from_millis(5100));
+    send_body(&mut agent, pressure(2600, 2200));
+    wait_until("the memory is given back", || {
+        launcher.0.lock().unwrap().memory_sizes == vec![2560, 2048]
+    });
+    // The hot-added blocks stay online in the guest, which counts 2560 MiB; the kernel kept
+    // 98 MiB of the 2048 MiB the VM has now, and the host has the rest back.
+    send_body(
+        &mut agent,
+        Body::GuestMemory(dsa_protocol::control::GuestMemory {
+            mem_total_kb: 1950 * 1024,
+            mem_free_kb: 1000 * 1024,
+            mem_available_kb: 1500 * 1024,
+            mem_online_kb: 2560 * 1024,
+            ..Default::default()
+        }),
+    );
+    wait_until("the report arrives", || session.guest_memory().is_some());
+    let memory = session.guest_memory().unwrap().memory;
+    assert_eq!(memory.kernel.mem_online_kb, 2048 * 1024);
+    assert_eq!(memory.reserved_at_boot_kb(), Some(98 * 1024));
 }
 
 #[test]
@@ -1209,7 +1311,7 @@ fn nfr2_a_resize_that_times_out_is_tried_again_smaller_and_later_resizes_still_h
     {
         let mut guest = launcher.0.lock().unwrap();
         guest.memory_range = Some((3072, 16384));
-        guest.refuse_memory = vec![4608];
+        guest.refuse_memory = vec![3712];
     }
     let (session, mut connector) = session_with(launcher.clone(), WAIT);
     session.start();
@@ -1224,17 +1326,17 @@ fn nfr2_a_resize_that_times_out_is_tried_again_smaller_and_later_resizes_still_h
     };
     send_body(&mut agent, short());
     wait_until("the growth is asked for", || {
-        launcher.0.lock().unwrap().memory_sizes == vec![4608]
+        launcher.0.lock().unwrap().memory_sizes == vec![3712]
     });
     // Within the retry wait nothing more is asked.
     send_body(&mut agent, short());
     thread::sleep(Duration::from_millis(200));
-    assert_eq!(launcher.0.lock().unwrap().memory_sizes, vec![4608]);
+    assert_eq!(launcher.0.lock().unwrap().memory_sizes, vec![3712]);
     // After it, the growth is tried again in a step half the size of the one that failed.
     thread::sleep(Duration::from_millis(5100));
     send_body(&mut agent, short());
     wait_until("the growth is tried again, smaller", || {
-        launcher.0.lock().unwrap().memory_sizes == vec![4608, 3840]
+        launcher.0.lock().unwrap().memory_sizes == vec![3712, 3456]
     });
     // The failure never told the launcher to stop growing.
     assert_eq!(launcher.0.lock().unwrap().growth_failed, 0);
@@ -1288,10 +1390,10 @@ fn nfr2_a_slow_resize_runs_beside_the_session_which_keeps_serving_and_asks_for_n
         changed.notify_all();
     }
     wait_until("the resize lands", || {
-        launcher.0.lock().unwrap().memory_sizes == vec![4608]
+        launcher.0.lock().unwrap().memory_sizes == vec![3712]
     });
     thread::sleep(Duration::from_millis(200));
-    assert_eq!(launcher.0.lock().unwrap().memory_sizes, vec![4608]);
+    assert_eq!(launcher.0.lock().unwrap().memory_sizes, vec![3712]);
     assert_eq!(launcher.0.lock().unwrap().growth_failed, 0);
 }
 
@@ -1819,6 +1921,7 @@ fn fr5_pointer_input_does_not_wait_for_the_session_to_stop_reading_the_channel()
         WAIT,
     )
     .expect("the host accepts the agent");
+    let mut agent: Box<dyn Connection> = Box::new(common::PastConnectSettings(agent));
     report_boot(&mut agent, true, true);
     assert!(session.wait_for(SessionState::Active, WAIT));
 
@@ -2090,6 +2193,92 @@ fn fr10_battery_saver_leaves_a_60_hz_monitor_alone() {
     );
 }
 
+fn resize(task_id: i32, width: u32, live: bool) -> TaskRequest {
+    TaskRequest::Resize {
+        task_id,
+        width,
+        height: 600,
+        live,
+    }
+}
+
+fn resize_body(task_id: i32, width: u32, live: bool) -> Body {
+    Body::ResizeTask(dsa_protocol::control::ResizeTask {
+        task_id,
+        width,
+        height: 600,
+        live,
+    })
+}
+
+/// A session with an agent connected and the guest told the `monitor_hz` rate.
+fn session_at(monitor_hz: u32) -> (Session, Box<dyn Connection>, FakeLauncher) {
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.set_monitor_refresh(monitor_hz);
+    session.windows_shown(true).unwrap();
+    session.start();
+    let mut agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    assert_eq!(next_body(&mut agent), display_refresh(monitor_hz));
+    (session, agent, launcher)
+}
+
+#[test]
+fn fr10_a_live_resize_holds_the_guest_at_60_hz_and_its_end_restores_the_monitor_rate() {
+    let (session, mut agent, _launcher) = session_at(144);
+    // The first live step lowers the rate before the step itself reaches the guest.
+    session.request(resize(7, 800, true)).unwrap();
+    assert_eq!(next_body(&mut agent), display_refresh(60));
+    assert_eq!(next_body(&mut agent), resize_body(7, 800, true));
+    // Later steps of the same drag say nothing more about the rate.
+    session.request(resize(7, 820, true)).unwrap();
+    assert_eq!(next_body(&mut agent), resize_body(7, 820, true));
+    // The end of the drag puts the rate back to the monitor's and reconfigures the task.
+    session.request(resize(7, 820, false)).unwrap();
+    assert_eq!(next_body(&mut agent), display_refresh(144));
+    assert_eq!(next_body(&mut agent), resize_body(7, 820, false));
+}
+
+#[test]
+fn fr10_a_live_resize_leaves_a_60_hz_monitor_alone() {
+    let (session, mut agent, _launcher) = session_at(60);
+    session.request(resize(7, 800, true)).unwrap();
+    session.request(resize(7, 800, false)).unwrap();
+    // Only the resize reaches the guest: its rate is 60 Hz either way.
+    assert_eq!(next_body(&mut agent), resize_body(7, 800, true));
+    assert_eq!(next_body(&mut agent), resize_body(7, 800, false));
+    session.set_power(on_battery(80));
+    assert_eq!(
+        next_body(&mut agent),
+        Body::PowerState(on_battery(80).to_control())
+    );
+}
+
+#[test]
+fn fr10_two_windows_dragged_one_after_the_other_each_hold_the_guest_at_60_hz() {
+    let (session, mut agent, _launcher) = session_at(120);
+    for task_id in [7, 8] {
+        session.request(resize(task_id, 800, true)).unwrap();
+        assert_eq!(next_body(&mut agent), display_refresh(60));
+        assert_eq!(next_body(&mut agent), resize_body(task_id, 800, true));
+        session.request(resize(task_id, 800, false)).unwrap();
+        assert_eq!(next_body(&mut agent), display_refresh(120));
+        assert_eq!(next_body(&mut agent), resize_body(task_id, 800, false));
+    }
+    // Two at once: the rate comes back only when the second drag ends.
+    session.request(resize(7, 900, true)).unwrap();
+    assert_eq!(next_body(&mut agent), display_refresh(60));
+    assert_eq!(next_body(&mut agent), resize_body(7, 900, true));
+    session.request(resize(8, 900, true)).unwrap();
+    assert_eq!(next_body(&mut agent), resize_body(8, 900, true));
+    session.request(resize(7, 900, false)).unwrap();
+    assert_eq!(next_body(&mut agent), resize_body(7, 900, false));
+    session.request(resize(8, 900, false)).unwrap();
+    assert_eq!(next_body(&mut agent), display_refresh(120));
+    assert_eq!(next_body(&mut agent), resize_body(8, 900, false));
+}
+
 #[test]
 fn fr10_a_host_without_a_battery_is_a_full_battery_on_ac_power() {
     let power = PowerState::MAINS_ONLY.to_control();
@@ -2324,6 +2513,40 @@ fn nfr2_a_host_short_of_memory_tells_the_guest_when_it_changes_and_when_the_agen
     assert!(!hub.memory_low());
     hub.update_memory(true);
     assert_eq!(next_body(&mut agent), host_memory(true));
+}
+
+fn tasks_shown(task_ids: &[i32]) -> Body {
+    Body::TasksShown(dsa_protocol::control::TasksShown {
+        task_ids: task_ids.to_vec(),
+    })
+}
+
+/// The next body the guest is sent that says which task windows are shown.
+fn next_tasks_shown(daemon: &mut Box<dyn Connection>) -> Body {
+    loop {
+        let body = next_body(daemon);
+        if matches!(body, Body::TasksShown(_)) {
+            return body;
+        }
+    }
+}
+
+#[test]
+fn nfr2_the_guest_is_told_which_task_windows_are_shown_when_it_connects_and_on_each_change() {
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.windows_shown(true).unwrap();
+    // Said before the guest runs: told as soon as its control daemon connects.
+    session
+        .request(TaskRequest::TasksShown { task_ids: vec![3] })
+        .unwrap();
+    session.start();
+    let mut daemon = connect_daemon(&mut connector, &launcher);
+    assert_eq!(next_tasks_shown(&mut daemon), tasks_shown(&[3]));
+    // The same word again is not news; a minimized window is.
+    session.tasks_shown(vec![3]).unwrap();
+    session.tasks_shown(vec![]).unwrap();
+    assert_eq!(next_tasks_shown(&mut daemon), tasks_shown(&[]));
 }
 
 #[test]
@@ -3598,6 +3821,138 @@ fn fr11_an_installed_app_reaches_the_start_menu_through_the_installed_apps_repor
     }
 }
 
+fn shortcut(id: &str, label: &str, rank: u32) -> dsa_protocol::control::AppShortcut {
+    dsa_protocol::control::AppShortcut {
+        id: id.into(),
+        short_label: label.into(),
+        icon_png: vec![0x89, b'P', b'N', b'G', rank as u8],
+        rank,
+        dynamic: true,
+        ..Default::default()
+    }
+}
+
+/// The installed apps the watcher hears of next.
+fn next_installed(watch: &dsa_host_core::tasks::TaskWatch) -> Vec<dsa_host_core::tasks::AppInfo> {
+    loop {
+        if let TaskEvent::Installed(apps) = watch.events.recv_timeout(WAIT).expect("the apps") {
+            return apps;
+        }
+    }
+}
+
+#[test]
+fn fr7_app_shortcuts_are_jump_list_tasks_and_desktop_shortcuts() {
+    let (session, mut agent, _launcher) = active_session();
+    let watch = session.watch_tasks();
+    send_body(
+        &mut agent,
+        Body::InstalledApp(dsa_protocol::control::InstalledApp {
+            package_name: "com.example.chat".into(),
+            label: "Chat".into(),
+            ..Default::default()
+        }),
+    );
+    send_body(
+        &mut agent,
+        Body::InstalledApps(dsa_protocol::control::InstalledApps {
+            package_names: vec!["com.example.chat".into()],
+        }),
+    );
+    assert!(next_installed(&watch)[0].shortcuts.is_empty());
+
+    // The agent reports the app's shortcuts; the list of installed apps, which the window
+    // manager builds the jump list from, carries them with their names and icons.
+    send_body(
+        &mut agent,
+        Body::AppShortcuts(dsa_protocol::control::AppShortcuts {
+            package_name: "com.example.chat".into(),
+            shortcuts: vec![
+                shortcut("new-chat", "New chat", 0),
+                shortcut("ana", "Ana", 1),
+            ],
+        }),
+    );
+    let apps = next_installed(&watch);
+    let tasks = dsa_host_core::tasks::jump_list_shortcuts(&apps[0].shortcuts);
+    assert_eq!(
+        tasks
+            .iter()
+            .map(|s| (s.id.as_str(), s.label()))
+            .collect::<Vec<_>>(),
+        vec![("new-chat", "New chat"), ("ana", "Ana")]
+    );
+    assert_eq!(tasks[0].icon_png, vec![0x89, b'P', b'N', b'G', 0]);
+
+    // The app changes them; the jump list follows.
+    send_body(
+        &mut agent,
+        Body::AppShortcuts(dsa_protocol::control::AppShortcuts {
+            package_name: "com.example.chat".into(),
+            shortcuts: vec![shortcut("new-chat", "New chat", 0)],
+        }),
+    );
+    assert_eq!(next_installed(&watch)[0].shortcuts.len(), 1);
+
+    // A jump list task starts its shortcut in Android.
+    session
+        .request(TaskRequest::LaunchShortcut {
+            package_name: "com.example.chat".into(),
+            shortcut_id: "new-chat".into(),
+        })
+        .expect("the launch");
+    loop {
+        if let Body::LaunchShortcut(launch) = next_body(&mut agent) {
+            assert_eq!(launch.package_name, "com.example.chat");
+            assert_eq!(launch.shortcut_id, "new-chat");
+            break;
+        }
+    }
+
+    // The app asks to pin a shortcut: the window manager hears of it, asks the user, and the
+    // answer reaches the agent.
+    send_body(
+        &mut agent,
+        Body::PinShortcutRequest(dsa_protocol::control::PinShortcutRequest {
+            request_id: 7,
+            package_name: "com.example.chat".into(),
+            app_label: "Chat".into(),
+            shortcut: Some(shortcut("ana", "Ana", 1)),
+        }),
+    );
+    let request = loop {
+        if let TaskEvent::PinShortcut(request) = watch.events.recv_timeout(WAIT).expect("pin") {
+            break request;
+        }
+    };
+    assert_eq!(request.request_id, 7);
+    assert_eq!(request.app_label, "Chat");
+    assert_eq!(request.shortcut.label(), "Ana");
+    session
+        .request(TaskRequest::AnswerPinShortcut {
+            request_id: 7,
+            accepted: true,
+        })
+        .expect("the answer");
+    loop {
+        if let Body::PinShortcutAnswer(answer) = next_body(&mut agent) {
+            assert_eq!(answer.request_id, 7);
+            assert!(answer.accepted);
+            break;
+        }
+    }
+
+    // Uninstalled: the app and its shortcuts leave the list, so the host removes its jump
+    // list and desktop shortcuts.
+    send_body(
+        &mut agent,
+        Body::InstalledApps(dsa_protocol::control::InstalledApps {
+            package_names: vec![],
+        }),
+    );
+    assert!(next_installed(&watch).is_empty());
+}
+
 #[test]
 fn fr11_the_install_window_learns_the_installed_version_and_signer_from_the_agent() {
     let (session, mut agent, _launcher) = active_session();
@@ -3792,6 +4147,73 @@ fn fr25_an_app_that_runs_as_arm_or_has_no_arm_code_is_offered_nothing() {
     }
     send_body(&mut agent, game_crash(true));
     nothing_for_the_watcher(&watch);
+}
+
+#[test]
+fn fr25_a_32_bit_build_that_ends_at_start_is_told_to_get_its_64_bit_build() {
+    use dsa_host_core::native_abi::Notice;
+    let (session, mut agent, _launcher) = active_session();
+    let watch = session.watch_notifications();
+    let tasks = session.watch_tasks();
+    // Chrome's build made to run as 32-bit code, as Google Play delivers it to a device
+    // without 32-bit code: the same library under x86 and x86_64, and no ARM code.
+    send_body(
+        &mut agent,
+        Body::InstalledApp(dsa_protocol::control::InstalledApp {
+            package_name: "com.android.chrome".into(),
+            label: "Chrome".into(),
+            primary_abi: "x86_64".into(),
+            version_code: 495106126,
+            native_libraries: vec![
+                game_libraries("x86", &["libmonochrome.so"]),
+                game_libraries("x86_64", &["libmonochrome.so"]),
+            ],
+            ..Default::default()
+        }),
+    );
+    send_body(
+        &mut agent,
+        Body::InstalledApps(dsa_protocol::control::InstalledApps {
+            package_names: vec!["com.android.chrome".into()],
+        }),
+    );
+    loop {
+        if let TaskEvent::Installed(apps) = tasks.events.recv_timeout(WAIT).expect("the apps") {
+            if apps
+                .iter()
+                .any(|app| app.package_name == "com.android.chrome")
+            {
+                break;
+            }
+        }
+    }
+    send_body(
+        &mut agent,
+        Body::NativeLibraryCrash(dsa_protocol::control::NativeLibraryCrash {
+            package_name: "com.android.chrome".into(),
+            detail: "java.lang.RuntimeException: Starting in 64-bit mode requires the 64-bit \
+                     native library."
+                .into(),
+            arm64_supported: true,
+        }),
+    );
+    let notice = match watch.recv_timeout(WAIT).unwrap() {
+        NotificationEvent::Posted(notice) => notice,
+        other => panic!("expected the notice, not {other:?}"),
+    };
+    assert_eq!(notice.key, Notice::Needs64Bit.key("com.android.chrome"));
+    assert_eq!(notice.app_label, "Chrome");
+    assert!(notice.text.contains("x86_64 build"), "{}", notice.text);
+    // A click removes it and installs nothing.
+    session
+        .notification_action(NotificationAction::Open {
+            key: notice.key.clone(),
+        })
+        .expect("taken");
+    assert_eq!(
+        watch.recv_timeout(WAIT).unwrap(),
+        NotificationEvent::Removed { key: notice.key }
+    );
 }
 
 #[test]
@@ -4286,7 +4708,111 @@ fn clock_widget() -> dsa_protocol::control::WidgetProvider {
         resize_mode: 3,
         needs_configuration: false,
         app_label: "Clock App".into(),
+        reconfigurable: false,
     }
+}
+
+/// The agent's side of a widget's settings opened again: the long press's menu asks for
+/// them, the agent runs the setup again for the same widget, and the caller hears how it
+/// ended. Only a widget that says it can be set up again is asked of the agent.
+#[test]
+fn fr12_long_pressing_a_widget_edits_it_like_a_home_screen() {
+    let (session, mut agent, _launcher) = active_session();
+    let session = Arc::new(session);
+    let weather = dsa_protocol::control::WidgetProvider {
+        provider: "com.example.weather/.WeatherWidget".into(),
+        needs_configuration: true,
+        reconfigurable: true,
+        ..clock_widget()
+    };
+    send_body(
+        &mut agent,
+        Body::WidgetUpdated(dsa_protocol::control::WidgetUpdated {
+            widget_id: 21,
+            provider: Some(weather.clone()),
+        }),
+    );
+    send_body(&mut agent, widget_updated(12));
+    let deadline = std::time::Instant::now() + WAIT;
+    while session.widgets().len() < 2 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the widgets never came"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    let settable = session
+        .widgets()
+        .into_iter()
+        .find(|(id, _)| *id == 21)
+        .map(|(_, provider)| provider)
+        .unwrap();
+    assert!(settable.reconfigurable, "the flag reaches the host");
+
+    // The user finishes the setup.
+    let asking = {
+        let session = Arc::clone(&session);
+        thread::spawn(move || session.reconfigure_widget(21, WAIT))
+    };
+    let request_id = match next_body(&mut agent) {
+        Body::ReconfigureWidget(asked) => {
+            assert_eq!(asked.widget_id, 21);
+            asked.request_id
+        }
+        other => panic!("expected the widget's settings to be asked for, got {other:?}"),
+    };
+    send_body(
+        &mut agent,
+        Body::WidgetReconfigured(dsa_protocol::control::WidgetReconfigured {
+            request_id,
+            widget_id: 21,
+            finished: true,
+            error: String::new(),
+        }),
+    );
+    assert_eq!(asking.join().unwrap(), Ok(()));
+
+    // The user leaves it: the reason reaches the caller, and the widget stays.
+    let leaving = {
+        let session = Arc::clone(&session);
+        thread::spawn(move || session.reconfigure_widget(21, WAIT))
+    };
+    let request_id = match next_body(&mut agent) {
+        Body::ReconfigureWidget(asked) => asked.request_id,
+        other => panic!("expected the widget's settings to be asked for, got {other:?}"),
+    };
+    send_body(
+        &mut agent,
+        Body::WidgetReconfigured(dsa_protocol::control::WidgetReconfigured {
+            request_id,
+            widget_id: 21,
+            finished: false,
+            error: "the user canceled the widget's settings".into(),
+        }),
+    );
+    assert_eq!(
+        leaving.join().unwrap(),
+        Err(SessionError::WidgetRefused(
+            "the user canceled the widget's settings".into()
+        ))
+    );
+    assert_eq!(session.widgets().len(), 2);
+
+    // The clock offers no settings, and an unknown widget has none: neither reaches the agent.
+    assert!(matches!(
+        session.reconfigure_widget(12, WAIT),
+        Err(SessionError::WidgetRefused(_))
+    ));
+    assert!(matches!(
+        session.reconfigure_widget(99, WAIT),
+        Err(SessionError::WidgetRefused(_))
+    ));
+    session.remove_widget(12).unwrap();
+    assert_eq!(
+        next_body(&mut agent),
+        Body::RemoveWidget(dsa_protocol::control::RemoveWidget { widget_id: 12 }),
+        "nothing was sent for the widgets that have no settings"
+    );
 }
 
 fn widget_updated(widget_id: i32) -> Body {
@@ -5182,12 +5708,12 @@ fn fr4_text_follows_the_windows_text_size() {
     session.start();
     let mut agent = connect_agent(&mut connector, &launcher);
     assert!(session.wait_for(SessionState::Active, WAIT));
-    // At a text size of 100% the guest's font scale is 160/96: a dp is 0.6 DIP, and text
-    // keeps the host's size.
+    // At a text size of 100% the guest's font scale is 1: text follows the same ratio as a
+    // dp, 0.819 DIP, so body text of 16 sp is about 13 DIP, near the host's own.
     let Body::SystemSettings(at_100) = next_body(&mut agent) else {
         panic!("expected the system settings");
     };
-    assert!((at_100.font_scale - 160.0 / 96.0).abs() < 1e-5);
+    assert!((at_100.font_scale - 1.0).abs() < 1e-5);
     // The user makes Windows' text 150%: the guest hears of it at once, as a setting and
     // nothing else, so no task is asked to change and none is relaunched for it.
     session.set_system_settings(dsa_host_core::system_settings::SystemSettings {
@@ -5197,7 +5723,7 @@ fn fr4_text_follows_the_windows_text_size() {
     let Body::SystemSettings(at_150) = next_body(&mut agent) else {
         panic!("expected the system settings");
     };
-    assert!((at_150.font_scale - 2.5).abs() < 1e-5);
+    assert!((at_150.font_scale - 1.5).abs() < 1e-5);
     assert_eq!(
         at_150,
         dsa_protocol::control::SystemSettings {
@@ -5214,7 +5740,7 @@ fn fr4_text_follows_the_windows_text_size() {
     let Body::SystemSettings(capped) = next_body(&mut agent) else {
         panic!("expected the system settings");
     };
-    assert!((capped.font_scale - 5.0).abs() < 1e-5);
+    assert!((capped.font_scale - 3.0).abs() < 1e-5);
 }
 
 #[test]
@@ -5404,8 +5930,8 @@ fn fr35_the_root_elevation_config_is_sent_once_the_agent_connects() {
     let mut agent = connect_agent(&mut connector, &launcher);
     let config = next_root_config(&mut agent);
     assert!(config.enabled);
-    // By package, as the host knows them, in package order; off apps are not listed, and
-    // the guest fills in each uid.
+    // By package, as the host knows them, in package order, off apps included (an app set
+    // to off keeps its whole shared user ID group from root); the guest fills in each uid.
     let apps: Vec<(String, u32, RootLevel)> = config
         .apps
         .iter()
@@ -5416,6 +5942,7 @@ fn fr35_the_root_elevation_config_is_sent_once_the_agent_connects() {
         vec![
             ("com.example.ask".to_string(), 0, RootLevel::Ask),
             ("com.example.keep".to_string(), 0, RootLevel::Remember),
+            ("com.example.off".to_string(), 0, RootLevel::Off),
         ]
     );
 
@@ -5674,6 +6201,136 @@ fn fr35_letting_an_app_keep_root_is_asked_through_the_sessions_prompt() {
     );
 }
 
+#[test]
+fn fr35_apps_sharing_a_user_id_are_approved_as_one_group() {
+    use dsa_host_core::root_approval::{
+        ApprovalPrompt, ApprovalRequest, PromptAnswer, RootApproval,
+    };
+    use dsa_host_core::settings::{MachineSettings, MemorySettings, SettingsStore};
+
+    struct RecordingPrompt {
+        seen: Mutex<Vec<ApprovalRequest>>,
+    }
+
+    impl ApprovalPrompt for RecordingPrompt {
+        fn ask(&self, request: &ApprovalRequest, _timeout: Duration) -> PromptAnswer {
+            self.seen.lock().unwrap().push(request.clone());
+            PromptAnswer::Approved
+        }
+    }
+
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    let store = Arc::new(MemorySettings::default());
+    store
+        .set_machine(MachineSettings {
+            root_elevation: true,
+            ..Default::default()
+        })
+        .unwrap();
+    store.set_root_app("user", "com.shared.one", "ask").unwrap();
+    dsa_host_core::root_elevation::apply(&session, &*store, "user");
+
+    let prompt = Arc::new(RecordingPrompt {
+        seen: Mutex::new(Vec::new()),
+    });
+    session.set_root_approval(Arc::new(RootApproval::new(
+        "user",
+        store.clone(),
+        prompt.clone(),
+        Arc::new(|_: &str| {}),
+    )));
+
+    session.start();
+    let mut agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    assert!(next_root_config(&mut agent).enabled);
+
+    // The agent lists both apps with the user ID they share.
+    let watch = session.watch_tasks();
+    for (package, label, icon) in [
+        ("com.shared.one", "Shared One", vec![1, 2, 3]),
+        ("com.shared.two", "Shared Two", vec![4, 5, 6]),
+    ] {
+        send_body(
+            &mut agent,
+            Body::InstalledApp(dsa_protocol::control::InstalledApp {
+                package_name: package.into(),
+                label: label.into(),
+                icon_png: icon,
+                shared_user_id: "com.shared".into(),
+                ..Default::default()
+            }),
+        );
+    }
+    send_body(
+        &mut agent,
+        Body::InstalledApps(dsa_protocol::control::InstalledApps {
+            package_names: vec!["com.shared.one".into(), "com.shared.two".into()],
+        }),
+    );
+    let installed = next_installed(&watch);
+    assert!(installed
+        .iter()
+        .all(|app| app.shared_user_id == "com.shared"));
+
+    send_body(&mut agent, su_request(1, "com.shared.one, com.shared.two"));
+    let approved = next_su_decision(&mut agent);
+    assert!(approved.approved);
+    {
+        let seen = prompt.seen.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].shared_apps.len(), 2);
+        assert_eq!(seen[0].shared_apps[0].label, "Shared One");
+        assert_eq!(seen[0].shared_apps[1].label, "Shared Two");
+        let msg = seen[0].message();
+        assert!(msg.contains("Shared One (com.shared.one)"), "{msg}");
+        assert!(msg.contains("Shared Two (com.shared.two)"), "{msg}");
+        assert!(msg.contains("share a user ID"), "{msg}");
+    }
+
+    // The second app in the group uses the group's grace without prompting again.
+    send_body(&mut agent, su_request(2, "com.shared.one, com.shared.two"));
+    assert!(next_su_decision(&mut agent).approved);
+    assert_eq!(prompt.seen.lock().unwrap().len(), 1);
+
+    // Setting one app in the group to off hides su from the whole group and denies requests.
+    store.set_root_app("user", "com.shared.two", "off").unwrap();
+    dsa_host_core::root_elevation::apply(&session, &*store, "user");
+    // The guest is told the app is off, which its su guard applies to the app's whole uid.
+    let updated = next_root_config(&mut agent);
+    let two = updated
+        .apps
+        .iter()
+        .find(|app| app.package == "com.shared.two")
+        .expect("the app set to off is named");
+    assert_eq!(two.level(), dsa_protocol::control::RootLevel::Off);
+
+    send_body(&mut agent, su_request(3, "com.shared.one, com.shared.two"));
+    assert!(!next_su_decision(&mut agent).approved);
+}
+
+fn speak_text(request_id: u32) -> Body {
+    Body::SpeakText(dsa_protocol::control::SpeakText {
+        request_id,
+        text: "Hello.".into(),
+        voice_id: "aria".into(),
+        language_tag: "en-US".into(),
+        rate: 1.0,
+        pitch: 1.0,
+    })
+}
+
+/// The next speech or spelling answer the guest is sent, past anything else it is sent.
+fn next_language_answer(agent: &mut Box<dyn Connection>) -> Body {
+    loop {
+        let body = next_body(agent);
+        if dsa_host_core::language::relay::is_answer(&body) {
+            return body;
+        }
+    }
+}
+
 /// The local API service over `session`, for every user, and a connector to it.
 fn service_over(
     session: &Arc<Session>,
@@ -5698,6 +6355,51 @@ fn next_matching<T>(agent: &mut Box<dyn Connection>, pick: impl Fn(Body) -> Opti
         if let Some(found) = pick(next_body(agent)) {
             return found;
         }
+    }
+}
+
+#[test]
+fn fr36_the_guests_speech_requests_reach_the_host_session_and_its_answers_the_guest() {
+    let (session, mut agent, _launcher) = active_session();
+    let served = session.serve_language();
+    send_body(&mut agent, speak_text(4));
+    let request = served.requests.recv_timeout(WAIT).expect("the request");
+    assert_eq!(request.body, Some(speak_text(4)));
+    let audio = Body::SpeechAudio(dsa_protocol::control::SpeechAudio {
+        request_id: 4,
+        sample_rate_hz: 24000,
+        channel_count: 1,
+        pcm: vec![1, 0, 2, 0],
+    });
+    session
+        .language_answer(
+            served.id,
+            Envelope {
+                body: Some(audio.clone()),
+            },
+        )
+        .expect("an answer");
+    assert_eq!(next_language_answer(&mut agent), audio);
+    // Something that is no answer reaches nobody.
+    assert!(session
+        .language_answer(
+            served.id,
+            Envelope {
+                body: Some(speak_text(5)),
+            },
+        )
+        .is_err());
+    // The client goes away before it finished: the guest is told.
+    session.language_server_gone(served.id);
+    match next_language_answer(&mut agent) {
+        Body::SpeechDone(done) => {
+            assert_eq!(done.request_id, 4);
+            assert_eq!(
+                done.outcome,
+                dsa_protocol::control::SpeechOutcome::Unavailable as i32
+            );
+        }
+        other => panic!("expected the end of the speech, got {other:?}"),
     }
 }
 
@@ -6069,4 +6771,25 @@ fn fr36_sharing_hands_content_to_the_host_share_ui() {
     stop.store(true, Ordering::Relaxed);
     watcher.join().unwrap();
     let _ = std::fs::remove_dir_all(&spool);
+}
+
+#[test]
+fn fr36_a_spelling_request_with_no_host_session_to_serve_it_is_unsupported() {
+    let (_session, mut agent, _launcher) = active_session();
+    send_body(
+        &mut agent,
+        Body::CheckSpelling(dsa_protocol::control::CheckSpelling {
+            request_id: 2,
+            language_tag: "en-US".into(),
+            texts: vec!["teh".into()],
+            max_suggestions: 3,
+        }),
+    );
+    match next_language_answer(&mut agent) {
+        Body::SpellingResult(result) => {
+            assert_eq!(result.request_id, 2);
+            assert!(!result.supported);
+        }
+        other => panic!("expected a spelling result, got {other:?}"),
+    }
 }

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The guest's text-to-speech engine. Its voices are the host's, so it has no settings of its
+  own to show.
+-->
+<tts-engine xmlns:android="http://schemas.android.com/apk/res/android" />

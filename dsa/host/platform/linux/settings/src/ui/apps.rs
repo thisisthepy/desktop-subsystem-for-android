@@ -3,8 +3,10 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::time::Duration;
 
 use adw::prelude::*;
+use gtk::glib;
 
 use super::common::*;
 use crate::i18n::{tr, trf};
@@ -20,7 +22,7 @@ pub fn apps(ctx: &Shared) -> gtk::Widget {
 
     let manage = group(
         "",
-        Some(&tr("The Android apps installed on this computer. Open an app, change its permissions, storage and notifications in App info, or uninstall an app you installed. Android starts when you open this page.")),
+        Some(&tr("The Android apps on this computer. Open them, change them in App info, or uninstall the ones you installed.\nAndroid starts when you open this page.")),
     );
     let manage_row = link_row(
         &tr("Manage apps"),
@@ -98,11 +100,20 @@ pub fn apps(ctx: &Shared) -> gtk::Widget {
                 rows.note(&tr("No app matches your search."));
             }
             if view::root_unavailable(all) {
-                rows.note(&tr("Root access is off for this computer, so no app can use su. An administrator turns it on under Advanced, and then you choose each app's level here."));
+                rows.note(&tr("Root access is off for this computer, so no app can use su.\nAn administrator turns it on under Advanced. Then you choose each app's level here."));
             }
             for app in shown {
                 let window = windows.borrow().get(&app.package).cloned();
-                let row = app_row(&ctx, &page, app, window, forced.get(), reload.clone());
+                let group_note = view::root_group_note(app, all);
+                let row = app_row(
+                    &ctx,
+                    &page,
+                    app,
+                    group_note,
+                    window,
+                    forced.get(),
+                    reload.clone(),
+                );
                 // The app App info was opened for: its row opens and comes into view, once.
                 let focused = ctx.focus_app.borrow().as_deref() == Some(app.package.as_str());
                 if focused {
@@ -169,15 +180,12 @@ fn app_row(
     ctx: &Shared,
     page: &Rc<Page>,
     app: &App,
+    group_note: Option<String>,
     window: Option<AppWindow>,
     system_forced_available: bool,
     reload: Hook,
 ) -> adw::ExpanderRow {
-    let row = adw::ExpanderRow::builder()
-        .title(app.label.as_str())
-        .subtitle(view::app_detail(app))
-        .use_markup(false)
-        .build();
+    let row = expander_row(&app.label, &view::app_detail(app));
     row.add_prefix(&png_image(&app.icon_png, "application-x-executable", 32));
 
     let open = button(&tr("Open"));
@@ -230,6 +238,34 @@ fn app_row(
                         &tr("The apps could not be read or changed"),
                         r.as_ref().err(),
                     );
+                },
+            );
+        });
+    }
+
+    let (desktop_row, desktop) = button_row(
+        &tr("Desktop shortcut"),
+        &tr("A shortcut on the desktop that opens the app"),
+        &tr("Create desktop shortcut"),
+    );
+    row.add_row(&desktop_row);
+    {
+        let (ctx, page, package) = (ctx.clone(), page.clone(), app.package.clone());
+        let label = app.label.clone();
+        desktop.connect_clicked(move |_| {
+            let (page, package, ctx2) = (page.clone(), package.clone(), ctx.clone());
+            let label = label.clone();
+            request(
+                &ctx,
+                move |c| c.desktop_shortcut(&package),
+                move |r| {
+                    page.show_failure(
+                        &tr("The desktop shortcut could not be made"),
+                        r.as_ref().err(),
+                    );
+                    if r.is_ok() {
+                        ctx2.toast(&trf("{0} is on the desktop.", &[&label]));
+                    }
                 },
             );
         });
@@ -351,6 +387,15 @@ fn app_row(
     // How far the app may use root: not at all, asking an administrator each time, or without
     // asking.
     let root = view::root_view(app);
+    // Apps that share a user ID are one group for root: the row says so, and with which apps.
+    let root_subtitle = match &group_note {
+        Some(note) => format!(
+            "{}
+{note}",
+            root.subtitle
+        ),
+        None => root.subtitle.clone(),
+    };
     let root_level = {
         let (ctx, page, package, label) = (
             ctx.clone(),
@@ -360,7 +405,7 @@ fn app_row(
         );
         let reload = reload.clone();
         let current = app.root.clone();
-        Combo::new(&tr("Root access"), &root.subtitle, move |index| {
+        Combo::new(&tr("Root access"), &root_subtitle, move |index| {
             let Some(level) = view::ROOT_LEVELS.get(index as usize) else {
                 return;
             };
@@ -512,7 +557,7 @@ fn switch_abi(
                             &ctx2,
                             &trf("Erase {0}'s data?", &[&label]),
                             &trf(
-                                "Android cannot change how {0} runs and keep its data. Installing it again erases its data: sign-ins, settings and files it keeps for itself.",
+                                "Android cannot change how {0} runs and keep its data.\n\nInstalling it again erases its data: sign-ins, settings and files it keeps for itself.",
                                 &[&label],
                             ),
                             &tr("Erase and install again"),
@@ -540,7 +585,7 @@ pub fn background(ctx: &Shared) -> gtk::Widget {
     let page = Rc::new(Page::new());
     let intro = group(
         &tr("Apps"),
-        Some(&tr("These Android apps keep running after their windows close, because they play music, download files, keep a VPN on or do other work in the background. Each also has an indicator in the top bar. Stopping an app ends what it is doing and frees the memory it used.")),
+        Some(&tr("These Android apps keep running after their windows close, to play music, download files, keep a VPN on or do other work.\nEach also has an indicator in the top bar.\nStopping an app ends what it is doing and frees the memory it used.")),
     );
     let refresh = gtk::Button::from_icon_name("view-refresh-symbolic");
     refresh.set_tooltip_text(Some(&tr("Refresh")));
@@ -677,12 +722,30 @@ fn media_title(title: &str, artist: &str) -> String {
     }
 }
 
-/// The widgets on the desktop and the ones the apps offer.
+/// A widget's preview, else its app's icon (which the compositor keeps in the icon theme
+/// beside the app's launcher entry), else a generic one.
+fn offer_image(offer: &crate::model::WidgetOffer) -> gtk::Image {
+    if !offer.preview_png.is_empty() {
+        return png_image(&offer.preview_png, "view-grid-symbolic", 48);
+    }
+    let icon = crate::model::app_icon_name(&offer.package);
+    let themed = gtk::gdk::Display::default()
+        .is_some_and(|display| gtk::IconTheme::for_display(&display).has_icon(&icon));
+    png_image(&[], if themed { &icon } else { "view-grid-symbolic" }, 48)
+}
+
+/// How long the watch of the placed widgets waits before it starts again after it ended, as
+/// it does when Android stops.
+const WIDGETS_RETRY: Duration = Duration::from_secs(5);
+
+/// The widgets on the desktop and the ones the apps offer. While the page is shown it watches
+/// the placed widgets, so one placed, moved, resized or removed elsewhere (its own menu on the
+/// desktop, `dsa`) shows here at once.
 pub fn widgets(ctx: &Shared) -> gtk::Widget {
     let page = Rc::new(Page::new());
     let placed = group(
         &tr("On your desktop"),
-        Some(&tr("Place the widgets your Android apps offer on your desktop. Each widget gets a window of its own. Drag the band along its top to move it, and its edges to resize it. Right-click a widget to resize or remove it. Android starts when you open this page.")),
+        Some(&tr("Place the widgets your Android apps offer on your desktop. Each widget gets a window of its own, below your other windows.\nPress and hold a widget to edit it: drag it to move it, and drag its handles to resize it.\nRight-click a widget for its settings, its sizes and Remove. Android starts when you open this page.")),
     );
     let refresh = gtk::Button::from_icon_name("view-refresh-symbolic");
     refresh.set_tooltip_text(Some(&tr("Refresh")));
@@ -766,7 +829,7 @@ pub fn widgets(ctx: &Shared) -> gtk::Widget {
                             detail.push(tr("asks you to set it up"));
                         }
                         let row = action_row(&offer.label, &detail.join(" · "));
-                        row.add_prefix(&png_image(&offer.preview_png, "view-grid-symbolic", 48));
+                        row.add_prefix(&offer_image(offer));
                         let add = button(&tr("Add to desktop"));
                         row.add_suffix(&add);
                         let (ctx, provider) = (ctx2.clone(), offer.provider.clone());
@@ -792,5 +855,100 @@ pub fn widgets(ctx: &Shared) -> gtk::Widget {
         refresh.connect_clicked(move |_| again());
         reload_now();
     }
+    watch_widgets(&page.root, reload);
     page.root.clone().upcast()
+}
+
+/// The watch of the placed widgets while `root` is shown: each change reported reads the page
+/// again, and a watch that ends starts again after [`WIDGETS_RETRY`].
+fn watch_widgets(root: &gtk::Box, reload: Hook) {
+    type Watching = Option<(
+        std::process::Child,
+        std::sync::mpsc::Receiver<Result<String, crate::api::Failure>>,
+    )>;
+    let watching: Rc<RefCell<Watching>> = Rc::default();
+    let retry_at: Rc<Cell<Option<std::time::Instant>>> = Rc::default();
+    let start = {
+        let watching = watching.clone();
+        Rc::new(move || {
+            if watching.borrow().is_some() {
+                return;
+            }
+            let (sender, lines) = std::sync::mpsc::channel();
+            let args: Vec<String> = crate::model::WIDGETS_WATCH
+                .iter()
+                .map(|arg| arg.to_string())
+                .collect();
+            if let Ok(child) = crate::api::spawn_lines(&args, sender) {
+                *watching.borrow_mut() = Some((child, lines));
+            }
+        })
+    };
+    let stop = {
+        let watching = watching.clone();
+        Rc::new(move || {
+            if let Some((mut child, _)) = watching.borrow_mut().take() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        })
+    };
+    {
+        let start = start.clone();
+        root.connect_map(move |_| start());
+    }
+    {
+        let stop = stop.clone();
+        root.connect_unmap(move |_| stop());
+    }
+    let root_weak = root.downgrade();
+    glib::timeout_add_local(Duration::from_millis(500), move || {
+        let Some(root) = root_weak.upgrade() else {
+            stop();
+            return glib::ControlFlow::Break;
+        };
+        let mut changed = false;
+        let mut ended = false;
+        if let Some((_, lines)) = watching.borrow().as_ref() {
+            loop {
+                match lines.try_recv() {
+                    // The first line lists the widgets the page has just read.
+                    Ok(Ok(line)) => {
+                        changed |= matches!(
+                            crate::model::WidgetChange::read(&line),
+                            Some(
+                                crate::model::WidgetChange::Placed(_)
+                                    | crate::model::WidgetChange::Removed(_)
+                            )
+                        )
+                    }
+                    Ok(Err(_)) => {}
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        ended = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if ended {
+            stop();
+            retry_at.set(Some(std::time::Instant::now() + WIDGETS_RETRY));
+        }
+        if root.is_mapped() && watching.borrow().is_none() {
+            match retry_at.get() {
+                Some(at) if std::time::Instant::now() < at => {}
+                _ => {
+                    retry_at.set(None);
+                    start();
+                }
+            }
+        }
+        if changed {
+            if let Some(reload) = reload.borrow().clone() {
+                reload();
+            }
+        }
+        glib::ControlFlow::Continue
+    });
 }

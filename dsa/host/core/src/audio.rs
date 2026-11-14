@@ -13,6 +13,10 @@
 //! open, and sends what it records to the guest as it comes ([`serve_stream`]). When the host
 //! lets no program record, the guest is told why and the stream does not open.
 //!
+//! The guest sends every output at full scale, whatever Android's media volume is; the host's
+//! volume is the only one applied (see [`crate::app_audio`]). Nothing here changes a sample's
+//! level, and [`BufferStats::peak`] records how loud the guest's sound arrived.
+//!
 //! Nothing here names a host operating system API. The platform supplies the devices through
 //! [`AudioDevice`].
 
@@ -73,6 +77,10 @@ pub struct BufferStats {
     pub gap_frames: u64,
     /// Frames the guest sent.
     pub received_frames: u64,
+    /// The largest magnitude of any sample the guest sent, out of 32768. The guest sends at
+    /// full scale whatever Android's media volume is, so this is how loud the app itself
+    /// played: the host's own volume is the only one applied after it.
+    pub peak: u16,
 }
 
 /// The host's queue of one stream's sound, in the guest's format.
@@ -165,10 +173,13 @@ impl JitterBuffer {
         self.next_position = Some(self.next_position.map_or(end, |next| next.max(end)));
         frames -= skip;
         let start = skip * BYTES_PER_FRAME;
+        let mut peak = self.stats.peak;
         for sample in pcm[start..start + frames * BYTES_PER_FRAME].chunks_exact(2) {
-            self.samples
-                .push_back(i16::from_le_bytes([sample[0], sample[1]]));
+            let value = i16::from_le_bytes([sample[0], sample[1]]);
+            peak = peak.max(value.unsigned_abs());
+            self.samples.push_back(value);
         }
+        self.stats.peak = peak;
         let queued = self.buffered_frames();
         if queued > self.max_frames {
             let drop = queued - self.target_frames;
@@ -613,6 +624,8 @@ fn serve_output(
     let source = SharedBuffer::default();
     let mut playback: Option<Box<dyn Playback>> = None;
     let mut device_frames = 0;
+    // The frames received when the stream last went idle, so each idle is logged once.
+    let mut logged_frames = 0u64;
     let ready = AudioOutputReady {
         buffered_frames: TARGET_BUFFER_FRAMES as u32,
         device_frames,
@@ -662,9 +675,21 @@ fn serve_output(
                     Ok(AudioOutputCommand::Pause) => source.lock().pause(),
                     Ok(AudioOutputCommand::Flush) => source.lock().flush(),
                     Ok(AudioOutputCommand::Standby) => {
-                        source.lock().standby();
+                        let stats = {
+                            let mut source = source.lock();
+                            source.standby();
+                            source.stats()
+                        };
                         // The device goes idle until the next start.
                         playback = None;
+                        // Once for each stretch of sound, whether or not a device played it.
+                        if stats.received_frames > logged_frames {
+                            logged_frames = stats.received_frames;
+                            log(&format!(
+                                "audio stream {name} is idle: {} frames received, peak {}",
+                                stats.received_frames, stats.peak
+                            ));
+                        }
                     }
                     _ => log(&format!(
                         "audio stream {name}: unknown command {}",
@@ -682,9 +707,13 @@ fn serve_output(
     connection.close();
     let stats = source.lock().stats();
     log(&format!(
-        "audio stream {name} closed ({reason}): {} frames received, {} frames of underrun, \
-         {} dropped, {} skipped by the guest, device delay {device_frames} frames",
-        stats.received_frames, stats.underrun_frames, stats.dropped_frames, stats.gap_frames
+        "audio stream {name} closed ({reason}): {} frames received, peak {}, {} frames of \
+         underrun, {} dropped, {} skipped by the guest, device delay {device_frames} frames",
+        stats.received_frames,
+        stats.peak,
+        stats.underrun_frames,
+        stats.dropped_frames,
+        stats.gap_frames
     ));
     Ok(StreamEnd {
         name,
@@ -705,9 +734,10 @@ fn body_name(body: &Body) -> &'static str {
     }
 }
 
-/// The streams that may play at once. Each one costs a thread and a device stream, and the
-/// guest opens one or two; more is a misbehaving process in the guest.
-pub const MAX_STREAMS: usize = 8;
+/// The streams that may play at once. Each one costs a thread, and a device stream while it
+/// plays. The guest opens its shared output, one output for each app with a window (eight)
+/// and the microphone's input; more is a misbehaving process in the guest.
+pub const MAX_STREAMS: usize = 16;
 
 /// Serves the audio port until `stop` is set: each connection is a stream, served on a
 /// thread of its own by [`serve_stream`], so the platform's mixer sums them. A connection

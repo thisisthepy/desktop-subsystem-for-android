@@ -1303,6 +1303,9 @@ impl UserAndroid for WithProgramStatus {
     fn adb_auto_connect_state(&self) -> crate::adb_discovery::AutoConnectState {
         self.android.adb_auto_connect_state()
     }
+    fn dns_answered_by_host(&self) -> Option<bool> {
+        self.android.dns_answered_by_host()
+    }
     fn watch_links(&self) -> Option<std::sync::mpsc::Receiver<String>> {
         self.android.watch_links()
     }
@@ -1311,6 +1314,12 @@ impl UserAndroid for WithProgramStatus {
     }
     fn share_folders(&self, on: bool, folders: Vec<String>) {
         self.android.share_folders(on, folders)
+    }
+    fn trust_host_certificates(&self, on: bool) {
+        self.android.trust_host_certificates(on)
+    }
+    fn host_certificates(&self) -> Vec<crate::host_certificates::ImportedCertificate> {
+        self.android.host_certificates()
     }
     fn set_root_elevation_config(&self, on: bool, apps: Vec<crate::root_elevation::AppLevel>) {
         self.android.set_root_elevation_config(on, apps)
@@ -1382,8 +1391,82 @@ impl UserAndroid for WithProgramStatus {
     fn print_result(&self, job_id: u32, outcome: &PrintOutcome) -> Result<(), TaskRequestError> {
         UserAndroid::print_result(&*self.android, job_id, outcome)
     }
+    fn backup(&self) -> Option<std::sync::Arc<crate::backup::BackupService>> {
+        UserAndroid::backup(&*self.android)
+    }
+    fn backup_now(&self) -> Result<dsa_protocol::control::BackupRunResult, TaskRequestError> {
+        UserAndroid::backup_now(&*self.android)
+    }
+    fn restore_backup(&self) -> Result<crate::session::RestoreOutcome, TaskRequestError> {
+        UserAndroid::restore_backup(&*self.android)
+    }
+    fn watch_passkeys(&self) -> Option<Receiver<crate::passkeys::PasskeyEvent>> {
+        UserAndroid::watch_passkeys(&*self.android)
+    }
+    fn passkey_result(
+        &self,
+        id: u64,
+        result: crate::passkeys::CeremonyResult,
+    ) -> Result<(), TaskRequestError> {
+        UserAndroid::passkey_result(&*self.android, id, result)
+    }
+    fn watch_geocoding(&self) -> Option<Receiver<crate::geocode::GeocodeQuery>> {
+        UserAndroid::watch_geocoding(&*self.android)
+    }
+    fn geocode_result(
+        &self,
+        query_id: u32,
+        outcome: &crate::geocode::GeocodeOutcome,
+    ) -> Result<(), TaskRequestError> {
+        UserAndroid::geocode_result(&*self.android, query_id, outcome)
+    }
+    fn watch_shares(&self) -> Option<Receiver<crate::share::ShareRequest>> {
+        UserAndroid::watch_shares(&*self.android)
+    }
+    fn share_result(
+        &self,
+        share_id: u32,
+        outcome: &crate::share::ShareOutcome,
+    ) -> Result<(), TaskRequestError> {
+        UserAndroid::share_result(&*self.android, share_id, outcome)
+    }
+    fn set_backup(
+        &self,
+        on: bool,
+        delete_backups: bool,
+    ) -> Result<crate::backup::BackupReport, TaskRequestError> {
+        UserAndroid::set_backup(&*self.android, on, delete_backups)
+    }
+    fn keymint_key_state(&self) -> Option<crate::session::KeyMintKeyState> {
+        UserAndroid::keymint_key_state(&*self.android)
+    }
+    fn forget_keymint_root_key(&self) {
+        UserAndroid::forget_keymint_root_key(&*self.android)
+    }
+    fn serve_language(&self) -> Option<crate::language::relay::Served> {
+        UserAndroid::serve_language(&*self.android)
+    }
+    fn language_answer(
+        &self,
+        server: u64,
+        envelope: dsa_protocol::control::Envelope,
+    ) -> Result<(), String> {
+        UserAndroid::language_answer(&*self.android, server, envelope)
+    }
+    fn language_server_gone(&self, server: u64) {
+        UserAndroid::language_server_gone(&*self.android, server)
+    }
     fn watch_background(&self) -> Option<BackgroundWatch> {
         UserAndroid::watch_background(&*self.android)
+    }
+    fn watch_app_audio(&self) -> Option<crate::app_audio::AppAudioWatch> {
+        UserAndroid::watch_app_audio(&*self.android)
+    }
+    fn set_app_volume(
+        &self,
+        change: &crate::app_audio::VolumeChange,
+    ) -> Result<(), TaskRequestError> {
+        UserAndroid::set_app_volume(&*self.android, change)
     }
     fn background_apps(&self) -> (Vec<BackgroundApp>, Vec<MediaSession>) {
         UserAndroid::background_apps(&*self.android)
@@ -1405,6 +1488,9 @@ impl UserAndroid for WithProgramStatus {
     }
     fn remove_widget(&self, widget_id: i32) -> Result<(), TaskRequestError> {
         UserAndroid::remove_widget(&*self.android, widget_id)
+    }
+    fn reconfigure_widget(&self, widget_id: i32) -> Result<(), WidgetError> {
+        UserAndroid::reconfigure_widget(&*self.android, widget_id)
     }
     fn resize_widget(&self, widget_id: i32, size: WidgetSize) -> Result<(), TaskRequestError> {
         UserAndroid::resize_widget(&*self.android, widget_id, size)

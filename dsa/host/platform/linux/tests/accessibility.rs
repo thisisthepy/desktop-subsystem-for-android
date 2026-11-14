@@ -375,6 +375,81 @@ fn fr18_places_are_in_the_windows_logical_pixels() {
     assert!(!access.contains(at(1, 3), 10, 50, coord::SCREEN));
 }
 
+/// Settings kept at the density of a monitor at 100% (130 dpi) and shown on one at 125%
+/// (164 dpi): its window shows each of the task's 400 by 600 pixels at 164 per 130.
+fn settings_at_125_percent_kept_at_100() -> (Toplevel, Access) {
+    use dsa_host_core::compositor::window_sizing::{
+        density_for_dpi, scale_between, to_window_size,
+    };
+    let mut model = model(1);
+    model.frame_scale = scale_between(density_for_dpi(120), density_for_dpi(96));
+    model.shown = to_window_size(model.task, model.frame_scale);
+    let mut access = Access::new(false, Duration::from_secs(30));
+    access.sync(TASK, facts_of(&model, false));
+    access.apply(TASK, settings_screen(1)).unwrap();
+    (model, access)
+}
+
+#[test]
+fn fr18_on_a_monitor_of_another_scale_places_are_where_the_window_shows_each_node() {
+    let (model, access) = settings_at_125_percent_kept_at_100();
+    assert_eq!(model.frame_scale, (82, 65));
+    assert_eq!(model.shown, (505, 757));
+    // The second row is 80 task pixels down and 80 high: 100.9 to 201.8 window pixels, grown
+    // to whole pixels.
+    assert_eq!(
+        access.extents(at(1, 5), coord::WINDOW),
+        Some((0, 100, 505, 102))
+    );
+    // Its title, 16 in and 90 down in the task, is 20.2 in and 113.5 down in the window.
+    assert_eq!(
+        access.extents(at(1, 6), coord::WINDOW),
+        Some((20, 113, 465, 39))
+    );
+    // A point on the title as the window shows it finds the title.
+    assert_eq!(
+        access.at_point(Object::Window(TASK), 30, 120, coord::WINDOW),
+        Some(at(1, 6))
+    );
+    // 101 window pixels down is 80.5 task pixels down: the second row above its title,
+    // where at 1:1 it would have been on the title.
+    assert_eq!(
+        access.at_point(Object::Window(TASK), 30, 101, coord::WINDOW),
+        Some(at(1, 5))
+    );
+    // 95 window pixels down is 75.7 task pixels down: still the first row, whose bottom the
+    // task has at 80, where at 1:1 it would have been the second row's title.
+    assert_eq!(
+        access.at_point(Object::Window(TASK), 30, 95, coord::WINDOW),
+        Some(at(1, 3))
+    );
+}
+
+#[test]
+fn fr18_a_new_scale_moves_every_node_on_the_screen() {
+    let (mut model, mut access) = settings_at_125_percent_kept_at_100();
+    // Back on a 100% monitor, the window shows the task 1:1 again.
+    model.frame_scale = (1, 1);
+    model.shown = model.task;
+    let events = access.sync(TASK, facts_of(&model, false));
+    let moved: Vec<(Object, (i32, i32, i32, i32))> = events
+        .iter()
+        .filter_map(|event| match event {
+            Event::Bounds { object, rect } if matches!(object, Object::Node { .. }) => {
+                Some((*object, *rect))
+            }
+            _ => None,
+        })
+        .collect();
+    for id in 1..=6 {
+        assert!(
+            moved.iter().any(|(object, _)| *object == at(1, id)),
+            "node {id} was not said to move: {moved:?}"
+        );
+    }
+    assert!(moved.contains(&(at(1, 5), (0, 80, 400, 80))));
+}
+
 #[test]
 fn fr18_actions_become_the_nodes_accessibility_actions() {
     let mut access = settings(1);

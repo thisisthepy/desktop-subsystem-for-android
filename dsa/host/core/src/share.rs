@@ -488,12 +488,6 @@ pub fn serve(
     }
 }
 
-/// Where the copied files of shares go by default: `dsa-shares` in the user's temporary
-/// folder.
-pub fn default_spool_dir() -> PathBuf {
-    std::env::temp_dir().join("dsa-shares")
-}
-
 /// Sleeps `time`, or less once `stop` is set.
 fn wait(stop: &AtomicBool, time: Duration) {
     let step = Duration::from_millis(50);

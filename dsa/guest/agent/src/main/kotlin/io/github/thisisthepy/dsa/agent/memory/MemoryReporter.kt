@@ -17,7 +17,14 @@ data class ProcessPss(
     val pssKb: Long,
     val swapPssKb: Long = 0,
     val googlePlay: Boolean = false,
-)
+) {
+    /**
+     * [swapPssKb], never more than [pssKb]: the part swapped out is part of the PSS. A larger
+     * figure is a count of every page swapped out, its share in other processes included, and
+     * it made every total read "0 resident".
+     */
+    val swappedOutKb: Long get() = swapPssKb.coerceIn(0, pssKb.coerceAtLeast(0))
+}
 
 /**
  * Which packages the memory report counts as Google Play services, so the user sees what the
@@ -50,7 +57,17 @@ interface MemorySource {
 
     /** The memory the kernel was given, in KiB, counted from its online memory blocks; null when unreadable. */
     fun memOnlineKb(): Long? = null
+
+    /** What free page reporting has handed back to the host, from DSA's kernel; null when unreadable. */
+    fun pageReporting(): PageReporting? = null
 }
+
+/**
+ * Free page reporting, in KiB, as DSA's kernel counts it (`page_reporting.*`): the free memory
+ * the host has taken back now, the memory reported since boot, and the reported free memory
+ * the host took back in with a neighbour in its fault cluster since boot.
+ */
+data class PageReporting(val freeReportedKb: Long, val reportedTotalKb: Long, val refaultedTotalKb: Long)
 
 /** The fields of /proc/meminfo the report carries, in KiB. */
 data class MemInfo(
@@ -129,7 +146,13 @@ data class ZramStat(val originalKb: Long, val usedKb: Long) {
  * Builds the GuestMemory report: the kernel's totals, zram, and the processes with the
  * largest proportional set size, largest first.
  */
-fun guestMemory(meminfo: MemInfo, zram: ZramStat?, processes: List<ProcessPss>, memOnlineKb: Long? = null): GuestMemory {
+fun guestMemory(
+    meminfo: MemInfo,
+    zram: ZramStat?,
+    processes: List<ProcessPss>,
+    memOnlineKb: Long? = null,
+    pageReporting: PageReporting? = null,
+): GuestMemory {
     val builder = GuestMemory.newBuilder()
         .setMemTotalKb(meminfo.memTotalKb)
         .setMemFreeKb(meminfo.memFreeKb)
@@ -144,7 +167,7 @@ fun guestMemory(meminfo: MemInfo, zram: ZramStat?, processes: List<ProcessPss>, 
         .setZramOriginalKb(zram?.originalKb ?: 0)
         .setZramUsedKb(zram?.usedKb ?: 0)
         .setTotalPssKb(processes.sumOf { it.pssKb })
-        .setSwapPssKb(processes.sumOf { it.swapPssKb })
+        .setSwapPssKb(processes.sumOf { it.swappedOutKb })
         .setSlabUnreclaimableKb(meminfo.slabUnreclaimableKb)
         .setKernelStackKb(meminfo.kernelStackKb)
         .setPageTablesKb(meminfo.pageTablesKb)
@@ -153,13 +176,16 @@ fun guestMemory(meminfo: MemInfo, zram: ZramStat?, processes: List<ProcessPss>, 
         .setCmaTotalKb(meminfo.cmaTotalKb)
         .setHugetlbKb(meminfo.hugetlbKb)
         .setMemOnlineKb(memOnlineKb ?: 0)
+        .setFreeReportedKb(pageReporting?.freeReportedKb ?: 0)
+        .setReportedTotalKb(pageReporting?.reportedTotalKb ?: 0)
+        .setRefaultedTotalKb(pageReporting?.refaultedTotalKb ?: 0)
     // Every process of Google Play services, not only those among the largest: together they
     // are what Google Play costs.
     val googlePlay = processes.filter { it.googlePlay }
     builder
         .setGooglePlayProcesses(googlePlay.size)
         .setGooglePlayPssKb(googlePlay.sumOf { it.pssKb })
-        .setGooglePlaySwapPssKb(googlePlay.sumOf { it.swapPssKb })
+        .setGooglePlaySwapPssKb(googlePlay.sumOf { it.swappedOutKb })
     processes
         .sortedWith(compareByDescending<ProcessPss> { it.pssKb }.thenBy { it.pid })
         .take(MemoryReporter.TOP_PROCESSES)
@@ -169,7 +195,7 @@ fun guestMemory(meminfo: MemInfo, zram: ZramStat?, processes: List<ProcessPss>, 
                     .setPid(it.pid)
                     .setName(it.name)
                     .setPssKb(it.pssKb)
-                    .setSwapPssKb(it.swapPssKb)
+                    .setSwapPssKb(it.swappedOutKb)
                     .setGooglePlay(it.googlePlay),
             )
         }
@@ -225,13 +251,20 @@ class MemoryReporter(
         } catch (e: Exception) {
             null
         }
+        val pageReporting = try {
+            source.pageReporting()
+        } catch (e: Exception) {
+            null
+        }
         val processes = try {
             source.processes()
         } catch (e: Exception) {
             log.warn("could not read the processes' memory", e)
             emptyList()
         }
-        val frame = Envelope.newBuilder().setGuestMemory(guestMemory(meminfo, zram, processes, memOnline)).build()
+        val frame = Envelope.newBuilder()
+            .setGuestMemory(guestMemory(meminfo, zram, processes, memOnline, pageReporting))
+            .build()
         send(frame.toByteArray())
     }
 

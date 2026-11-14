@@ -7,15 +7,22 @@ could start without developer mode, listen on TCP or ask for an authorisation, w
 app is not signed with one of the keys in the key folder, when a system screen overlay is
 missing or was built against another framework-res or another build of the app it overlays,
 when Settings' pages would open with their large title folded, when the trace script is missing, when the agent is missing or not signed with the platform key, when
-Settings still has the preferences or code that crash it without Bluetooth, when a list in
-Settings or Files that sets its own padding keeps no room below its last row, when a system
+Settings still has the preferences or code that crash it without Bluetooth, when Settings'
+home list would add Android's freeform padding to the navigation bar inset, when the window
+manager would not give a freeform window its status bar and navigation bar insets, when the
+package manager would refuse a multiArch app with arm64-v8a code only while ARM translation is
+on, or services.jar stores its dex unaligned, when the framework overlay's status bar heights
+are not the window title bar's or its navigation bar heights are not 24 dp, when a system
 app users open is not compiled for the guest's boot image and its own dex, when an app the
 published build shipped compiled lost its odex, vdex or app image, or has one made for
 other dex, another boot image or another compiler filter, when the files
 do not match image.json, when an arm64 image carries an ARM translation package or an x86_64
 image's default one does not match image.json or would be refused by the host, when the patched
 framework image.json names (SurfaceFlinger, libhwui and libEGL from the Framework build) is not
-in the image as built, when the kernel or a DSA guest binary is built for another
+in the image as built, when DSA's KeyMint from the same build, when image.json names it, is not
+in the image as built, would not start in the KeyMint HAL's domain or lacks a library, or runs
+beside a KeyMint APEX the kernel command line still selects, when the kernel or a DSA guest
+binary is built for another
 architecture than the image's, when the ramdisk lacks the directories and links Android's
 first stage init needs, when the network adapter is not shown to Android as Wi-Fi with its
 address and DNS servers from DHCP, or when the kernel command line, a mount table or an init script
@@ -97,7 +104,10 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
             for reference in sorted(set(make_image.kernel_disk_names(z.read(name).decode(errors="replace")))):
                 problems.append(f"{name} names a disk by its probe order ({reference}), "
                                 "which changes when the host attaches another disk")
-    for app in ["Launcher3QuickStep", "SystemUI", "LatinIME", "CuttlefishService"]:
+    # LatinIME was also the guest's spell checker, and PicoTts would be a text-to-speech engine
+    # of its own: the agent's speech and spelling services, which answer with the host's, are
+    # the only ones.
+    for app in ["Launcher3QuickStep", "SystemUI", "LatinIME", "CuttlefishService", "PicoTts"]:
         if any(f"/{app}/" in n and n.endswith(".apk") for n in names):
             problems.append(f"{app} is still in the image")
     features_xml = "VENDOR/etc/permissions/dsa-unavailable-features.xml"
@@ -196,20 +206,14 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
                 if left:
                     problems.append(f"{name}:{dex} still has the code in {', '.join(sorted(set(left)))} "
                                     "that crashes Settings without the Bluetooth adapter")
-    # The lists that set their own bottom padding, in Settings and Files, keep room below
-    # their last row. (PermissionController's, inside the permission APEX, make-image.py
-    # checks after signing: reading an APEX payload takes otatools' deapexer.)
-    for suffix, edits in [
-        (make_image.SETTINGS_APK, {"code": make_image.SETTINGS_CODE_LIST_MARGIN,
-                                   "dimensions": make_image.SETTINGS_LIST_DIMENSIONS}),
-        (make_image.DOCUMENTSUI_APK, {"code": make_image.DOCUMENTSUI_CODE}),
-    ]:
-        for name in names:
-            if name.endswith(suffix):
-                left = make_image.apk_edits_left(z.read(name), **edits)
-                if left:
-                    problems.append(f"{name} still has {'; '.join(left)}, so the last row of its list "
-                                    "sits on the window's bottom edge")
+    # Settings' home list is padded by the navigation bar inset alone, as its other lists are,
+    # not by Android 17's freeform padding on top of it.
+    for name in names:
+        if name.endswith(make_image.SETTINGS_APK):
+            left = make_image.apk_edits_left(z.read(name), code=make_image.SETTINGS_CODE_FREEFORM_PADDING)
+            if left:
+                problems.append(f"{name} still has {'; '.join(left)}, so its home list ends higher above "
+                                "the window's bottom edge than its other lists")
     # Settings' pages take whether their large title opens expanded from the theme, which the
     # Settings overlay sets by the window's height.
     for name in names:
@@ -219,6 +223,44 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
             if left:
                 problems.append(f"{name} still has {'; '.join(left)}, so its pages open with the large "
                                 "title folded in every window")
+    # The window manager hands a freeform window its status bar inset, so an app that pads its
+    # toolbar by that inset keeps it below the window's title bar, and its navigation bar
+    # inset, so its bottom bar keeps clear of the window's bottom edge. services.jar keeps its dex
+    # aligned, or system_server copies 20 MiB of it into memory; its odex is checked with the
+    # apps the published build compiled, below.
+    if make_image.SERVICES_JAR not in names:
+        problems.append(f"{make_image.SERVICES_JAR} is missing")
+    else:
+        services = z.read(make_image.SERVICES_JAR)
+        left = make_image.apk_edits_left(services, code=make_image.SERVICES_INSETS_CODE)
+        if left:
+            problems.append(f"{make_image.SERVICES_JAR} still has {'; '.join(left)}, so a freeform window "
+                            "gets no status bar or navigation bar inset, and an app that pads by them draws "
+                            "under the title bar and on the window's bottom edge")
+        # The package manager takes every 64-bit ABI the guest lists for a multiArch app, so an
+        # app with arm64-v8a code only installs while ARM translation is on.
+        left = make_image.apk_edits_left(services, code=make_image.SERVICES_ABI_CODE)
+        if left:
+            problems.append(f"{make_image.SERVICES_JAR} still has {'; '.join(left)}, so Android refuses a "
+                            "multiArch app with arm64-v8a code only even while ARM translation is on")
+        # The WebView zygote starts with the first WebView renderer, so nothing in services.jar
+        # starts it at boot.
+        callers = make_image.jar_callers(services, make_image.WEBVIEW_ZYGOTE_START)
+        if callers:
+            problems.append(f"{make_image.SERVICES_JAR} still starts the WebView zygote from "
+                            f"{', '.join(callers)}, so it holds its memory from boot whether or not an "
+                            "app uses WebView")
+        misaligned = make_image.zip_misaligned(services)
+        if misaligned:
+            problems.append(f"{make_image.SERVICES_JAR} stores {', '.join(misaligned)} unaligned, so "
+                            "system_server copies them into memory")
+    # The system apps that had nothing to do at boot are not started by it.
+    for name in names:
+        if name.endswith(tuple(make_image.BOOT_RECEIVER_FREE_APKS)):
+            left = make_image.boot_receivers_left(z.read(name))
+            if left:
+                problems.append(f"{name} still starts at every boot ({', '.join(map(str, left))}) and "
+                                "stays as a cached process")
     # The system apps users open, compiled when the image was made: each odex must be there,
     # made for the APK's own (edited, signed) dex and the guest's boot image, or ART drops it
     # and the app runs interpreted again.
@@ -228,6 +270,16 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
     problems += make_image.prebuilt_oat_problems(z)
     if "VENDOR/etc/fstab.dsa" not in names:
         problems.append("the Hyper-V mount table is missing")
+    elif b"zram_backingdev_size=" not in z.read("VENDOR/etc/fstab.dsa"):
+        problems.append("the mount table gives zram no backing file, so its cold pages stay in memory")
+    # fs_mgr makes zram's backing file only in a folder that exists, which this script makes.
+    if make_image.ZRAM_BACKING_RC not in names:
+        problems.append(f"{make_image.ZRAM_BACKING_RC} is missing, so zram starts without its backing file")
+    plat_contexts = "SYSTEM/etc/selinux/plat_file_contexts"
+    if plat_contexts in names and make_image.ZRAM_BACKING_CONTEXT not in z.read(plat_contexts).decode().splitlines():
+        problems.append("plat_file_contexts does not label zram's backing folder, so the loop driver "
+                        "may not read or write the file")
+    problems += make_image.direct_mapped_problems(names, z.read, manifest.get("direct_mapped"))
     if "SYSTEM/etc/selinux/plat_sepolicy.cil" not in names:
         problems.append("plat_sepolicy.cil is missing from the image")
     else:
@@ -303,6 +355,12 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
     # guard that hides su from every app the host did not allow.
     if "VENDOR/bin/dsa-channeld" in names:
         problems += make_image.root_elevation_problems(names, z.read)
+        # KeyMint's root key from the host, which only KeyMint may read.
+        problems += make_image.keymint_key_problems(names, z.read)
+        # The host's root certificates among Android's system certificates.
+        problems += make_image.cacerts_problems(names, z.read)
+        # The guest's DNS, answered by the host's resolver through the daemon's stub.
+        problems += make_image.dns_problems(names, z.read)
 
     # The binder service the agent and the hwcomposer reach the daemon through.
     # servicemanager refuses it unless the vendor manifest declares it, and checks who may
@@ -343,6 +401,9 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
     if "SYSTEM_EXT/etc/permissions/privapp-permissions-dsa-agent.xml" not in names:
         problems.append("SYSTEM_EXT/etc/permissions/privapp-permissions-dsa-agent.xml is missing, so the "
                         "framework refuses to boot with the agent")
+    if agent in names and make_image.AGENT_SYSCONFIG not in names:
+        problems.append(f"{make_image.AGENT_SYSCONFIG} is missing, so Android's backup manager does not use "
+                        "the agent's backup transport and app data never reaches the host's backup")
 
     # The network: eth0 shown as Wi-Fi, with its address and DNS servers from DHCP.
     problems.extend(make_image.network_problems(names, z.read, manifest["kernel_cmdline"]))
@@ -387,7 +448,8 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
         if f"SYSTEM/etc/init/{rc_name}" in names:
             problems += make_image.program_folder_problems(
                 rc_name, z.read(f"SYSTEM/etc/init/{rc_name}").decode(errors="replace"))
-    # The patched framework: the Framework build's files, for this build and architecture.
+    # The patched framework: the Framework build's files, for this build and architecture, and
+    # its KeyMint, the only one Android runs.
     problems += make_image.check_framework(manifest, names, z.read)
     # The ABIs translation adds come after the guest's own, so the Play Store hands out the
     # x86_64 builds of Google Play services and the other system apps, not their ARM builds.
@@ -425,6 +487,9 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
         problems += make_image.gapps_folder_problems(names)
     # The add-on disk the Google apps and a user's ARM translation package are mounted from.
     problems += make_image.addon_disk_problems(names, z.read)
+    problems += make_image.widevine_problems(names, z.read)
+    # Google Play sees the computer's memory, and only Google Play does.
+    problems += make_image.host_memory_problems(manifest, names, z.read)
     if "SYSTEM/etc/dsa/gapps-on.prop" in names:
         on = [line.strip() for line in
               z.read("SYSTEM/etc/dsa/gapps-on.prop").decode(errors="replace").splitlines()]

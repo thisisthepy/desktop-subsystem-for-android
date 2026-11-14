@@ -1,9 +1,9 @@
 //! Windows 11 (Fluent) drawing for the window manager's own surfaces: the widgets' menu and
-//! the button that opens it.
+//! the border and handles of a widget being edited.
 //!
 //! The colors are WinUI 3's theme resources (`TextFillColorPrimary`,
 //! `SubtleFillColorSecondary`, `DividerStrokeColorDefault` and the rest), in the theme the
-//! user picked for apps, so the menu and the button look as a WinUI app's would. Under a high
+//! user picked for apps, so the menu looks as a WinUI app's would. Under a high
 //! contrast theme they take the theme's system colors instead, as WinUI does.
 //!
 //! Everything is drawn on a small canvas of premultiplied BGRA pixels ([`Canvas`]), the
@@ -28,8 +28,6 @@ pub const DEFAULT_ACCENT: Argb = 0xFF00_78D4;
 /// The Segoe Fluent Icons glyphs the surfaces draw (Segoe MDL2 Assets has them at the same
 /// code points).
 pub mod glyph {
-    /// "More": three dots in a row.
-    pub const MORE: char = '\u{E712}';
     /// "CheckMark": the chosen item of a menu.
     pub const CHECK: char = '\u{E73E}';
     /// "ChevronRight": an item that opens a submenu.
@@ -38,6 +36,20 @@ pub mod glyph {
     pub const RESIZE: char = '\u{E740}';
     /// "Unpin": taking something off where it was put.
     pub const UNPIN: char = '\u{E77A}';
+    /// "Setting": a gear, for an item's own settings.
+    pub const SETTINGS: char = '\u{E713}';
+    /// "Play": a triangle pointing right.
+    pub const PLAY: char = '\u{E768}';
+    /// "Pause": two bars.
+    pub const PAUSE: char = '\u{E769}';
+    /// "Previous": a bar and a triangle pointing left, to the track before.
+    pub const PREVIOUS: char = '\u{E892}';
+    /// "Next": a triangle pointing right and a bar, to the track after.
+    pub const NEXT: char = '\u{E893}';
+    /// "OpenInNewWindow": a window with an arrow out of it, for opening an app.
+    pub const OPEN_WINDOW: char = '\u{E8A7}';
+    /// "Stop": a square.
+    pub const STOP: char = '\u{E71A}';
 }
 
 /// The system colors of a high contrast theme that a menu and a button are drawn in.
@@ -219,54 +231,6 @@ pub fn menu_palette(theme: &Theme) -> MenuPalette {
     }
 }
 
-/// The colors of a small round button drawn over content, such as a widget's "More" button.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ButtonPalette {
-    /// The button's own fill, mostly opaque so it reads over whatever is under it.
-    pub fill: Argb,
-    /// Laid over the fill while the pointer is on it (`SubtleFillColorSecondary`).
-    pub hover: Argb,
-    /// Laid over the fill while it is pressed (`SubtleFillColorTertiary`).
-    pub pressed: Argb,
-    /// Its hairline edge (`ControlStrokeColorSecondary`).
-    pub border: Argb,
-    pub glyph: Argb,
-    pub glyph_pressed: Argb,
-}
-
-/// The button's colors for `theme`.
-pub fn button_palette(theme: &Theme) -> ButtonPalette {
-    if let Some(hc) = theme.high_contrast {
-        return ButtonPalette {
-            fill: hc.window | 0xFF00_0000,
-            hover: hc.highlight | 0xFF00_0000,
-            pressed: hc.highlight | 0xFF00_0000,
-            border: hc.text | 0xFF00_0000,
-            glyph: hc.text | 0xFF00_0000,
-            glyph_pressed: hc.highlight_text | 0xFF00_0000,
-        };
-    }
-    if theme.dark {
-        ButtonPalette {
-            fill: 0xD92C_2C2C,
-            hover: 0x0FFF_FFFF,
-            pressed: 0x0AFF_FFFF,
-            border: 0x18FF_FFFF,
-            glyph: 0xFFFF_FFFF,
-            glyph_pressed: 0xC5FF_FFFF,
-        }
-    } else {
-        ButtonPalette {
-            fill: 0xD9F9_F9F9,
-            hover: 0x0900_0000,
-            pressed: 0x0600_0000,
-            border: 0x2900_0000,
-            glyph: 0xE400_0000,
-            glyph_pressed: 0x9E00_0000,
-        }
-    }
-}
-
 /// How much of the pixel whose top left corner is (`px`, `py`) a rounded rectangle at (`x`,
 /// `y`) of `w` by `h` with corners of `radius` covers, from 0 to 1. The edge is smoothed over
 /// one pixel.
@@ -441,9 +405,17 @@ pub fn read_theme() -> Theme {
     }
 }
 
+/// Whether the taskbar, its previews and its flyouts use the light theme
+/// (`SystemUsesLightTheme`), which is set apart from the apps' theme.
+#[cfg(windows)]
+pub fn taskbar_is_light() -> bool {
+    const PERSONALIZE: &str = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
+    registry::user_dword(PERSONALIZE, "SystemUsesLightTheme") == Some(1)
+}
+
 /// The high contrast theme's colors, while one is on.
 #[cfg(windows)]
-fn high_contrast() -> Option<HighContrast> {
+pub fn high_contrast() -> Option<HighContrast> {
     use windows_sys::Win32::Graphics::Gdi::{
         GetSysColor, COLOR_GRAYTEXT, COLOR_HIGHLIGHT, COLOR_HIGHLIGHTTEXT, COLOR_WINDOW,
         COLOR_WINDOWTEXT, SYS_COLOR_INDEX,
@@ -546,6 +518,13 @@ pub mod text {
     /// before it. Both put the same glyphs at the same code points.
     pub const ICON_FACES: [&str; 2] = ["Segoe Fluent Icons", "Segoe MDL2 Assets"];
 
+    /// The faces of a title: Segoe UI Variable at its display size, then Segoe UI.
+    pub const TITLE_FACES: [&str; 2] = ["Segoe UI Variable Display", "Segoe UI"];
+
+    /// The weights text is drawn at: WinUI's body text, and its titles' semibold.
+    pub const REGULAR: i32 = 400;
+    pub const SEMIBOLD: i32 = 600;
+
     /// Where text sits in its box: at the left, cut with an ellipsis where it runs past the
     /// box, or in the middle, as a glyph is.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -556,12 +535,12 @@ pub mod text {
 
     /// The first face of `faces` that is installed at `em` pixels, selected into nothing;
     /// the last one when none is. Null when GDI could make none.
-    unsafe fn font(dc: HDC, faces: &[&str], em: i32) -> HFONT {
+    unsafe fn font(dc: HDC, faces: &[&str], em: i32, weight: i32) -> HFONT {
         for (index, face) in faces.iter().enumerate() {
             let mut font: LOGFONTW = std::mem::zeroed();
             // A negative height is the em size, as WinUI gives font sizes.
             font.lfHeight = -em.max(1);
-            font.lfWeight = 400;
+            font.lfWeight = weight;
             font.lfCharSet = DEFAULT_CHARSET as _;
             // Gray antialiasing: the text is drawn as coverage.
             font.lfQuality = ANTIALIASED_QUALITY as _;
@@ -592,6 +571,11 @@ pub mod text {
 
     /// How wide `text` is in the first installed face of `faces` at `em` pixels.
     pub fn measure(text: &str, faces: &[&str], em: i32) -> i32 {
+        measure_weighted(text, faces, em, REGULAR)
+    }
+
+    /// How wide `text` is in the first installed face of `faces` at `em` pixels and `weight`.
+    pub fn measure_weighted(text: &str, faces: &[&str], em: i32, weight: i32) -> i32 {
         if text.is_empty() {
             return 0;
         }
@@ -602,7 +586,7 @@ pub mod text {
             if dc.is_null() {
                 return 0;
             }
-            let font = font(dc, faces, em);
+            let font = font(dc, faces, em, weight);
             let old = (!font.is_null()).then(|| SelectObject(dc, font));
             let units: Vec<u16> = text.encode_utf16().collect();
             let mut size = SIZE { cx: 0, cy: 0 };
@@ -623,6 +607,18 @@ pub mod text {
         text: &str,
         faces: &[&str],
         em: i32,
+        size: (usize, usize),
+        align: Align,
+    ) -> Option<Vec<u8>> {
+        mask_weighted(text, faces, em, REGULAR, size, align)
+    }
+
+    /// As [`mask`], at `weight` ([`REGULAR`] or [`SEMIBOLD`]).
+    pub fn mask_weighted(
+        text: &str,
+        faces: &[&str],
+        em: i32,
+        weight: i32,
         size: (usize, usize),
         align: Align,
     ) -> Option<Vec<u8>> {
@@ -665,7 +661,7 @@ pub mod text {
                 return None;
             }
             let old_bitmap = SelectObject(dc, bitmap);
-            let font = font(dc, faces, em);
+            let font = font(dc, faces, em, weight);
             let old_font = (!font.is_null()).then(|| SelectObject(dc, font));
             SetBkMode(dc, TRANSPARENT as _);
             SetTextColor(dc, 0x00FF_FFFF);
@@ -782,9 +778,6 @@ mod tests {
         assert_eq!(palette.hover, hc.highlight);
         assert_eq!(palette.text_highlighted, hc.highlight_text);
         assert_eq!(palette.text_disabled, hc.gray_text);
-        let button = button_palette(&theme);
-        assert_eq!(button.border, 0xFFFF_FFFF);
-        assert_eq!(button.fill, 0xFF00_0000);
     }
 
     #[test]

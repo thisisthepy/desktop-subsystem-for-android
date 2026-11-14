@@ -816,7 +816,11 @@ impl ConfigApplier {
             HashMap::new()
         };
         let resolved = with_uids(config, &uids);
-        for app in resolved.apps.iter().filter(|app| app.uid == 0) {
+        for app in resolved
+            .apps
+            .iter()
+            .filter(|app| app.uid == 0 && app.level() != RootLevel::Off)
+        {
             (self.say)(&format!(
                 "root elevation: {} is not installed, so it sees no su",
                 app.package

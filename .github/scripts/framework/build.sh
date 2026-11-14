@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Builds the patched SurfaceFlinger, libhwui and libEGL in a tree fetch-source.py made from
-# dsa/guest/framework/framework-lock.json.
+# Builds the patched SurfaceFlinger, libhwui, libEGL and libandroid_runtime, and DSA's KeyMint (dsa-keymint, whose
+# root key of key blobs comes from the DSA host, with the libssl it needs), in a tree
+# fetch-source.py made from dsa/guest/framework/framework-lock.json.
 #
 #   build.sh <tree> <android16|android17> <x86_64|arm64>
 #
@@ -35,7 +36,11 @@ rm -rf "$device"
 mkdir -p "$device"
 cp "$here/device/AndroidProducts.mk" "$here/device/dsa_framework.mk" "$device/"
 cp "$here/device/$arch/BoardConfig.mk" "$device/"
-cp -r "$here/device/hosttools" "$device/"
+# The stand-in libsqlite only while the tree has no real one: libandroid_runtime needs
+# external/sqlite, and two modules of one name stop Soong's analysis.
+if [[ ! -e "$top/external/sqlite/dist/Android.bp" ]]; then
+  cp -r "$here/device/hosttools" "$device/"
+fi
 
 # Build files the tree takes in DSA's cut (stand-ins/common for every version, then
 # stand-ins/<android>): each upstream file declares modules over sources the sparse checkout
@@ -94,10 +99,11 @@ if command -v ccache >/dev/null; then
   esac
   mkdir -p "$CCACHE_DIR"
   # A fresh checkout gives every file a new time, so the compiler is known by its version
-  # rather than its time, and headers are trusted by content. The cache is restored from
-  # GitHub's cache, which holds about 10 GB for the whole repository, so each of the four
-  # builds keeps at most 2 GB.
-  ccache -o max_size=2G -o compression=true -o hash_dir=false -o base_dir="$top" \
+  # rather than its time, and headers are trusted by content. One build's objects take about
+  # 1.9 GB compressed, which filled the 2 GB the cache had when it lived in GitHub's Actions
+  # cache. It is now kept as an artifact (ccache-artifact.sh), so it has room for a build and
+  # what the build before it made.
+  ccache -o max_size=3G -o compression=true -o hash_dir=false -o base_dir="$top" \
     -o compiler_check="string:$(jq -r '.clang | join(",")' "$top/.dsa-sources.json")" \
     -o sloppiness=include_file_mtime,include_file_ctime,time_macros,file_stat_matches
   ccache --zero-stats >/dev/null
@@ -124,7 +130,8 @@ if (( status == 0 )); then
 fi
 
 if command -v ccache >/dev/null; then
-  ccache --show-stats || true
+  # Verbose, so the stats also say how many entries the size limit evicted.
+  ccache --show-stats --verbose || true
 fi
 if (( status != 0 )); then
   echo "::group::What the build could not find"

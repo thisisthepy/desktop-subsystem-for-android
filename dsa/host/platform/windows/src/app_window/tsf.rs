@@ -101,6 +101,20 @@ struct Sink {
     mask: u32,
 }
 
+/// Where the input method's windows go on the screen: beside `cursor`, which the window
+/// manager gives in the window's client pixels (the task's at the scale the window shows the
+/// task at), in the client area `client` on the screen, whose corner may be at negative
+/// coordinates on a monitor left of or above the main one. A cursor of no width is one pixel
+/// wide, so the candidate list has something to stand beside.
+fn cursor_on_screen(client: RECT, cursor: ImeCursor) -> RECT {
+    RECT {
+        left: client.left + cursor.left,
+        top: client.top + cursor.top,
+        right: client.left + cursor.right.max(cursor.left + 1),
+        bottom: client.top + cursor.bottom,
+    }
+}
+
 /// One window's text input, shared by the window and the text store the framework holds.
 pub struct Shared {
     hwnd: Cell<isize>,
@@ -870,12 +884,7 @@ impl ITextStoreACP_Impl for Store_Impl {
             .ok_or_else(|| error(TS_E_NOLAYOUT))?;
         // SAFETY: the framework's out pointers.
         unsafe {
-            *prc = RECT {
-                left: client.left + cursor.left,
-                top: client.top + cursor.top,
-                right: client.left + cursor.right.max(cursor.left + 1),
-                bottom: client.top + cursor.bottom,
-            };
+            *prc = cursor_on_screen(client, cursor);
             if !pfclipped.is_null() {
                 *pfclipped = false.into();
             }
@@ -1174,5 +1183,67 @@ impl Drop for Document {
             );
             let _ = self.document.Pop(TF_POPF_ALL);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dsa_host_core::compositor::task_windows::TaskWindows;
+    use dsa_host_core::compositor::task_windows::WindowChange;
+    use dsa_host_core::tasks::{Task, TaskEvent};
+
+    /// The candidate list of a task kept at the density of a main monitor at 100% (130 dpi),
+    /// whose window is on a monitor at 125% (164 dpi) left of and above the main one.
+    #[test]
+    fn fr6_on_a_monitor_of_another_scale_the_candidate_list_stands_beside_the_cursor_shown() {
+        let mut windows = TaskWindows::new();
+        windows.apply(&TaskEvent::Updated(Task {
+            task_id: 4,
+            package_name: "com.example.notes".into(),
+            label: "Notes".into(),
+            density_dpi: 130,
+            bounds: dsa_host_core::tasks::Bounds {
+                left: 0,
+                top: 0,
+                right: 810,
+                bottom: 1661,
+            },
+            ..Task::default()
+        }));
+        windows.window_dpi(4, 96);
+        // The editor's cursor, 650 by 1300 task pixels in.
+        let cursor = ImeCursor {
+            left: 650,
+            top: 1300,
+            right: 652,
+            bottom: 1365,
+        };
+        windows.apply(&TaskEvent::ImeCursor { task_id: 4, cursor });
+        // The window moves to the 125% monitor and shows the task at 164 per 130: the window
+        // hears the cursor where it now shows it.
+        let (changes, _) = windows.window_dpi(4, 120);
+        let shown = changes
+            .iter()
+            .find_map(|change| match change {
+                WindowChange::ImeCursor { cursor, .. } => Some(*cursor),
+                _ => None,
+            })
+            .expect("the cursor again at the new scale");
+        assert_eq!((shown.left, shown.top), (820, 1640));
+        // The client area's top left is at (-2900, -880) on the screen.
+        let client = RECT {
+            left: -2900,
+            top: -880,
+            right: -2900 + 1022,
+            bottom: -880 + 2095,
+        };
+        let rect = cursor_on_screen(client, shown);
+        assert_eq!((rect.left, rect.top), (-2080, 760));
+        assert_eq!(rect.bottom - rect.top, 82);
+        assert!(rect.right > rect.left);
+        // At 1:1 it would have stood 170 pixels left of and 340 above the cursor shown.
+        let unscaled = cursor_on_screen(client, cursor);
+        assert_eq!((unscaled.left, unscaled.top), (-2250, 420));
     }
 }

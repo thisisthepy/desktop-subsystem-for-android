@@ -115,6 +115,9 @@ class LockTests(unittest.TestCase):
             self.assertIn("external/protobuf", [p["path"] for p in version["projects"]])
         build = (REPO / ".github/scripts/framework/build.sh").read_text()
         self.assertIn('cp -r "$here/device/hosttools" "$device/"', build)
+        # With external/sqlite in the tree (libandroid_runtime needs it) its libsqlite is the
+        # real one, and the stand-in would define the module twice.
+        self.assertIn('if [[ ! -e "$top/external/sqlite/dist/Android.bp" ]]; then', build)
 
     def test_nfr5_modules_soong_analyses_find_their_sources_and_licenses(self):
         # Errors that missing dependencies do not excuse stopped the second and third Framework
@@ -225,6 +228,65 @@ class LockTests(unittest.TestCase):
                            ("frameworks/native", "opengl/libs"),
                            ("frameworks/base", "libs/hwui")]:
                 self.assertIn(wanted, changed, android)
+
+    def test_nfr1_both_versions_free_the_client_target_when_nothing_is_composed_into_it(self):
+        # The client target is the display's size (63 MiB at 2880x2880). FramebufferSurface
+        # gives its buffers back after a while without client composition, and RenderSurface
+        # drops its textures of them, or the memory would stay held.
+        for android in ("android16", "android17"):
+            added = {}
+            for project, patch in framework_lock.patch_files(android):
+                if project != "frameworks/native":
+                    continue
+                path = None
+                for line in patch.read_text().splitlines():
+                    if line.startswith("+++ b/"):
+                        path = line[len("+++ b/"):]
+                    elif line.startswith("+") and path:
+                        added.setdefault(path, []).append(line[1:])
+            def adds(path, text):
+                return any(text in line for line in added.get(path, []))
+            fbs = "services/surfaceflinger/DisplayHardware/FramebufferSurface.cpp"
+            self.assertTrue(adds("services/surfaceflinger/CompositionEngine/include/compositionengine/"
+                                 "DisplaySurface.h", "virtual bool takeBuffersReleased()"), android)
+            self.assertTrue(adds("services/surfaceflinger/CompositionEngine/src/RenderSurface.cpp",
+                                 "mTextureCache.clear();"), android)
+            self.assertTrue(adds(fbs, "discardFreeBuffers("), android)
+            self.assertTrue(adds(fbs, "kReleaseIdleBuffersAfter"), android)
+            self.assertTrue(adds("services/surfaceflinger/DisplayHardware/FramebufferSurface.h",
+                                 "kReleaseIdleBuffersAfter = 1'000'000'000"), android)
+
+    def test_nfr1_android17_frees_the_client_target_whichever_framebuffer_surface_it_picks(self):
+        # Android 17 picks FramebufferSurface or LegacyFramebufferSurface by the
+        # wb_framebuffersurface2 flag, and the build DSA ships takes the legacy one. A release
+        # only in FramebufferSurface never ran there: the client target stayed held, and its
+        # "buffers are freed" line never appeared.
+        added = {}
+        for project, patch in framework_lock.patch_files("android17"):
+            if project != "frameworks/native":
+                continue
+            path = None
+            for line in patch.read_text().splitlines():
+                if line.startswith("+++ b/"):
+                    path = line[len("+++ b/"):]
+                elif line.startswith("+") and path:
+                    added.setdefault(path, []).append(line[1:])
+
+        def adds(path, text):
+            return any(text in line for line in added.get(path, []))
+
+        for name in ("FramebufferSurface", "LegacyFramebufferSurface"):
+            source = f"services/surfaceflinger/DisplayHardware/{name}.cpp"
+            header = f"services/surfaceflinger/DisplayHardware/{name}.h"
+            self.assertTrue(adds(header, "bool takeBuffersReleased() override;"), name)
+            self.assertTrue(adds(header, "kReleaseIdleBuffersAfter = 1'000'000'000"), name)
+            self.assertTrue(adds(source, f"bool {name}::takeBuffersReleased()"), name)
+            self.assertTrue(adds(source, "discardFreeBuffers("), name)
+            self.assertTrue(adds(source, "its buffers are freed"), name)
+        # The legacy class tells HWC about each slot's buffer only once; after the discard the
+        # slots hold new buffers, which must go to HWC whole.
+        self.assertTrue(adds("services/surfaceflinger/DisplayHardware/LegacyFramebufferSurface.cpp",
+                             "id = UINT64_MAX;"))
 
     def test_nfr5_each_patch_adds_the_tested_recovery_policy_unchanged(self):
         # The policy the renderers follow is the one test_device_loss_recovery.cpp tests.
@@ -433,6 +495,48 @@ class NinjaInputsTests(unittest.TestCase):
             self.assertNotIn("cone", legacy)
             self.assertNotIn("patterns", legacy)
 
+    def test_fr32_what_libandroid_runtime_links_is_fetched(self):
+        # Framework build 43377022889 passed the analysis and the input check, then stopped in
+        # ninja on libraries libandroid_runtime links: headers beside sources the cones left out
+        # (libnetd_client's and libandroid_net's NetdClient.h, libmeminfo's include, perfetto's
+        # JNIHelp.h, libbpf's libelf.h, contexthub_data_flow's chre/platform/atomic_ref.h), a
+        # HIDL interface's dependency (camera.device@3.2 on camera.common@1.0), a project
+        # libtflite_static includes by path (external/gemmlowp), and aconfig declarations
+        # whose flag files were not fetched ("production library contains no production
+        # flags", or the file named as missing). libtflite_static's own sources, which that
+        # run never reached, include TensorFlow's core, TSL and third_party headers.
+        both = {
+            "external/elfutils": ["bionic-fixup", "include", "lib", "libelf"],
+            "external/perfetto": ["src/android_sdk/nativehelper"],
+            "external/tensorflow": ["tensorflow/core/kernels", "tensorflow/core/lib/bfloat16",
+                                    "tensorflow/core/lib/random", "tensorflow/core/platform",
+                                    "tensorflow/core/public", "tensorflow/lite",
+                                    "tensorflow/tsl/platform", "third_party/eigen3",
+                                    "third_party/fft2d"],
+            "frameworks/base": ["core/java/android/database/sqlite", "core/java/android/permission",
+                                "core/java/android/window/flags"],
+            "hardware/interfaces": ["camera/common/1.0", "camera/device/3.2"],
+            "system/memory/libmeminfo": ["include"],
+            "system/netd": ["client", "include"],
+        }
+        only = {
+            "android16": {},
+            "android17": {
+                "frameworks/base": ["core/java/android/tracing"],
+                "system/chre": ["platform/include", "platform/shared/public_std_atomic_ref",
+                                "variant/googletest/include", "variant/include"],
+            },
+        }
+        for version in framework_lock.load()["versions"]:
+            projects = {p["path"]: p for p in version["projects"]}
+            for wanted in (both, only[version["android"]]):
+                for path, folders in wanted.items():
+                    for folder in folders:
+                        self.assertIn(folder, projects[path]["cone"], f"{version['android']} {path}")
+            gemmlowp = projects["external/gemmlowp"]
+            self.assertNotIn("cone", gemmlowp)
+            self.assertNotIn("patterns", gemmlowp)
+
     def test_nfr5_boringssls_go_build_tools_are_fetched(self):
         # bssl_inject_hash and the Go packages it uses, which the fifth run stopped on.
         lock = framework_lock.load()
@@ -521,23 +625,30 @@ class CollectTests(unittest.TestCase):
 
     def _product(self, root, machine):
         product = root / "product"
-        for installed in framework_lock.OUTPUTS.values():
+        for installed in {**framework_lock.OUTPUTS, **framework_lock.KEYMINT_OUTPUTS}.values():
             (product / installed).parent.mkdir(parents=True, exist_ok=True)
             (product / installed).write_bytes(self._elf(machine, installed.encode()))
         return product
+
+    def _tree(self, root):
+        top = root / "tree"
+        for path in framework_lock.KEYMINT_SOURCES.values():
+            (top / path).parent.mkdir(parents=True, exist_ok=True)
+            (top / path).write_text(f"<manifest>{path}</manifest>\n")
+        return top
 
     def test_nfr5_collect_takes_the_three_files_and_describes_them_for_the_image(self):
         version = framework_lock.version_entry(framework_lock.load(), "android17")
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             out = root / "out"
-            description = collect.collect(version, "arm64", self._product(root, 183), out)
+            description = collect.collect(version, "arm64", self._product(root, 183), out, top=self._tree(root))
             written = json.loads((out / "framework.json").read_text())
             self.assertEqual(written, description)
             self.assertEqual(written["build_id"], "16373615")
             self.assertEqual(written["arch"], "arm64")
             self.assertEqual(written["version"], framework_lock.build_version(version))
-            self.assertEqual(sorted(written["files"]), sorted(framework_lock.OUTPUTS))
+            self.assertEqual(sorted(written["files"]), sorted(list(framework_lock.OUTPUTS) + framework_lock.KEYMINT_FILES))
             for name, entry in written["files"].items():
                 data = (out / name).read_bytes()
                 self.assertEqual(entry, {"size": len(data), "sha256": hashlib.sha256(data).hexdigest()})
@@ -547,7 +658,246 @@ class CollectTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             with self.assertRaisesRegex(SystemExit, "not x86_64"):
-                collect.collect(version, "x86_64", self._product(root, 183), root / "out")
+                collect.collect(version, "x86_64", self._product(root, 183), root / "out", top=self._tree(root))
+
+    def test_fr36_collect_takes_the_keymint_from_the_build_and_its_fragments_from_the_tree(self):
+        version = framework_lock.version_entry(framework_lock.load(), "android16")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            out = root / "out"
+            top = self._tree(root)
+            description = collect.collect(version, "x86_64", self._product(root, 62), out, top=top)
+            for name, path in framework_lock.KEYMINT_SOURCES.items():
+                self.assertEqual((out / name).read_bytes(), (top / path).read_bytes())
+            self.assertIn(framework_lock.KEYMINT_BINARY, description["files"])
+            self.assertIn("VENDOR/lib64/libssl.so", description["files"])
+            # Without the tree there are no fragments, and without them no image can declare it.
+            with self.assertRaisesRegex(SystemExit, "give --top"):
+                collect.collect(version, "x86_64", self._product(root, 62), root / "out2")
+            (top / framework_lock.KEYMINT_SOURCES[
+                "VENDOR/etc/vintf/manifest/android.hardware.security.secureclock-service.xml"]).unlink()
+            with self.assertRaisesRegex(SystemExit, "secureclock-service.xml"):
+                collect.collect(version, "x86_64", self._product(root, 62), root / "out3", top=top)
+            # A build that did not make the KeyMint is not collected.
+            (root / "product" / framework_lock.KEYMINT_OUTPUTS[framework_lock.KEYMINT_BINARY]).unlink()
+            with self.assertRaisesRegex(SystemExit, "did not make vendor/bin/hw/dsa-keymint"):
+                collect.collect(version, "x86_64", root / "product", root / "out4", top=self._tree(root))
+
+
+class KeyMintLockTests(unittest.TestCase):
+    """What the Framework build needs to build DSA's KeyMint, and the patches that make it take
+    the root key of key blobs from the host."""
+
+    HOST_KEY = "security/keymint/aidl/default/ta/host_key.rs"
+
+    def _patch(self, project, android):
+        found = [patch for p, patch in framework_lock.patch_files(android) if p == project]
+        self.assertEqual(len(found), 1, f"{android} {project}")
+        return found[0].read_text()
+
+    def test_fr36_the_build_makes_the_keymint_the_image_takes(self):
+        outputs = subprocess.run([sys.executable, "-I", str(HERE / "framework_lock.py"), "outputs"],
+                                 capture_output=True, text=True, check=True).stdout.split()
+        self.assertEqual(outputs, list(framework_lock.OUTPUTS.values()) + list(framework_lock.KEYMINT_OUTPUTS.values()))
+        self.assertIn("vendor/bin/hw/dsa-keymint", outputs)
+        # The image's vendor partition has no libssl, which the Rust openssl crate links.
+        self.assertIn("vendor/lib64/libssl.so", outputs)
+        for board in ("x86_64", "arm64"):
+            config = (REPO / ".github/scripts/framework/device" / board / "BoardConfig.mk").read_text()
+            self.assertRegex(config, r"(?m)^TARGET_COPY_OUT_VENDOR := vendor$", board)
+
+    def test_fr36_the_lock_fetches_what_the_keymint_is_built_from(self):
+        crates = ["ciborium", "ciborium-io", "ciborium-ll", "coset", "der", "der_derive", "const-oid", "spki",
+                  "pkcs1", "pkcs8", "sec1", "x509-cert", "flagset", "zeroize", "zeroize_derive", "enumn", "hex",
+                  "half", "foreign-types", "foreign-types-shared", "openssl-macros", "android_logger", "log",
+                  "libc", "nix", "regex", "zerocopy", "downcast-rs", "thiserror",
+                  # The AIDL Rust backend gives every generated interface crate libasync_trait,
+                  # for its async traits. Without it the first KeyMint Framework build stopped on
+                  # the KeyMint, RKP, secure clock and shared secret interface crates.
+                  "async-trait"]
+        for version in framework_lock.load()["versions"]:
+            projects = {p["path"]: p for p in version["projects"]}
+            for whole in ("system/keymint", "external/rust/crates/openssl"):
+                self.assertNotIn("cone", projects[whole], f"{version['android']} {whole}")
+                self.assertNotIn("patterns", projects[whole], f"{version['android']} {whole}")
+            for folder in ("security/keymint/aidl", "security/rkp/aidl", "security/secureclock/aidl",
+                           "security/sharedsecret/aidl"):
+                self.assertIn(folder, projects["hardware/interfaces"]["cone"], version["android"])
+            self.assertIn("src/rust/bssl-sys", projects["external/boringssl"]["cone"], version["android"])
+            self.assertIn("libs/binder", projects["frameworks/native"]["cone"], version["android"])
+            for crate in crates:
+                self.assertIn("crates/" + crate, projects["external/rust/android-crates-io"]["cone"],
+                              f"{version['android']} {crate}")
+
+    def test_fr36_both_versions_take_the_root_key_from_the_host(self):
+        sources = set()
+        for android in ("android16", "android17"):
+            patch = self._patch("hardware/interfaces", android)
+            match = re.search(r"^\+\+\+ b/" + re.escape(self.HOST_KEY) + r"\n@@ [^\n]+\n((?:\+[^\n]*\n)+)", patch, re.M)
+            self.assertIsNotNone(match, android)
+            source = "".join(line[1:] + "\n" for line in match.group(1).splitlines())
+            sources.add(source)
+            self.assertIn('pub const HOST_KEY_FILE: &str = "/dev/dsa_keymint/root_key";', source)
+            self.assertIn('pub const HOST_KEK_CONTEXT: &[u8] = b"dsa-host-root-key-v1";', source)
+            self.assertIn("Duration::from_secs(30)", source)
+            self.assertIn("fn kek_context_is_outdated", source)
+            # The TA is built with it, and the image's binary is built on its own, with its Rust
+            # crates linked in; the APEX the tree cannot build goes.
+            self.assertIn("+        Box::new(host_key::HostKeys::new());", patch)
+            self.assertRegex(patch, r'\+rust_binary \{\n\+    name: "dsa-keymint",\n\+    relative_install_path: "hw",'
+                                    r'\n\+    vendor: true,')
+            binary = patch[patch.index('+    name: "dsa-keymint",'):]
+            self.assertIn("+    prefer_rlib: true,", binary[:binary.index("+}")])
+            self.assertIn('-    name: "com.android.hardware.keymint.rust_nonsecure",', patch)
+        # One implementation for both versions.
+        self.assertEqual(len(sources), 1)
+
+    def test_fr36_android16_gets_the_ta_hook_android17_has(self):
+        # Android 17's system/keymint asks the device whether a blob's KEK context is outdated
+        # and answers KEY_REQUIRES_UPGRADE for it; Android 16's does not, so DSA's patch brings
+        # the same code there.
+        patch = self._patch("system/keymint", "android16")
+        for text in ("+    fn kek_context_is_outdated(&self, _kek_context: &[u8]) -> Result<bool, Error> {",
+                     '+            return Err(km_err!(KeyRequiresUpgrade, "KEK context outdated, request upgrade"));',
+                     "+                Ok(result) => (result.keyblob, result.kek_context_is_outdated),"):
+            self.assertIn(text, patch)
+        self.assertFalse([p for p, _ in framework_lock.patch_files("android17") if p == "system/keymint"])
+
+
+class WorkflowTests(unittest.TestCase):
+    """How the Framework build keeps its compiler caches and how the image release finds its
+    files: the build is two hours cold and twenty minutes warm, and a development build waits
+    on it."""
+
+    def setUp(self):
+        self.framework = (REPO / ".github/workflows/framework.yml").read_text(encoding="utf-8")
+        self.release = (REPO / ".github/workflows/release-image.yml").read_text(encoding="utf-8")
+        self.build = (REPO / ".github/scripts/framework/build.sh").read_text(encoding="utf-8")
+
+    def _step(self, text, name):
+        start = text.index(f"- name: {name}\n")
+        end = text.find("\n      - ", start + 1)
+        return text[start:end if end != -1 else len(text)]
+
+    def test_nfr5_a_development_build_waits_only_for_the_job_it_takes_files_from(self):
+        find = self._step(self.release, "Find the Framework build run with the pinned files")
+        dev = find[find.index('if [[ "$DEV_BUILD" == true ]]'):find.index("wanted=()")]
+        # The newest supported Android's x86_64 files, from the job framework.yml names so.
+        self.assertIn('android="android$(jq \'.supported_majors | max\' dsa/android-versions.json)"', dev)
+        self.assertIn('name="framework-$android-x86_64-', dev)
+        self.assertIn('job="Build the framework (ubuntu-24.04, $android, x86_64)"', dev)
+        self.assertIn("name: Build the framework (ubuntu-24.04, ${{ matrix.android }}, ${{ matrix.arch }})",
+                      self.framework)
+        # Its job's conclusion, not the run's: the run may still be going or have failed.
+        self.assertIn('[[ "$conclusion" == success ]] || continue', dev)
+        self.assertNotIn("--status success", dev)
+        # A release still takes every version and architecture from one passing run.
+        release = find[find.index("wanted=()"):]
+        self.assertIn("--status success", release)
+        self.assertIn("for arch in x86_64 arm64; do", release)
+
+    def test_nfr5_the_image_downloads_the_framework_while_its_run_still_goes(self):
+        download = self._step(self.release, "Download the patched framework")
+        self.assertNotIn('gh run download "', download)
+        self.assertIn("/actions/artifacts/$id/zip", download)
+
+    def test_nfr5_the_newest_android_and_x86_64_build_first(self):
+        self.assertIn("sort_by(ltrimstr(\"android\") | tonumber) | reverse", self.framework)
+        self.assertIn("arches='[\"x86_64\",\"arm64\"]'", self.framework)
+
+    def test_nfr5_the_compiler_cache_is_kept_as_an_artifact_and_restored_before_the_build(self):
+        steps = [line.strip()[len("- name: "):] for line in self.framework.splitlines()
+                 if line.strip().startswith("- name: ")]
+        order = ["Restore the compiler cache", "Build SurfaceFlinger, libhwui, libEGL and the KeyMint",
+                 "Pack the compiler cache", "Keep the compiler cache", "Delete the compiler caches it replaces"]
+        self.assertEqual([s for s in steps if s in order], order)
+        keep = self._step(self.framework, "Keep the compiler cache")
+        self.assertIn("uses: actions/upload-artifact@v4", keep)
+        self.assertIn("name: framework-ccache-${{ matrix.android }}-${{ matrix.arch }}\n", keep)
+        self.assertIn("compression-level: 0", keep)
+        # Nothing is saved to the Actions cache any more, where GitHub evicted it.
+        self.assertNotIn("actions/cache/save", self.framework)
+        # An empty cache from a build that never ran must not replace a full one.
+        self.assertIn("steps.build.outcome", self._step(self.framework, "Pack the compiler cache"))
+
+    def test_nfr5_the_build_reports_its_compiler_cache_hits(self):
+        self.assertIn("ccache --zero-stats", self.build)
+        self.assertIn("ccache --show-stats --verbose", self.build)
+        self.assertIn("-o max_size=3G", self.build)
+
+
+@unittest.skipIf(sys.platform == "win32", "runs the shell script with a fake gh and curl")
+class CcacheArtifactTests(unittest.TestCase):
+    SCRIPT = REPO / ".github/scripts/framework/ccache-artifact.sh"
+
+    def _run(self, root, listing, *args, branch="feat/x"):
+        root = Path(root)
+        bin_dir = root / "bin"
+        bin_dir.mkdir(exist_ok=True)
+        (root / "listing.tsv").write_text(listing)
+        log = root / "calls.log"
+        # gh prints the listing as the script's own jq would; curl hands out a zip holding
+        # ccache.tar with one file, named after the artifact it was asked for.
+        (bin_dir / "gh").write_text(
+            "#!/bin/sh\n"
+            f'echo "gh $*" >> "{log}"\n'
+            'case "$*" in *DELETE*) exit 0 ;; esac\n'
+            f'cat "{root}/listing.tsv"\n')
+        (bin_dir / "curl").write_text(
+            "#!/bin/sh\n"
+            f'echo "curl $*" >> "{log}"\n'
+            'out=""; prev=""; url=""\n'
+            'for a in "$@"; do [ "$prev" = "-o" ] && out="$a"; prev="$a"; url="$a"; done\n'
+            'id="$(echo "$url" | sed -E \'s#.*/artifacts/([0-9]+)/zip#\\1#\')"\n'
+            f'w="{root}/pack-$id"; mkdir -p "$w/c"; echo "$id" > "$w/c/from"\n'
+            'tar -C "$w/c" -cf "$w/ccache.tar" . && (cd "$w" && zip -q "$out" ccache.tar)\n')
+        for tool in ("gh", "curl"):
+            (bin_dir / tool).chmod(0o755)
+        env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}", GH_TOKEN="t",
+                   GITHUB_REPOSITORY="o/r", GITHUB_REF_NAME=branch, GITHUB_OUTPUT=str(root / "out"))
+        env.pop("GITHUB_HEAD_REF", None)
+        result = subprocess.run(["bash", str(self.SCRIPT), *args], env=env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = log.read_text() if log.exists() else ""
+        out = (root / "out").read_text() if (root / "out").exists() else ""
+        return calls, out
+
+    LISTING = ("30\t300\tdevelop\t2026-11-14T09:00:00Z\n"
+               "20\t200\tfeat/x\t2026-11-13T09:00:00Z\n"
+               "10\t100\tdevelop\t2026-11-12T09:00:00Z\n")
+
+    @unittest.skipUnless(subprocess.run(["sh", "-c", "command -v zip unzip"], capture_output=True).returncode == 0,
+                         "needs zip and unzip")
+    def test_nfr5_a_branch_restores_its_own_cache_before_develops(self):
+        with tempfile.TemporaryDirectory() as root:
+            cache = Path(root, "ccache")
+            _, out = self._run(root, self.LISTING, "restore", "framework-ccache-android17-x86_64",
+                               str(cache), str(Path(root, "dl")))
+            self.assertIn("found=true", out)
+            self.assertEqual((cache / "from").read_text().strip(), "20")
+
+    @unittest.skipUnless(subprocess.run(["sh", "-c", "command -v zip unzip"], capture_output=True).returncode == 0,
+                         "needs zip and unzip")
+    def test_nfr5_develop_restores_its_newest_cache_whatever_lock_made_it(self):
+        with tempfile.TemporaryDirectory() as root:
+            cache = Path(root, "ccache")
+            _, out = self._run(root, self.LISTING, "restore", "framework-ccache-android17-x86_64",
+                               str(cache), str(Path(root, "dl")), branch="develop")
+            self.assertIn("found=true", out)
+            self.assertEqual((cache / "from").read_text().strip(), "30")
+
+    def test_nfr5_no_cache_to_restore_is_a_cold_build_not_a_failure(self):
+        with tempfile.TemporaryDirectory() as root:
+            calls, out = self._run(root, "", "restore", "framework-ccache-android17-x86_64",
+                                   str(Path(root, "ccache")), str(Path(root, "dl")))
+            self.assertIn("found=false", out)
+            self.assertNotIn("curl", calls)
+
+    def test_nfr5_only_develops_older_caches_are_deleted(self):
+        with tempfile.TemporaryDirectory() as root:
+            calls, _ = self._run(root, self.LISTING, "prune", "framework-ccache-android17-x86_64", "30")
+            deleted = [line for line in calls.splitlines() if "DELETE" in line]
+            self.assertEqual(deleted, ["gh api -X DELETE repos/o/r/actions/artifacts/10"])
 
 
 if __name__ == "__main__":

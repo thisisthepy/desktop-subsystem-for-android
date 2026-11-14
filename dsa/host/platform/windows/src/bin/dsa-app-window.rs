@@ -273,6 +273,42 @@ fn main() -> std::process::ExitCode {
         );
         return std::process::ExitCode::FAILURE;
     };
+    // "Create desktop shortcut" in the app's jump list: a shortcut to the app goes on the
+    // desktop, which needs neither the window manager nor Android. The user hears of it only
+    // when it fails; the shortcut appearing is the answer.
+    if dsa_host_windows::desktop_shortcuts::creates_desktop_shortcut(&args) {
+        return match dsa_host_windows::desktop_shortcuts::place_program_on_desktop(
+            &package, &program,
+        ) {
+            Ok(path) => {
+                note(
+                    logger.as_deref(),
+                    &format!(
+                        "{package}: put a shortcut on the desktop: {}",
+                        path.display()
+                    ),
+                );
+                std::process::ExitCode::SUCCESS
+            }
+            Err(why) => {
+                note(
+                    logger.as_deref(),
+                    &format!("{package}: no desktop shortcut: {why}"),
+                );
+                let name = program
+                    .file_stem()
+                    .map(|stem| stem.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| package.clone());
+                tell_user(
+                    &name,
+                    &format!("A desktop shortcut to {name} could not be made. {why}."),
+                );
+                std::process::ExitCode::FAILURE
+            }
+        };
+    }
+    // From a jump list task or a desktop shortcut: that shortcut of the app is started.
+    let shortcut = dsa_host_windows::desktop_shortcuts::shortcut_of(&args);
     // The app's own ID, which its Start menu shortcut carries too, so the taskbar shows the
     // app on a button of its own.
     if let Err(why) = use_app_user_model_id(&package) {
@@ -351,6 +387,7 @@ fn main() -> std::process::ExitCode {
     let setup = HostSetup {
         package: package.clone(),
         launch,
+        shortcut: shortcut.filter(|_| launch),
         connector: Box::new(SameUserPipeConnector {
             name: window_manager_pipe,
         }),

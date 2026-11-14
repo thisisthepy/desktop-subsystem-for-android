@@ -30,6 +30,13 @@ interface TaskActions {
     fun launchNewWindow(packageName: String): Boolean = false
 
     /**
+     * Starts the shortcut [shortcutId] of [packageName] as a task in its own freeform window,
+     * as a launcher does (LauncherApps.startShortcut). False when the app has no such shortcut,
+     * it is turned off, or the framework refused.
+     */
+    fun launchShortcut(packageName: String, shortcutId: String): Boolean = false
+
+    /**
      * Opens Android Settings' [page] of [packageName], or the list of every installed app when
      * it is null, as a new task in its own freeform window. A Settings without that page opens
      * the app's info instead. False when the framework refused.
@@ -85,6 +92,36 @@ interface TaskActions {
      * has no way to give a task an inset, or refused.
      */
     fun setCaptionInset(taskId: Int, frame: TaskBounds?, boundingRects: List<TaskBounds> = emptyList()): Boolean
+
+    /**
+     * The status bar's height, in pixels, that an app drawing at [densityDpi] reads from the
+     * framework's resources. The image sets it to the host window's title bar at the monitor
+     * scale that density belongs to. 0 when it cannot be read.
+     */
+    fun statusBarHeight(densityDpi: Int): Int = 0
+
+    /**
+     * Gives the task a bottom navigation bar inset covering [frame] (guest display pixels): a
+     * band along the task's bottom edge, as a gesture navigation phone's navigation bar. The
+     * task's app receives it as its navigation bar, system bar and tappable element inset. A
+     * null [frame] removes it. [InsetGiven.FOLLOWS_TASK] when the framework keeps the band on
+     * the task's bottom edge by itself, so a resize needs nothing new; [InsetGiven.AT_FRAME]
+     * when it stays at [frame] until it is given again; [InsetGiven.REFUSED] when the framework
+     * has no way to give a task an inset, or refused.
+     */
+    fun setNavigationBarInset(taskId: Int, frame: TaskBounds?): InsetGiven = InsetGiven.REFUSED
+}
+
+/** What became of an inset given to a task. */
+enum class InsetGiven {
+    /** The framework keeps the inset on the task's edge as the task is resized. */
+    FOLLOWS_TASK,
+
+    /** The inset stays where it was given until it is given again. */
+    AT_FRAME,
+
+    /** The framework could not give it, or refused. */
+    REFUSED,
 }
 
 /** Which of Android Settings' pages of an app to open. */
@@ -119,6 +156,12 @@ sealed interface RequestResult {
     /** The app started, or came to the front; [newWindow] when it started another task. */
     data class Launched(val packageName: String, val newWindow: Boolean = false) : RequestResult
     data class LaunchFailed(val packageName: String, val reason: String) : RequestResult
+
+    /**
+     * The shortcut [shortcutId] of [packageName] started; or, with [appInstead], the shortcut
+     * could not start and the app started in its place.
+     */
+    data class ShortcutLaunched(val packageName: String, val shortcutId: String, val appInstead: Boolean = false) : RequestResult
     /** Android's [page] of [packageName] opened; null for the list of every app. */
     data class SettingsOpened(val packageName: String?, val page: SettingsPage = SettingsPage.DETAILS) : RequestResult
     data class SettingsFailed(val packageName: String?, val reason: String) : RequestResult
@@ -155,7 +198,8 @@ sealed interface RequestResult {
  * Turns the frames the channel delivers into actions on the guest's tasks.
  *
  * LaunchApp starts an app, or with new_window another task of an app that supports several
- * windows; OpenAppSettings opens one of Android's settings pages of an app; CloseTask ends a task, but only one the host was told about, so
+ * windows; LaunchShortcut starts one of an app's shortcuts, or the app when the shortcut cannot
+ * start; OpenAppSettings opens one of Android's settings pages of an app; CloseTask ends a task, but only one the host was told about, so
  * the host cannot end the agent's own task or anything else that has no window. ResizeTask
  * and SetTaskDensity are checked the same way and handed back for the agent to apply with
  * the rest of the task layout, and so is SetTaskCaption, the height of the host's title bar
@@ -176,6 +220,8 @@ class HostRequests(
         }
         return when (envelope.bodyCase) {
             Envelope.BodyCase.LAUNCH_APP -> launch(envelope.launchApp.packageName, envelope.launchApp.newWindow)
+            Envelope.BodyCase.LAUNCH_SHORTCUT ->
+                launchShortcut(envelope.launchShortcut.packageName, envelope.launchShortcut.shortcutId)
             Envelope.BodyCase.OPEN_APP_SETTINGS ->
                 settings(envelope.openAppSettings.packageName, pageOf(envelope.openAppSettings.page))
             Envelope.BodyCase.CLOSE_TASK -> close(envelope.closeTask.taskId)
@@ -208,6 +254,18 @@ class HostRequests(
             }
         actions.launchApp(packageName) -> RequestResult.Launched(packageName)
         else -> RequestResult.LaunchFailed(packageName, "the package has no launcher activity, or the framework refused to start it")
+    }
+
+    // A shortcut that is gone or turned off still opens its app, as a launcher's stale
+    // shortcut does, so the user's click is never lost.
+    private fun launchShortcut(packageName: String, shortcutId: String): RequestResult = when {
+        !PACKAGE_NAME.matches(packageName) ->
+            RequestResult.Malformed("LaunchShortcut names ${packageName.take(80).ifEmpty { "no package" }}, which is not a package name")
+        shortcutId.isEmpty() -> RequestResult.Malformed("LaunchShortcut names no shortcut of $packageName")
+        packageName == ownPackage -> RequestResult.LaunchFailed(packageName, "the agent has no shortcuts to start")
+        actions.launchShortcut(packageName, shortcutId) -> RequestResult.ShortcutLaunched(packageName, shortcutId)
+        actions.launchApp(packageName) -> RequestResult.ShortcutLaunched(packageName, shortcutId, appInstead = true)
+        else -> RequestResult.LaunchFailed(packageName, "neither the shortcut $shortcutId nor the app could be started")
     }
 
     // A page this build does not know opens the app's info, the page every Settings has.

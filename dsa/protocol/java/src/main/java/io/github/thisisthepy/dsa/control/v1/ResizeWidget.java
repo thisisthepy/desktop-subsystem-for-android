@@ -6,7 +6,7 @@ package io.github.thisisthepy.dsa.control.v1;
 /**
  * <pre>
  * Host to guest: the size of the widget's host window. The agent draws the widget at `width`
- * by `height` pixels at `density_dpi` (96 at a scale of 100%), and tells the widget's app
+ * by `height` pixels at `density_dpi` (130 at a scale of 100%), and tells the widget's app
  * its size in dp, so a widget with layouts for several sizes picks the one that fits.
  * </pre>
  *
@@ -259,7 +259,7 @@ public  final class ResizeWidget extends
   /**
    * <pre>
    * Host to guest: the size of the widget's host window. The agent draws the widget at `width`
-   * by `height` pixels at `density_dpi` (96 at a scale of 100%), and tells the widget's app
+   * by `height` pixels at `density_dpi` (130 at a scale of 100%), and tells the widget's app
    * its size in dp, so a widget with layouts for several sizes picks the one that fits.
    * </pre>
    *

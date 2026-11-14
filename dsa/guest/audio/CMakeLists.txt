@@ -72,6 +72,7 @@ file(GLOB_RECURSE AIDL_SOURCES CONFIGURE_DEPENDS "${AIDL_GEN_DIR}/src/*.cpp")
 add_executable(dsa-audio
     src/main.cpp
     src/module.cpp
+    src/app_outputs.cpp
     src/stream_out.cpp
     src/stream_in.cpp
     src/input_stream_logic.cpp

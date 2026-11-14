@@ -167,7 +167,7 @@ struct SettingsWindow: View {
         case .updates: UpdatesPage(vm: model.settings, android: model.android, general: model.general, update: model.programUpdate)
         case .identity: DeviceIdentityPage(vm: model.identity)
         case .network: NetworkPage(vm: model.settings)
-        case .advanced: AdvancedPage(vm: model.settings, gapps: model.gapps)
+        case .advanced: AdvancedPage(vm: model.settings, gapps: model.gapps, widevine: model.widevine, backup: model.backup)
         case .logs: LogsPage(vm: model.logs)
         case .about: AboutPage(vm: model.settings)
         }

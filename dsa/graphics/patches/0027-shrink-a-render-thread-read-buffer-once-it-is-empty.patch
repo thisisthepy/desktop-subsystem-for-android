@@ -1,0 +1,104 @@
+diff --git a/host/ReadBuffer.cpp b/host/ReadBuffer.cpp
+index 8fc4728a8..2e637e22a 100644
+--- a/host/ReadBuffer.cpp
++++ b/host/ReadBuffer.cpp
+@@ -24,12 +24,15 @@
+ #include <limits.h>
+ 
++#include "dsa_reply_buffer.h"
++
+ namespace gfxstream {
+ 
+ ReadBuffer::ReadBuffer(size_t bufsize) {
+     m_size = bufsize;
++    m_initialSize = bufsize;
+     m_buf = (unsigned char*)malloc(m_size);
+     m_validData = 0;
+     m_readPtr = m_buf;
+ }
+ 
+ ReadBuffer::~ReadBuffer() {
+@@ -42,12 +45,18 @@ void ReadBuffer::setNeededFreeTailSize(size_t size) {
+ 
+ int ReadBuffer::getData(IOStream* stream, size_t minSize) {
+     assert(stream);
+     assert(minSize > m_validData);
+ 
+     const size_t minSizeToRead = minSize - m_validData;
++    // A batch larger than the first size keeps the buffer; one that fits gives it back once
++    // no larger batch has come for a while (dsa_reply_buffer.h), so a video's large uploads
++    // on every frame never free and make it again.
++    m_shrinkDue = dsa::bufferShrinks(minSize, m_size, m_initialSize, dsa::ReplyClock::now(),
++                                     m_lastLargeRead, m_seenLargeRead);
+     const size_t neededFreeTailThisTime =
+         std::max(minSizeToRead,
+                  m_neededFreeTailSize);
+ 
+     size_t maxSizeToRead;
+     const size_t freeTailSize = m_buf + m_size - (m_readPtr + m_validData);
+@@ -106,12 +115,31 @@ int ReadBuffer::getData(IOStream* stream, size_t minSize) {
+ }
+ 
+ void ReadBuffer::consume(size_t amount) {
+     assert(amount <= m_validData);
+     m_validData -= amount;
+     m_readPtr += amount;
++    if (m_validData == 0 && m_shrinkDue) {
++        shrinkWhenEmpty();
++    }
++}
++
++void ReadBuffer::shrinkWhenEmpty() {
++    m_shrinkDue = false;
++    if (m_size <= m_initialSize) {
++        return;
++    }
++    auto* small = (unsigned char*)malloc(m_initialSize);
++    if (!small) {
++        return;
++    }
++    free(m_buf);
++    m_buf = small;
++    m_size = m_initialSize;
++    m_readPtr = m_buf;
+ }
+ 
+ void ReadBuffer::onSave(android::base::Stream* stream) {
+     stream->putBe32(m_size);
+     stream->putBe32(m_validData);
+     stream->write(m_readPtr, m_validData);
+diff --git a/host/ReadBuffer.h b/host/ReadBuffer.h
+index fb0c56f35..a5d366603 100644
+--- a/host/ReadBuffer.h
++++ b/host/ReadBuffer.h
+@@ -14,6 +14,7 @@
+ * limitations under the License.
+ */
+ #pragma once
++#include <chrono>
+ #include "aemu/base/files/Stream.h"
+ #include "render-utils/IOStream.h"
+ 
+@@ -39,9 +40,22 @@ private:
+     unsigned char *m_readPtr;
+     size_t m_size;
+     size_t m_validData;
+ 
+     uint64_t m_tailMoveTimeUs = 0;
+     size_t m_neededFreeTailSize = 0;
++
++    // The buffer grows to twice the largest batch of commands a guest thread sent (a guest's
++    // copy of host-visible memory travels in one), and it used to stay that size for the
++    // thread's whole life. Once it holds no data after a batch that fits its first size, and
++    // no larger batch has come for 2 s, it goes back to its first size (dsa_reply_buffer.h,
++    // the rule the Vulkan reply buffer follows). Batches that stay large, as a video's uploads
++    // are on every frame, keep it. ReadBuffer.cpp alone includes the rule's header; this one,
++    // which other libraries include too, keeps its state as plain members.
++    size_t m_initialSize = 0;
++    std::chrono::steady_clock::time_point m_lastLargeRead{};
++    bool m_seenLargeRead = false;
++    bool m_shrinkDue = false;
++    void shrinkWhenEmpty();
+ };
+ 
+ }  // namespace gfxstream

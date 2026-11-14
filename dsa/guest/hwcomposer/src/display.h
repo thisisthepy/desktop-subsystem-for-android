@@ -19,6 +19,7 @@
 #include <aidl/android/hardware/graphics/composer3/LayerCommand.h>
 #include <aidl/android/hardware/graphics/composer3/PowerMode.h>
 
+#include "cpu_upload_policy.h"
 #include "host_renderer.h"
 #include "task_composer.h"
 #include "unique_fd.h"
@@ -32,7 +33,7 @@ namespace composer3 = aidl::android::hardware::graphics::composer3;
 struct DisplayConfig {
     int32_t width = 1920;
     int32_t height = 1080;
-    int32_t dpi = 96;
+    int32_t dpi = 130;
     int32_t refreshRateHz = 60;
 
     static DisplayConfig fromProperties();
@@ -96,6 +97,11 @@ class Display {
     // The frame to compose now. Takes the layers' acquire fences.
     Frame takeFrame();
 
+    // The layers whose buffers a CPU writes, whose pictures are copied up to the host before
+    // anything draws them (cpu_upload.h). `changedOnly` leaves out a layer whose buffer has
+    // not changed since the last call.
+    std::vector<CpuLayer> cpuWrittenLayers(bool changedOnly);
+
     composer3::PowerMode powerMode() const { return mPowerMode; }
     void setPowerMode(composer3::PowerMode mode) { mPowerMode = mode; }
 
@@ -107,6 +113,7 @@ class Display {
     BufferRef mClientTarget;
     UniqueFd mClientTargetFence;
     std::map<int64_t, composer3::Composition> mPendingChanges;
+    LayerPictures mPictures;
     bool mValidated = false;
     composer3::PowerMode mPowerMode = composer3::PowerMode::OFF;
 };

@@ -48,8 +48,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 use super::automation::{self, Action, View, ViewLevel, ViewRow};
 use super::{
-    key_of, layout, metrics, place, render, Anchor, Look, Mask, MenuEntry, MenuLayout, MenuState,
-    Outcome, Rect, RowArt,
+    key_of, layout_with_shortcuts, metrics, place, render, Anchor, Look, Mask, MenuEntry,
+    MenuLayout, MenuState, Outcome, Rect, RowArt,
 };
 use crate::compositor::fluent::text::{self, Align, ICON_FACES, TEXT_FACES};
 use crate::compositor::fluent::{glyph, menu_palette, read_theme, Backdrop, MenuPalette, Theme};
@@ -378,30 +378,7 @@ fn open_level(level: usize) -> Option<()> {
     })
     .flatten()?;
     let (x, y) = anchor.point();
-    let title = wide(&name);
-    let ex_style = if level == 0 {
-        WS_EX_TOOLWINDOW | WS_EX_TOPMOST
-    } else {
-        WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE
-    };
-    // SAFETY: a popup of this thread, made where the menu opens so it takes that monitor's
-    // DPI; the names outlive the call.
-    let hwnd = unsafe {
-        CreateWindowExW(
-            ex_style,
-            class.as_ptr(),
-            title.as_ptr(),
-            WS_POPUP | WS_THICKFRAME,
-            x,
-            y,
-            1,
-            1,
-            null_mut(),
-            null_mut(),
-            GetModuleHandleW(null()),
-            null(),
-        )
-    };
+    let hwnd = create_level_window(&class, &name, level, (x, y));
     if hwnd.is_null() {
         return None;
     }
@@ -419,7 +396,17 @@ fn open_level(level: usize) -> Option<()> {
             None => 0,
         })
         .collect();
-    let laid = layout(&entries, &widths, dpi);
+    let shortcut_em = px_of_dip(metrics::SHORTCUT_TEXT_SIZE, dpi);
+    let shortcut_widths: Vec<i32> = entries
+        .iter()
+        .map(
+            |entry| match entry.item().and_then(|item| item.shortcut.as_deref()) {
+                Some(shortcut) => text::measure(shortcut, &TEXT_FACES, shortcut_em),
+                None => 0,
+            },
+        )
+        .collect();
+    let laid = layout_with_shortcuts(&entries, &widths, &shortcut_widths, dpi);
     let art = row_art(&entries, &laid);
     let gap = px_of_dip(metrics::ANCHOR_GAP, dpi);
     let (left, top) = place(anchor, (laid.width, laid.height), area, gap);
@@ -449,23 +436,72 @@ fn open_level(level: usize) -> Option<()> {
     Some(())
 }
 
-/// Gives a level's window its look: dark or light, rounded, its whole client area DWM's
-/// frame, the acrylic backdrop where it is drawn, and no open animation, which a menu has
-/// none of.
-unsafe fn style(hwnd: HWND, theme: &Theme) {
+/// The window styles of a level's window: a popup with a sizing frame, which `WM_NCCALCSIZE`
+/// takes away but which keeps DWM's shadow; a tool window, so it has no taskbar button, above
+/// every other window. Only the first level takes the foreground.
+fn level_styles(level: usize) -> (u32, u32) {
+    let ex_style = if level == 0 {
+        WS_EX_TOOLWINDOW | WS_EX_TOPMOST
+    } else {
+        WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE
+    };
+    (WS_POPUP | WS_THICKFRAME, ex_style)
+}
+
+/// Makes the (hidden) window of level `level` at `at` on the screen, so it takes the DPI of
+/// that point's monitor. Null when it cannot be made.
+fn create_level_window(class: &[u16], name: &str, level: usize, at: (i32, i32)) -> HWND {
+    let title = wide(name);
+    let (style, ex_style) = level_styles(level);
+    // SAFETY: a popup of this thread of a class registered by `register_class`; the names
+    // outlive the call.
+    unsafe {
+        CreateWindowExW(
+            ex_style,
+            class.as_ptr(),
+            title.as_ptr(),
+            style,
+            at.0,
+            at.1,
+            1,
+            1,
+            null_mut(),
+            null_mut(),
+            GetModuleHandleW(null()),
+            null(),
+        )
+    }
+}
+
+/// DWM's window attributes a level's window takes for `theme`, as (attribute, value): dark or
+/// light, no open animation (a menu has none), the larger rounded corners of a flyout from
+/// Windows 11, and the transient acrylic backdrop where it is drawn.
+pub(super) fn frame_attributes(theme: &Theme) -> Vec<(u32, i32)> {
+    let mut attributes = vec![
+        (DWMWA_USE_IMMERSIVE_DARK_MODE, i32::from(theme.dark)),
+        (DWMWA_TRANSITIONS_FORCEDISABLED, 1),
+    ];
+    if theme.rounded() {
+        attributes.push((DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND));
+    }
+    if theme.backdrop() == Backdrop::Acrylic {
+        attributes.push((DWMWA_SYSTEMBACKDROP_TYPE, DWMSBT_TRANSIENTWINDOW));
+    }
+    attributes
+}
+
+/// Gives a level's window its look ([`frame_attributes`]), with its whole client area DWM's
+/// frame, so the see-through pixels show the backdrop. Returns what DWM answered for each
+/// attribute.
+unsafe fn style(hwnd: HWND, theme: &Theme) -> Vec<(u32, i32)> {
     let set = |attribute: u32, value: i32| {
         DwmSetWindowAttribute(
             hwnd,
             attribute,
             &value as *const i32 as *const std::ffi::c_void,
             std::mem::size_of::<i32>() as u32,
-        );
+        )
     };
-    set(DWMWA_USE_IMMERSIVE_DARK_MODE, i32::from(theme.dark));
-    set(DWMWA_TRANSITIONS_FORCEDISABLED, 1);
-    if theme.rounded() {
-        set(DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND);
-    }
     let margins = MARGINS {
         cxLeftWidth: -1,
         cxRightWidth: -1,
@@ -473,13 +509,14 @@ unsafe fn style(hwnd: HWND, theme: &Theme) {
         cyBottomHeight: -1,
     };
     DwmExtendFrameIntoClientArea(hwnd, &margins);
-    if theme.backdrop() == Backdrop::Acrylic {
-        set(DWMWA_SYSTEMBACKDROP_TYPE, DWMSBT_TRANSIENTWINDOW);
-    }
+    frame_attributes(theme)
+        .into_iter()
+        .map(|(attribute, value)| (attribute, set(attribute, value)))
+        .collect()
 }
 
 /// The work area of the monitor `hwnd` is on.
-fn work_area(hwnd: HWND) -> Option<ScreenRect> {
+pub(crate) fn work_area(hwnd: HWND) -> Option<ScreenRect> {
     // SAFETY: a window of this thread, and a structure of the right size to fill.
     unsafe {
         let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
@@ -518,7 +555,22 @@ pub fn row_art(entries: &[MenuEntry], laid: &MenuLayout) -> Vec<RowArt> {
             let label = text::mask(&item.label, &TEXT_FACES, em, (width, height), Align::Left);
             let check = (item.checked == Some(true)).then_some(glyph::CHECK);
             let chevron = item.opens_submenu().then_some(glyph::CHEVRON_RIGHT);
+            let shortcut = item
+                .shortcut
+                .as_deref()
+                .zip(row.shortcut)
+                .and_then(|(text, at)| {
+                    let (width, height) = (at.w.max(0) as usize, at.h.max(0) as usize);
+                    let em = px(metrics::SHORTCUT_TEXT_SIZE);
+                    let cover = text::mask(text, &TEXT_FACES, em, (width, height), Align::Left)?;
+                    Some(Mask {
+                        width,
+                        height,
+                        cover,
+                    })
+                });
             RowArt {
+                shortcut,
                 label: label.map(|cover| Mask {
                     width,
                     height,
@@ -770,6 +822,7 @@ fn sync_view() {
                             submenu: item.is_some_and(|i| i.opens_submenu()),
                             expanded: open == Some(row.entry),
                             access_key: item.and_then(|i| i.access_key),
+                            shortcut: item.and_then(|i| i.shortcut.clone()),
                             bounds: (window.origin.0 + at.x, window.origin.1 + at.y, at.w, at.h),
                         }
                     })
@@ -817,7 +870,7 @@ unsafe fn paint(hwnd: HWND) {
 
 /// Copies premultiplied BGRA `pixels` of `width` by `height` to `dc`, alpha and all, which
 /// the DWM frame under the client area blends with the backdrop.
-unsafe fn blit(dc: HDC, pixels: &[u8], width: i32, height: i32) {
+pub(crate) unsafe fn blit(dc: HDC, pixels: &[u8], width: i32, height: i32) {
     let memory = CreateCompatibleDC(dc);
     if memory.is_null() {
         return;
@@ -960,5 +1013,113 @@ unsafe extern "system" fn menu_proc(
         }
         WM_DESTROY => 0,
         _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::compositor::fluent::{HighContrast, BACKDROP_BUILD, ROUNDED_BUILD};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, GWL_EXSTYLE, GWL_STYLE, WS_EX_APPWINDOW,
+    };
+
+    fn value(attributes: &[(u32, i32)], attribute: u32) -> Option<i32> {
+        attributes
+            .iter()
+            .find(|(a, _)| *a == attribute)
+            .map(|(_, v)| *v)
+    }
+
+    /// The tray menu is the same menu as the widgets': its window is a Windows 11 flyout.
+    #[test]
+    fn fr24_the_tray_menu_window_is_a_windows_11_flyout() {
+        // On Windows 11 22H2 and later: rounded, acrylic, in the user's light or dark theme,
+        // with no open animation.
+        let light = Theme::light();
+        let attributes = frame_attributes(&light);
+        assert_eq!(
+            value(&attributes, DWMWA_WINDOW_CORNER_PREFERENCE),
+            Some(DWMWCP_ROUND)
+        );
+        assert_eq!(
+            value(&attributes, DWMWA_SYSTEMBACKDROP_TYPE),
+            Some(DWMSBT_TRANSIENTWINDOW)
+        );
+        assert_eq!(value(&attributes, DWMWA_USE_IMMERSIVE_DARK_MODE), Some(0));
+        assert_eq!(value(&attributes, DWMWA_TRANSITIONS_FORCEDISABLED), Some(1));
+        let dark = Theme {
+            dark: true,
+            ..light
+        };
+        assert_eq!(
+            value(&frame_attributes(&dark), DWMWA_USE_IMMERSIVE_DARK_MODE),
+            Some(1)
+        );
+        // Windows 11 before 22H2 rounds it with a solid fill; Windows 10 draws neither.
+        let early = Theme {
+            build: ROUNDED_BUILD,
+            ..light
+        };
+        assert!(value(&frame_attributes(&early), DWMWA_WINDOW_CORNER_PREFERENCE).is_some());
+        assert!(value(&frame_attributes(&early), DWMWA_SYSTEMBACKDROP_TYPE).is_none());
+        let ten = Theme {
+            build: 19045,
+            ..light
+        };
+        assert!(value(&frame_attributes(&ten), DWMWA_WINDOW_CORNER_PREFERENCE).is_none());
+        // High contrast and transparency effects off: a solid fill, still rounded.
+        let contrast = Theme {
+            high_contrast: Some(HighContrast {
+                window: 0xFF00_0000,
+                text: 0xFFFF_FFFF,
+                highlight: 0xFF1A_EBFF,
+                highlight_text: 0xFF00_0000,
+                gray_text: 0xFF3F_F23F,
+            }),
+            ..light
+        };
+        assert!(value(&frame_attributes(&contrast), DWMWA_SYSTEMBACKDROP_TYPE).is_none());
+        let opaque = Theme {
+            transparency: false,
+            ..light
+        };
+        assert!(value(&frame_attributes(&opaque), DWMWA_SYSTEMBACKDROP_TYPE).is_none());
+        assert!(value(&frame_attributes(&opaque), DWMWA_WINDOW_CORNER_PREFERENCE).is_some());
+
+        // A real window of the menu, on this Windows: a framed popup (DWM's shadow), a tool
+        // window above the others with no taskbar button, and DWM takes every attribute this
+        // build has.
+        let class = register_class();
+        let hwnd = create_level_window(&class, "Music", 0, (0, 0));
+        assert!(!hwnd.is_null(), "the menu's window was not made");
+        // SAFETY: a window of this thread, destroyed below.
+        unsafe {
+            let styles = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
+            let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+            assert_eq!(styles & WS_POPUP, WS_POPUP);
+            assert_eq!(styles & WS_THICKFRAME, WS_THICKFRAME);
+            assert_eq!(ex_style & WS_EX_TOOLWINDOW, WS_EX_TOOLWINDOW);
+            assert_eq!(ex_style & WS_EX_TOPMOST, WS_EX_TOPMOST);
+            assert_eq!(ex_style & WS_EX_APPWINDOW, 0);
+            let theme = read_theme();
+            let answers = style(hwnd, &theme);
+            assert_eq!(answers.len(), frame_attributes(&theme).len());
+            for (attribute, answer) in &answers {
+                let known = match *attribute {
+                    DWMWA_WINDOW_CORNER_PREFERENCE => theme.build >= ROUNDED_BUILD,
+                    DWMWA_SYSTEMBACKDROP_TYPE => theme.build >= BACKDROP_BUILD,
+                    _ => true,
+                };
+                if known {
+                    assert!(
+                        *answer >= 0,
+                        "DWM refused attribute {attribute} (0x{:08x})",
+                        *answer as u32
+                    );
+                }
+            }
+            DestroyWindow(hwnd);
+        }
     }
 }

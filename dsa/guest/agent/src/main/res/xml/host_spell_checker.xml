@@ -1,0 +1,286 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The guest's spell checker. Its dictionaries are the host's, so it offers every language
+  a host spell checker may check; Android picks the one of the system's language. A language
+  the host has no dictionary for is answered as unsupported, and its text stays unmarked.
+  The list is fixed because Android reads it from here, not from the running service.
+-->
+<spell-checker xmlns:android="http://schemas.android.com/apk/res/android"
+    android:label="@string/spell_checker_name">
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="ar"
+        android:languageTag="ar" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="bg_BG"
+        android:languageTag="bg-BG" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="bn_IN"
+        android:languageTag="bn-IN" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="ca_ES"
+        android:languageTag="ca-ES" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="cs_CZ"
+        android:languageTag="cs-CZ" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="da_DK"
+        android:languageTag="da-DK" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="de_AT"
+        android:languageTag="de-AT" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="de_CH"
+        android:languageTag="de-CH" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="de_DE"
+        android:languageTag="de-DE" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="el_GR"
+        android:languageTag="el-GR" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="en_AU"
+        android:languageTag="en-AU" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="en_CA"
+        android:languageTag="en-CA" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="en_GB"
+        android:languageTag="en-GB" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="en_IN"
+        android:languageTag="en-IN" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="en_NZ"
+        android:languageTag="en-NZ" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="en_US"
+        android:languageTag="en-US" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="en_ZA"
+        android:languageTag="en-ZA" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="es_ES"
+        android:languageTag="es-ES" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="es_MX"
+        android:languageTag="es-MX" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="es_US"
+        android:languageTag="es-US" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="et_EE"
+        android:languageTag="et-EE" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="eu_ES"
+        android:languageTag="eu-ES" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="fa_IR"
+        android:languageTag="fa-IR" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="fi_FI"
+        android:languageTag="fi-FI" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="fr_BE"
+        android:languageTag="fr-BE" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="fr_CA"
+        android:languageTag="fr-CA" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="fr_CH"
+        android:languageTag="fr-CH" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="fr_FR"
+        android:languageTag="fr-FR" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="gl_ES"
+        android:languageTag="gl-ES" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="gu_IN"
+        android:languageTag="gu-IN" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="he_IL"
+        android:languageTag="he-IL" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="hi_IN"
+        android:languageTag="hi-IN" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="hr_HR"
+        android:languageTag="hr-HR" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="hu_HU"
+        android:languageTag="hu-HU" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="hy_AM"
+        android:languageTag="hy-AM" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="id_ID"
+        android:languageTag="id-ID" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="is_IS"
+        android:languageTag="is-IS" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="it_IT"
+        android:languageTag="it-IT" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="ja_JP"
+        android:languageTag="ja-JP" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="kn_IN"
+        android:languageTag="kn-IN" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="ko_KR"
+        android:languageTag="ko-KR" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="lt_LT"
+        android:languageTag="lt-LT" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="lv_LV"
+        android:languageTag="lv-LV" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="mk_MK"
+        android:languageTag="mk-MK" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="ml_IN"
+        android:languageTag="ml-IN" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="mr_IN"
+        android:languageTag="mr-IN" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="ms_MY"
+        android:languageTag="ms-MY" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="nb_NO"
+        android:languageTag="nb-NO" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="nl_BE"
+        android:languageTag="nl-BE" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="nl_NL"
+        android:languageTag="nl-NL" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="pa_IN"
+        android:languageTag="pa-IN" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="pl_PL"
+        android:languageTag="pl-PL" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="pt_BR"
+        android:languageTag="pt-BR" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="pt_PT"
+        android:languageTag="pt-PT" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="ro_RO"
+        android:languageTag="ro-RO" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="ru_RU"
+        android:languageTag="ru-RU" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="sk_SK"
+        android:languageTag="sk-SK" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="sl_SI"
+        android:languageTag="sl-SI" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="sr_RS"
+        android:languageTag="sr-RS" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="sv_SE"
+        android:languageTag="sv-SE" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="ta_IN"
+        android:languageTag="ta-IN" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="te_IN"
+        android:languageTag="te-IN" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="th_TH"
+        android:languageTag="th-TH" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="tr_TR"
+        android:languageTag="tr-TR" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="uk_UA"
+        android:languageTag="uk-UA" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="ur_PK"
+        android:languageTag="ur-PK" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="vi_VN"
+        android:languageTag="vi-VN" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="zh_CN"
+        android:languageTag="zh-CN" />
+    <subtype
+        android:label="@string/spell_checker_subtype"
+        android:subtypeLocale="zh_TW"
+        android:languageTag="zh-TW" />
+</spell-checker>

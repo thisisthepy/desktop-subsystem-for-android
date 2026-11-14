@@ -343,7 +343,7 @@ fn screenshots_folder() -> Result<PathBuf, String> {
 }
 
 /// The path of the known folder `id`, for this process's user.
-fn known_folder(id: &windows_sys::core::GUID, flags: i32) -> Option<PathBuf> {
+pub(crate) fn known_folder(id: &windows_sys::core::GUID, flags: i32) -> Option<PathBuf> {
     use windows_sys::Win32::System::Com::CoTaskMemFree;
     use windows_sys::Win32::UI::Shell::SHGetKnownFolderPath;
     let mut path = std::ptr::null_mut();

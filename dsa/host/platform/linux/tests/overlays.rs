@@ -88,6 +88,22 @@
 //! with the raw samples and the guest log beside them. It fails when it cannot measure, and
 //! when an alarm fired as a storm in that boot, the one with a Play services that runs.
 //!
+//! A third boot check measures the memory with Google Play installed the same way and one app
+//! window (Settings) open, so every release shows the number: it leaves the window untouched
+//! for a minute and reads the memory six times, ten seconds apart, as `dsa memory` reads it
+//! (the host's processes, the service's own, and the guest's report), plus the guest's PSS by
+//! process from `dumpsys meminfo`. The medians go to `memory.md` and `memory.json`
+//! (`memory_check`), with every reading beside them, and how much more the VM holds than the
+//! guest uses. Beside the numbers it says what they are made of: the guest kernel's largest
+//! slab caches, vmalloc users and threads, which the guest reads as root when the shell asks
+//! (`dsa-channeld --memory-report`), and system_server's App Summary, threads and services,
+//! its ART heap settings and, where the build allows one, its heap dump. Then it closes the
+//! window and waits for the zram writeback, which the boot's command line lets run 30 s after
+//! no app is in use, of pages unused for 60 s, and reads the memory again: the zram store
+//! before and after, what was written, and the VM's excess over the guest's use with the
+//! window open and closed. It fails on a large regression against the baseline recorded in
+//! `memory_check/baseline.json`, and when the guest's zram has no backing file.
+//!
 //! Runs when CI gives it what it needs: `DSA_CROSVM` names the crosvm to run,
 //! `DSA_WIDGET_TEST_IMAGE` the image folder built from the commit under test (made with a
 //! default ARM translation package), `DSA_ARM_PROBE` the ARM probe APK
@@ -100,6 +116,7 @@
 
 mod boot_check;
 mod idle_reclaim;
+mod memory_check;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -1671,6 +1688,75 @@ fn cached_limit_problems(adb: &Adb, dir: &Path, boot: &str, problems: &mut Vec<S
     }
 }
 
+/// The files `dumpsys pinner` lists as locked in memory, with their pinned bytes, leaving out
+/// those it lists with none.
+fn pinned_files(dump: &str) -> Vec<(String, u64)> {
+    dump.lines()
+        .filter_map(|line| {
+            let (file, rest) = line.trim().split_once(" pinned:")?;
+            let bytes: u64 = rest.split_whitespace().next()?.parse().ok()?;
+            (bytes > 0).then(|| (file.to_string(), bytes))
+        })
+        .collect()
+}
+
+/// What is wrong with the memory the pinner service holds: the image turns it off, because
+/// locked pages are neither reclaimed nor compressed, so the host could never get them back.
+fn pinned_memory_problems(adb: &Adb, dir: &Path, boot: &str, problems: &mut Vec<String>) {
+    match adb.shell("dumpsys pinner") {
+        Ok(dump) => {
+            let _ = std::fs::write(dir.join(format!("pinner-{boot}.txt")), &dump);
+            let pinned = pinned_files(&dump);
+            if !pinned.is_empty() {
+                let total: u64 = pinned.iter().map(|(_, bytes)| bytes).sum();
+                let files: Vec<String> = pinned
+                    .iter()
+                    .map(|(file, bytes)| format!("{file} ({} KiB)", bytes >> 10))
+                    .collect();
+                problems.push(format!(
+                    "{boot}: the pinner service locks {} KiB in memory, which no reclaim can give \
+                     back to the host: {}",
+                    total >> 10,
+                    files.join(", ")
+                ));
+            }
+        }
+        Err(why) => problems.push(format!("{boot}: reading dumpsys pinner: {why}")),
+    }
+}
+
+#[test]
+fn nfr1_the_files_the_pinner_service_locks_are_read_from_its_dump() {
+    // Android 17's dump with its default configuration: the home app (the agent) and WebView.
+    let dump = "Pinner Configs:\n   Total Pinner quota: 10% of total device memory\n   \
+                Max Home App Pin Bytes (without deps): 62914560 (60.00 MB)\n\nPinned Files:\n\
+                Home uid=10109 active=true\n  \
+                /system_ext/priv-app/DsaAgent/DsaAgent.apk pinned:4194304 bytes (4.00 MB) pinlist:false\n  \
+                /system_ext/priv-app/DsaAgent/oat/x86_64/DsaAgent.odex pinned:2097152 bytes (2.00 MB) pinlist:false (Dependency)\n\
+                Total Pinned = 6291456 (6.00 MB) [App=4194304 (4.00 MB), Dependencies=2097152 (2.00 MB)]\n\n\
+                \nGroup:webview\n  /product/app/webview/webview.apk pinned: 20971520 bytes (20.00 MB) pinlist:false\n\
+                Total Pinned = 20971520 (20.00 MB) [Main=20971520 (20.00 MB), Dependencies=0 (0.00 MB)]\n";
+    assert_eq!(
+        pinned_files(dump),
+        vec![
+            (
+                "/system_ext/priv-app/DsaAgent/DsaAgent.apk".to_string(),
+                4194304
+            ),
+            (
+                "/system_ext/priv-app/DsaAgent/oat/x86_64/DsaAgent.odex".to_string(),
+                2097152
+            ),
+            ("/product/app/webview/webview.apk".to_string(), 20971520),
+        ]
+    );
+    // With the image's configuration nothing is listed, and a file pinned with no bytes is
+    // nothing held.
+    let off = "Pinner Configs:\n   Total Pinner quota: 0% of total device memory\n\nPinned Files:\n\n\
+               \nGroup:system\n  /system/framework/framework.jar pinned: 0 bytes (0.00 MB) pinlist:false\n";
+    assert_eq!(pinned_files(off), Vec::<(String, u64)>::new());
+}
+
 #[test]
 fn nfr2_the_cached_process_limit_is_read_as_the_activity_manager_applies_it() {
     // Android 17 on the owner's PC: the setting said 8, the activity manager applied 1024.
@@ -1745,6 +1831,12 @@ fn play_services_component_problems(dump: &str, when: &str) -> Vec<String> {
 
 #[test]
 fn fr32_the_play_services_components_turned_off_are_read_from_the_package_dump() {
+    // The shell may turn single components back on only in a test-only package; for any
+    // other app the package manager refuses `pm enable <package>/<class>` from adb.
+    assert!(
+        GMS_PROBE_MANIFEST.contains("android:testOnly=\"true\""),
+        "the Play services probe must be a test-only package, or the shell cannot turn its services back on"
+    );
     let services = probe_services(GMS_PROBE_MANIFEST);
     assert!(services.contains(&GMS_KEPT), "{services:?}");
     assert!(
@@ -1809,10 +1901,11 @@ fn wait_for_off(adb: &Adb) -> String {
 /// services the agent keeps off must be off and the push service on. Then each is turned on
 /// again from the shell, as Play services' own setup does after an update, and the probe is
 /// installed over itself, which Android announces as an update: a moment later they must be
-/// off again.
+/// off again. The probe is a test-only package, so it installs with `-t` and the shell may
+/// change its single components.
 fn play_services_problems(adb: &Adb, apk: &Path, dir: &Path, problems: &mut Vec<String>) {
     let _ = adb.shell("logcat -c -b main");
-    if let Err(why) = adb.run(&["install", "-r", &apk.to_string_lossy()]) {
+    if let Err(why) = adb.run(&["install", "-r", "-t", &apk.to_string_lossy()]) {
         problems.push(format!("Google Play services: installing the probe: {why}"));
         return;
     }
@@ -1833,7 +1926,7 @@ fn play_services_problems(adb: &Adb, apk: &Path, dir: &Path, problems: &mut Vec<
         ));
         return;
     }
-    if let Err(why) = adb.run(&["install", "-r", &apk.to_string_lossy()]) {
+    if let Err(why) = adb.run(&["install", "-r", "-t", &apk.to_string_lossy()]) {
         problems.push(format!("Google Play services: updating the probe: {why}"));
         return;
     }
@@ -2187,6 +2280,7 @@ fn fr25_fr32_the_translation_and_google_apps_images_are_laid_over_the_booted_sys
     }
     log_problems(&adb, &dir, "first boot", &mut problems);
     cached_limit_problems(&adb, &dir, "first boot", &mut problems);
+    pinned_memory_problems(&adb, &dir, "first boot", &mut problems);
     // An ARM app, after the boot's log is read: the probe clears the log to read its own start.
     arm_app_run_problems(&adb, &probe, &dir, &mut problems);
     // What Google Play compares each app's manifest with, which the Google apps do not change.
@@ -2352,6 +2446,8 @@ fn fr25_fr32_the_translation_and_google_apps_images_are_laid_over_the_booted_sys
     gapps_boot_problems(&adb, &dir, &mut problems);
     log_problems(&adb, &dir, "second boot", &mut problems);
     cached_limit_problems(&adb, &dir, "second boot", &mut problems);
+    // With Google Play, which may write the device configuration the pinner also reads.
+    pinned_memory_problems(&adb, &dir, "second boot", &mut problems);
     play_services_problems(&adb, &gms_probe, &dir, &mut problems);
 
     // The service's own copy of the guest log, across both boots.
@@ -2478,14 +2574,55 @@ fn mirror_litegapps(mirror: &Path, arch: &str, sdk: u32) -> Result<String, Strin
     Ok(build.file)
 }
 
-#[test]
-fn nfr3_the_idle_reclaim_with_google_apps_is_measured_on_the_booted_image() {
+/// Android booted twice by a measurement: first to install Google Play from the mirror, then
+/// with it in place, with developer mode on so adb reaches the guest.
+struct GooglePlayBoot {
+    service: Service,
+    _compositor: Service,
+    api: HostApiClient,
+    adb: Adb,
+    log: Arc<Mutex<Vec<String>>>,
+    dir: PathBuf,
+    started: Instant,
+    /// Which Google apps build was installed, and the image mounted from it, for the report.
+    gapps: String,
+    mounted: String,
+    /// The service's configuration file and what it says, so a measurement can start the
+    /// service again with a setting changed.
+    config: PathBuf,
+    settings: serde_json::Value,
+    socket: PathBuf,
+}
+
+impl GooglePlayBoot {
+    /// Fails the measurement with what the service and the guest said.
+    fn fail(&self, why: String) -> ! {
+        fail(why, &self.service, &self.log)
+    }
+}
+
+/// Boots the image with Google Play for a measurement: installs LiteGapps' own newest build
+/// for the guest (the check's small stand-in build when LiteGapps cannot be reached, which the
+/// returned description says), starts Android again with it and checks that its image is
+/// mounted. The VM has `memory_mb` of memory and `processors` processors. The second boot
+/// leaves `after` of the time to `deadline` for the measurement itself. `kernel_cmdline` goes on
+/// the guest's kernel command line after the image's. `direct_mapped` attaches the read-only
+/// disks as persistent memory, mapped with DAX. `None` when CI named no crosvm and
+/// image, so there is nothing to boot.
+fn boot_with_google_play(
+    deadline: Instant,
+    after: Duration,
+    memory_mb: u64,
+    processors: u64,
+    kernel_cmdline: &str,
+    direct_mapped: bool,
+) -> Option<GooglePlayBoot> {
     let (Some(crosvm), Some(image)) = (
         std::env::var_os("DSA_CROSVM").map(PathBuf::from),
         std::env::var_os("DSA_WIDGET_TEST_IMAGE").map(PathBuf::from),
     ) else {
         eprintln!("skipped: DSA_CROSVM and DSA_WIDGET_TEST_IMAGE name no crosvm and image");
-        return;
+        return None;
     };
     let kernel = std::env::var_os("DSA_WIDGET_TEST_KERNEL").map(PathBuf::from);
     let adb_program = std::env::var_os("DSA_ADB")
@@ -2498,8 +2635,6 @@ fn nfr3_the_idle_reclaim_with_google_apps_is_measured_on_the_booted_image() {
     let arch = manifest["arch"].as_str().unwrap_or("x86_64").to_string();
 
     let started = Instant::now();
-    let deadline = started + IDLE_BUDGET;
-    let _watchdog = Watchdog::start("the idle reclaim measurement", IDLE_BUDGET + OVERRUN);
     let dir = scratch();
     let mirror = dir.join("mirror");
     write_mirror(&mirror, &arch).unwrap();
@@ -2512,10 +2647,12 @@ fn nfr3_the_idle_reclaim_with_google_apps_is_measured_on_the_booted_image() {
         "socket": socket,
         "machine_dir": dir.join("machine"),
         "network": false,
-        "memory_mb": IDLE_MEMORY_MB,
-        "processors": IDLE_PROCESSORS,
+        "memory_mb": memory_mb,
+        "processors": processors,
         "data_disk_size_gb": 8,
         "gapps_project": format!("file://{}", mirror.display()),
+        "kernel_cmdline": kernel_cmdline,
+        "direct_mapped_images": direct_mapped,
     });
     std::fs::write(&config, settings.to_string()).unwrap();
     let service = Service::spawn(
@@ -2524,7 +2661,7 @@ fn nfr3_the_idle_reclaim_with_google_apps_is_measured_on_the_booted_image() {
             .arg(&config),
         dir.join("hostd.log"),
     );
-    let _compositor = Service::spawn(
+    let compositor = Service::spawn(
         Command::new(env!("CARGO_BIN_EXE_dsa-compositor")).env("DSA_SOCKET", &socket),
         dir.join("compositor.log"),
     );
@@ -2575,7 +2712,7 @@ fn nfr3_the_idle_reclaim_with_google_apps_is_measured_on_the_booted_image() {
         Ok(file) => format!("LiteGapps' {file}"),
         Err(why) => {
             println!(
-                "::warning::the idle reclaim is measured with the check's small stand-in Google apps build, not LiteGapps' own: {why}"
+                "::warning::the measurement runs with the check's small stand-in Google apps build, not LiteGapps' own: {why}"
             );
             format!(
                 "the check's small stand-in build, because LiteGapps' own could not be had ({why}); \
@@ -2639,7 +2776,7 @@ fn nfr3_the_idle_reclaim_with_google_apps_is_measured_on_the_booted_image() {
     }
     let boot = deadline
         .saturating_duration_since(Instant::now())
-        .saturating_sub(IDLE_WINDOW + Duration::from_secs(180));
+        .saturating_sub(after);
     if let Err(why) = api.ensure_running(boot, Duration::from_secs(2), |state| {
         eprintln!("{} s: Android is {state:?}", started.elapsed().as_secs());
     }) {
@@ -2658,7 +2795,7 @@ fn nfr3_the_idle_reclaim_with_google_apps_is_measured_on_the_booted_image() {
         );
     }
     let table = adb.shell("cat /proc/self/mountinfo").unwrap_or_default();
-    let _ = std::fs::write(dir.join("idle-reclaim-mounts.txt"), &table);
+    let _ = std::fs::write(dir.join("google-play-mounts.txt"), &table);
     let Some(mounted) = mounts(&table)
         .iter()
         .find(|m| m.point == GAPPS_POINT && m.kind == "erofs")
@@ -2672,6 +2809,46 @@ fn nfr3_the_idle_reclaim_with_google_apps_is_measured_on_the_booted_image() {
             &log,
         );
     };
+    Some(GooglePlayBoot {
+        service,
+        _compositor: compositor,
+        api,
+        adb,
+        log,
+        dir,
+        started,
+        gapps,
+        mounted,
+        config,
+        settings,
+        socket,
+    })
+}
+
+#[test]
+fn nfr3_the_idle_reclaim_with_google_apps_is_measured_on_the_booted_image() {
+    let deadline = Instant::now() + IDLE_BUDGET;
+    let _watchdog = Watchdog::start("the idle reclaim measurement", IDLE_BUDGET + OVERRUN);
+    let Some(boot) = boot_with_google_play(
+        deadline,
+        IDLE_WINDOW + Duration::from_secs(180),
+        IDLE_MEMORY_MB,
+        IDLE_PROCESSORS,
+        "",
+        false,
+    ) else {
+        return;
+    };
+    let GooglePlayBoot {
+        service,
+        adb,
+        log,
+        dir,
+        started,
+        gapps,
+        mounted,
+        ..
+    } = &boot;
 
     // Five minutes with no app window open, sampled from inside the guest.
     let sampler = dir.join("idle-sampler.sh");
@@ -2679,8 +2856,8 @@ fn nfr3_the_idle_reclaim_with_google_apps_is_measured_on_the_booted_image() {
     if let Err(why) = adb.run(&["push", &sampler.to_string_lossy(), SAMPLER_GUEST]) {
         fail(
             format!("putting the sampler in the guest: {why}"),
-            &service,
-            &log,
+            service,
+            log,
         );
     }
     eprintln!(
@@ -2694,7 +2871,7 @@ fn nfr3_the_idle_reclaim_with_google_apps_is_measured_on_the_booted_image() {
     );
     let raw = match adb.run_for(&["shell", &command], IDLE_WINDOW + Duration::from_secs(120)) {
         Ok(out) => String::from_utf8_lossy(&out).into_owned(),
-        Err(why) => fail(format!("the idle sampler: {why}"), &service, &log),
+        Err(why) => fail(format!("the idle sampler: {why}"), service, log),
     };
     let _ = std::fs::write(dir.join("idle-reclaim-samples.txt"), &raw);
     let guest_log = adb
@@ -2724,15 +2901,766 @@ fn nfr3_the_idle_reclaim_with_google_apps_is_measured_on_the_booted_image() {
                 record.looks.len(),
                 IDLE_WINDOW.as_secs()
             ),
-            &service,
-            &log,
+            service,
+            log,
         );
     }
     // The one boot with a Play services that runs: none of its alarms, nor any other, may
     // retry as Play services' flag sync did while it could not write DeviceConfig.
     let mut storms = Vec::new();
-    alarm_storm_problems(&adb, &dir.join("idle-reclaim-alarms.txt"), &mut storms);
+    alarm_storm_problems(adb, &dir.join("idle-reclaim-alarms.txt"), &mut storms);
     if !storms.is_empty() {
-        fail(storms.join("\n"), &service, &log);
+        fail(storms.join("\n"), service, log);
+    }
+}
+
+/// The memory measurement, both boots, LiteGapps' download, the kernel and system_server
+/// reports and the part after the window closes included, stays under twenty-nine minutes,
+/// inside the job's thirty-four.
+const MEMORY_BUDGET: Duration = Duration::from_secs(1740);
+/// How long the heap dump of system_server, and then copying it out, may each take.
+const HEAP_DUMP_WAIT: Duration = Duration::from_secs(60);
+/// The zram writeback's times for this check, on the guest's kernel command line: a writeback
+/// 30 s after no app is in use, of pages unused for 60 s. The defaults (ten minutes, half an
+/// hour) are longer than the check can wait.
+const MEMORY_WRITEBACK_CMDLINE: &str =
+    "androidboot.dsa.zram_writeback_after=30 androidboot.dsa.zram_writeback_age=60";
+/// How long after the window closes the check waits for the first zram writeback: the daemon
+/// looks every 30 s and waits 30 s of no app in use.
+const MEMORY_WRITEBACK_WAIT: Duration = Duration::from_secs(150);
+/// The readings after the window closed and the writeback ran, and how far apart.
+const MEMORY_IDLE_READINGS: u32 = 3;
+/// The app whose window is open while the memory is read: the simple app the one-window target
+/// is set for.
+const MEMORY_APP: &str = "com.android.settings";
+/// How long its task may take to appear.
+const MEMORY_APP_WAIT: Duration = Duration::from_secs(90);
+/// How long the window stays untouched before the first reading.
+const MEMORY_SETTLE: Duration = Duration::from_secs(60);
+/// How many readings are taken, and how far apart.
+const MEMORY_READINGS: u32 = 6;
+const MEMORY_EVERY: Duration = Duration::from_secs(10);
+
+/// The service's own process (`dsa-linux-hostd`), which the host's snapshot does not list.
+fn service_memory() -> memory_check::ServiceMemory {
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return memory_check::ServiceMemory::default();
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let named = std::fs::read_to_string(path.join("comm"))
+            .is_ok_and(|name| name.trim() == "dsa-linux-hostd");
+        if !named {
+            continue;
+        }
+        let status = std::fs::read_to_string(path.join("status")).unwrap_or_default();
+        let resident_kb = dsa_host_linux::memory::resident_kb(&status).unwrap_or(0);
+        let private_kb = std::fs::read_to_string(path.join("smaps_rollup"))
+            .ok()
+            .and_then(|text| dsa_host_linux::memory::private_kb(&text))
+            .unwrap_or(resident_kb);
+        return memory_check::ServiceMemory {
+            resident_kb,
+            private_kb,
+        };
+    }
+    memory_check::ServiceMemory::default()
+}
+
+/// How long the guest has to write its kernel memory report once asked.
+const KERNEL_REPORT_WAIT: Duration = Duration::from_secs(60);
+
+/// Asks the guest for its kernel memory report (root reads the slab caches, vmalloc users and
+/// threads, which the shell cannot) and waits for it in the kernel log. The log goes to
+/// `memory-kernel-log.txt` and the report's lines to `memory-kernel.txt`.
+fn kernel_memory_report(adb: &Adb, dir: &Path) -> Result<Vec<String>, String> {
+    let property = memory_check::KERNEL_REPORT_PROPERTY;
+    adb.shell(&format!("setprop {property} 0; setprop {property} 1"))?;
+    let until = Instant::now() + KERNEL_REPORT_WAIT;
+    let mut log = String::new();
+    loop {
+        if let Ok(text) = adb.shell("logcat -d -b kernel") {
+            log = text;
+        }
+        if let Some(lines) = memory_check::kernel_report(&log) {
+            let _ = std::fs::write(dir.join("memory-kernel-log.txt"), &log);
+            let _ = std::fs::write(dir.join("memory-kernel.txt"), lines.join("\n"));
+            return Ok(lines);
+        }
+        if Instant::now() >= until {
+            let _ = std::fs::write(dir.join("memory-kernel-log.txt"), &log);
+            return Err(format!(
+                "the guest wrote no whole report to the kernel log within {} s of {property} \
+                 set to 1 (dsa_memory_report in dsa-channeld.rc; look in memory-kernel-log.txt \
+                 for its lines and for an avc denial of dsa_memory_report)",
+                KERNEL_REPORT_WAIT.as_secs()
+            ));
+        }
+        std::thread::sleep(Duration::from_secs(2));
+    }
+}
+
+/// system_server's memory: its `dumpsys meminfo` (`memory-system-server.txt`, with ART's
+/// details), its threads, the services it lists (`memory-services.txt`), what it holds locked
+/// in memory (`memory-pinner.txt`, with the kernel's locked page count), the ART heap
+/// settings, and a heap dump when the build allows one (`memory-system-server.hprof`; a user
+/// build refuses it, and the report says what it answered).
+fn system_server_memory(adb: &Adb, dir: &Path) -> (String, serde_json::Value) {
+    let pid = adb
+        .shell("pidof system_server")
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let meminfo = if pid.is_empty() {
+        String::new()
+    } else {
+        adb.shell(&format!("dumpsys meminfo -d {pid}"))
+            .unwrap_or_else(|why| why)
+    };
+    let _ = std::fs::write(dir.join("memory-system-server.txt"), &meminfo);
+    let threads = if pid.is_empty() {
+        String::new()
+    } else {
+        adb.shell(&format!("cat /proc/{pid}/task/*/comm"))
+            .unwrap_or_default()
+    };
+    let services = adb.shell("dumpsys -l").unwrap_or_default();
+    let _ = std::fs::write(dir.join("memory-services.txt"), &services);
+    // The features decide which services system_server starts.
+    let features = adb.shell("pm list features").unwrap_or_default();
+    let _ = std::fs::write(dir.join("memory-features.txt"), &features);
+    // What system_server holds locked in memory (none, with the image's pinner settings), and
+    // the kernel's count of locked and unevictable pages.
+    let pinner = adb.shell("dumpsys pinner").unwrap_or_default();
+    let locked = adb
+        .shell("grep -E '^(Mlocked|Unevictable):' /proc/meminfo")
+        .unwrap_or_default();
+    let _ = std::fs::write(dir.join("memory-pinner.txt"), format!("{locked}\n{pinner}"));
+    let heap_settings = memory_check::heap_settings(&adb.shell("getprop").unwrap_or_default());
+    let heap_dump = if pid.is_empty() {
+        "system_server was not found".to_string()
+    } else {
+        let path = "/data/local/tmp/system_server.hprof";
+        let answer = adb
+            .run_for(
+                &["shell", &format!("am dumpheap {pid} {path}")],
+                HEAP_DUMP_WAIT,
+            )
+            .map(|out| String::from_utf8_lossy(&out).into_owned())
+            .unwrap_or_else(|why| why);
+        let kept = dir.join("memory-system-server.hprof");
+        let kept_path = kept.to_string_lossy().into_owned();
+        let pulled = adb
+            .run_for(&["pull", path, kept_path.as_str()], HEAP_DUMP_WAIT)
+            .is_ok()
+            && std::fs::metadata(&kept).is_ok_and(|m| m.len() > 0);
+        let _ = adb.shell(&format!("rm -f {path}"));
+        if pulled {
+            "kept as memory-system-server.hprof".to_string()
+        } else {
+            let answer: String = answer
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .chars()
+                .take(300)
+                .collect();
+            format!("none (`am dumpheap` answered: {answer})")
+        }
+    };
+    memory_check::system_server_report(&memory_check::SystemServer {
+        meminfo: &meminfo,
+        threads: &threads,
+        services: &services,
+        heap_settings: &heap_settings,
+        heap_dump: &heap_dump,
+    })
+}
+
+/// The runner the measurement ran on: its kernel, processor and memory.
+fn runner_environment() -> String {
+    let kernel = std::fs::read_to_string("/proc/sys/kernel/osrelease").unwrap_or_default();
+    let cpuinfo = std::fs::read_to_string("/proc/cpuinfo").unwrap_or_default();
+    let processor = cpuinfo
+        .lines()
+        .find_map(|line| line.strip_prefix("model name"))
+        .and_then(|rest| rest.split_once(':'))
+        .map_or("an unknown processor", |(_, name)| name.trim());
+    let threads = cpuinfo
+        .lines()
+        .filter(|line| line.starts_with("processor"))
+        .count();
+    let meminfo = std::fs::read_to_string("/proc/meminfo").unwrap_or_default();
+    let memory_mib = meminfo
+        .lines()
+        .find_map(|line| line.strip_prefix("MemTotal:"))
+        .and_then(|rest| rest.split_whitespace().next())
+        .and_then(|kb| kb.parse::<u64>().ok())
+        .map_or(0, memory_check::mib);
+    format!(
+        "Linux {}, {processor} ({threads} threads), {memory_mib} MiB, crosvm over KVM",
+        kernel.trim()
+    )
+}
+
+/// Opens one window of [`MEMORY_APP`], as a user does, leaves it untouched for a minute and
+/// reads the memory [`MEMORY_READINGS`] times as `dsa memory` reads it. What each reading said
+/// goes to `<name>-readings.txt` in the boot's folder.
+fn one_window_readings(boot: &mut GooglePlayBoot, name: &str) -> Vec<memory_check::Reading> {
+    eprintln!(
+        "{} s: opening {MEMORY_APP}",
+        boot.started.elapsed().as_secs()
+    );
+    if let Err(why) = boot.api.launch_app(MEMORY_APP) {
+        boot.fail(format!("opening {MEMORY_APP}: {why}"));
+    }
+    let until = Instant::now() + MEMORY_APP_WAIT;
+    loop {
+        match boot.api.tasks() {
+            Ok(list) if list.tasks.iter().any(|t| t.package_name == MEMORY_APP) => break,
+            Ok(_) if Instant::now() < until => std::thread::sleep(Duration::from_secs(1)),
+            Ok(list) => {
+                let open: Vec<String> = list.tasks.into_iter().map(|t| t.package_name).collect();
+                boot.fail(format!(
+                    "{MEMORY_APP}'s task did not appear within {} s; the tasks are {open:?}",
+                    MEMORY_APP_WAIT.as_secs()
+                ))
+            }
+            Err(why) => boot.fail(format!("listing the tasks: {why}")),
+        }
+    }
+
+    // A minute untouched, then the readings, as `dsa memory` reads them.
+    std::thread::sleep(MEMORY_SETTLE);
+    let mut readings = Vec::new();
+    let mut raw = Vec::new();
+    for index in 0..MEMORY_READINGS {
+        if index > 0 {
+            std::thread::sleep(MEMORY_EVERY);
+        }
+        let snapshot = match boot.api.memory() {
+            Ok(snapshot) => snapshot,
+            Err(why) => boot.fail(format!("reading the memory: {why}")),
+        };
+        raw.push(snapshot.to_string());
+        if let Some(reading) = memory_check::reading(&snapshot, service_memory()) {
+            readings.push(reading);
+        }
+    }
+    let _ = std::fs::write(
+        boot.dir.join(format!("{name}-readings.txt")),
+        raw.join("\n---\n"),
+    );
+    readings
+}
+
+/// What the VM's crosvm process holds by kind, from `/proc/<pid>/status`: the largest crosvm
+/// the runner has, which is the VM's main process (its device processes hold little).
+fn crosvm_resident() -> memory_check::direct_mapped::Resident {
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return Default::default();
+    };
+    entries
+        .flatten()
+        .filter(|entry| {
+            std::fs::read_to_string(entry.path().join("comm"))
+                .is_ok_and(|name| name.trim() == "crosvm")
+        })
+        .map(|entry| {
+            let status = std::fs::read_to_string(entry.path().join("status")).unwrap_or_default();
+            memory_check::direct_mapped::resident(&status)
+        })
+        .max_by_key(|resident| resident.anon_kb + resident.file_kb + resident.shmem_kb)
+        .unwrap_or_default()
+}
+
+/// The direct-mapped measurement, its four boots, LiteGapps' download and the making of the
+/// uncompressed system disk included, stays under fifty minutes.
+const DIRECT_MAPPED_BUDGET: Duration = Duration::from_secs(3000);
+
+/// How long the service may take to make and check the uncompressed system disk.
+const DIRECT_MAPPED_DISK_WAIT: Duration = Duration::from_secs(900);
+
+/// Stops Android and starts it again in the same service, and connects adb again.
+fn restart_android(boot: &mut GooglePlayBoot, within: Duration, why: &str) {
+    use dsa_host_core::session::SessionState;
+    eprintln!(
+        "{} s: starting Android again {why}",
+        boot.started.elapsed().as_secs()
+    );
+    if let Err(error) = boot.api.stop() {
+        boot.fail(format!("stopping Android: {error}"));
+    }
+    let stop_until = Instant::now() + Duration::from_secs(120);
+    loop {
+        match boot.api.status() {
+            Ok(status) if status.state == SessionState::Stopped => break,
+            Ok(_) if Instant::now() < stop_until => std::thread::sleep(Duration::from_secs(1)),
+            Ok(status) => boot.fail(format!("Android did not stop: it is {:?}", status.state)),
+            Err(error) => boot.fail(format!("reading the status: {error}")),
+        }
+    }
+    let started = boot.started;
+    if let Err(error) = boot
+        .api
+        .ensure_running(within, Duration::from_secs(2), |state| {
+            eprintln!("{} s: Android is {state:?}", started.elapsed().as_secs());
+        })
+    {
+        boot.fail(format!("Android did not become ready {why}: {error}"));
+    }
+    if let Err(error) = boot.adb.connect(Duration::from_secs(120)) {
+        boot.fail(format!("adb did not reach the guest {why}: {error}"));
+    }
+}
+
+/// What a boot says of its verified boot: `ro.boot.avb_version` and the kernel log's lines
+/// about AVB and dm-verity.
+fn verified_boot(adb: &Adb) -> (String, Vec<String>) {
+    let version = adb
+        .shell("getprop ro.boot.avb_version")
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let log = adb.shell("logcat -d -b kernel").unwrap_or_default();
+    let lines = log
+        .lines()
+        .filter(|line| {
+            let line = line.to_ascii_lowercase();
+            line.contains("avb") || line.contains("verity")
+        })
+        .map(str::to_string)
+        .collect();
+    (version, lines)
+}
+
+#[test]
+fn nfr1_nfr2_the_direct_mapped_disks_are_measured_against_the_cached_ones_on_the_booted_image() {
+    // The same image twice: its system and add-on disks first on virtio-pmem, mapped with DAX
+    // (Google Play is installed in this mode), then on virtio-blk, cached by the guest, with
+    // Google Play and one app window both times. It fails only when the mapped boot did not map
+    // its read-only partitions; the numbers are reported, not judged.
+    let deadline = Instant::now() + DIRECT_MAPPED_BUDGET;
+    let _watchdog = Watchdog::start(
+        "the direct-mapped measurement",
+        DIRECT_MAPPED_BUDGET + OVERRUN,
+    );
+    let one_window =
+        MEMORY_APP_WAIT + MEMORY_SETTLE + MEMORY_EVERY * MEMORY_READINGS + Duration::from_secs(60);
+    // The making of the disk and a boot, the mapped measurement, then a boot and the cached
+    // measurement.
+    let after = DIRECT_MAPPED_DISK_WAIT + one_window * 2 + Duration::from_secs(720);
+    let Some(mut boot) =
+        boot_with_google_play(deadline, after, IDLE_MEMORY_MB, IDLE_PROCESSORS, "", true)
+    else {
+        return;
+    };
+    // The image is the published one, compressed: the service makes its uncompressed system
+    // disk in the background while Android runs from the image's own, and the next start of
+    // Android maps it.
+    let image = PathBuf::from(std::env::var_os("DSA_WIDGET_TEST_IMAGE").expect("named above"));
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(image.join("image.json")).unwrap()).unwrap();
+    if manifest["direct_mapped"]["system_disk"].is_null() {
+        boot.fail(
+            "the image's image.json describes no direct-mapped system disk (dsa-release \
+             direct-mapped did not record one)"
+                .into(),
+        );
+    }
+    let version = manifest["version"].as_str().unwrap_or_default().to_string();
+    let copy = boot
+        .dir
+        .join("machine")
+        .join("direct-mapped")
+        .join(format!("{version}.img"));
+    let record = copy.with_extension("img.json");
+    let waited = Instant::now();
+    while !record.exists() {
+        if waited.elapsed() > DIRECT_MAPPED_DISK_WAIT {
+            boot.fail(format!(
+                "the service did not make and check the direct-mapped system disk {} within {} s",
+                copy.display(),
+                DIRECT_MAPPED_DISK_WAIT.as_secs()
+            ));
+        }
+        std::thread::sleep(Duration::from_secs(5));
+    }
+    let made_in = waited.elapsed();
+    let (_, before) = dsa_host_core::direct_mapped_disk::file_sha256(&copy).unwrap();
+    let made = format!(
+        "{} bytes, ready {} s after Android first booted with Google Play; SHA-256 {before}",
+        std::fs::metadata(&copy).map(|m| m.len()).unwrap_or(0),
+        made_in.as_secs()
+    );
+    eprintln!("the direct-mapped system disk: {made}");
+    let _ = std::fs::write(boot.dir.join("direct-mapped-disk.txt"), &made);
+    // The boot before it, from the image's own disk, checked its verified boot data.
+    let (cached_avb, cached_avb_lines) = verified_boot(&boot.adb);
+    let rest = deadline
+        .saturating_duration_since(Instant::now())
+        .saturating_sub(one_window * 2 + Duration::from_secs(420));
+    restart_android(&mut boot, rest, "with its disks mapped");
+    let mapped_table = boot
+        .adb
+        .shell("cat /proc/self/mountinfo")
+        .unwrap_or_default();
+    let _ = std::fs::write(boot.dir.join("direct-mapped-mounts.txt"), &mapped_table);
+    let devices = boot
+        .adb
+        .shell(
+            "ls -l /sys/block /dev/block/by-name; getprop ro.boot.boot_devices; \
+             getprop ro.boot.fstab_suffix; getprop ro.boot.dsa.direct_mapped; \
+             getprop ro.boot.dsa.gapps_image",
+        )
+        .unwrap_or_default();
+    let _ = std::fs::write(boot.dir.join("direct-mapped-devices.txt"), &devices);
+    let kernel = boot
+        .adb
+        .shell("logcat -d -b kernel -v monotonic")
+        .unwrap_or_default();
+    let dax_lines: Vec<&str> = kernel
+        .lines()
+        .filter(|line| {
+            let line = line.to_ascii_lowercase();
+            line.contains("dax") || line.contains("pmem") || line.contains("nvdimm")
+        })
+        .collect();
+    let _ = std::fs::write(
+        boot.dir.join("direct-mapped-kernel.txt"),
+        dax_lines.join("\n"),
+    );
+    let mapped_mounts = memory_check::direct_mapped::erofs_mounts(&mapped_table);
+    let problems = memory_check::direct_mapped::mapping_problems(&mapped_mounts, GAPPS_POINT);
+    if !problems.is_empty() {
+        boot.fail(format!(
+            "the direct-mapped boot did not map its read-only disks:\n{}\nthe kernel said:\n{}",
+            problems.join("\n"),
+            dax_lines.join("\n")
+        ));
+    }
+    // The mapped boot still checks the verified boot data as the boot from the image's own
+    // disk did: first stage init opens it for odm, which keeps dm-verity.
+    let (mapped_avb, mapped_avb_lines) = verified_boot(&boot.adb);
+    let _ = std::fs::write(
+        boot.dir.join("direct-mapped-avb.txt"),
+        format!(
+            "image's own disk: ro.boot.avb_version={cached_avb}\n{}\n\nmapped: \
+             ro.boot.avb_version={mapped_avb}\n{}\n",
+            cached_avb_lines.join("\n"),
+            mapped_avb_lines.join("\n")
+        ),
+    );
+    if mapped_avb.is_empty() || mapped_avb != cached_avb {
+        boot.fail(format!(
+            "the direct-mapped boot reports ro.boot.avb_version {mapped_avb:?}, the boot from the \
+             image's own disk {cached_avb:?}: its verified boot data was not checked the same \
+             way (direct-mapped-avb.txt)"
+        ));
+    }
+    if !cached_avb_lines.is_empty() && mapped_avb_lines.is_empty() {
+        boot.fail(
+            "the direct-mapped boot's kernel log has no AVB or dm-verity line, and the boot from \
+             the image's own disk had some (direct-mapped-avb.txt)"
+                .into(),
+        );
+    }
+    // The persistent memory disks are read only in the guest, and a write to one does not
+    // reach the host's file.
+    let read_only = boot
+        .adb
+        .shell("for d in /sys/block/pmem*; do echo \"$d $(cat $d/ro)\"; done")
+        .unwrap_or_default();
+    let write = boot
+        .adb
+        .shell("dd if=/dev/zero of=/dev/block/pmem0 bs=4096 count=1 seek=1 2>&1; echo status $?")
+        .unwrap_or_default();
+    let _ = std::fs::write(
+        boot.dir.join("direct-mapped-read-only.txt"),
+        format!("{read_only}\n---\n{write}"),
+    );
+    let flags: Vec<&str> = read_only.lines().filter(|l| !l.trim().is_empty()).collect();
+    if flags.is_empty() || flags.iter().any(|l| !l.trim_end().ends_with(" 1")) {
+        boot.fail(format!(
+            "the guest's persistent memory disks are not all read only:\n{read_only}"
+        ));
+    }
+    let mapped = one_window_readings(&mut boot, "direct-mapped");
+    let mapped_crosvm = crosvm_resident();
+    let (_, after_boot) = dsa_host_core::direct_mapped_disk::file_sha256(&copy).unwrap();
+    if after_boot != before {
+        boot.fail(format!(
+            "the direct-mapped system disk changed while the guest mapped it: SHA-256 {before} \
+             before, {after_boot} after"
+        ));
+    }
+
+    // The service again with the disks on virtio-blk; Google Play stays installed.
+    eprintln!(
+        "{} s: starting Android again with its disks cached",
+        boot.started.elapsed().as_secs()
+    );
+    if let Err(why) = boot.api.stop() {
+        boot.fail(format!("stopping Android: {why}"));
+    }
+    let stop_until = Instant::now() + Duration::from_secs(120);
+    loop {
+        use dsa_host_core::session::SessionState;
+        match boot.api.status() {
+            Ok(status) if status.state == SessionState::Stopped => break,
+            Ok(_) if Instant::now() < stop_until => std::thread::sleep(Duration::from_secs(1)),
+            Ok(status) => boot.fail(format!("Android did not stop: it is {:?}", status.state)),
+            Err(why) => boot.fail(format!("reading the status: {why}")),
+        }
+    }
+    boot.settings["direct_mapped_images"] = serde_json::Value::Bool(false);
+    std::fs::write(&boot.config, boot.settings.to_string()).unwrap();
+    // The old service ends before the new one takes its socket: a stand-in that exits at once
+    // takes its place first, which stops it.
+    boot.service = Service::spawn(&mut Command::new("true"), boot.dir.join("between.log"));
+    let _ = std::fs::remove_file(&boot.socket);
+    boot.service = Service::spawn(
+        Command::new(env!("CARGO_BIN_EXE_dsa-linux-hostd"))
+            .arg("--config")
+            .arg(&boot.config),
+        boot.dir.join("hostd-cached.log"),
+    );
+    boot.api = client(&boot.socket, Duration::from_secs(30));
+    read_log(&boot.socket, &boot.log);
+    let rest = deadline
+        .saturating_duration_since(Instant::now())
+        .saturating_sub(one_window + Duration::from_secs(60));
+    let started = boot.started;
+    if let Err(why) = boot
+        .api
+        .ensure_running(rest, Duration::from_secs(2), |state| {
+            eprintln!("{} s: Android is {state:?}", started.elapsed().as_secs());
+        })
+    {
+        boot.fail(format!(
+            "Android did not become ready with its disks cached: {why}"
+        ));
+    }
+    if let Err(why) = boot.adb.connect(Duration::from_secs(120)) {
+        boot.fail(format!(
+            "adb did not reach the guest after the restart: {why}"
+        ));
+    }
+    let cached_table = boot
+        .adb
+        .shell("cat /proc/self/mountinfo")
+        .unwrap_or_default();
+    let _ = std::fs::write(boot.dir.join("cached-mounts.txt"), &cached_table);
+    let cached_mounts = memory_check::direct_mapped::erofs_mounts(&cached_table);
+    if cached_mounts.iter().any(|m| m.dax) {
+        boot.fail(
+            "the boot with the setting off still mapped a disk with DAX; see cached-mounts.txt"
+                .into(),
+        );
+    }
+    let cached = one_window_readings(&mut boot, "cached");
+    let cached_crosvm = crosvm_resident();
+
+    let google_play = format!("{}, its image mounted from {}", boot.gapps, boot.mounted);
+    let environment = runner_environment();
+    let setting = memory_check::Setting {
+        google_play: &google_play,
+        app: "Settings",
+        memory_mb: IDLE_MEMORY_MB,
+        processors: IDLE_PROCESSORS,
+        environment: &environment,
+    };
+    let Some(report) = memory_check::direct_mapped::report(
+        &memory_check::direct_mapped::Boot {
+            readings: &cached,
+            crosvm: cached_crosvm,
+            mounts: &cached_mounts,
+        },
+        &memory_check::direct_mapped::Boot {
+            readings: &mapped,
+            crosvm: mapped_crosvm,
+            mounts: &mapped_mounts,
+        },
+        &setting,
+    ) else {
+        boot.fail(
+            "a boot had no reading with both the guest's report and the VM's process, so \
+             nothing was measured; they are in direct-mapped-readings.txt and cached-readings.txt"
+                .into(),
+        );
+    };
+    let _ = std::fs::write(boot.dir.join("direct-mapped.md"), &report.markdown);
+    let _ = std::fs::write(
+        boot.dir.join("direct-mapped.json"),
+        serde_json::to_string_pretty(&report.json).unwrap_or_default(),
+    );
+    println!("{}", report.markdown);
+}
+
+#[test]
+fn nfr1_the_memory_with_google_play_and_one_app_window_is_measured_on_the_booted_image() {
+    let deadline = Instant::now() + MEMORY_BUDGET;
+    let _watchdog = Watchdog::start("the memory measurement", MEMORY_BUDGET + OVERRUN);
+    let after = MEMORY_APP_WAIT
+        + MEMORY_SETTLE
+        + MEMORY_EVERY * (MEMORY_READINGS + MEMORY_IDLE_READINGS)
+        + MEMORY_WRITEBACK_WAIT
+        + KERNEL_REPORT_WAIT
+        + HEAP_DUMP_WAIT * 2
+        + Duration::from_secs(180);
+    let Some(mut boot) = boot_with_google_play(
+        deadline,
+        after,
+        IDLE_MEMORY_MB,
+        IDLE_PROCESSORS,
+        MEMORY_WRITEBACK_CMDLINE,
+        false,
+    ) else {
+        return;
+    };
+    let readings = one_window_readings(&mut boot, "memory");
+    // What the kernel's part is made of, read by root in the guest right after the readings.
+    let kernel = kernel_memory_report(&boot.adb, &boot.dir);
+    let dumpsys = boot.adb.shell("dumpsys meminfo").unwrap_or_default();
+    let _ = std::fs::write(boot.dir.join("memory-dumpsys.txt"), &dumpsys);
+    let pss = memory_check::pss_by_process(&dumpsys);
+    let (system_server_md, system_server_json) = system_server_memory(&boot.adb, &boot.dir);
+
+    let baseline: serde_json::Value =
+        serde_json::from_str(memory_check::BASELINE).expect("the memory baseline is JSON");
+    let google_play = format!("{}, its image mounted from {}", boot.gapps, boot.mounted);
+    let environment = runner_environment();
+    let setting = memory_check::Setting {
+        google_play: &google_play,
+        app: "Settings",
+        memory_mb: IDLE_MEMORY_MB,
+        processors: IDLE_PROCESSORS,
+        environment: &environment,
+    };
+    let Some(mut report) = memory_check::report(&readings, &pss, &baseline, &setting) else {
+        boot.fail(format!(
+            "none of the {MEMORY_READINGS} readings had both the guest's report and the VM's \
+             process, so nothing was measured; they are in memory-readings.txt"
+        ));
+    };
+    report.markdown.push('\n');
+    match &kernel {
+        Ok(lines) => {
+            report
+                .markdown
+                .push_str(&memory_check::kernel_markdown(lines));
+            report.json["kernel_report"] = serde_json::json!(lines);
+        }
+        Err(why) => {
+            report.markdown.push_str(&format!(
+                "## The guest kernel's memory\n\nNo kernel memory report: {why}\n\n"
+            ));
+            report.json["kernel_report"] = serde_json::json!({ "error": why });
+        }
+    }
+    report.markdown.push_str(&system_server_md);
+    report.json["system_server"] = system_server_json;
+
+    // The window closes: the idle reclaim, the free pages reported again, and the zram
+    // writeback, at the times the boot set. The numbers again, beside the ones above.
+    let closed = Instant::now();
+    match boot.api.tasks() {
+        Ok(list) => {
+            for task in list.tasks.iter().filter(|t| t.package_name == MEMORY_APP) {
+                if let Err(why) = boot.api.close_task(task.task_id) {
+                    boot.fail(format!("closing {MEMORY_APP}'s window: {why}"));
+                }
+            }
+        }
+        Err(why) => boot.fail(format!("listing the tasks: {why}")),
+    }
+    let guest_log = || {
+        boot.adb
+            .shell("logcat -d -b kernel -b main -v monotonic")
+            .unwrap_or_default()
+    };
+    let mut log = guest_log();
+    while memory_check::writeback_runs(&log).is_empty()
+        && !memory_check::no_backing_file(&log)
+        && closed.elapsed() < MEMORY_WRITEBACK_WAIT
+    {
+        std::thread::sleep(Duration::from_secs(5));
+        log = guest_log();
+    }
+    // The reclaim and the rereport after the writeback settle before the readings.
+    std::thread::sleep(MEMORY_EVERY);
+    let mut idle_readings = Vec::new();
+    let mut idle_raw = Vec::new();
+    for index in 0..MEMORY_IDLE_READINGS {
+        if index > 0 {
+            std::thread::sleep(MEMORY_EVERY);
+        }
+        let snapshot = match boot.api.memory() {
+            Ok(snapshot) => snapshot,
+            Err(why) => boot.fail(format!("reading the memory after the window closed: {why}")),
+        };
+        idle_raw.push(snapshot.to_string());
+        if let Some(reading) = memory_check::reading(&snapshot, service_memory()) {
+            idle_readings.push(reading);
+        }
+    }
+    let waited = closed.elapsed().as_secs();
+    let log = guest_log();
+    let _ = std::fs::write(
+        boot.dir.join("memory-idle-readings.txt"),
+        idle_raw.join("\n---\n"),
+    );
+    let _ = std::fs::write(boot.dir.join("memory-guest-log.txt"), &log);
+    let runs = memory_check::writeback_runs(&log);
+    let mut problems = Vec::new();
+    match memory_check::idle_report(&readings, &idle_readings, &runs, waited) {
+        Some(idle) => {
+            report.markdown.push('\n');
+            report.markdown.push_str(&idle.markdown);
+            report.json["after_the_window_closes"] = idle.json;
+        }
+        None => problems.push(format!(
+            "none of the {MEMORY_IDLE_READINGS} readings after the window closed had both the \
+             guest's report and the VM's process; they are in memory-idle-readings.txt"
+        )),
+    }
+    // A guest whose zram has no backing file keeps all of zram in memory: the image or the
+    // kernel lost what the writeback needs.
+    if memory_check::no_backing_file(&log) {
+        problems.push(
+            "the guest's zram has no backing file, so no writeback can run; the guest's log is \
+             in memory-guest-log.txt"
+                .to_string(),
+        );
+    } else if runs.is_empty() {
+        println!(
+            "::warning::no zram writeback ran within {} s of the window closing; the guest's log is in memory-guest-log.txt",
+            MEMORY_WRITEBACK_WAIT.as_secs()
+        );
+    }
+
+    let _ = std::fs::write(boot.dir.join("memory.md"), &report.markdown);
+    let _ = std::fs::write(
+        boot.dir.join("memory.json"),
+        serde_json::to_string_pretty(&report.json).unwrap_or_default(),
+    );
+    println!("{}", report.markdown);
+    if let Err(why) = &kernel {
+        println!("::warning::no kernel memory report: {why}");
+    }
+    if !problems.is_empty() {
+        boot.fail(problems.join("\n"));
+    }
+    let missing = memory_check::unrecorded(&baseline);
+    if !missing.is_empty() {
+        println!(
+            "::warning::the memory baseline records no value for {}, so they are reported and not compared",
+            missing.join(", ")
+        );
+    }
+    let problems: Vec<String> =
+        serde_json::from_value(report.json["regressions"].clone()).unwrap_or_default();
+    if !problems.is_empty() {
+        boot.fail(problems.join("\n"));
     }
 }

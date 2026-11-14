@@ -91,3 +91,53 @@ fn fr15_a_mirror_on_a_drive_is_read_as_a_file_and_the_web_through_winhttp() {
     assert_eq!(body, b"from the web");
     assert_eq!(server.join().unwrap(), "GET /program.json HTTP/1.1");
 }
+
+/// The policy of a passkey check, over plain HTTP so the test server can answer it.
+fn passkey_policy(limit: u64) -> dsa_host_windows::https::Policy {
+    dsa_host_windows::https::Policy {
+        timeout: std::time::Duration::from_secs(10),
+        https_only: false,
+        follow_redirects: false,
+        limit: Some(limit),
+    }
+}
+
+#[test]
+fn fr36_a_passkey_check_does_not_follow_a_redirect() {
+    let (base, server) = serve_once(
+        "302 Found\r\nLocation: http://127.0.0.1:1/elsewhere",
+        b"moved".to_vec(),
+    );
+    let error = dsa_host_windows::https::get(
+        &format!("{base}/.well-known/assetlinks.json"),
+        &passkey_policy(1024),
+        &mut Vec::new(),
+    )
+    .unwrap_err();
+    assert!(error.contains("redirect"), "{error}");
+    server.join().unwrap();
+}
+
+#[test]
+fn fr36_a_passkey_check_stops_at_its_size_limit() {
+    let (base, server) = serve_once("200 OK", vec![b'x'; 4096]);
+    let error = dsa_host_windows::https::get(
+        &format!("{base}/.well-known/assetlinks.json"),
+        &passkey_policy(1000),
+        &mut Vec::new(),
+    )
+    .unwrap_err();
+    assert!(error.contains("larger than 1000 bytes"), "{error}");
+    let _ = server.join();
+
+    let (base, server) = serve_once("200 OK", b"[]".to_vec());
+    let mut body = Vec::new();
+    dsa_host_windows::https::get(
+        &format!("{base}/.well-known/assetlinks.json"),
+        &passkey_policy(1000),
+        &mut body,
+    )
+    .unwrap();
+    assert_eq!(body, b"[]");
+    server.join().unwrap();
+}

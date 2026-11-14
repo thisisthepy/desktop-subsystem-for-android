@@ -48,6 +48,11 @@ mkdir -p "$out"
     "$here/tests/shared_color_buffer_test.cpp" -o "$out/shared_color_buffer_test"
 "$out/shared_color_buffer_test"
 
+"$cxx" "${flags[@]}" -I"$here/tests" -I"$here/../../graphics/include" \
+    "$here/src/cpu_upload_policy.cpp" "$here/tests/cpu_upload_policy_test.cpp" \
+    -o "$out/cpu_upload_policy_test"
+"$out/cpu_upload_policy_test"
+
 # The generated codec is not ours to warn about.
 "$cxx" -std=c++17 -I"$protocol/cpp/generated" "${protobuf[@]}" -c \
     "$protocol/cpp/generated/control.pb.cc" -o "$out/control.pb.o"

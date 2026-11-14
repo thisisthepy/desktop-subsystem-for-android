@@ -1,58 +1,64 @@
 //! The guest's sound on the user's speakers, and the user's microphone in the guest, through
-//! PulseAudio's simple API.
+//! PulseAudio's API.
 //!
 //! PulseAudio's API is what every Linux desktop speaks: PipeWire serves it through
 //! `pipewire-pulse`, and PulseAudio itself where it still runs. The library is loaded when a
-//! stream opens (`libpulse-simple.so.0`), so a computer without it still runs DSA, without
-//! sound. Each stream goes to the user's default device and follows it when the user picks
-//! another, because no device is named.
+//! stream opens (`libpulse-simple.so.0`, `libpulse.so.0`), so a computer without it still
+//! runs DSA, without sound. Each stream goes to the user's default device and follows it when
+//! the user picks another, because no device is named.
+//!
+//! The microphone is read through the simple API. Each output plays through the asynchronous
+//! API instead ([`super::pulse_stream`]), as the app it plays, at the app's volume, in the
+//! desktop's sound mixer, which is the only volume the guest's sound has.
 //!
 //! The guest's format (48 kHz, stereo, 16-bit) is what each stream asks for; the sound
 //! server converts it to the device's. A microphone the user has muted or a computer that has
 //! none fails the stream with the server's reason, which the guest is told.
 
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::thread::{self, JoinHandle};
 
+use dsa_host_core::app_audio::AppVolumes;
 use dsa_host_core::audio::{
     AudioDevice, CaptureSink, DeviceFormat, Playback, Recording, Renderer, SampleType, SharedBuffer,
 };
 
 /// The guest's rate.
-const RATE: u32 = 48_000;
+pub(super) const RATE: u32 = 48_000;
 /// The guest's channels.
-const CHANNELS: u8 = 2;
+pub(super) const CHANNELS: u8 = 2;
 /// Bytes in one frame of the guest's format.
-const FRAME_BYTES: usize = 4;
+pub(super) const FRAME_BYTES: usize = 4;
 /// Frames written or read at a time: 10 ms.
-const CHUNK_FRAMES: usize = (RATE as usize) / 100;
+pub(super) const CHUNK_FRAMES: usize = (RATE as usize) / 100;
 /// How much the server keeps queued for playback, in bytes: 40 ms. Short, so the guest's own
 /// timing stays close to what is heard.
-const TARGET_BYTES: u32 = (RATE / 25) * FRAME_BYTES as u32;
+pub(super) const TARGET_BYTES: u32 = (RATE / 25) * FRAME_BYTES as u32;
 
 /// `PA_SAMPLE_S16LE`.
-const PA_SAMPLE_S16LE: c_int = 3;
-/// `PA_STREAM_PLAYBACK`.
-const PA_STREAM_PLAYBACK: c_int = 1;
+pub(super) const PA_SAMPLE_S16LE: c_int = 3;
 /// `PA_STREAM_RECORD`.
 const PA_STREAM_RECORD: c_int = 2;
 
+/// `pa_sample_spec`.
 #[repr(C)]
-struct SampleSpec {
-    format: c_int,
-    rate: u32,
-    channels: u8,
+pub(super) struct SampleSpec {
+    pub(super) format: c_int,
+    pub(super) rate: u32,
+    pub(super) channels: u8,
 }
 
+/// `pa_buffer_attr`.
 #[repr(C)]
-struct BufferAttr {
-    maxlength: u32,
-    tlength: u32,
-    prebuf: u32,
-    minreq: u32,
-    fragsize: u32,
+pub(super) struct BufferAttr {
+    pub(super) maxlength: u32,
+    pub(super) tlength: u32,
+    pub(super) prebuf: u32,
+    pub(super) minreq: u32,
+    pub(super) fragsize: u32,
 }
 
 type NewFn = unsafe extern "C" fn(
@@ -66,7 +72,6 @@ type NewFn = unsafe extern "C" fn(
     *const BufferAttr,
     *mut c_int,
 ) -> *mut c_void;
-type IoFn = unsafe extern "C" fn(*mut c_void, *const c_void, usize, *mut c_int) -> c_int;
 type ReadFn = unsafe extern "C" fn(*mut c_void, *mut c_void, usize, *mut c_int) -> c_int;
 type LatencyFn = unsafe extern "C" fn(*mut c_void, *mut c_int) -> u64;
 type FreeFn = unsafe extern "C" fn(*mut c_void);
@@ -75,7 +80,6 @@ type StrErrorFn = unsafe extern "C" fn(c_int) -> *const c_char;
 /// The functions of the simple API this uses.
 struct Pulse {
     new: NewFn,
-    write: IoFn,
     read: ReadFn,
     latency: LatencyFn,
     free: FreeFn,
@@ -121,7 +125,6 @@ fn pulse() -> Result<&'static Pulse, String> {
             unsafe {
                 Ok(Pulse {
                     new: symbol(simple, c"pa_simple_new").ok_or_else(missing)?,
-                    write: symbol(simple, c"pa_simple_write").ok_or_else(missing)?,
                     read: symbol(simple, c"pa_simple_read").ok_or_else(missing)?,
                     latency: symbol(simple, c"pa_simple_get_latency").ok_or_else(missing)?,
                     free: symbol(simple, c"pa_simple_free").ok_or_else(missing)?,
@@ -217,8 +220,26 @@ impl Drop for Stream {
     }
 }
 
-/// The user's sound devices, through the sound server.
-pub struct PulseAudio;
+/// The user's sound devices, through the sound server, with each output playing as the app
+/// `volumes` says it plays.
+pub struct PulseAudio {
+    volumes: Arc<AppVolumes>,
+    /// The icon theme the user's app icons are in, where the mixer finds each app's icon.
+    icon_theme: Option<PathBuf>,
+}
+
+impl PulseAudio {
+    pub fn new(volumes: Arc<AppVolumes>) -> PulseAudio {
+        let icon_theme = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .filter(|home| home.is_absolute())
+            .map(|home| home.join(".local/share/icons/hicolor"));
+        PulseAudio {
+            volumes,
+            icon_theme,
+        }
+    }
+}
 
 /// A stream's thread, stopped and waited for when it is dropped.
 struct Running {
@@ -280,31 +301,14 @@ pub fn stream_format() -> DeviceFormat {
 
 impl AudioDevice for PulseAudio {
     fn play(&self, name: &str, source: SharedBuffer) -> Result<Box<dyn Playback>, String> {
-        let mut renderer = Renderer::new(stream_format(), source)?;
-        let stream = Stream::open(PA_STREAM_PLAYBACK, name)?;
-        let running = Running::start(name, stream, move |stream, stop, delay| {
-            let mut chunk = vec![0u8; CHUNK_FRAMES * FRAME_BYTES];
-            while !stop.load(Ordering::Relaxed) {
-                renderer.render(&mut chunk);
-                let mut error: c_int = 0;
-                // SAFETY: an open stream and a buffer of the length passed. The call returns
-                // once the server has room, which paces this loop at the device's rate.
-                let written = unsafe {
-                    (stream.pulse.write)(
-                        stream.handle,
-                        chunk.as_ptr().cast(),
-                        chunk.len(),
-                        &mut error,
-                    )
-                };
-                if written < 0 {
-                    eprintln!("sound: playback ended: {}", stream.pulse.describe(error));
-                    break;
-                }
-                delay.store(stream.latency_frames(), Ordering::Relaxed);
-            }
-        })?;
-        Ok(Box::new(running))
+        let renderer = Renderer::new(stream_format(), source)?;
+        let playback = super::pulse_stream::play(
+            name,
+            renderer,
+            Arc::clone(&self.volumes),
+            self.icon_theme.clone(),
+        )?;
+        Ok(Box::new(playback))
     }
 
     fn record(&self, name: &str, mut sink: CaptureSink) -> Result<Box<dyn Recording>, String> {

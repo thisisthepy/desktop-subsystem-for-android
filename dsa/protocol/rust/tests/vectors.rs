@@ -22,8 +22,9 @@ use dsa_protocol::control::{
     ResizeTask, Role, ScreenState, SetTaskDensity, TaskFrames, TaskRemoved, TaskUpdated,
 };
 use dsa_protocol::control::{
-    AddWidget, ListWidgetProviders, RemoveWidget, ResizeWidget, WidgetAdded, WidgetFrame,
-    WidgetList, WidgetPointer, WidgetProvider, WidgetProviders, WidgetUpdated,
+    AddWidget, ListWidgetProviders, ReconfigureWidget, RemoveWidget, ResizeWidget, WidgetAdded,
+    WidgetFrame, WidgetList, WidgetPointer, WidgetProvider, WidgetProviders, WidgetReconfigured,
+    WidgetUpdated,
 };
 use dsa_protocol::control::{
     CameraDevice, CameraFacing, CameraFrame, CameraList, CameraMode, CameraOpen, CameraStill,
@@ -36,6 +37,10 @@ use dsa_protocol::control::{
 };
 use dsa_protocol::control::{
     PrintJob, PrintJobCancel, PrintJobChunk, PrintJobResult, PrintOutcome,
+};
+use dsa_protocol::control::{
+    RecognitionEvent, RecognitionEventKind, SpeakText, SpeechAudio, SpellingMistake,
+    SpellingResult, SpellingText,
 };
 use dsa_protocol::control::{
     SensorActivate, SensorDescription, SensorKind, SensorList, SensorReading, SensorReadings,
@@ -85,6 +90,7 @@ fn clock_provider() -> WidgetProvider {
         resize_mode: 3,
         needs_configuration: false,
         app_label: String::new(),
+        reconfigurable: false,
     }
 }
 
@@ -901,6 +907,22 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
             })),
         ),
         (
+            "widget_reconfigure",
+            wrap(Body::ReconfigureWidget(ReconfigureWidget {
+                request_id: 7,
+                widget_id: 12,
+            })),
+        ),
+        (
+            "widget_reconfigured",
+            wrap(Body::WidgetReconfigured(WidgetReconfigured {
+                request_id: 7,
+                widget_id: 12,
+                finished: true,
+                error: String::new(),
+            })),
+        ),
+        (
             "accessibility_watch_on",
             wrap(Body::AccessibilityWatch(AccessibilityWatch {
                 task_id: 42,
@@ -1192,6 +1214,52 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
                     timestamp_us: 1000,
                     values: vec![2.5],
                 }],
+            })),
+        ),
+        (
+            "speak_text",
+            wrap(Body::SpeakText(SpeakText {
+                request_id: 3,
+                text: "hello".into(),
+                voice_id: "aria".into(),
+                language_tag: "en-US".into(),
+                rate: 1.5,
+                pitch: 0.8,
+            })),
+        ),
+        (
+            "speech_audio",
+            wrap(Body::SpeechAudio(SpeechAudio {
+                request_id: 3,
+                sample_rate_hz: 24000,
+                channel_count: 1,
+                pcm: vec![1, 0, 2, 0],
+            })),
+        ),
+        (
+            "recognition_event",
+            wrap(Body::RecognitionEvent(RecognitionEvent {
+                request_id: 9,
+                kind: RecognitionEventKind::Final as i32,
+                texts: vec!["hello world".into()],
+                confidences: vec![0.9],
+                error: 0,
+                message: String::new(),
+            })),
+        ),
+        (
+            "spelling_result",
+            wrap(Body::SpellingResult(SpellingResult {
+                request_id: 5,
+                texts: vec![SpellingText {
+                    mistakes: vec![SpellingMistake {
+                        start: 6,
+                        length: 3,
+                        suggestions: vec!["the".into()],
+                        recommended: true,
+                    }],
+                }],
+                supported: true,
             })),
         ),
     ])

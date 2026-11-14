@@ -150,4 +150,16 @@ public interface WidgetProviderOrBuilder extends
    */
   com.google.protobuf.ByteString
       getAppLabelBytes();
+
+  /**
+   * <pre>
+   * Whether the widget can be set up again once placed: it has a configuration activity, and
+   * its app says so (the reconfigurable widget feature). The widget's menu then offers its
+   * settings, which ReconfigureWidget opens.
+   * </pre>
+   *
+   * <code>bool reconfigurable = 14;</code>
+   * @return The reconfigurable.
+   */
+  boolean getReconfigurable();
 }

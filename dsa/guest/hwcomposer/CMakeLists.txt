@@ -77,6 +77,8 @@ add_executable(dsa-hwcomposer
     src/compose_request.cpp
     src/composer.cpp
     src/composer_client.cpp
+    src/cpu_upload.cpp
+    src/cpu_upload_policy.cpp
     src/display.cpp
     src/frame_pipeline.cpp
     src/host_renderer.cpp

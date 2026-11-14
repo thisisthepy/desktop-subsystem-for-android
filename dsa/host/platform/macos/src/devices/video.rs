@@ -190,6 +190,9 @@ mod toolbox {
 
     use super::{length_prefixed, nal_units, ParameterSets};
     use crate::devices::camera::{pack_nv12, Plane};
+    use crate::security::{
+        kCFTypeDictionaryKeyCallBacks, kCFTypeDictionaryValueCallBacks, CFDictionaryCreate,
+    };
 
     type OSStatus = i32;
     type CFTypeRef = *const c_void;
@@ -231,17 +234,7 @@ mod toolbox {
 
     #[link(name = "CoreFoundation", kind = "framework")]
     extern "C" {
-        static kCFTypeDictionaryKeyCallBacks: c_void;
-        static kCFTypeDictionaryValueCallBacks: c_void;
         static kCFBooleanTrue: CFTypeRef;
-        fn CFDictionaryCreate(
-            allocator: CFTypeRef,
-            keys: *const CFTypeRef,
-            values: *const CFTypeRef,
-            count: isize,
-            key_callbacks: *const c_void,
-            value_callbacks: *const c_void,
-        ) -> CFTypeRef;
         fn CFNumberCreate(allocator: CFTypeRef, kind: isize, value: *const c_void) -> CFTypeRef;
         fn CFRelease(object: CFTypeRef);
     }

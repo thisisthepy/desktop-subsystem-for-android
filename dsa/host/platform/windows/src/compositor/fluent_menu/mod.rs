@@ -21,6 +21,8 @@ mod automation;
 mod window;
 
 #[cfg(windows)]
+pub(crate) use window::{blit, work_area};
+#[cfg(windows)]
 pub use window::{row_art, show, Request};
 
 use super::fluent::{Argb, Canvas, MenuPalette};
@@ -41,6 +43,9 @@ pub struct MenuItem {
     pub enabled: bool,
     /// The items of the submenu the item opens; empty for an item that is chosen.
     pub submenu: Vec<MenuEntry>,
+    /// The keyboard shortcut that does the same outside the menu ("Alt+F4"), drawn at the
+    /// item's right end in the secondary text color, as WinUI draws a keyboard accelerator.
+    pub shortcut: Option<String>,
 }
 
 impl MenuItem {
@@ -53,7 +58,18 @@ impl MenuItem {
             checked: None,
             enabled: true,
             submenu: Vec::new(),
+            shortcut: None,
         }
+    }
+
+    pub fn with_shortcut(mut self, shortcut: impl Into<String>) -> MenuItem {
+        self.shortcut = Some(shortcut.into());
+        self
+    }
+
+    pub fn with_enabled(mut self, enabled: bool) -> MenuItem {
+        self.enabled = enabled;
+        self
     }
 
     pub fn with_glyph(mut self, glyph: char) -> MenuItem {
@@ -137,6 +153,10 @@ pub mod metrics {
     pub const MAX_WIDTH: u32 = 456;
     /// How far below a button a menu it opens sits.
     pub const ANCHOR_GAP: u32 = 4;
+    /// The keyboard accelerator's text size (`CaptionTextBlockStyle`).
+    pub const SHORTCUT_TEXT_SIZE: u32 = 12;
+    /// The least room between a label and its keyboard accelerator.
+    pub const SHORTCUT_GAP: u32 = 24;
 }
 
 /// A rectangle in a menu's pixels, or on the screen.
@@ -171,6 +191,8 @@ pub struct Row {
     pub text: Rect,
     /// The chevron of an item that opens a submenu.
     pub chevron: Option<Rect>,
+    /// The keyboard shortcut's box, right-aligned in the item.
+    pub shortcut: Option<Rect>,
     pub separator: bool,
 }
 
@@ -207,6 +229,19 @@ fn selectable(entries: &[MenuEntry], entry: usize) -> bool {
 /// can be checked, and an icon column when one has an icon, so the labels line up, as WinUI
 /// lines them up.
 pub fn layout(entries: &[MenuEntry], text_widths: &[i32], dpi: u32) -> MenuLayout {
+    layout_with_shortcuts(entries, text_widths, &[], dpi)
+}
+
+/// [`layout`], with the keyboard shortcuts of the items that have one `shortcut_widths` pixels
+/// wide (in the same order as the entries; missing widths count as 0). The shortcuts line up
+/// at the right end of the menu, after the widest label and a gap, as WinUI lines up its
+/// keyboard accelerators.
+pub fn layout_with_shortcuts(
+    entries: &[MenuEntry],
+    text_widths: &[i32],
+    shortcut_widths: &[i32],
+    dpi: u32,
+) -> MenuLayout {
     use metrics::*;
     let px = |dip: u32| px_of_dip(dip, dpi);
     let items = || entries.iter().filter_map(MenuEntry::item);
@@ -229,7 +264,16 @@ pub fn layout(entries: &[MenuEntry], text_widths: &[i32], dpi: u32) -> MenuLayou
         .map(|(index, _)| text_widths.get(index).copied().unwrap_or(0))
         .max()
         .unwrap_or(0);
-    let width = (text_x + widest + trailing).clamp(px(MIN_WIDTH), px(MAX_WIDTH));
+    let shortcut_of = |index: usize| {
+        let has = entries
+            .get(index)
+            .and_then(MenuEntry::item)
+            .is_some_and(|item| item.shortcut.is_some());
+        has.then(|| shortcut_widths.get(index).copied().unwrap_or(0).max(0))
+    };
+    let widest_shortcut = (0..entries.len()).filter_map(shortcut_of).max();
+    let shortcut_room = widest_shortcut.map_or(0, |width| px(SHORTCUT_GAP) + width);
+    let width = (text_x + widest + shortcut_room + trailing).clamp(px(MIN_WIDTH), px(MAX_WIDTH));
     let line = px(SEPARATOR_HEIGHT).max(1);
     let item_height = px(ITEM_HEIGHT);
     let mut rows = Vec::with_capacity(entries.len());
@@ -255,6 +299,7 @@ pub fn layout(entries: &[MenuEntry], text_widths: &[i32], dpi: u32) -> MenuLayou
                 glyph: None,
                 text: Rect::default(),
                 chevron: None,
+                shortcut: None,
                 separator: true,
             });
             top += height;
@@ -275,6 +320,16 @@ pub fn layout(entries: &[MenuEntry], text_widths: &[i32], dpi: u32) -> MenuLayou
             h: px(size),
         };
         let arrow = square(width - trailing + px(CHEVRON_GAP), CHEVRON_SIZE);
+        let shortcut = shortcut_of(entry).map(|shortcut_width| Rect {
+            x: (width - trailing - shortcut_width).max(text_x),
+            y: highlight.y,
+            w: shortcut_width,
+            h: item_height,
+        });
+        let text_end = match shortcut {
+            Some(at) => at.x - px(SHORTCUT_GAP),
+            None => width - trailing,
+        };
         rows.push(Row {
             entry,
             slot: Rect {
@@ -289,10 +344,11 @@ pub fn layout(entries: &[MenuEntry], text_widths: &[i32], dpi: u32) -> MenuLayou
             text: Rect {
                 x: text_x,
                 y: highlight.y,
-                w: (width - trailing - text_x).max(0),
+                w: (text_end - text_x).max(0),
                 h: item_height,
             },
             chevron: item.opens_submenu().then_some(arrow),
+            shortcut,
             separator: false,
         });
         top += height;
@@ -746,6 +802,8 @@ pub struct RowArt {
     pub glyph: Option<Mask>,
     pub check: Option<Mask>,
     pub chevron: Option<Mask>,
+    /// The keyboard shortcut's text.
+    pub shortcut: Option<Mask>,
     /// The line under the label's access key, in the menu's pixels.
     pub underline: Option<Rect>,
 }
@@ -828,6 +886,13 @@ pub fn render(look: &Look<'_>) -> Vec<u8> {
         }
         let chevron = on_highlight(palette.chevron);
         draw(&mut canvas, row.chevron, art.chevron.as_ref(), chevron);
+        // The shortcut in the secondary text color, as WinUI draws a keyboard accelerator.
+        let shortcut = if item.enabled {
+            on_highlight(palette.chevron)
+        } else {
+            palette.text_disabled
+        };
+        draw(&mut canvas, row.shortcut, art.shortcut.as_ref(), shortcut);
     }
     pixels
 }
@@ -1150,5 +1215,31 @@ mod tests {
         // The separator's line is drawn.
         let line = laid.rows[1].highlight;
         assert_ne!(pixel(&plain, line.x + 10, line.y), [0xF9, 0xF9, 0xF9, 0xFF]);
+    }
+
+    #[test]
+    fn fr22_a_keyboard_shortcut_stands_at_the_right_end_of_its_item() {
+        let entries = vec![
+            MenuEntry::Item(MenuItem::new(1, "Minimize")),
+            MenuEntry::Separator,
+            MenuEntry::Item(MenuItem::new(2, "Close").with_shortcut("Alt+F4")),
+        ];
+        let laid = layout_with_shortcuts(&entries, &[60, 0, 36], &[0, 0, 40], 96);
+        let close = laid.rows[2];
+        let shortcut = close.shortcut.expect("Close has its shortcut");
+        // Right-aligned before the item's padding, a gap after the widest label.
+        assert_eq!(shortcut.x + shortcut.w, laid.width - 4 - 11);
+        assert_eq!(shortcut.w, 40);
+        assert!(close.text.x + close.text.w <= shortcut.x - 24);
+        assert!(laid.width >= close.text.x + 60 + 24 + 40 + 15);
+        assert_eq!(laid.rows[0].shortcut, None);
+        // A menu without shortcuts is laid out as before.
+        let plain = vec![
+            MenuEntry::Item(MenuItem::new(1, "Minimize")),
+            MenuEntry::Item(MenuItem::new(2, "Close")),
+        ];
+        let laid = layout(&plain, &[60, 36], 96);
+        assert!(laid.rows.iter().all(|row| row.shortcut.is_none()));
+        assert_eq!(laid.rows[0].text.w, laid.width - 15 - 15);
     }
 }

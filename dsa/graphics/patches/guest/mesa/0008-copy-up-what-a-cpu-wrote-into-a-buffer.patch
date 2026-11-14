@@ -1,0 +1,327 @@
+diff --git a/src/gfxstream/guest/android/GrallocMinigbm.cpp b/src/gfxstream/guest/android/GrallocMinigbm.cpp
+index 5889c7b064f..5e49ed580c2 100644
+--- a/src/gfxstream/guest/android/GrallocMinigbm.cpp
++++ b/src/gfxstream/guest/android/GrallocMinigbm.cpp
+@@ -24,6 +24,7 @@
+ #include <cerrno>
+ #include <cinttypes>
+ #include <cstring>
++#include <ctime>
+ #include <vector>
+ 
+ #include "VirtGpu.h"
+@@ -124,6 +125,8 @@ void MinigbmGralloc::release(AHardwareBuffer* ahb) {
+                 if (auto* rcEnc = renderControl()) {
+                     rcEnc->rcCloseColorBuffer(rcEnc, hostHandle);
+                 }
++                std::lock_guard<std::mutex> lock(mUploadMutex);
++                mUploads.forget(cros_handle->id);
+             }
+         }
+         AHardwareBuffer_release(ahb);
+@@ -189,10 +192,12 @@ uint32_t MinigbmGralloc::getHostHandle(const native_handle_t* handle) {
+ 
+     // The ColorBuffer has the buffer's own format: the VkImage the guest binds to it is
+     // made in that format, and an RGBA ColorBuffer under an R8 or RGB565 image is a
+-    // different size and layout.
+-    const uint32_t glFormat = dsa_shared_color_buffer_gl_format(cros_handle->format);
++    // different size and layout. A YUV buffer gets a YUV ColorBuffer from a host that makes
++    // them, so what a CPU writes into it can be copied up as it is.
+     const uint32_t width = cros_handle->width ? cros_handle->width : 1;
+     const uint32_t height = cros_handle->height ? cros_handle->height : 1;
++    const uint32_t glFormat = dsa_shared_color_buffer_create_format(
++        cros_handle->format, width, height, hostHasYuv(rcEnc) ? 1 : 0);
+     const uint32_t hostHandle = dsa_shared_color_buffer_handle(bufferId);
+     if (rcEnc->rcOpenColorBuffer2(rcEnc, hostHandle) != 0) {
+         rcEnc->rcCreateColorBufferWithHandle(rcEnc, width, height, glFormat, hostHandle);
+@@ -325,6 +330,129 @@ int MinigbmGralloc::readBackForCpu(const native_handle_t* handle) {
+     return 0;
+ }
+ 
++bool MinigbmGralloc::hostHasYuv(ExtendedRCEncoderContext* rcEnc) {
++    int known = mHostYuv.load();
++    if (known < 0 && rcEnc) {
++        known = rcEnc->queryHostExtensions().find(DSA_YUV_COLOR_BUFFERS_EXTENSION) !=
++                        std::string::npos
++                    ? 1
++                    : 0;
++        mHostYuv.store(known);
++    }
++    return known == 1;
++}
++
++bool MinigbmGralloc::wantsCpuUpload(const native_handle_t* handle) {
++    // With virtio-gpu the kernel moves a CPU's writes to the host when the lock ends.
++    if (mDevice || !handle) {
++        return false;
++    }
++    cros_gralloc_handle const* cros_handle = reinterpret_cast<cros_gralloc_handle const*>(handle);
++    if (!dsa::wantsCpuUpload(static_cast<uint64_t>(cros_handle->usage))) {
++        return false;
++    }
++    return dsa::uploadLayout(cros_handle->format, cros_handle->width, cros_handle->height,
++                             hostHasYuv(renderControl()))
++        .valid();
++}
++
++int64_t MinigbmGralloc::uploadForGpu(AHardwareBuffer* ahb) {
++    const native_handle_t* handle = ahb ? AHardwareBuffer_getNativeHandle(ahb) : nullptr;
++    if (!wantsCpuUpload(handle)) {
++        return 0;
++    }
++    cros_gralloc_handle const* cros_handle = reinterpret_cast<cros_gralloc_handle const*>(handle);
++    auto* rcEnc = renderControl();
++    const uint32_t hostHandle = getHostHandle(handle);
++    if (!rcEnc || hostHandle == 0) {
++        return -ENODEV;
++    }
++    const dsa::UploadLayout layout = dsa::uploadLayout(cros_handle->format, cros_handle->width,
++                                                       cros_handle->height, hostHasYuv(rcEnc));
++    // The planes as a CPU lock maps them: the lock gives the first plane at its offset, the
++    // others follow at theirs. A gralloc lock, because a dma-buf of minigbm's could not be
++    // mapped directly in every process (see writeThroughGralloc).
++    const uint32_t planes =
++        cros_handle->num_planes < DRV_MAX_PLANES ? cros_handle->num_planes : DRV_MAX_PLANES;
++    const uint64_t first = planes ? cros_handle->offsets[0] : 0;
++    dsa::SourcePlane sources[DRV_MAX_PLANES];
++    for (uint32_t i = 0; i < planes; ++i) {
++        sources[i] = dsa::SourcePlane{
++            cros_handle->offsets[i] >= first ? cros_handle->offsets[i] - first : UINT64_MAX / 2,
++            cros_handle->strides[i]};
++    }
++    // The planes span the allocation without its metadata region.
++    const uint64_t planeBytes = cros_handle->total_size > cros_handle->reserved_region_size
++                                    ? cros_handle->total_size - cros_handle->reserved_region_size
++                                    : 0;
++    const size_t mapSize = planeBytes > first ? static_cast<size_t>(planeBytes - first) : 0;
++
++    std::lock_guard<std::mutex> lock(mUploadMutex);
++    void* mapped = nullptr;
++    int result = AHardwareBuffer_lock(ahb, AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN, -1, nullptr,
++                                      &mapped);
++    if (result != 0 || !mapped) {
++        if (!mUploadFailureLogged) {
++            mesa_loge("%s: cannot lock buffer %u to copy what the CPU wrote up to the host: %d",
++                      __func__, cros_handle->id, result);
++            mUploadFailureLogged = true;
++        }
++        return result != 0 ? result : -EINVAL;
++    }
++    const uint8_t* bytes = static_cast<const uint8_t*>(mapped);
++    const uint64_t print = dsa::fingerprint(bytes, mapSize, sources, planes, layout);
++    bool send = false;
++    if (print == 0) {
++        result = -EINVAL;
++    } else if (mUploads.needsUpload(cros_handle->id, print, false)) {
++        mUploadStaging.resize(layout.packedSize());
++        send = dsa::packPlanes(bytes, mapSize, sources, planes, layout, mUploadStaging.data());
++        if (!send) {
++            result = -EINVAL;
++        }
++    }
++    AHardwareBuffer_unlock(ahb, nullptr);
++    if (result < 0) {
++        if (!mUploadFailureLogged) {
++            mesa_loge("%s: buffer %u (%ux%u, format %#x) has planes outside its %zu bytes",
++                      __func__, cros_handle->id, cros_handle->width, cros_handle->height,
++                      cros_handle->format, mapSize);
++            mUploadFailureLogged = true;
++        }
++        return result;
++    }
++    if (!send) {
++        return 0;
++    }
++
++    // The host answers once the ColorBuffer holds the planes, before the GPU is given work.
++    const int status = rcEnc->rcUpdateColorBuffer(rcEnc, hostHandle, 0, 0, layout.callWidth,
++                                                  layout.callHeight, layout.glFormat,
++                                                  layout.glType, mUploadStaging.data());
++    const int64_t sent = static_cast<int64_t>(mUploadStaging.size());
++    if (status != 0) {
++        if (!mUploadFailureLogged) {
++            mesa_loge("%s: the host did not take what the CPU wrote into buffer %u (%ux%u, "
++                      "format %#x)",
++                      __func__, cros_handle->id, cros_handle->width, cros_handle->height,
++                      cros_handle->format);
++            mUploadFailureLogged = true;
++        }
++        return -EIO;
++    }
++    mUploads.uploaded(cros_handle->id, print);
++    timespec now = {};
++    clock_gettime(CLOCK_MONOTONIC, &now);
++    dsa::UploadRate::Report report;
++    if (mUploadRate.add(uint64_t(now.tv_sec) * 1000000000ULL + uint64_t(now.tv_nsec),
++                        static_cast<uint64_t>(sent), &report)) {
++        mesa_logd("copied %" PRIu64 " KiB that the CPU wrote up to the host in %u uploads over "
++                  "%" PRIu64 " ms",
++                  report.bytes / 1024, report.uploads, report.windowNs / 1000000);
++    }
++    return sent;
++}
++
+ uint32_t MinigbmGralloc::getHostHandle(const AHardwareBuffer* ahb) {
+     const native_handle_t* handle = AHardwareBuffer_getNativeHandle(ahb);
+     return getHostHandle(handle);
+diff --git a/src/gfxstream/guest/android/GrallocMinigbm.h b/src/gfxstream/guest/android/GrallocMinigbm.h
+index fb83e673c71..7f1d0598c94 100644
+--- a/src/gfxstream/guest/android/GrallocMinigbm.h
++++ b/src/gfxstream/guest/android/GrallocMinigbm.h
+@@ -7,8 +7,12 @@
+ 
+ #include <memory>
+ 
++#include <atomic>
+ #include <mutex>
+ #include <unordered_map>
++#include <vector>
++
++#include "dsa_cpu_upload.h"
+ 
+ #include "VirtGpu.h"
+ #include "gfxstream/guest/GfxStreamGralloc.h"
+@@ -60,13 +64,27 @@ class MinigbmGralloc : public Gralloc {
+     bool wantsCpuReadback(const native_handle_t* handle) override;
+     int readBackForCpu(const native_handle_t* handle) override;
+ 
++    bool wantsCpuUpload(const native_handle_t* handle) override;
++    int64_t uploadForGpu(AHardwareBuffer* ahb) override;
++
+    private:
+     // The renderControl encoder of the calling thread's host connection.
+     ExtendedRCEncoderContext* renderControl();
++    // Whether the host makes YUV ColorBuffers (dsa_shared_color_buffer.h). Asked once.
++    bool hostHasYuv(ExtendedRCEncoderContext* rcEnc);
+ 
+     std::unique_ptr<VirtGpuDevice> mDevice;
+     std::mutex mColorBufferMutex;
+     std::unordered_map<uint32_t, uint32_t> mBufferIdToColorBuffer;
++    // -1 until asked, then 0 or 1.
++    std::atomic<int> mHostYuv{-1};
++    // Guards the upload state: what each buffer was last uploaded with, the staging copy and
++    // the debug rate.
++    std::mutex mUploadMutex;
++    dsa::UploadTracker mUploads;
++    std::vector<uint8_t> mUploadStaging;
++    dsa::UploadRate mUploadRate;
++    bool mUploadFailureLogged = false;
+ };
+ 
+ }  // namespace gfxstream
+diff --git a/src/gfxstream/guest/android/include/gfxstream/guest/GfxStreamGralloc.h b/src/gfxstream/guest/android/include/gfxstream/guest/GfxStreamGralloc.h
+index e5aa7c57929..8f30751e415 100644
+--- a/src/gfxstream/guest/android/include/gfxstream/guest/GfxStreamGralloc.h
++++ b/src/gfxstream/guest/android/include/gfxstream/guest/GfxStreamGralloc.h
+@@ -186,6 +186,13 @@ class Gralloc {
+     virtual bool wantsCpuReadback(const native_handle_t* /*handle*/) { return false; }
+     // Copies the host's drawing over the buffer's memory. 0 when it did.
+     virtual int readBackForCpu(const native_handle_t* /*handle*/) { return -1; }
++
++    // Whether what a CPU writes into this buffer must be copied up to its host ColorBuffer
++    // before the GPU samples it: only the guest's memory holds it (dsa_cpu_upload.h).
++    virtual bool wantsCpuUpload(const native_handle_t* /*handle*/) { return false; }
++    // Copies the buffer's planes up if they changed since this process last did. Returns the
++    // bytes sent, 0 when nothing needed sending, and a negative errno when it failed.
++    virtual int64_t uploadForGpu(AHardwareBuffer* /*ahb*/) { return 0; }
+ };
+ 
+ Gralloc* createPlatformGralloc(int32_t descriptor = -1);
+diff --git a/src/gfxstream/guest/vulkan_enc/ResourceTracker.cpp b/src/gfxstream/guest/vulkan_enc/ResourceTracker.cpp
+index bd2e8a3d06a..bb56e595564 100644
+--- a/src/gfxstream/guest/vulkan_enc/ResourceTracker.cpp
++++ b/src/gfxstream/guest/vulkan_enc/ResourceTracker.cpp
+@@ -1111,6 +1111,7 @@ void ResourceTracker::unregister_VkDeviceMemory(VkDeviceMemory mem) {
+ 
+ #ifdef VK_USE_PLATFORM_ANDROID_KHR
+     mCpuReadback.remove((uint64_t)mem);
++    mCpuUploads.erase((uint64_t)mem);
+     if (memInfo.ahw) {
+         mGralloc->release(memInfo.ahw);
+     }
+@@ -1352,6 +1353,15 @@ void ResourceTracker::setDeviceInfo(VkDevice device, VkPhysicalDevice physdev,
+     }
+ }
+ 
++#ifdef VK_USE_PLATFORM_ANDROID_KHR
++// Whether this process is SurfaceFlinger. It samples only layers its composer was handed
++// first, and the composer copies up what a CPU wrote into those before SurfaceFlinger draws.
++static bool isComposerClient() {
++    static const bool composer = strcmp(getprogname(), "surfaceflinger") == 0;
++    return composer;
++}
++#endif
++
+ void ResourceTracker::setDeviceMemoryInfo(VkDevice device, VkDeviceMemory memory,
+                                           VkDeviceSize allocationSize, uint8_t* ptr,
+                                           uint32_t memoryTypeIndex, void* ahw, bool imported,
+@@ -1368,6 +1378,10 @@ void ResourceTracker::setDeviceMemoryInfo(VkDevice device, VkDeviceMemory memory
+     if (info.ahw && mGralloc->wantsCpuReadback(mGralloc->getNativeHandle(info.ahw))) {
+         mCpuReadback.add((uint64_t)memory, (uint64_t)device, info.ahw);
+     }
++    if (info.ahw && !isComposerClient() &&
++        mGralloc->wantsCpuUpload(mGralloc->getNativeHandle(info.ahw))) {
++        mCpuUploads[(uint64_t)memory] = info.ahw;
++    }
+ #endif
+     info.imported = imported;
+     info.vmoHandle = vmoHandle;
+@@ -1752,6 +1766,26 @@ void ResourceTracker::readBackImageForCpu(VkImage image) {
+ #endif
+ }
+ 
++void ResourceTracker::uploadForGpu() {
++#ifdef VK_USE_PLATFORM_ANDROID_KHR
++    std::vector<AHardwareBuffer*> buffers;
++    {
++        std::lock_guard<std::recursive_mutex> lock(mLock);
++        if (mCpuUploads.empty()) return;
++        // Each buffer stays alive while it is copied, even if another thread frees its memory.
++        buffers.reserve(mCpuUploads.size());
++        for (const auto& entry : mCpuUploads) {
++            AHardwareBuffer_acquire(entry.second);
++            buffers.push_back(entry.second);
++        }
++    }
++    for (AHardwareBuffer* ahb : buffers) {
++        mGralloc->uploadForGpu(ahb);
++        AHardwareBuffer_release(ahb);
++    }
++#endif
++}
++
+ uint32_t ResourceTracker::getStreamFeatures() const { return ResourceTracker::streamFeatureBits; }
+ 
+ bool ResourceTracker::supportsDeferredCommands() const {
+@@ -6421,6 +6455,8 @@ VkResult ResourceTracker::on_vkQueueSubmitTemplate(void* context, VkResult input
+                                                    VkQueue queue, uint32_t submitCount,
+                                                    const VkSubmitInfoType* pSubmits,
+                                                    VkFence fence) {
++    // Before the host sees the work, which may sample a buffer a CPU has written since.
++    uploadForGpu();
+     flushStagingStreams(context, queue, submitCount, pSubmits);
+ 
+     if (!usingDirectMapping()) {
+diff --git a/src/gfxstream/guest/vulkan_enc/ResourceTracker.h b/src/gfxstream/guest/vulkan_enc/ResourceTracker.h
+index 4dc5c7286ce..5eeb1f2031f 100644
+--- a/src/gfxstream/guest/vulkan_enc/ResourceTracker.h
++++ b/src/gfxstream/guest/vulkan_enc/ResourceTracker.h
+@@ -568,6 +568,8 @@ class ResourceTracker {
+     void readBackForCpu(VkEncoder* enc, VkDevice device);
+     // The same for one window image, whose drawing the host has finished.
+     void readBackImageForCpu(VkImage image);
++    // Copies up what a CPU wrote into the imported buffers a CPU writes, where it changed.
++    void uploadForGpu();
+     uint32_t getStreamFeatures() const;
+     uint32_t getApiVersionFromInstance(VkInstance instance);
+     uint32_t getApiVersionFromDevice(VkDevice device);
+@@ -943,6 +945,9 @@ class ResourceTracker {
+     std::unique_ptr<gfxstream::Gralloc> mGralloc = nullptr;
+     // The imported buffers a CPU reads what the GPU draws into, held under mLock.
+     dsa::CpuReadbackSet mCpuReadback;
++    // The imported buffers a CPU writes and the GPU samples, by memory, held under mLock: what
++    // the CPU wrote is copied up before each submit (dsa_cpu_upload.h).
++    std::unordered_map<uint64_t, AHardwareBuffer*> mCpuUploads;
+ #endif
+ 
+     std::unique_ptr<gfxstream::SyncHelper> mSyncHelper = nullptr;

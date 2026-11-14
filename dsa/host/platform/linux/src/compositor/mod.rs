@@ -8,6 +8,8 @@
 //! - [`gfxstream`]: the host renderer and the guest's graphics streams (Linux only).
 //! - [`title_bar`]: what a task window's title bar shows and what its points do.
 //! - [`window_menu`]: a task window's menu, its items and how it is drawn.
+//! - [`widget_menu`]: a widget window's menu, laid out and drawn as the window menu is.
+//! - [`widget_windows`]: what a widget window is on this desktop, and its units and input.
 //! - [`text`]: text for the title bar and the menu, drawn with Pango (Linux only).
 //! - [`session`]: what ties them to the DSA service (Linux only).
 
@@ -16,6 +18,8 @@ pub mod dmabuf_read;
 pub mod frames;
 pub mod title_bar;
 pub mod toplevel;
+pub mod widget_menu;
+pub mod widget_windows;
 pub mod window_menu;
 
 #[cfg(target_os = "linux")]

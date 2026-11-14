@@ -5,7 +5,7 @@ package io.github.thisisthepy.dsa.agent.splash
  * is drawn from pixels at least as fine as the ones it lands on.
  *
  * A task window shows the task's frames one guest pixel to one screen pixel, and the task
- * draws at the density of its window's monitor (320 dpi at 200%). An icon loaded at a lower
+ * draws at the density of its window's monitor (262 dpi at 200%). An icon loaded at a lower
  * density, or at the size an app ships for a phone, has fewer pixels than the square it is
  * drawn into and would be scaled up, which blurs it. So an icon is loaded first at the task's
  * density, and when its bitmap is still smaller than where it is drawn, again at the density
@@ -34,10 +34,17 @@ object SplashIconSize {
      * [densityDpi] it is [intrinsicPixels] large (its larger side). A drawable with no size of
      * its own (a color, or a size of 0 or less) and one already large enough stay at
      * [densityDpi].
+     *
+     * Both sizes are rounded to whole pixels: the drawable's true size at [densityDpi] can be up
+     * to half a pixel below [intrinsicPixels], and at the new density it needs to reach half a
+     * pixel below [pixels] to round to it. So the density is
+     * `densityDpi * (pixels - 1/2) / (intrinsicPixels - 1/2)`, rounded up; the plain ratio of
+     * the rounded sizes comes out a pixel short at some densities (130 dpi, for one).
      */
     fun loadDensity(densityDpi: Int, intrinsicPixels: Int, pixels: Int): Int {
         if (intrinsicPixels <= 0 || pixels <= 0 || intrinsicPixels >= pixels) return densityDpi
-        val wanted = (densityDpi.toLong() * pixels + intrinsicPixels - 1) / intrinsicPixels
+        val below = 2L * intrinsicPixels - 1
+        val wanted = (densityDpi.toLong() * (2L * pixels - 1) + below - 1) / below
         return wanted.coerceAtMost(MAX_LOAD_DENSITY.toLong()).toInt()
     }
 }

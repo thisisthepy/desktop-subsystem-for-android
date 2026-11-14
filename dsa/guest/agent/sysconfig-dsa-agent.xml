@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The guest agent's system configuration. The image installs this file next to the agent
+  (system_ext/etc/sysconfig/). Android's backup manager uses a backup transport only when a
+  sysconfig file lists it and its app is privileged; this lists the agent's, which keeps app
+  data backups in the host's backup folder.
+-->
+<config>
+    <backup-transport-whitelisted-service
+        service="io.github.thisisthepy.dsa.agent/io.github.thisisthepy.dsa.agent.platform.HostBackupTransportService" />
+</config>

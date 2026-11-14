@@ -142,6 +142,14 @@ public partial class AppsPage : Page
         }
     }
 
+    private async void OnDesktopShortcut(object sender, RoutedEventArgs e)
+    {
+        if (PackageOf(sender) is { } package)
+        {
+            await ViewModel.CreateDesktopShortcutAsync(package);
+        }
+    }
+
     private async void OnUninstall(object sender, RoutedEventArgs e)
     {
         if (PackageOf(sender) is not { } package)

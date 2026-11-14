@@ -1,0 +1,235 @@
+diff --git a/host/vulkan/DeviceOpTracker.cpp b/host/vulkan/DeviceOpTracker.cpp
+index 55376a079..fe2751743 100644
+--- a/host/vulkan/DeviceOpTracker.cpp
++++ b/host/vulkan/DeviceOpTracker.cpp
+@@ -112,67 +112,101 @@ void DeviceOpTracker::PollAndProcessGarbage() {
+                                                }
+                                                return !IsDone(pendingGarbage.waitable);
+                                            });
+ 
+         for (auto it = mPendingGarbage.begin(); it != firstPendingIt; it++) {
+             PendingGarbage& pendingGarbage = *it;
+ 
+             // Garbage is only looked at when the device is used, so an entry can be old because
+-            // nothing used the device for a while, its work long finished. Only one whose work
+-            // is still pending is leaked; the others are destroyed as usual.
++            // nothing used the device for a while, its work long finished. One whose work is
++            // still pending is kept for the device's destruction, which waits for the device
++            // to go idle (it used to be leaked, left with the driver for the device's whole
++            // life); the others are destroyed as usual.
+             if (pendingGarbage.timepoint < old && !IsDone(pendingGarbage.waitable)) {
+                 const auto pending = std::chrono::duration_cast<std::chrono::milliseconds>(
+                     now - pendingGarbage.timepoint);
+-                WARN("VkDevice:%p had a waitable pending for %d milliseconds. Leaking object.",
++                WARN("VkDevice:%p had a waitable pending for %d milliseconds; its object is "
++                     "destroyed with the device.",
+                      mDevice, static_cast<int>(pending.count()));
++                mOverdueGarbage.push_back(pendingGarbage.obj);
+                 continue;
+             }
+ 
+-            std::visit(
+-                [this](auto&& arg) {
+-                    using T = std::decay_t<decltype(arg)>;
+-                    if constexpr (std::is_same_v<T, VkFence>) {
+-                        mDeviceDispatch->vkDestroyFence(mDevice, arg, nullptr);
+-                    } else if constexpr (std::is_same_v<T, VkSemaphore>) {
+-                        mDeviceDispatch->vkDestroySemaphore(mDevice, arg, nullptr);
+-                    } else {
+-                        static_assert(always_false_v<T>, "non-exhaustive visitor!");
+-                    }
+-                },
+-                pendingGarbage.obj);
++            DestroyGarbage(pendingGarbage.obj);
+         }
+ 
+         mPendingGarbage.erase(mPendingGarbage.begin(), firstPendingIt);
+ 
+         if (mPendingGarbage.size() > kSizeLoggingThreshold) {
+             WARN("VkDevice:%p has %d pending garbage objects.", mDevice, mPendingGarbage.size());
+         }
+     }
+ }
+ 
++void DeviceOpTracker::DestroyGarbage(const std::variant<VkFence, VkSemaphore>& obj) {
++    std::visit(
++        [this](auto&& arg) {
++            using T = std::decay_t<decltype(arg)>;
++            if constexpr (std::is_same_v<T, VkFence>) {
++                mDeviceDispatch->vkDestroyFence(mDevice, arg, nullptr);
++            } else if constexpr (std::is_same_v<T, VkSemaphore>) {
++                mDeviceDispatch->vkDestroySemaphore(mDevice, arg, nullptr);
++            } else {
++                static_assert(always_false_v<T>, "non-exhaustive visitor!");
++            }
++        },
++        obj);
++}
++
+ void DeviceOpTracker::OnDestroyDevice() {
++    // Waited for even when the device is lost: a lost device runs nothing more either.
+     mDeviceDispatch->vkDeviceWaitIdle(mDevice);
+ 
+     PollAndProcessGarbage();
+ 
++    // The device is idle, so an operation still pending watches a fence that will never
++    // signal: one never submitted (its submission failed), or one the guest reset before it
++    // was polled. Its waitable is made ready by dropping its promise, and its own fence goes.
++    std::deque<PollFunction> stale;
+     {
+-        std::lock_guard<std::mutex> lock(mPendingGarbageMutex);
+-        if (!mPendingGarbage.empty()) {
+-            WARN("VkDevice:%p has %d leaking garbage objects on destruction.", mDevice,
+-                 mPendingGarbage.size());
++        std::lock_guard<std::mutex> lock(mPollFunctionsMutex);
++        stale.swap(mPollFunctions);
++    }
++    for (const PollFunction& op : stale) {
++        if (op.ownedFence != VK_NULL_HANDLE) {
++            mDeviceDispatch->vkDestroyFence(mDevice, op.ownedFence, nullptr);
+         }
+     }
++    stale.clear();
++
++    std::lock_guard<std::mutex> lock(mPendingGarbageMutex);
++    const size_t left = mPendingGarbage.size() + mOverdueGarbage.size();
++    for (const PendingGarbage& pendingGarbage : mPendingGarbage) {
++        DestroyGarbage(pendingGarbage.obj);
++    }
++    mPendingGarbage.clear();
++    for (const auto& obj : mOverdueGarbage) {
++        DestroyGarbage(obj);
++    }
++    mOverdueGarbage.clear();
++    if (left > 0) {
++        VERBOSE("VkDevice:%p destroyed %zu garbage objects whose work had not been seen to "
++                "finish, once the device was idle.",
++                mDevice, left);
++    }
+ }
+ 
+-void DeviceOpTracker::AddPendingDeviceOp(std::function<DeviceOpStatus()> pollFunction) {
++void DeviceOpTracker::AddPendingDeviceOp(std::function<DeviceOpStatus()> pollFunction,
++                                         VkFence ownedFence) {
+     std::lock_guard<std::mutex> lock(mPollFunctionsMutex);
+     mPollFunctions.push_back(PollFunction{
+         .func = std::move(pollFunction),
+         .timepoint = std::chrono::system_clock::now(),
++        .ownedFence = ownedFence,
+     });
+ }
+ 
+ DeviceOpBuilder::DeviceOpBuilder(DeviceOpTracker& tracker) : mTracker(tracker) {}
+ 
+ DeviceOpBuilder::~DeviceOpBuilder() {
+     if (!mSubmittedFence) {
+         GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
+@@ -224,15 +258,15 @@ DeviceOpWaitable DeviceOpBuilder::OnQueueSubmittedWithFence(VkFence fence) {
+         }
+ 
+         if (destroyFenceOnCompletion) {
+             deviceDispatch->vkDestroyFence(device, fence, nullptr);
+         }
+         promise->set_value();
+ 
+         return result == VK_SUCCESS ? DeviceOpStatus::kDone : DeviceOpStatus::kFailure;
+-    });
++    }, destroyFenceOnCompletion ? fence : VK_NULL_HANDLE);
+ 
+     return future;
+ }
+ 
+ }  // namespace vk
+ }  // namespace gfxstream
+diff --git a/host/vulkan/DeviceOpTracker.h b/host/vulkan/DeviceOpTracker.h
+index 4ff412978..f5ccfe5ea 100644
+--- a/host/vulkan/DeviceOpTracker.h
++++ b/host/vulkan/DeviceOpTracker.h
+@@ -59,41 +59,55 @@ class DeviceOpTracker {
+     // Transfers ownership of the semaphore to this helper and marks that the given
+     // semaphore can be destroyed once the waitable has finished.
+     void AddPendingGarbage(DeviceOpWaitable waitable, VkSemaphore semaphore);
+ 
+     // Checks for completion of previously submitted waitables and destroys dependent
+     // objects.
+     void PollAndProcessGarbage();
+ 
++    // Waits for the device to go idle, and destroys every object it still holds: once the
++    // device is idle, nothing it was given still runs, whether or not the fence an operation
++    // watched ever signals (a fence never submitted, or reset by the guest before it was
++    // polled, never does).
+     void OnDestroyDevice();
+ 
+    private:
+     VkDevice mDevice = VK_NULL_HANDLE;
+     VulkanDispatch* mDeviceDispatch = nullptr;
+ 
+     friend class DeviceOpBuilder;
+ 
+     using OpPollingFunction = std::function<DeviceOpStatus()>;
+ 
+-    void AddPendingDeviceOp(OpPollingFunction pollFunction);
++    // `ownedFence` is a fence the operation made for itself, which its poll function destroys
++    // once it signals; one still pending when the device is destroyed is destroyed then.
++    void AddPendingDeviceOp(OpPollingFunction pollFunction, VkFence ownedFence = VK_NULL_HANDLE);
+     struct PollFunction {
+         OpPollingFunction func;
+         std::chrono::time_point<std::chrono::system_clock> timepoint;
++        VkFence ownedFence = VK_NULL_HANDLE;
+     };
+     std::mutex mPollFunctionsMutex;
+     std::deque<PollFunction> mPollFunctions GUARDED_BY(mPollFunctionsMutex);
+ 
+     struct PendingGarbage {
+         DeviceOpWaitable waitable;
+         std::variant<VkFence, VkSemaphore> obj;
+         std::chrono::time_point<std::chrono::system_clock> timepoint;
+     };
+     std::mutex mPendingGarbageMutex;
+     std::deque<PendingGarbage> mPendingGarbage GUARDED_BY(mPendingGarbageMutex);
++    // Garbage whose operation was still pending after kAutoDeleteTimeThreshold. It is not
++    // destroyed while the device runs, since the GPU may still use it, and it is not leaked
++    // either: the device's destruction waits for the device to go idle and destroys it then.
++    std::deque<std::variant<VkFence, VkSemaphore>> mOverdueGarbage
++        GUARDED_BY(mPendingGarbageMutex);
++
++    void DestroyGarbage(const std::variant<VkFence, VkSemaphore>& obj);
+ };
+ 
+ class DeviceOpBuilder {
+    public:
+     DeviceOpBuilder(DeviceOpTracker& tracker);
+ 
+     DeviceOpBuilder(const DeviceOpBuilder& rhs) = delete;
+     DeviceOpBuilder& operator=(const DeviceOpBuilder& rhs) = delete;
+diff --git a/host/vulkan/VkDecoderGlobalState.cpp b/host/vulkan/VkDecoderGlobalState.cpp
+index 9ba4983f5..afd507eb8 100644
+--- a/host/vulkan/VkDecoderGlobalState.cpp
++++ b/host/vulkan/VkDecoderGlobalState.cpp
+@@ -3255,16 +3255,26 @@ class VkDecoderGlobalState::Impl {
+                         externalFences.push_back(pFences[i]);
+                     } else {
+                         // Reset all fences' states to kNotWaitable.
+                         cleanedFences.push_back(pFences[i]);
+                         mFenceInfo[pFences[i]].state = FenceInfo::State::kNotWaitable;
+                     }
+                 }
+             }
++
++            // A fence is reset only once its work is done, but the device's operations are
++            // polled only when the device is used: one whose fence is reset before it was
++            // polled would look pending ever after, and every object that waits for it would
++            // be kept. They are polled now, while the fences still show what finished.
++            if (!cleanedFences.empty() || !externalFences.empty()) {
++                if (auto* deviceInfo = android::base::find(mDeviceInfo, device)) {
++                    deviceInfo->deviceOpTracker->PollAndProcessGarbage();
++                }
++            }
+         }
+ 
+         if (!cleanedFences.empty()) {
+             // A failure (a lost device) is the guest's answer, not the end of the renderer.
+             VkResult resetResult = vk->vkResetFences(device, (uint32_t)cleanedFences.size(),
+                                                      cleanedFences.data());
+             if (resetResult != VK_SUCCESS) {
+                 ERR("vkResetFences failed with %s.", string_VkResult(resetResult));

@@ -24,6 +24,7 @@ use crate::accessibility::{
 use crate::adb_discovery::AutoConnectState;
 use crate::addon_disk::{Addon, AddonDisk, Format};
 use crate::apk::{self, InstallOutcome, InstallPart, InstallStatus, InstalledPackage};
+use crate::app_audio::{AppAudioHub, AppAudioWatch, AppStream, VolumeChange};
 use crate::arm_translation::{GuestArmTranslation, Package};
 use crate::background::{
     BackgroundApp, BackgroundCommand, BackgroundEvent, BackgroundHub, BackgroundWatch,
@@ -82,6 +83,8 @@ pub struct FakeAndroid {
     /// Each word on whether any task window is shown, in order. Taken in every state, as a
     /// session takes it.
     pub shown: Mutex<Vec<bool>>,
+    /// Each word on which tasks have their window shown, in order. Taken in every state too.
+    pub tasks_shown: Mutex<Vec<Vec<i32>>>,
     /// Each word on whether it may be frozen when idle, in order.
     pub freeze_when_idle: Mutex<Vec<bool>>,
     /// Each word on whether web links open in it, in order.
@@ -94,6 +97,8 @@ pub struct FakeAndroid {
     pub adb_auto_connect: Mutex<Vec<bool>>,
     /// Where it says auto-connect stands.
     pub adb_auto_connect_state: Mutex<AutoConnectState>,
+    /// Whether it says the host's resolver answers its DNS queries.
+    pub dns_answered_by_host: Mutex<Option<bool>>,
     /// Each word on file sharing (on, and the folders), in order.
     pub shared_folders: Mutex<Vec<(bool, Vec<String>)>>,
     /// The drags the host ended, and whether each was dropped.
@@ -116,6 +121,10 @@ pub struct FakeAndroid {
     background: Mutex<BackgroundHub>,
     /// What the user did with its apps that run in the background, in order.
     pub background_requests: Mutex<Vec<BackgroundRequest>>,
+    /// Which app each output of its sound plays, and who watches it.
+    app_audio: Mutex<AppAudioHub>,
+    /// The app volumes the host set, in order.
+    pub app_volumes: Mutex<Vec<VolumeChange>>,
     /// The APKs it installed or refused, by name, with their whole content, in order.
     pub installs: Mutex<Vec<(String, Vec<u8>)>>,
     /// The installs of several files it took, in order: the bundle's name, the parts, the ABI
@@ -134,6 +143,11 @@ pub struct FakeAndroid {
     pub widget_sizes: Mutex<Vec<(i32, WidgetSize)>>,
     /// The pointer input its widgets were given, in order.
     pub widget_pointers: Mutex<Vec<dsa_protocol::control::WidgetPointer>>,
+    /// The widgets whose setup it was asked to open again, in order.
+    pub widget_reconfigures: Mutex<Vec<i32>>,
+    /// How the user leaves the next setups opened again: None finishes them, Some says why
+    /// they did not.
+    pub widget_reconfigure_answer: Mutex<Option<String>>,
     /// Each start (`true`) and end (`false`) of a watch of a task's accessibility tree, in
     /// order.
     pub accessibility_watches: Arc<Mutex<Vec<(i32, bool)>>>,
@@ -241,12 +255,14 @@ impl FakeAndroid {
             keys: Mutex::new(Vec::new()),
             text: Mutex::new(Vec::new()),
             shown: Mutex::new(Vec::new()),
+            tasks_shown: Mutex::new(Vec::new()),
             freeze_when_idle: Mutex::new(Vec::new()),
             links_in_android: Mutex::new(Vec::new()),
             developer_mode: Mutex::new(Vec::new()),
             refuse_developer_mode: Mutex::new(None),
             adb_auto_connect: Mutex::new(Vec::new()),
             adb_auto_connect_state: Mutex::new(AutoConnectState::Off),
+            dns_answered_by_host: Mutex::new(None),
             shared_folders: Mutex::new(Vec::new()),
             ended_drags: Mutex::new(Vec::new()),
             link_watchers: Mutex::new(Vec::new()),
@@ -260,6 +276,8 @@ impl FakeAndroid {
             print_watchers: Mutex::new(Vec::new()),
             background: Mutex::new(BackgroundHub::default()),
             background_requests: Mutex::new(Vec::new()),
+            app_audio: Mutex::new(AppAudioHub::default()),
+            app_volumes: Mutex::new(Vec::new()),
             installs: Mutex::new(Vec::new()),
             part_installs: Mutex::new(Vec::new()),
             install_steps: Mutex::new(Vec::new()),
@@ -269,6 +287,8 @@ impl FakeAndroid {
             widgets: Mutex::new((std::collections::BTreeMap::new(), Vec::new())),
             widget_sizes: Mutex::new(Vec::new()),
             widget_pointers: Mutex::new(Vec::new()),
+            widget_reconfigures: Mutex::new(Vec::new()),
+            widget_reconfigure_answer: Mutex::new(None),
             accessibility_watches: Arc::new(Mutex::new(Vec::new())),
             accessibility_watchers: Mutex::new(Vec::new()),
             accessibility_actions: Mutex::new(Vec::new()),
@@ -316,6 +336,12 @@ impl FakeAndroid {
     /// Changes its apps that run in the background as its agent would, and tells the watchers.
     pub fn background_event(&self, event: BackgroundEvent) {
         self.background.lock().unwrap().apply(event);
+    }
+
+    /// Lists which app each output of its sound plays, as its agent would, and tells the
+    /// watchers.
+    pub fn list_app_audio(&self, streams: Vec<AppStream>) {
+        self.app_audio.lock().unwrap().apply(streams);
     }
 
     /// Changes its notifications as an app in this Android would, and tells the watchers.
@@ -443,6 +469,9 @@ impl UserAndroid for FakeAndroid {
     }
     fn adb_auto_connect_state(&self) -> AutoConnectState {
         *self.adb_auto_connect_state.lock().unwrap()
+    }
+    fn dns_answered_by_host(&self) -> Option<bool> {
+        *self.dns_answered_by_host.lock().unwrap()
     }
     fn watch_links(&self) -> Option<mpsc::Receiver<String>> {
         let (tx, rx) = mpsc::channel();
@@ -598,6 +627,14 @@ impl UserAndroid for FakeAndroid {
         self.background_requests.lock().unwrap().push(request);
         Ok(())
     }
+    fn watch_app_audio(&self) -> Option<AppAudioWatch> {
+        Some(self.app_audio.lock().unwrap().watch())
+    }
+    fn set_app_volume(&self, change: &VolumeChange) -> Result<(), TaskRequestError> {
+        self.running_or().map_err(TaskRequestError::NotRunning)?;
+        self.app_volumes.lock().unwrap().push(change.clone());
+        Ok(())
+    }
     fn watch_widgets(&self) -> Option<crate::session::WidgetWatch> {
         let (tx, events) = mpsc::channel();
         let mut widgets = self.widgets.lock().unwrap();
@@ -658,6 +695,14 @@ impl UserAndroid for FakeAndroid {
         self.widget_event(WidgetEvent::Removed { widget_id });
         Ok(())
     }
+    fn reconfigure_widget(&self, widget_id: i32) -> Result<(), WidgetError> {
+        self.running_or().map_err(WidgetError::NotRunning)?;
+        self.widget_reconfigures.lock().unwrap().push(widget_id);
+        match self.widget_reconfigure_answer.lock().unwrap().clone() {
+            None => Ok(()),
+            Some(why) => Err(WidgetError::Refused(why)),
+        }
+    }
     fn resize_widget(&self, widget_id: i32, size: WidgetSize) -> Result<(), TaskRequestError> {
         self.running_or().map_err(TaskRequestError::NotRunning)?;
         self.widget_sizes.lock().unwrap().push((widget_id, size));
@@ -683,6 +728,11 @@ impl UserAndroid for FakeAndroid {
         let slot = match addon {
             Addon::Gapps => &self.gapps_image,
             Addon::ArmTranslation => &self.arm_image,
+            Addon::Widevine => {
+                return Err(InstallError::Refused(
+                    "no DSA kept the Widevine module on Android's disk".into(),
+                ))
+            }
         };
         let image = slot.lock().unwrap();
         let Some(image) = image.as_ref() else {
@@ -926,6 +976,10 @@ impl UserAndroid for FakeAndroid {
             self.shown.lock().unwrap().push(shown);
             return Ok(());
         }
+        if let TaskRequest::TasksShown { task_ids } = &request {
+            self.tasks_shown.lock().unwrap().push(task_ids.clone());
+            return Ok(());
+        }
         if self.state() != SessionState::Active {
             return Err(TaskRequestError::NotRunning(format!(
                 "Android is {}, not running",
@@ -1137,12 +1191,20 @@ macro_rules! host_api_conformance {
             $crate::host_api_conformance::close_and_launch_reach_the_caller(&mut || $make);
         }
         #[test]
+        fn fr7_app_shortcuts_and_pin_requests_reach_the_caller_and_back() {
+            $crate::host_api_conformance::app_shortcuts_reach_the_caller(&mut || $make);
+        }
+        #[test]
         fn fr4_resizing_and_rescaling_a_task_reach_the_callers_android() {
             $crate::host_api_conformance::resize_and_density_reach_the_caller(&mut || $make);
         }
         #[test]
         fn fr10_the_word_on_shown_windows_reaches_the_callers_android_in_any_state() {
             $crate::host_api_conformance::windows_shown_reaches_the_caller(&mut || $make);
+        }
+        #[test]
+        fn nfr2_the_shown_tasks_reach_the_callers_android_in_any_state() {
+            $crate::host_api_conformance::tasks_shown_reaches_the_caller(&mut || $make);
         }
         #[test]
         fn fr10_freezing_reaches_the_callers_android_only_while_it_runs() {
@@ -1261,6 +1323,10 @@ macro_rules! host_api_conformance {
             $crate::host_api_conformance::install_abi_follows_the_libraries(&mut || $make);
         }
         #[test]
+        fn fr25_an_apk_with_arm64_code_only_is_refused_with_its_reason_without_translation() {
+            $crate::host_api_conformance::arm64_only_install_needs_translation(&mut || $make);
+        }
+        #[test]
         fn fr25_run_as_arm_reaches_the_callers_android_and_asks_before_erasing_data() {
             $crate::host_api_conformance::run_as_arm_reaches_the_caller(&mut || $make);
         }
@@ -1303,6 +1369,14 @@ macro_rules! host_api_conformance {
         #[test]
         fn fr25_the_images_default_translator_is_used_until_a_package_replaces_it() {
             $crate::host_api_conformance::default_arm_translation_reaches_the_caller(&mut || $make);
+        }
+        #[test]
+        fn fr37_widevine_is_installed_reported_and_removed() {
+            $crate::host_api_conformance::widevine_reaches_the_caller(&mut || $make);
+        }
+        #[test]
+        fn fr37_a_module_that_is_not_widevines_or_not_for_this_android_is_refused() {
+            $crate::host_api_conformance::unusable_widevine_is_refused(&mut || $make);
         }
         #[test]
         fn fr32_google_play_is_installed_reported_and_removed() {
@@ -1423,6 +1497,14 @@ macro_rules! host_api_conformance {
             );
         }
         #[test]
+        fn fr26_app_outputs_reach_a_watcher_and_a_hosts_volume_reaches_the_callers_android() {
+            $crate::host_api_conformance::app_audio_reaches_a_watcher(&mut || $make);
+        }
+        #[test]
+        fn nfr5_a_malformed_app_volume_is_refused() {
+            $crate::host_api_conformance::malformed_app_volume_is_refused(&mut || $make);
+        }
+        #[test]
         fn fr24_apps_that_run_in_the_background_reach_a_watcher_and_a_list() {
             $crate::host_api_conformance::background_apps_reach_a_watcher(&mut || $make);
         }
@@ -1441,6 +1523,10 @@ macro_rules! host_api_conformance {
         #[test]
         fn fr12_the_gallery_lists_the_widgets_the_callers_android_offers() {
             $crate::host_api_conformance::widget_gallery_lists_the_offer(&mut || $make);
+        }
+        #[test]
+        fn fr12_long_pressing_a_widget_edits_it_like_a_home_screen() {
+            $crate::host_api_conformance::widget_reconfigure_round_trip(&mut || $make);
         }
         #[test]
         fn fr12_adding_a_widget_places_it_and_the_service_keeps_its_place() {
@@ -1849,6 +1935,27 @@ pub fn windows_shown_reaches_the_caller(make: MakeLocal<'_>) {
     assert!(android.requests.lock().unwrap().is_empty());
 }
 
+pub fn tasks_shown_reaches_the_caller(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    let mut client = connect(&mut *connector);
+    // Taken while the Android is stopped, for its next start.
+    client
+        .request(&TaskRequest::TasksShown { task_ids: vec![3] })
+        .expect("the word while stopped");
+    client.start().unwrap();
+    client
+        .set_tasks_shown(&[3, 5])
+        .expect("the word while running");
+    let android = androids.of(&user).unwrap();
+    assert_eq!(
+        *android.tasks_shown.lock().unwrap(),
+        vec![vec![3], vec![3, 5]]
+    );
+    assert!(android.requests.lock().unwrap().is_empty());
+}
+
 pub fn freeze_reaches_the_caller(make: MakeLocal<'_>) {
     let (listener, mut connector, _) = make();
     let androids = Arc::new(FakeAndroids::default());
@@ -2179,6 +2286,63 @@ pub fn watcher_receives_editor(make: MakeLocal<'_>) {
     assert_eq!(next_event(&mut stream), editor);
 }
 
+pub fn app_shortcuts_reach_the_caller(make: MakeLocal<'_>) {
+    use crate::tasks::{AppInfo, AppShortcut, PinShortcutRequest};
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    let mut client = connect(&mut *connector);
+    client.start().unwrap();
+    let mut stream = connect(&mut *connector).watch_tasks().expect("watching");
+    let android = androids.of(&user).unwrap();
+    let new_chat = AppShortcut {
+        id: "new-chat".into(),
+        short_label: "New chat".into(),
+        long_label: "Start a new chat".into(),
+        icon_png: vec![0x89, b'P', b'N', b'G', 9],
+        rank: 0,
+        manifest: true,
+        ..Default::default()
+    };
+    let installed = TaskEvent::Installed(vec![AppInfo {
+        package_name: "com.example.chat".into(),
+        label: "Chat".into(),
+        shortcuts: vec![new_chat.clone()],
+        ..Default::default()
+    }]);
+    android.publish(installed.clone());
+    assert_eq!(next_event(&mut stream), installed);
+    let pin = TaskEvent::PinShortcut(PinShortcutRequest {
+        request_id: 3,
+        package_name: "com.example.chat".into(),
+        app_label: "Chat".into(),
+        shortcut: AppShortcut {
+            pinned: true,
+            ..new_chat
+        },
+    });
+    android.publish(pin.clone());
+    assert_eq!(next_event(&mut stream), pin);
+
+    client
+        .launch_shortcut("com.example.chat", "new-chat")
+        .expect("the launch");
+    client.answer_pin_shortcut(3, false).expect("the answer");
+    assert_eq!(
+        *android.requests.lock().unwrap(),
+        vec![
+            TaskRequest::LaunchShortcut {
+                package_name: "com.example.chat".into(),
+                shortcut_id: "new-chat".into(),
+            },
+            TaskRequest::AnswerPinShortcut {
+                request_id: 3,
+                accepted: false,
+            },
+        ]
+    );
+}
+
 pub fn selection_reaches_the_caller(make: MakeLocal<'_>) {
     let (listener, mut connector, user) = make();
     let androids = Arc::new(FakeAndroids::default());
@@ -2338,6 +2502,46 @@ pub fn install_abi_follows_the_libraries(make: MakeLocal<'_>) {
             Some("x86_64".to_string()),
             None,
         ]
+    );
+}
+
+pub fn arm64_only_install_needs_translation(make: MakeLocal<'_>) {
+    use crate::native_abi::NativeLibraries;
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    connect(&mut *connector).start().unwrap();
+    let content = sample_apk();
+    let mut arm = NativeLibraries::new();
+    arm.add("arm64-v8a", "libmain.so");
+    // Without a translator it is refused with the reason, before anything is sent: the reader
+    // fails the test if it is read.
+    let mut never = Unread;
+    match connect(&mut *connector).install_apk_with_libraries(
+        "game.apk",
+        content.len() as u64,
+        &arm,
+        &mut never,
+    ) {
+        Err(ClientError::Service { code, detail }) => {
+            assert_eq!(code, ErrorCode::InstallRefused, "{detail}");
+            assert!(detail.contains("ARM translation is not on"), "{detail}");
+            assert!(detail.contains("Turn it on under ARM apps"), "{detail}");
+        }
+        other => panic!("expected an arm64-only APK to be refused, got {other:?}"),
+    }
+    let android = androids.of(&user).unwrap();
+    assert!(android.install_abis.lock().unwrap().is_empty());
+    assert!(android.installs.lock().unwrap().is_empty());
+    // With one it is installed as arm64-v8a.
+    *android.translating.lock().unwrap() = true;
+    let outcome = connect(&mut *connector)
+        .install_apk_with_libraries("game.apk", content.len() as u64, &arm, &mut &content[..])
+        .expect("installing");
+    assert_eq!(outcome.status, InstallStatus::Installed);
+    assert_eq!(
+        *android.install_abis.lock().unwrap(),
+        vec![Some("arm64-v8a".to_string())]
     );
 }
 
@@ -3238,6 +3442,136 @@ pub fn arm_translation_reaches_the_caller(make: MakeLocal<'_>) {
     assert!(!removed.restart_needed);
     assert!(!disk.holds(Addon::ArmTranslation));
     assert_eq!(store.arm_translation(&user).unwrap(), None);
+}
+
+fn widevine_package(apex: &[u8]) -> crate::widevine::WidevinePackage {
+    crate::widevine::WidevinePackage {
+        apex: format!("{}.apex", crate::widevine::MODULE),
+        version: "BE2A.250530.026.F3 (API 36, r7)".into(),
+        android_major: 16,
+        abi: crate::widevine::guest_abi().into(),
+        source: "https://dl.google.com/android/repository/sys-img/google_apis/x86_64-36_r07.zip"
+            .into(),
+        size: apex.len() as u64,
+        sha256: crate::widevine::sha256_hex(apex),
+        license: "android-sdk-license".into(),
+    }
+}
+
+pub fn widevine_reaches_the_caller(make: MakeLocal<'_>) {
+    use crate::widevine::fixture::apex;
+    let (listener, mut connector, user) = make();
+    let store = Arc::new(MemorySettings::default());
+    let androids = Arc::new(FakeAndroids::default());
+    let disks = addon_disks(addon_dir("widevine"));
+    let service = HostApiService::new(androids.clone(), "test service")
+        .with_settings(store.clone(), facts())
+        .with_addon_disks(disks.clone());
+    let _service = RunningService::start_service(listener, service);
+    let mut client = connect(&mut *connector);
+    let none = client.widevine().expect("asking where Widevine stands");
+    assert_eq!(none.package, None);
+    assert!(!none.on_disk && !none.restart_needed);
+
+    // Android need not run.
+    let module = apex(crate::widevine::MODULE, crate::widevine::guest_abi());
+    let package = widevine_package(&module);
+    let installed = connect(&mut *connector)
+        .install_widevine(&package, &mut module.as_slice())
+        .expect("installing Widevine");
+    assert_eq!(installed.package, Some(package.clone()));
+    assert!(installed.on_disk);
+    assert!(!installed.running && !installed.restart_needed);
+    // The APEX is on the caller's add-on disk, unchanged, as the one file of its image.
+    let disk = disks(&user).unwrap();
+    let image = disk
+        .image(Addon::Widevine)
+        .expect("the image is on the disk");
+    let files = crate::erofs::read::files(&image);
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[&package.apex], module);
+    assert_eq!(store.widevine(&user).unwrap(), Some(package.clone()));
+    let next = disk.prepare_for_boot();
+    assert!(next.contains(&Addon::Widevine));
+    assert!(crate::widevine::bootconfig_for(&*store, &user, &next)
+        .starts_with(crate::widevine::BOOTCONFIG_ON));
+
+    client.start().unwrap();
+    let running = client.widevine().expect("asking again");
+    assert!(running.running && running.active && !running.restart_needed);
+
+    let removed = client.remove_widevine().expect("removing Widevine");
+    assert_eq!(removed.package, None);
+    assert!(!removed.on_disk);
+    assert!(
+        removed.active,
+        "the running Android keeps what it started with"
+    );
+    assert!(removed.restart_needed);
+    assert!(!disk.holds(Addon::Widevine));
+    assert_eq!(store.widevine(&user).unwrap(), None);
+    assert_eq!(
+        crate::widevine::bootconfig_for(&*store, &user, &[]),
+        crate::widevine::BOOTCONFIG_OFF
+    );
+}
+
+pub fn unusable_widevine_is_refused(make: MakeLocal<'_>) {
+    use crate::widevine::fixture::apex;
+    let (listener, mut connector, user) = make();
+    let store = Arc::new(MemorySettings::default());
+    let androids = Arc::new(FakeAndroids::default());
+    let disks = addon_disks(addon_dir("widevine-refused"));
+    let service = HostApiService::new(androids, "test service")
+        .with_settings(store.clone(), facts())
+        .with_addon_disks(disks.clone());
+    let _service = RunningService::start_service(listener, service);
+    let abi = crate::widevine::guest_abi();
+    let other_abi = if abi == "x86_64" {
+        "arm64-v8a"
+    } else {
+        "x86_64"
+    };
+    let other_module = apex("com.android.other", abi);
+    let foreign = apex(crate::widevine::MODULE, other_abi);
+    let good = apex(crate::widevine::MODULE, abi);
+    let cases: Vec<(crate::widevine::WidevinePackage, Vec<u8>)> = vec![
+        // Described for another processor: refused before anything is sent.
+        (
+            crate::widevine::WidevinePackage {
+                abi: other_abi.into(),
+                ..widevine_package(&foreign)
+            },
+            foreign.clone(),
+        ),
+        // Described for this one, but built for another.
+        (widevine_package(&foreign), foreign),
+        // Another module.
+        (widevine_package(&other_module), other_module),
+        // Not what was described.
+        (
+            crate::widevine::WidevinePackage {
+                sha256: "1".repeat(64),
+                ..widevine_package(&good)
+            },
+            good,
+        ),
+    ];
+    for (package, data) in cases {
+        let refused = connect(&mut *connector).install_widevine(&package, &mut data.as_slice());
+        assert!(
+            matches!(
+                refused,
+                Err(ClientError::Service {
+                    code: ErrorCode::InstallRefused,
+                    ..
+                })
+            ),
+            "{package:?}: {refused:?}"
+        );
+        assert_eq!(store.widevine(&user).unwrap(), None);
+        assert!(!disks(&user).unwrap().holds(Addon::Widevine));
+    }
 }
 
 fn default_arm_package() -> Package {
@@ -4197,6 +4531,81 @@ pub fn background_apps_reach_a_watcher(make: MakeLocal<'_>) {
     );
 }
 
+/// An output of sound that plays `package` at `volume`.
+pub fn sample_app_stream(stream: &str, package: &str, volume: f32) -> AppStream {
+    AppStream {
+        stream: stream.into(),
+        package_name: package.into(),
+        app_label: if package.is_empty() {
+            String::new()
+        } else {
+            "Music".into()
+        },
+        volume,
+        muted: false,
+    }
+}
+
+pub fn app_audio_reaches_a_watcher(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    connect(&mut *connector).start().unwrap();
+    let android = androids.of(&user).expect("the caller's Android");
+    let first = vec![
+        sample_app_stream("primary", "", 1.0),
+        sample_app_stream("app 0", "com.example.music", 0.5),
+    ];
+    android.list_app_audio(first.clone());
+
+    let mut watch = connect(&mut *connector)
+        .watch_app_audio()
+        .expect("watching the outputs of Android's sound");
+    assert_eq!(watch.streams, first, "starts from the outputs now");
+    assert_eq!(watch.next(Duration::from_millis(50)).unwrap(), None);
+    let louder = vec![
+        sample_app_stream("primary", "", 1.0),
+        sample_app_stream("app 0", "com.example.music", 0.75),
+    ];
+    android.list_app_audio(louder.clone());
+    assert_eq!(watch.next(WAIT).unwrap(), Some(louder));
+
+    let change = VolumeChange {
+        package_name: "com.example.music".into(),
+        volume: 0.25,
+        muted: true,
+    };
+    connect(&mut *connector)
+        .set_app_volume(&change)
+        .expect("the host's volume reaches Android");
+    assert_eq!(*android.app_volumes.lock().unwrap(), vec![change.clone()]);
+    // A stopped Android has no app to set it for, and that is no failure.
+    connect(&mut *connector).stop().unwrap();
+    connect(&mut *connector)
+        .set_app_volume(&change)
+        .expect("nothing to set is no failure");
+    assert_eq!(android.app_volumes.lock().unwrap().len(), 1);
+}
+
+pub fn malformed_app_volume_is_refused(make: MakeLocal<'_>) {
+    let (listener, mut connector, _user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    let mut client = connect(&mut *connector);
+    client.start().unwrap();
+    let refused = client.set_app_volume(&VolumeChange {
+        package_name: "not a package".into(),
+        volume: 0.5,
+        muted: false,
+    });
+    assert!(
+        refused.is_err(),
+        "a package name that is not one is refused"
+    );
+    // The service goes on.
+    assert!(connect(&mut *connector).status().is_ok());
+}
+
 pub fn background_actions_reach_the_caller(make: MakeLocal<'_>) {
     let (listener, mut connector, user) = make();
     let androids = Arc::new(FakeAndroids::default());
@@ -4682,7 +5091,68 @@ pub fn sample_widget_provider() -> WidgetProvider {
         resize_mode: 3,
         needs_configuration: false,
         app_label: "Clock App".into(),
+        reconfigurable: false,
     }
+}
+
+/// A widget whose app lets the user set it up again from its menu.
+pub fn sample_reconfigurable_widget_provider() -> WidgetProvider {
+    WidgetProvider {
+        provider: "com.example.weather/.WeatherWidget".into(),
+        package_name: "com.example.weather".into(),
+        label: "Weather".into(),
+        needs_configuration: true,
+        reconfigurable: true,
+        ..sample_widget_provider()
+    }
+}
+
+/// Opening a placed widget's settings again reaches its Android for that widget and answers
+/// with the widget once the user finishes; a setup the user leaves and a widget that cannot be
+/// set up again are refused with the reason, and the widget stays placed.
+pub fn widget_reconfigure_round_trip(make: MakeLocal<'_>) {
+    let (_service, androids, _connector, user, mut client) = widget_android(make);
+    let android = androids.of(&user).unwrap();
+    android
+        .widget_offer
+        .lock()
+        .unwrap()
+        .push(sample_reconfigurable_widget_provider());
+    let weather = client
+        .add_widget("com.example.weather/.WeatherWidget", WAIT)
+        .unwrap();
+    assert!(weather.provider.reconfigurable);
+    let again = client.reconfigure_widget(weather.widget_id, WAIT).unwrap();
+    assert_eq!(again, weather, "the widget stays where it was");
+    assert_eq!(
+        *android.widget_reconfigures.lock().unwrap(),
+        vec![weather.widget_id]
+    );
+    // The user leaves the setup: the caller hears why, and the widget stays.
+    *android.widget_reconfigure_answer.lock().unwrap() =
+        Some("the user canceled the widget's settings".into());
+    match client.reconfigure_widget(weather.widget_id, WAIT) {
+        Err(ClientError::Service { code, detail }) => {
+            assert_eq!(code, ErrorCode::WidgetRefused);
+            assert!(detail.contains("canceled"), "{detail}");
+        }
+        other => panic!("expected the setup to be left, got {other:?}"),
+    }
+    let (placed, _) = client.widgets().unwrap();
+    assert!(placed.iter().any(|w| w.widget_id == weather.widget_id));
+    // A widget whose app offers no settings is never asked of Android.
+    let clock = client
+        .add_widget("com.example.clock/.ClockWidget", WAIT)
+        .unwrap();
+    match client.reconfigure_widget(clock.widget_id, WAIT) {
+        Err(ClientError::Service { code, .. }) => assert_eq!(code, ErrorCode::WidgetRefused),
+        other => panic!("expected the clock to have no settings, got {other:?}"),
+    }
+    match client.reconfigure_widget(9999, WAIT) {
+        Err(ClientError::Service { code, .. }) => assert_eq!(code, ErrorCode::UnknownRequest),
+        other => panic!("expected an unknown widget, got {other:?}"),
+    }
+    assert_eq!(android.widget_reconfigures.lock().unwrap().len(), 2);
 }
 
 /// A started Android that offers the clock widget, and a client of it.
@@ -4735,7 +5205,8 @@ pub fn added_widget_is_placed_and_kept(make: MakeLocal<'_>) {
             x: 64,
             y: 64,
             width_dp: 180,
-            height_dp: 110
+            height_dp: 110,
+            resized: false,
         }
     );
     let second = client
@@ -4806,6 +5277,7 @@ pub fn placed_widget_size_reaches_the_caller(make: MakeLocal<'_>) {
         y: 20,
         width_dp: 240,
         height_dp: 147,
+        resized: false,
     };
     client
         .place_widget(widget.widget_id, moved, 360, 220, 240)
@@ -4831,7 +5303,8 @@ pub fn placed_widget_size_reaches_the_caller(make: MakeLocal<'_>) {
         )]
     );
     assert_eq!(client.widgets().unwrap().0[0].placement, moved);
-    // A size the widget does not allow is kept within its limits.
+    // A size the widget does not allow is kept within its limits, and no side gets smaller
+    // than a widget window can be: 40 of the host's device-independent pixels, 49 dp.
     client
         .place_widget(
             widget.widget_id,
@@ -4846,7 +5319,7 @@ pub fn placed_widget_size_reaches_the_caller(make: MakeLocal<'_>) {
         )
         .unwrap();
     let kept = client.widgets().unwrap().0[0].placement;
-    assert_eq!((kept.width_dp, kept.height_dp), (110, 40));
+    assert_eq!((kept.width_dp, kept.height_dp), (110, 49));
 }
 
 pub fn widget_pointer_reaches_the_caller(make: MakeLocal<'_>) {

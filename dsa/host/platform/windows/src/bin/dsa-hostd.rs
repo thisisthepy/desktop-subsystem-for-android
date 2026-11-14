@@ -24,6 +24,16 @@
 //!                                  from the old files, and starts the service and the window
 //!                                  managers again (the service runs it to restart into files
 //!                                  setup replaced under it)
+//! dsa-hostd install-image <folder> [<config.json>]
+//!                                  installs the Android image in <folder> (a signed
+//!                                  images.json and its files) through the update checks, for
+//!                                  `dsa android install-image`; the configuration is the
+//!                                  installed one unless named
+//! dsa-hostd check-setup <folder> [<config.json>]
+//!                                  checks the setup file in <folder> against the signed
+//!                                  program.json beside it, as an update is checked, and
+//!                                  prints its version and path (the development build's
+//!                                  install script runs it before setup)
 //! ```
 //!
 //! Without a mode it starts one VM, waits for the guest's channel daemon to connect and
@@ -91,7 +101,9 @@ mod windows_host {
                          dsa-hostd remove-machine-data <folder> | dsa-hostd remove-user-data | \
                          dsa-hostd stop-programs <folder> | dsa-hostd start-window-managers | \
                          dsa-hostd hold-service | dsa-hostd release-service [--start] | \
-                         dsa-hostd restart-service";
+                         dsa-hostd restart-service | \
+                         dsa-hostd install-image <folder> [<config.json>] | \
+                         dsa-hostd check-setup <folder> [<config.json>]";
 
     fn build() -> String {
         format!("dsa-hostd {}", dsa_host_windows::VERSION)
@@ -182,9 +194,131 @@ mod windows_host {
                 release_service(true)
             }
             [mode] if mode == "restart-service" => restart_service(),
+            [mode, folder] if mode == "check-setup" => check_setup(folder, None),
+            [mode, folder, config] if mode == "check-setup" => check_setup(folder, Some(config)),
+            [mode, folder] if mode == "install-image" => install_image(folder, None),
+            [mode, folder, config] if mode == "install-image" => {
+                install_image(folder, Some(config))
+            }
             [path] if path != "serve" && path != "service" => one_vm(read_config(path)?),
             _ => Err(USAGE.into()),
         }
+    }
+
+    /// The installed configuration: `dsa-hostd.json` in the data folder the installer
+    /// recorded, or in `%ProgramData%\DSA` when it recorded none.
+    fn installed_config() -> std::path::PathBuf {
+        use dsa_host_windows::paths::MachineRoot;
+        match installed_data_folder() {
+            Some(folder) => MachineRoot::at(folder).config_file(),
+            None => MachineRoot::default_location().config_file(),
+        }
+    }
+
+    /// The data folder the installer recorded in the registry.
+    fn installed_data_folder() -> Option<std::path::PathBuf> {
+        use windows_sys::Win32::System::Registry::{
+            RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ,
+        };
+        let wide = |text: &str| text.encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
+        let key = wide(r"SOFTWARE\thisisthepy\DSA");
+        let value = wide("DataFolder");
+        let mut buffer = vec![0u16; 1024];
+        let mut size = (buffer.len() * 2) as u32;
+        // SAFETY: NUL-terminated names and a buffer of the size given.
+        let status = unsafe {
+            RegGetValueW(
+                HKEY_LOCAL_MACHINE,
+                key.as_ptr(),
+                value.as_ptr(),
+                RRF_RT_REG_SZ,
+                std::ptr::null_mut(),
+                buffer.as_mut_ptr().cast(),
+                &mut size,
+            )
+        };
+        if status != 0 {
+            return None;
+        }
+        let end = buffer.iter().position(|c| *c == 0).unwrap_or(buffer.len());
+        let text = String::from_utf16_lossy(&buffer[..end]);
+        let text = text.trim().trim_end_matches(['\\', '/']);
+        (!text.is_empty()).then(|| std::path::PathBuf::from(text))
+    }
+
+    /// The keys the installed configuration (or the one named) trusts for the release lists.
+    fn trusted_keys(
+        config: Option<&String>,
+    ) -> Result<(HostConfig, Vec<ed25519_dalek::VerifyingKey>), String> {
+        let config_path = config
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(installed_config);
+        let config = read_config(&config_path.to_string_lossy())?;
+        let keys = config
+            .update
+            .as_ref()
+            .ok_or_else(|| {
+                format!(
+                    "{} trusts no release key (it has no update settings), so nothing can be \
+                     checked",
+                    config_path.display()
+                )
+            })?
+            .keys()
+            .map_err(|e| e.to_string())?;
+        Ok((config, keys))
+    }
+
+    /// Checks the setup file in `folder` against the signed program list beside it, as the
+    /// service checks an update of DSA it downloaded, and prints its version and path.
+    fn check_setup(folder: &str, config: Option<&String>) -> Result<(), String> {
+        let (_, keys) = trusted_keys(config)?;
+        let (list, path) = dsa_host_core::update::local::check_setup_in_folder(
+            std::path::Path::new(folder),
+            &keys,
+        )
+        .map_err(|e| e.to_string())?;
+        println!("{} {}", list.version, path.display());
+        Ok(())
+    }
+
+    /// Installs the Android image in `folder` into the image store the service boots from,
+    /// trusting the keys the service trusts: the same signature, rules and hash checks as a
+    /// downloaded update. The service picks it up as it does a downloaded image: at the next
+    /// start of Android, or by restarting a running Android once no app window is open.
+    fn install_image(folder: &str, config: Option<&String>) -> Result<(), String> {
+        use dsa_host_core::update::local::install_from_folder;
+        use dsa_host_core::update::store::ImageStore;
+        let (config, keys) = trusted_keys(config)?;
+        let (Some(root), Some(configured)) = (&config.images_dir, &config.first_image) else {
+            return Err(
+                "the configuration names no image store (images_dir and first_image), so \
+                 there is nothing to install into"
+                    .into(),
+            );
+        };
+        let first = config.bundled_image.as_ref().unwrap_or(configured);
+        let store = ImageStore::open_as(root, first, &build()).map_err(|e| e.to_string())?;
+        let folder = std::path::Path::new(folder);
+        let mut shown = None;
+        let image = install_from_folder(&store, folder, &keys, &mut |copy| {
+            let percent = (copy.done as u128 * 100)
+                .checked_div(copy.total as u128)
+                .unwrap_or(100);
+            if shown != Some(percent / 10) {
+                shown = Some(percent / 10);
+                eprintln!("copying Android {}: {percent}%", copy.image.version);
+            }
+        })
+        .map_err(|e| e.to_string())?;
+        println!(
+            "Android {} is installed and boots on trial at the next start of Android; a \
+             running Android restarts into it once no app window is open (dsa android restart \
+             restarts it now). If it does not finish booting, the service goes back to the \
+             image before it.",
+            image.version
+        );
+        Ok(())
     }
 
     /// The service the installer registers.

@@ -307,12 +307,18 @@ mod os {
                 }
             };
             let existing = crate::app_exe::program_path(&apps_dir, package, request.app_name());
-            if existing.is_file() {
-                return Ok(existing);
-            }
-            match crate::app_exe::ensure(&template, &apps_dir, package, Some(&request.app)) {
-                Ok((program, _)) => Ok(program),
-                Err(why) => {
+            // The app's program lives in the user's own folder, so it is checked and made
+            // with the user's own rights.
+            let made = crate::safe_fs::as_user(&self.sid, || -> Result<PathBuf, String> {
+                if existing.is_file() {
+                    return Ok(existing);
+                }
+                crate::app_exe::ensure(&template, &apps_dir, package, Some(&request.app))
+                    .map(|(program, _)| program)
+            });
+            match made {
+                Ok(Ok(program)) => Ok(program),
+                Ok(Err(why)) | Err(why) => {
                     eprintln!(
                         "root: asking under DSA's own name, as {package}'s program cannot be \
                          made: {why}"

@@ -128,8 +128,8 @@ impl SystemSettings {
     }
 
     /// The control message that carries these settings to the guest. The font scale is
-    /// always set, even when the text size is unknown: Android draws at 96 dpi at a scale of
-    /// 100%, and at a font scale of 1 its text would be 0.6 of the host's size.
+    /// always set, even when the text size is unknown (it is then 1), so the guest never keeps
+    /// a scale the host no longer asks for.
     pub fn to_control(&self) -> control::SystemSettings {
         control::SystemSettings {
             time_zone: self.time_zone.clone(),

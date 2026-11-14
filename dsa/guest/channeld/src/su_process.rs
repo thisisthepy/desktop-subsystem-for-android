@@ -73,6 +73,33 @@ fn pump_output(
     });
 }
 
+/// Whether the child `pid` has ended, leaving it unreaped so its process ID (and the process
+/// group it leads) cannot be taken by another process yet.
+fn exited(pid: u32) -> io::Result<bool> {
+    // SAFETY: zero is a valid siginfo_t, and waitid writes at most one into it.
+    let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    loop {
+        // SAFETY: info points to a valid siginfo_t.
+        let result = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                pid as libc::id_t,
+                &mut info,
+                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+            )
+        };
+        if result == 0 {
+            // The kernel leaves si_signo 0 when the child has not ended, and sets SIGCHLD
+            // when it has.
+            return Ok(info.si_signo == libc::SIGCHLD);
+        }
+        let error = io::Error::last_os_error();
+        if error.kind() != io::ErrorKind::Interrupted {
+            return Err(error);
+        }
+    }
+}
+
 /// The shell inherits only streams made by the helper, never descriptors from an app.
 pub fn run(
     socket: UnixStream,
@@ -108,7 +135,31 @@ fn run_shell(
             "the caller disconnected",
         ));
     }
+    // The shell starts from the helper's environment (init's, never the app's), without what
+    // only the helper needs (the sockets init passed it) or anything that would load code into
+    // a root process, and with root's own names.
     let mut shell = Command::new(executable);
+    for (name, _) in std::env::vars_os() {
+        if name
+            .to_str()
+            .is_some_and(|name| name.starts_with("ANDROID_SOCKET_"))
+        {
+            shell.env_remove(name);
+        }
+    }
+    shell
+        .env_remove("LD_PRELOAD")
+        .env_remove("LD_LIBRARY_PATH")
+        .env("USER", "root")
+        .env("LOGNAME", "root")
+        .env("HOME", "/data")
+        .env("SHELL", executable);
+    if std::env::var_os("PATH").is_none_or(|p| p.is_empty()) {
+        shell.env(
+            "PATH",
+            "/product/bin:/apex/com.android.runtime/bin:/apex/com.android.art/bin:/system_ext/bin:/system/bin:/system/xbin:/odm/bin:/vendor/bin:/vendor/xbin",
+        );
+    }
     if let Some(command) = command {
         shell.arg("-c").arg(command);
     }
@@ -138,6 +189,22 @@ fn run_shell(
     // SAFETY: only async-signal-safe system calls run between fork and exec.
     unsafe {
         shell.pre_exec(move || {
+            // Root's credentials alone: no supplementary group of the helper's carries over.
+            // init starts the helper as root with no other group, so the groups are dropped
+            // only when some are there (dropping them needs a capability the helper's domain
+            // is not given), and a shell that cannot shed them does not start.
+            if libc::geteuid() == 0 {
+                let mut groups: [libc::gid_t; 64] = [0; 64];
+                let count = libc::getgroups(groups.len() as libc::c_int, groups.as_mut_ptr());
+                let others = count < 0 || groups[..count as usize].iter().any(|group| *group != 0);
+                let root_gid: libc::gid_t = 0;
+                if (others && libc::setgroups(1, &root_gid) < 0)
+                    || libc::setresgid(0, 0, 0) < 0
+                    || libc::setresuid(0, 0, 0) < 0
+                {
+                    return Err(io::Error::last_os_error());
+                }
+            }
             if libc::setsid() < 0 {
                 return Err(io::Error::last_os_error());
             }
@@ -203,9 +270,17 @@ fn run_shell(
         }
     });
     let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) => {}
+        match exited(child.id()) {
+            Ok(true) => {
+                // Root lasts only as long as the approved command: whatever the shell left
+                // running in its session (a command sent to the background, a daemon that did
+                // not start a session of its own) ends with it. The shell is not reaped yet, so
+                // its process group's ID still names this group and no other.
+                // SAFETY: the negative PID addresses the process group created by setsid.
+                unsafe { libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL) };
+                break child.wait()?;
+            }
+            Ok(false) => {}
             Err(error) => {
                 // SAFETY: the negative PID addresses the process group created by setsid.
                 unsafe { libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL) };
@@ -283,6 +358,54 @@ mod tests {
         assert_eq!(out, b"out");
         assert_eq!(err, b"err");
         worker.join().unwrap();
+    }
+
+    #[test]
+    fn fr35_nothing_the_approved_command_left_running_outlives_it() {
+        let (mut client, server) = UnixStream::pair().unwrap();
+        let worker = std::thread::spawn(move || {
+            run_shell(
+                server,
+                Some("sleep 300 & echo $!".into()),
+                false,
+                0,
+                0,
+                "/bin/sh",
+            )
+            .unwrap();
+        });
+        let mut output = Vec::new();
+        loop {
+            let frame = su_wire::read_frame(&mut client).unwrap();
+            match frame.kind {
+                su_wire::STDOUT => output.extend(frame.payload),
+                su_wire::EXIT => {
+                    assert_eq!(frame.payload, 0i32.to_be_bytes());
+                    break;
+                }
+                _ => {}
+            }
+        }
+        worker.join().unwrap();
+        let pid: u32 = String::from_utf8(output).unwrap().trim().parse().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            // Gone, or a zombie waiting for whoever took it over to reap it.
+            let state = std::fs::read_to_string(format!("/proc/{pid}/stat"))
+                .ok()
+                .and_then(|stat| {
+                    let (_, rest) = stat.rsplit_once(')')?;
+                    rest.trim_start().chars().next()
+                });
+            if matches!(state, None | Some('Z' | 'X')) {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the background command {pid} still runs as {state:?}"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
 
     #[test]

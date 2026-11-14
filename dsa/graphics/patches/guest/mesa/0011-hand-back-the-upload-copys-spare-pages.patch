@@ -1,0 +1,31 @@
+Subject: Hand back the spare pages of the copy that takes a CPU's writes up to the host
+
+The copy that packs what a CPU wrote into a gralloc buffer for the host (0008) is reused for
+every picture and keeps the size of the largest: once a video or a large picture has gone
+through, its pages stay resident in the app's process until it ends, though nothing reads them
+again before the next picture writes them. Once the host has the planes, the whole pages past
+its first 256 KiB are marked free (dsa_spare_pages.h): the kernel takes them when the guest
+reclaims page cache, and a picture written before then reuses them without a fault.
+
+Applies after 0008 in patches/guest/mesa, on Mesa 224e91e39836d3ca31f80df2e0379e55c70574f8.
+---
+diff --git a/src/gfxstream/guest/android/GrallocMinigbm.cpp b/src/gfxstream/guest/android/GrallocMinigbm.cpp
+--- a/src/gfxstream/guest/android/GrallocMinigbm.cpp
++++ b/src/gfxstream/guest/android/GrallocMinigbm.cpp
+@@ -28,4 +28,5 @@
+ #include <vector>
+
+ #include "VirtGpu.h"
++#include "dsa_spare_pages.h"
+ #include "util/log.h"
+@@ -460,6 +461,11 @@
+     const int status = rcEnc->rcUpdateColorBuffer(rcEnc, hostHandle, 0, 0, layout.callWidth,
+                                                   layout.callHeight, layout.glFormat,
+                                                   layout.glType, mUploadStaging.data());
+     const int64_t sent = static_cast<int64_t>(mUploadStaging.size());
++    // The host answered, so it has the planes and the copy is dead until the next picture:
++    // its pages past the first part go back when the guest reclaims page cache, not when
++    // the app ends (a 2880x2880 picture is 32 MiB).
++    dsa::releaseSparePages(mUploadStaging.data(), mUploadStaging.size());
+     if (status != 0) {
+         if (!mUploadFailureLogged) {

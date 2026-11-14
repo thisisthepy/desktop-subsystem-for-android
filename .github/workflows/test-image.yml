@@ -4,55 +4,70 @@
 # disk template and ramdisk match image.json. Each run signs with a throwaway key set; a
 # release signs with the project's keys.
 #
-# The Android 17 x86_64 image is then booted by seven boot checks at once, each on a runner of
+# The Android 17 x86_64 image is then booted by eight boot checks at once, each on a runner of
 # its own, with the guest kernel built from the same commit. That image is kept in the Actions
 # cache, keyed on everything that decides it, so a run whose inputs did not change takes it
-# from there instead of making it again; the checks run on it all the same.
+# from there instead of making it again; the checks run on it all the same. A ninth check boots
+# it with the uncompressed system disk the host makes of it, to measure the host's direct-mapped
+# mode.
 
 name: Image test
 
 on:
   # Only develop is built and tested: features are integrated there and fixed there.
-  push:
-    branches: [develop]
-    paths:
-      - "dsa/guest/image/**"
-      - "dsa/graphics/**"
-      - "dsa/kernel/**"
-      - "dsa/guest/channeld/**"
-      - "dsa/guest/hwcomposer/**"
-      - "dsa/guest/codec2/**"
-      - "dsa/guest/audio/**"
-      - "dsa/guest/sensors/**"
-      - "dsa/guest/camera/**"
-      - "dsa/guest/power/**"
-      - "dsa/guest/gnss/**"
-      - "dsa/guest/aidl/**"
-      - "dsa/guest/transport/**"
-      - "dsa/guest/agent/**"
-      - "dsa/guest/aidl/**"
-      - "dsa/protocol/**"
-      - "dsa/guest/media-probe/**"
-      - "dsa/guest/arm-probe/**"
-      - "dsa/guest/gms-probe/**"
-      - "dsa/host/platform/linux/tests/widgets.rs"
-      - "dsa/host/platform/linux/tests/media.rs"
-      - "dsa/host/platform/linux/tests/system_screens.rs"
-      - "dsa/host/platform/linux/tests/graphics.rs"
-      - "dsa/host/platform/linux/tests/overlays.rs"
-      - "dsa/host/platform/linux/tests/boot_check/**"
-      - "dsa/host/platform/linux/tests/idle_reclaim/**"
-      - ".github/scripts/linux-vm/**"
-      - ".github/scripts/cache/prune.sh"
-      - ".github/workflows/test-image.yml"
-      - "scripts/tests/image-graphics-workflow.test.sh"
-      - "scripts/tests/image-audio-workflow.test.sh"
-      - "scripts/tests/image-media-workflow.test.sh"
-      - "scripts/tests/image-boot-overlays-workflow.test.sh"
-      - "scripts/tests/image-boot-check-image-dir.test.sh"
-      - "scripts/tests/image-cache-workflow.test.sh"
-      - "scripts/tests/image-boot-parallel-workflow.test.sh"
-      - "dsa/host/platform/linux/src/config.rs"
+  # Paused by the owner's decision (2026-11-14): while memory and resizing are fixed on
+  # the owner's PC, tests run only by hand (workflow_dispatch), so a push to develop does
+  # not take the runners the Development and Framework builds wait for. Uncomment to resume.
+  # push:
+  #   branches: [develop]
+  #   paths:
+  #     - "dsa/guest/image/**"
+  #     - "dsa/graphics/**"
+  #     - "dsa/kernel/**"
+  #     - "dsa/guest/channeld/**"
+  #     - "dsa/guest/hwcomposer/**"
+  #     - "dsa/guest/codec2/**"
+  #     - "dsa/guest/audio/**"
+  #     - "dsa/guest/sensors/**"
+  #     - "dsa/guest/camera/**"
+  #     - "dsa/guest/power/**"
+  #     - "dsa/guest/gnss/**"
+  #     - "dsa/guest/aidl/**"
+  #     - "dsa/guest/transport/**"
+  #     - "dsa/guest/agent/**"
+  #     - "dsa/guest/aidl/**"
+  #     - "dsa/protocol/**"
+  #     - "dsa/guest/media-probe/**"
+  #     - "dsa/guest/widget-probe/**"
+  #     - "dsa/guest/arm-probe/**"
+  #     - "dsa/guest/gms-probe/**"
+  #     - "dsa/host/platform/linux/tests/widgets.rs"
+  #     - "dsa/host/platform/linux/tests/media.rs"
+  #     - "dsa/host/platform/linux/tests/system_screens.rs"
+  #     - "dsa/host/platform/linux/tests/graphics.rs"
+  #     - "dsa/host/platform/linux/tests/resize.rs"
+  #     - "dsa/host/platform/linux/tests/overlays.rs"
+  #     - "dsa/host/platform/linux/tests/dns.rs"
+  #     - "dsa/host/core/src/dns/**"
+  #     - "dsa/host/platform/unix/src/dns_resolver.rs"
+  #     - "dsa/host/platform/linux/tests/boot_check/**"
+  #     - "dsa/host/platform/linux/tests/idle_reclaim/**"
+  #     - "dsa/host/platform/linux/tests/memory_check/**"
+  #     - ".github/scripts/linux-vm/**"
+  #     - ".github/scripts/cache/prune.sh"
+  #     - ".github/workflows/test-image.yml"
+  #     - "scripts/tests/image-graphics-workflow.test.sh"
+  #     - "scripts/tests/image-audio-workflow.test.sh"
+  #     - "scripts/tests/image-media-workflow.test.sh"
+  #     - "scripts/tests/image-boot-overlays-workflow.test.sh"
+  #     - "scripts/tests/image-boot-check-image-dir.test.sh"
+  #     - "scripts/tests/image-cache-workflow.test.sh"
+  #     - "scripts/tests/image-boot-parallel-workflow.test.sh"
+  #     - "dsa/host/platform/linux/src/config.rs"
+  #     - "dsa/host/platform/linux/src/crosvm.rs"
+  #     - "dsa/host/platform/linux/src/launcher.rs"
+  #     - "dsa/host/core/src/addon_disk.rs"
+  #     - "dsa/host/core/src/direct_mapped.rs"
   workflow_dispatch:
     inputs:
       keep_disk:
@@ -74,14 +89,35 @@ on:
         type: string
         required: false
         default: ""
+  # Checks (checks.yml) runs it as one of its jobs, with every other test, in one run. The
+  # same inputs; android is a string here, since a called workflow has no choice type.
+  workflow_call:
+    inputs:
+      keep_disk:
+        description: "Keep each generated image (its disks, initrd and image.json) as an artifact for a local boot check"
+        type: boolean
+        required: false
+        default: false
+      android:
+        description: "Android release to make: 17, 16, or all for the compatibility run"
+        type: string
+        required: false
+        default: "17"
+      graphics_run:
+        description: "Graphics test run that produced guest-gfxstream-hvsocket"
+        type: string
+        required: false
+        default: ""
 
 concurrency:
-  # On develop a run in progress finishes and only the newest waiting run stays: GitHub
-  # keeps one pending run per group, so a newer merge replaces the one still waiting.
-  # The newest run tests everything the dropped ones held. Anywhere else, such as a pull
-  # request, a newer run still replaces the older one.
-  group: test-image-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/develop' }}
+  # A run in progress always finishes, and only the newest waiting run stays: GitHub keeps
+  # one pending run per group, so a newer run replaces the one still waiting, and the newest
+  # tests everything the dropped ones held. The group is the workflow and the branch (or
+  # the pull request), never the run, so manual runs replace each other too. Called from
+  # Checks, github.workflow names Checks, so a Checks run neither waits on nor replaces a
+  # run started on its own.
+  group: test-image-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -190,11 +226,14 @@ jobs:
           test "$exports" = "HMI"
           grep -aFq 'hvsocket' "$target_vk"
 
+      # Named image-..., as is the test apps' artifact below: Checks runs this workflow and
+      # the Graphics test in one run, where an artifact's name must be unique, and the
+      # Graphics test keeps the unprefixed names that other runs download.
       - name: Keep the patched guest library
         if: ${{ !cancelled() && steps.graphics-verify.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
-          name: guest-gfxstream-hvsocket${{ matrix.arch == 'arm64' && '-arm64' || '' }}
+          name: image-guest-gfxstream-hvsocket${{ matrix.arch == 'arm64' && '-arm64' || '' }}
           path: |
             .scratch/build/libOpenglSystemCommon.so
             .scratch/build/vulkan.ranchu.so
@@ -475,6 +514,19 @@ jobs:
           path: .scratch/media-probe/dsa-media-probe.apk
           if-no-files-found: error
 
+      # An app whose widgets need a setup, which the widget boot check places.
+      - name: Build the widget probe
+        id: widget-probe
+        if: ${{ !cancelled() }}
+        run: bash dsa/guest/widget-probe/build.sh .scratch/widget-probe
+
+      - if: ${{ !cancelled() && steps.widget-probe.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: guest-widget-probe
+          path: .scratch/widget-probe/dsa-widget-probe.apk
+          if-no-files-found: error
+
       # An app whose only code is an ARM64 library, which the overlay check starts through
       # the ARM translator.
       - name: Build the ARM probe
@@ -555,7 +607,7 @@ jobs:
       - name: Build the widget boot check
         working-directory: dsa
         run: |
-          cargo test -p dsa-host-linux --test widgets --test system_screens --test media --test graphics --test overlays --no-run \
+          cargo test -p dsa-host-linux --test widgets --test system_screens --test media --test graphics --test resize --test dns --test overlays --no-run \
             --message-format=json-render-diagnostics > "$RUNNER_TEMP/boot-checks.json"
           cargo build -p dsa-host-linux --bin dsa-compositor --message-format=json-render-diagnostics >> "$RUNNER_TEMP/boot-checks.json"
           out="$GITHUB_WORKSPACE/.scratch/boot-checks"
@@ -570,7 +622,7 @@ jobs:
           while IFS=$'\t' read -r name executable; do
             cp "$executable" "$out/bin/$name"
           done < "$out/bin/programs.tsv"
-          for check in widgets system_screens media graphics overlays; do
+          for check in widgets system_screens media graphics resize overlays dns; do
             test -x "$out/tests/$check" || { echo "cargo built no $check boot check"; exit 1; }
           done
           for program in dsa-linux-hostd dsa-compositor dsa-devices dsa-gfx; do
@@ -612,7 +664,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: graphics-test-apps
+          name: image-graphics-test-apps
           path: |
             .scratch/graphics-test-apps/hello-gl2.apk
             .scratch/graphics-test-apps/hello-vulkan.apk
@@ -688,7 +740,7 @@ jobs:
         if: inputs.graphics_run == ''
         uses: actions/download-artifact@v4
         with:
-          name: guest-gfxstream-hvsocket${{ matrix.arch == 'arm64' && '-arm64' || '' }}
+          name: image-guest-gfxstream-hvsocket${{ matrix.arch == 'arm64' && '-arm64' || '' }}
           path: .scratch/guest-graphics
 
       - name: Verify graphics libraries ELF dependencies
@@ -796,14 +848,15 @@ jobs:
 
       # The default ARM translator a released x86_64 Android 17 image carries, from the newest
       # release that has one, so the image booted below lays it over its system as a release
-      # does and the overlay check has it to look at.
+      # does and the overlay check has it to look at. Releases are published by the official
+      # repository only, so a fork takes it from there too.
       - name: Download the default ARM translator
         id: translator
         if: matrix.android == '17' && matrix.arch == 'x86_64'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          repo="${{ github.repository }}"
+          repo=thisisthepy/desktop-subsystem-for-android
           for tag in $(gh release list -R "$repo" -L 50 --json tagName -q '.[] | select(.tagName | startswith("android-17") and (endswith("-arm64") | not)) | .tagName'); do
             if gh release view "$tag" -R "$repo" --json assets -q '.assets[].name' | grep -qx 'arm-translation.zip'; then
               echo "default ARM translator from: $tag"
@@ -886,6 +939,69 @@ jobs:
           mapfile -t args < .scratch/image-args
           uv run dsa/guest/image/make-image.py "${args[@]}"
 
+      # The host makes the direct-mapped mode's uncompressed system disk from system.vhdx
+      # itself, so the download stays the size it is (GitHub takes 2 GiB a file). image.json
+      # records the hash the host checks that disk against, made here exactly as the host makes
+      # it, and the hash of the disk as it is, which hosts that attach raw disks check their copy
+      # against; the signed list covers both through image.json's own hash. An image that
+      # declares the mode but whose disk cannot be described would boot every host on SCSI, so
+      # that fails the check. Only an image with no direct_mapped entry at all is meant to go
+      # without the mode.
+      - name: Record the hashes of the system disk the host makes
+        if: env.BOOT_IMAGE == 'true'
+        working-directory: dsa
+        run: |
+          cargo build -q --release -p dsa-host-core --bin dsa-release
+          dir="$(echo target/image/*/)"
+          if ! jq -e 'has("direct_mapped")' "$dir/image.json" > /dev/null; then
+            echo "::notice::the image declares no direct-mapped mode, so it has no system disk for it"
+            exit 0
+          fi
+          if ! target/release/dsa-release direct-mapped "$dir"; then
+            echo "::error::the image declares the direct-mapped mode, but its system disk could not be described, so it would boot without the mode"
+            exit 1
+          fi
+          jq '{direct_mapped, system_disk_raw}' "$dir/image.json"
+          if ! jq -e '.direct_mapped.system_disk and .system_disk_raw' "$dir/image.json" > /dev/null; then
+            echo "::error::image.json lacks direct_mapped.system_disk or system_disk_raw after dsa-release direct-mapped"
+            exit 1
+          fi
+
+      # The copies the host makes of the image's erofs partitions, beside the originals: each
+      # copy passes erofs-utils' own check, and the two extract to the same files, modes and
+      # owners, so the copy the direct-mapped mode maps holds what the image does.
+      - name: Check the host's uncompressed file systems against erofs-utils
+        if: env.BOOT_IMAGE == 'true'
+        continue-on-error: true
+        run: |
+          sudo apt-get install -y -q erofs-utils >/dev/null
+          work=/mnt/direct-mapped-check
+          sudo rm -rf "$work"
+          sudo mkdir -p "$work"
+          sudo chown "$USER" "$work"
+          dsa/target/release/dsa-release direct-mapped-partitions dsa/target/image/*/ "$work"
+          failed=0
+          for copy in "$work"/*.copy.img; do
+            name="$(basename "$copy" .copy.img)"
+            echo "::group::$name"
+            ls -l "$work/$name.original.img" "$copy"
+            fsck.erofs "$copy" || { echo "::error::fsck.erofs refuses the copy of $name"; failed=1; }
+            sudo fsck.erofs --extract="$work/a" --preserve "$work/$name.original.img" >/dev/null
+            sudo fsck.erofs --extract="$work/b" --preserve "$copy" >/dev/null
+            sudo diff -r --no-dereference "$work/a" "$work/b" > "$work/$name.diff" \
+              || { echo "::error::the copy of $name holds other files"; head -50 "$work/$name.diff"; failed=1; }
+            (cd "$work/a" && sudo find . -printf '%p %m %U %G %y %l\n' | sort) > "$work/$name.a.txt"
+            (cd "$work/b" && sudo find . -printf '%p %m %U %G %y %l\n' | sort) > "$work/$name.b.txt"
+            diff "$work/$name.a.txt" "$work/$name.b.txt" | head -50 \
+              && cmp -s "$work/$name.a.txt" "$work/$name.b.txt" \
+              || { echo "::error::the copy of $name has other modes, owners or links"; failed=1; }
+            echo "$name: $(wc -l < "$work/$name.a.txt") entries"
+            sudo rm -rf "$work/a" "$work/b" "$work/$name.original.img" "$copy"
+            echo "::endgroup::"
+          done
+          sudo rm -rf "$work"
+          exit $failed
+
       # Runs on every image, the one from the cache too.
       - name: Check the image
         run: uv run dsa/guest/image/check-image.py dsa/target/image/*/ .scratch/image-keys
@@ -916,7 +1032,7 @@ jobs:
         if: env.BOOT_IMAGE == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: boot-image
+          name: ${{ env.BOOT_IMAGE_ARTIFACT || 'boot-image' }}
           path: |
             dsa/target/image/
             !dsa/target/image/*/signed-target_files.zip
@@ -1020,7 +1136,9 @@ jobs:
   #
   # widgets: the digital clock widget placed through the local API. Its pictures must reach the
   # client, show something and change as the clock ticks, and the guest log must not say a
-  # widget failed to draw.
+  # widget failed to draw. Then the widget probe's widgets, which need a setup: each setup must
+  # open as the probe's own focused task window, a finished one places its widget, a canceled
+  # one does not, one that finishes at once places it, and an optional one is skipped.
   #
   # system_screens: Settings opened in a window 800 dp tall and one 520 dp tall and read
   # through adb in developer mode: its view hierarchy and the screen. The home page's large
@@ -1083,7 +1201,7 @@ jobs:
         include:
           - check: Place a widget on the booted image
             test: widgets
-            timeout: 12
+            timeout: 15
             keep: Keep the widget boot check's logs
             artifact: widget-boot-logs
             logs: |
@@ -1107,8 +1225,9 @@ jobs:
             timeout: 18
             keep: Keep the media check's logs
             artifact: media-check-logs
-            # The root check boots on a runner of its own, below.
-            filter: --skip fr35_an_app_needs_approval_and_su_is_hidden_when_disabled
+            # The root check, the root certificate check and the Widevine check boot on runners
+            # of their own, below.
+            filter: --skip fr35_an_app_needs_approval_and_su_is_hidden_when_disabled --skip fr28_ --skip fr37_widevine_is_offered_only_when_installed
             logs: |
               .scratch/media-*/*.log
               .scratch/media-*/*.txt
@@ -1122,6 +1241,34 @@ jobs:
               .scratch/root-*/*.log
               .scratch/root-*/*.txt
               ~/.local/share/dsa/logs/android-console.log*
+          - check: Trust a root certificate the host added in an app on the booted image
+            test: media
+            timeout: 18
+            keep: Keep the root certificate check's logs
+            artifact: root-certificate-check-logs
+            filter: fr28_
+            logs: |
+              .scratch/certs-*/*.log
+              .scratch/certs-*/*.txt
+              ~/.local/share/dsa/logs/android-console.log*
+          - check: Offer Widevine to an app only while it is installed on the booted image
+            test: media
+            timeout: 27
+            keep: Keep the Widevine check's logs
+            artifact: widevine-check-logs
+            filter: fr37_widevine_is_offered_only_when_installed
+            logs: |
+              .scratch/drm-*/*.log
+              .scratch/drm-*/*.txt
+              ~/.local/share/dsa/logs/android-console.log*
+          - check: Resolve a name only the host knows on the booted image
+            test: dns
+            timeout: 14
+            keep: Keep the DNS check's logs
+            artifact: dns-check-logs
+            logs: |
+              /tmp/dns-test-*/*.log
+              ~/.local/share/dsa/logs/android-console.log*
           - check: Run the Vulkan CTS subset and the graphics test apps on the booted image
             test: graphics
             timeout: 28
@@ -1131,13 +1278,25 @@ jobs:
               /tmp/graphics-test-*/cts/
               /tmp/graphics-test-*/*.png
               /tmp/graphics-test-*/*.log
+          # Settings resized at sizes across Android's size classes while a host accessibility
+          # client watches it, as on a desktop: each new size must reach the agent at once and
+          # its frame must come within the runner's budget.
+          - check: Resize a real app's window on the booted image
+            test: resize
+            timeout: 18
+            keep: Keep the resize check's measurement
+            artifact: resize-check-measurement
+            summary: /tmp/resize-test-*/resize.md
+            logs: |
+              /tmp/resize-test-*/*.log
+              /tmp/resize-test-*/resize.md
           - check: Lay the ARM translator and Google Play over the booted system
             test: overlays
             timeout: 18
             keep: Keep the overlay check's logs
             artifact: overlay-check-logs
-            # The idle reclaim measurement boots on a runner of its own, below.
-            filter: --skip nfr3_the_idle_reclaim_with_google_apps_is_measured
+            # The idle reclaim and memory measurements boot on runners of their own, below.
+            filter: --skip nfr3_the_idle_reclaim_with_google_apps_is_measured --skip nfr1_the_memory_with_google_play_and_one_app_window_is_measured --skip nfr1_nfr2_the_direct_mapped_disks_are_measured_against_the_cached_ones
             logs: |
               /tmp/overlays-test-*/*.log
               /tmp/overlays-test-*/*.txt
@@ -1151,6 +1310,37 @@ jobs:
             logs: |
               /tmp/overlays-test-*/*.log
               /tmp/overlays-test-*/idle-reclaim*
+              /tmp/overlays-test-*/google-play-mounts.txt
+          # Every release shows its memory with Google Play and one app window; the check fails
+          # only on a large regression against the recorded baseline.
+          - check: Measure the memory with Google Play and one app window on the booted image
+            test: overlays
+            timeout: 34
+            keep: Keep the memory measurement
+            artifact: memory-measurement
+            filter: nfr1_the_memory_with_google_play_and_one_app_window_is_measured
+            summary: /tmp/overlays-test-*/memory.md
+            logs: |
+              /tmp/overlays-test-*/*.log
+              /tmp/overlays-test-*/memory*
+              /tmp/overlays-test-*/google-play-mounts.txt
+          # The host's direct-mapped mode (off by default) against the cached disks: the image
+          # as it is published, whose uncompressed system disk the service makes, checks and
+          # maps on virtio-pmem with DAX, and then the image's disks on virtio-blk, with Google
+          # Play and one app window each time. The guest's page cache and the VM's memory of both
+          # go on the job's page.
+          - check: Measure the direct-mapped read-only disks against the cached ones on the booted image
+            test: overlays
+            timeout: 55
+            keep: Keep the direct-mapped measurement
+            artifact: direct-mapped-measurement
+            filter: nfr1_nfr2_the_direct_mapped_disks_are_measured_against_the_cached_ones
+            summary: /tmp/overlays-test-*/direct-mapped.md
+            logs: |
+              /tmp/overlays-test-*/*.log
+              /tmp/overlays-test-*/direct-mapped*
+              /tmp/overlays-test-*/cached*
+              /tmp/overlays-test-*/google-play-mounts.txt
     steps:
       - uses: actions/checkout@v4
 
@@ -1228,6 +1418,13 @@ jobs:
           name: guest-media-probe
           path: .scratch/media-probe
 
+      - name: Download the widget probe
+        if: matrix.test == 'widgets'
+        uses: actions/download-artifact@v4
+        with:
+          name: guest-widget-probe
+          path: .scratch/widget-probe
+
       - name: Download the ARM probe
         if: matrix.test == 'overlays'
         uses: actions/download-artifact@v4
@@ -1246,7 +1443,7 @@ jobs:
         if: matrix.test == 'graphics'
         uses: actions/download-artifact@v4
         with:
-          name: graphics-test-apps
+          name: image-graphics-test-apps
           path: .scratch/graphics-test-apps
 
       # verify.py fetches and runs the Vulkan CTS through uv.
@@ -1307,11 +1504,14 @@ jobs:
           if [[ "${{ matrix.test }}" == media ]]; then
             export DSA_MEDIA_PROBE="$GITHUB_WORKSPACE/.scratch/media-probe/dsa-media-probe.apk"
           fi
+          if [[ "${{ matrix.test }}" == widgets ]]; then
+            export DSA_WIDGET_PROBE="$GITHUB_WORKSPACE/.scratch/widget-probe/dsa-widget-probe.apk"
+          fi
           if [[ "${{ matrix.test }}" == overlays ]]; then
             export DSA_ARM_PROBE="$GITHUB_WORKSPACE/.scratch/arm-probe/dsa-arm-probe.apk"
             export DSA_GMS_PROBE="$GITHUB_WORKSPACE/.scratch/gms-probe/dsa-gms-probe.apk"
           fi
-          if [[ "${{ matrix.test }}" == graphics ]]; then
+          if [[ "${{ matrix.test }}" == graphics || "${{ matrix.test }}" == resize ]]; then
             # Lavapipe is the only Vulkan driver on the runner; naming it keeps it so.
             icd="$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -n 1)"
             export VK_ICD_FILENAMES="$icd" VK_DRIVER_FILES="$icd"

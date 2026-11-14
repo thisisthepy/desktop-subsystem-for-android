@@ -1,9 +1,12 @@
 """Reads and checks framework-lock.json, the pins the patched framework build is made from.
 
-The build makes SurfaceFlinger, libhwui and libEGL with DSA's GPU device loss recovery (the
-patches in patches/<project>/<android>/) and the image takes them in place of the published
-build's own (make-image.py --framework). Their neighbours in the image stay the published ones,
-so each must be built from the exact source of the build the image is made from.
+The build makes SurfaceFlinger, libhwui and libEGL with DSA's GPU device loss recovery,
+libandroid_runtime, whose Process.getTotalMemory gives Google Play the computer's memory, and
+DSA's KeyMint, whose root key of key blobs comes from the DSA host (the patches in
+patches/<project>/<android>/). The image takes the first four in place of the published build's
+own, and installs the KeyMint in place of the build's KeyMint APEX (make-image.py --framework).
+Their neighbours in the image stay the published ones, so each must be built from the exact
+source of the build the image is made from.
 
 The lock holds one entry per Android version DSA ships an image of (android16, android17). Each
 entry names that published build (build_id and target, the ones dsa/guest/image/inputs.json
@@ -22,7 +25,8 @@ a project fetched in part) and fetched by .github/scripts/translator/fetch-sourc
                                                    fails unless every pinned commit is the one
                                                    the build's manifest names
     framework_lock.py outputs                      where the build installs the files the image
-                                                   takes, one per line
+                                                   takes (the framework's, then the KeyMint's),
+                                                   one per line
 """
 
 import hashlib
@@ -49,15 +53,49 @@ OUTPUTS = {
     "SYSTEM/bin/surfaceflinger": "system/bin/surfaceflinger",
     "SYSTEM/lib64/libhwui.so": "system/lib64/libhwui.so",
     "SYSTEM/lib64/libEGL.so": "system/lib64/libEGL.so",
+    # The framework's JNI library, whose Process.getTotalMemory gives the apps the guest names
+    # (Google Play) the computer's memory as ActivityManager's totalMem.
+    "SYSTEM/lib64/libandroid_runtime.so": "system/lib64/libandroid_runtime.so",
 }
+
+# DSA's KeyMint: the nonsecure KeyMint service whose TA takes the root key of key blobs from the
+# DSA host (the patches in patches/hardware/interfaces, and in patches/system/keymint for
+# Android 16, which lacks the TA's hook for moving blobs to a new root key). The image installs
+# these as vendor files in place of the com.android.hardware.keymint APEX, which it then does
+# not select. The binary links its Rust crates in; libssl, which the Rust openssl crate links, is
+# the one shared library it needs that the published vendor partition does not carry.
+KEYMINT_BINARY = "VENDOR/bin/hw/dsa-keymint"
+KEYMINT_OUTPUTS = {
+    KEYMINT_BINARY: "vendor/bin/hw/dsa-keymint",
+    "VENDOR/lib64/libssl.so": "vendor/lib64/libssl.so",
+}
+# What the APEX carries beside its binary, taken as the tree has it: the VINTF fragments that
+# declare the KeyMint, remotely provisioned component, secure clock and shared secret instances,
+# and the hardware_keystore feature.
+KEYMINT_DIR = "hardware/interfaces/security/keymint/aidl/default"
+KEYMINT_SOURCES = {
+    "VENDOR/etc/vintf/manifest/android.hardware.security.keymint-service.xml":
+        f"{KEYMINT_DIR}/android.hardware.security.keymint-service.xml",
+    "VENDOR/etc/vintf/manifest/android.hardware.security.secureclock-service.xml":
+        f"{KEYMINT_DIR}/android.hardware.security.secureclock-service.xml",
+    "VENDOR/etc/vintf/manifest/android.hardware.security.sharedsecret-service.xml":
+        f"{KEYMINT_DIR}/android.hardware.security.sharedsecret-service.xml",
+    "VENDOR/etc/permissions/android.hardware.hardware_keystore.xml":
+        f"{KEYMINT_DIR}/android.hardware.hardware_keystore.xml",
+}
+KEYMINT_FILES = list(KEYMINT_OUTPUTS) + list(KEYMINT_SOURCES)
 
 # Projects every version fetches: the build system, and the projects the patches change.
 REQUIRED = ["build/make", "build/soong", "build/release", "build/blueprint",
-            "frameworks/native", "frameworks/base"]
+            "frameworks/native", "frameworks/base", "hardware/interfaces", "system/keymint",
+            "external/rust/crates/openssl", "external/boringssl"]
 # The folders of a project fetched in part that the patches and the targets need.
 REQUIRED_FOLDERS = {
-    "frameworks/native": ["libs/renderengine", "services/surfaceflinger", "opengl"],
-    "frameworks/base": ["libs/hwui"],
+    "frameworks/native": ["libs/renderengine", "services/surfaceflinger", "opengl", "libs/binder/rust"],
+    "frameworks/base": ["libs/hwui", "core/jni"],
+    "hardware/interfaces": ["security/keymint/aidl", "security/rkp/aidl", "security/secureclock/aidl",
+                            "security/sharedsecret/aidl"],
+    "external/boringssl": ["src/rust/bssl-sys"],
 }
 
 BUILD_ID = re.compile(r"^[0-9]+$")
@@ -219,7 +257,7 @@ def main(argv):
     elif len(argv) == 3 and argv[1] == "version":
         print(build_version(version_entry(lock, argv[2])))
     elif argv[1:] == ["outputs"]:
-        print("\n".join(OUTPUTS.values()))
+        print("\n".join(list(OUTPUTS.values()) + list(KEYMINT_OUTPUTS.values())))
     elif len(argv) == 4 and argv[1] == "check-manifest":
         problems = manifest_problems(version_entry(lock, argv[2]), Path(argv[3]).read_bytes())
         for problem in problems:

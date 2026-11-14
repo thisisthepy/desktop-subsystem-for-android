@@ -15,6 +15,8 @@ internal sealed class AppsText : ITextSource
         "Apps_Uninstalled" => "uninstalled {0}",
         "Apps_NotUninstalled" => "kept {0}: {1} [{2}]",
         "Apps_Refused_system-app" => "part of Android",
+        "Apps_DesktopShortcutMade" => "on the desktop: {0}",
+        "Apps_RootGroup" => "Apps_RootGroup {0}",
         _ => key,
     };
 }
@@ -144,6 +146,34 @@ public class AppsViewModelTests
         Assert.False(vm.HasError, vm.Error);
         Assert.Equal("uninstalled Notes", vm.Message);
         Assert.Equal(new[] { "Settings" }, vm.Rows.Select(r => r.Label));
+    }
+
+    [Fact]
+    public async Task Fr7_create_desktop_shortcut_puts_the_app_on_the_desktop_through_dsa()
+    {
+        var cli = new FakeCli()
+            .Answer("apps list --json", List)
+            .Answer("apps desktop-shortcut com.example.notes --json",
+                "{\"package\":\"com.example.notes\",\"created\":true,\"path\":\"C:\\\\Users\\\\me\\\\Desktop\\\\Notes.lnk\"}");
+        var (vm, _) = Make(cli);
+        await vm.RefreshAsync();
+        await vm.CreateDesktopShortcutAsync("com.example.notes");
+        Assert.False(vm.HasError, vm.Error);
+        Assert.Equal("on the desktop: Notes", vm.Message);
+        Assert.Contains("apps desktop-shortcut com.example.notes --json", cli.Calls);
+    }
+
+    [Fact]
+    public async Task Fr7_a_desktop_shortcut_that_could_not_be_made_says_why()
+    {
+        var (vm, _) = Make(new FakeCli()
+            .Answer("apps list --json", List)
+            .Fail("apps desktop-shortcut com.example.notes --json",
+                "dsa: Notes has no program to start yet"));
+        await vm.RefreshAsync();
+        await vm.CreateDesktopShortcutAsync("com.example.notes");
+        Assert.True(vm.HasError);
+        Assert.Contains("Notes has no program to start yet", vm.Error);
     }
 
     [Fact]

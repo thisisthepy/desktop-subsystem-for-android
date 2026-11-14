@@ -1,0 +1,211 @@
+diff --git a/src/gfxstream/guest/vulkan_enc/ResourceTracker.cpp b/src/gfxstream/guest/vulkan_enc/ResourceTracker.cpp
+--- a/src/gfxstream/guest/vulkan_enc/ResourceTracker.cpp
++++ b/src/gfxstream/guest/vulkan_enc/ResourceTracker.cpp
+@@ -1305,10 +1305,33 @@ void ResourceTracker::deviceMemoryTransform_fromhost(VkDeviceMemory* memory, uin
+     (void)offsetCount;
+     (void)size;
+     (void)sizeCount;
++    // A host type index is the same guest type (dsa_memory_types.h). A host type mask gains
++    // the coherent twin of each cached type it holds: a buffer or an image that can live in
++    // a type can live in its twin.
+     (void)typeIndex;
+     (void)typeIndexCount;
+-    (void)typeBits;
+-    (void)typeBitsCount;
++    if (typeBits && typeBitsCount) {
++        std::lock_guard<std::mutex> lock(mMemoryTypeSplitLock);
++        for (uint32_t i = 0; i < typeBitsCount; ++i) {
++            typeBits[i] = mMemoryTypeSplit.guestBits(typeBits[i]);
++        }
++    }
++}
++
++static_assert(dsa::kMemoryHostVisible == VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT &&
++                  dsa::kMemoryHostCoherent == VK_MEMORY_PROPERTY_HOST_COHERENT_BIT &&
++                  dsa::kMemoryHostCached == VK_MEMORY_PROPERTY_HOST_CACHED_BIT &&
++                  dsa::kMaxMemoryTypes == VK_MAX_MEMORY_TYPES,
++              "dsa_memory_types.h names Vulkan's memory property bits");
++
++void ResourceTracker::splitMemoryTypes(VkPhysicalDeviceMemoryProperties* properties) {
++    std::lock_guard<std::mutex> lock(mMemoryTypeSplitLock);
++    mMemoryTypeSplit.split(properties->memoryTypes, &properties->memoryTypeCount);
++}
++
++bool ResourceTracker::isAddedMemoryType(uint32_t typeIndex) {
++    std::lock_guard<std::mutex> lock(mMemoryTypeSplitLock);
++    return mMemoryTypeSplit.isTwin(typeIndex);
+ }
+ 
+ void ResourceTracker::transformImpl_VkExternalMemoryProperties_fromhost(
+@@ -1692,8 +1715,11 @@ void ResourceTracker::receiveReadBack(VkDeviceMemory memory, uint64_t offset, co
+ }
+ 
+ void ResourceTracker::invalidateShadowedMemory(VkEncoder* enc, VkDevice device) {
+-    // Only memory the host caches for reading comes back: reading back memory the guest
+-    // only writes would overwrite what it wrote since its last submit.
++    // Only memory of a type the guest reports coherent comes back (dsa_memory_types.h): the
++    // app never invalidates it. A non-coherent type comes back when the app invalidates it,
++    // as Vulkan asks, so its user does not wait for a read back at every fence. A type the
++    // host does not cache is never coherent: reading back memory the guest only writes
++    // would overwrite what it wrote since its last submit.
+     //
+     // This runs at every fence the app sees signalled, so it must cost what the device
+     // wrote, not what the app has mapped. Each allocation is asked for in pieces: the host
+@@ -1718,8 +1744,9 @@ void ResourceTracker::invalidateShadowedMemory(VkEncoder* enc, VkDevice device)
+             if (!info.shadowed || info.device != device || !info.shadowMapping.keptInStep()) {
+                 continue;
+             }
+-            if (!(memProps.memoryTypes[info.memoryTypeIndex].propertyFlags &
+-                  VK_MEMORY_PROPERTY_HOST_CACHED_BIT)) {
++            if (info.memoryTypeIndex >= VK_MAX_MEMORY_TYPES ||
++                !dsa::readBackAtCompletion(
++                    memProps.memoryTypes[info.memoryTypeIndex].propertyFlags)) {
+                 continue;
+             }
+             for (VkDeviceSize offset = 0; offset < info.allocationSize; offset += kReadBackPiece) {
+@@ -1915,10 +1942,18 @@ void ResourceTracker::deviceMemoryTransform_tohost(VkDeviceMemory* memory, uint3
+     (void)memoryCount;
+     (void)offsetCount;
+     (void)sizeCount;
+-    (void)typeIndex;
+-    (void)typeIndexCount;
+-    (void)typeBits;
+-    (void)typeBitsCount;
++
++    // A coherent twin the guest added allocates from the host type it was made of, and a
++    // guest type mask goes as the host's types (dsa_memory_types.h).
++    if ((typeIndex && typeIndexCount) || (typeBits && typeBitsCount)) {
++        std::lock_guard<std::mutex> lock(mMemoryTypeSplitLock);
++        for (uint32_t i = 0; typeIndex && i < typeIndexCount; ++i) {
++            typeIndex[i] = mMemoryTypeSplit.hostIndex(typeIndex[i]);
++        }
++        for (uint32_t i = 0; typeBits && i < typeBitsCount; ++i) {
++            typeBits[i] = mMemoryTypeSplit.hostBits(typeBits[i]);
++        }
++    }
+ 
+     if (memory) {
+         std::lock_guard<std::recursive_mutex> lock(mLock);
+@@ -1931,6 +1966,16 @@ void ResourceTracker::deviceMemoryTransform_tohost(VkDeviceMemory* memory, uint3
+ 
+             const auto& info = it->second;
+ 
++            if (info.shadowed && offset && size && i < offsetCount && i < sizeCount &&
++                size[i] == VK_WHOLE_SIZE) {
++                // To the end of the host's allocation, said in bytes: the host renderer
++                // reads and sends a range's bytes from its offset for the allocation's whole
++                // size when it is VK_WHOLE_SIZE, past the end of its mapping for any offset
++                // but 0. A non-coherent type's user flushes and invalidates ranges.
++                const uint64_t end = info.shadowSize;
++                size[i] = offset[i] < end ? end - offset[i] : 0;
++            }
++
+             if (!info.coherentMemory) continue;
+ 
+             memory[i] = info.coherentMemory->getDeviceMemory();
+@@ -1986,6 +2031,9 @@ uint32_t ResourceTracker::getColorBufferMemoryIndex(void* context, VkDevice devi
+     // property type VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+     VkMemoryPropertyFlags memoryProperty = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+     for (int i = VK_MAX_MEMORY_TYPES - 1; i >= 0; --i) {
++        // The host's own types only: a coherent twin the guest added is not the type the
++        // host picked, and a color buffer is not read back at every fence.
++        if (isAddedMemoryType(static_cast<uint32_t>(i))) continue;
+         if ((memReqs.memoryTypeBits & (1u << i)) &&
+             (memProps.memoryTypes[i].propertyFlags & memoryProperty)) {
+             return i;
+diff --git a/src/gfxstream/guest/vulkan_enc/ResourceTracker.h b/src/gfxstream/guest/vulkan_enc/ResourceTracker.h
+--- a/src/gfxstream/guest/vulkan_enc/ResourceTracker.h
++++ b/src/gfxstream/guest/vulkan_enc/ResourceTracker.h
+@@ -103,6 +103,7 @@ struct GfxStreamVkFeatureInfo {
+ 
+ class HostConnection;
+ 
++#include "dsa_memory_types.h"
+ #include "dsa_shadow_memory.h"
+ 
+ namespace dsa {
+@@ -560,6 +561,13 @@ class ResourceTracker {
+                          uint64_t size);
+     void flushShadowedMemory(VkEncoder* enc, VkDevice device);
+     void invalidateShadowedMemory(VkEncoder* enc, VkDevice device);
++    // The host's memory types as the guest reports them without memory the host shares: each
++    // type the host caches as it is, not coherent, and as a coherent twin after the host's
++    // types (dsa_memory_types.h). Every way of asking for the properties comes here.
++    void splitMemoryTypes(VkPhysicalDeviceMemoryProperties* properties);
++    // Whether a guest memory type index is a coherent twin the guest added, which the host
++    // does not know.
++    bool isAddedMemoryType(uint32_t typeIndex);
+     // What the device wrote into the guest's copies, read back once the app learns that its
+     // work finished, so the memory types the guest reports coherent are: after a wait for
+     // the device or for semaphores, after a fence's first success since its submit, and
+@@ -947,6 +955,12 @@ class ResourceTracker {
+ 
+     std::recursive_mutex mLock;
+ 
++    // How the guest's memory types map to the host's. gfxstream exposes one physical device,
++    // so there is one list. Its own lock: the transforms run inside the encoder, under mLock
++    // or not.
++    std::mutex mMemoryTypeSplitLock;
++    dsa::MemoryTypeSplit mMemoryTypeSplit;
++
+     std::optional<const VkPhysicalDeviceMemoryProperties> mCachedPhysicalDeviceMemoryProps;
+ 
+     struct GfxStreamVkFeatureInfo mFeatureInfo = {};
+diff --git a/src/gfxstream/guest/vulkan_enc/VkEncoder.cpp b/src/gfxstream/guest/vulkan_enc/VkEncoder.cpp
+--- a/src/gfxstream/guest/vulkan_enc/VkEncoder.cpp
++++ b/src/gfxstream/guest/vulkan_enc/VkEncoder.cpp
+@@ -2143,8 +2143,13 @@ VkResult VkEncoder::vkFlushMappedMemoryRanges(VkDevice device, uint32_t memoryRa
+                 continue;
+             };
+             auto hostPtr = sResourceTracker->getMappedPointer(memory);
+-            auto actualSize =
+-                size == VK_WHOLE_SIZE ? sResourceTracker->getMappedSize(memory) : size;
++            // Only bytes of the guest's copy, from the range's offset to its end or the
++            // copy's: VK_WHOLE_SIZE is to the end of the mapping, not the mapping's size, and
++            // a non-coherent type's user flushes ranges at any offset.
++            const uint64_t mappedSize = sResourceTracker->getMappedSize(memory);
++            const uint64_t left = offset < mappedSize ? mappedSize - offset : 0;
++            const uint64_t actualSize =
++                size == VK_WHOLE_SIZE ? left : std::min<uint64_t>(size, left);
+             if (!hostPtr) {
+                 stream->write(&streamSize, sizeof(uint64_t));
+                 continue;
+@@ -2152,7 +2157,7 @@ VkResult VkEncoder::vkFlushMappedMemoryRanges(VkDevice device, uint32_t memoryRa
+             streamSize = actualSize;
+             stream->write(&streamSize, sizeof(uint64_t));
+             uint8_t* targetRange = hostPtr + offset;
+-            stream->write(targetRange, actualSize);
++            if (actualSize) stream->write(targetRange, actualSize);
+         }
+     }
+     VkResult vkFlushMappedMemoryRanges_VkResult_return = (VkResult)0;
+diff --git a/src/gfxstream/guest/vulkan_enc/goldfish_vk_transform_guest.cpp b/src/gfxstream/guest/vulkan_enc/goldfish_vk_transform_guest.cpp
+--- a/src/gfxstream/guest/vulkan_enc/goldfish_vk_transform_guest.cpp
++++ b/src/gfxstream/guest/vulkan_enc/goldfish_vk_transform_guest.cpp
+@@ -409,18 +409,15 @@ void transform_fromhost_VkPhysicalDeviceMemoryProperties(
+     // and an app that asks for such memory, as most do for uniform buffers, would find none
+     // and stop. The guest keeps its own copy of a type the host caches in step both ways:
+     // what the app wrote goes to the host at every submit, and what the device wrote comes
+-    // back whenever the app learns that the device's work finished (a fence, a semaphore or
+-    // a wait for the queue or the device). That is what coherence promises, so such a type
+-    // is coherent again. A type the host does not cache is not read back, so it stays as the
+-    // host said, and the app invalidates it itself.
++    // back when the guest reads it back. Each such type is reported twice: as the host
++    // reports it, read back when the app invalidates, which a driver that takes the first
++    // type that fits takes; and after the host's types as a coherent twin, read back
++    // whenever the app learns that the device's work finished (a fence, a semaphore or a
++    // wait for the queue or the device), which is what coherence promises
++    // (dsa_memory_types.h). A type the host does not cache is not read back, so it stays as
++    // the host said, and the app invalidates it itself.
+     if (resourceTracker && !resourceTracker->usingDirectMapping()) {
+-        for (uint32_t i = 0; i < toTransform->memoryTypeCount && i < VK_MAX_MEMORY_TYPES; ++i) {
+-            VkMemoryPropertyFlags& flags = toTransform->memoryTypes[i].propertyFlags;
+-            if ((flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) &&
+-                (flags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT)) {
+-                flags |= VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+-            }
+-        }
++        resourceTracker->splitMemoryTypes(toTransform);
+     }
+     for (uint32_t i = 0; i < (uint32_t)VK_MAX_MEMORY_HEAPS; ++i) {
+         transform_fromhost_VkMemoryHeap(resourceTracker,

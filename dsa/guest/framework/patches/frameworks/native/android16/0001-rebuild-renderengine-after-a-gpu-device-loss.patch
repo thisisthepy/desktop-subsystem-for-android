@@ -213,7 +213,7 @@ index 291177d..18bde2e 100644
  
  SkiaGLRenderEngine::~SkiaGLRenderEngine() {
      finishRenderingAndAbandonContexts();
-@@ -553,6 +556,87 @@ int SkiaGLRenderEngine::getContextPriority() {
+@@ -553,6 +556,95 @@ int SkiaGLRenderEngine::getContextPriority() {
      return value;
  }
  
@@ -226,14 +226,22 @@ index 291177d..18bde2e 100644
 +}
 +
 +bool SkiaGLRenderEngine::rebuildBackend() {
-+    // A display that lost its device answers nothing but being made not current and being
-+    // terminated, and terminating it frees everything made on it. The same holds for what an
-+    // earlier failed attempt made.
++    // A display that lost its device answers nothing but being terminated and the thread
++    // being released, and terminating it frees everything made on it. The same holds for what
++    // an earlier failed attempt made.
 +    eglMakeCurrent(mEGLDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
 +    if (mDisplayInitialized) {
 +        eglTerminate(mEGLDisplay);
 +        mDisplayInitialized = false;
 +    }
++    // ANGLE refuses eglMakeCurrent on a display that lost its device (EGL_CONTEXT_LOST), so the
++    // lost context stays current on this thread, and a display with a current context is not
++    // terminated until the context is let go. The display initialized next was then half the
++    // old one, and every context made on it failed with EGL_BAD_DISPLAY, for good.
++    // eglReleaseThread lets go of the thread's context without asking the display (HWUI does
++    // the same when it ends its EGL), so the lost display is terminated before it is
++    // initialized again.
++    eglReleaseThread();
 +    mEGLContext = EGL_NO_CONTEXT;
 +    mPlaceholderSurface = EGL_NO_SURFACE;
 +    mProtectedPlaceholderSurface = EGL_NO_SURFACE;
@@ -338,7 +346,7 @@ index e08943b..c086c54 100644
  
  #include "Cache.h"
  #include "ColorSpaces.h"
-@@ -471,6 +472,107 @@ void SkiaRenderEngine::ensureContextsCreated() {
+@@ -471,6 +472,119 @@ void SkiaRenderEngine::ensureContextsCreated() {
      }
  
      std::tie(mContext, mProtectedContext) = createContexts();
@@ -378,22 +386,34 @@ index e08943b..c086c54 100644
 +            return mContext != nullptr;
 +        }
 +        mDeviceRecovery.onLost(Clock::now());
++        mWaitedForDevice = false;
++        mReportedAttempts = 0;
 +        ALOGW("RenderEngine lost its GPU device. It drops its GPU context and textures, and "
 +              "builds them again once the GPU answers.");
 +        mWasProtectedBeforeLoss = mInProtectedContext;
 +        dropGpuObjects();
 +    }
 +    // While the host resets its GPU an attempt fails. RenderEngine waits for it here, on its own
-+    // thread, for up to kDeviceRecoveryWait, and tries again on its next use after that.
-+    const auto deadline = Clock::now() + kDeviceRecoveryWait;
++    // thread, for up to kDeviceRecoveryWait once after the loss. Once that wait has run out, a
++    // use makes only the attempt that is due, if one is, and returns at once: a screenshot the
++    // window manager asks for under its lock must not wait the whole time again, or
++    // system_server stalls behind every one of them until its watchdog ends it.
++    const auto deadline =
++            mWaitedForDevice ? Clock::now() : Clock::now() + kDeviceRecoveryWait;
 +    while (!mDeviceRecovery.isHealthy()) {
 +        const auto now = Clock::now();
 +        if (!mDeviceRecovery.shouldRebuild(now)) {
 +            const auto wait = mDeviceRecovery.untilNextAttempt(now);
 +            if (now + wait > deadline) {
-+                ALOGW("The GPU does not answer yet after the device loss (%u attempts); "
-+                      "RenderEngine draws nothing until it does",
-+                      mDeviceRecovery.failedAttempts());
++                mWaitedForDevice = true;
++                // Once every five failed attempts, as the uses that return at once would
++                // otherwise say it at every frame.
++                if (mDeviceRecovery.failedAttempts() >= mReportedAttempts + 5) {
++                    mReportedAttempts = mDeviceRecovery.failedAttempts();
++                    ALOGW("The GPU does not answer yet after the device loss (%u attempts); "
++                          "RenderEngine draws nothing until it does",
++                          mDeviceRecovery.failedAttempts());
++                }
 +                return false;
 +            }
 +            std::this_thread::sleep_for(wait);
@@ -446,7 +466,7 @@ index e08943b..c086c54 100644
  }
  
  void SkiaRenderEngine::mapExternalTextureBuffer(const sp<GraphicBuffer>& buffer,
-@@ -497,16 +599,21 @@ void SkiaRenderEngine::mapExternalTextureBuffer(const sp<GraphicBuffer>& buffer,
+@@ -497,16 +611,21 @@ void SkiaRenderEngine::mapExternalTextureBuffer(const sp<GraphicBuffer>& buffer,
      // If we were to support caching protected buffers then we will need to switch the
      // currently bound context if we are not already using the protected context (and subsequently
      // switch back after the buffer is cached).
@@ -472,7 +492,7 @@ index e08943b..c086c54 100644
          std::unique_ptr<SkiaBackendTexture> backendTexture =
                  context->makeBackendTexture(buffer->toAHardwareBuffer(), isRenderable);
          auto imageTextureRef =
-@@ -543,6 +650,7 @@ void SkiaRenderEngine::unmapExternalTextureBuffer(sp<GraphicBuffer>&& buffer) {
+@@ -543,6 +662,7 @@ void SkiaRenderEngine::unmapExternalTextureBuffer(sp<GraphicBuffer>&& buffer) {
  
          if (iter->second == 0) {
              mTextureCache.erase(buffer->getId());
@@ -480,7 +500,7 @@ index e08943b..c086c54 100644
              mGraphicBufferExternalRefs.erase(buffer->getId());
          }
  
-@@ -577,6 +685,11 @@ void SkiaRenderEngine::cleanupPostRender() {
+@@ -577,6 +697,11 @@ void SkiaRenderEngine::cleanupPostRender() {
      SFTRACE_CALL();
      std::lock_guard<std::mutex> lock(mRenderingMutex);
      mTextureCleanupMgr.cleanup();
@@ -492,7 +512,7 @@ index e08943b..c086c54 100644
  }
  
  sk_sp<SkShader> SkiaRenderEngine::createRuntimeEffectShader(
-@@ -796,9 +909,12 @@ void SkiaRenderEngine::drawLayersInternal(
+@@ -796,9 +921,12 @@ void SkiaRenderEngine::drawLayersInternal(
  
      validateOutputBufferUsage(buffer->getBuffer());
  
@@ -507,7 +527,7 @@ index e08943b..c086c54 100644
  
      // any AutoBackendTexture deletions will now be deferred until cleanupPostRender is called
      DeferTextureCleanup dtc(mTextureCleanupMgr);
-@@ -809,6 +925,12 @@ void SkiaRenderEngine::drawLayersInternal(
+@@ -809,6 +937,12 @@ void SkiaRenderEngine::drawLayersInternal(
      waitFence(context, bufferFence);
  
      sk_sp<SkSurface> dstSurface = surfaceTextureRef->getOrCreateSurface(display.outputDataspace);
@@ -520,7 +540,7 @@ index e08943b..c086c54 100644
  
      SkCanvas* dstCanvas = mCapture->tryCapture(dstSurface.get());
      if (dstCanvas == nullptr) {
-@@ -1181,6 +1303,10 @@ void SkiaRenderEngine::drawLayersInternal(
+@@ -1181,6 +1315,10 @@ void SkiaRenderEngine::drawLayersInternal(
                      : item.usePremultipliedAlpha         ? kPremul_SkAlphaType
                                                           : kUnpremul_SkAlphaType;
              sk_sp<SkImage> image = imageTextureRef->makeImage(layerDataspace, alphaType);
@@ -531,7 +551,7 @@ index e08943b..c086c54 100644
  
              auto texMatrix = getSkM44(item.textureTransform).asM33();
              // textureTansform was intended to be passed directly into a shader, so when
-@@ -1352,6 +1478,14 @@ void SkiaRenderEngine::drawLayersInternal(
+@@ -1352,6 +1490,14 @@ void SkiaRenderEngine::drawLayersInternal(
  
      LOG_ALWAYS_FATAL_IF(activeSurface != dstSurface);
      auto drawFence = sp<Fence>::make(flushAndSubmit(context, dstSurface));
@@ -546,7 +566,7 @@ index e08943b..c086c54 100644
      trace(drawFence);
      FenceTimePtr fenceTime = FenceTime::makeValid(drawFence);
      for (const auto& layer : layers) {
-@@ -1377,6 +1511,10 @@ void SkiaRenderEngine::tonemapAndDrawGainmapInternal(
+@@ -1377,6 +1523,10 @@ void SkiaRenderEngine::tonemapAndDrawGainmapInternal(
          float hdrSdrRatio, ui::Dataspace dataspace, const std::shared_ptr<ExternalTexture>& sdr,
          const std::shared_ptr<ExternalTexture>& gainmap) {
      std::lock_guard<std::mutex> lock(mRenderingMutex);
@@ -557,7 +577,7 @@ index e08943b..c086c54 100644
      auto context = getActiveContext();
      auto gainmapTextureRef = getOrCreateBackendTexture(gainmap->getBuffer(), true);
  
-@@ -1394,6 +1532,12 @@ void SkiaRenderEngine::tonemapAndDrawGainmapInternal(
+@@ -1394,6 +1544,12 @@ void SkiaRenderEngine::tonemapAndDrawGainmapInternal(
      waitFence(context, hdrFence);
      const auto hdrTextureRef = getOrCreateBackendTexture(hdr->getBuffer(), false);
      const auto hdrImage = hdrTextureRef->makeImage(dataspace, kPremul_SkAlphaType);
@@ -570,7 +590,7 @@ index e08943b..c086c54 100644
      const auto hdrShader =
              hdrImage->makeShader(SkTileMode::kClamp, SkTileMode::kClamp,
                                   SkSamplingOptions({SkFilterMode::kNearest, SkMipmapMode::kNone}),
-@@ -1432,11 +1576,13 @@ void SkiaRenderEngine::tonemapAndDrawGainmapInternal(
+@@ -1432,11 +1588,13 @@ void SkiaRenderEngine::tonemapAndDrawGainmapInternal(
  }
  
  size_t SkiaRenderEngine::getMaxTextureSize() const {
@@ -586,7 +606,7 @@ index e08943b..c086c54 100644
  }
  
  void SkiaRenderEngine::drawShadow(SkCanvas* canvas,
-@@ -1466,6 +1612,11 @@ void SkiaRenderEngine::onActiveDisplaySizeChanged(ui::Size size) {
+@@ -1466,6 +1624,11 @@ void SkiaRenderEngine::onActiveDisplaySizeChanged(ui::Size size) {
      // conservative default based on that analysis.
      const float SURFACE_SIZE_MULTIPLIER = 3.5f * bytesPerPixel(mDefaultPixelFormat);
      const int maxResourceBytes = size.width * size.height * SURFACE_SIZE_MULTIPLIER;
@@ -598,7 +618,7 @@ index e08943b..c086c54 100644
  
      // start by resizing the current context
      getActiveContext()->setResourceCacheLimit(maxResourceBytes);
-@@ -1520,7 +1671,10 @@ void SkiaRenderEngine::dump(std::string& result) {
+@@ -1520,7 +1683,10 @@ void SkiaRenderEngine::dump(std::string& result) {
                  {"skia", "Other"},
          };
          SkiaMemoryReporter gpuReporter(gpuResourceMap, true);
@@ -671,7 +691,7 @@ index 26fab27..803e5ed 100644
  
      // Alphabetical by type name
      // TODO(b/380159947): move these into RuntimeEffectManager
-@@ -223,6 +245,20 @@ private:
+@@ -223,6 +245,24 @@ private:
      bool mInProtectedContext = false;
  
      bool mInitializedDiskCache = false;
@@ -683,6 +703,10 @@ index 26fab27..803e5ed 100644
 +    std::atomic<size_t> mMaxViewportDims = 0;
 +    size_t mResourceCacheLimit = 0;
 +    bool mWasProtectedBeforeLoss = false;
++    // Whether the wait for the GPU after the last loss has run out: later uses do not wait.
++    bool mWaitedForDevice = false;
++    // The failed attempts the last warning counted.
++    uint32_t mReportedAttempts = 0;
 +    std::function<void()> mDeviceResetListener GUARDED_BY(mRenderingMutex);
 +    // A frame found the device lost; the context is built again after the frame.
 +    bool mDeviceLossPending GUARDED_BY(mRenderingMutex) = false;

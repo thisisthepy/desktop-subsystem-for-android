@@ -22,10 +22,11 @@ use std::sync::mpsc::Sender;
 use std::time::Duration;
 
 use dsa_host_core::accessibility::{
-    to_screen, ActionRequest, Changes, ClientPresence, Node, NodeAction, NodeRange, Tree,
-    TreeError, TreeUpdate,
+    from_screen, to_screen, ActionRequest, Changes, ClientPresence, Node, NodeAction, NodeRange,
+    Tree, TreeError, TreeUpdate,
 };
 use dsa_host_core::compositor::caption::CaptionButton;
+use dsa_host_core::input::WindowGeometry;
 use dsa_host_core::tasks::Bounds;
 
 use super::atspi::{self, coord, role, state, StateSet};
@@ -61,7 +62,7 @@ const MAX_NAME_EVENTS: usize = 64;
 /// A rectangle in the window's logical pixels: left, top, width, height.
 pub type Rect = (i32, i32, i32, i32);
 
-/// A rectangle in the window's pixels (the task's pixels): left, top, width, height.
+/// A rectangle in the window's pixels: left, top, width, height.
 pub type PixelRect = (i32, i32, u32, u32);
 
 /// A button of the title bar.
@@ -304,6 +305,10 @@ pub struct WindowFacts {
     pub shown: (u32, u32),
     /// The task's size in Android's pixels.
     pub task: (u32, u32),
+    /// How large the window shows each of the task's pixels (window pixels per task pixels):
+    /// 1:1 unless the task keeps its density on a monitor of another scale. A node's bounds
+    /// are in the task's pixels, and the window shows them at this scale.
+    pub frame_scale: (u32, u32),
     /// Whether the window is the active one.
     pub active: bool,
     pub maximized: bool,
@@ -332,6 +337,7 @@ pub fn window_facts(model: &Toplevel, title_bar: &TitleBar) -> WindowFacts {
         scale: model.scale.max(1),
         shown: model.shown,
         task: model.task,
+        frame_scale: model.frame_scale,
         active: model.states.activated,
         maximized: model.states.maximized,
         resizable: model.resizable,
@@ -405,8 +411,18 @@ impl WindowAccess {
         ))
     }
 
+    /// What node bounds and points are converted with: the window shows the task's frames
+    /// at its frame scale.
+    fn geometry(&self) -> WindowGeometry {
+        WindowGeometry {
+            client: self.facts.shown,
+            task: self.facts.task,
+            scale: self.facts.frame_scale,
+        }
+    }
+
     fn node_rect(&self, bounds: Bounds) -> Rect {
-        let rect = to_screen(bounds, self.facts.task, self.facts.shown, (0, 0));
+        let rect = to_screen(bounds, self.geometry(), (0, 0));
         logical(
             rect.left,
             rect.top,
@@ -888,8 +904,15 @@ impl Access {
                 }
             }
         }
-        let scale = window.facts.scale.max(1) as i32;
-        let hit = window.tree.hit(wx * scale, wy * scale)?;
+        // The middle of the logical pixel, in the window's pixels, is the task pixel the
+        // window shows there at its frame scale.
+        let scale = f64::from(window.facts.scale.max(1));
+        let (tx, ty) = from_screen(
+            ((f64::from(wx) + 0.5) * scale, (f64::from(wy) + 0.5) * scale),
+            window.geometry(),
+            (0, 0),
+        );
+        let hit = window.tree.hit(tx, ty)?;
         let found = window.node_object(task_id, hit)?;
         match object {
             Object::Window(_) => Some(found),
@@ -1107,6 +1130,28 @@ impl Access {
                         rect,
                     });
                 }
+            }
+        }
+        // A new scale moves every node on the screen without the task changing.
+        if before.scale != after.scale || before.frame_scale != after.frame_scale {
+            let mut ids: Vec<u32> = window.tree.roots().to_vec();
+            let mut at = 0;
+            while at < ids.len() && ids.len() <= window.tree.len() {
+                if let Some(node) = window.tree.node(ids[at]) {
+                    ids.extend(node.children.iter().copied());
+                }
+                at += 1;
+            }
+            for id in ids.into_iter().take(window.tree.len()) {
+                let (Some(object), Some(node)) =
+                    (window.node_object(task_id, id), window.tree.node(id))
+                else {
+                    continue;
+                };
+                events.push(Event::Bounds {
+                    object,
+                    rect: window.node_rect(node.bounds),
+                });
             }
         }
         if before.active != after.active {

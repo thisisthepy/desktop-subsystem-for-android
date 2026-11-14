@@ -1,7 +1,7 @@
 // Copyright 2026 The DSA Authors
 // SPDX-License-Identifier: Apache-2.0
 //
-// The primary output stream: the HAL interface objects the framework holds, the shared
+// An output stream: the HAL interface objects the framework holds, the shared
 // queues it talks to them through, and the thread that runs each command it sends
 // (OutputStreamLogic) and sends the sound to the host (HostLink).
 
@@ -15,6 +15,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <thread>
 
 #include "host_link.h"
@@ -53,10 +54,11 @@ class StreamCommon final : public core::BnStreamCommon {
 
 class StreamOut final : public core::BnStreamOut {
    public:
-    // A stream of `bufferFrames` frames at a time, whose descriptor goes in `descriptor`.
-    // `onClosed` runs once, when the framework closes it. Returns null when the shared
-    // memory cannot be made.
+    // A stream of `bufferFrames` frames at a time, whose descriptor goes in `descriptor`, which
+    // the host's audio port knows as `name` ("primary", "app 0"). `onClosed` runs once, when
+    // the framework closes it. Returns null when the shared memory cannot be made.
     static std::shared_ptr<StreamOut> create(int32_t portConfigId, int64_t bufferFrames,
+                                             std::string name,
                                              std::function<void(int32_t)> onClosed,
                                              core::StreamDescriptor* descriptor);
     ~StreamOut() override;

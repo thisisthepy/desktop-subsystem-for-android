@@ -231,4 +231,32 @@ public interface GuestMemoryOrBuilder extends
    * @return The googlePlaySwapPssKb.
    */
   long getGooglePlaySwapPssKb();
+
+  /**
+   * <pre>
+   * Free page reporting, as the guest's kernel counts it: the free memory marked reported
+   * now, which the host has taken back (mem_free_kb less it is free memory the VM still
+   * holds); the memory reported to the host since boot, whose growth between two reports is
+   * how fast freed memory goes back; and the reported free memory the host took back in again
+   * since boot because a page beside it in the host's fault cluster was used, which the guest
+   * then reported again. All 0 when the guest cannot read them (reported_total_kb is never 0
+   * once reporting runs, since the first pass after boot reports every free page).
+   * </pre>
+   *
+   * <code>uint64 free_reported_kb = 27;</code>
+   * @return The freeReportedKb.
+   */
+  long getFreeReportedKb();
+
+  /**
+   * <code>uint64 reported_total_kb = 28;</code>
+   * @return The reportedTotalKb.
+   */
+  long getReportedTotalKb();
+
+  /**
+   * <code>uint64 refaulted_total_kb = 29;</code>
+   * @return The refaultedTotalKb.
+   */
+  long getRefaultedTotalKb();
 }

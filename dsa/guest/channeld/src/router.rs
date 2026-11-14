@@ -34,6 +34,11 @@
 //!   on to the listeners too: the agent has the media scanner look at the folders. Its
 //!   `AndroidFiles` goes to the switch alone ([`Router::on_android_files`]), which has init
 //!   serve the shared storage to the host.
+//! - The host's `HostCertificates` goes to the platform's certificate installer
+//!   ([`Router::on_host_certificates`]), which adds the roots the host names to Android's
+//!   system certificates and takes away those it no longer names, and then on to the
+//!   listeners: the agent has the running apps forget the trust anchors they looked up, once
+//!   the folders already say what the host said.
 //! - The host's ARM translation and Google apps messages stop here as well, and so do its
 //!   reads of an add-on image an older host left on the user's disk: the daemon looks after
 //!   those images ([`Router::on_arm_translation`], [`Router::on_gapps`]) and answers each one.
@@ -55,7 +60,8 @@ use std::time::Duration;
 use dsa_protocol::control::envelope::Body;
 use dsa_protocol::control::{
     AddonImage, AddonImagePart, AddonImageRead, AndroidFiles, ArmTranslationState, Envelope,
-    FileSharing, GappsState, GuestBoot, LocationRequest, PowerHintKind, RootElevationConfig,
+    FileSharing, GappsState, GuestBoot, HostCertificates, LocationRequest, PowerHintKind,
+    RootElevationConfig,
 };
 
 use crate::arm_translation::ArmTranslation;
@@ -173,6 +179,9 @@ struct State {
     apps: BTreeMap<String, Vec<u8>>,
     /// The host said no task window is shown: open tasks are minimized, and the guest dozes.
     screen_off: bool,
+    /// The tasks whose window the host last said it shows (open and not minimized), or `None`
+    /// until it says.
+    shown_tasks: Option<std::collections::BTreeSet<i32>>,
     /// The host said it is short of memory.
     host_memory_low: bool,
     next_id: u64,
@@ -262,6 +271,8 @@ pub struct Router {
     file_sharing: Option<FileSharingSwitch>,
     /// Serves the shared storage to the host, as the host asks.
     android_files: Option<AndroidFilesSwitch>,
+    /// Adds the host's root certificates to Android's system certificates.
+    host_certificates: Option<HostCertificatesSwitch>,
     /// The ARM translation package on the user's disk, which the host installs and removes.
     arm_translation: Option<Arc<ArmTranslation>>,
     /// The Google apps' image on the user's disk, which the host installs and removes.
@@ -289,6 +300,9 @@ type FileSharingSwitch = Box<dyn Fn(&FileSharing) + Send + Sync>;
 /// Serves the shared storage to the host on the port, with the token, it names.
 type AndroidFilesSwitch = Box<dyn Fn(&AndroidFiles) + Send + Sync>;
 
+/// Makes Android's system certificates hold the host's root certificates it names.
+type HostCertificatesSwitch = Box<dyn Fn(&HostCertificates) + Send + Sync>;
+
 /// Drives the kernel's su guard for a root elevation config: which uids may see su, on or off.
 type RootElevationSwitch = Box<dyn Fn(&RootElevationConfig) + Send + Sync>;
 
@@ -309,6 +323,7 @@ impl Router {
             developer_mode: None,
             file_sharing: None,
             android_files: None,
+            host_certificates: None,
             arm_translation: None,
             gapps: None,
             gamepads: None,
@@ -384,6 +399,16 @@ impl Router {
         switch: impl Fn(&AndroidFiles) + Send + Sync + 'static,
     ) -> Router {
         self.android_files = Some(Box::new(switch));
+        self
+    }
+
+    /// Hands the host's root certificates to `switch`, which installs them, before the
+    /// listeners hear of them.
+    pub fn on_host_certificates(
+        mut self,
+        switch: impl Fn(&HostCertificates) + Send + Sync + 'static,
+    ) -> Router {
+        self.host_certificates = Some(Box::new(switch));
         self
     }
 
@@ -608,6 +633,26 @@ impl Router {
         }
     }
 
+    /// How many of the tasks in use have their window shown on the host: open and not
+    /// minimized. Until the host says which windows it shows, every task in use counts as shown.
+    pub fn tasks_shown(&self) -> usize {
+        let state = self.lock();
+        if state.screen_off {
+            return 0;
+        }
+        state
+            .tasks
+            .iter()
+            .filter(|(_, task)| task.updated.is_some())
+            .filter(|(id, _)| {
+                state
+                    .shown_tasks
+                    .as_ref()
+                    .is_none_or(|shown| shown.contains(id))
+            })
+            .count()
+    }
+
     /// Whether the host last said it is short of memory.
     pub fn host_memory_low(&self) -> bool {
         self.lock().host_memory_low
@@ -632,6 +677,13 @@ impl Router {
             // The daemon has the folders mounted; the agent hears of it as well.
             if let Some(switch) = &self.file_sharing {
                 switch(sharing);
+            }
+        }
+        if let Some(Body::HostCertificates(certificates)) = &body {
+            // The daemon installs them first; the agent hears of it as well, and has the
+            // running apps look their trust anchors up again.
+            if let Some(switch) = &self.host_certificates {
+                switch(certificates);
             }
         }
         if let Some(Body::RootElevationConfig(config)) = &body {
@@ -665,6 +717,11 @@ impl Router {
                 return;
             }
         }
+        if let Some(Body::TasksShown(shown)) = &body {
+            // For the daemon alone: the reclaim keeps less cache for a minimized task.
+            self.lock().shown_tasks = Some(shown.task_ids.iter().copied().collect());
+            return;
+        }
         let mut state = self.lock();
         match body {
             Some(Body::ScreenState(screen)) => state.screen_off = !screen.on,
@@ -688,6 +745,8 @@ impl Router {
         // again if it is short of memory.
         state.screen_off = false;
         state.host_memory_low = false;
+        // It says again which task windows it shows.
+        state.shown_tasks = None;
         let _ = self.to_host.send(state.boot_report());
         for frame in state.power_modes.values() {
             let _ = self.to_host.send(frame.clone());
@@ -762,6 +821,37 @@ impl Router {
                         "only the agent says the Google Services Framework Android ID: {why}"
                     ))
                 })?;
+            }
+            // The host stores what the backup transport sends as the user's app data, and
+            // trusts a passkey request to name the app Android's credential manager says
+            // called; both are the agent's alone.
+            Some(
+                Body::PasskeyRequest(_)
+                | Body::BackupUpload(_)
+                | Body::BackupCommit(_)
+                | Body::BackupDiscard(_)
+                | Body::BackupClear(_)
+                | Body::BackupQuery(_)
+                | Body::BackupFetch(_)
+                | Body::BackupRunResult(_),
+            ) => {
+                (self.agent_check)(sender).map_err(|why| {
+                    SendError::NotAllowed(format!(
+                        "only the agent speaks for the guest's backups and passkeys: {why}"
+                    ))
+                })?;
+            }
+            Some(Body::KeymintRootKeyRequest(_) | Body::KeymintRootKey(_)) => {
+                return Err(SendError::NotAllowed(
+                    "KeyMint's root key is asked for on a port of its own, by the daemon alone"
+                        .to_string(),
+                ))
+            }
+            Some(Body::DnsQuery(_) | Body::DnsAnswer(_)) => {
+                return Err(SendError::NotAllowed(
+                    "DNS queries go to the host on a port of their own, by the daemon alone"
+                        .to_string(),
+                ))
             }
             Some(Body::AgentConnected(_)) => {
                 if !state.listeners.iter().any(|s| s.peer == sender) {

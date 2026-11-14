@@ -8,6 +8,11 @@ framework.json, which says what they are: the Android version and the published 
 were made from, the build's version (framework_lock.py version), the architecture, and each
 file's size and SHA-256. make-image.py takes the files only into an image of that same build
 and architecture, and check-image.py finds the same hashes in the image.
+
+Beside the framework's files (framework_lock.OUTPUTS) it holds DSA's KeyMint: the files the build installs
+(framework_lock.KEYMINT_OUTPUTS), and the VINTF fragments and the feature file the KeyMint APEX
+carries, which come from the tree as it was fetched (framework_lock.KEYMINT_SOURCES; hence
+--top).
 """
 
 import argparse
@@ -41,14 +46,16 @@ def sha256(path):
     return h.hexdigest()
 
 
-def collect(version, arch, product_out, out, sources=None, patches=None):
-    """Copies the build's outputs from `product_out` into `out` and writes framework.json;
-    returns what it wrote there."""
+def collect(version, arch, product_out, out, sources=None, patches=None, top=None):
+    """Copies the build's outputs from `product_out`, and the KeyMint's files the tree `top`
+    has, into `out` and writes framework.json; returns what it wrote there."""
     if arch not in ELF_MACHINES:
         raise SystemExit(f"the architecture must be one of {', '.join(ELF_MACHINES)}, not {arch}")
-    product_out, out = Path(product_out), Path(out)
+    if top is None:
+        raise SystemExit("the KeyMint's VINTF fragments and feature file come from the tree: give --top")
+    product_out, out, top = Path(product_out), Path(out), Path(top)
     files = {}
-    for name, installed in framework_lock.OUTPUTS.items():
+    for name, installed in {**framework_lock.OUTPUTS, **framework_lock.KEYMINT_OUTPUTS}.items():
         source = product_out / installed
         if not source.is_file():
             raise SystemExit(f"the build did not make {installed} (looked in {product_out})")
@@ -56,6 +63,14 @@ def collect(version, arch, product_out, out, sources=None, patches=None):
             found = elf_machine(f.read(64))
         if found != ELF_MACHINES[arch]:
             raise SystemExit(f"{installed} is built for ELF machine {found}, not {arch} ({ELF_MACHINES[arch]})")
+        target = out / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+        files[name] = {"size": target.stat().st_size, "sha256": sha256(target)}
+    for name, source_path in framework_lock.KEYMINT_SOURCES.items():
+        source = top / source_path
+        if not source.is_file():
+            raise SystemExit(f"the tree has no {source_path} (looked in {top})")
         target = out / name
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, target)
@@ -83,19 +98,18 @@ def main():
     parser.add_argument("--android", required=True)
     parser.add_argument("--arch", required=True)
     parser.add_argument("--product-out", type=Path, required=True)
-    parser.add_argument("--top", type=Path, help="the tree, for what was fetched and patched")
+    parser.add_argument("--top", type=Path, required=True,
+                        help="the tree: what was fetched and patched, and the KeyMint's VINTF fragments")
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     version = framework_lock.version_entry(framework_lock.load(), args.android)
-    sources = patches = None
-    if args.top:
-        for name in (".dsa-sources.json", ".dsa-patches.json"):
-            if not (args.top / name).is_file():
-                raise SystemExit(f"{args.top / name} is missing: the tree was not fetched and patched "
-                                 "by fetch-source.py and apply-patches.py")
-        sources = json.loads((args.top / ".dsa-sources.json").read_text())
-        patches = json.loads((args.top / ".dsa-patches.json").read_text())
-    description = collect(version, args.arch, args.product_out, args.out, sources, patches)
+    for name in (".dsa-sources.json", ".dsa-patches.json"):
+        if not (args.top / name).is_file():
+            raise SystemExit(f"{args.top / name} is missing: the tree was not fetched and patched "
+                             "by fetch-source.py and apply-patches.py")
+    sources = json.loads((args.top / ".dsa-sources.json").read_text())
+    patches = json.loads((args.top / ".dsa-patches.json").read_text())
+    description = collect(version, args.arch, args.product_out, args.out, sources, patches, args.top)
     print(json.dumps({k: v for k, v in description.items() if k not in ("sources", "patches")}, indent=2))
 
 

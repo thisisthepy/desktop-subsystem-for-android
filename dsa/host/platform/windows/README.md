@@ -233,21 +233,30 @@ after two minutes. `"keep_window_manager": false` turns this off.
   frames, decoded with WIC, with what the widget leaves clear see-through. Until the first
   frame comes, or when a frame has nothing in it, it shows a mostly opaque dark card with
   rounded corners, so a widget is never an invisible hole on the desktop. While the pointer
-  is over a widget, a small round "More" button fades in at its top right corner, inside
-  its rounded corners. Clicking it, or right-clicking the widget, opens the widget's menu:
-  Resize, with the sizes the widget allows, and Remove (in Korean when that is the display
-  language). The menu is a Windows 11 menu drawn by the window manager, with rounded
-  corners, the acrylic backdrop (a solid fill on Windows 10 or with transparency effects
-  off), the light or dark theme, icons and full keyboard use, and UI Automation reads it as
-  a menu. Dragging the More button moves the widget, and so does pressing anywhere on it,
-  holding still for half a second and then dragging; a press that moves sooner stays the
-  widget's own, so its lists scroll and its buttons work. Dragging its edges resizes it.
-  When the user lets go, the service remembers the placement (per user, beside the user's
-  settings, as `users/<user>.widgets.json`) and tells Android the window's size, which the
-  widget draws at. Presses, moves and releases inside the widget go to Android. The widgets
-  come from the settings app's Widgets
-  page, which shows changes made elsewhere through `dsa widgets watch`, or
-  `dsa widgets list|add <provider>|remove <id>`. The
+  is over a widget, a small "More" button fades in at its top right corner, inside its
+  rounded corners: a 24 px rounded square of dark grey at 85% with three light dots, the
+  same in light and dark themes, which takes presses in a 32 px square for touch. Clicking it, or right-clicking the widget, opens the widget's menu:
+  Widget settings, for a widget whose app lets it be set up again, Resize, with the sizes
+  the widget allows, and Remove (in Korean when that is the display language). The menu is
+  a Windows 11 menu drawn by the window manager, with rounded corners, the acrylic backdrop
+  (a solid fill on Windows 10 or with transparency effects off), the light or dark theme,
+  icons and full keyboard use, and UI Automation reads it as a menu. Widget settings opens
+  the widget's setup again as the app's window, and the widget shows what the user chose
+  once they finish. A long press edits the widget as Android's home screen does: a finger
+  or a pen held on it, or the left mouse button held for half a second without moving past
+  the drag threshold. Android's press is cancelled then, so a long press never also clicks.
+  The widget lifts a little over a soft shadow, with an accent border and a handle on each
+  edge it may be resized along; dragging moves it, letting go opens its menu under it, the
+  handles resize it within the widget's minimum and maximum, and Esc, a click anywhere else
+  or the end of a move or a resize ends the edit. A press that moves sooner stays the
+  widget's own, so its lists scroll and its buttons work. Dragging the More button also
+  moves the widget, and dragging its edges resizes it. When the user lets go, the service
+  remembers the placement (per user, beside the user's settings, as
+  `users/<user>.widgets.json`) and tells Android the window's size, which the widget draws
+  at. Until the user resizes a widget, its window follows the widget's default size as
+  Android grows it to hold the widget's content; once they do, it keeps their size. Presses, moves and releases inside the widget go to Android. The widgets come from the
+  settings app's Widgets page, which shows changes made elsewhere through
+  `dsa widgets watch`, or `dsa widgets list|add <provider>|settings <id>|remove <id>`. The
   window manager starts at sign-in and starts Android then, so the first app opened after
   the computer starts does not wait for a boot and remembered widgets come back.
 - It owns no window. Each Android app task shows in a window of the app's own window
@@ -275,11 +284,13 @@ after two minutes. `"keep_window_manager": false` turns this off.
   other display, such as Android's whole screen, are dropped, so no window shows more
   than one app.
 - One Android pixel is one pixel of the window, so frames are shown 1:1 and stay sharp
-  at any monitor scale. Each task draws at the density of its window's monitor: 96 dpi at
-  100%, 144 at 150%, 192 at 200%, since an Android dp is 1/160 inch and a Windows pixel
-  at 100% 1/96 inch. Android scales text on its own, so its font scale is 160/96 times
-  the Windows text size (Accessibility > Text size), and text keeps the size of Windows'
-  text. A change to the text size reaches Android at once. Android restarts an app that
+  at any monitor scale. Each task draws at the density of its window's monitor: 130 dpi at
+  100%, 164 at 125%, 196 at 150%, 262 at 200%. Android's desktop dp is 48 dp for 10.4 mm
+  (1/117.23 inch) and a Windows pixel at 100% 1/96 inch, so the density is 131 times the
+  scale, rounded to an even number, and a dp is 0.819 of a Windows pixel: Android's
+  buttons, sized for a finger, come out the size of Windows' own. Text follows the same
+  ratio, so Android's font scale is the Windows text size (Accessibility > Text size)
+  alone, 1 at 100%, and body text of 16 sp is about 13 pixels at 100%. A change to the text size reaches Android at once. Android restarts an app that
   does not say it handles a change of font scale, so while such an app is open the new
   scale waits, and it applies as soon as none is. A window that opens on, or moves to, a
   monitor of another scale asks Android for that density, and then for the size that
@@ -298,7 +309,7 @@ after two minutes. `"keep_window_manager": false` turns this off.
   see the user's monitors from session 0, so the window manager and the app windows record
   them in `%LOCALAPPDATA%\DSA\monitors.txt`, and the main monitor's DPI beside it in
   `monitor-density.txt`: Android starts at the density a window on the main monitor gives its
-  task (96 dpi at 100%, 144 at 150%), so an app that opens there is not relaunched for a
+  task (130 dpi at 100%, 196 at 150%), so an app that opens there is not relaunched for a
   change of density right after it starts. A monitor longer than the display, or one
   attached after Android started, caps its windows at the display's size, and a maximised
   window is centred on the screen, until the next start of Android. If Android gives the
@@ -738,6 +749,41 @@ What keeps the number small:
   does when no window has been shown for 30 seconds.
 - `dsa-wm` empties its working set 30 seconds after the last task window closes, and logs
   how much it held. Memory it touches again comes back by itself.
+
+### Direct-mapped read-only disks
+
+Off by default, while its saving is measured: `"direct_mapped_images": true` in
+`dsa-hostd.json` (read when the service starts). Each boot then attaches the image's system
+disk and the user's add-on disk as Hyper-V virtual persistent memory instead of SCSI disks.
+The guest mounts the read-only partitions with DAX: it maps each file from the host's mapping
+of the image instead of reading it into a page cache of its own, on top of Windows' file cache
+of the same file. The pages the VM maps are clean file pages, which Windows can drop and read
+again; the guest keeps page structs for the mapped disks, about 1.6% of their size.
+
+- It works on x86_64 PCs only (Hyper-V on ARM64 boots with the disks on SCSI), and only for an
+  image whose `image.json` describes the mode's system disk (`direct_mapped.system_disk`); any
+  other boot attaches the disks as before, with a line in the service's log saying why.
+- The published images compress their read-only partitions, which keeps each download under
+  GitHub's 2 GiB a file, and only a file stored whole can be mapped. So after an image is
+  installed or downloaded and checked, the service makes the disk the mode maps itself, on the
+  PC: a copy of `system.vhdx` with every erofs partition uncompressed, as a fixed VHD, in
+  `%ProgramData%\DSA\direct-mapped\<version>.vhd`. It runs in the background at Windows'
+  lowest priority, resumes where a stopped run left off, and logs its progress, its time and
+  its size. Until the copy is made and checked, Android boots with the image's own disk on
+  SCSI, verified by dm-verity as without the mode. The copy of an image that was replaced is
+  removed.
+- The copy is checked, not trusted: the image build makes the same copy and records its
+  SHA-256 in `image.json`, which the signed release list covers, and the service compares the
+  copy with it before the first boot uses it, and again each time the service starts. A copy
+  that does not match is removed and made again. Only SYSTEM writes the folder; administrators
+  may read and delete, and the VMs read, so a VM opens it read only.
+- A mapped partition cannot be checked by dm-verity in the guest, so the host's check stands
+  in for it. `odm` stays as the image has it, with dm-verity, so the guest still checks the
+  verified boot data (vbmeta and the boot images) as in a normal boot. The guest marks its
+  persistent memory disks read only.
+- About 2.3 GB more on the disk for an Android 17 image (the copy beside the 1.8 GB
+  `system.vhdx`), and a few tens of seconds to a few minutes to make on a laptop SSD; the log
+  says how long it took.
 
 ## DSA Settings
 

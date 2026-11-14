@@ -14,21 +14,28 @@ name: Installer test
 
 on:
   # Only develop is built and tested: features are integrated there and fixed there.
-  push:
-    branches: [develop]
-    paths:
-      - "dsa/**"
-      - ".github/workflows/test-installer.yml"
-      - ".github/scripts/installer/**"
+  # Paused by the owner's decision (2026-11-14): while memory and resizing are fixed on
+  # the owner's PC, tests run only by hand (workflow_dispatch), so a push to develop does
+  # not take the runners the Development and Framework builds wait for. Uncomment to resume.
+  # push:
+  #   branches: [develop]
+  #   paths:
+  #     - "dsa/**"
+  #     - ".github/workflows/test-installer.yml"
+  #     - ".github/scripts/installer/**"
   workflow_dispatch:
+  # Checks (checks.yml) runs it as one of its jobs, with every other test, in one run.
+  workflow_call:
 
 concurrency:
-  # On develop a run in progress finishes and only the newest waiting run stays: GitHub
-  # keeps one pending run per group, so a newer merge replaces the one still waiting.
-  # The newest run tests everything the dropped ones held. Anywhere else, such as a pull
-  # request, a newer run still replaces the older one.
-  group: test-installer-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/develop' }}
+  # A run in progress always finishes, and only the newest waiting run stays: GitHub keeps
+  # one pending run per group, so a newer run replaces the one still waiting, and the newest
+  # tests everything the dropped ones held. The group is the workflow and the branch (or
+  # the pull request), never the run, so manual runs replace each other too. Called from
+  # Checks, github.workflow names Checks, so a Checks run neither waits on nor replaces a
+  # run started on its own.
+  group: test-installer-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -1992,7 +1999,11 @@ jobs:
         shell: pwsh
     env:
       GH_TOKEN: ${{ github.token }}
+      # The runs whose artifacts it takes are this repository's (a fork's own builds); the
+      # published images, releases and update lists are the official repository's, which
+      # every real installer reads, in a fork too.
       REPO: ${{ github.repository }}
+      PUBLISHED_REPO: thisisthepy/desktop-subsystem-for-android
       DSA_ARCH: ${{ matrix.arch }}
       KERNEL_NAME: ${{ matrix.kernel }}
       GFXSTREAM_ARTIFACT: ${{ matrix.gfxstream }}
@@ -2049,7 +2060,7 @@ jobs:
         run: |
           if (-not $env:SIGNING_KEY) { throw "The DSA_RELEASE_SIGNING_KEY secret is not available to this run, so the published list cannot be trusted." }
           $published = (New-Item -ItemType Directory -Force .scratch\published).FullName
-          gh release download images --repo $env:REPO --pattern 'images.json*' --dir $published
+          gh release download images --repo $env:PUBLISHED_REPO --pattern 'images.json*' --dir $published
           if ($LASTEXITCODE -ne 0) { throw "downloading the published image list failed" }
           Push-Location dsa
           cargo build -q --release -p dsa-host-core --bin dsa-release
@@ -2086,7 +2097,7 @@ jobs:
           $major = ($list.supported_majors | Measure-Object -Maximum).Maximum
           # One patch above the newest published DSA, so it installs over that one; the
           # release of the same version later replaces it.
-          $tag = gh release list --repo $env:REPO --limit 50 --json tagName --jq '[.[].tagName | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))][0]'
+          $tag = gh release list --repo $env:PUBLISHED_REPO --limit 50 --json tagName --jq '[.[].tagName | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))][0]'
           $parts = $tag.TrimStart('v').Split('.')
           $version = "$($parts[0]).$($parts[1]).$([int]$parts[2] + 1)"
           Write-Host "the real $env:DSA_ARCH installer is version $version (the newest published DSA is $tag), Android $major, kernel of $kernelFrom"
@@ -2099,9 +2110,9 @@ jobs:
         run: >
           dsa/host/platform/windows/installer/build.ps1 -Version $env:REAL_VERSION -Arch $env:DSA_ARCH
           -Kernel $env:KERNEL -GfxstreamBackend $env:GFXSTREAM_DLL -AndroidMajor $env:ANDROID_MAJOR
-          -ListUrl "https://github.com/$env:REPO/releases/download/images/images$env:LISTS.json"
+          -ListUrl "https://github.com/$env:PUBLISHED_REPO/releases/download/images/images$env:LISTS.json"
           -TrustedKey $env:PUBLIC_KEY
-          -ProgramListUrl "https://github.com/$env:REPO/releases/download/images/program$env:LISTS.json"
+          -ProgramListUrl "https://github.com/$env:PUBLISHED_REPO/releases/download/images/program$env:LISTS.json"
 
       # Nothing in it may be a test package's: not its name, not its stand-ins, not its lists.
       - name: Check that the package is the real one
@@ -2131,7 +2142,7 @@ jobs:
           if ($config.first_image.version -ne 'none') { throw "the real package names a first image" }
           if ($config.pipe_sddl) { throw "the real package widens the pipe's access" }
           foreach ($url in $config.update.list_url, $config.update.program_list_url) {
-            if ($url -notlike "https://github.com/$env:REPO/releases/download/*") { throw "the real package reads updates from $url" }
+            if ($url -notlike "https://github.com/$env:PUBLISHED_REPO/releases/download/*") { throw "the real package reads updates from $url" }
           }
 
       - name: Keep the real installer

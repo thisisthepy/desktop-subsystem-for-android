@@ -1,0 +1,32 @@
+# Widevine, the DRM module streaming apps play protected video with, when the user installed it
+# (dsa drm widevine install). DSA ships none of Google's software: the host takes Google's
+# com.google.android.widevine APEX, unchanged, out of Google's emulator system image of this
+# Android version and architecture, and puts it on the user's add-on disk as widevine.img, an
+# erofs image holding the APEX as its one file. The host adds androidboot.dsa.widevine=on to the
+# boot's bootconfig only while that image is on the disk it attaches, with
+# androidboot.dsa.widevine_image saying where to mount it from: "disk" for the file on the disk,
+# or "dax" in the host's direct-mapped mode, where the partition table names the image's own
+# bytes (dsa_widevine) on persistent memory.
+#
+# dsa-widevine-early.rc mounts the image and lays it over /vendor/apex at early-init, before
+# apexd-bootstrap activates the APEXes there: make-image.py splices it into the system's init.rc,
+# the one script read before this one. apexd checks the APEX's signature against the key it
+# carries, as for the vendor's own, and mounts its payload with the labels Google's build gave
+# its files, whose types the vendor policy declares (or sepolicy/widevine-hal.cil, where it does
+# not): the module's service runs in hal_drm_widevine and keeps its device certificates in
+# /data/vendor/mediadrm. This script keeps what happens once /data is there.
+
+# The folder the module keeps its device certificates in, which Android's provisioning fills the
+# first time an app uses Widevine.
+on post-fs-data && property:ro.boot.dsa.widevine=on
+    mkdir /data/vendor/mediadrm 0770 media mediadrm
+
+# A boot after the user removed the module (androidboot.dsa.widevine=off) removes those
+# certificates, so removing Widevine removes what it provisioned, and makes the folder again,
+# empty, for any other DRM module. The vendor's toybox removes it, as root, in a domain that may
+# touch nothing else (sepolicy/widevine.cil). A boot whose host says nothing either way (the
+# host could not read its record) leaves it as it is.
+on post-fs-data && property:ro.boot.dsa.widevine=off
+    exec u:r:dsa_widevine_reset:s0 root root -- /vendor/bin/toybox_vendor rm -rf /data/vendor/mediadrm
+    mkdir /data/vendor/mediadrm 0770 media mediadrm
+    restorecon_recursive /data/vendor/mediadrm

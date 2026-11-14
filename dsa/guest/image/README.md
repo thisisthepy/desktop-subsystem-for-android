@@ -8,17 +8,20 @@ default is x86_64. The arm64 guest runs no 32-bit ARM code, because the target h
 
 | File | What it is |
 |---|---|
-| `inputs.json` | The pinned inputs: per Android version, the CI build number and the SHA-256 of its `target_files`, `otatools` and `dexpreopt_tools` |
+| `inputs.json` | The pinned inputs: per Android version, the CI build number and the SHA-256 of its `target_files`, `otatools` and `dexpreopt_tools`, and the URL and SHA-256 of `services.jar`'s ART profile at the build's own frameworks/base commit |
 | `fetch.sh` | Downloads one version's inputs for one architecture (`x86_64` by default, or `arm64`) into `.scratch/aosp-inputs/<build>-<arch>/` and checks them |
 | `make-keys.sh` | Makes a set of signing keys (CI makes a throwaway set each run) |
 | `pack-keys.sh`, `unpack-keys.sh` | Split the key set into repository secrets and put it back |
 | `make-image.py` | Changes, re-signs and lays out the image |
 | `check-image.py` | Checks a made image |
-| `fstab.dsa` | The guest's mount table on Hyper-V |
+| `fstab.dsa` | The guest's mount table on Hyper-V; `make-image.py` makes `fstab.dsa_dax` from it for the host's direct-mapped mode (the logical partitions with `dax=always` and without dm-verity), and `--uncompressed-erofs` builds the read-only partitions uncompressed so that mode maps every file |
 | `dsa-console.rc` | Quiets the serial console once boot completes, so it carries only the kernel's early boot and a panic |
 | `unavailable-features.xml` | Hardware features the VM lacks, withdrawn from the system |
 | `dsa-channeld.rc` | The service that runs the control channel daemon, and the trigger that drops the guest's caches when it asks |
+| `dsa-keymint-key.rc` | Makes the tmpfs folder for KeyMint's root key and starts the daemon's mode that fetches it from the host, on init |
+| `dsa-cacerts.rc` | Binds tmpfs copies of Android's system certificate folders over the originals before the zygote starts, so the daemon can add the root certificates the host added beside Android's |
 | `dsa-memory.rc` | Turns on the zram swap and tunes the kernel for it |
+| `dsa-zram-backing.rc` | Makes the folder for zram's backing file on the data disk and removes the last boot's file |
 | `dsa-display.rc` | Starts SurfaceFlinger, and so every app, at the density the boot names (the user's main monitor's) |
 | `dsa-channel-manifest.xml` | The vendor manifest entry declaring the daemon's binder service |
 | `dsa-trace.rc` | Turns on main thread timing in every app when the input trace is on |
@@ -60,7 +63,12 @@ aapt2 from the Android SDK's build-tools for the system screen overlays.
   minimized), or most of its memory is cache, the control daemon sets
   `vendor.dsa.memory.reclaim`. Once boot has finished, init moves cold pages to zram, drops the
   clean caches and compacts memory, which free page reporting then hands back to Hyper-V.
-  While idle it does so again when memory has grown back. ART keeps less free heap
+  While idle it does so again when memory has grown back, and then has the kernel report
+  every free page to the host again (`page_reporting.rereport`). What stays cold in zram goes
+  on to a backing file on the data disk (`/data/per_boot/zram_swap`, 512 MiB, made again each
+  boot): once no app has been open for ten minutes, at most every ten minutes, the daemon has
+  init write zram's pages unused for half an hour, incompressible ones first, at most 32 MiB a
+  run and 512 MiB a day. ART keeps less free heap
   (`MEMORY_PROPS` in `make-image.py`). Only the daemon
   may set the property, and only init's vendor scripts may write those kernel settings.
 - The oemlock, UWB, Bluetooth and Thread HAL APEXes are removed. Their devices
@@ -94,8 +102,8 @@ aapt2 from the Android SDK's build-tools for the system screen overlays.
   `speed`, the others with `speed-profile` when the APK carries a profile and `speed`
   otherwise. It prints the size each app adds. `check-image.py` fails an image whose compiled
   app is missing, was made for other dex checksums than the APK's, uses another filter, boot
-  image or set of shared libraries. The apps whose dex it edits (`EDITED_APPS`: Settings and
-  Files) are compiled with `--abort-on-hard-verifier-error`, so an edited method the verifier
+  image or set of shared libraries. The apps whose dex it edits (`EDITED_APPS`: Settings) are
+  compiled with `--abort-on-hard-verifier-error`, so an edited method the verifier
   rejects stops the build instead of closing the app when it loads. PermissionController is
   not compiled: it is inside the permission APEX, where ART takes no odex.
 - The apps the published build itself compiled into their own partition (KeyChain,
@@ -105,6 +113,30 @@ aapt2 from the Android SDK's build-tools for the system screen overlays.
   again, with the filter, shared libraries and boot image the published build used.
   `check-image.py` fails an image where one of them lost a file, or has one made for another
   dex, another boot image or another filter.
+- The host window's title bar is Android's status bar. The agent gives each task status bar
+  and caption bar insets as high as the title bar, but stock Android hands a freeform window
+  only its caption bar and IME insets, so an app that pads its toolbar by its status bar inset
+  drew it under the title bar. Along each task's bottom edge the agent gives navigation bar and
+  tappable element insets 24 dp high at the task's density, as a gesture navigation phone's
+  navigation bar gives, so phone apps keep their bottom bars and the ends of their lists clear
+  of the window's bottom edge. `services.jar`'s dex is edited (`SERVICES_CODE`): the window
+  manager's `InsetsPolicy` keeps every inset type of a floating window (`all()`), not only its
+  caption bar; `systemBars()` would leave out the tappable element. The jar's stored dex files
+  stay aligned, and the jar is compiled again with the
+  published build's filter, class loader context, app image and profile (`services/art-profile`
+  and `art-profile-extra` at the build's own frameworks/base commit, pinned in `inputs.json`).
+  The framework overlay below also sets Android's status bar height resources
+  (`status_bar_height`, `status_bar_height_default` and the rest) to the title bar's height at
+  each scale's density, for the apps that read those instead of their insets, and the
+  navigation bar height resources (`navigation_bar_height`, `navigation_bar_frame_height` and
+  their landscape values) to 24 dp, also where Android gives them 56 dp from a smallest width
+  of 900 dp. The band is transparent: as AOSP's gesture navigation overlay does, the overlay
+  sets `config_navBarDefaultTransparent` on and `config_navBarNeedsScrim` off, so an app that
+  does not draw behind the navigation bar shows its own window background there, not a black
+  or grey strip. An app that sets a navigation bar colour of its own gets that colour there,
+  as on a phone. `check-image.py` fails an image without the edit, with `services.jar`'s dex
+  unaligned, with status bar heights that are not the title bar's, or with navigation bar
+  heights that are not 24 dp.
 - A static overlay (`/vendor/overlay/DsaFrameworkOverlay.apk`) sets the framework's tap
   timeout to 0. A view inside anything that scrolls, which includes every list row, waits that
   long before it shows that it is pressed, in case the touch becomes a scroll, so a mouse
@@ -117,14 +149,8 @@ aapt2 from the Android SDK's build-tools for the system screen overlays.
   framework draws the button's hover layer and ripple around the button's centre, and they
   showed 8 dp left of the circle at every density. The replacement keeps the 56 dp and puts
   8 dp on each side of the circle. aapt2 builds it the same way as the framework overlay.
-  The same overlay replaces the list every Settings preference screen shows its rows in
-  (androidx.preference's `preference_recyclerview`) with one that keeps 24 dp below the last
-  row. Settings takes the space under a list only from the navigation bar's inset
-  (SettingsLib's `EdgeToEdgeUtils` pads the content view by it), and a DSA window has no
-  navigation bar, so the last row sat on the window's bottom edge. The space is inside the
-  list, so rows still scroll to the edge. The overlay names what it replaces in a resource
-  map (`android:resourcesMap`), which makes the framework rewrite the layout's id and style
-  attribute to Settings' own.
+  The overlay names what it replaces in a resource map (`android:resourcesMap`), which makes
+  the framework rewrite its layouts' ids and attributes to Settings' own.
 - The screens Android draws itself have one design: Settings, Files (DocumentsUI), the
   permission screens and dialogs (PermissionController), the install dialogs
   (PackageInstaller), the share sheet (IntentResolver), and the framework's dialogs and
@@ -159,20 +185,18 @@ aapt2 from the Android SDK's build-tools for the system screen overlays.
     its views when its window is resized, so a window resized across 600 dp keeps its title
     area until the page opens again. Files has no title of its own to enlarge: its layouts
     are not overlayable, so it gets the colours and its rounded Material 3 look only.
-- The lists that set their own padding get the same 24 dp, edited in the apps themselves
-  (`LIST_BOTTOM_MARGIN_DP`). Settings' home page: on Android 16 its
-  `TopLevelSettings.onCreateRecyclerView` no longer calls `setPadding(0, 0, 0, 0)` over the
-  overlay's layout; on Android 17, `isRunningInFreeformWindow` says yes (the host draws the
-  caption), so Android's own freeform padding applies, and the overlay sets that
-  `dashboard_padding_bottom` to 24 dp. Settings' All apps list gets `paddingBottom` in its
-  compiled `manage_applications_apps.xml`. PermissionController's `preference_recyclerview`
-  gets it too; the app declares `<overlayable>`, so no overlay may replace its layouts, and it
-  lives in the permission APEX, which `make-image.py` unpacks with otatools' `deapexer`,
-  edits and packs with `apexer` before signing, as signing itself packs it, and checks again
-  after signing. Files (DocumentsUI) on Android 16 pads its list's bottom by the height of
-  the bar below it, and by 0 in windows without one: `getSaveLayoutHeight` now returns at
-  least 24 dp in pixels. Android 17's Files keeps 48 dp of its own. The dex edits keep each
-  method's size; `check-image.py` fails an image without them.
+- Settings, Files and the permission screens keep the room a phone's navigation bar leaves
+  below the last row of a list from the task's 24 dp navigation bar inset alone: SettingsLib's
+  `EdgeToEdgeUtils` and Files' `BaseActivity` pad their content by it. Nothing adds a margin
+  of its own to it. Android 17's Settings home page adds `dashboard_padding_bottom` (16 dp) when
+  its window shows a caption bar (`TopLevelSettings.isRunningInFreeformWindow`), padding that
+  stands in for the navigation bar inset Android's own desktop windows lack. A DSA task shows a
+  caption bar inset and has the navigation bar inset too, so that method says no
+  (`SETTINGS_CODE_FREEFORM_PADDING`), and the home list ends where Settings' other lists end.
+  PermissionController lives in the permission APEX, which `make-image.py` unpacks with
+  otatools' `deapexer`, edits (its cards' corners) and packs with `apexer` before signing, as
+  signing itself packs it, and checks again after signing. `check-image.py` fails an image
+  without the Settings edit.
 - With the input trace on (`androidboot.hardware.dsa_input_trace=1`), `dsa-trace.rc` makes every
   app's main thread log each message it takes 16 ms or more to handle, or starts 16 ms or more
   late.
@@ -207,6 +231,22 @@ aapt2 from the Android SDK's build-tools for the system screen overlays.
   build number and architecture; `image.json` lists their SHA-256 under `framework`, and
   `check-image.py` finds them in the image. `sepolicy/gpu-reset.cil` lets SurfaceFlinger tell
   the apps of a reset through `debug.dsa.gpu.resets`.
+- The same Framework build makes DSA's KeyMint, `dsa-keymint`. The KeyMint APEX the published
+  build selects wraps every key under a fixed all-zero root key, so a copy of the guest's disk
+  gives up every key on it. `dsa-keymint` is the same nonsecure KeyMint, patched to take its
+  root key from the host: dsa-channeld fetches it each boot and leaves it on tmpfs as
+  `/dev/dsa_keymint/root_key`. New keys are wrapped under the host's key; keys wrapped before
+  under the built-in one still open, and Android is asked to upgrade each one, which wraps it
+  again under the host's key, so an existing install loses no key. Without a key from the host
+  it behaves as the APEX did. When the framework folder has it, `make-image.py` installs it as
+  vendor files (`/vendor/bin/hw/dsa-keymint`, the `libssl` it needs, `dsa-keymint.rc`, and the
+  VINTF fragments and feature file the APEX carries), labels it as the APEX labelled its binary
+  (`hal_keymint_default_exec`, so it runs in the same domain as the same service), and selects
+  no KeyMint APEX (`androidboot.vendor.apex.com.android.hardware.keymint=none`). `image.json`
+  lists its files' SHA-256 under `framework`, and `check-image.py` checks that they are in the
+  image, that it declares every instance the service registers and has every library it needs,
+  and that no KeyMint APEX is active beside it. A framework folder from before the KeyMint has
+  none of these files, and the image keeps the APEX.
 - Google Play stays out of the image. A user who wants it runs `dsa gapps install` (or the
   settings app's Google Play item): the host downloads LiteGapps' Core build for this Android
   and makes an erofs image of its apps, permission lists, system configuration and framework
@@ -227,10 +267,20 @@ aapt2 from the Android SDK's build-tools for the system screen overlays.
   permission its privileged apps ask for (`dsa-gapps-privapp-permissions.xml` in each
   partition's `etc/permissions`), so the log should stay empty. `sepolicy/gapps.cil` lets init
   lay the image over.
-- The add-on images a user installs (the Google apps, an ARM translation package) are on the
+- Google Play sees the computer's memory as the device's memory. Play gives a device under
+  8 GB a Chrome whose browser is 32-bit, which this 64-bit only guest cannot start, and the VM
+  starts small and grows. The host passes the computer's physical memory in the bootconfig
+  (`kernel.dsa_host_memory.total_kb`). `dsa-channeld` names the Play Store's and Play services'
+  uids in `vendor.dsa.host_memory.uids`, and `dsa-memory.rc` hands them to the kernel
+  (`/sys/module/dsa_host_memory/parameters/uids`), which shows those apps the computer's memory
+  as `MemTotal` in `/proc/meminfo` and in `sysinfo()`. The framework build's
+  `libandroid_runtime` answers their `ActivityManager.getMemoryInfo` (`totalMem`) with it.
+  Every other app and Android itself see the VM's memory. Only init may write the list and only
+  the daemon may set the property (`sepolicy/memory.cil`), which `check-image.py` checks.
+- The add-on images a user installs (the Google apps, an ARM translation package, Widevine) are on the
   user's add-on disk, which the host builds, one per user, and attaches to the VM read only.
   Its one partition, `dsa_addons`, is an erofs file system holding each image as a plain,
-  uncompressed file (`gapps.img`, `arm-translation.img`). While the host attaches it, it puts
+  uncompressed file (`gapps.img`, `arm-translation.img`, `widevine.img`). While the host attaches it, it puts
   `androidboot.dsa.addon_disk=on` in the bootconfig, and `dsa-addons.rc` mounts the partition
   at `/mnt/dsa-addons` at `post-fs`, before the scripts above mount the images from it with
   `directio`. The images used to be in the encrypted `/data`, where ext4 gives an encrypted file
@@ -241,6 +291,23 @@ aapt2 from the Android SDK's build-tools for the system screen overlays.
   and the scripts mount that copy; meanwhile the host reads it through dsa-channeld, puts it on
   the add-on disk, and has dsa-channeld delete it, so the next boot mounts it from the disk.
   `sepolicy/addons.cil` lets init mount the disk, and `check-image.py` checks the scripts.
+- Widevine, for a user who installs it (`dsa drm widevine install`): the host takes Google's
+  `com.google.android.widevine` APEX, unchanged, out of Google's emulator system image of this
+  Android version and architecture, and puts it on the add-on disk as `widevine.img`, an erofs
+  image whose one file is the APEX. DSA ships none of it. While it is there the host puts
+  `androidboot.dsa.widevine=on` in the bootconfig, and the actions of `dsa-widevine-early.rc`
+  mount the image and lay it over `/vendor/apex` at `early-init`, right before
+  `apexd-bootstrap`, which activates it as a vendor APEX and checks its signature against
+  Google's key. On Android 17 that run activates every pre-installed APEX and `apexd` at
+  `post-fs-data` only takes over its mounts, so an APEX laid over later is listed but never
+  activated. Only the system's `init.rc` runs before it, so `make-image.py` splices the actions
+  into `init.rc`'s `early-init` there. The image always labels the module's service
+  (`android.hardware.drm.IDrmFactory/widevine`) in `vendor_service_contexts`. After the user
+  removes it the host says `androidboot.dsa.widevine=off`, and `dsa-widevine.rc` removes the
+  device certificates the module kept in `/data/vendor/mediadrm`. `sepolicy/widevine.cil` lets init mount and lay the image over;
+  where the vendor policy does not declare the module's own types (`hal_drm_widevine`,
+  `mediadrm_vendor_data_file`), `sepolicy/widevine-hal.cil` declares them, so the image carries
+  the policy before anything is installed. `check-image.py` checks both.
 - Cuttlefish's `seriallogging.rc` is removed. Its logger writes to a virtio console Hyper-V
   does not have, and init would restart it every five seconds for as long as the guest runs.
 - `sepolicy/memory.cil` lets the audio HAL and the software codecs share memory through
@@ -279,11 +346,11 @@ aapt2 from the Android SDK's build-tools for the system screen overlays.
   each task's frames rather than one picture of the whole display. The kernel command line
   sets its display (`androidboot.dsa.display_width`, `_height`, `_dpi`) and drops the
   settings only Cuttlefish's composer read.
-- Every app starts at the density of the user's main monitor (96 dpi at a scale of 100%, 144
-  at 150%). The image's kernel command line names 96 (`androidboot.dsa.display_dpi` for the
+- Every app starts at the density of the user's main monitor (130 dpi at a scale of 100%,
+  196 at 150%). The image's kernel command line names 130 (`androidboot.dsa.display_dpi` for the
   hwcomposer, `androidboot.lcd_density` for SurfaceFlinger), and the host replaces both at each
   boot. `dsa-display.rc` sets `ro.sf.lcd_density` from it, and no `build.prop` sets that
-  property, since a `build.prop` value would come first and hold every boot at 96. An app
+  property, since a `build.prop` value would come first and hold every boot at 130. An app
   that started at another density than its window's monitor would be relaunched as soon as
   the window asked for the right one.
 - DSA's primary audio module (`/vendor/bin/hw/dsa-audio`, from `dsa/guest/audio/`) is added when
@@ -295,6 +362,33 @@ aapt2 from the Android SDK's build-tools for the system screen overlays.
 - The agent (`dsa/guest/agent/`) is added as a privileged app in
   `/system_ext/priv-app/DsaAgent/`, with its privileged permission list, and is signed with
   the platform key. It tells the host about each app task, so each gets its own window.
+  `sysconfig-dsa-agent.xml` goes with it to `/system_ext/etc/sysconfig/`: Android's backup
+  manager uses a backup transport only when a sysconfig file lists it, and the agent's keeps
+  app data in the host's backup folder once the user turns backup on (it is off until then).
+- KeyMint's root key comes from the host, which keeps it sealed by the computer's TPM (the
+  Secure Enclave on a Mac), and by the user's credential store only where there is none, so a
+  copy of the guest's disk opens none of Android's keys. `dsa-keymint-key.rc` makes the
+  tmpfs folder `/dev/dsa_keymint` (mode 0700, owned by `nobody`, KeyMint's user) on init and
+  starts `dsa-channeld --keymint-key` (`dsa-channeld.rc`), a oneshot that runs as `nobody` in
+  its own domain. It asks the host on vsock port 5604, past the control channel's handshake,
+  and writes `root_key` there: `key <hex>`, or `none <reason>` when the host has none or cannot
+  be reached within 25 seconds. The key never reaches the user's disk. `channeld.cil` labels the
+  folder `dsa_keymint_key_file`, which only that domain writes and only KeyMint
+  (`hal_keymint_server`) reads; `check-image.py` refuses an image that lets any other domain
+  read it.
+- The root certificates a user or administrator added to the host (an internet filter's or a
+  company proxy's) become system certificates, beside Android's own. Android reads its system
+  certificates from `/apex/com.android.conscrypt/cacerts` and `/system/etc/security/cacerts`,
+  which are read only. `dsa-cacerts.rc` makes the tmpfs folder `/dev/dsa_cacerts` at
+  post-fs-data, has `dsa-channeld --cacerts-setup` copy both folders into it, and binds each
+  copy over the original before the zygote starts, so every app's mount namespace has them.
+  The daemon then writes each root the host sends there, named as Android names its own
+  (`<subject hash>.<n>`), and takes away those the host no longer names, or all of them when
+  the user turns the setting off. It lists what it added in `/dev/dsa_cacerts/host-added`, so
+  Android's own files are never touched. Being one tmpfs, a change shows in every app at once,
+  and the agent then has the running apps forget the trust anchors they looked up.
+  `cacerts.cil` labels the folder `dsa_cacerts_file`, which only the daemon writes and every
+  domain reads; `check-image.py` refuses an image that lets any other domain write it.
 - The published kernel modules are dropped. They belong to Google's kernel; DSA boots its
   own kernel with the drivers built in.
 - `fstab.dsa` replaces the mount table. Every partition is found by its name

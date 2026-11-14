@@ -44,3 +44,8 @@ final class FakeCli: DsaCli, LogStream {
 final class KeyText: TextSource {
     func get(_ key: String) -> String { key }
 }
+
+/// Gives each text's key back, except the DNS fallback, whose servers the tests read.
+final class DnsText: TextSource {
+    func get(_ key: String) -> String { key == "Network_DnsFallback" ? "dns fallback: {0}" : key }
+}

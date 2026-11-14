@@ -25,6 +25,13 @@ name: Linux repository release
 on:
   workflow_dispatch:
 
+# A publication in progress always finishes, and only the newest waiting one stays. The
+# group is the workflow and the branch; "Site release", which it calls, keeps its own group
+# (release-site), a different name, so the two never wait on each other.
+concurrency:
+  group: release-linux-repo-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
 

@@ -10,17 +10,26 @@
 //! A minimized window gets no frames: its route is withdrawn, so the frame surfaces of its
 //! task are released until the window is shown again, and once no window is shown the guest
 //! is told so and may sleep.
+//!
+//! A GPU reset (the renderer found its device lost, [`ManagerEvent::GpuReset`]) is followed
+//! as on the other hosts: a task that ends soon after it keeps its window, and its app is
+//! started again into it (`GpuResetWindows`, which turns the window hosts' window IDs into
+//! the tasks' and back). And when no task window gets a frame for long after it, the guest's
+//! compositor did not recover (`FrameStall`): the platform tells the user and restarts
+//! Android ([`Platform::recover`]).
 
 use std::collections::BTreeSet;
 use std::time::Instant;
 
 use dsa_host_core::app_windows::AppWindowSettings;
+use dsa_host_core::compositor::frame_stall::{FrameStall, Stall};
+use dsa_host_core::compositor::gpu_reset::{GpuResetWindows, Report};
 use dsa_host_core::compositor::shown_windows::ShownWindows;
 use dsa_host_core::compositor::task_windows::{TaskWindows, WindowChange};
 use dsa_host_core::compositor::window_hosts::{
     is_valid_package, FromHost, HostAction, HostId, MenuWork, ToHost, WindowHosts,
 };
-use dsa_host_core::tasks::{AppInfo, TaskEvent, TaskRequest};
+use dsa_host_core::tasks::{AppInfo, PinShortcutRequest, TaskEvent, TaskRequest};
 
 /// The URL scheme DSA's settings app (DSA.app) opens, which a running copy receives too.
 pub const SETTINGS_SCHEME: &str = "dsa-settings";
@@ -47,6 +56,8 @@ pub enum ManagerEvent {
         host: HostId,
         package: String,
         launch: bool,
+        /// With `launch`, the shortcut of the app to start rather than the app; empty for none.
+        shortcut: String,
     },
     /// A window host reported what the user did to a window.
     Report { host: HostId, report: FromHost },
@@ -54,9 +65,13 @@ pub enum ManagerEvent {
     Gone { host: HostId },
     /// The user's window settings for each app, as the service has them now.
     AppWindows(Vec<AppWindowSettings>),
+    /// The renderer found its GPU device lost, or made it again: a GPU reset.
+    GpuReset,
 }
 
-/// Where one display's frames go: the task and the window host that shows its window.
+/// Where one display's frames go: the window that shows its task, by the ID its window host
+/// knows it by, and that window host. A task that took a window over after a GPU reset draws
+/// into that window, whose ID is the task it first opened for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Route {
     pub display_id: u32,
@@ -81,8 +96,24 @@ pub trait Platform {
     fn installed(&mut self, _apps: &[AppInfo]) {}
     /// Whether a task window is the active window now.
     fn focused(&mut self, _any: bool) {}
+    /// An app asks for one of its shortcuts on the Desktop: the user is asked, and the
+    /// answer goes to Android. Without a way to ask, the app hears no.
+    fn pin_requested(&mut self, request: &PinShortcutRequest) {
+        self.request(TaskRequest::AnswerPinShortcut {
+            request_id: request.request_id,
+            accepted: false,
+        });
+    }
     /// Opens DSA's settings on the Apps page at `package`, as a window's App Info does.
     fn open_app_page(&mut self, package: &str) -> Result<(), String>;
+    /// How many frames have reached a task window so far.
+    fn frames_shown(&mut self) -> u64 {
+        0
+    }
+    /// The guest's compositor did not recover from a GPU reset: the user is told, and
+    /// Android restarted when `stall` says so, with `packages` (the apps that had windows)
+    /// opened again.
+    fn recover(&mut self, _stall: &Stall, _packages: Vec<String>) {}
     /// Writes a line to the log.
     fn log(&mut self, line: &str);
 }
@@ -100,6 +131,10 @@ pub struct Manager<P: Platform> {
     hidden: BTreeSet<i32>,
     /// The routes the platform was last given.
     routes: Option<Vec<Route>>,
+    /// The windows kept through a GPU reset, and which task each window shows.
+    resets: GpuResetWindows,
+    /// Whether the guest draws again after a GPU reset.
+    stall: FrameStall,
     platform: P,
 }
 
@@ -113,6 +148,8 @@ impl<P: Platform> Manager<P> {
             told_focused: false,
             hidden: BTreeSet::new(),
             routes: None,
+            resets: GpuResetWindows::new(),
+            stall: FrameStall::new(),
             platform,
         }
     }
@@ -141,12 +178,15 @@ impl<P: Platform> Manager<P> {
                     self.app_event(event, now);
                 }
                 let changes = self.windows.sync(&current);
-                self.change(changes, now);
+                self.guest_change(changes, now);
             }
             ManagerEvent::Task(event) => {
                 self.app_event(&event, now);
                 let changes = self.windows.apply(&event);
-                self.change(changes, now);
+                for note in self.windows.take_notes() {
+                    self.platform.log(&note);
+                }
+                self.guest_change(changes, now);
                 // A task that took a size its window gave it live outside a drag is
                 // reconfigured for it now, at a size it has.
                 let requests = self.windows.reconfigures(now);
@@ -155,6 +195,18 @@ impl<P: Platform> Manager<P> {
             ManagerEvent::Lost => {
                 let changes = self.windows.reset();
                 self.change(changes, now);
+                // A window kept for its app's next task waits for nothing now.
+                let kept = self.resets.close_all();
+                self.send_to_hosts(kept, now);
+            }
+            ManagerEvent::GpuReset => {
+                self.platform.log(
+                    "the GPU was reset: task windows whose apps end now are kept for them, and \
+                     the windows are watched for the frames that follow",
+                );
+                self.resets.gpu_reset(now);
+                let frames = self.platform.frames_shown();
+                self.stall.gpu_reset(now, frames);
             }
             ManagerEvent::CloseFailed(task_id) => {
                 self.platform.log(&format!(
@@ -168,8 +220,15 @@ impl<P: Platform> Manager<P> {
                 host,
                 package,
                 launch,
+                shortcut,
             } => {
-                let actions = self.hosts.attached(host, &package, launch, now);
+                let actions = self.hosts.attached_for(
+                    host,
+                    &package,
+                    launch,
+                    Some(shortcut.as_str()).filter(|id| !id.is_empty()),
+                    now,
+                );
                 self.carry_out(actions);
             }
             ManagerEvent::Report { host, report } => {
@@ -179,7 +238,12 @@ impl<P: Platform> Manager<P> {
                 }
             }
             ManagerEvent::Gone { host } => {
-                for task_id in self.hosts.detached(host) {
+                for window in self.hosts.detached(host) {
+                    // A window kept through a GPU reset has no task to end.
+                    let Some(task_id) = self.resets.window_gone(window) else {
+                        continue;
+                    };
+                    self.focused.remove(&task_id);
                     // Ending an app's window program closes its windows, as ending any
                     // program does: Android ends their tasks.
                     self.user_closed(task_id, now);
@@ -196,6 +260,16 @@ impl<P: Platform> Manager<P> {
     /// Looks at the timers: windows whose task did not take their size, and window hosts
     /// that are late.
     pub fn tick(&mut self, now: Instant) {
+        // A window kept through a GPU reset whose app did not come back closes.
+        let late = self.resets.tick(now);
+        if !late.is_empty() {
+            self.platform.log(&format!(
+                "{} task window(s) kept through a GPU reset close: their app did not come back",
+                late.len()
+            ));
+        }
+        self.send_to_hosts(late, now);
+        self.follow_frame_stall(now);
         let changes = self.windows.tick(now);
         self.change(changes, now);
         let requests = self.windows.reconfigures(now);
@@ -226,11 +300,23 @@ impl<P: Platform> Manager<P> {
                 self.carry_out(actions);
             }
             TaskEvent::Installed(apps) => self.platform.installed(apps),
+            TaskEvent::PinShortcut(request) => self.platform.pin_requested(request),
             _ => {}
         }
     }
 
     fn reported(&mut self, report: FromHost, now: Instant) {
+        // The window hosts name windows; the task rules, tasks.
+        let report = match self.resets.report(report) {
+            Report::Task(report) => report,
+            Report::CloseKept(close) => {
+                self.platform
+                    .log("a window kept through a GPU reset was closed before its app came back");
+                self.send_to_hosts(vec![close], now);
+                return;
+            }
+            Report::Dropped => return,
+        };
         match report {
             FromHost::Closed { task_id } => self.user_closed(task_id, now),
             // The task takes its window's client size, and draws at its display's density.
@@ -273,7 +359,8 @@ impl<P: Platform> Manager<P> {
             // An Android entry of a window's Window menu: Android opens its page, or DSA's
             // settings open the app's.
             FromHost::MenuChosen { task_id, action } => {
-                match self.hosts.menu_chosen(task_id, action) {
+                let window = self.resets.window_of(task_id);
+                match self.hosts.menu_chosen(window, action) {
                     Some(MenuWork::Request(request)) => self.platform.request(request),
                     Some(MenuWork::AppPage { package }) => {
                         if let Err(why) = self.platform.open_app_page(&package) {
@@ -284,6 +371,8 @@ impl<P: Platform> Manager<P> {
                     None => {}
                 }
             }
+            // Only a Windows taskbar preview has media buttons; these windows send none.
+            FromHost::MediaButton { .. } => {}
         }
     }
 
@@ -301,11 +390,74 @@ impl<P: Platform> Manager<P> {
         self.change(vec![WindowChange::Close { task_id }], now);
     }
 
+    /// The task rules' changes the guest did not cause by ending a task: to the window hosts,
+    /// with the IDs of the windows the tasks show.
     fn change(&mut self, changes: Vec<WindowChange>, now: Instant) {
+        let changes = self.resets.changes(changes);
+        self.send_to_hosts(changes, now);
+    }
+
+    /// The task rules' changes after the guest's tasks changed. A task that ended soon after a
+    /// GPU reset keeps its window and its app is started again; the app's new task takes the
+    /// window over.
+    fn guest_change(&mut self, changes: Vec<WindowChange>, now: Instant) {
+        let outcome = self.resets.guest_changes(changes, now);
+        for window in &outcome.kept {
+            self.platform.log(&format!(
+                "task window {window}'s task ended right after a GPU reset; the window stays \
+                 open and its app is started again"
+            ));
+        }
+        for package in outcome.relaunch {
+            self.platform.request(TaskRequest::Launch {
+                package_name: package,
+            });
+        }
+        for (task_id, size) in outcome.adopted {
+            let window = self.resets.window_of(task_id);
+            self.platform.log(&format!(
+                "task {task_id} took over task window {window} after the GPU reset"
+            ));
+            // The new task takes the size of the window it shows.
+            if let Some(size) = size {
+                let requests = self.windows.window_resized(task_id, size, now);
+                self.request(requests);
+            }
+        }
+        self.send_to_hosts(outcome.changes, now);
+    }
+
+    /// Changes by window ID, to the window hosts.
+    fn send_to_hosts(&mut self, changes: Vec<WindowChange>, now: Instant) {
         for change in changes {
             let actions = self.hosts.change(&change, now);
             self.carry_out(actions);
         }
+    }
+
+    /// After a GPU reset, looks whether the guest draws again: when no task window has had a
+    /// frame for long, its compositor did not recover, and the platform tells the user and
+    /// restarts Android, with the apps that had windows opened again.
+    fn follow_frame_stall(&mut self, now: Instant) {
+        let windows: Vec<i32> = self
+            .windows
+            .windows()
+            .into_iter()
+            .filter(|task_id| !self.hidden.contains(task_id))
+            .collect();
+        let shown = self.shown.shown_among(&windows);
+        let frames = self.platform.frames_shown();
+        let Some(stall) = self.stall.tick(now, &shown, frames) else {
+            return;
+        };
+        self.platform.log(&stall.reason());
+        let mut packages = self.windows.window_packages();
+        for package in self.resets.kept_packages() {
+            if !packages.contains(&package) {
+                packages.push(package);
+            }
+        }
+        self.platform.recover(&stall, packages);
     }
 
     fn carry_out(&mut self, actions: Vec<HostAction>) {
@@ -321,9 +473,15 @@ impl<P: Platform> Manager<P> {
                 HostAction::Send { host, message } => {
                     self.platform.send(host, &message);
                 }
-                HostAction::Launch { package } => {
-                    self.platform.request(TaskRequest::Launch {
-                        package_name: package,
+                HostAction::Launch { package, shortcut } => {
+                    self.platform.request(match shortcut {
+                        Some(shortcut_id) => TaskRequest::LaunchShortcut {
+                            package_name: package,
+                            shortcut_id,
+                        },
+                        None => TaskRequest::Launch {
+                            package_name: package,
+                        },
                     });
                 }
                 HostAction::Disconnect { host, why } => {
@@ -346,6 +504,9 @@ impl<P: Platform> Manager<P> {
             self.told_focused = focused;
             self.platform.focused(focused);
         }
+        if let Some(request) = self.shown.update_tasks(&windows) {
+            self.platform.request(request);
+        }
         if let Some(request) = self.shown.update(&windows) {
             self.platform.request(request);
         }
@@ -355,10 +516,12 @@ impl<P: Platform> Manager<P> {
             .into_iter()
             .filter(|(_, task_id)| !self.hidden.contains(task_id))
             .filter_map(|(display_id, task_id)| {
+                // A task that took a window over after a GPU reset draws into that window.
+                let window = self.resets.window_of(task_id);
                 Some(Route {
                     display_id,
-                    task_id,
-                    host: self.hosts.host_of(task_id)?,
+                    task_id: window,
+                    host: self.hosts.host_of(window)?,
                 })
             })
             .collect();
@@ -384,6 +547,8 @@ mod tests {
         focused: bool,
         refuse_start: bool,
         app_pages: Vec<String>,
+        frames: u64,
+        recovered: Vec<(bool, Vec<String>)>,
     }
 
     impl Platform for Fake {
@@ -414,6 +579,12 @@ mod tests {
             self.app_pages.push(package.to_string());
             Ok(())
         }
+        fn frames_shown(&mut self) -> u64 {
+            self.frames
+        }
+        fn recover(&mut self, stall: &Stall, packages: Vec<String>) {
+            self.recovered.push((stall.restart, packages));
+        }
         fn log(&mut self, _line: &str) {}
     }
 
@@ -439,7 +610,7 @@ mod tests {
                 right: 400,
                 bottom: 600,
             },
-            density_dpi: 192,
+            density_dpi: 262,
             ..Task::default()
         }
     }
@@ -457,6 +628,7 @@ mod tests {
             host: HOST,
             package: PACKAGE.into(),
             launch: false,
+            shortcut: String::new(),
         };
         manager.handle(attached, now);
         let frames = TaskEvent::Frames {
@@ -698,6 +870,90 @@ mod tests {
                 end_width: 0,
             }
         ));
+    }
+
+    #[test]
+    fn nfr5_a_task_that_ends_after_a_gpu_reset_keeps_its_window_and_its_app_comes_back_into_it() {
+        let now = Instant::now();
+        let mut manager = with_window();
+        manager.handle(ManagerEvent::GpuReset, now);
+        manager.handle(
+            ManagerEvent::Task(Box::new(TaskEvent::Removed { task_id: 7 })),
+            now,
+        );
+        // The app starts again; its window stays, in the window host it was in.
+        assert!(asked(
+            &manager,
+            &TaskRequest::Launch {
+                package_name: PACKAGE.into()
+            }
+        ));
+        let closed = manager
+            .platform()
+            .sent
+            .iter()
+            .any(|(_, message)| matches!(message, ToHost::Close { .. }));
+        assert!(!closed, "the window is not closed");
+        // The app's new task takes the window over, and its frames go to it.
+        manager.handle(
+            ManagerEvent::Task(Box::new(TaskEvent::Updated(task(9)))),
+            now,
+        );
+        // The window host is told, so the window's own input goes to the new task.
+        assert!(manager.platform().sent.iter().any(|(host, message)| {
+            *host == HOST
+                && *message
+                    == ToHost::ShownTask {
+                        task_id: 7,
+                        shown_task_id: 9,
+                    }
+        }));
+        let frames = TaskEvent::Frames {
+            task_id: 9,
+            display_id: 5,
+        };
+        manager.handle(ManagerEvent::Task(Box::new(frames)), now);
+        assert_eq!(
+            manager.platform().routes,
+            vec![Route {
+                display_id: 5,
+                task_id: 7,
+                host: HOST,
+            }]
+        );
+        // What the window reports reaches the new task.
+        report(&mut manager, FromHost::Closed { task_id: 7 });
+        assert!(asked(&manager, &TaskRequest::Close { task_id: 9 }));
+    }
+
+    #[test]
+    fn nfr5_no_frame_after_a_gpu_reset_restarts_android_with_the_apps_that_had_windows() {
+        let now = Instant::now();
+        let mut manager = with_window();
+        manager.platform_mut().frames = 40;
+        manager.handle(ManagerEvent::GpuReset, now);
+        manager.tick(now + std::time::Duration::from_secs(10));
+        assert!(manager.platform().recovered.is_empty());
+        manager.tick(now + std::time::Duration::from_secs(31));
+        assert_eq!(
+            manager.platform().recovered,
+            vec![(true, vec![PACKAGE.to_string()])]
+        );
+        // Once only.
+        manager.tick(now + std::time::Duration::from_secs(90));
+        assert_eq!(manager.platform().recovered.len(), 1);
+    }
+
+    #[test]
+    fn nfr5_a_frame_after_a_gpu_reset_restarts_nothing() {
+        let now = Instant::now();
+        let mut manager = with_window();
+        manager.handle(ManagerEvent::GpuReset, now);
+        manager.tick(now + std::time::Duration::from_secs(5));
+        manager.platform_mut().frames += 1;
+        manager.tick(now + std::time::Duration::from_secs(10));
+        manager.tick(now + std::time::Duration::from_secs(60));
+        assert!(manager.platform().recovered.is_empty());
     }
 
     #[test]

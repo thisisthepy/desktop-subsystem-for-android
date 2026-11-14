@@ -34,6 +34,7 @@ internal sealed class KeyText : ITextSource
 {
     public string Get(string key) => key switch
     {
+        "Network_DnsFallback" => "dns fallback: {0}",
         "Memory_ReportAge" => "{0} s",
         "Memory_ProcessDetail" => "pid {0}, {1} private",
         "Memory_ZramDetail" => "{0} stored",
@@ -54,6 +55,11 @@ internal sealed class KeyText : ITextSource
         "Background_Paused" => "paused {0}",
         "Background_Stopped" => "stopped {0}",
         "TouchGestures_Failed" => "cannot be used: {0}",
+        "Backup_Folder" => "folder {0}",
+        "Backup_Last" => "last {0}",
+        "Backup_Apps" => "{0} apps, {1}",
+        "Backup_LastError" => "problem {0}",
+        "Certificate_IssuedBy" => "issued by {0}",
         _ => key,
     };
 }

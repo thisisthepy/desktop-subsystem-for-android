@@ -8,7 +8,7 @@ use dsa_host_core::tasks::TaskRequestError;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use dsa_host_core::compositor::{FakeRenderer, GraphicsRenderer, GraphicsStreamKind};
 use dsa_host_core::host_api::{HostApiService, PerUser, UserAndroid};
@@ -1097,27 +1097,278 @@ fn nfr5_a_lost_device_is_reported_to_the_guest_and_made_again() {
         "the renderer keeps serving the guest"
     );
 
-    // The renderer's own device is made again at its next operation, and buffers work.
+    // The renderer's own device is made again on a thread of its own. The call that finds
+    // the loss does not wait for it: it fails at once, so no guest's input goes unanswered
+    // while the GPU comes back from its reset (13.4 s on the owner's Intel Arc).
     let args = [64u32, 64, GL_RGBA]
         .iter()
         .flat_map(|value| value.to_le_bytes())
         .collect::<Vec<u8>>();
+    let asked = Instant::now();
     wire.render_control(GfxstreamWire::RC_CREATE_COLOR_BUFFER, &args);
-    assert_ne!(
-        wire.read_u32(),
-        0,
-        "a color buffer is made on the new device"
+    let first = wire.read_u32();
+    assert!(
+        asked.elapsed() < Duration::from_secs(1),
+        "a call during the remake is answered at once, not after it ({:?})",
+        asked.elapsed()
     );
+    let made = Instant::now();
+    while adapter.device_generation() == before && made.elapsed() < Duration::from_secs(30) {
+        thread::sleep(Duration::from_millis(20));
+    }
     assert_eq!(
         adapter.device_generation(),
         before + 1,
         "the renderer made its device again"
     );
+    // A buffer asked for once it is back is made on the new device.
+    if first == 0 {
+        wire.render_control(GfxstreamWire::RC_CREATE_COLOR_BUFFER, &args);
+        assert_ne!(
+            wire.read_u32(),
+            0,
+            "a color buffer is made on the new device"
+        );
+    }
 
     // The guest makes a new device of its own, as it does after a loss, and it works.
     let made_again = create_vulkan_device(&mut wire);
     assert_ne!(made_again, lost, "the guest has a new device");
     assert_eq!(device_wait_idle(&mut wire, made_again), VK_SUCCESS);
+
+    drop(wire);
+    cmd_thread.join().expect("command stream ends");
+    process.end();
+}
+
+const VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO: u32 = 5;
+const VK_ALLOCATE_MEMORY: u32 = 20021;
+const VK_FREE_MEMORY: u32 = 20022;
+
+/// Allocates `size` bytes of the guest's memory type `type_index` on its `device`: the
+/// memory's handle and the result.
+fn allocate_memory(
+    wire: &mut GfxstreamWire,
+    device: u64,
+    size: u64,
+    type_index: u32,
+) -> (u64, u32) {
+    let body = VkBody::default()
+        .u64(device)
+        .s_type(VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO)
+        .u64(size)
+        .u32(type_index)
+        .ptr(false) // pAllocator
+        .u64(0) // pMemory
+        .done();
+    wire.vulkan(VK_ALLOCATE_MEMORY, &body);
+    let memory = wire.read_u64();
+    (memory, wire.read_u32())
+}
+
+/// Frees `memory` of the guest's `device`. Nothing is answered; a later call that is answered
+/// shows it was carried out.
+fn free_memory(wire: &mut GfxstreamWire, device: u64, memory: u64) {
+    let body = VkBody::default()
+        .u64(device)
+        .u64(memory)
+        .ptr(false) // pAllocator
+        .done();
+    wire.vulkan(VK_FREE_MEMORY, &body);
+}
+
+/// Everything the renderer counts, of every kind: KiB and allocations.
+fn counted(adapter: &GfxstreamAdapter) -> (u64, u32) {
+    let memory = adapter
+        .counted_memory()
+        .expect("the renderer counts its allocations while it runs");
+    (
+        memory.device_local_kb + memory.host_visible_kb + memory.imported_kb,
+        memory.device_local_count + memory.host_visible_count + memory.imported_count,
+    )
+}
+
+#[test]
+fn nfr1_the_renderer_counts_every_device_after_a_lost_device() {
+    let Some(adapter) = test_renderer() else {
+        return;
+    };
+    let process = GuestProcess::start(&adapter);
+    let (mut wire, cmd_thread) = process.stream(&adapter);
+    assert!(wire.renderer_version() > 0, "renderControl answers");
+
+    // What a guest allocates on its own device is counted, and stops being counted when it
+    // is freed. The count used to see only the renderer's own device.
+    let device = create_vulkan_device(&mut wire);
+    let (before_kb, before_count) = counted(&adapter);
+    let (memory, result) = allocate_memory(&mut wire, device, 1 << 20, 0);
+    assert_eq!(result, VK_SUCCESS, "vkAllocateMemory");
+    assert_ne!(memory, 0, "vkAllocateMemory returns the memory");
+    let (allocated_kb, allocated_count) = counted(&adapter);
+    assert!(
+        allocated_count > before_count && allocated_kb >= before_kb + 1024,
+        "a guest's 1 MiB allocation is counted ({before_kb} KiB in {before_count} before, \
+         {allocated_kb} KiB in {allocated_count} after)"
+    );
+    free_memory(&mut wire, device, memory);
+    assert_eq!(device_wait_idle(&mut wire, device), VK_SUCCESS);
+    let (freed_kb, freed_count) = counted(&adapter);
+    assert!(
+        freed_count < allocated_count && freed_kb + 1024 <= allocated_kb,
+        "a freed allocation is no longer counted ({allocated_kb} KiB in {allocated_count} \
+         before the free, {freed_kb} KiB in {freed_count} after)"
+    );
+
+    // A color buffer on the renderer's own device.
+    let args = [64u32, 64, GL_RGBA]
+        .iter()
+        .flat_map(|value| value.to_le_bytes())
+        .collect::<Vec<u8>>();
+    wire.render_control(GfxstreamWire::RC_CREATE_COLOR_BUFFER, &args);
+    assert_ne!(wire.read_u32(), 0, "a color buffer is made");
+
+    // A GPU reset: the renderer makes its device again, and the color buffer on it. On the
+    // owner's PC the count read 0 ever after, while the renderer's private memory grew.
+    let before = adapter.device_generation();
+    assert!(
+        adapter.simulate_device_loss(),
+        "the renderer can lose its devices"
+    );
+    // The call that finds the loss starts the remake.
+    wire.render_control(GfxstreamWire::RC_CREATE_COLOR_BUFFER, &args);
+    wire.read_u32();
+    let made = Instant::now();
+    while adapter.device_generation() == before && made.elapsed() < Duration::from_secs(30) {
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(
+        adapter.device_generation(),
+        before + 1,
+        "the renderer made its device again"
+    );
+    let (kb, count) = counted(&adapter);
+    assert!(
+        count >= 1 && kb >= 16,
+        "the color buffers made again on the new device are counted ({kb} KiB in {count})"
+    );
+
+    drop(wire);
+    cmd_thread.join().expect("command stream ends");
+    process.end();
+}
+
+const RC_CLOSE_COLOR_BUFFER: u32 = 10014;
+const RC_OPEN_COLOR_BUFFER_2: u32 = 10025;
+
+#[test]
+fn nfr2_a_destroyed_color_buffer_is_freed_without_another_call() {
+    let Some(adapter) = test_renderer() else {
+        return;
+    };
+    let process = GuestProcess::start(&adapter);
+    let (mut wire, cmd_thread) = process.stream(&adapter);
+    assert!(wire.renderer_version() > 0, "renderControl answers");
+
+    // A 512x512 buffer (1 MiB), opened by this process as gralloc opens a window's buffers.
+    let (before_kb, _) = counted(&adapter);
+    let args = [512u32, 512, GL_RGBA]
+        .iter()
+        .flat_map(|value| value.to_le_bytes())
+        .collect::<Vec<u8>>();
+    wire.render_control(GfxstreamWire::RC_CREATE_COLOR_BUFFER, &args);
+    let buffer = wire.read_u32();
+    assert_ne!(buffer, 0, "a color buffer is made");
+    wire.render_control(RC_OPEN_COLOR_BUFFER_2, &buffer.to_le_bytes());
+    assert_eq!(wire.read_u32(), 0, "the color buffer opens");
+    let (made_kb, _) = counted(&adapter);
+    assert!(
+        made_kb >= before_kb + 1024,
+        "the color buffer is counted ({before_kb} KiB before, {made_kb} KiB after)"
+    );
+
+    // The window closes: its last buffer is closed, and nothing else is made or destroyed
+    // after it. Its memory goes once the GPU is done with it, without another call; it used
+    // to stay until the next color buffer was made or destroyed.
+    wire.render_control(RC_CLOSE_COLOR_BUFFER, &buffer.to_le_bytes());
+    assert!(wire.renderer_version() > 0, "the close is carried out");
+    let closed = Instant::now();
+    let mut now_kb = made_kb;
+    while closed.elapsed() < Duration::from_secs(10) {
+        now_kb = counted(&adapter).0;
+        if now_kb + 1024 <= made_kb {
+            break;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    assert!(
+        now_kb + 1024 <= made_kb,
+        "the closed color buffer's memory is freed ({made_kb} KiB before the close, {now_kb} \
+         KiB {:?} after)",
+        closed.elapsed()
+    );
+
+    drop(wire);
+    cmd_thread.join().expect("command stream ends");
+    process.end();
+}
+
+const RC_READ_COLOR_BUFFER: u32 = 10023;
+const GL_UNSIGNED_BYTE: u32 = 0x1401;
+
+#[test]
+fn nfr1_the_staging_buffer_is_made_for_a_copy_and_freed_when_idle() {
+    let Some(adapter) = test_renderer() else {
+        return;
+    };
+    let process = GuestProcess::start(&adapter);
+    let (mut wire, cmd_thread) = process.stream(&adapter);
+    assert!(wire.renderer_version() > 0, "renderControl answers");
+
+    let args = [512u32, 512, GL_RGBA]
+        .iter()
+        .flat_map(|value| value.to_le_bytes())
+        .collect::<Vec<u8>>();
+    wire.render_control(GfxstreamWire::RC_CREATE_COLOR_BUFFER, &args);
+    let buffer = wire.read_u32();
+    assert_ne!(buffer, 0, "a color buffer is made");
+    let (made_kb, _) = counted(&adapter);
+
+    // A guest CPU reads the buffer back (1 MiB): the copy goes through a staging buffer,
+    // which is made for it. One of 128 MiB used to be held from the start.
+    let size = 512 * 512 * 4;
+    let read = [buffer, 0, 0, 512, 512, GL_RGBA, GL_UNSIGNED_BYTE, size]
+        .iter()
+        .flat_map(|value| value.to_le_bytes())
+        .collect::<Vec<u8>>();
+    wire.render_control(RC_READ_COLOR_BUFFER, &read);
+    assert_eq!(
+        wire.read(size as usize).len(),
+        size as usize,
+        "the pixels come back"
+    );
+    let (read_kb, _) = counted(&adapter);
+    assert!(
+        read_kb >= made_kb + 1024 && read_kb <= made_kb + 8 * 1024,
+        "a staging buffer as large as the copy is made for it ({made_kb} KiB before the read, \
+         {read_kb} KiB after)"
+    );
+
+    // No copy uses it for a while: it goes, and the color buffer stays.
+    let idle = Instant::now();
+    let mut now_kb = read_kb;
+    while idle.elapsed() < Duration::from_secs(20) {
+        now_kb = counted(&adapter).0;
+        if now_kb + 1024 <= read_kb {
+            break;
+        }
+        thread::sleep(Duration::from_millis(200));
+    }
+    assert!(
+        now_kb + 1024 <= read_kb && now_kb >= made_kb,
+        "the idle staging buffer is freed ({read_kb} KiB after the read, {now_kb} KiB {:?} \
+         later)",
+        idle.elapsed()
+    );
 
     drop(wire);
     cmd_thread.join().expect("command stream ends");

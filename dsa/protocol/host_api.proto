@@ -204,7 +204,7 @@ message ResizeTask {
 }
 
 // A task's window moved to a monitor of another scale: asks the caller's Android to draw
-// the task at `density_dpi` (96 at a scale of 100%, where a dp is 0.6 of a host pixel).
+// the task at `density_dpi` (130 at a scale of 100%, where a dp is 0.819 of a host pixel).
 message SetTaskDensity {
   int32 task_id = 1;
   uint32 density_dpi = 2;
@@ -236,6 +236,14 @@ message StreamInput {}
 // next start.
 message SetWindowsShown {
   bool shown = 1;
+}
+
+// Says which tasks of the caller's Android have their window shown: open and not minimized.
+// The window manager sends it on each change. The caller's Android keeps less memory for an
+// app whose windows are all minimized. The service keeps the latest value while the Android is
+// not running, for its next start.
+message SetTasksShown {
+  repeated int32 task_ids = 1;
 }
 
 // Says whether the caller's window manager can turn the host's three- and four-finger touch
@@ -429,6 +437,26 @@ message LocationFix {
   float bearing_degrees = 10;
   // Milliseconds since the Unix epoch (UTC).
   uint64 unix_time_ms = 11;
+}
+
+// Turns the connection into the speech and spelling of the caller's Android: after the
+// answer (Done), the service sends a LanguageServiceFrame for each request the Android's
+// text-to-speech engine, speech recognition service or spell checker makes (ListSpeechVoices,
+// SpeakText, StopSpeaking, StartRecognition, StopRecognition, CancelRecognition and
+// CheckSpelling), and the client answers each with LanguageServiceFrame messages of its own
+// (SpeechVoices, SpeechAudio, SpeechDone, RecognitionEvent and SpellingResult), which the
+// service passes to the Android. The client runs the host's speech synthesis, speech
+// recognition and spell checker in the user's session, where the user's voices, dictionaries
+// and privacy settings are. Requests go to the first client still connected; when its
+// connection ends, every request it had not finished fails in the Android. The connection
+// lasts across restarts of the Android.
+message ServeLanguageServices {}
+
+// One message of control.proto (an encoded Envelope of dsa.control.v1), on a connection that
+// serves speech and spelling. The service checks each one the client sends is an answer and
+// passes it on unchanged, so the messages are defined once, where the Android reads them.
+message LanguageServiceFrame {
+  bytes control = 1;
 }
 
 // A notification of the caller's Android, on a connection that watches them
@@ -746,6 +774,39 @@ message ControlMedia {
   MediaCommand command = 2;
 }
 
+// One output of the caller's Android's sound, and the app it plays. Android sends every
+// output at full scale; the host plays it at `volume`, under the app's name and icon.
+message AppAudioStream {
+  // The output, as the audio port names it ("app 0", "primary").
+  string stream = 1;
+  // Empty for the shared output, which every sound of an app without its own plays on.
+  string package_name = 2;
+  string app_label = 3;
+  // From 0 (silent) to 1 (full).
+  float volume = 4;
+  bool muted = 5;
+}
+
+// The outputs of the caller's Android's sound, the whole list.
+message AppAudio {
+  repeated AppAudioStream streams = 1;
+}
+
+// Watches which app each output of the caller's Android's sound plays, and its volume. The
+// answer is AppAudio, and the connection then carries an AppAudio each time it changes; an
+// Android that stops gives an empty one. The client sends nothing more on it. The watch lasts
+// across restarts of the Android.
+message WatchAppAudio {}
+
+// The user set an app's volume or mute in the host's volume mixer: it becomes the volume
+// Android gives the app. Empty `package_name` is the shared output. Answered with Done.
+message SetAppVolume {
+  string package_name = 1;
+  // From 0 to 1.
+  float volume = 2;
+  bool muted = 3;
+}
+
 // Asks for the widgets the apps in the caller's Android offer. The answer is WidgetProviders.
 // Needs the caller's Android to be running.
 message ListWidgetProviders {}
@@ -772,6 +833,9 @@ message WidgetProvider {
   bool needs_configuration = 12;
   // The name of the app that offers the widget, as a launcher shows it. Empty when unknown.
   string app_label = 13;
+  // Whether a placed widget can be set up again (ReconfigureWidget): its app says so and it
+  // has a setup. Its menu offers its settings only then.
+  bool reconfigurable = 14;
 }
 
 // The answer to ListWidgetProviders, in label order.
@@ -788,6 +852,15 @@ message AddWidget {
 
 // Removes a widget: Android forgets it, its window closes, and its place is forgotten.
 message RemoveWidget {
+  int32 widget_id = 1;
+}
+
+// Opens the setup of a placed widget whose app says it can be set up again, as the app's
+// window, for the same widget. The answer waits for the user: the Widget once they finish the
+// setup, which the widget then shows, or ERROR_CODE_WIDGET_REFUSED with the reason when they
+// cancel it, when it could not start, or when the widget cannot be set up again. The widget
+// stays where it is either way.
+message ReconfigureWidget {
   int32 widget_id = 1;
 }
 
@@ -852,8 +925,8 @@ message WidgetEvent {
 message PlaceWidget {
   int32 widget_id = 1;
   WidgetPlacement placement = 2;
-  // The window's size in its monitor's pixels, and Android's density for it (96 at a scale of
-  // 100%).
+  // The window's size in its monitor's pixels, and Android's density for it (130 at a scale
+  // of 100%).
   uint32 width = 3;
   uint32 height = 4;
   uint32 density_dpi = 5;
@@ -1152,7 +1225,7 @@ message Task {
   string label = 4;
   // Whether the task has input focus in Android.
   bool focused = 5;
-  // The density the task's app draws at, in dots per inch (96 at a scale of 100%). 0 when
+  // The density the task's app draws at, in dots per inch (130 at a scale of 100%). 0 when
   // unknown.
   uint32 density_dpi = 6;
   // The largest size Android can give the task, in its display pixels. 0 when unknown.
@@ -1253,6 +1326,56 @@ message AppInfo {
   // (approved without asking, within the grace). "unavailable" when root elevation is off for
   // the whole computer, so the level cannot be set. Set it with SetAppRoot.
   string root = 16;
+  // The app's launcher shortcuts, in the list of installed apps: the static and dynamic ones
+  // in rank order, then the pinned ones. Empty for a task's app.
+  repeated AppShortcut shortcuts = 17;
+  // The user ID the app shares with other apps (its manifest's `android:sharedUserId`), in
+  // the list of installed apps. Apps with the same value run under one Android uid and are
+  // one group for root elevation: their level and grace apply to all of them, and a settings
+  // app shows them together. Empty for an app with a user ID of its own, and for a task's app.
+  string shared_user_id = 18;
+}
+
+// One of an app's launcher shortcuts in Android: a static one from its manifest, a dynamic
+// one it published, or one pinned at its request. The host's jump list (Dock menu, desktop
+// entry actions) shows the static and dynamic ones; a pinned one is a desktop shortcut.
+message AppShortcut {
+  // Unique within its app.
+  string id = 1;
+  string short_label = 2;
+  // Empty when the app gave none.
+  string long_label = 3;
+  // A square PNG image; empty when the shortcut has none, and the app's icon stands in.
+  bytes icon_png = 4;
+  // Lowest first.
+  uint32 rank = 5;
+  bool manifest = 6;
+  bool dynamic = 7;
+  bool pinned = 8;
+}
+
+// Starts one of an app's shortcuts in the caller's Android as a task in its own window, as
+// its jump list task or desktop shortcut does. Answered with Done once Android has been
+// asked.
+message LaunchShortcut {
+  string package_name = 1;
+  string shortcut_id = 2;
+}
+
+// An app of the caller's Android asks for one of its shortcuts on the desktop
+// (requestPinShortcut). Sent as a TaskEvent to every watcher of the tasks; the window manager
+// asks the user and answers with AnswerPinShortcut. A request nobody answers lapses.
+message PinShortcutRequest {
+  uint32 request_id = 1;
+  string package_name = 2;
+  string app_label = 3;
+  AppShortcut shortcut = 4;
+}
+
+// The user's answer to a PinShortcutRequest. Answered with Done.
+message AnswerPinShortcut {
+  uint32 request_id = 1;
+  bool accepted = 2;
 }
 
 // Installs an app of the caller's Android again from the APKs it has there, with its native
@@ -1353,6 +1476,9 @@ message TaskEvent {
     ImeEditor ime_editor = 7;
     // The apps installed in the caller's Android changed: the whole list, as it is now.
     InstalledApps installed = 6;
+    // An app asks for one of its shortcuts on the desktop. It is passed on as it comes and is
+    // not part of the tasks a late watcher starts from.
+    PinShortcutRequest pin_shortcut = 8;
   }
 }
 
@@ -1425,6 +1551,18 @@ message GuestMemory {
   uint32 google_play_processes = 25;
   uint64 google_play_pss_kb = 26;
   uint64 google_play_swap_pss_kb = 27;
+  // Free page reporting, as the control channel's GuestMemory says: the free memory the host
+  // has taken back now, the memory reported since boot, and the reported free memory the
+  // host took back in again with a neighbour since boot. All 0 when the guest could not read
+  // them.
+  uint64 free_reported_kb = 28;
+  uint64 reported_total_kb = 29;
+  uint64 refaulted_total_kb = 30;
+  // How fast memory went back to the host between the report before this one and this one,
+  // in KiB a minute, when reported_rate_known is set: the growth of reported_total_kb over
+  // the time between the two.
+  uint64 reported_kb_per_minute = 31;
+  bool reported_rate_known = 32;
 }
 
 // One host process that runs the caller's Android: its VM's memory process, the window
@@ -1437,6 +1575,10 @@ message HostProcessMemory {
   uint64 working_set_kb = 3;
   // The memory committed to it alone, in KiB.
   uint64 private_kb = 4;
+  // Of working_set_kb, the pages of the disk files the VM maps directly (the host's
+  // direct-mapped mode), in KiB: clean file pages the host drops without writing anything.
+  // 0 for every other process, and from a service that does not count them.
+  uint64 mapped_kb = 5;
 }
 
 // The answer to GetMemory.
@@ -1705,12 +1847,40 @@ message Settings {
   // it off; a client sends back the value it read. Off, a downloaded image is used from the
   // next time the user starts Android.
   bool image_auto_restart = 39;
+  // Whether the caller's Android trusts, as system certificates, the root certificates a user
+  // or an administrator added to this computer (imported_certificates). On unless the user
+  // turned it off; a client sends back the value it read. It applies at once, without
+  // restarting Android.
+  bool host_certificates = 40;
+  // The root certificates the service found added to this computer's trust stores for the
+  // caller, whether or not host_certificates is on. Those the operating system ships are left
+  // out. A client cannot change it.
+  repeated ImportedCertificate imported_certificates = 41;
   // A run mode setting (run_mode, a RunMode enum, stop_after_secs and keep_for_notifications)
   // was here and is gone: an idle Android stays in Doze. Its numbers and names are never
   // used again, so an older peer that still sends them is read without them. The enum name
   // RunMode is not used again either.
   reserved 310, 311, 312;
   reserved "run_mode", "stop_after_secs", "keep_for_notifications";
+}
+
+// One root certificate the service found added to the computer's trust stores.
+message ImportedCertificate {
+  // Who the certificate is for and who signed it, as distinguished names ("CN=Example Root,
+  // O=Example").
+  string subject = 1;
+  string issuer = 2;
+  // Where it was found: "machine" (the computer's trusted root store), "machine_group_policy",
+  // "machine_enterprise", "user" (the caller's own trusted root store), "user_group_policy",
+  // "admin" (the computer's administrator trust settings) or "system" (a certificate added to
+  // the system's certificate store).
+  string source = 3;
+  // The store or file it was found in, as the operating system names it.
+  string location = 4;
+  // The SHA-256 fingerprint of the certificate, in lower-case hexadecimal.
+  string sha256 = 5;
+  // When it stops being valid, in seconds since the Unix epoch; 0 when unknown.
+  int64 not_after = 6;
 }
 
 // How the caller's Android reaches the network.
@@ -1728,6 +1898,11 @@ message NetworkStatus {
   // Why advanced networking is not in use although it is on, or another problem with the
   // network. Empty when there is none.
   string problem = 5;
+  // Who answers the guest's DNS queries: "host" while this host's resolver answers them (so
+  // the host's hosts file, VPN and DNS filters apply to Android's apps), "network" while the
+  // host's resolver does not answer and Android asks `dns_servers` itself. Empty while Android
+  // is not running or still booting, and from a service that cannot say.
+  string dns_resolver = 6;
 }
 
 // Erases the caller's Android data: the apps they installed, their accounts and every app's
@@ -1735,6 +1910,193 @@ message NetworkStatus {
 // disk with a fresh one from the Android image. The system image and DSA's settings stay as
 // they are. The answer is Done once the new disk is in place; the next start boots it.
 message ResetData {}
+
+// Backs up every app of the caller's Android now, into the caller's backup folder, encrypted
+// with the key the host's credential store keeps for them. Android has to be running
+// (ERROR_CODE_NOT_RUNNING otherwise). The answer is BackupReport once Android's backup
+// manager has finished.
+message BackupNow {}
+
+// Asks where the caller's backup stands. The service answers BackupReport. It reads only the
+// backup folder, so it answers while Android is stopped too.
+message GetBackup {}
+
+// Restores the caller's Android from their backup folder: installs each app the backup holds
+// the APKs of and Android does not have, then has Android restore every app's data. It is
+// how the data comes back after a data reset, or on another computer once the folder and
+// the recovery key are there. Android has to be running (ERROR_CODE_NOT_RUNNING otherwise).
+// Answered with BackupReport.
+message RestoreBackup {}
+
+// Asks for the caller's backup recovery key: the key their backup folder is encrypted with,
+// as text to write down. With it the folder can be restored on another computer or under
+// another user. Answered with BackupRecoveryKey.
+message GetBackupRecoveryKey {}
+
+message BackupRecoveryKey {
+  // Groups of letters and digits with a check at the end, such as `ABCD-EFGH-...`.
+  string key = 1;
+}
+
+// Keeps `key`, a recovery key GetBackupRecoveryKey gave, as the caller's backup key, so a
+// backup folder made on another computer or under another user can be read here. Text that
+// is not a recovery key, or one the folder was not made with, is ERROR_CODE_INVALID_SETTING.
+// Answered with BackupReport.
+message SetBackupRecoveryKey {
+  string key = 1;
+}
+
+// Where the caller's backup stands.
+message BackupReport {
+  // Whether backups can be made and read now.
+  bool available = 1;
+  // Why not, in words a person can act on; empty when they can.
+  string problem = 2;
+  // The backup folder.
+  string folder = 3;
+  // When an app was last backed up, in milliseconds since the Unix epoch; 0 for never.
+  int64 last_backup_unix_ms = 4;
+  // The apps the backup holds, and the bytes their data and APKs take before encryption.
+  uint32 packages = 5;
+  uint64 size = 6;
+  // What went wrong in the last backup or restore; empty when nothing did.
+  string last_error = 7;
+  // BackupNow and RestoreBackup: the apps backed up or restored, those that failed, and the
+  // apps a restore installed.
+  uint32 succeeded = 8;
+  uint32 failed = 9;
+  uint32 installed = 10;
+  // When the backup was last restored, in milliseconds since the Unix epoch; 0 for never.
+  int64 last_restore_unix_ms = 11;
+  // Whether the user turned backup on. Off by default: until the user turns it on, no backup
+  // runs, and neither the backup folder nor its key is made. While it is off `available` is
+  // false with no problem, and what an earlier backup left in the folder is still counted.
+  bool enabled = 12;
+}
+
+// Turns the caller's backup on or off. On, Android's backup manager backs the apps' data up to
+// the host on its own schedule, and BackupNow and RestoreBackup work. Off, Android's backup
+// manager stops backing up to the host, and the host takes no more backups; with
+// `delete_backups` the backup folder's files and the backup key are removed as well, else
+// they stay for a later restore. Answered with BackupReport.
+message SetBackup {
+  bool enabled = 1;
+  bool delete_backups = 2;
+}
+
+// Asks how the root key of the caller's Android's KeyMint is protected on this computer.
+// Answered with KeyProtection. It reads only what the key's file records, so it never asks
+// for a password and answers while Android is stopped.
+message GetKeyProtection {}
+
+// How the root key of the guest's KeyMint is sealed on this computer.
+message KeyProtection {
+  // Whether a root key is kept yet: one is made the first time Android starts.
+  bool kept = 1;
+  // What sealed it: "tpm" (the computer's TPM), "secure-enclave" (the Mac's Secure Enclave),
+  // "dpapi" (Windows DPAPI under the user's account), "secret-service" (the user's Secret
+  // Service keyring) or "keychain" (the user's login keychain). Empty while none is kept.
+  string sealed_by = 2;
+  // Whether hardware of this computer (a TPM or the Secure Enclave) holds what seals it.
+  bool hardware = 3;
+  // What sealed it, in words, such as "the computer's TPM 2.0 and DPAPI under your account".
+  string description = 4;
+  // When it is not sealed by hardware: why this computer's hardware could not be used.
+  string fallback_reason = 5;
+  // Why the kept key could not be opened for the latest start of Android, and what to do;
+  // empty when it opened (or no start has asked for it yet).
+  string problem = 6;
+}
+
+// Turns the connection into a watch of the passkey ceremonies of the caller's Android: after
+// the answer (Done), the service sends a PasskeyCeremony for each request of an app that the
+// service has checked (the app's signature against the relying party's Digital Asset Links,
+// or a browser's origin against the relying party), and a PasskeyCeremonyWithdrawn when
+// Android no longer waits for one. Requests that fail the check never reach a watcher. The
+// watcher, which runs in the user's desktop session, brings up the host's passkey prompt and
+// answers each ceremony with ReportPasskeyCeremony, on another connection, and sends
+// nothing on this one.
+message WatchPasskeys {}
+
+// Which passkey ceremony.
+enum PasskeyOperation {
+  PASSKEY_OPERATION_UNSPECIFIED = 0;
+  // Make a new passkey.
+  PASSKEY_OPERATION_CREATE = 1;
+  // Sign in with a passkey.
+  PASSKEY_OPERATION_GET = 2;
+}
+
+// A passkey ceremony the host's authenticator is to perform, already checked.
+message PasskeyCeremony {
+  uint64 ceremony_id = 1;
+  PasskeyOperation operation = 2;
+  string rp_id = 3;
+  // CREATE only: the relying party's name and the account the passkey is for.
+  string rp_name = 4;
+  bytes user_id = 5;
+  string user_name = 6;
+  string user_display_name = 7;
+  // The client data the authenticator signs the hash of (WebAuthn's CollectedClientData
+  // JSON); empty when a browser gave only its hash.
+  bytes client_data_json = 8;
+  // SHA-256 of client_data_json, or the browser's own hash.
+  bytes client_data_hash = 9;
+  // CREATE only: the COSE algorithms the relying party takes, the one it prefers first.
+  repeated int32 algorithms = 10;
+  // CREATE: the passkeys the authenticator must not already hold. GET: the passkeys it may
+  // use; empty for any of the relying party's.
+  repeated bytes credential_ids = 11;
+  // CREATE only: "required", "preferred" or "discouraged".
+  string resident_key = 12;
+  // "required", "preferred" or "discouraged".
+  string user_verification = 13;
+  // How long the relying party waits; 0 for the authenticator's own default.
+  uint32 timeout_ms = 14;
+  // The app that asked, for the prompt.
+  string app_label = 15;
+  string package = 16;
+  // The origin the client data names: the browser's https origin, or the app's
+  // android:apk-key-hash origin.
+  string origin = 17;
+  // CREATE only: "none", "indirect", "direct" or "enterprise".
+  string attestation = 18;
+}
+
+// The ceremony is no longer wanted: its app went away, or Android stopped.
+message PasskeyCeremonyWithdrawn {
+  uint64 ceremony_id = 1;
+}
+
+// What became of a passkey ceremony on the host.
+enum PasskeyResult {
+  PASSKEY_RESULT_UNSPECIFIED = 0;
+  PASSKEY_RESULT_OK = 1;
+  // The person canceled the prompt, or it timed out.
+  PASSKEY_RESULT_CANCELED = 2;
+  // The host has no authenticator, or the person turned passkeys off.
+  PASSKEY_RESULT_UNAVAILABLE = 3;
+  // The authenticator failed; the message says why.
+  PASSKEY_RESULT_ERROR = 4;
+  // CREATE: the authenticator already holds an excluded passkey. GET: it holds none allowed.
+  PASSKEY_RESULT_NOT_ALLOWED = 5;
+}
+
+// Tells the caller's Android what became of a passkey ceremony. Answered with Done.
+message ReportPasskeyCeremony {
+  uint64 ceremony_id = 1;
+  PasskeyResult result = 2;
+  string message = 3;
+  bytes credential_id = 4;
+  // CREATE: the attestation object (CBOR), and the transports the passkey can be reached by.
+  bytes attestation_object = 5;
+  repeated string transports = 6;
+  // GET: the authenticator data, the signature over it and the client data hash, and the
+  // passkey's user handle.
+  bytes authenticator_data = 7;
+  bytes signature = 8;
+  bytes user_handle = 9;
+}
 
 // Asks which Android version runs and which can be chosen. The service answers
 // AndroidVersions.
@@ -1855,6 +2217,62 @@ message ArmTranslation {
   // its own disk, which the service moves onto the add-on disk and then removes. Holds only
   // when guest_known.
   bool guest_left_on_data = 10;
+}
+
+// The Widevine module a user installed: the com.google.android.widevine APEX of Google's
+// emulator system image for their Android version and architecture, which the client
+// downloaded from Google's SDK repository and took out unchanged. DSA does not ship it.
+message WidevinePackage {
+  // The APEX's file name in the image's /vendor/apex, such as
+  // "com.google.android.widevine.apex". The guest's apexd reads it from there.
+  string apex = 1;
+  // The image it came from: its build, API level and revision, such as
+  // "BE2A.250530.026.F3 (API 36, r7)".
+  string version = 2;
+  // The Android major version and the ABI ("x86_64", "arm64-v8a") of that image, which are
+  // the caller's Android's.
+  uint32 android_major = 3;
+  string abi = 4;
+  // The system image archive it was taken from, on Google's download server.
+  string source = 5;
+  // The APEX's size in bytes and its SHA-256 digest, as the image holds it.
+  uint64 size = 6;
+  bytes sha256 = 7;
+  // The licence Google offers the image under, as its list names it.
+  string license = 8;
+}
+
+// Installs Widevine for the caller's Android. The service answers at once: Done when it takes
+// an APEX with this description, or an error. After Done the client sends the APEX, exactly
+// as the image holds it, package.size bytes, in ApkChunk frames, and the service answers the
+// same request id once more: Widevine once the APEX is on the caller's add-on disk, or an
+// error. The connection then ends. Android need not run: the module is used from its next
+// start.
+message InstallWidevine {
+  WidevinePackage package = 1;
+}
+
+// Asks where Widevine stands for the caller. Answered with Widevine.
+message GetWidevine {}
+
+// Removes the caller's Widevine module. Answered with Widevine. From Android's next start the
+// module is gone, and so are the device certificates Widevine kept in /data/vendor/mediadrm.
+// A running Android keeps the module it booted with until it restarts.
+message RemoveWidevine {}
+
+// Where Widevine stands for the caller.
+message Widevine {
+  // The module the caller installed; absent when there is none.
+  WidevinePackage package = 1;
+  // The caller's add-on disk holds the module, for Android's next start.
+  bool on_disk = 2;
+  // The caller's Android runs now: the two fields below hold only then.
+  bool running = 3;
+  // The running Android was started with Widevine.
+  bool active = 4;
+  // What is installed differs from what the running Android was started with, so it applies
+  // once Android starts again.
+  bool restart_needed = 5;
 }
 
 // The Google apps package a user installed: LiteGapps' Core build for their Android, which the
@@ -2290,6 +2708,7 @@ message Request {
     GetSettings get_settings = 16;
     SetSettings set_settings = 17;
     SetWindowsShown set_windows_shown = 20;
+    SetTasksShown set_tasks_shown = 47;
     FreezeSession freeze_session = 21;
     WatchLinks watch_links = 25;
     OpenFile open_file = 26;
@@ -2300,6 +2719,7 @@ message Request {
     ListWidgetProviders list_widget_providers = 29;
     AddWidget add_widget = 30;
     RemoveWidget remove_widget = 31;
+    ReconfigureWidget reconfigure_widget = 46;
     ListWidgets list_widgets = 32;
     WatchWidgets watch_widgets = 33;
     PlaceWidget place_widget = 34;
@@ -2342,10 +2762,27 @@ message Request {
     SetRunAsArm set_run_as_arm = 340;
     SetAppRoot set_app_root = 341;
     ReportTouchGestures report_touch_gestures = 350;
+    ServeLanguageServices serve_language_services = 620;
     WatchGeocoding watch_geocoding = 470;
     ReportGeocode report_geocode = 471;
     WatchShares watch_shares = 472;
     ReportShare report_share = 473;
+    BackupNow backup_now = 640;
+    GetBackup get_backup = 641;
+    RestoreBackup restore_backup = 642;
+    GetBackupRecoveryKey get_backup_recovery_key = 643;
+    SetBackupRecoveryKey set_backup_recovery_key = 644;
+    WatchPasskeys watch_passkeys = 645;
+    ReportPasskeyCeremony report_passkey_ceremony = 646;
+    SetBackup set_backup = 647;
+    GetKeyProtection get_key_protection = 648;
+    WatchAppAudio watch_app_audio = 660;
+    SetAppVolume set_app_volume = 661;
+    LaunchShortcut launch_shortcut = 680;
+    AnswerPinShortcut answer_pin_shortcut = 681;
+    InstallWidevine install_widevine = 700;
+    GetWidevine get_widevine = 701;
+    RemoveWidevine remove_widevine = 702;
   }
 }
 
@@ -2380,6 +2817,11 @@ message Response {
     GappsProgress gapps_progress = 401;
     RunAsArmResult run_as_arm_result = 340;
     AppRootResult app_root_result = 341;
+    BackupReport backup_report = 620;
+    BackupRecoveryKey backup_recovery_key = 621;
+    KeyProtection key_protection = 622;
+    AppAudio app_audio = 660;
+    Widevine widevine = 700;
   }
 }
 
@@ -2420,7 +2862,11 @@ message Envelope {
     BackgroundAppEvent background_app_event = 21;
     GamepadEvent gamepad_event = 300;
     GamepadRumble gamepad_rumble = 301;
+    LanguageServiceFrame language_service_frame = 620;
     GeocodeQuery geocode_query = 470;
     ShareOffer share_offer = 471;
+    PasskeyCeremony passkey_ceremony = 640;
+    PasskeyCeremonyWithdrawn passkey_ceremony_withdrawn = 641;
+    AppAudio app_audio = 660;
   }
 }

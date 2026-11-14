@@ -1,4 +1,5 @@
-# The fast quality gate. Runs on every push to develop, and on the release pull request into main.
+# The fast quality gate. Runs by hand (on its own or as a job of Checks), and on the release
+# pull request into main.
 #
 # The repository checks (the planning documents are present on develop, no em dashes,
 # README files do not link documents that main does not have, the release sync script
@@ -10,19 +11,26 @@ name: Test
 on:
   # Features are integrated on develop and fixed there, so develop is what is tested. The
   # release pull request into main is gated by the same run.
-  push:
-    branches: [develop]
+  # Paused by the owner's decision (2026-11-14): while memory and resizing are fixed on
+  # the owner's PC, tests run only by hand (workflow_dispatch), so a push to develop does
+  # not take the runners the Development and Framework builds wait for. Uncomment to resume.
+  # push:
+  #   branches: [develop]
   pull_request:
     branches: [main]
   workflow_dispatch:
+  # Checks (checks.yml) runs it as one of its jobs, with every other test, in one run.
+  workflow_call:
 
 concurrency:
-  # On develop a run in progress finishes and only the newest waiting run stays: GitHub
-  # keeps one pending run per group, so a newer merge replaces the one still waiting.
-  # The newest run tests everything the dropped ones held. Anywhere else, such as a pull
-  # request, a newer run still replaces the older one.
-  group: test-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/develop' }}
+  # A run in progress always finishes, and only the newest waiting run stays: GitHub keeps
+  # one pending run per group, so a newer run replaces the one still waiting, and the newest
+  # tests everything the dropped ones held. The group is the workflow and the branch (or
+  # the pull request), never the run, so manual runs replace each other too. Called from
+  # Checks, github.workflow names Checks, so a Checks run neither waits on nor replaces a
+  # run started on its own.
+  group: test-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -256,13 +264,13 @@ jobs:
           name: caption-pictures
           path: .scratch/caption-pictures
 
-      # Pictures of a widget's menu (the menu and its Resize submenu) and of its More button
-      # at rest, hovered and pressed, in both themes at 100% and 150%, kept with the run.
+      # Pictures of a widget's menu (the menu and its Resize submenu) and of a widget being
+      # edited with its menu under it, in both themes at 100% and 150%, kept with the run.
       - name: Draw the widget menu pictures
         if: runner.os == 'Windows'
         env:
           DSA_WIDGET_MENU_PICTURES: ${{ github.workspace }}/.scratch/widget-menu-pictures
-        run: cargo test -p dsa-host-windows --lib fr12_pictures_of_the_widget_menu_and_its_more_button
+        run: cargo test -p dsa-host-windows --lib fr12_pictures_of_the_widget_menu
 
       - name: Keep the widget menu pictures
         if: runner.os == 'Windows'
@@ -637,17 +645,19 @@ jobs:
           echo "DSA_CROSVM_TEST_KERNEL=$kernel" >> "$GITHUB_ENV"
           echo "DSA_CROSVM_TEST_INITRD=$RUNNER_TEMP/test-initrd.img" >> "$GITHUB_ENV"
 
+      # Images are published by the official repository only, so a fork tests with them too.
       - name: Download the newest published Android image
         env:
           GH_TOKEN: ${{ github.token }}
+          OFFICIAL_REPOSITORY: thisisthepy/desktop-subsystem-for-android
         run: |
-          tag="$(gh release list -R "${{ github.repository }}" -L 50 --json tagName -q '[.[] | select(.tagName | startswith("android-17") and (endswith("-arm64") | not))][0].tagName')"
+          tag="$(gh release list -R "$OFFICIAL_REPOSITORY" -L 50 --json tagName -q '[.[] | select(.tagName | startswith("android-17") and (endswith("-arm64") | not))][0].tagName')"
           test -n "$tag" || { echo "no published x86_64 Android 17 image release"; exit 1; }
           echo "image release: $tag"
           image="$RUNNER_TEMP/image"
           mkdir -p "$image"
           for file in image.json bzImage initrd.img system.vhdx data.vhdx; do
-            gh release download "$tag" -R "${{ github.repository }}" -p "$file" -D "$image"
+            gh release download "$tag" -R "$OFFICIAL_REPOSITORY" -p "$file" -D "$image"
           done
           ls -l "$image"
           echo "DSA_CROSVM_TEST_IMAGE=$image" >> "$GITHUB_ENV"

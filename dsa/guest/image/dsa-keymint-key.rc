@@ -1,0 +1,8 @@
+# KeyMint's root key from the host (dsa-channeld.rc defines the service). This system script
+# runs as init, which may make a folder in /dev; a vendor script's mkdir runs as vendor_init.
+# The folder is tmpfs, so the key it holds is gone when the guest stops, and only nobody,
+# KeyMint's user and the user the service runs as, may enter it. Its label
+# (dsa_keymint_key_file, vendor_file_contexts) lets only KeyMint's domain read what is in it.
+on init
+    mkdir /dev/dsa_keymint 0700 nobody nobody
+    start dsa_keymint_key

@@ -77,6 +77,24 @@ enum Shell {
         return alert.runModal() == .alertFirstButtonReturn
     }
 
+    /// Asks a question with two answers and a way out: true for `yes`, false for `no`, nil when
+    /// the user cancels.
+    static func ask(_ title: String, _ message: String, yes: String, no: String) -> Bool? {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        let first = alert.addButton(withTitle: yes)
+        first.hasDestructiveAction = true
+        alert.addButton(withTitle: no)
+        alert.addButton(withTitle: T("CancelButton"))
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: return true
+        case .alertSecondButtonReturn: return false
+        default: return nil
+        }
+    }
+
     /// Quotes `text` for /bin/sh.
     nonisolated static func shellQuote(_ text: String) -> String {
         "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'"

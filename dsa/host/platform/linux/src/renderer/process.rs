@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use dsa_host_core::memory::{HeldMemory, HostRole};
 use dsa_host_core::renderer::{
-    address_from, open_renderer, RendererProcessMemory, WindowManagerLink,
+    address_from, follow_device_state, open_renderer, RendererProcessMemory, WindowManagerLink,
 };
 use dsa_host_unix::fd_frames::{stream_at, FdConnection, FdSender};
 use dsa_protocol::renderer::encode_body;
@@ -185,6 +185,19 @@ pub fn run(args: &[String]) -> ! {
         end_now(5);
     }
     if let Some(renderer) = &renderer {
+        // A lost device reaches the compositor the moment the renderer finds it, so it is
+        // followed as a GPU reset (and the windows watched for frames that do not come back)
+        // while the renderer makes its device again.
+        let watched = Arc::clone(renderer);
+        if let Err(why) = follow_device_state(
+            Arc::clone(&link),
+            Box::new(move || (watched.device_losses(), watched.device_generation())),
+        ) {
+            link.note(&format!(
+                "the renderer's device state cannot be followed, so the compositor does not \
+                 learn of a GPU reset: {why}"
+            ));
+        }
         let listen = Listen::from_env();
         let note = Arc::clone(&link);
         let log: Arc<dyn Fn(&str) + Send + Sync> = Arc::new(move |line: &str| note.note(line));

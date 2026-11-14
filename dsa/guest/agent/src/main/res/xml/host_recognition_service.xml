@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The guest's speech recognition service. The host's speech recognition listens, so it has no
+  settings of its own to show.
+-->
+<recognition-service xmlns:android="http://schemas.android.com/apk/res/android" />

@@ -8,6 +8,9 @@
 //! popup with the window's and Android's items. What the user does goes out as [`Event`]s:
 //! reports for the window rules, input for the guest, the desktop's clipboard and dropped
 //! files.
+//!
+//! The widgets placed on the desktop are surfaces of their own on the desktop's layer
+//! (`widgets`), which the platform-neutral widget desk drives.
 
 mod data;
 mod gpu;
@@ -15,6 +18,7 @@ mod menu;
 pub mod pip;
 mod seat;
 mod shm;
+mod widgets;
 mod window;
 
 use std::collections::{BTreeMap, HashMap};
@@ -82,6 +86,11 @@ pub enum Event {
     /// The window menu of a picture-in-picture window outside Wayland (X11): Alt+Space, or
     /// input on the open menu.
     X11Menu(crate::compositor::x11_pip::MenuInput),
+    /// Input on a widget's X11 desktop window.
+    X11Widget {
+        widget_id: i32,
+        input: crate::compositor::x11_pip::WidgetInput,
+    },
     /// Files were dropped on a task's window.
     Dropped {
         task_id: i32,
@@ -175,6 +184,8 @@ pub struct State {
     pub(crate) text: Option<crate::compositor::text::Text>,
     /// The window menu while it is open.
     pub(crate) menu: Option<menu::Menu>,
+    /// The widget windows on the desktop.
+    pub(crate) widgets: widgets::Widgets,
     /// Whether the session reads Korean, for the window menu's words.
     pub(crate) korean: bool,
 }
@@ -238,6 +249,9 @@ impl Desktop {
                 None
             }
         };
+        let korean =
+            crate::compositor::window_menu::reads_korean_in(|name| std::env::var(name).ok());
+        let widgets = widgets::Widgets::new(layer_shell.is_some(), x11.is_some(), korean);
         let mut state = State {
             qh: qh.clone(),
             connection: connection.clone(),
@@ -281,9 +295,8 @@ impl Desktop {
             app_looks: HashMap::new(),
             text,
             menu: None,
-            korean: crate::compositor::window_menu::reads_korean_in(|name| {
-                std::env::var(name).ok()
-            }),
+            widgets,
+            korean,
         };
         if let Some(seat) = seat {
             state.seat_ready(seat);
@@ -336,9 +349,11 @@ impl Desktop {
         Ok(ready > 0 && fds[1].revents & libc::POLLIN != 0)
     }
 
-    /// Runs what is due: key repeat.
+    /// Runs what is due: key repeat, a widget's long press, and the size of a widget being
+    /// resized.
     pub fn tick(&mut self, now: Instant) {
         self.state.repeat_due(now);
+        self.state.widget_tick(now);
     }
 
     /// Sends the requests made since the last flush.

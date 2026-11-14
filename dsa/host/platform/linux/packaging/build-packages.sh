@@ -505,7 +505,7 @@ if [[ "$make_deb" -eq 1 ]]; then
         echo "Maintainer: thisisthepy <noreply@github.com>"
         echo "Installed-Size: $size_kb"
         echo "Depends: libc6, libstdc++6, libcap2, libwayland-client0, libdrm2, libvulkan1, libgtk-4-1, libadwaita-1-0, systemd, udev"
-        echo "Recommends: pipewire-pulse | pulseaudio, libpulse0, geoclue-2.0, xdg-desktop-portal, cups-client, upower, power-profiles-daemon, iio-sensor-proxy, xdg-utils, polkitd | policykit-1"
+        echo "Recommends: pipewire-pulse | pulseaudio, libpulse0, geoclue-2.0, xdg-desktop-portal, cups-client, upower, power-profiles-daemon, iio-sensor-proxy, xdg-utils, polkitd | policykit-1, speech-dispatcher, libenchant-2-2"
         echo "Section: otherosfs"
         echo "Priority: optional"
         echo "Homepage: https://github.com/thisisthepy/desktop-subsystem-for-android"

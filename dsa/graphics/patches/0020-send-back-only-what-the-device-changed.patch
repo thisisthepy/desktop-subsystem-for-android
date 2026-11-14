@@ -1,0 +1,44 @@
+diff --git a/host/vulkan/VkDecoder.cpp b/host/vulkan/VkDecoder.cpp
+--- a/host/vulkan/VkDecoder.cpp
++++ b/host/vulkan/VkDecoder.cpp
+@@ -43,6 +43,7 @@
+ #include "VulkanBoxedHandles.h"
+ #include "VulkanDispatch.h"
+ #include "VulkanStream.h"
++#include "dsa_shadow_record.h"
+ #include "aemu/base/BumpPool.h"
+ #include "aemu/base/Metrics.h"
+ #include "aemu/base/system/System.h"
+@@ -1753,6 +1754,7 @@ size_t VkDecoder::Impl::decode(void* buf, size_t len, IOStream* ioStream,
+                     m_state->on_vkFreeMemory(&m_pool, snapshotApiCallInfo, device, memory,
+                                              pAllocator);
+                 }
++                dsa::shadowRecord().forget((uint64_t)memory);
+                 vkStream->unsetHandleMapping();
+                 if (m_snapshotsEnabled) {
+                     m_state->snapshot()->vkFreeMemory(&m_pool, snapshotApiCallInfo, packet,
+@@ -1950,6 +1952,10 @@ size_t VkDecoder::Impl::decode(void* buf, size_t len, IOStream* ioStream,
+                         }
+                         uint8_t* targetRange = hostPtr + offset;
+                         memcpy(targetRange, *readStreamPtrPtr, readStream);
++                        // The guest's copy holds these bytes now; a read back leaves them
++                        // out until the device changes them.
++                        dsa::shadowRecord().flushed((uint64_t)memory, mappedSize, offset,
++                                                    *readStreamPtrPtr, readStream);
+                         *readStreamPtrPtr += readStream;
+                     }
+                 }
+@@ -2051,6 +2057,13 @@ size_t VkDecoder::Impl::decode(void* buf, size_t len, IOStream* ioStream,
+                             continue;
+                         };
+                         uint8_t* targetRange = hostPtr + offset;
++                        if (!dsa::shadowRecord().mustSend((uint64_t)memory, hostPtr, mappedSize,
++                                                          offset, actualSize)) {
++                            // The device changed nothing in the range since the guest last
++                            // had it: size 0 leaves the guest's copy as it is.
++                            vkStream->write(&writeStream, sizeof(uint64_t));
++                            continue;
++                        }
+                         writeStream = actualSize;
+                         vkStream->write(&writeStream, sizeof(uint64_t));
+                         vkStream->write(targetRange, actualSize);

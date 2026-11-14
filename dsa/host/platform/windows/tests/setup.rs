@@ -142,7 +142,24 @@ mod on_windows {
             "CARGO_BIN_EXE_dsa-hostd"
         )))
         .expect("dsa-hostd carries version information");
-        let [a, b, c, d] = dsa_exe_resources::version_parts(dsa_host_windows::VERSION);
-        assert_eq!(version, format!("{a}.{b}.{c}.{d}"));
+        // The release's own text, so a development build's -dev.<n> is kept.
+        assert_eq!(version, dsa_host_windows::VERSION);
+    }
+
+    #[test]
+    fn fr15_a_development_build_on_disk_is_not_taken_for_a_newer_one() {
+        use dsa_host_core::update::program_service::restart_into_files;
+        // The files' text version is compared, never the fixed numbers (0.2.4.0 here), which
+        // would read as newer than the service itself and restart it again and again.
+        assert!(!restart_into_files(
+            "0.2.4-dev.7",
+            Some("0.2.4-dev.7"),
+            false
+        ));
+        assert!(restart_into_files(
+            "0.2.4-dev.7",
+            Some("0.2.4-dev.8"),
+            false
+        ));
     }
 }

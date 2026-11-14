@@ -48,6 +48,20 @@ internal static class Shell
         await box.ShowDialogAsync();
     }
 
+    /// <summary>Asks a question with two answers; true for <paramref name="yes"/>, false for
+    /// <paramref name="no"/> or the dialog closed.</summary>
+    public static async Task<bool> Ask(string title, string message, string yes, string no)
+    {
+        var box = new MessageBox
+        {
+            Title = title,
+            Content = new System.Windows.Controls.TextBlock { Text = message, TextWrapping = System.Windows.TextWrapping.Wrap },
+            PrimaryButtonText = yes,
+            CloseButtonText = no,
+        };
+        return await box.ShowDialogAsync() == MessageBoxResult.Primary;
+    }
+
     public static async Task<bool> Confirm(string title, string message, string action)
     {
         var box = new MessageBox

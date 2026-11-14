@@ -7,6 +7,7 @@ import io.github.thisisthepy.dsa.control.v1.AddWidget
 import io.github.thisisthepy.dsa.control.v1.Envelope
 import io.github.thisisthepy.dsa.control.v1.ListWidgetProviders
 import io.github.thisisthepy.dsa.control.v1.PointerAction
+import io.github.thisisthepy.dsa.control.v1.ReconfigureWidget
 import io.github.thisisthepy.dsa.control.v1.RemoveWidget
 import io.github.thisisthepy.dsa.control.v1.ResizeWidget
 import io.github.thisisthepy.dsa.control.v1.WidgetPointer
@@ -25,10 +26,23 @@ class FakeWidgetPlatform : WidgetPlatform {
     val shown = mutableListOf<Pair<Int, WidgetSize>>()
     val pointers = mutableListOf<String>()
     val dozing = mutableListOf<Boolean>()
-    val configuring = mutableMapOf<Int, (Boolean) -> Unit>()
+    val configuring = mutableMapOf<Int, (WidgetSetup) -> Unit>()
+
+    /** How the next setup ends before [configure] returns, as one that finishes at once; null to wait. */
+    var setupAtOnce: WidgetSetup? = null
+
+    /** Setups started, by widget ID, in order. */
+    val setups = mutableListOf<Int>()
     var frame: (Int, Int, Int, ByteArray) -> Unit = { _, _, _, _ -> }
     var changed: () -> Unit = {}
     var failed: (Int) -> Unit = {}
+
+    /** Says a widget's views reach past its size: its content needs a width and height in dp. */
+    var needs: (Int, Int, Int) -> Unit = { _, _, _ -> }
+
+    override fun fitting(needs: (widgetId: Int, widthDp: Int, heightDp: Int) -> Unit) {
+        this.needs = needs
+    }
 
     /**
      * The widget IDs a view listens to. Like Android's widget host, it starts empty in every
@@ -69,8 +83,10 @@ class FakeWidgetPlatform : WidgetPlatform {
         deleted += widgetId
     }
 
-    override fun configure(widgetId: Int, done: (Boolean) -> Unit) {
+    override fun configure(widgetId: Int, done: (WidgetSetup) -> Unit) {
+        setups += widgetId
         configuring[widgetId] = done
+        setupAtOnce?.let(done)
     }
 
     override fun show(widgetId: Int, size: WidgetSize) {
@@ -81,6 +97,14 @@ class FakeWidgetPlatform : WidgetPlatform {
             return
         }
         listening += widgetId
+    }
+
+    /** The widgets drawn anew whatever they drew before, in order. */
+    val redrawn = mutableListOf<Pair<Int, WidgetSize>>()
+
+    override fun redraw(widgetId: Int, size: WidgetSize) {
+        redrawn += widgetId to size
+        show(widgetId, size)
     }
 
     override fun pointer(widgetId: Int, action: PointerAction, pointerId: Int, x: Float, y: Float) {
@@ -98,9 +122,9 @@ class FakeWidgetPlatform : WidgetPlatform {
     }
 }
 
-fun clock(configure: Boolean = false) = WidgetInfo(
-    provider = "com.example.clock/.ClockWidget",
-    packageName = "com.example.clock",
+fun clock(configure: Boolean = false, provider: String = "com.example.clock/.ClockWidget") = WidgetInfo(
+    provider = provider,
+    packageName = provider.substringBefore('/'),
     label = "Clock",
     previewPng = byteArrayOf(0x89.toByte(), 'P'.code.toByte(), 'N'.code.toByte(), 'G'.code.toByte()),
     minWidthDp = 110,
@@ -178,6 +202,158 @@ class WidgetManagerTest {
     }
 
     @Test
+    fun fr12_a_widget_is_placed_in_whole_launcher_cells_that_hold_its_minimum() {
+        // Android's rule: n cells hold 70n - 30 dp.
+        assertEquals(1, WidgetInfo.cellsFor(0))
+        assertEquals(1, WidgetInfo.cellsFor(40))
+        assertEquals(2, WidgetInfo.cellsFor(110))
+        assertEquals(3, WidgetInfo.cellsFor(180))
+        // A 5 by 2 music widget of 369 by 110 dp: two rows of cells, 132 dp, rather than its
+        // bare 110 dp minimum, which cut its playback buttons off.
+        assertEquals(132, WidgetInfo.launcherSide(110, 0))
+        assertEquals("never below the minimum", 369, WidgetInfo.launcherSide(369, 0))
+        assertEquals(58, WidgetInfo.launcherSide(40, 0))
+        assertEquals("the cells its app asks for", 206, WidgetInfo.launcherSide(110, 3))
+        assertEquals("never fewer cells than hold the minimum", 206, WidgetInfo.launcherSide(180, 1))
+        assertEquals("no more than a launcher's grid", 354, WidgetInfo.launcherSide(110, 9))
+        assertEquals("within its maximum", 120, WidgetInfo.launcherSide(110, 0, 120))
+        assertEquals("a maximum below the minimum leaves the minimum", 110, WidgetInfo.launcherSide(110, 0, 90))
+    }
+
+    @Test
+    fun fr12_a_widget_whose_content_needs_more_than_its_minimum_gets_a_window_that_fits() {
+        val music = clock(provider = "com.example.music/.Widget5x2").copy(
+            label = "Music",
+            minWidthDp = 369,
+            minHeightDp = 110,
+            defaultWidthDp = WidgetInfo.launcherSide(369, 0),
+            defaultHeightDp = WidgetInfo.launcherSide(110, 0),
+            resizeMode = 1,
+        )
+        started()
+        platform.offered += music
+        add("com.example.music/.Widget5x2")
+        val placed = sent.last { it.hasWidgetUpdated() }.widgetUpdated.provider
+        assertEquals(369 to 132, placed.defaultWidthDp to placed.defaultHeightDp)
+
+        // Its text is larger than its app planned for: its last row reaches 168 dp down.
+        sent.clear()
+        platform.needs(1, 369, 168)
+        scheduler.runDue()
+        val grown = sent.single { it.hasWidgetUpdated() }.widgetUpdated
+        assertEquals(1, grown.widgetId)
+        assertEquals("the window that holds it", 369 to 168, grown.provider.defaultWidthDp to grown.provider.defaultHeightDp)
+        assertEquals("its minimum is what its app says", 110, grown.provider.minHeightDp)
+
+        // A smaller need later changes nothing: the window never jumps back.
+        sent.clear()
+        platform.needs(1, 369, 150)
+        scheduler.runDue()
+        assertTrue(sent.none { it.hasWidgetUpdated() })
+
+        // Each new connection hears the size that holds it.
+        manager.connected()
+        val again = sent.first { it.hasWidgetUpdated() }.widgetUpdated.provider
+        assertEquals(168, again.defaultHeightDp)
+
+        // An agent that starts again describes it at that size from the start, so its window
+        // does not shrink and grow again each time Android starts.
+        val restarted = mutableListOf<Envelope>()
+        val next = WidgetManager(platform, store, { frame -> restarted += decode(frame); true }, log, { true })
+        next.start { it() }
+        next.connected()
+        assertEquals(168, restarted.first { it.hasWidgetUpdated() }.widgetUpdated.provider.defaultHeightDp)
+
+        // A need within the widget's maximum only.
+        val capped = music.copy(maxHeightDp = 150).holding(369, 400)
+        assertEquals(150, capped.defaultHeightDp)
+    }
+
+    @Test
+    fun fr12_a_widget_whose_views_reach_past_its_window_is_drawn_shrunk_to_fit_never_cut() {
+        // Its views fit: drawn at full size.
+        assertEquals(1f, WidgetFit.scale(443, 158, 443, 158), 0f)
+        // Its last row reaches 200 pixels down a window of 158: shrunk until it shows whole.
+        val scale = WidgetFit.scale(443, 158, 443, 200)
+        assertEquals(158f / 200f, scale, 0.0001f)
+        assertTrue(WidgetFit.layoutSide(158, scale) >= 200)
+        assertEquals(WidgetFit.layoutSide(443, scale).toFloat() * scale, 443f, 1f)
+        // Across too, and the side that needs it more decides.
+        assertEquals(0.8f, WidgetFit.scale(400, 100, 500, 110), 0.0001f)
+        // Shrunk no further than can still be read.
+        assertEquals(WidgetFit.MIN_SCALE, WidgetFit.scale(100, 100, 100, 1000), 0f)
+        // The size it needs, rounded up so it is held whole.
+        assertEquals(168, WidgetFit.dpOf(210, 200))
+        assertEquals(169, WidgetFit.dpOf(200, 190))
+        assertEquals(110, WidgetFit.dpOf(132, 192))
+    }
+
+    /**
+     * A 5 by 2 music widget at 369 by 170 dp, on a monitor at 200% (262 dpi) and at 125%
+     * (164 dpi). Its app was told 16 dp less each way than its window, Android's padding for a
+     * launcher's grid, which the agent's widget view does not have: at 262 dpi it laid out
+     * 154 dp, 252 pixels of a 278 pixel window, and the window showed a 26 pixel empty band
+     * below the widget.
+     */
+    @Test
+    fun fr12_a_widgets_app_is_told_the_size_of_its_window_at_200_and_125_percent() {
+        for ((density, window) in listOf(262 to (604 to 278), 164 to (378 to 174))) {
+            val told = WidgetFit.told(369, 170)
+            assertEquals(WidgetFit.Told(369, 170), told)
+            // The size the app lays out for covers the window to the pixel.
+            val px = { dp: Int -> Math.round(dp * density / 160.0).toInt() }
+            assertEquals("width at $density dpi", window.first.toDouble(), px(told.widthDp).toDouble(), 1.0)
+            assertEquals("height at $density dpi", window.second.toDouble(), px(told.heightDp).toDouble(), 1.0)
+        }
+    }
+
+    /**
+     * Android centres a widget's content, so content taller than its window is cut off at the
+     * top as much as at the bottom. Counting only the bottom, the 369 by 132 dp music widget
+     * whose content was 172 dp grew 132, 140, 156, 163, 167, 169, 170 dp and never held it.
+     */
+    @Test
+    fun fr12_a_widget_whose_content_overflows_at_the_top_too_is_measured_whole_and_shown_whole() {
+        // 200%: 132 dp is 216 pixels, and 172 dp of content 282 pixels, from -33 to 249.
+        val room = 216
+        val content = 282
+        val start = (room - content) / 2
+        assertEquals(-33, start)
+        val span = WidgetFit.span(room, start, start + content)
+        assertEquals(content, span)
+        assertEquals(173, WidgetFit.dpOf(span, 262))
+        // Drawn shrunk until a room that large holds it, where centred content starts at 0.
+        val scale = WidgetFit.scale(604, room, 604, span)
+        val layout = WidgetFit.layoutSide(room, scale)
+        assertTrue(layout >= content)
+        assertTrue((layout - content) / 2 >= 0)
+        // At its 170 dp (278 pixels) the content still reaches 2 pixels past each edge.
+        assertEquals(282, WidgetFit.span(278, -2, 280))
+        assertEquals(173, WidgetFit.dpOf(282, 262))
+        // 125%: 132 dp is 135 pixels, the content 176.
+        assertEquals(176, WidgetFit.span(135, (135 - 176) / 2, (135 - 176) / 2 + 176))
+        assertEquals(172, WidgetFit.dpOf(176, 164))
+        // Content inside its window needs nothing more.
+        assertEquals(278, WidgetFit.span(278, 0, 278))
+        assertEquals(278, WidgetFit.span(278, 20, 258))
+    }
+
+    @Test
+    fun fr12_what_an_apps_own_view_cuts_off_inside_the_window_is_not_counted_as_cut() {
+        // A card from 20 to 584 of a 604 pixel window cuts off its picture: the app's design.
+        assertEquals(20, WidgetFit.clipEdge(Int.MIN_VALUE, 20, 0, low = true))
+        assertEquals(584, WidgetFit.clipEdge(Int.MAX_VALUE, 584, 604, low = false))
+        // A view at the window's edges, or past them, is cut off by the window itself.
+        assertEquals(Int.MIN_VALUE, WidgetFit.clipEdge(Int.MIN_VALUE, 0, 0, low = true))
+        assertEquals(Int.MIN_VALUE, WidgetFit.clipEdge(Int.MIN_VALUE, -13, 0, low = true))
+        assertEquals(Int.MAX_VALUE, WidgetFit.clipEdge(Int.MAX_VALUE, 278, 278, low = false))
+        assertEquals(Int.MAX_VALUE, WidgetFit.clipEdge(Int.MAX_VALUE, 291, 278, low = false))
+        // An inner edge never loosens an outer one.
+        assertEquals(30, WidgetFit.clipEdge(30, 20, 0, low = true))
+        assertEquals(500, WidgetFit.clipEdge(500, 584, 604, low = false))
+    }
+
+    @Test
     fun fr12_a_widget_android_does_not_allow_or_no_app_offers_is_refused_with_the_reason() {
         started()
         add("com.example.none/.Nothing")
@@ -198,19 +374,188 @@ class WidgetManagerTest {
         platform.offered += clock(configure = true)
         add()
         assertTrue("nothing is placed before the setup ends", sent.isEmpty())
-        platform.configuring.getValue(1)(true)
+        assertEquals("the setup runs once", listOf(1), platform.setups)
+        platform.configuring.getValue(1)(WidgetSetup.Finished)
         scheduler.runDue()
         assertEquals(1, sent.first { it.hasWidgetAdded() }.widgetAdded.widgetId)
+        assertEquals(listOf(1), platform.placedIds())
+        assertEquals(1, platform.shown.last().first)
 
         add(requestId = 9)
-        platform.configuring.getValue(2)(false)
+        platform.configuring.getValue(2)(WidgetSetup.Canceled)
         scheduler.runDue()
         assertTrue(sent.last { it.hasWidgetAdded() }.widgetAdded.error.contains("canceled"))
         assertEquals(listOf(2), platform.deleted)
         // A second answer changes nothing.
-        platform.configuring.getValue(2)(true)
+        platform.configuring.getValue(2)(WidgetSetup.Finished)
         scheduler.runDue()
         assertEquals(listOf(1), platform.placedIds())
+    }
+
+    @Test
+    fun fr12_a_setup_that_finishes_at_once_with_ok_places_the_widget() {
+        started()
+        platform.offered += clock(configure = true)
+        platform.setupAtOnce = WidgetSetup.Finished
+        add()
+        val added = sent.single { it.hasWidgetAdded() }.widgetAdded
+        assertEquals("", added.error)
+        assertEquals(1, added.widgetId)
+        assertEquals(listOf(1), platform.placedIds())
+        assertTrue("the host hears of the placed widget", sent.any { it.hasWidgetUpdated() && it.widgetUpdated.widgetId == 1 })
+    }
+
+    @Test
+    fun fr12_a_setup_canceled_at_once_removes_the_widget_and_says_the_user_canceled() {
+        started()
+        platform.offered += clock(configure = true)
+        platform.setupAtOnce = WidgetSetup.Canceled
+        add()
+        val added = sent.single { it.hasWidgetAdded() }.widgetAdded
+        assertEquals("the user canceled the widget's setup", added.error)
+        assertEquals(listOf(1), platform.deleted)
+        assertTrue(platform.placedIds().isEmpty())
+    }
+
+    @Test
+    fun fr12_only_a_real_cancel_is_reported_as_canceled() {
+        started()
+        platform.offered += clock(configure = true)
+        platform.setupAtOnce = WidgetSetup.Failed("ActivityNotFoundException: no setup activity")
+        add()
+        val failed = sent.single { it.hasWidgetAdded() }.widgetAdded.error
+        assertFalse(failed, failed.contains("canceled"))
+        assertTrue(failed, failed.contains("did not start") && failed.contains("no setup activity"))
+        assertEquals(listOf(1), platform.deleted)
+
+        // A setup that cannot even be asked for is not a cancel either.
+        val throwing = object : WidgetPlatform by platform {
+            override fun configure(widgetId: Int, done: (WidgetSetup) -> Unit) {
+                throw SecurityException("not allowed")
+            }
+        }
+        val other = mutableListOf<Envelope>()
+        val manager = WidgetManager(throwing, WidgetStore.memory(), { frame -> other += decode(frame); true }, log, { true })
+        manager.start { it() }
+        manager.handle(Envelope.newBuilder().setAddWidget(AddWidget.newBuilder().setRequestId(3).setProvider(clock().provider)).build())
+        val error = other.single { it.hasWidgetAdded() }.widgetAdded.error
+        assertFalse(error, error.contains("canceled"))
+        assertTrue(error, error.contains("did not start"))
+    }
+
+    @Test
+    fun fr12_the_setups_answer_is_read_from_its_result_code() {
+        assertEquals(WidgetSetup.Finished, WidgetSetup.ofResult(-1))
+        assertEquals(WidgetSetup.Canceled, WidgetSetup.ofResult(0))
+        // A result an app made up is not a finished setup.
+        assertEquals(WidgetSetup.Canceled, WidgetSetup.ofResult(1))
+    }
+
+    @Test
+    fun fr12_a_setup_the_app_says_is_optional_is_skipped_and_the_widget_placed_at_once() {
+        val reconfigurable = WidgetInfo.FEATURE_RECONFIGURABLE
+        val optional = WidgetInfo.FEATURE_CONFIGURATION_OPTIONAL
+        assertFalse("no configuration activity, no setup", WidgetInfo.needsSetup(false, 0))
+        assertTrue(WidgetInfo.needsSetup(true, 0))
+        assertTrue("reconfigurable alone still sets the widget up first", WidgetInfo.needsSetup(true, reconfigurable))
+        assertTrue("optional means nothing without reconfigurable", WidgetInfo.needsSetup(true, optional))
+        assertFalse(WidgetInfo.needsSetup(true, reconfigurable or optional))
+        // Hidden from the picker (2) does not change it.
+        assertFalse(WidgetInfo.needsSetup(true, reconfigurable or optional or 2))
+
+        started()
+        platform.offered += clock(configure = WidgetInfo.needsSetup(true, reconfigurable or optional))
+        add()
+        assertTrue("no setup runs", platform.setups.isEmpty())
+        assertEquals(1, sent.single { it.hasWidgetAdded() }.widgetAdded.widgetId)
+    }
+
+    private fun reconfigure(widgetId: Int, requestId: Int) {
+        manager.handle(
+            Envelope.newBuilder().setReconfigureWidget(
+                ReconfigureWidget.newBuilder().setRequestId(requestId).setWidgetId(widgetId),
+            ).build(),
+        )
+        scheduler.runDue()
+    }
+
+    @Test
+    fun fr12_long_pressing_a_widget_edits_it_like_a_home_screen() {
+        val reconfigurable = WidgetInfo.FEATURE_RECONFIGURABLE
+        val optional = WidgetInfo.FEATURE_CONFIGURATION_OPTIONAL
+        // Its settings are offered only for a widget with a setup whose app says it can run again.
+        assertTrue(WidgetInfo.canSetUpAgain(true, reconfigurable))
+        assertTrue(WidgetInfo.canSetUpAgain(true, reconfigurable or optional))
+        assertFalse("a setup only when placed", WidgetInfo.canSetUpAgain(true, 0))
+        assertFalse("optional alone is not reconfigurable", WidgetInfo.canSetUpAgain(true, optional))
+        assertFalse("no setup to run", WidgetInfo.canSetUpAgain(false, reconfigurable))
+        assertTrue(clock().copy(reconfigurable = true).toProto().reconfigurable)
+        assertFalse(clock().toProto().reconfigurable)
+
+        started()
+        platform.offered += clock().copy(reconfigurable = true)
+        platform.offered += clock(provider = "com.example.notes/.NotesWidget")
+        add(requestId = 1)
+        add(provider = "com.example.notes/.NotesWidget", requestId = 2)
+        assertTrue(platform.setups.isEmpty())
+        sent.clear()
+
+        // The user finishes the settings: the same widget ID is set up, then described and
+        // drawn anew at its size, and the host hears it finished.
+        reconfigure(widgetId = 1, requestId = 5)
+        assertEquals(listOf(1), platform.setups)
+        assertTrue("nothing is answered before the user is done", sent.isEmpty())
+        platform.configuring.getValue(1)(WidgetSetup.Finished)
+        scheduler.runDue()
+        assertEquals(
+            listOf(Envelope.BodyCase.WIDGET_UPDATED, Envelope.BodyCase.WIDGET_RECONFIGURED),
+            sent.map { it.bodyCase },
+        )
+        assertEquals(1, sent[0].widgetUpdated.widgetId)
+        assertTrue(sent[0].widgetUpdated.provider.reconfigurable)
+        val done = sent[1].widgetReconfigured
+        assertEquals(5, done.requestId)
+        assertEquals(1, done.widgetId)
+        assertTrue(done.finished)
+        assertEquals(listOf(1 to WidgetSize(180, 110, 160, 180, 110)), platform.redrawn)
+        assertEquals(mapOf(1 to "com.example.clock/.ClockWidget", 2 to "com.example.notes/.NotesWidget"), platform.bound.toMap())
+
+        // The user closes them instead: the widget stays as it was, and the host hears why.
+        sent.clear()
+        reconfigure(widgetId = 1, requestId = 6)
+        platform.configuring.getValue(1)(WidgetSetup.Canceled)
+        scheduler.runDue()
+        val canceled = sent.single().widgetReconfigured
+        assertEquals(6, canceled.requestId)
+        assertFalse(canceled.finished)
+        assertTrue(canceled.error, canceled.error.contains("without a change"))
+        assertEquals(1, platform.redrawn.size)
+        assertTrue(platform.deleted.isEmpty())
+
+        // A widget whose app offers no settings, and one that is not placed, run no setup.
+        sent.clear()
+        reconfigure(widgetId = 2, requestId = 7)
+        reconfigure(widgetId = 9, requestId = 8)
+        assertEquals(listOf(1, 1), platform.setups)
+        assertEquals(listOf(7, 8), sent.map { it.widgetReconfigured.requestId })
+        assertTrue(sent.none { it.widgetReconfigured.finished })
+    }
+
+    @Test
+    fun fr12_two_setups_at_once_each_get_their_own_answer() {
+        started()
+        platform.offered += clock(configure = true)
+        platform.offered += clock(configure = true, provider = "com.example.notes/.NotesWidget")
+        add(requestId = 1)
+        add(provider = "com.example.notes/.NotesWidget", requestId = 2)
+        assertEquals(listOf(1, 2), platform.setups)
+        platform.configuring.getValue(2)(WidgetSetup.Finished)
+        platform.configuring.getValue(1)(WidgetSetup.Canceled)
+        scheduler.runDue()
+        val answers = sent.filter { it.hasWidgetAdded() }.associate { it.widgetAdded.requestId to it.widgetAdded }
+        assertEquals(2, answers.getValue(2).widgetId)
+        assertTrue(answers.getValue(1).error.contains("canceled"))
+        assertEquals(listOf(2), platform.placedIds())
     }
 
     @Test
@@ -231,6 +576,35 @@ class WidgetManagerTest {
         manager.handle(Envelope.newBuilder().setResizeWidget(ResizeWidget.newBuilder().setWidgetId(1).setWidth(0).setHeight(5).setDensityDpi(240).setWidthDp(1).setHeightDp(1)).build())
         manager.handle(Envelope.newBuilder().setResizeWidget(ResizeWidget.newBuilder().setWidgetId(99).setWidth(10).setHeight(10).setDensityDpi(160).setWidthDp(10).setHeightDp(10)).build())
         assertEquals(before, platform.shown.size)
+    }
+
+    /**
+     * A size the widget is drawn at already changes nothing: the host passes the size of a
+     * window being resized as the drag pauses and again at its end, and a widget drawn anew
+     * makes its views again, which costs memory and time.
+     */
+    @Test
+    fun fr12_a_size_the_widget_is_drawn_at_already_does_not_draw_it_again() {
+        started()
+        platform.offered += clock()
+        add()
+        fun resize(width: Int, widthDp: Int) = manager.handle(
+            Envelope.newBuilder().setResizeWidget(
+                ResizeWidget.newBuilder().setWidgetId(1).setWidth(width).setHeight(220).setDensityDpi(240)
+                    .setWidthDp(widthDp).setHeightDp(147),
+            ).build(),
+        )
+        resize(360, 240)
+        val drawn = platform.shown.size
+        resize(360, 240)
+        resize(360, 240)
+        scheduler.runDue()
+        assertEquals("the same size drew the widget again", drawn, platform.shown.size)
+        assertEquals(WidgetSize(360, 220, 240, 240, 147), store.sizes()[1])
+        // A new size draws it once more.
+        resize(420, 280)
+        assertEquals(drawn + 1, platform.shown.size)
+        assertEquals(1 to WidgetSize(420, 220, 240, 280, 147), platform.shown.last())
     }
 
     @Test

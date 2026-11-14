@@ -57,6 +57,22 @@ public partial class AdvancedPage : Page
 
     private void OnOpenGoogleArmTerms(object sender, RoutedEventArgs e) => OpenWebPage(ViewModel.GoogleArmTermsUrl);
 
+    /// <summary>Says where Widevine comes from and under which terms, and takes it only when the
+    /// user accepts.</summary>
+    private async void OnInstallWidevine(object sender, RoutedEventArgs e)
+    {
+        if (await Shell.Confirm(App.Text.Get("WidevineConfirm.Title"), ViewModel.WidevineNotice,
+                App.Text.Get("WidevineConfirm.Action")))
+        {
+            await ViewModel.InstallWidevineAsync();
+        }
+    }
+
+    private async void OnRemoveWidevine(object sender, RoutedEventArgs e) =>
+        await ViewModel.RemoveWidevineAsync();
+
+    private void OnOpenWidevineTerms(object sender, RoutedEventArgs e) => OpenWebPage(ViewModel.WidevineTermsUrl);
+
     private async void OnInstallGapps(object sender, RoutedEventArgs e) =>
         await ViewModel.InstallGappsAsync();
 
@@ -123,6 +139,63 @@ public partial class AdvancedPage : Page
         button.Icon = new Wpf.Ui.Controls.SymbolIcon { Symbol = Wpf.Ui.Controls.SymbolRegular.Checkmark24 };
         await System.Threading.Tasks.Task.Delay(1500);
         button.Icon = new Wpf.Ui.Controls.SymbolIcon { Symbol = Wpf.Ui.Controls.SymbolRegular.Copy24 };
+    }
+
+    /// <summary>Turns backup on, or off; off while backups are kept, asks whether they are
+    /// deleted too or kept for a later restore.</summary>
+    private async void OnBackupToggled(object sender, RoutedEventArgs e)
+    {
+        var on = BackupSwitch.IsChecked == true;
+        var delete = false;
+        if (!on && ViewModel.HasBackupsKept)
+        {
+            delete = await Shell.Ask(App.Text.Get("BackupOffConfirm.Title"), ViewModel.BackupDeleteQuestion,
+                App.Text.Get("BackupOffConfirm.Delete"), App.Text.Get("BackupOffConfirm.Keep"));
+        }
+        await ViewModel.SetBackupAsync(on, delete);
+    }
+
+    private async void OnBackUpNow(object sender, RoutedEventArgs e) => await ViewModel.BackUpNowAsync();
+
+    /// <summary>Asks first, saying each app's data is replaced by the backup's, then restores.</summary>
+    private async void OnRestoreBackup(object sender, RoutedEventArgs e)
+    {
+        if (await Shell.Confirm(App.Text.Get("BackupRestoreConfirm.Title"), ViewModel.RestoreWarning,
+                App.Text.Get("BackupRestoreConfirm.Action")))
+        {
+            await ViewModel.RestoreBackupAsync();
+        }
+    }
+
+    private async void OnShowRecoveryKey(object sender, RoutedEventArgs e) => await ViewModel.ShowRecoveryKeyAsync();
+
+    private void OnHideRecoveryKey(object sender, RoutedEventArgs e) => ViewModel.HideRecoveryKey();
+
+    /// <summary>Copies the recovery key, and shows a check mark on the button for a moment.</summary>
+    private async void OnCopyRecoveryKey(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            System.Windows.Clipboard.SetDataObject(RecoveryKeyBox.Text, copy: true);
+        }
+        catch (System.Runtime.InteropServices.ExternalException)
+        {
+            return;
+        }
+        RecoveryKeyCopyButton.Icon = new Wpf.Ui.Controls.SymbolIcon { Symbol = Wpf.Ui.Controls.SymbolRegular.Checkmark24 };
+        await System.Threading.Tasks.Task.Delay(1500);
+        RecoveryKeyCopyButton.Icon = new Wpf.Ui.Controls.SymbolIcon { Symbol = Wpf.Ui.Controls.SymbolRegular.Copy24 };
+    }
+
+    /// <summary>Keeps the recovery key the user typed as their backup key; the box is emptied
+    /// once it is kept.</summary>
+    private async void OnUseRecoveryKey(object sender, RoutedEventArgs e)
+    {
+        await ViewModel.UseRecoveryKeyAsync(RecoveryKeyEntry.Text ?? "");
+        if (!ViewModel.HasBackupError)
+        {
+            RecoveryKeyEntry.Text = "";
+        }
     }
 
     /// <summary>Asks first, saying what is lost, then resets Android's data.</summary>

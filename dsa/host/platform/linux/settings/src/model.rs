@@ -210,6 +210,18 @@ pub enum NetworkMode {
     Off,
 }
 
+/// Who answers Android's DNS queries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DnsResolver {
+    /// The service did not say: Android is still starting, or the service is older.
+    Unknown,
+    /// This computer's resolver, so its hosts file, VPN and DNS filters apply.
+    Host,
+    /// This computer's resolver does not answer, so Android asks the network's DNS servers
+    /// itself.
+    Network,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Network {
     pub mode: NetworkMode,
@@ -217,6 +229,7 @@ pub struct Network {
     pub dns_servers: Vec<String>,
     pub gateway: String,
     pub problem: Option<String>,
+    pub dns_resolver: DnsResolver,
 }
 
 impl Network {
@@ -232,6 +245,11 @@ impl Network {
             dns_servers: texts(json, "dns_servers"),
             gateway: text(json, "gateway"),
             problem: optional_text(json, "problem"),
+            dns_resolver: match json["dns_resolver"].as_str() {
+                Some("host") => DnsResolver::Host,
+                Some("network") => DnsResolver::Network,
+                _ => DnsResolver::Unknown,
+            },
         }
     }
 }
@@ -288,6 +306,43 @@ pub struct Settings {
     /// Whether apps in Android may ask for root through an administrator's approval. The
     /// machine's, off by default; it applies from the next start of Android.
     pub root_elevation: bool,
+    /// Whether Android trusts the root certificates a user or an administrator added to this
+    /// computer. On by default; it applies at once.
+    pub host_certificates: bool,
+    /// The root certificates the service found added to this computer, whether or not
+    /// [`Settings::host_certificates`] is on. Those the system ships are left out.
+    pub imported_certificates: Vec<ImportedCertificate>,
+}
+
+/// A root certificate the service found added to this computer's trust stores.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportedCertificate {
+    /// Who it is for, as a distinguished name ("CN=Example Root, O=Example").
+    pub subject: String,
+    /// Who signed it, the same way.
+    pub issuer: String,
+    /// Where it was found: "system" on Linux (added to the system's certificate store beside
+    /// the distribution's bundle); the other hosts name their own stores.
+    pub source: String,
+    /// The file or store it was found in.
+    pub location: String,
+    /// Its SHA-256 fingerprint, in lower-case hexadecimal.
+    pub sha256: String,
+    /// When it stops being valid, in seconds since 1970; 0 when unknown.
+    pub not_after: i64,
+}
+
+impl ImportedCertificate {
+    pub fn read(json: &Value) -> ImportedCertificate {
+        ImportedCertificate {
+            subject: text(json, "subject"),
+            issuer: text(json, "issuer"),
+            source: text(json, "source"),
+            location: text(json, "location"),
+            sha256: text(json, "sha256"),
+            not_after: signed(json, "not_after"),
+        }
+    }
 }
 
 /// Where attaching developer mode's port to the user's adb server stands.
@@ -366,6 +421,12 @@ impl Settings {
             prerelease_updates: flag(json, "prerelease_updates", false),
             update_channel_available: flag(json, "update_channel_available", false),
             root_elevation: flag(json, "root_elevation", false),
+            host_certificates: flag(json, "host_certificates", true),
+            imported_certificates: items(json, "imported_certificates")
+                .iter()
+                .filter(|c| c.is_object())
+                .map(ImportedCertificate::read)
+                .collect(),
         }
     }
 
@@ -391,6 +452,16 @@ pub struct HostProcess {
     pub pid: u64,
     pub working_set_kb: u64,
     pub private_kb: u64,
+    /// Of `working_set_kb`, the pages of the disk files the VM maps directly: clean file pages
+    /// the host drops without writing anything. 0 from a service that does not count them.
+    pub mapped_kb: u64,
+}
+
+impl HostProcess {
+    /// What the process holds for itself: its working set without `mapped_kb`.
+    pub fn own_kb(&self) -> u64 {
+        self.working_set_kb.saturating_sub(self.mapped_kb)
+    }
 }
 
 /// What some of Android's processes cost, in KiB: their pages in memory, and their share of
@@ -493,6 +564,7 @@ impl Memory {
                     pid: number(p, "pid"),
                     working_set_kb: number(p, "working_set_kb"),
                     private_kb: number(p, "private_kb"),
+                    mapped_kb: number(p, "mapped_kb"),
                 })
             })
             .collect();
@@ -570,6 +642,9 @@ pub struct App {
     /// How far the app may use root: `off`, `ask` or `remember`, or `unavailable` while root
     /// elevation is off for the computer. Empty from a `dsa` that does not say.
     pub root: String,
+    /// The user ID the app shares with other apps (`android:sharedUserId`); empty for an app
+    /// with a user ID of its own, and from a `dsa` that does not say.
+    pub shared_user_id: String,
 }
 
 /// The "Run as ARM" switch of an app, as `dsa apps list` reports it.
@@ -614,6 +689,7 @@ impl App {
             icon_png: base64_decode(json["icon_png"].as_str().unwrap_or_default()),
             run_as_arm: RunAsArm::read(&json["run_as_arm"]),
             root: text(json, "root"),
+            shared_user_id: text(json, "shared_user_id"),
         }
     }
 }
@@ -704,6 +780,8 @@ impl AppWindow {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WidgetOffer {
     pub provider: String,
+    /// The package of the app that offers it, whose icon stands in for a missing preview.
+    pub package: String,
     pub label: String,
     pub app: String,
     pub preview_png: Vec<u8>,
@@ -752,6 +830,18 @@ impl Widgets {
                 .iter()
                 .map(|p| WidgetOffer {
                     provider: text(p, "provider"),
+                    package: {
+                        let package = text(p, "package");
+                        if package.is_empty() {
+                            text(p, "provider")
+                                .split('/')
+                                .next()
+                                .unwrap_or_default()
+                                .to_string()
+                        } else {
+                            package
+                        }
+                    },
                     label: text(p, "label"),
                     app: text(p, "app"),
                     preview_png: base64_decode(p["preview_png"].as_str().unwrap_or_default()),
@@ -766,7 +856,65 @@ impl Widgets {
                 .collect(),
         }
     }
+
+    /// Applies a change `dsa widgets watch` reported to the placed widgets. The widgets on
+    /// offer stay as they were read.
+    pub fn apply(&mut self, change: WidgetChange) {
+        match change {
+            WidgetChange::All(placed) => self.placed = placed,
+            WidgetChange::Placed(widget) => {
+                match self.placed.iter_mut().find(|w| w.id == widget.id) {
+                    Some(shown) => *shown = widget,
+                    None => {
+                        self.placed.push(widget);
+                        self.placed.sort_by_key(|w| w.id);
+                    }
+                }
+            }
+            WidgetChange::Removed(id) => self.placed.retain(|w| w.id != id),
+        }
+    }
 }
+
+/// A change to the placed widgets, as `dsa widgets watch --json` reports it: from this page,
+/// a widget's own menu on the desktop, or `dsa`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WidgetChange {
+    /// The widgets placed now, all of them.
+    All(Vec<PlacedWidget>),
+    /// A widget was placed, or described again (moved or resized).
+    Placed(PlacedWidget),
+    Removed(i64),
+}
+
+impl WidgetChange {
+    /// The change one line of `dsa widgets watch --json` reports; `None` for any other line.
+    pub fn read(line: &str) -> Option<WidgetChange> {
+        let json: Value = serde_json::from_str(line).ok()?;
+        match json["event"].as_str()? {
+            "widgets" => Some(WidgetChange::All(
+                items(&json, "widgets")
+                    .iter()
+                    .map(PlacedWidget::read)
+                    .collect(),
+            )),
+            "placed" if json["widget"].is_object() => {
+                Some(WidgetChange::Placed(PlacedWidget::read(&json["widget"])))
+            }
+            "removed" => Some(WidgetChange::Removed(signed(&json, "id"))),
+            _ => None,
+        }
+    }
+}
+
+/// The name an app's icon has in the desktop's icon theme, where the compositor keeps it
+/// beside the app's launcher entry: `dsa-` and its package.
+pub fn app_icon_name(package: &str) -> String {
+    format!("dsa-{package}")
+}
+
+/// The arguments of the watch of the placed widgets.
+pub const WIDGETS_WATCH: [&str; 3] = ["widgets", "watch", "--json"];
 
 /// An app that keeps running in the background, with the notification it keeps shown.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1056,6 +1204,322 @@ impl Gapps {
     /// request is under way.
     pub fn can_remove(&self, busy: bool) -> bool {
         !busy && self.package.is_some()
+    }
+}
+
+/// Google's terms for what its SDK repository gives, which Widevine comes from.
+pub const WIDEVINE_TERMS_URL: &str = "https://developer.android.com/studio/terms";
+/// Where the emulator image Widevine is taken from is downloaded.
+pub const WIDEVINE_SOURCE: &str = "https://dl.google.com/android/repository/sys-img/google_apis/";
+
+/// The Widevine module DSA installed for the user, as dsa describes it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WidevinePackage {
+    /// The APEX's file name, `com.google.android.widevine.apex`.
+    pub apex: String,
+    /// Google's image it came from: its build, API level and revision.
+    pub version: String,
+    pub android_major: u64,
+    pub abi: String,
+    pub source: String,
+}
+
+/// What the protected content item shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WidevineState {
+    /// No module is installed, and the running Android has none.
+    NotInstalled,
+    /// A module is installed, and the running Android uses it (or does not run).
+    Installed,
+    /// What is installed differs from what the running Android started with.
+    RestartPending,
+}
+
+/// Where Widevine stands for the user.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Widevine {
+    pub package: Option<WidevinePackage>,
+    /// Whether Android runs now, and whether it was started with Widevine.
+    pub running: bool,
+    pub active: bool,
+    pub restart_needed: bool,
+    /// The security level the module gives: L3.
+    pub security_level: String,
+}
+
+impl Widevine {
+    pub fn read(json: &Value) -> Widevine {
+        let package = json
+            .get("package")
+            .filter(|p| p.is_object())
+            .map(|p| WidevinePackage {
+                apex: text(p, "apex"),
+                version: text(p, "version"),
+                android_major: number(p, "android_major"),
+                abi: text(p, "abi"),
+                source: text(p, "source"),
+            });
+        Widevine {
+            package,
+            running: flag(json, "running", false),
+            active: flag(json, "active", false),
+            restart_needed: flag(json, "restart_needed", false),
+            security_level: optional_text(json, "security_level").unwrap_or_else(|| "L3".into()),
+        }
+    }
+
+    pub fn state(&self) -> WidevineState {
+        if self.restart_needed {
+            WidevineState::RestartPending
+        } else if self.package.is_some() {
+            WidevineState::Installed
+        } else {
+            WidevineState::NotInstalled
+        }
+    }
+
+    /// Whether the install button may be pressed: without a module, and not while a request is
+    /// under way.
+    pub fn can_install(&self, busy: bool) -> bool {
+        !busy && self.package.is_none()
+    }
+
+    /// Whether the remove button may be pressed: only with a module, and not while a request
+    /// is under way.
+    pub fn can_remove(&self, busy: bool) -> bool {
+        !busy && self.package.is_some()
+    }
+}
+
+/// Where the user's app data backup stands, as `dsa backup --json` reports it. The backup is
+/// encrypted, in a folder of the user's home; the key that opens it is kept in the desktop's
+/// credential store, and its recovery key opens it anywhere else.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Backup {
+    /// Whether the user turned backup on. Off until they do: it keeps a second copy of the
+    /// apps' user data on this computer.
+    pub enabled: bool,
+    /// Whether backups can be made and read here.
+    pub available: bool,
+    /// Why they cannot, when they cannot.
+    pub problem: Option<String>,
+    /// The backup folder.
+    pub folder: String,
+    /// When the last backup ended, in milliseconds since 1970; 0 is never.
+    pub last_backup_unix_ms: i64,
+    /// When the last restore ended, in milliseconds since 1970; 0 is never.
+    pub last_restore_unix_ms: i64,
+    /// How many apps the backup holds.
+    pub packages: u32,
+    /// How many bytes of app data it holds, before encryption.
+    pub size: u64,
+    /// What went wrong last, when something did.
+    pub last_error: Option<String>,
+    /// After a backup or a restore: the apps it worked for, the apps it failed for, and the
+    /// apps a restore installed first.
+    pub succeeded: u32,
+    pub failed: u32,
+    pub installed: u32,
+    /// How Android's KeyMint root key is sealed here; `None` from a service that does not say.
+    pub keymint_key: Option<KeyProtection>,
+}
+
+/// How the root key of Android's KeyMint is sealed on this computer, as `dsa backup --json`
+/// reports it under `keymint_key`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct KeyProtection {
+    /// Whether a key is kept yet; one is made when Android first starts.
+    pub kept: bool,
+    /// `tpm`, `secret-service` (and on other hosts `dpapi`, `secure-enclave`, `keychain`).
+    pub sealed_by: String,
+    /// Whether hardware of this computer holds what seals it.
+    pub hardware: bool,
+    /// What seals it, in the service's words.
+    pub description: String,
+    /// Why the TPM does not seal it, when it does not.
+    pub fallback_reason: Option<String>,
+    /// Why the latest start of Android could not open it, and what to do.
+    pub problem: Option<String>,
+}
+
+/// What the key protection row says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyProtectionShown {
+    /// No key yet.
+    NotYet,
+    /// Sealed by the computer's TPM.
+    Tpm,
+    /// Kept by the user's keyring, because no TPM 2.0 works.
+    Keyring,
+    /// Sealed by other hardware, or kept by another store; the description says which.
+    Other,
+}
+
+impl KeyProtection {
+    pub fn read(json: &Value) -> KeyProtection {
+        KeyProtection {
+            kept: flag(json, "kept", false),
+            sealed_by: text(json, "sealed_by"),
+            hardware: flag(json, "hardware", false),
+            description: text(json, "description"),
+            fallback_reason: optional_text(json, "fallback_reason"),
+            problem: optional_text(json, "problem"),
+        }
+    }
+
+    pub fn shown(&self) -> KeyProtectionShown {
+        match (self.kept, self.sealed_by.as_str()) {
+            (false, _) => KeyProtectionShown::NotYet,
+            (true, "tpm") => KeyProtectionShown::Tpm,
+            (true, "secret-service") => KeyProtectionShown::Keyring,
+            _ => KeyProtectionShown::Other,
+        }
+    }
+
+    /// Why no TPM seals the key, to show beside it: only while the key is kept without one.
+    pub fn shown_reason(&self) -> Option<&str> {
+        if self.kept && !self.hardware {
+            self.fallback_reason.as_deref()
+        } else {
+            None
+        }
+    }
+}
+
+impl Backup {
+    pub fn read(json: &Value) -> Backup {
+        let count = |name: &str| u32::try_from(number(json, name)).unwrap_or(u32::MAX);
+        Backup {
+            enabled: flag(json, "enabled", false),
+            available: flag(json, "available", false),
+            problem: optional_text(json, "problem"),
+            folder: text(json, "folder"),
+            last_backup_unix_ms: signed(json, "last_backup_unix_ms"),
+            last_restore_unix_ms: signed(json, "last_restore_unix_ms"),
+            packages: count("packages"),
+            size: number(json, "size"),
+            last_error: optional_text(json, "last_error"),
+            succeeded: count("succeeded"),
+            failed: count("failed"),
+            installed: count("installed"),
+            keymint_key: json
+                .get("keymint_key")
+                .filter(|key| key.is_object())
+                .map(KeyProtection::read),
+        }
+    }
+
+    /// Whether turning backup off leaves backups behind, which the section offers to delete.
+    pub fn has_backups_kept(&self) -> bool {
+        self.packages > 0
+    }
+
+    /// When the last backup ended, in milliseconds since 1970; `None` when there was none.
+    pub fn last_backup(&self) -> Option<i64> {
+        (self.last_backup_unix_ms > 0).then_some(self.last_backup_unix_ms)
+    }
+
+    /// When the last restore ended, in milliseconds since 1970; `None` when there was none.
+    pub fn last_restore(&self) -> Option<i64> {
+        (self.last_restore_unix_ms > 0).then_some(self.last_restore_unix_ms)
+    }
+
+    /// The problem to show: why backups cannot be made here, or nothing while they can. Off
+    /// is the user's choice, not a problem.
+    pub fn shown_problem(&self) -> Option<&str> {
+        if self.available || (!self.enabled && self.problem.is_none()) {
+            None
+        } else {
+            Some(self.problem.as_deref().unwrap_or_default())
+        }
+    }
+}
+
+/// A request of the backup section that is under way. Only one runs at a time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackupJob {
+    /// Reading where the backup stands.
+    Read,
+    /// Backing up every app now, which waits for Android.
+    BackUp,
+    /// Installing the backup's apps Android lacks and restoring every app's data, which waits
+    /// for Android.
+    Restore,
+    /// Reading the recovery key.
+    ShowKey,
+    /// Keeping a recovery key the user entered.
+    ImportKey,
+    /// Turning backup on or off.
+    Switch,
+}
+
+impl BackupJob {
+    /// Whether the request waits for Android, which can take long, so the section shows that
+    /// it is under way.
+    pub fn is_long(self) -> bool {
+        matches!(self, BackupJob::BackUp | BackupJob::Restore)
+    }
+}
+
+/// Which of the backup section's buttons can be pressed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct BackupActions {
+    pub switch: bool,
+    pub back_up: bool,
+    pub restore: bool,
+    pub show_key: bool,
+    pub import_key: bool,
+}
+
+/// The buttons that work for `backup` (`None` before it is read) while `running` is under
+/// way: none while a request runs; backing up and the recovery key only where backups can be
+/// made; restoring only from a backup that holds apps. While backup is on a recovery key can
+/// always be entered, since it is what makes a backup from another computer readable; while
+/// it is off only the switch works.
+pub fn backup_actions(backup: Option<&Backup>, running: Option<BackupJob>) -> BackupActions {
+    let Some(backup) = backup.filter(|_| running.is_none()) else {
+        return BackupActions::default();
+    };
+    BackupActions {
+        switch: true,
+        back_up: backup.available,
+        restore: backup.available && backup.packages > 0,
+        show_key: backup.available,
+        import_key: backup.enabled,
+    }
+}
+
+/// The words of a recovery key as the user typed or pasted it, as `dsa backup key import`
+/// takes them: split at spaces, with dashes at the ends of a word dropped (they only group
+/// the letters), so nothing reads as an option.
+pub fn backup_key_words(text: &str) -> Vec<String> {
+    text.split_whitespace()
+        .map(|word| word.trim_matches('-'))
+        .filter(|word| !word.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// How entering a recovery key ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KeyImport {
+    /// The key is kept, and the backup reads as it now stands.
+    Kept(Backup),
+    /// The key was refused; the reason is the service's words, empty when no key was entered.
+    Refused(String),
+}
+
+impl KeyImport {
+    /// Reads a refusal of the key from what the client said: the service's reason, or the
+    /// client's own when it did not take the key. `None` for a failure that is not about the
+    /// key, such as a service that cannot be reached.
+    pub fn refusal(failure: &Failure) -> Option<KeyImport> {
+        if failure.problem != Problem::Refused {
+            return None;
+        }
+        let detail = failure.detail.lines().next().unwrap_or_default().trim();
+        let detail = detail.strip_prefix("the DSA service: ").unwrap_or(detail);
+        Some(KeyImport::Refused(detail.to_string()))
     }
 }
 
@@ -1418,6 +1882,12 @@ impl Client {
         ])?))
     }
 
+    /// Whether Android trusts the root certificates a user or an administrator added to this
+    /// computer. The user's own setting; it applies at once.
+    pub fn set_host_certificates(&self, on: bool) -> Result<Settings, Failure> {
+        self.switch("host-certificates", on)
+    }
+
     /// The most memory Android may grow to, in MiB; 0 is automatic.
     pub fn set_memory_limit(&self, mb: u32) -> Result<Settings, Failure> {
         let value = if mb == 0 {
@@ -1510,6 +1980,76 @@ impl Client {
         Ok(Gapps::read(&self.json(&["gapps", "remove"])?))
     }
 
+    /// Where Widevine stands.
+    pub fn widevine(&self) -> Result<Widevine, Failure> {
+        Ok(Widevine::read(&self.json(&["drm", "widevine", "status"])?))
+    }
+
+    /// Downloads Google's emulator image for this Android, takes Widevine out of it unchanged
+    /// and installs it. The user agreed to Google's terms in the app first, so dsa does not ask
+    /// again. It takes minutes; Android uses the module from its next start.
+    pub fn install_widevine(&self) -> Result<Widevine, Failure> {
+        let args = ["drm", "widevine", "install", "--yes"];
+        Ok(Widevine::read(&self.json(&args)?))
+    }
+
+    /// Removes Widevine and the device certificates it kept, from Android's next start.
+    pub fn remove_widevine(&self) -> Result<Widevine, Failure> {
+        Ok(Widevine::read(&self.json(&["drm", "widevine", "remove"])?))
+    }
+
+    /// Where the app data backup stands. It never starts Android.
+    pub fn backup(&self) -> Result<Backup, Failure> {
+        Ok(Backup::read(&self.json(&["backup", "status"])?))
+    }
+
+    /// Turns backup on, or off; off with `delete_backups`, the backups kept so far and their
+    /// key are removed as well.
+    pub fn set_backup(&self, on: bool, delete_backups: bool) -> Result<Backup, Failure> {
+        let args: &[&str] = match (on, delete_backups) {
+            (true, _) => &["backup", "on"],
+            (false, true) => &["backup", "off", "--delete-backups"],
+            (false, false) => &["backup", "off"],
+        };
+        Ok(Backup::read(&self.json(args)?))
+    }
+
+    /// Has Android back up every app now, starting Android first when it is not running, and
+    /// waits until it has. It can take long.
+    pub fn back_up_now(&self) -> Result<Backup, Failure> {
+        Ok(Backup::read(&self.json(&["backup", "now"])?))
+    }
+
+    /// Installs the backup's apps that Android lacks, then replaces every app's data with the
+    /// backup's, starting Android first when it is not running. It can take long.
+    pub fn restore_backup(&self) -> Result<Backup, Failure> {
+        Ok(Backup::read(&self.json(&["backup", "restore"])?))
+    }
+
+    /// The backup's recovery key, to write down.
+    pub fn backup_recovery_key(&self) -> Result<String, Failure> {
+        Ok(text(
+            &self.json(&["backup", "key", "show"])?,
+            "recovery_key",
+        ))
+    }
+
+    /// Keeps the key the recovery key `text` carries as the backup key. A key the service or
+    /// the client refuses, such as one that does not open the backup folder, is a refusal with
+    /// its reason; nothing is asked when `text` holds no key.
+    pub fn import_backup_key(&self, text: &str) -> Result<KeyImport, Failure> {
+        let words = backup_key_words(text);
+        if words.is_empty() {
+            return Ok(KeyImport::Refused(String::new()));
+        }
+        let mut args = vec!["backup", "key", "import"];
+        args.extend(words.iter().map(String::as_str));
+        match self.json(&args) {
+            Ok(json) => Ok(KeyImport::Kept(Backup::read(&json))),
+            Err(failure) => KeyImport::refusal(&failure).ok_or(failure),
+        }
+    }
+
     /// Every app installed in Android; Android is started first when it is not running.
     pub fn apps(&self) -> Result<Vec<App>, Failure> {
         let json = self.json(&["apps", "list"])?;
@@ -1527,6 +2067,12 @@ impl Client {
             None => self.json(&["apps", "settings"]),
         }
         .map(|_| ())
+    }
+
+    /// Puts a shortcut to an app on the desktop; returns where it is.
+    pub fn desktop_shortcut(&self, package: &str) -> Result<String, Failure> {
+        self.json(&["apps", "desktop-shortcut", package])
+            .map(|json| text(&json, "path"))
     }
 
     /// Uninstalls an app; a refusal by Android is an outcome with its reason.

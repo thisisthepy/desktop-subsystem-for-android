@@ -86,6 +86,32 @@ HostRenderer::ConnectionPtr HostRenderer::open() {
 void HostRenderer::adopt(ConnectionPtr connection) {
     mConnection = std::move(connection);
     ++mGeneration;
+    mHostYuv = -1;
+}
+
+bool HostRenderer::hostHasYuv() {
+    if (mHostYuv < 0 && connected()) {
+        ExtendedRCEncoderContext* rc = mConnection->encoder.get();
+        mHostYuv = rc->queryHostExtensions().find(DSA_YUV_COLOR_BUFFERS_EXTENSION) !=
+                           std::string::npos
+                       ? 1
+                       : 0;
+        HWC_LOGI("the host renderer %s YUV ColorBuffers", mHostYuv ? "makes" : "does not make");
+    }
+    return mHostYuv == 1;
+}
+
+bool HostRenderer::uploadColorBuffer(uint32_t colorBuffer, const dsa::UploadLayout& layout,
+                                     const uint8_t* packed) {
+    if (!connected() || colorBuffer == 0 || !layout.valid()) {
+        return false;
+    }
+    ExtendedRCEncoderContext* rc = mConnection->encoder.get();
+    // The host answers once the ColorBuffer holds the planes.
+    const int result = rc->rcUpdateColorBuffer(rc, colorBuffer, 0, 0, layout.callWidth,
+                                               layout.callHeight, layout.glFormat, layout.glType,
+                                               const_cast<uint8_t*>(packed));
+    return result == 0 && connected();
 }
 
 bool HostRenderer::connected() const { return mConnection && mConnection->ok(); }
@@ -101,9 +127,12 @@ uint32_t HostRenderer::openSharedColorBuffer(const BufferRef& buffer) {
     }
     // No process has used the buffer yet. It gets the buffer's own format, the one every
     // other process (the app's Vulkan driver among them) would give it.
-    rc->rcCreateColorBufferWithHandle(rc, buffer.width ? buffer.width : 1,
-                                      buffer.height ? buffer.height : 1,
-                                      dsa_shared_color_buffer_gl_format(buffer.format), handle);
+    const uint32_t width = buffer.width ? buffer.width : 1;
+    const uint32_t height = buffer.height ? buffer.height : 1;
+    rc->rcCreateColorBufferWithHandle(
+        rc, width, height,
+        dsa_shared_color_buffer_create_format(buffer.format, width, height, hostHasYuv() ? 1 : 0),
+        handle);
     if (rc->rcOpenColorBuffer2(rc, handle) != 0 || !connected()) {
         HWC_LOGE("the host has no ColorBuffer %#x for gralloc buffer %u", handle, buffer.id);
         return 0;

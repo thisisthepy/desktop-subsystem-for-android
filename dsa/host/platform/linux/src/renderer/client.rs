@@ -11,7 +11,7 @@ use std::os::fd::{AsRawFd, OwnedFd};
 use std::sync::{Arc, Mutex};
 
 use dsa_host_core::renderer::{
-    Pending, RendererHandler, RendererLink, RendererProcessMemory, QUESTION_TIMEOUT,
+    DeviceChanges, Pending, RendererHandler, RendererLink, RendererProcessMemory, QUESTION_TIMEOUT,
 };
 use dsa_host_unix::renderer_launch::CurrentFds;
 use dsa_protocol::renderer::types::{
@@ -32,6 +32,8 @@ pub struct RendererClient {
     render_gpu: String,
     link: Mutex<Option<RendererLink>>,
     memory: Pending<MemoryReport>,
+    /// Each DeviceState the renderer sent: a change is a GPU reset.
+    device_changes: DeviceChanges,
     starts: Mutex<u64>,
     log: Box<dyn Fn(&str) + Send + Sync>,
 }
@@ -71,9 +73,17 @@ impl RendererClient {
             render_gpu,
             link: Mutex::new(None),
             memory: Pending::new(),
+            device_changes: DeviceChanges::new(),
             starts: Mutex::new(0),
             log,
         })
+    }
+
+    /// A count that changes each time the renderer finds its GPU device lost or makes it
+    /// again: the compositor takes any change as a GPU reset, the moment the renderer finds
+    /// it.
+    pub fn device_changes(&self) -> u64 {
+        self.device_changes.count()
     }
 
     /// How many renderers have started.
@@ -185,6 +195,12 @@ impl RendererHandler for RendererClient {
                 }
             }
             Body::MemoryReport(report) => self.memory.complete(report.request, report),
+            Body::DeviceState(state) => {
+                // The main loop looks at this at its next tick and takes the change as a GPU
+                // reset.
+                let line = self.device_changes.told(&state);
+                (self.log)(&format!("graphics: {line}"));
+            }
             Body::RendererLog(line) => {
                 let severity = char::from_u32(line.severity).unwrap_or('E');
                 (self.log)(&format!("graphics renderer {severity}: {}", line.message));

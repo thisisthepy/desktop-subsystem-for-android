@@ -10,15 +10,13 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <utility>
 
 #include "log.h"
 
 namespace dsa::codec2 {
 
 namespace {
-
-// The largest frame the host may send: a 4096 by 2304 picture with its framing, and room.
-constexpr uint32_t kMaxHostFrame = 16 * 1024 * 1024;
 
 bool writeAll(int fd, const std::vector<uint8_t>& bytes) {
     size_t done = 0;
@@ -29,27 +27,6 @@ bool writeAll(int fd, const std::vector<uint8_t>& bytes) {
         done += static_cast<size_t>(n);
     }
     return true;
-}
-
-bool readAll(int fd, uint8_t* out, size_t size) {
-    size_t done = 0;
-    while (done < size) {
-        const ssize_t n = recv(fd, out + done, size - done, 0);
-        if (n < 0 && errno == EINTR) continue;
-        if (n <= 0) return false;
-        done += static_cast<size_t>(n);
-    }
-    return true;
-}
-
-bool readFrame(int fd, std::vector<uint8_t>* frame) {
-    uint8_t header[4];
-    if (!readAll(fd, header, sizeof(header))) return false;
-    const uint32_t size = static_cast<uint32_t>(header[0]) | (static_cast<uint32_t>(header[1]) << 8) |
-                          (static_cast<uint32_t>(header[2]) << 16) | (static_cast<uint32_t>(header[3]) << 24);
-    if (size > kMaxHostFrame) return false;
-    frame->resize(size);
-    return readAll(fd, frame->data(), size);
 }
 
 void setTimeout(int fd, int seconds) {
@@ -77,7 +54,7 @@ int connectAndGreet(std::string* error, Capabilities* caps) {
     }
     setTimeout(fd, 5);
     std::vector<uint8_t> frame;
-    if (!writeAll(fd, withLength(encodeHello("dsa-codec2"))) || !readFrame(fd, &frame)) {
+    if (!writeAll(fd, withLength(encodeHello("dsa-codec2"))) || !readHostFrame(fd, &frame)) {
         *error = "the host did not answer on the video port";
         ::close(fd);
         return -1;
@@ -88,7 +65,7 @@ int connectAndGreet(std::string* error, Capabilities* caps) {
         ::close(fd);
         return -1;
     }
-    if (!std::holds_alternative<Accepted>(hello) || !readFrame(fd, &frame)) {
+    if (!std::holds_alternative<Accepted>(hello) || !readHostFrame(fd, &frame)) {
         *error = "the host answered the video port's hello with something else";
         ::close(fd);
         return -1;
@@ -126,7 +103,7 @@ std::unique_ptr<HostDecoder> HostDecoder::open(Codec codec, uint32_t width, uint
         return nullptr;
     }
     std::vector<uint8_t> frame;
-    if (!writeAll(fd, withLength(encodeOpen(codec, width, height))) || !readFrame(fd, &frame)) {
+    if (!writeAll(fd, withLength(encodeOpen(codec, width, height))) || !readHostFrame(fd, &frame)) {
         *error = "the host did not answer the request for a decoder";
         ::close(fd);
         return nullptr;
@@ -138,37 +115,58 @@ std::unique_ptr<HostDecoder> HostDecoder::open(Codec codec, uint32_t width, uint
         ::close(fd);
         return nullptr;
     }
-    // Pictures come when the decoder has them; the reader waits as long as it takes.
+    // Pictures come when the decoder has them; the reader waits as long as it takes. The writer
+    // too: the host reads no packet while the guest has not taken its last picture, which
+    // waits for a buffer of the app's surface. A send that timed out here would end the
+    // stream on a pause, and close() ends both waits.
     timeval none{0, 0};
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &none, sizeof(none));
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &none, sizeof(none));
+    return adopt(fd, std::move(onMessage));
+}
+
+std::unique_ptr<HostDecoder> HostDecoder::adopt(int fd, MessageHandler onMessage) {
     std::unique_ptr<HostDecoder> decoder(new HostDecoder(fd, std::move(onMessage)));
-    decoder->mReader = std::thread([raw = decoder.get()] { raw->read(); });
+    decoder->mWriter = std::thread([raw = decoder.get()] { raw->write(); });
     return decoder;
 }
 
-HostDecoder::HostDecoder(int fd, MessageHandler onMessage) : mFd(fd), mOnMessage(std::move(onMessage)) {}
+// What may wait unsent: packets are compressed, and the framework keeps only a pipeline's worth
+// of works in flight, so this is reached only when the host has stopped reading.
+constexpr size_t kMaxQueuedBytes = 16 * 1024 * 1024;
+
+HostDecoder::HostDecoder(int fd, MessageHandler onMessage)
+    : mFd(fd),
+      mOutgoing(kMaxQueuedBytes),
+      mReader(std::make_unique<MessageReader>(fd, std::move(onMessage))) {}
 
 HostDecoder::~HostDecoder() { close(); }
 
-bool HostDecoder::send(const std::vector<uint8_t>& frame) {
-    std::lock_guard<std::mutex> lock(mSendLock);
-    if (mClosed.load()) {
-        return false;
+PushResult HostDecoder::send(const std::vector<uint8_t>& frame, bool droppable, std::chrono::milliseconds wait) {
+    if (mClosed.load() || mWriteFailed.load()) {
+        return PushResult::Closed;
     }
-    return writeAll(mFd, withLength(frame));
+    return mOutgoing.pushFor(withLength(frame), droppable, wait);
 }
 
-void HostDecoder::read() {
-    std::vector<uint8_t> frame;
-    while (!mClosed.load() && readFrame(mFd, &frame)) {
-        const HostMessage message = decodeHostFrame(frame.data(), frame.size());
-        if (!mClosed.load()) {
-            mOnMessage(message);
-        }
+bool HostDecoder::sendFlush(const std::vector<uint8_t>& frame) {
+    if (mClosed.load() || mWriteFailed.load()) {
+        return false;
     }
-    if (!mClosed.load()) {
-        CODEC_LOGW("the host's decoder went away");
-        mOnMessage(DecodeError{"the host's decoder went away"});
+    return mOutgoing.pushReplacingDroppable(withLength(frame)) >= 0;
+}
+
+void HostDecoder::write() {
+    std::vector<uint8_t> frame;
+    while (mOutgoing.pop(&frame)) {
+        if (!writeAll(mFd, frame)) {
+            if (!mClosed.load()) {
+                CODEC_LOGW("a packet did not reach the host's decoder");
+            }
+            mWriteFailed.store(true);
+            mOutgoing.close();
+            return;
+        }
     }
 }
 
@@ -176,15 +174,26 @@ void HostDecoder::close() {
     if (mClosed.exchange(true)) {
         return;
     }
+    // Nothing more is handed on, not even the socket's end as the host going away.
+    if (mReader) {
+        mReader->silence();
+    }
+    // Wakes the writer whether it waits for a packet or for the socket, and the reader.
+    mOutgoing.close();
     shutdown(mFd, SHUT_RDWR);
-    if (mReader.joinable()) {
-        if (mReader.get_id() == std::this_thread::get_id()) {
-            mReader.detach();
+    // The writer never closes the link itself, so it is never this thread.
+    if (mWriter.joinable()) {
+        if (mWriter.get_id() == std::this_thread::get_id()) {
+            mWriter.detach();
         } else {
-            mReader.join();
+            mWriter.join();
         }
     }
-    std::lock_guard<std::mutex> lock(mSendLock);
+    // Waits for the reader, unless this is the reader, inside its handler: it then ends when
+    // the handler returns, without touching the socket again.
+    if (mReader) {
+        mReader->stop();
+    }
     ::close(mFd);
     mFd = -1;
 }

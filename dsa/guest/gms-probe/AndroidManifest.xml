@@ -7,11 +7,17 @@
   package manager's states. It stands in for Play services because the Google apps build that
   check installs is a small unsigned one, which the package manager does not install. The
   agent's own tests check that this list and the agent's stay the same.
+
+  It is a test-only package (android:testOnly) because the package manager lets the shell
+  change single components only of such a package: the check turns the services back on from
+  `adb shell pm enable`, as Play services' own setup does from its own process, and the shell
+  is refused that for any other app. A test-only package installs only with `adb install -t`.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.google.android.gms">
 
-    <application android:label="DSA Play services probe" android:hasCode="false">
+    <application android:label="DSA Play services probe" android:hasCode="false"
+        android:testOnly="true">
         <!-- Left on: push messages. -->
         <service android:name="com.google.android.gms.gcm.GcmService" />
         <!-- Turned off by the agent. -->

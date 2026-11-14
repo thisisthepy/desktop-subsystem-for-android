@@ -69,6 +69,41 @@ struct RowLabel: View {
     }
 }
 
+/// A short note in a page: a page's introduction, or what to know under a row. Every page
+/// draws its notes with this, so they all look the same and wrap inside the form's width.
+struct Note: View {
+    let text: String
+    var selectable = false
+
+    var body: some View {
+        if selectable {
+            styled.textSelection(.enabled)
+        } else {
+            styled
+        }
+    }
+
+    private var styled: some View {
+        Text(text)
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// More about a row, folded away until the user opens it, so the row itself stays short.
+struct LearnMore: View {
+    let text: String
+
+    var body: some View {
+        DisclosureGroup {
+            Note(text: text)
+        } label: {
+            Text(T("LearnMore.Label")).font(.callout)
+        }
+    }
+}
+
 /// A switch row. Only the user's change is sent; the switch shows what the service keeps
 /// once it answers.
 struct SwitchRow: View {

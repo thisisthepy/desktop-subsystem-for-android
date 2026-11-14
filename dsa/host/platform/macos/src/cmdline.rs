@@ -53,6 +53,12 @@ pub fn for_virtualization_framework(image: &str, extra: &str, pstore: bool) -> S
         PAGE_REPORTING.to_string(),
         boot_devices(),
     ];
+    // What the guest kernel sets aside at boot, kept as small as on every host.
+    words.extend(
+        dsa_host_core::memory::GUEST_BOOT_MEMORY_CMDLINE
+            .split_whitespace()
+            .map(str::to_string),
+    );
     if pstore {
         words.extend(
             crate::pstore_disk::KERNEL_CMDLINE

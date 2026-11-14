@@ -1,0 +1,49 @@
+; Desktop Subsystem for Android (DSA)
+; The types Google's Widevine APEX labels its files with, and the rules its service needs, for a
+; vendor policy that does not declare them already. Cuttlefish's does (its
+; shared/sepolicy/vendor/hal_drm_widevine.te), and make-image.py adds this file only where the
+; vendor policy lacks hal_drm_widevine: a type declared twice stops the policy compiling, and
+; Android would not boot. apexd mounts the APEX's payload with the labels Google's build gave
+; its files: the service (bin/hw/android.hardware.drm-service.widevine) is hal_drm_widevine_exec,
+; and it runs in hal_drm_widevine, one of the platform's DRM HAL servers, keeping its device
+; certificates in /data/vendor/mediadrm (mediadrm_vendor_data_file). vendor_file_contexts and
+; vendor_service_contexts get the matching lines with this file.
+
+(type hal_drm_widevine)
+(roletype object_r hal_drm_widevine)
+(typeattributeset domain (hal_drm_widevine))
+(typeattributeset hal_drm_server (hal_drm_widevine))
+(typeattributeset hal_drm (hal_drm_widevine))
+(typeattributeset halserverdomain (hal_drm_widevine))
+(type hal_drm_widevine_exec)
+(roletype object_r hal_drm_widevine_exec)
+(typeattributeset file_type (hal_drm_widevine_exec))
+(typeattributeset exec_type (hal_drm_widevine_exec))
+(typeattributeset vendor_file_type (hal_drm_widevine_exec))
+(typetransition init hal_drm_widevine_exec process hal_drm_widevine)
+(allow init hal_drm_widevine_exec (file (read getattr map execute open)))
+(allow init hal_drm_widevine (process (transition siginh rlimitinh)))
+(dontaudit init hal_drm_widevine (process (noatsecure)))
+(allow hal_drm_widevine hal_drm_widevine_exec (file (entrypoint read getattr map execute open)))
+(allow hal_drm_widevine init (fd (use)))
+; Its binder service, android.hardware.drm.IDrmFactory/widevine, labelled hal_drm_service.
+(allow hal_drm_widevine binder_device (chr_file (ioctl read write open getattr map)))
+(allow hal_drm_widevine servicemanager (binder (call transfer)))
+(allow servicemanager hal_drm_widevine (binder (call transfer)))
+(allow servicemanager hal_drm_widevine (dir (search)))
+(allow servicemanager hal_drm_widevine (file (read open)))
+(allow servicemanager hal_drm_widevine (process (getattr)))
+(allow hal_drm_widevine hal_drm_service (service_manager (add find)))
+; The media DRM server, which apps reach it through, and the buffers the codecs share with it.
+(allow mediadrmserver hal_drm_widevine (binder (call transfer)))
+(allow hal_drm_widevine mediadrmserver (binder (call transfer)))
+(allow hal_drm_widevine mediacodec (fd (use)))
+(allow hal_drm_widevine hal_allocator_server (fd (use)))
+
+(type mediadrm_vendor_data_file)
+(roletype object_r mediadrm_vendor_data_file)
+(typeattributeset file_type (mediadrm_vendor_data_file))
+(typeattributeset data_file_type (mediadrm_vendor_data_file))
+(allow hal_drm_widevine vendor_data_file (dir (search)))
+(allow hal_drm_widevine mediadrm_vendor_data_file (dir (create search getattr setattr open read write add_name remove_name rmdir rename)))
+(allow hal_drm_widevine mediadrm_vendor_data_file (file (create read write open getattr setattr unlink rename lock map)))

@@ -1,10 +1,10 @@
 # The density every app starts at: the user's main monitor's, which the host puts on the kernel
 # command line each boot (androidboot.lcd_density, and androidboot.dsa.display_dpi for the
-# hwcomposer; 96 at a scale of 100%, 144 at 150%). SurfaceFlinger reads it from
+# hwcomposer; 130 at a scale of 100%, 196 at 150%). SurfaceFlinger reads it from
 # ro.sf.lcd_density, so no build.prop sets that property: a build.prop value is read before this
 # script and would keep every boot at the image's density. Cuttlefish's vendor script sets the
 # same property from the same boot argument; whichever runs first sets it, to the same value.
 # An app that started at another density than its window's monitor would be relaunched as soon
 # as the window asked for the right one.
 on early-init
-    setprop ro.sf.lcd_density ${ro.boot.lcd_density:-96}
+    setprop ro.sf.lcd_density ${ro.boot.lcd_density:-130}

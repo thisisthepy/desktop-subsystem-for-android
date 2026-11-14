@@ -36,16 +36,16 @@ fn pr5_the_users_files_and_socket_are_in_their_own_folder() {
 #[test]
 fn nfr2_memory_starts_small_and_grows_to_what_the_mac_can_spare() {
     // No limit: the default start, growing to half the Mac's memory, with no fixed cap.
-    assert_eq!(memory_range_mb(0, Some(16384)), (3072, 8192));
-    assert_eq!(memory_range_mb(0, Some(65536)), (3072, 32768));
-    assert_eq!(memory_range_mb(0, Some(8192)), (3072, 4096));
+    assert_eq!(memory_range_mb(0, Some(16384)), (2048, 8192));
+    assert_eq!(memory_range_mb(0, Some(65536)), (2048, 32768));
+    assert_eq!(memory_range_mb(0, Some(8192)), (2048, 4096));
     // A limit is how far it grows; a low one is also where it starts.
-    assert_eq!(memory_range_mb(6144, Some(32768)), (3072, 6144));
+    assert_eq!(memory_range_mb(6144, Some(32768)), (2048, 6144));
     // A limit above half the Mac is honoured, within what the Mac has.
-    assert_eq!(memory_range_mb(24576, Some(32768)), (3072, 24576));
+    assert_eq!(memory_range_mb(24576, Some(32768)), (2048, 24576));
     assert_eq!(memory_range_mb(2048, Some(32768)), (2048, 2048));
     // Unknown memory: the start, fixed.
-    assert_eq!(memory_range_mb(0, None), (3072, 3072));
+    assert_eq!(memory_range_mb(0, None), (2048, 2048));
     let fixed = MacHostConfig::parse(r#"{"image_dir": "/i", "memory_mb": 4096}"#).unwrap();
     assert_eq!(fixed.memory_mb(0, Some(65536)), (4096, 4096));
 }

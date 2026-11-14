@@ -366,23 +366,23 @@ pub fn reads_korean_in(var: impl Fn(&str) -> Option<String>) -> bool {
 }
 
 /// The height of an item at 100%, in pixels.
-const ITEM_AT_100: u32 = 32;
+pub(crate) const ITEM_AT_100: u32 = 32;
 /// The height of the separator's row at 100%.
-const SEPARATOR_AT_100: u32 = 9;
+pub(crate) const SEPARATOR_AT_100: u32 = 9;
 /// The space around the items, and before and after each label, at 100%.
-const PADDING_AT_100: u32 = 4;
-const LABEL_PADDING_AT_100: u32 = 12;
+pub(crate) const PADDING_AT_100: u32 = 4;
+pub(crate) const LABEL_PADDING_AT_100: u32 = 12;
 /// The narrowest a menu is at 100%.
-const MIN_WIDTH_AT_100: u32 = 180;
+pub(crate) const MIN_WIDTH_AT_100: u32 = 180;
 /// The labels' text size at 100%, in pixels.
 pub const TEXT_AT_100: u32 = 14;
 
 /// The menu's colors, 0xAARRGGBB: a light menu, as the desktop's own menus are by default.
-const BACKGROUND: u32 = 0xFFF9_F9F9;
-const BORDER: u32 = 0x33_000000;
-const TEXT: u32 = 0xE4_000000;
-const HIGHLIGHT: u32 = 0x14_000000;
-const SEPARATOR: u32 = 0x1F_000000;
+pub(crate) const BACKGROUND: u32 = 0xFFF9_F9F9;
+pub(crate) const BORDER: u32 = 0x33_000000;
+pub(crate) const TEXT: u32 = 0xE4_000000;
+pub(crate) const HIGHLIGHT: u32 = 0x14_000000;
+pub(crate) const SEPARATOR: u32 = 0x1F_000000;
 
 /// Where each entry of a menu is, in its buffer's pixels.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -467,7 +467,7 @@ impl MenuLayout {
     }
 }
 
-fn premultiplied(color: u32, coverage: f64) -> [f64; 4] {
+pub(crate) fn premultiplied(color: u32, coverage: f64) -> [f64; 4] {
     let alpha = f64::from(color >> 24) / 255.0 * coverage;
     [
         f64::from(color & 0xff) / 255.0 * alpha,
@@ -478,7 +478,7 @@ fn premultiplied(color: u32, coverage: f64) -> [f64; 4] {
 }
 
 /// `top` over the premultiplied BGRA pixel `pixel`.
-fn blend(pixel: &mut [u8], top: [f64; 4]) {
+pub(crate) fn blend(pixel: &mut [u8], top: [f64; 4]) {
     let keep = 1.0 - top[3];
     for (channel, value) in pixel.iter_mut().zip(top) {
         *channel = (f64::from(*channel) * keep + value * 255.0)

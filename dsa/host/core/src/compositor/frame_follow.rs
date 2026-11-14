@@ -25,6 +25,13 @@
 //!   its last frame 1:1, and frames the app still draws at the old size are neither shown nor
 //!   followed.
 //!
+//! - A window that holds the size the desktop gives it (maximised, snapped, full screen; see
+//!   [`size_is_held`](super::window_sizing::size_is_held)) takes every size proposed at once
+//!   and shows every frame as it comes, in the window's middle if it is of another size
+//!   ([`FrameFollow::set_held`]). The guest may keep the task smaller than the window (its
+//!   display holds no more), and a window that took that size as its answer would leave the
+//!   place the desktop gave it.
+//!
 //! The window therefore follows the mouse as fast as the app draws, and the last size of a
 //! drag, which the guest is asked for when the drag ends, arrives as a frame like any other.
 //! It names no window system.
@@ -57,6 +64,8 @@ pub struct FrameFollow {
     /// The size of the frame shown when the window's monitor changed scale, until a frame of
     /// another size is shown: frames of it were drawn for the old scale.
     stale: Option<(u32, u32)>,
+    /// Whether the window holds the size the desktop gave it ([`FrameFollow::set_held`]).
+    held: bool,
 }
 
 impl FrameFollow {
@@ -88,10 +97,39 @@ impl FrameFollow {
         self.claimed
     }
 
+    /// Whether the window holds the size the desktop gave it.
+    pub fn held(&self) -> bool {
+        self.held
+    }
+
+    /// The window holds the size the desktop gives it (`true`: it is maximised, snapped or
+    /// full screen) or takes the size of its frames again. While it holds its size, every size
+    /// proposed is taken at once and every frame is shown as it comes, whatever its size: the
+    /// window shows it in its middle. Nothing is kept or claimed. When the window lets go, it
+    /// keeps the size it has until a frame of the size it is proposed next arrives, as it would
+    /// after any frame of its size.
+    pub fn set_held(&mut self, held: bool) {
+        if self.held == held {
+            return;
+        }
+        self.held = held;
+        self.kept = None;
+        self.claimed = false;
+        self.stale = None;
+        if !held {
+            self.shown = Some(self.view);
+        }
+    }
+
     /// A frame of `size` arrived.
     pub fn frame_arrived(&mut self, size: (u32, u32)) -> Arrival {
         if self.claimed {
             return Arrival::Wait;
+        }
+        if self.held {
+            self.shown = Some(size);
+            self.kept = None;
+            return Arrival::Show;
         }
         if size == self.view {
             self.shown = Some(size);
@@ -117,6 +155,9 @@ impl FrameFollow {
     /// prevents. A proposal of that old size itself (the window gives up on the new one,
     /// because the guest did not take it) is taken, and frames of it are followed again.
     pub fn size_for(&mut self, proposed: (u32, u32)) -> Option<(u32, u32)> {
+        if self.held {
+            return None;
+        }
         if let Some(kept) = self.kept {
             self.claimed = true;
             return Some(kept);
@@ -140,7 +181,8 @@ impl FrameFollow {
     pub fn scale_changed(&mut self, proposed: (u32, u32)) -> (u32, u32) {
         self.claimed = false;
         self.kept = None;
-        self.stale = self.shown.filter(|shown| *shown != proposed);
+        // A window that holds its size shows every frame anyway.
+        self.stale = self.shown.filter(|shown| !self.held && *shown != proposed);
         proposed
     }
 
@@ -292,6 +334,87 @@ mod tests {
         follow.size_for((900, 600));
         follow.release();
         assert_eq!(follow.frame_arrived((800, 600)), Arrival::Show);
+    }
+
+    #[test]
+    fn fr4_a_maximised_window_keeps_its_size_when_the_guest_keeps_the_task_smaller() {
+        // A window of 1401x1649 on a 125% monitor shows a task at the 200% main monitor's
+        // density. Maximised, it is proposed 2560x1380; the guest's display holds 2880 task
+        // pixels across, so the task's frame comes back 1802x1380 in window pixels.
+        let mut follow = FrameFollow::new((1401, 1649));
+        assert_eq!(follow.frame_arrived((1401, 1649)), Arrival::Show);
+        follow.set_held(true);
+        assert!(follow.held());
+        // The window takes the maximised size at once, not the size of its last frame.
+        assert_eq!(follow.size_for((2560, 1380)), None);
+        assert!(!follow.view_taken((2560, 1380)));
+        // The old frame and the capped one are shown in it; neither is kept for the window to
+        // take, so the window never goes back to either size.
+        assert_eq!(follow.frame_arrived((1401, 1649)), Arrival::Show);
+        assert_eq!(follow.frame_arrived((1802, 1380)), Arrival::Show);
+        assert_eq!(follow.kept(), None);
+        assert_eq!(follow.view(), (2560, 1380));
+        // Another size the desktop gives it (snapped to the other half, say) is taken as well.
+        assert_eq!(follow.size_for((1280, 1380)), None);
+        // A change of monitor scale leaves no frame stale while it holds its size.
+        follow.scale_changed((2000, 1100));
+        assert_eq!(follow.frame_arrived((1802, 1380)), Arrival::Show);
+
+        // Restored, the window follows its frames again: it stays at its size until the app
+        // draws the size it is proposed, then takes that.
+        let mut follow = FrameFollow::new((2560, 1380));
+        follow.set_held(true);
+        follow.frame_arrived((1802, 1380));
+        follow.set_held(false);
+        assert_eq!(follow.size_for((1401, 1649)), Some((2560, 1380)));
+        assert_eq!(follow.frame_arrived((1401, 1649)), Arrival::Keep);
+        assert_eq!(follow.size_for((1401, 1649)), Some((1401, 1649)));
+        assert!(follow.view_taken((1401, 1649)));
+    }
+
+    #[test]
+    fn fr4_a_maximised_window_stays_maximised_when_frames_of_its_size_or_its_restored_size_arrive()
+    {
+        // Settings at 1041x1495 is maximised on a 2880x1800 monitor whose work area is
+        // 2880x1704: the window's client area becomes the work area at once.
+        let mut follow = FrameFollow::new((1041, 1495));
+        assert_eq!(follow.frame_arrived((1041, 1495)), Arrival::Show);
+        follow.set_held(true);
+        assert_eq!(follow.size_for((2880, 1704)), None);
+        assert!(!follow.view_taken((2880, 1704)));
+        assert_eq!(follow.view(), (2880, 1704));
+        // Frames the app still draws at the restored size are shown in it, and none is kept
+        // for the window to take: a kept frame is what would move it back to that size.
+        assert_eq!(follow.frame_arrived((1041, 1495)), Arrival::Show);
+        assert_eq!(follow.kept(), None);
+        assert_eq!(follow.view(), (2880, 1704));
+        // The frame of the maximised size fills it.
+        assert_eq!(follow.frame_arrived((2880, 1704)), Arrival::Show);
+        assert_eq!(follow.shown(), Some((2880, 1704)));
+        assert_eq!(follow.view(), (2880, 1704));
+        // Windows proposes the maximised size again (a change of frame or of the work area):
+        // the window takes it as it is, and nothing claims a size for it.
+        assert_eq!(follow.size_for((2880, 1704)), None);
+        assert!(!follow.claimed());
+        // A frame of the restored size that the guest sends on its own is shown in it too.
+        assert_eq!(follow.frame_arrived((1041, 1495)), Arrival::Show);
+        assert_eq!(follow.kept(), None);
+        assert_eq!(follow.size_for((2880, 1704)), None);
+        assert!(!follow.view_taken((2880, 1704)));
+        assert_eq!(follow.view(), (2880, 1704));
+    }
+
+    #[test]
+    fn fr4_a_dragged_window_takes_the_size_the_guest_keeps_the_task_at() {
+        // A drag past what the guest's display holds: the window is never held, so it keeps the
+        // size of the largest frame the guest draws rather than show it with a margin.
+        let mut screen = Screen::new((1800, 1200), (1800, 1200));
+        screen.propose((2400, 1200));
+        assert_eq!(screen.follow.view(), (1800, 1200));
+        // The guest gives the task the most its display holds.
+        screen.frame((2000, 1200));
+        assert_eq!(screen.follow.view(), (2000, 1200));
+        assert_eq!(screen.on_screen, Some((2000, 1200)));
     }
 
     #[test]

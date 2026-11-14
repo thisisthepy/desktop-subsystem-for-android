@@ -3,6 +3,7 @@
 
 #include "module.h"
 
+#include <aidl/android/media/audio/common/AudioGainMode.h>
 #include <aidl/android/media/audio/common/AudioOutputFlags.h>
 #include <android/binder_ibinder.h>
 #include <android/binder_ibinder_platform.h>
@@ -11,6 +12,7 @@
 #include <algorithm>
 #include <string>
 
+#include "app_outputs.h"
 #include "log.h"
 #include "stream_in.h"
 #include "stream_out.h"
@@ -21,6 +23,8 @@ using media::AudioChannelLayout;
 using media::AudioDeviceType;
 using media::AudioFormatDescription;
 using media::AudioFormatType;
+using media::AudioGain;
+using media::AudioGainMode;
 using media::AudioIoFlags;
 using media::AudioOutputFlags;
 using media::AudioPort;
@@ -74,6 +78,39 @@ AudioPortExt speakerExt() {
     return AudioPortExt::make<AudioPortExt::Tag::device>(device);
 }
 
+// An app output's bus device, at the address the agent routes the app's uid to.
+AudioPortExt busExt(int32_t slot) {
+    AudioPortDeviceExt device;
+    device.device.type.type = AudioDeviceType::OUT_BUS;
+    device.device.address =
+            media::AudioDeviceAddress::make<media::AudioDeviceAddress::Tag::id>(appDeviceAddress(slot));
+    return AudioPortExt::make<AudioPortExt::Tag::device>(device);
+}
+
+// The gain every output device has, which audio policy sets the volume as, so its mixer stays
+// at full scale and the host's volume is the only one the sound has.
+AudioGain volumeGain() {
+    AudioGain gain;
+    gain.mode = 1 << static_cast<int32_t>(AudioGainMode::JOINT);
+    gain.minValue = kGainMinMb;
+    gain.maxValue = kGainMaxMb;
+    gain.defaultValue = kGainMaxMb;
+    gain.stepValue = kGainStepMb;
+    gain.useForVolume = true;
+    return gain;
+}
+
+// Whether `requested` is a gain the device port `port` takes: one value in range, by its one
+// gain's index and mode.
+bool takesGain(const AudioPort& port, const media::AudioGainConfig& requested) {
+    if (port.gains.empty() || requested.index != 0 || requested.values.empty()) return false;
+    if ((requested.mode & port.gains[0].mode) == 0) return false;
+    for (int32_t value : requested.values) {
+        if (!gainInRange(value)) return false;
+    }
+    return true;
+}
+
 AudioPortExt micExt() {
     AudioPortDeviceExt device;
     device.device.type.type = AudioDeviceType::IN_MICROPHONE;
@@ -114,6 +151,7 @@ Module::Module() {
     speaker.name = "Speaker";
     speaker.profiles = {hostProfile()};
     speaker.flags = outputFlags(0);
+    speaker.gains = {volumeGain()};
     speaker.ext = speakerExt();
 
     // The input: the microphone records into its mix port.
@@ -144,6 +182,37 @@ Module::Module() {
     inputRoute.sinkPortId = kInputMixPortId;
     mRoutes = {route, inputRoute};
 
+    // An output for each app with a window: a mix port and a bus device of its own, which the
+    // agent routes the app to. Each is its own stream on the host, played as its app.
+    std::vector<AudioPort> busDevices;
+    for (int32_t slot = 0; slot < kAppOutputs; ++slot) {
+        AudioPort appMix;
+        appMix.id = appMixPortId(slot);
+        appMix.name = streamName(appMix.id) + " output";
+        appMix.profiles = {hostProfile()};
+        appMix.flags = outputFlags(0);
+        AudioPortMixExt appMixExt;
+        appMixExt.maxOpenStreamCount = 1;
+        appMixExt.maxActiveStreamCount = 1;
+        appMix.ext = AudioPortExt::make<AudioPortExt::Tag::mix>(appMixExt);
+
+        AudioPort bus;
+        bus.id = appDevicePortId(slot);
+        bus.name = appDeviceAddress(slot);
+        bus.profiles = {hostProfile()};
+        bus.flags = outputFlags(0);
+        bus.gains = {volumeGain()};
+        bus.ext = busExt(slot);
+
+        core::AudioRoute appRoute;
+        appRoute.sourcePortIds = {appMix.id};
+        appRoute.sinkPortId = bus.id;
+        mRoutes.push_back(appRoute);
+        mPorts.push_back(appMix);
+        mPorts.push_back(bus);
+        busDevices.push_back(bus);
+    }
+
     AudioPortConfig speakerConfig;
     speakerConfig.id = kSpeakerConfigId;
     speakerConfig.portId = kSpeakerPortId;
@@ -158,6 +227,33 @@ Module::Module() {
     micConfig.flags = mic.flags;
     micConfig.ext = mic.ext;
     mConfigs = {speakerConfig, micConfig};
+    // Each bus device's own configuration, like the speaker's, has the port's ID.
+    for (const auto& bus : busDevices) {
+        AudioPortConfig busConfig = speakerConfig;
+        busConfig.id = bus.id;
+        busConfig.portId = bus.id;
+        busConfig.flags = bus.flags;
+        busConfig.ext = bus.ext;
+        mConfigs.push_back(busConfig);
+    }
+}
+
+bool Module::isOutputMix(int32_t portId) {
+    return portId == kMixPortId || appSlotOfMixPort(portId) >= 0;
+}
+
+int32_t Module::deviceOfMix(int32_t mixPortId) {
+    if (mixPortId == kMixPortId) return kSpeakerPortId;
+    const int32_t slot = appSlotOfMixPort(mixPortId);
+    return slot < 0 ? 0 : appDevicePortId(slot);
+}
+
+bool Module::streamOnPort(int32_t portId) {
+    for (const auto& entry : mStreams) {
+        auto config = findConfig(entry.first);
+        if (config != mConfigs.end() && config->portId == portId) return true;
+    }
+    return false;
 }
 
 const AudioPort* Module::findPort(int32_t id) const {
@@ -319,12 +415,13 @@ ndk::ScopedAStatus Module::openOutputStream(const core::IModule::OpenOutputStrea
                                             core::IModule::OpenOutputStreamReturn* _aidl_return) {
     std::lock_guard<std::mutex> lock(mLock);
     auto config = findConfig(in_args.portConfigId);
-    if (config == mConfigs.end() || config->portId != kMixPortId) {
-        AUDIO_LOGE("openOutputStream: %d is not a configuration of the output", in_args.portConfigId);
+    if (config == mConfigs.end() || !isOutputMix(config->portId)) {
+        AUDIO_LOGE("openOutputStream: %d is not a configuration of an output", in_args.portConfigId);
         return error(EX_ILLEGAL_ARGUMENT);
     }
-    if (mStreams.count(in_args.portConfigId) != 0 || !mStreams.empty()) {
-        AUDIO_LOGE("openOutputStream: the output already has a stream");
+    const int32_t mixPortId = config->portId;
+    if (mStreams.count(in_args.portConfigId) != 0 || streamOnPort(mixPortId)) {
+        AUDIO_LOGE("openOutputStream: %s already has a stream", streamName(mixPortId).c_str());
         return error(EX_ILLEGAL_STATE);
     }
     if (in_args.bufferSizeFrames < kBurstFrames) {
@@ -335,7 +432,7 @@ ndk::ScopedAStatus Module::openOutputStream(const core::IModule::OpenOutputStrea
     const int64_t bufferFrames = std::min<int64_t>(in_args.bufferSizeFrames, kSampleRate);
     std::weak_ptr<Module> self = ref<Module>();
     auto stream = StreamOut::create(
-            in_args.portConfigId, bufferFrames,
+            in_args.portConfigId, bufferFrames, streamName(mixPortId),
             [self](int32_t id) {
                 if (auto module = self.lock()) module->streamClosed(id);
             },
@@ -348,8 +445,8 @@ ndk::ScopedAStatus Module::openOutputStream(const core::IModule::OpenOutputStrea
     AIBinder_setInheritRt(binder.get(), true);
     mStreams[in_args.portConfigId] = stream;
     _aidl_return->stream = stream;
-    AUDIO_LOGI("opened the output stream on configuration %d, %lld frames", in_args.portConfigId,
-               static_cast<long long>(bufferFrames));
+    AUDIO_LOGI("opened the %s stream on configuration %d, %lld frames", streamName(mixPortId).c_str(),
+               in_args.portConfigId, static_cast<long long>(bufferFrames));
     return ndk::ScopedAStatus::ok();
 }
 
@@ -368,11 +465,11 @@ ndk::ScopedAStatus Module::setAudioPatch(const core::AudioPatch& in_requested,
     auto source = findConfig(sources[0]);
     auto sink = findConfig(sinks[0]);
     const bool output = source != mConfigs.end() && sink != mConfigs.end() &&
-                        source->portId == kMixPortId && sink->portId == kSpeakerPortId;
+                        isOutputMix(source->portId) && sink->portId == deviceOfMix(source->portId);
     const bool input = source != mConfigs.end() && sink != mConfigs.end() &&
                        source->portId == kMicPortId && sink->portId == kInputMixPortId;
     if (!output && !input) {
-        // The two routes are the output to the speaker and the microphone to the input.
+        // The routes are each output to its device and the microphone to the input.
         return error(EX_ILLEGAL_ARGUMENT);
     }
     auto existing = mPatches.end();
@@ -404,6 +501,11 @@ ndk::ScopedAStatus Module::setAudioPortConfig(const AudioPortConfig& in_requeste
     const int32_t portId = existing != mConfigs.end() ? existing->portId : in_requested.portId;
     const AudioPort* port = findPort(portId);
     if (port == nullptr) return error(EX_ILLEGAL_ARGUMENT);
+    // A device has one configuration, its own, with the port's ID: a request for the device
+    // changes that one.
+    if (existing == mConfigs.end() && port->ext.getTag() == AudioPortExt::Tag::device) {
+        existing = findConfig(port->id);
+    }
 
     // What the configuration becomes: the existing one, or the port's one format.
     if (existing != mConfigs.end()) {
@@ -420,7 +522,16 @@ ndk::ScopedAStatus Module::setAudioPortConfig(const AudioPortConfig& in_requeste
 
     bool valid = matchesHostFormat(in_requested);
     if (in_requested.flags.has_value() && in_requested.flags.value() != port->flags) valid = false;
-    if (in_requested.gain.has_value()) valid = false;  // No port has a gain.
+    if (in_requested.gain.has_value()) {
+        // The volume audio policy gives an output device. It is kept as the device's gain and
+        // never applied: the sound leaves the guest at full scale, and the host's volume,
+        // which the agent tells the host, is the only one it has.
+        if (takesGain(*port, in_requested.gain.value())) {
+            out_suggested->gain = in_requested.gain;
+        } else {
+            valid = false;
+        }
+    }
     if (in_requested.ext.getTag() != AudioPortExt::Tag::unspecified) {
         if (in_requested.ext.getTag() != port->ext.getTag()) {
             valid = false;
@@ -461,13 +572,16 @@ ndk::ScopedAStatus Module::resetAudioPortConfig(int32_t in_portConfigId) {
     if (it == mConfigs.end()) return error(EX_ILLEGAL_ARGUMENT);
     if (configInUse(in_portConfigId)) return error(EX_ILLEGAL_STATE);
     // The devices' own configurations stay; they never change.
-    if (in_portConfigId != kSpeakerConfigId && in_portConfigId != kMicConfigId) {
+    const AudioPort* port = findPort(it->portId);
+    const bool device = port != nullptr && port->ext.getTag() == AudioPortExt::Tag::device &&
+                        in_portConfigId == port->id;
+    if (!device) {
         mConfigs.erase(it);
     }
     return ndk::ScopedAStatus::ok();
 }
 
-// The framework's mixer applies the volume and the mute when the module has neither.
+// The module has no master volume or mute: the host's volume is the only one the sound has.
 ndk::ScopedAStatus Module::getMasterMute(bool*) { return error(EX_UNSUPPORTED_OPERATION); }
 ndk::ScopedAStatus Module::setMasterMute(bool) { return error(EX_UNSUPPORTED_OPERATION); }
 ndk::ScopedAStatus Module::getMasterVolume(float*) { return error(EX_UNSUPPORTED_OPERATION); }

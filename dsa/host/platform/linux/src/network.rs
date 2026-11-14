@@ -68,16 +68,31 @@ pub fn macvtap_name(uid: u32) -> String {
     format!("dsatap{uid:x}")
 }
 
-/// Finds `program` beside this program (where DSA's package puts crosvm and passt), on the
-/// `PATH`, or in the system's program folders.
+/// Where DSA's package puts the VM programs (crosvm and passt) and its own host programs.
+pub const PACKAGE_PROGRAMS: &str = "/usr/lib/dsa/bin";
+
+/// Finds `program` beside this program, in DSA's package folder, on the `PATH`, or in the
+/// system's program folders.
 pub fn find_program(program: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH").unwrap_or_default();
     let beside = std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(Path::to_path_buf));
+    program_folders(beside, std::env::split_paths(&path).collect())
+        .into_iter()
+        .map(|dir| dir.join(program))
+        .find(|candidate| is_executable(candidate))
+}
+
+/// The folders `find_program` looks in, in order. DSA's package folder comes before the `PATH`
+/// and the system's folders: the passt of a distribution's own packages has no vhost-user on
+/// older releases, and a service that does not run from the package folder would otherwise
+/// start that passt instead of DSA's own.
+pub fn program_folders(beside: Option<PathBuf>, path: Vec<PathBuf>) -> Vec<PathBuf> {
     beside
         .into_iter()
-        .chain(std::env::split_paths(&path))
+        .chain(std::iter::once(PathBuf::from(PACKAGE_PROGRAMS)))
+        .chain(path)
         .chain(
             [
                 "/usr/bin",
@@ -90,8 +105,7 @@ pub fn find_program(program: &str) -> Option<PathBuf> {
             .into_iter()
             .map(PathBuf::from),
         )
-        .map(|dir| dir.join(program))
-        .find(|candidate| is_executable(candidate))
+        .collect()
 }
 
 fn is_executable(path: &Path) -> bool {
@@ -136,6 +150,9 @@ pub fn host_status(mode: &str, problem: Option<String>) -> NetworkStatus {
         dns_servers: nameservers(&resolv),
         gateway,
         problem,
+        // The service fills it from the session, which knows whether the guest reaches the
+        // DNS port.
+        dns_resolver: String::new(),
     }
 }
 
@@ -367,6 +384,25 @@ mod tests {
         let args = passt_args();
         assert_eq!(args[0], "--vhost-user");
         assert_eq!(args.last(), Some(&"--socket"));
+    }
+
+    #[test]
+    fn fr28_dsas_own_passt_comes_before_a_distributions() {
+        let folders = program_folders(
+            Some(PathBuf::from("/work/target/debug")),
+            vec![PathBuf::from("/usr/local/bin"), PathBuf::from("/usr/bin")],
+        );
+        assert_eq!(folders[0], PathBuf::from("/work/target/debug"));
+        assert_eq!(folders[1], PathBuf::from(PACKAGE_PROGRAMS));
+        let package = folders
+            .iter()
+            .position(|d| d == Path::new(PACKAGE_PROGRAMS));
+        let system = folders.iter().position(|d| d == Path::new("/usr/bin"));
+        assert!(package < system, "{folders:?}");
+        assert_eq!(
+            program_folders(None, Vec::new())[0],
+            PathBuf::from(PACKAGE_PROGRAMS)
+        );
     }
 
     #[test]

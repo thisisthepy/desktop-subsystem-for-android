@@ -72,6 +72,8 @@ pub struct ViewRow {
     /// Whether its submenu is open.
     pub expanded: bool,
     pub access_key: Option<char>,
+    /// The keyboard shortcut that does the same outside the menu, as "Alt+F4".
+    pub shortcut: Option<String>,
     /// Left, top, width and height on the screen.
     pub bounds: (i32, i32, i32, i32),
 }
@@ -430,6 +432,10 @@ impl IRawElementProviderSimple_Impl for RowProvider_Impl {
                 UIA_NamePropertyId => variant_str(&row.name),
                 UIA_AccessKeyPropertyId => match row.access_key {
                     Some(key) => variant_str(&key.to_string()),
+                    None => variant_empty(),
+                },
+                UIA_AcceleratorKeyPropertyId => match &row.shortcut {
+                    Some(shortcut) => variant_str(shortcut),
                     None => variant_empty(),
                 },
                 UIA_IsEnabledPropertyId => variant_bool(row.enabled),

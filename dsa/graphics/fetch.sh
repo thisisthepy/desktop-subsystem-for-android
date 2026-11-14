@@ -75,8 +75,13 @@ fi
 # reads it), Android's loader gets every core
 # command it looks up, whatever Vulkan version the app asked for, the driver lists only
 # the device extensions its vkCreateDevice takes, host-visible memory the guest keeps
-# in step with the host both ways is reported coherent, and only memory the app has mapped
-# is kept in step (the rest is never sent, read back or touched).
+# in step with the host both ways is reported coherent, only memory the app has mapped
+# is kept in step (the rest is never sent, read back or touched), what a CPU wrote into
+# a buffer the GPU samples is copied up to the host before the GPU is given work, a
+# window buffer's host ColorBuffer is closed when the last image made on it is destroyed,
+# a read back asks in pieces and takes only what the device changed, keeping what the
+# app wrote, and that coherent memory is then reported twice: as the host reports it, read
+# back only when the app invalidates, before a coherent twin read back at completion.
 for patch in "$patch_dir"/guest/mesa/*.patch; do
     git -C "$mesa_dir" apply --recount --check "$patch"
     git -C "$mesa_dir" apply --recount "$patch"

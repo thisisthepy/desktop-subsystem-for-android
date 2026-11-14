@@ -5,7 +5,7 @@ use dsa_host_core::input::PointerEvent;
 use dsa_host_core::keys::KeyEvent;
 use dsa_host_core::tasks::TaskRequestError;
 use std::process::{Command, Output};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use dsa_cli::{parse, Command as Cmd};
@@ -1063,6 +1063,62 @@ fn fr5_touch_gestures_off_is_on_by_default_and_dsa_turns_it_off() {
 }
 
 #[test]
+fn fr28_host_certificates_are_on_by_default_and_dsa_turns_them_off() {
+    use dsa_cli::Change;
+    assert_eq!(
+        parse(&args("settings set host-certificates off"))
+            .unwrap()
+            .change,
+        Some(Change::HostCertificates(false))
+    );
+    assert!(parse(&args("settings set host-certificates maybe")).is_err());
+    let ((listener, _, _), endpoint) = local_pair();
+    let _service = settings_service(listener);
+    let settings = json_of(&dsa(&endpoint, "settings --json"));
+    assert_eq!(settings["host_certificates"], true);
+    assert_eq!(settings["imported_certificates"], serde_json::json!([]));
+    let changed = json_of(&dsa(&endpoint, "settings set host-certificates off --json"));
+    assert_eq!(changed["host_certificates"], false);
+}
+
+#[test]
+fn fr28_the_settings_list_the_root_certificates_found_and_where() {
+    use dsa_host_core::host_api::SettingsReport;
+    use dsa_host_core::host_certificates::ImportedCertificate;
+    let report = SettingsReport {
+        settings: dsa_host_core::settings::Settings::default(),
+        facts: Default::default(),
+        network: None,
+        adb_auto_connect_state: Default::default(),
+        touch_gestures: Default::default(),
+        adb_shell_root: String::new(),
+        imported_certificates: vec![ImportedCertificate {
+            subject: "CN=Filter Root, O=Example Filter".into(),
+            issuer: "CN=Filter Root, O=Example Filter".into(),
+            source: "machine_group_policy".into(),
+            location: "HKLM\\SOFTWARE\\Policies\\Microsoft\\SystemCertificates\\Root".into(),
+            sha256: "ab".repeat(32),
+            not_after: 1_893_456_000,
+        }],
+    };
+    let json = dsa_cli::settings_json(&report);
+    let listed = &json["imported_certificates"][0];
+    assert_eq!(listed["subject"], "CN=Filter Root, O=Example Filter");
+    assert_eq!(listed["source"], "machine_group_policy");
+    assert_eq!(listed["not_after"], 1_893_456_000);
+    let text = dsa_cli::describe_settings(&report);
+    assert!(
+        text.contains("Trust the root certificates added to this computer: on (1 found)"),
+        "{text}"
+    );
+    assert!(
+        text.contains("Root certificate: CN=Filter Root, O=Example Filter")
+            && text.contains("this computer's group policy"),
+        "{text}"
+    );
+}
+
+#[test]
 fn fr5_the_touch_gestures_line_says_why_it_cannot_be_used_and_is_hidden_without_gestures() {
     use dsa_host_core::host_api::SettingsReport;
     use dsa_host_core::touch_gestures::TouchGesturesState;
@@ -1073,6 +1129,7 @@ fn fr5_the_touch_gestures_line_says_why_it_cannot_be_used_and_is_hidden_without_
         adb_auto_connect_state: Default::default(),
         touch_gestures: state,
         adb_shell_root: String::new(),
+        imported_certificates: Vec::new(),
     };
     let line = |report: &SettingsReport| {
         dsa_cli::describe_settings(report)
@@ -1415,6 +1472,104 @@ fn fr25_dsa_refuses_googles_image_when_its_hash_differs() {
 }
 
 #[test]
+fn fr37_dsa_drm_widevine_commands_are_parsed() {
+    assert_eq!(
+        parse(&args("drm widevine")).unwrap().command,
+        Cmd::WidevineStatus
+    );
+    assert_eq!(
+        parse(&args("drm widevine status --json")).unwrap().command,
+        Cmd::WidevineStatus
+    );
+    let install = parse(&args("drm widevine install --yes")).unwrap();
+    assert_eq!(install.command, Cmd::WidevineInstall);
+    assert!(install.yes);
+    assert_eq!(
+        parse(&args("drm widevine remove")).unwrap().command,
+        Cmd::WidevineRemove
+    );
+    assert!(parse(&args("drm playready")).is_err());
+    assert!(parse(&args("drm widevine upgrade")).is_err());
+    assert!(parse(&args("drm widevine remove --yes")).is_err());
+}
+
+#[test]
+fn fr37_dsa_takes_widevine_from_googles_image_only_when_agreed_and_removes_it() {
+    use dsa_host_core::widevine::{self, fixture};
+    let id = std::process::id();
+    let repository = std::env::temp_dir().join(format!("dsa-cli-widevine-{id}"));
+    let _ = std::fs::remove_dir_all(&repository);
+    let abi = widevine::guest_abi();
+    let module = fixture::apex(widevine::MODULE, abi);
+    // The service's facts say Android 17, so the image of API 37 is the one taken.
+    let zip = fixture::image_archive("37", abi, Some(&module));
+    fixture::write_repository(&repository, &[("37.0", abi, &zip)]).unwrap();
+    let ((listener, _, _), endpoint) = local_pair();
+    let _service = settings_service(listener);
+    let none = json_of(&dsa(&endpoint, "drm widevine --json"));
+    assert!(none["package"].is_null(), "{none}");
+    assert_eq!(none["installed"], false);
+    assert_eq!(none["security_level"], "L3");
+
+    // Asked with nobody to answer, it says where the download comes from and its terms, and
+    // changes nothing.
+    let asked = dsa_with_repository(&endpoint, "drm widevine install", &repository);
+    assert!(!asked.status.success());
+    let said = stderr(&asked);
+    assert!(said.contains("Android SDK License"), "{said}");
+    assert!(said.contains("nothing was changed"), "{said}");
+    assert!(json_of(&dsa(&endpoint, "drm widevine --json"))["package"].is_null());
+
+    let line = "drm widevine install --yes --json";
+    let installed = json_of(&dsa_with_repository(&endpoint, line, &repository));
+    assert_eq!(installed["installed"], true, "{installed}");
+    assert_eq!(installed["on_disk"], true);
+    assert_eq!(installed["package"]["abi"], abi);
+    assert_eq!(installed["package"]["android_major"], 17);
+    assert_eq!(
+        installed["package"]["apex"],
+        "com.google.android.widevine.apex"
+    );
+    assert_eq!(installed["package"]["size"], module.len());
+    assert_eq!(
+        installed["package"]["sha256"],
+        widevine::sha256_hex(&module)
+    );
+    let text = stdout(&dsa(&endpoint, "drm widevine status"));
+    assert!(text.contains("standard definition"), "{text}");
+    assert!(text.contains("browser or app"), "{text}");
+
+    let removed = json_of(&dsa(&endpoint, "drm widevine remove --json"));
+    assert!(removed["package"].is_null());
+    assert_eq!(removed["on_disk"], false);
+    let _ = std::fs::remove_dir_all(&repository);
+}
+
+#[test]
+fn fr37_dsa_refuses_an_image_without_widevine_and_changes_nothing() {
+    use dsa_host_core::widevine::{self, fixture};
+    let id = std::process::id();
+    let repository = std::env::temp_dir().join(format!("dsa-cli-widevine-none-{id}"));
+    let _ = std::fs::remove_dir_all(&repository);
+    let abi = widevine::guest_abi();
+    let zip = fixture::image_archive("37", abi, None);
+    fixture::write_repository(&repository, &[("37.0", abi, &zip)]).unwrap();
+    let ((listener, _, _), endpoint) = local_pair();
+    let _service = settings_service(listener);
+    let refused = dsa_with_repository(&endpoint, "drm widevine install --yes", &repository);
+    assert!(!refused.status.success());
+    assert!(
+        stderr(&refused).contains("holds no Widevine module"),
+        "{}",
+        stderr(&refused)
+    );
+    let none = json_of(&dsa(&endpoint, "drm widevine --json"));
+    assert!(none["package"].is_null(), "the stored state is unchanged");
+    assert_eq!(none["on_disk"], false);
+    let _ = std::fs::remove_dir_all(&repository);
+}
+
+#[test]
 fn fr17_dsa_status_json_reports_the_state_and_the_last_reason() {
     let ((listener, _, _), endpoint) = local_pair();
     let _service = RunningService::start(listener, Arc::new(FakeAndroids::default()));
@@ -1604,6 +1759,7 @@ fn fr17_dsa_memory_json_carries_the_guest_breakdown_and_the_host_processes() {
             pid: 10,
             working_set_kb: 900_000,
             private_kb: 880_000,
+            mapped_kb: 300_000,
         }],
     });
     assert_eq!(json["guest"]["mem_total_kb"], 4 * 1024 * 1024);
@@ -1612,6 +1768,10 @@ fn fr17_dsa_memory_json_carries_the_guest_breakdown_and_the_host_processes() {
     assert_eq!(json["guest"]["top_processes"][0]["name"], "system_server");
     assert_eq!(json["host"][0]["role"], "vm");
     assert_eq!(json["host_total_kb"], 900_000);
+    // The pages of the disks the VM maps directly, apart from what it holds for itself.
+    assert_eq!(json["host"][0]["mapped_kb"], 300_000);
+    assert_eq!(json["host_mapped_kb"], 300_000);
+    assert_eq!(json["host_own_kb"], 600_000);
 }
 
 #[test]
@@ -1949,6 +2109,48 @@ fn fr11_dsa_install_says_why_android_refused_the_apk_and_fails() {
 }
 
 #[test]
+fn fr25_dsa_install_refuses_an_arm64_only_app_with_its_reason_while_translation_is_off() {
+    use dsa_host_core::apk_info::fixture::archive;
+    use dsa_host_core::host_api::{HostApiService, ServiceFacts};
+    use dsa_host_core::settings::MemorySettings;
+    let ((listener, _, user), endpoint) = local_pair();
+    let androids = Arc::new(FakeAndroids::default());
+    let service = HostApiService::new(androids.clone(), "test service")
+        .with_settings(Arc::new(MemorySettings::default()), ServiceFacts::default());
+    let _service = RunningService::start_service(listener, service);
+    let content = archive(
+        &[
+            ("AndroidManifest.xml", &b"manifest"[..]),
+            ("lib/arm64-v8a/libgame.so", &b"\x7fELF"[..]),
+        ],
+        b"",
+    );
+    let path = apk_file("arm-game.apk", &content);
+
+    // The running Android does not translate ARM code: refused with the reason, unsent.
+    let output = dsa_with_path(&endpoint, "install", &path, "");
+    assert_eq!(output.status.code(), Some(1));
+    let error = stderr(&output);
+    assert!(
+        error.starts_with("dsa: not installed (translation-off): arm-game.apk: "),
+        "{error}"
+    );
+    assert!(error.contains("ARM translation is not on"), "{error}");
+    assert!(error.contains("Turn it on under ARM apps"), "{error}");
+    let android = androids.of(&user).unwrap();
+    assert!(android.installs.lock().unwrap().is_empty());
+
+    // It does: installed as arm64-v8a.
+    *android.translating.lock().unwrap() = true;
+    let output = dsa_with_path(&endpoint, "install", &path, "");
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        *android.install_abis.lock().unwrap(),
+        vec![Some("arm64-v8a".to_string())]
+    );
+}
+
+#[test]
 fn fr11_dsa_install_refuses_a_file_that_is_no_apk_before_starting_android() {
     let ((listener, _, user), endpoint) = local_pair();
     let androids = Arc::new(FakeAndroids::default());
@@ -2231,18 +2433,23 @@ fn fr28_dsa_turns_advanced_networking_on_and_dsa_network_shows_the_address_and_d
         Cmd::Network
     );
     let ((listener, _, _), endpoint) = local_pair();
-    let network: NetworkSource = Arc::new(|_: &str, settings: &Settings| {
-        Some(NetworkStatus {
-            mode: if settings.advanced_networking {
-                NetworkStatus::ADVANCED.into()
-            } else {
-                NetworkStatus::NAT.into()
-            },
-            addresses: vec!["172.28.16.2".into(), "fd5a:d5a:0:1::2".into()],
-            dns_servers: vec!["172.28.16.1".into()],
-            gateway: "172.28.16.1".into(),
-            problem: None,
-        })
+    let resolver = Arc::new(Mutex::new(String::new()));
+    let network: NetworkSource = Arc::new({
+        let resolver = Arc::clone(&resolver);
+        move |_: &str, settings: &Settings| {
+            Some(NetworkStatus {
+                mode: if settings.advanced_networking {
+                    NetworkStatus::ADVANCED.into()
+                } else {
+                    NetworkStatus::NAT.into()
+                },
+                addresses: vec!["172.28.16.2".into(), "fd5a:d5a:0:1::2".into()],
+                dns_servers: vec!["172.28.16.1".into()],
+                gateway: "172.28.16.1".into(),
+                problem: None,
+                dns_resolver: resolver.lock().unwrap().clone(),
+            })
+        }
     });
     let service = HostApiService::new(Arc::new(FakeAndroids::default()), "test service")
         .with_settings(Arc::new(MemorySettings::default()), ServiceFacts::default())
@@ -2264,6 +2471,25 @@ fn fr28_dsa_turns_advanced_networking_on_and_dsa_network_shows_the_address_and_d
         "{text}"
     );
     assert!(text.contains("DNS servers: 172.28.16.1"), "{text}");
+
+    // Who answers Android's names: this computer's resolver, or the network's DNS servers
+    // when that does not answer.
+    *resolver.lock().unwrap() = NetworkStatus::DNS_HOST.into();
+    let status = json_of(&dsa(&endpoint, "network --json"));
+    assert_eq!(status["dns_resolver"], "host");
+    let text = stdout(&dsa(&endpoint, "network"));
+    assert!(
+        text.contains("DNS: answered by this computer's resolver"),
+        "{text}"
+    );
+    *resolver.lock().unwrap() = NetworkStatus::DNS_NETWORK.into();
+    let status = json_of(&dsa(&endpoint, "network --json"));
+    assert_eq!(status["dns_resolver"], "network");
+    let text = stdout(&dsa(&endpoint, "network"));
+    assert!(
+        text.contains("DNS: this computer's resolver does not answer, so Android asks 172.28.16.1"),
+        "{text}"
+    );
 
     let changed = json_of(&dsa(
         &endpoint,
@@ -2378,6 +2604,13 @@ fn fr12_dsa_widgets_is_parsed() {
     assert!(parse(&args("widgets add clock")).is_err());
     assert!(parse(&args("widgets remove twelve")).is_err());
     assert!(parse(&args("widgets remove -1")).is_err());
+    assert_eq!(
+        parse(&args("widgets settings 12")).unwrap().widgets,
+        Some(WidgetAction::Settings(12))
+    );
+    assert!(parse(&args("widgets settings")).is_err());
+    assert!(parse(&args("widgets settings 0")).is_err());
+    assert!(dsa_cli::USAGE.contains("settings <id>"));
     assert_eq!(parse(&args("status")).unwrap().widgets, None);
 }
 
@@ -2392,6 +2625,7 @@ fn fr12_widgets_watch_prints_one_json_line_per_change_with_the_app_name() {
             y: 64,
             width_dp: 180,
             height_dp: 110,
+            resized: false,
         },
     };
     let first: serde_json::Value = serde_json::from_str(&dsa_cli::widgets_now_line(
@@ -2803,6 +3037,80 @@ fn fr25_dsa_apps_run_as_arm_is_parsed() {
     assert!(parse(&args("apps run-as-arm com.example.game")).is_err());
     assert!(parse(&args("apps run-as-arm com.example.game maybe")).is_err());
     assert!(parse(&args("apps run-as-arm not/a/package on")).is_err());
+}
+
+#[test]
+fn fr7_dsa_apps_shortcut_and_desktop_shortcut_are_parsed() {
+    use dsa_cli::AppsAction;
+    assert_eq!(
+        parse(&args("apps shortcut com.example.chat new-chat"))
+            .unwrap()
+            .apps,
+        Some(AppsAction::Shortcut(
+            "com.example.chat".into(),
+            "new-chat".into()
+        ))
+    );
+    assert_eq!(
+        parse(&args("apps desktop-shortcut com.example.chat --json"))
+            .unwrap()
+            .apps,
+        Some(AppsAction::DesktopShortcut("com.example.chat".into()))
+    );
+    assert!(parse(&args("apps shortcut com.example.chat")).is_err());
+    assert!(parse(&args("apps shortcut not/a/package new-chat")).is_err());
+    assert!(parse(&args("apps desktop-shortcut")).is_err());
+}
+
+#[test]
+fn fr7_dsa_apps_shortcut_starts_the_shortcut_in_the_users_android() {
+    use dsa_host_core::tasks::TaskRequest;
+    let ((listener, _, user), endpoint) = local_pair();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    let output = dsa(&endpoint, "apps shortcut com.example.chat new-chat --json");
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(
+        stdout(&output).contains("\"started\":true"),
+        "{}",
+        stdout(&output)
+    );
+    assert!(androids
+        .of(&user)
+        .unwrap()
+        .requests
+        .lock()
+        .unwrap()
+        .contains(&TaskRequest::LaunchShortcut {
+            package_name: "com.example.chat".into(),
+            shortcut_id: "new-chat".into(),
+        }));
+}
+
+#[test]
+fn fr7_dsa_apps_lists_each_apps_shortcuts() {
+    use dsa_host_core::tasks::{AppInfo, AppShortcut};
+    let app = AppInfo {
+        package_name: "com.example.chat".into(),
+        label: "Chat".into(),
+        shortcuts: vec![AppShortcut {
+            id: "new-chat".into(),
+            short_label: "New chat".into(),
+            dynamic: true,
+            icon_png: vec![1, 2, 3],
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let listed = dsa_cli::app_json(&app, true);
+    assert_eq!(listed["shortcuts"][0]["id"], "new-chat");
+    assert_eq!(listed["shortcuts"][0]["label"], "New chat");
+    assert_eq!(listed["shortcuts"][0]["in_jump_list"], true);
+    assert_eq!(listed["shortcuts"][0]["pinned"], false);
+    assert_eq!(listed["shortcuts"][0]["icon_png"], "AQID");
+    assert!(dsa_cli::app_json(&app, false)["shortcuts"][0]
+        .get("icon_png")
+        .is_none());
 }
 
 #[test]
@@ -3222,6 +3530,7 @@ fn fr15_settings_say_where_program_updates_come_from() {
         adb_auto_connect_state: Default::default(),
         touch_gestures: Default::default(),
         adb_shell_root: String::new(),
+        imported_certificates: Vec::new(),
     };
     let text = dsa_cli::describe_settings(&report);
     let line = text
@@ -3311,6 +3620,34 @@ fn fr14_dsa_android_shows_the_version_and_moves_down_only_with_erase_data() {
 }
 
 #[test]
+fn fr14_dsa_android_install_image_takes_the_folder_and_refuses_one_without_a_list() {
+    let parsed = parse(&args("android install-image dev-build")).unwrap();
+    assert_eq!(parsed.command, Cmd::AndroidInstallImage);
+    assert_eq!(
+        parsed.file.as_deref(),
+        Some(std::path::Path::new("dev-build"))
+    );
+    let why = parse(&args("android install-image")).unwrap_err();
+    assert!(why.contains("folder"), "{why}");
+    assert!(parse(&args("android install-image --json")).is_err());
+
+    // A folder without a signed list is refused before anything runs, and no service is
+    // needed to say so.
+    let empty = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("install-image-empty-{}", std::process::id()));
+    std::fs::create_dir_all(&empty).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_dsa"))
+        .arg("android")
+        .arg("install-image")
+        .arg(&empty)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let said = String::from_utf8_lossy(&output.stderr);
+    assert!(said.contains("images.json"), "{said}");
+}
+
+#[test]
 fn fr14_a_downloaded_image_is_applied_without_the_user_restarting() {
     use dsa_host_core::host_api::{HostApiService, ServiceFacts};
     use dsa_host_core::settings::MemorySettings;
@@ -3378,6 +3715,131 @@ fn fr14_a_downloaded_image_is_applied_without_the_user_restarting() {
         parse(&args("android restart")).unwrap().command,
         Cmd::AndroidRestart
     );
+}
+
+#[test]
+fn fr36_dsa_backup_commands_are_parsed() {
+    assert_eq!(parse(&args("backup")).unwrap().command, Cmd::BackupStatus);
+    assert_eq!(
+        parse(&args("backup --json")).unwrap().command,
+        Cmd::BackupStatus
+    );
+    assert_eq!(parse(&args("backup now")).unwrap().command, Cmd::BackupNow);
+    assert_eq!(
+        parse(&args("backup restore")).unwrap().command,
+        Cmd::BackupRestore
+    );
+    assert_eq!(
+        parse(&args("backup key show")).unwrap().command,
+        Cmd::BackupKeyShow
+    );
+    let import = parse(&args("backup key import ABCDE FGHJK --json")).unwrap();
+    assert_eq!(import.command, Cmd::BackupKeyImport);
+    assert_eq!(import.backup_key.as_deref(), Some("ABCDE FGHJK"));
+    assert!(import.json);
+    assert!(parse(&args("backup key import")).is_err());
+    assert!(parse(&args("backup key forget")).is_err());
+    assert!(parse(&args("backup everything")).is_err());
+    assert_eq!(parse(&args("backup on")).unwrap().command, Cmd::BackupOn);
+    let off = parse(&args("backup off")).unwrap();
+    assert_eq!(off.command, Cmd::BackupOff);
+    assert!(!off.delete_backups, "the backups stay unless asked");
+    let delete = parse(&args("backup off --delete-backups --json")).unwrap();
+    assert_eq!(delete.command, Cmd::BackupOff);
+    assert!(delete.delete_backups && delete.json);
+    assert!(
+        parse(&args("backup on --delete-backups")).is_err(),
+        "deleting goes only with turning off"
+    );
+}
+
+#[test]
+fn fr36_dsa_backup_says_backup_is_off_and_offers_to_delete_what_is_kept() {
+    let off = dsa_host_core::backup::BackupReport {
+        folder: "C:\\Users\\ada\\DSA Backup".into(),
+        ..Default::default()
+    };
+    let text = dsa_cli::describe_backup(Cmd::BackupStatus, &off);
+    assert!(text.contains("Backup: off"), "{text}");
+    assert!(text.contains("dsa backup on"), "{text}");
+    assert!(text.contains("second copy"), "{text}");
+    let kept = dsa_host_core::backup::BackupReport {
+        packages: 4,
+        size: 3 * 1024 * 1024,
+        ..off.clone()
+    };
+    let text = dsa_cli::describe_backup(Cmd::BackupOff, &kept);
+    assert!(text.contains("still kept"), "{text}");
+    assert!(text.contains("--delete-backups"), "{text}");
+    let text = dsa_cli::describe_backup(Cmd::BackupOff, &off);
+    assert!(text.contains("no backups are kept"), "{text}");
+    let on = dsa_host_core::backup::BackupReport {
+        enabled: true,
+        available: true,
+        ..off
+    };
+    assert!(dsa_cli::describe_backup(Cmd::BackupOn, &on).contains("Backup is on"));
+    assert_eq!(dsa_cli::backup_json(&on, None)["enabled"], true);
+}
+
+#[test]
+fn fr36_dsa_status_says_what_seals_the_keymint_root_key() {
+    use dsa_host_core::host_keys::KeyProtection;
+    use dsa_host_core::session::KeyMintKeyState;
+    let tpm = KeyMintKeyState {
+        protection: Some(KeyProtection {
+            sealed_by: "tpm".into(),
+            hardware: true,
+            description: "the computer's TPM 2.0 and DPAPI under your account".into(),
+            fallback_reason: String::new(),
+        }),
+        problem: String::new(),
+    };
+    let text = dsa_cli::describe_keymint_key(&tpm);
+    assert!(text.contains("sealed by the computer's TPM 2.0"), "{text}");
+    let json = dsa_cli::keymint_key_json(&tpm);
+    assert_eq!(json["sealed_by"], "tpm");
+    assert_eq!(json["hardware"], true);
+    assert_eq!(json["kept"], true);
+
+    let dpapi = KeyMintKeyState {
+        protection: Some(KeyProtection {
+            sealed_by: "dpapi".into(),
+            hardware: false,
+            description: "DPAPI under your account".into(),
+            fallback_reason: "this computer has no TPM".into(),
+        }),
+        problem: "the TPM is locked out".into(),
+    };
+    let text = dsa_cli::describe_keymint_key(&dpapi);
+    assert!(
+        text.contains("kept by DPAPI under your account only"),
+        "{text}"
+    );
+    assert!(text.contains("this computer has no TPM"), "{text}");
+    assert!(text.contains("the TPM is locked out"), "{text}");
+    let none = KeyMintKeyState::default();
+    assert!(dsa_cli::describe_keymint_key(&none).contains("no root key yet"));
+    assert_eq!(dsa_cli::keymint_key_json(&none)["kept"], false);
+}
+
+#[test]
+fn fr36_dsa_backup_describes_where_the_backup_stands() {
+    let report = dsa_host_core::backup::BackupReport {
+        available: true,
+        folder: "C:\\Users\\ada\\DSA Backup".into(),
+        last_backup_ms: 86_400_000 * 365,
+        packages: 3,
+        size: 5 * 1024 * 1024,
+        ..Default::default()
+    };
+    let text = dsa_cli::describe_backup(Cmd::BackupStatus, &report);
+    assert!(text.contains("DSA Backup"), "{text}");
+    assert!(text.contains("1971-01-01 00:00 UTC"), "{text}");
+    assert!(text.contains("Apps: 3 (5 MiB"), "{text}");
+    let json = dsa_cli::backup_json(&report, None);
+    assert_eq!(json["packages"], 3);
+    assert_eq!(json["available"], true);
 }
 
 #[test]
@@ -3567,6 +4029,7 @@ fn fr15_dsa_settings_chooses_whether_to_take_prereleases() {
         adb_auto_connect_state: Default::default(),
         touch_gestures: Default::default(),
         adb_shell_root: String::new(),
+        imported_certificates: Vec::new(),
     };
     let channel_line = |report: &SettingsReport| {
         dsa_cli::describe_settings(report)
@@ -3599,6 +4062,7 @@ fn fr35_the_settings_apps_read_root_elevation_and_each_apps_level() {
         adb_auto_connect_state: Default::default(),
         touch_gestures: Default::default(),
         adb_shell_root: String::new(),
+        imported_certificates: Vec::new(),
     };
     assert_eq!(dsa_cli::settings_json(&report)["root_elevation"], true);
     let line = dsa_cli::describe_settings(&report)

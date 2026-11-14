@@ -1,13 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The media probe: an ordinary third-party app, with no permissions, whose
-  instrumentation plays sound and runs codecs in its own process, as any app would. The image
-  boot check installs it and runs it with SELinux enforcing (dsa/host/platform/linux/tests/
-  media.rs): an app's process runs in the untrusted app domain at an MLS level of its own,
-  which is what the platform's own media services do not test.
+  The media probe: an ordinary third-party app, whose instrumentation plays sound and runs
+  codecs in its own process, as any app would. The image boot check installs it and runs it
+  with SELinux enforcing (dsa/host/platform/linux/tests/media.rs): an app's process runs in
+  the untrusted app domain at an MLS level of its own, which is what the platform's own media
+  services do not test. Its one permission, INTERNET, is for the HTTPS check, which opens a
+  server signed by a root certificate the host added, with an app's own trust.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="io.github.thisisthepy.dsa.mediaprobe">
+
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <application android:label="DSA media probe" android:hasCode="true">
         <activity android:name=".ProbeActivity" android:exported="true">

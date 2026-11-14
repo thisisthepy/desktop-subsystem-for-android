@@ -70,14 +70,17 @@ DSA_GFX_EXPORT void dsa_gfx_set_log_callback(dsa_gfx_log_fn cb, void* context);
 
 /* A GPU reset loses every Vulkan device on the GPU. The renderer then answers the guest's
  * calls on its lost devices with VK_ERROR_DEVICE_LOST, so the guest can make new ones, and
- * makes its own device again, with every color buffer at its size, before its next
- * operation. dsa_gfx_device_generation says how many times it has made its device again.
+ * makes its own device again, with every color buffer at its size, on a thread of its own:
+ * until it is back, what needs it fails at once. dsa_gfx_device_losses says how many times
+ * the renderer found its device lost (it counts up the moment it does), and
+ * dsa_gfx_device_generation how many times it has made its device again.
  *
  * dsa_gfx_simulate_device_loss makes every device's queue and fence calls fail with
  * VK_ERROR_DEVICE_LOST, as a reset does, so a test can see this on any driver. Returns 0, or
  * -1 when the renderer is not running. */
 DSA_GFX_EXPORT int dsa_gfx_simulate_device_loss(void);
 DSA_GFX_EXPORT uint64_t dsa_gfx_device_generation(void);
+DSA_GFX_EXPORT uint64_t dsa_gfx_device_losses(void);
 
 /* Initializes the host gfxstream renderer (Vulkan only, surfaceless). */
 DSA_GFX_EXPORT int dsa_gfx_init(uint32_t width, uint32_t height);
@@ -251,8 +254,9 @@ DSA_GFX_EXPORT void dsa_gfx_channel_stop(void* channel);
 /* What the renderer holds, by owner: its live Vulkan allocations by kind (memory only the GPU
  * sees, memory the host's CPU maps, which holds the guest's host-visible memory, and memory
  * imported from another API, such as a task window's Direct3D texture), the largest one, and
- * how many guest processes have their process pipe open. Allocations made while the renderer
- * started are not counted. */
+ * how many guest processes have their process pipe open. The allocations of the renderer's
+ * own device (made again after a GPU reset) and of every guest process's device are counted;
+ * those made while the renderer started are not. */
 typedef struct dsa_gfx_memory_stats {
     uint64_t device_local_bytes;
     uint64_t host_visible_bytes;
@@ -266,6 +270,33 @@ typedef struct dsa_gfx_memory_stats {
 
 /* Fills `stats`. Returns 0 on success, -1 when the renderer is not running. */
 DSA_GFX_EXPORT int dsa_gfx_get_memory_stats(dsa_gfx_memory_stats* stats);
+
+/* The kinds of dsa_gfx_memory_stats, as the arrays below index them. */
+#define DSA_GFX_MEMORY_DEVICE_LOCAL 0
+#define DSA_GFX_MEMORY_HOST_VISIBLE 1
+#define DSA_GFX_MEMORY_IMPORTED 2
+#define DSA_GFX_MEMORY_KINDS 3
+/* How many of the guest devices that hold the most the owners name. */
+#define DSA_GFX_MEMORY_LARGEST_DEVICES 4
+
+/* The same live allocations by owner, so a log says whose the renderer's GPU memory is: the
+ * renderer's own device (the color buffer behind every gralloc buffer: window buffers, hardware
+ * bitmaps, decoded video frames, and the task windows' textures imported from Direct3D), and
+ * the guest processes' devices (what each guest process allocates through Vulkan itself: its
+ * images and buffers, and the copies of its host-visible memory), each by kind; how many guest
+ * devices hold memory, and the bytes of the ones that hold the most, largest first. */
+typedef struct dsa_gfx_memory_owners {
+    uint64_t renderer_bytes[DSA_GFX_MEMORY_KINDS];
+    uint64_t guest_bytes[DSA_GFX_MEMORY_KINDS];
+    uint64_t largest_guest_device_bytes[DSA_GFX_MEMORY_LARGEST_DEVICES];
+    uint32_t renderer_count[DSA_GFX_MEMORY_KINDS];
+    uint32_t guest_count[DSA_GFX_MEMORY_KINDS];
+    uint32_t guest_devices;
+    uint32_t reserved;
+} dsa_gfx_memory_owners;
+
+/* Fills `owners`. Returns 0 on success, -1 when the renderer is not running. */
+DSA_GFX_EXPORT int dsa_gfx_get_memory_owners(dsa_gfx_memory_owners* owners);
 
 #ifdef __cplusplus
 }

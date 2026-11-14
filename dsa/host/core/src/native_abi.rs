@@ -21,6 +21,7 @@ use std::io::{Read, Seek};
 use dsa_protocol::control;
 use dsa_protocol::host_api::types;
 
+use crate::apk_info::axml;
 use crate::apk_info::zip::Archive;
 
 /// The guest's own ABI.
@@ -221,10 +222,299 @@ pub fn choose(
     }
 }
 
+/// Whether an app with `libraries` runs only through ARM translation: it has arm64-v8a
+/// libraries and no x86_64 ones.
+pub fn needs_translation(libraries: &NativeLibraries) -> bool {
+    libraries.has(ARM64) && !libraries.has(X86_64)
+}
+
+/// The ABI the package installer is told to install an app with `libraries` for, as
+/// [`choose`] says, or why the app is not installed at all. `translation` says whether the
+/// running Android translates ARM code (`None` when it cannot be asked); it is asked only when
+/// the answer depends on it.
+///
+/// An app whose 64-bit code is for arm64-v8a only is installed as arm64-v8a while translation
+/// is on, and refused with [`TranslationOff`] while it is off: Android would refuse it too, in
+/// words that do not say translation is the way out. When translation cannot be asked, the app
+/// is left to Android.
+pub fn install_abi(
+    libraries: &NativeLibraries,
+    translation: impl FnOnce() -> Option<bool>,
+) -> Result<Option<&'static str>, TranslationOff> {
+    if needs_translation(libraries) {
+        return match translation() {
+            Some(true) => Ok(Some(ARM64)),
+            Some(false) => Err(TranslationOff),
+            None => Ok(None),
+        };
+    }
+    Ok(choose(libraries, || translation() == Some(true)))
+}
+
+/// Why an app is not installed: its 64-bit native code is for arm64-v8a only, which the guest
+/// runs through ARM translation, and the running Android does not translate ARM code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TranslationOff;
+
+impl TranslationOff {
+    /// A stable code for programs, such as the install window, that say it in the user's
+    /// language.
+    pub fn code(self) -> &'static str {
+        "translation-off"
+    }
+}
+
+impl fmt::Display for TranslationOff {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(
+            "the app's native code is for arm64-v8a only, which DSA's Android runs through ARM \
+             translation, and ARM translation is not on in the running Android. Turn it on \
+             under ARM apps, restart Android and install the app again",
+        )
+    }
+}
+
 /// Whether `abilist`, the guest's `ro.product.cpu.abilist`, holds arm64-v8a, which it does
 /// only while a translator is in place.
 pub fn translates_arm64(abilist: &str) -> bool {
     abilist.split(',').any(|abi| abi.trim() == ARM64)
+}
+
+/// The 32-bit ABIs. The guest is 64-bit only: it has no 32-bit zygote and no 32-bit system
+/// libraries, so it runs none of their code.
+pub const ABIS_32_BIT: [&str; 3] = ["x86", "armeabi-v7a", "armeabi"];
+
+/// Whether `abi` is a 32-bit ABI.
+pub fn is_32_bit(abi: &str) -> bool {
+    ABIS_32_BIT.contains(&abi)
+}
+
+/// The 64-bit ABI of the same processor family as the 32-bit ABI `abi`: where a device has no
+/// 32-bit ABI, an app's code for this one is what Android installs instead.
+fn wide_abi(abi: &str) -> Option<&'static str> {
+    match abi {
+        "x86" => Some(X86_64),
+        "armeabi-v7a" | "armeabi" => Some(ARM64),
+        _ => None,
+    }
+}
+
+/// Whether the native libraries an installed app's APKs hold include code for a 32-bit ABI.
+pub fn has_32_bit_code(libraries: &NativeLibraries) -> bool {
+    libraries.abis().any(is_32_bit)
+}
+
+/// What Chromium says when a build made to run as 32-bit code starts as 64-bit code, which
+/// for it holds only WebView: "Starting in 64-bit mode requires the 64-bit native library".
+pub const CHROMIUM_32_BIT_BUILD: &str = "64-bit native library";
+
+/// Whether an app that ended for want of native code (`detail`, the line of its crash record
+/// that says so) is a build made to run as 32-bit code, whose 64-bit build has to be installed
+/// instead: its APKs on the device hold 32-bit code, running it as ARM is no way out (it has
+/// no ARM code, or runs as ARM already), and either its 64-bit code leaves out libraries its
+/// 32-bit code has or the app says it is such a build.
+pub fn needs_64_bit_build(libraries: &NativeLibraries, switch: RunAsArm, detail: &str) -> bool {
+    let no_way_out = switch.on || switch.unavailable == Some(RunAsArmUnavailable::NoArmLibraries);
+    let partial = libraries
+        .abis()
+        .any(|abi| wide_abi(abi).is_some_and(|wide| !libraries.covers(wide, abi)));
+    has_32_bit_code(libraries) && no_way_out && (partial || detail.contains(CHROMIUM_32_BIT_BUILD))
+}
+
+/// The framework's resource ID of `android:use32bitAbi`, which [`NativeCode`] reads.
+const USE_32BIT_ABI: u32 = 0x0101_0515;
+
+/// The largest manifest [`NativeCode`] reads.
+const MAX_MANIFEST: usize = 4 * 1024 * 1024;
+
+/// What an app's APKs hold of native code, read before Android sees them, to tell an app the
+/// guest cannot run at all ([`NativeCode::wont_run`]).
+///
+/// Unlike [`NativeLibraries`], it leaves empty files out of the code. Chromium's split builds
+/// put an empty `libplaceholder.so` under an ABI whose code is elsewhere, only so that Android
+/// installs the app for that ABI: the 32-bit builds of Chrome hold one under `arm64-v8a` or
+/// `x86_64`, and all their own code under the 32-bit ABI.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct NativeCode {
+    /// The libraries that are not empty, by ABI.
+    code: NativeLibraries,
+    /// Every ABI with a file under `lib/<abi>/`, empty or not.
+    folders: BTreeSet<String>,
+    /// The manifest asks Android to run the app's 32-bit code where a device has both
+    /// (`android:use32bitAbi`).
+    prefers_32_bit: bool,
+    /// The app uses a static shared library (`<uses-static-library>`), which can hold its
+    /// native code for it.
+    shared_library: bool,
+}
+
+impl NativeCode {
+    pub fn new() -> NativeCode {
+        NativeCode::default()
+    }
+
+    /// Adds the archive entry `entry` of `size` bytes, when it is a native library.
+    pub fn add_entry(&mut self, entry: &str, size: u64) {
+        let Some(rest) = entry.strip_prefix("lib/") else {
+            return;
+        };
+        let Some((abi, name)) = rest.split_once('/') else {
+            return;
+        };
+        if !valid_abi(abi) || !valid_library(name) {
+            return;
+        }
+        if self.folders.len() < MAX_ABIS || self.folders.contains(abi) {
+            self.folders.insert(abi.to_string());
+        }
+        if size > 0 {
+            self.code.add(abi, name);
+        }
+    }
+
+    /// Takes what the binary manifest `document` says of the app's native code. A split's
+    /// manifest has no `application` element and changes nothing.
+    pub fn add_manifest(&mut self, document: &axml::Document) {
+        let flag = |element: &axml::Element, id: u32, name: &str| {
+            element.integer(id, name).is_some_and(|value| value != 0)
+        };
+        for element in &document.elements {
+            if element.depth == 1 && element.name == "application" {
+                self.prefers_32_bit |= flag(element, USE_32BIT_ABI, "use32bitAbi");
+            }
+            if element.depth == 2 && element.name == "uses-static-library" {
+                self.shared_library = true;
+            }
+        }
+    }
+
+    /// The native code of the APK `archive` is, with its manifest when it can be read; Android
+    /// judges a manifest that cannot.
+    pub fn of_archive<R: Read + Seek>(archive: &mut Archive<R>) -> NativeCode {
+        let mut code = NativeCode::new();
+        for entry in &archive.entries {
+            code.add_entry(&entry.name, entry.size());
+        }
+        if let Some(entry) = archive.entry("AndroidManifest.xml").cloned() {
+            if let Ok(document) = archive
+                .read(&entry, MAX_MANIFEST)
+                .and_then(|data| axml::parse(&data))
+            {
+                code.add_manifest(&document);
+            }
+        }
+        code
+    }
+
+    /// The native code of the APK `reader` holds.
+    pub fn read<R: Read + Seek>(reader: R) -> Result<NativeCode, String> {
+        let mut archive = Archive::open(reader)?;
+        Ok(NativeCode::of_archive(&mut archive))
+    }
+
+    /// The native code of an APK and its splits together.
+    pub fn merged<'a>(apks: impl IntoIterator<Item = &'a NativeCode>) -> NativeCode {
+        let mut all = NativeCode::new();
+        for apk in apks {
+            all.code = NativeLibraries::merged([&all.code, &apk.code]);
+            for abi in &apk.folders {
+                if all.folders.len() < MAX_ABIS || all.folders.contains(abi) {
+                    all.folders.insert(abi.clone());
+                }
+            }
+            all.prefers_32_bit |= apk.prefers_32_bit;
+            all.shared_library |= apk.shared_library;
+        }
+        all
+    }
+
+    /// Why the guest cannot run this app's native code at all, or `None` when it may. Code for
+    /// arm64-v8a counts as code the guest runs, since ARM translation can be turned on; whether
+    /// it is on decides only the ABI the app is installed for ([`choose`]).
+    pub fn wont_run(&self) -> Option<WontRun> {
+        if self.code.is_empty() {
+            return None;
+        }
+        let runs = self.code.has(X86_64) || self.code.has(ARM64);
+        if !runs {
+            // An app may keep its 64-bit code in a static shared library it uses, with an
+            // empty file under the 64-bit ABI so that Android installs it for that ABI, as the
+            // Trichrome builds of Chrome and WebView do. Unless it asks to run as 32-bit code,
+            // its 64-bit code is in that library.
+            let declares_64_bit = self.folders.contains(X86_64) || self.folders.contains(ARM64);
+            if self.shared_library && declares_64_bit && !self.prefers_32_bit {
+                return None;
+            }
+            let abis: Vec<String> = self.code.abis().map(str::to_string).collect();
+            return Some(if abis.iter().all(|abi| is_32_bit(abi)) {
+                WontRun::ThirtyTwoBitOnly { abis }
+            } else {
+                WontRun::OtherAbis { abis }
+            });
+        }
+        if self.prefers_32_bit {
+            // A build made to run as 32-bit code whose 64-bit code is only a part of the app,
+            // as Chrome's 32-bit builds carry only WebView in their 64-bit library.
+            for abi in self.code.abis() {
+                if let Some(wide) = wide_abi(abi) {
+                    if self.folders.contains(wide) && !self.code.covers(wide, abi) {
+                        return Some(WontRun::ThirtyTwoBitBuild {
+                            abi: abi.to_string(),
+                            wide,
+                        });
+                    }
+                }
+            }
+        }
+        None
+    }
+}
+
+/// Why the guest cannot run an app's native code, found before Android sees the app.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WontRun {
+    /// All of its native code is for 32-bit ABIs (`abis`).
+    ThirtyTwoBitOnly { abis: Vec<String> },
+    /// Its native code is for ABIs the guest does not run (`abis`), such as riscv64.
+    OtherAbis { abis: Vec<String> },
+    /// It asks Android to run its 32-bit code for `abi`, and its code for the 64-bit ABI
+    /// `wide` leaves out libraries the 32-bit code has, so on a 64-bit-only Android it would
+    /// start without them.
+    ThirtyTwoBitBuild { abi: String, wide: &'static str },
+}
+
+impl WontRun {
+    /// A stable code for programs, such as the install window, that say it in the user's
+    /// language.
+    pub fn code(&self) -> &'static str {
+        "unsupported-abi"
+    }
+}
+
+impl fmt::Display for WontRun {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        const RUNS: &str = "DSA's Android runs 64-bit code only: x86_64, and arm64-v8a through \
+                            ARM translation";
+        match self {
+            WontRun::ThirtyTwoBitOnly { abis } => write!(
+                f,
+                "the app's native code is 32-bit only ({}), and {RUNS}. Get the app's x86_64 or \
+                 arm64-v8a build",
+                abis.join(", ")
+            ),
+            WontRun::OtherAbis { abis } => write!(
+                f,
+                "the app's native code is for {} only, and {RUNS}. Get the app's x86_64 or \
+                 arm64-v8a build",
+                abis.join(", ")
+            ),
+            WontRun::ThirtyTwoBitBuild { abi, wide } => write!(
+                f,
+                "this is a build of the app made to run as 32-bit code ({abi}); its {wide} code \
+                 is only part of the app, and {RUNS}. Get the app's 64-bit build"
+            ),
+        }
+    }
 }
 
 /// Why the "Run as ARM" switch of an app cannot be changed.
@@ -465,6 +755,10 @@ pub enum Notice {
     NeedsErase,
     /// The app was not installed again.
     Failed,
+    /// The app ended for want of native code, its APKs hold code for a 32-bit ABI, and it
+    /// cannot run as ARM: it is a build the guest does not run, and its 64-bit build has to
+    /// be installed instead. A click removes it.
+    Needs64Bit,
 }
 
 impl Notice {
@@ -474,6 +768,7 @@ impl Notice {
             Notice::Done => "done",
             Notice::NeedsErase => "needs-erase",
             Notice::Failed => "failed",
+            Notice::Needs64Bit => "needs-64-bit",
         }
     }
 
@@ -500,6 +795,7 @@ impl Notice {
             Notice::Done,
             Notice::NeedsErase,
             Notice::Failed,
+            Notice::Needs64Bit,
         ]
         .into_iter()
         .find(|notice| notice.word() == word)?;
@@ -551,6 +847,20 @@ impl Notice {
                 format!("{label}을(를) 다시 설치하지 않았습니다"),
                 "Android가 ARM으로 실행하도록 다시 설치하지 않았습니다. DSA 설정의 앱 \
                  화면에서 다시 해 볼 수 있습니다."
+                    .into(),
+            ),
+            (Notice::Needs64Bit, false) => (
+                format!("{label} cannot run in DSA"),
+                "This build of it runs as 32-bit code, and DSA's Android runs 64-bit code only. \
+                 Uninstall it and install its x86_64 build instead (or its arm64-v8a build, \
+                 with ARM translation on)."
+                    .into(),
+            ),
+            (Notice::Needs64Bit, true) => (
+                format!("{label}을(를) DSA에서 실행할 수 없습니다"),
+                "이 빌드는 32비트 코드로 실행되는데, DSA의 Android는 64비트 코드만 \
+                 실행합니다. 이 앱을 지우고 x86_64판을 대신 설치하십시오(ARM 번역이 켜져 \
+                 있으면 arm64-v8a판도 됩니다)."
                     .into(),
             ),
         }
@@ -675,6 +985,74 @@ mod tests {
     }
 
     #[test]
+    fn fr25_an_app_with_x86_64_and_arm64_code_is_installed_as_x86_64() {
+        for translation in [Some(true), Some(false), None] {
+            assert_eq!(
+                install_abi(&apk(BOTH), || translation),
+                Ok(Some(X86_64)),
+                "{translation:?}"
+            );
+        }
+        // Partial x86_64 code runs as ARM only while translation is on.
+        assert_eq!(
+            install_abi(&apk(X86_PARTIAL), || Some(true)),
+            Ok(Some(ARM64))
+        );
+        assert_eq!(
+            install_abi(&apk(X86_PARTIAL), || Some(false)),
+            Ok(Some(X86_64))
+        );
+    }
+
+    #[test]
+    fn fr25_an_app_with_arm64_code_only_is_installed_as_arm64_while_translation_is_on() {
+        assert!(needs_translation(&apk(ARM_ONLY)));
+        assert_eq!(install_abi(&apk(ARM_ONLY), || Some(true)), Ok(Some(ARM64)));
+        // Android judges it when the running Android cannot be asked.
+        assert_eq!(install_abi(&apk(ARM_ONLY), || None), Ok(None));
+    }
+
+    #[test]
+    fn fr25_an_app_with_arm64_code_only_is_refused_with_its_reason_while_translation_is_off() {
+        let refused = install_abi(&apk(ARM_ONLY), || Some(false)).unwrap_err();
+        assert_eq!(refused.code(), "translation-off");
+        let text = refused.to_string();
+        assert!(text.contains("arm64-v8a only"), "{text}");
+        assert!(text.contains("ARM translation is not on"), "{text}");
+        assert!(text.contains("Turn it on under ARM apps"), "{text}");
+        // ARM code beside 32-bit code needs translation as much.
+        let mut with_32_bit = apk(ARM_ONLY);
+        with_32_bit.add("armeabi-v7a", "libmain.so");
+        assert_eq!(
+            install_abi(&with_32_bit, || Some(false)),
+            Err(TranslationOff)
+        );
+    }
+
+    #[test]
+    fn fr25_an_app_with_32_bit_code_only_is_still_refused() {
+        // The install refuses it before Android sees it, whatever translation does.
+        for abis in [
+            &["lib/armeabi-v7a/libmain.so"][..],
+            &["lib/x86/libmain.so"][..],
+        ] {
+            let mut code = NativeCode::new();
+            for entry in abis {
+                code.add_entry(entry, 1);
+            }
+            assert!(
+                matches!(code.wont_run(), Some(WontRun::ThirtyTwoBitOnly { .. })),
+                "{abis:?}"
+            );
+            // Neither 64-bit ABI is ever chosen for it.
+            let libraries = apk(abis);
+            for translation in [Some(true), Some(false), None] {
+                assert_eq!(install_abi(&libraries, || translation), Ok(None));
+            }
+        }
+    }
+
+    #[test]
     fn fr25_translation_is_asked_only_when_the_choice_depends_on_it() {
         let asked = std::cell::Cell::new(false);
         let ask = || {
@@ -749,6 +1127,7 @@ mod tests {
             Notice::Done,
             Notice::NeedsErase,
             Notice::Failed,
+            Notice::Needs64Bit,
         ] {
             let key = notice.key("com.example.game");
             assert!(key.starts_with(crate::notifications::HOST_KEY_PREFIX));
@@ -760,6 +1139,194 @@ mod tests {
         assert_eq!(Notice::parse("dsa:run-as-arm:offer:not a package"), None);
         assert_eq!(Notice::parse("dsa:run-as-arm:other:com.example.game"), None);
         assert_eq!(Notice::parse("0|com.example.game|1|null|10100"), None);
+    }
+
+    /// The native code of an APK of `files` (each with content, or empty), whose manifest asks
+    /// to run as 32-bit code when `prefers_32_bit`.
+    fn code(files: &[(&str, bool)], prefers_32_bit: bool) -> NativeCode {
+        use crate::apk_info::axml::TYPE_INT_BOOLEAN;
+        use crate::apk_info::fixture::{document, Attr, El};
+        let application = if prefers_32_bit {
+            vec![Attr::Typed(
+                "use32bitAbi",
+                USE_32BIT_ABI,
+                TYPE_INT_BOOLEAN,
+                u32::MAX,
+            )]
+        } else {
+            Vec::new()
+        };
+        let manifest = document(&[
+            El(
+                "manifest",
+                vec![Attr::Str("package", 0, "com.example.game")],
+                false,
+            ),
+            El("application", application, false),
+        ]);
+        let mut entries: Vec<(&str, &[u8])> = vec![("AndroidManifest.xml", &manifest[..])];
+        for (name, content) in files {
+            entries.push((*name, if *content { &b"\x7fELF"[..] } else { &b""[..] }));
+        }
+        NativeCode::read(Cursor::new(archive(&entries, &[]))).expect("an APK")
+    }
+
+    #[test]
+    fn fr11_an_app_without_64_bit_code_is_told_apart() {
+        // Code the guest runs, or no code at all.
+        assert_eq!(
+            code(&[("lib/x86_64/libmain.so", true)], false).wont_run(),
+            None
+        );
+        assert_eq!(
+            code(&[("lib/arm64-v8a/libmain.so", true)], false).wont_run(),
+            None
+        );
+        assert_eq!(code(&[], false).wont_run(), None);
+        assert_eq!(
+            code(&[("lib/x86/libplaceholder.so", false)], false).wont_run(),
+            None
+        );
+        // 32-bit code only, with or without an empty 64-bit placeholder.
+        let x86 = code(
+            &[
+                ("lib/x86/libmain.so", true),
+                ("lib/armeabi-v7a/libmain.so", true),
+            ],
+            false,
+        );
+        assert_eq!(
+            x86.wont_run(),
+            Some(WontRun::ThirtyTwoBitOnly {
+                abis: vec!["armeabi-v7a".into(), "x86".into()]
+            })
+        );
+        let placeholder = code(
+            &[
+                ("lib/armeabi-v7a/libmain.so", true),
+                ("lib/arm64-v8a/libplaceholder.so", false),
+            ],
+            true,
+        );
+        assert!(matches!(
+            placeholder.wont_run(),
+            Some(WontRun::ThirtyTwoBitOnly { .. })
+        ));
+        // Code for ABIs the guest does not run at all.
+        assert_eq!(
+            code(&[("lib/riscv64/libmain.so", true)], false).wont_run(),
+            Some(WontRun::OtherAbis {
+                abis: vec!["riscv64".into()]
+            })
+        );
+        // A build made to run as 32-bit code whose 64-bit code is only a part of it.
+        let partial = code(
+            &[
+                ("lib/x86/libmonochrome.so", true),
+                ("lib/x86/libchrome.so", true),
+                ("lib/x86_64/libmonochrome.so", true),
+            ],
+            true,
+        );
+        assert_eq!(
+            partial.wont_run(),
+            Some(WontRun::ThirtyTwoBitBuild {
+                abi: "x86".into(),
+                wide: X86_64
+            })
+        );
+        let text = partial.wont_run().unwrap().to_string();
+        assert!(
+            text.contains("32-bit code (x86)") && text.contains("64-bit build"),
+            "{text}"
+        );
+        // The same files without use32bitAbi run as x86_64, whose code Android picks.
+        let wide = code(
+            &[
+                ("lib/x86/libmonochrome.so", true),
+                ("lib/x86/libchrome.so", true),
+                ("lib/x86_64/libmonochrome.so", true),
+            ],
+            false,
+        );
+        assert_eq!(wide.wont_run(), None);
+        // A split's code counts with its base's manifest.
+        let base = code(&[], true);
+        let split = code(&[("lib/x86/libmain.so", true)], false);
+        assert!(NativeCode::merged([&base, &split]).wont_run().is_some());
+        let split64 = code(&[("lib/x86_64/libmain.so", true)], false);
+        assert_eq!(
+            NativeCode::merged([&base, &split, &split64]).wont_run(),
+            None
+        );
+    }
+
+    #[test]
+    fn fr25_a_32_bit_build_that_ended_for_want_of_code_is_told_to_get_its_64_bit_build() {
+        fn libraries(sets: &[(&str, &[&str])]) -> NativeLibraries {
+            let mut all = NativeLibraries::new();
+            for (abi, names) in sets {
+                for name in names.iter() {
+                    all.add(abi, name);
+                }
+            }
+            all
+        }
+        let no_arm = RunAsArm {
+            on: false,
+            unavailable: Some(RunAsArmUnavailable::NoArmLibraries),
+        };
+        let chromium = "java.lang.RuntimeException: Starting in 64-bit mode requires the 64-bit \
+                        native library.";
+        // Chrome's 32-bit build: the same library name under both ABIs, and Chromium says it.
+        let monochrome = libraries(&[
+            ("x86", &["libmonochrome.so"][..]),
+            (X86_64, &["libmonochrome.so"][..]),
+        ]);
+        assert!(needs_64_bit_build(&monochrome, no_arm, chromium));
+        assert!(!needs_64_bit_build(
+            &monochrome,
+            no_arm,
+            "dlopen failed: libfoo.so"
+        ));
+        // A 64-bit ABI that leaves out a 32-bit library says so itself.
+        let partial = libraries(&[
+            ("x86", &["libmain.so", "libextra.so"][..]),
+            (X86_64, &["libmain.so"][..]),
+        ]);
+        assert!(needs_64_bit_build(
+            &partial,
+            no_arm,
+            "dlopen failed: libextra.so"
+        ));
+        // An app with 64-bit code only, or one ARM translation can still help, is not.
+        let wide = libraries(&[(X86_64, &["libmain.so"][..])]);
+        assert!(!needs_64_bit_build(&wide, no_arm, chromium));
+        let off = RunAsArm {
+            on: false,
+            unavailable: Some(RunAsArmUnavailable::TranslationOff),
+        };
+        assert!(!needs_64_bit_build(&partial, off, "dlopen failed"));
+        // A 32-bit ARM app that runs as arm64 already has no way out either.
+        let arm = libraries(&[
+            ("armeabi-v7a", &["libmain.so", "libgame.so"][..]),
+            (ARM64, &["libmain.so"][..]),
+        ]);
+        let on = RunAsArm {
+            on: true,
+            unavailable: Some(RunAsArmUnavailable::ArmOnly),
+        };
+        assert!(needs_64_bit_build(&arm, on, "dlopen failed: libgame.so"));
+        let (title, text) = Notice::Needs64Bit.text("Chrome", false);
+        assert!(
+            title.contains("Chrome") && text.contains("x86_64 build"),
+            "{text}"
+        );
+        let (title, text) = Notice::Needs64Bit.text("Chrome", true);
+        assert!(
+            title.contains("Chrome") && text.contains("x86_64판"),
+            "{text}"
+        );
     }
 
     #[test]

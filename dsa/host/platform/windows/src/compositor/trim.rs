@@ -3,14 +3,20 @@
 //! The window manager holds every task's frames. While windows are shown
 //! that memory is in use; once the last one has closed or been minimized, most of it is not,
 //! but Windows takes it back only when it runs short, so until then it counts as the window
-//! manager's. As soon as no task window is shown ([`IdleTrim`]), the window
-//! manager asks the GPU driver to free what it keeps for its device beyond live resources,
+//! manager's. As soon as no task window is shown ([`IdleTrim`]), and again every five minutes
+//! while none is (`IDLE_TRIM_REPEAT`), the window manager asks the GPU driver to free what it keeps for its device beyond live resources,
 //! decommits the free memory of every heap in the process (heaps keep freed blocks committed
 //! for the next allocation, so a window's worth of freed buffers would otherwise stay charged
 //! to the process), and empties its working set: pages it touches again come back on their
 //! own, and the rest go to the standby list, free for anything else on the host. Emptying the
 //! working set alone frees nothing: the pages stay committed, only paged out. The renderer
 //! itself stays: the guest's surfaces live in it, and a window that opens again shows at once.
+//!
+//! While windows are shown, the GPU driver's spare memory and the default heap's free memory go
+//! back too, and the working set stays: when the shown windows are still, every five minutes
+//! whether or not they draw, and a few seconds after the last video decoder closed (the
+//! decoders, their Direct3D device and Media Foundation free their memory into the heap and the
+//! driver, which keep it committed until asked to give it back).
 //!
 //! Each give-back logs what the process still holds (working set, private commit and GPU
 //! memory) and its committed memory by owner (`committed`), so a log shows where the window
@@ -126,47 +132,76 @@ pub fn give_back(
     }
 }
 
+/// Gives back the GPU driver's spare memory and the default heap's free memory while windows
+/// may be shown, and logs why (`reason`), what the process held before and holds after, and
+/// whose the rest is. The working set stays, so the next frame finds its pages resident.
+fn give_back_spare(
+    gpu: Option<&Gpu>,
+    renderer: Option<&dyn DisplayPresenter>,
+    logger: Option<&CompositorLogger>,
+    reason: &str,
+) {
+    let before = held(gpu);
+    if let Some(gpu) = gpu {
+        gpu.trim();
+    }
+    committed::compact_heaps();
+    let after = held(gpu);
+    note(
+        logger,
+        &format!(
+            "{reason}: gave back the GPU driver's spare memory and the heap's free memory; {}",
+            held_line(&before, &after)
+        ),
+    );
+    note(logger, &by_owner(&after));
+    if let Some(renderer) = renderer {
+        note(logger, &renderer_line(renderer.memory().as_ref()));
+    }
+}
+
 /// Checks `idle` every second until `stop` is set, and gives memory back when it says so.
 /// `quiet_for` says how long ago the last frame arrived: while windows are shown but still,
 /// only the GPU driver's spare memory goes back, and the working set stays, so the next frame
-/// finds its pages resident.
+/// finds its pages resident. `let_go` is set when the window manager let go of something
+/// large (its video decoders, once the last video closed); what that freed goes back a few
+/// seconds later, whether or not windows are shown.
 pub fn run(
     idle: Arc<Mutex<IdleTrim>>,
     gpu: Option<Arc<Gpu>>,
     renderer: Option<Arc<dyn DisplayPresenter>>,
     quiet_for: Box<dyn Fn() -> Duration + Send>,
+    let_go: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
     logger: Option<Arc<CompositorLogger>>,
 ) {
     while !stop.load(Ordering::Relaxed) {
         thread::sleep(POLL);
-        let (due, quiet_due) = {
+        let (due, quiet_due, spare_due) = {
             let mut idle = idle.lock().unwrap_or_else(|e| e.into_inner());
-            (idle.due(Instant::now()), idle.quiet_due(quiet_for()))
+            let now = Instant::now();
+            if let_go.swap(false, Ordering::SeqCst) {
+                idle.let_go(now);
+            }
+            let spare_due = idle.spare_due(now);
+            (idle.due(now), idle.quiet_due(quiet_for()), spare_due)
         };
         if due {
             give_back(gpu.as_deref(), renderer.as_deref(), logger.as_deref());
         } else if quiet_due {
-            if let Some(gpu) = gpu.as_deref() {
-                let before = held(Some(gpu));
-                gpu.trim();
-                committed::compact_heaps();
-                let after = held(Some(gpu));
-                note(
-                    logger.as_deref(),
-                    &format!(
-                        "the shown windows are still: gave back the GPU driver's spare memory; {}",
-                        held_line(&before, &after)
-                    ),
-                );
-                note(logger.as_deref(), &by_owner(&after));
-                if let Some(renderer) = renderer.as_deref() {
-                    note(
-                        logger.as_deref(),
-                        &renderer_line(renderer.memory().as_ref()),
-                    );
-                }
-            }
+            give_back_spare(
+                gpu.as_deref(),
+                renderer.as_deref(),
+                logger.as_deref(),
+                "the shown windows are still",
+            );
+        } else if spare_due {
+            give_back_spare(
+                gpu.as_deref(),
+                renderer.as_deref(),
+                logger.as_deref(),
+                "windows are shown, or the last video decoder closed",
+            );
         }
     }
 }

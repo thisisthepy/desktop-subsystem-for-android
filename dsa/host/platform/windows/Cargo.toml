@@ -26,13 +26,22 @@ windows-sys = { version = "0.61", features = [
     "Win32_Graphics_Gdi",
     # The VM's network: the host's adapters and the guest's addresses as the host sees them.
     "Win32_NetworkManagement_IpHelper",
+    # The guest's DNS queries, answered by Windows' DNS client (DnsQueryRaw, DnsQueryEx).
+    "Win32_NetworkManagement_Dns",
     "Win32_NetworkManagement_Ndis",
     "Win32_Networking_WinHttp",
     "Win32_Networking_WinSock",
     "Win32_Security",
     "Win32_Security_Authorization",
+    # Each user's backup key and KeyMint root key: DPAPI, and the TPM through NCrypt.
+    "Win32_Security_Cryptography",
+    # Passkeys through Windows Hello: webauthn.dll's structures (its functions are loaded at
+    # run time, so a Windows without it still starts).
+    "Win32_Networking_WindowsWebServices",
     "Win32_Storage_FileSystem",
     "Win32_Storage_Vhd",
+    # The question whether an app may put a shortcut on the desktop: a task dialog, which only
+    # version 6 of the common controls has, loaded under an activation context of its own.
     # Freeing the path of a known folder the shell gives (the shared folders).
     "Win32_System_Com",
     "Win32_System_HostComputeSystem",
@@ -107,6 +116,9 @@ windows = { version = "0.62", features = [
     "Win32_UI_Shell",
     "Win32_UI_Shell_Common",
     "Win32_UI_Shell_PropertiesSystem",
+    # The media buttons in a task window's taskbar preview: ITaskbarList3's buttons carry
+    # icons (HICON).
+    "Win32_UI_WindowsAndMessaging",
     # Text input in each task window: the text services framework's thread manager, document
     # manager and text store, which every input method composes through.
     "Win32_UI_TextServices",
@@ -134,6 +146,13 @@ windows = { version = "0.62", features = [
     "Win32_Media_Audio",
     # Windows' media controls for the media sessions of the user's Android.
     "Media",
+    # Speech and spelling for the user's Android: Windows' voices, speech recognition and
+    # spell checker.
+    "Media_SpeechSynthesis",
+    "Media_SpeechRecognition",
+    "Media_Core",
+    "Globalization",
+    "Win32_Globalization",
     # Windows' share window, for what apps in the user's Android share with the PC.
     "ApplicationModel_DataTransfer",
 ] }

@@ -559,6 +559,50 @@ public  final class WidgetProvider extends
     
   }
 
+  public static final int RECONFIGURABLE_FIELD_NUMBER = 14;
+  private boolean reconfigurable_;
+  /**
+   * <pre>
+   * Whether the widget can be set up again once placed: it has a configuration activity, and
+   * its app says so (the reconfigurable widget feature). The widget's menu then offers its
+   * settings, which ReconfigureWidget opens.
+   * </pre>
+   *
+   * <code>bool reconfigurable = 14;</code>
+   * @return The reconfigurable.
+   */
+  @java.lang.Override
+  public boolean getReconfigurable() {
+    return reconfigurable_;
+  }
+  /**
+   * <pre>
+   * Whether the widget can be set up again once placed: it has a configuration activity, and
+   * its app says so (the reconfigurable widget feature). The widget's menu then offers its
+   * settings, which ReconfigureWidget opens.
+   * </pre>
+   *
+   * <code>bool reconfigurable = 14;</code>
+   * @param value The reconfigurable to set.
+   */
+  private void setReconfigurable(boolean value) {
+    
+    reconfigurable_ = value;
+  }
+  /**
+   * <pre>
+   * Whether the widget can be set up again once placed: it has a configuration activity, and
+   * its app says so (the reconfigurable widget feature). The widget's menu then offers its
+   * settings, which ReconfigureWidget opens.
+   * </pre>
+   *
+   * <code>bool reconfigurable = 14;</code>
+   */
+  private void clearReconfigurable() {
+    
+    reconfigurable_ = false;
+  }
+
   public static io.github.thisisthepy.dsa.control.v1.WidgetProvider parseFrom(
       java.nio.ByteBuffer data)
       throws com.google.protobuf.InvalidProtocolBufferException {
@@ -1220,6 +1264,52 @@ public  final class WidgetProvider extends
       return this;
     }
 
+    /**
+     * <pre>
+     * Whether the widget can be set up again once placed: it has a configuration activity, and
+     * its app says so (the reconfigurable widget feature). The widget's menu then offers its
+     * settings, which ReconfigureWidget opens.
+     * </pre>
+     *
+     * <code>bool reconfigurable = 14;</code>
+     * @return The reconfigurable.
+     */
+    @java.lang.Override
+    public boolean getReconfigurable() {
+      return instance.getReconfigurable();
+    }
+    /**
+     * <pre>
+     * Whether the widget can be set up again once placed: it has a configuration activity, and
+     * its app says so (the reconfigurable widget feature). The widget's menu then offers its
+     * settings, which ReconfigureWidget opens.
+     * </pre>
+     *
+     * <code>bool reconfigurable = 14;</code>
+     * @param value The reconfigurable to set.
+     * @return This builder for chaining.
+     */
+    public Builder setReconfigurable(boolean value) {
+      copyOnWrite();
+      instance.setReconfigurable(value);
+      return this;
+    }
+    /**
+     * <pre>
+     * Whether the widget can be set up again once placed: it has a configuration activity, and
+     * its app says so (the reconfigurable widget feature). The widget's menu then offers its
+     * settings, which ReconfigureWidget opens.
+     * </pre>
+     *
+     * <code>bool reconfigurable = 14;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearReconfigurable() {
+      copyOnWrite();
+      instance.clearReconfigurable();
+      return this;
+    }
+
     // @@protoc_insertion_point(builder_scope:dsa.control.v1.WidgetProvider)
   }
   @java.lang.Override
@@ -1249,11 +1339,12 @@ public  final class WidgetProvider extends
             "resizeMode_",
             "needsConfiguration_",
             "appLabel_",
+            "reconfigurable_",
           };
           java.lang.String info =
-              "\u0000\r\u0000\u0000\u0001\r\r\u0000\u0000\u0000\u0001\u0208\u0002\u0208\u0003\u0208" +
-              "\u0004\n\u0005\u000b\u0006\u000b\u0007\u000b\b\u000b\t\u000b\n\u000b\u000b\u000b" +
-              "\f\u0007\r\u0208";
+              "\u0000\u000e\u0000\u0000\u0001\u000e\u000e\u0000\u0000\u0000\u0001\u0208\u0002\u0208" +
+              "\u0003\u0208\u0004\n\u0005\u000b\u0006\u000b\u0007\u000b\b\u000b\t\u000b\n\u000b" +
+              "\u000b\u000b\f\u0007\r\u0208\u000e\u0007";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through

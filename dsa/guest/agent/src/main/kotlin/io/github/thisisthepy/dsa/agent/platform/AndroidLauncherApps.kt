@@ -75,6 +75,10 @@ class AndroidLauncherApps(
             }
         }
         val application = info.applicationInfo
+        // Deprecated for apps to declare from Android 13, but still what the package manager
+        // groups an installed app's uid by.
+        @Suppress("DEPRECATION")
+        val sharedUserId = info.sharedUserId.orEmpty()
         return LauncherApp(
             packageName = packageName,
             label = label,
@@ -89,6 +93,7 @@ class AndroidLauncherApps(
             cacheBytes = cacheBytes,
             primaryAbi = application?.let { AndroidApks.primaryAbi(it) }.orEmpty(),
             nativeLibraries = application?.let { apks.libraries(it) }.orEmpty(),
+            sharedUserId = sharedUserId,
         )
     }
 

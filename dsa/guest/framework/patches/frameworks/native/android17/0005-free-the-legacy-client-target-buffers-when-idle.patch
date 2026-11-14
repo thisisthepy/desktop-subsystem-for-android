@@ -1,0 +1,140 @@
+Subject: SurfaceFlinger: free the client target's buffers when idle in LegacyFramebufferSurface too
+
+Android 17 has two FramebufferSurface classes, and SurfaceFlinger picks one by the
+wb_framebuffersurface2 flag. With the flag off, as in this build, every physical display gets
+LegacyFramebufferSurface, the ConsumerBase one, so the release that 0004 adds to
+FramebufferSurface never runs: the two buffers of the display's size (63 MiB at 2880x2880) stay
+held after the last client composition, and the log line that says they were freed never
+appears.
+
+LegacyFramebufferSurface gets the same release, as Android 16's FramebufferSurface (the same
+ConsumerBase class) has it: when a frame composes nothing into the client target and the last
+one that did is a second old, it gives its current buffer back once that frame is presented and
+discards every free buffer in its queue. It forgets the buffer ids HWC has seen, so the next
+buffer goes to HWC whole, and tells RenderSurface (takeBuffersReleased, from 0004) to drop the
+textures it kept for them.
+
+Applies to frameworks/native at ae266dcb706d083868578cfedce381ef44488a07 (Android 17), after 0004.
+---
+diff --git a/services/surfaceflinger/DisplayHardware/LegacyFramebufferSurface.h b/services/surfaceflinger/DisplayHardware/LegacyFramebufferSurface.h
+--- a/services/surfaceflinger/DisplayHardware/LegacyFramebufferSurface.h
++++ b/services/surfaceflinger/DisplayHardware/LegacyFramebufferSurface.h
+@@ -25,6 +25,7 @@
+ #include <gui/ConsumerBase.h>
+ #include <ui/DisplayId.h>
+ #include <ui/Size.h>
++#include <utils/Timers.h>
+ 
+ // ---------------------------------------------------------------------------
+ namespace android {
+@@ -48,6 +49,8 @@
+ 
+     virtual const sp<Fence>& getClientTargetAcquireFence() const override;
+ 
++    bool takeBuffersReleased() override;
++
+     void onFirstRef() override;
+ 
+ private:
+@@ -109,6 +112,22 @@
+     bool mHasPendingRelease;
+     int mPreviousBufferSlot;
+     sp<GraphicBuffer> mPreviousBuffer;
++
++    // How long after the last frame composed into this surface its buffers are given back.
++    // The client target is as large as the display, which on a desktop is large (two buffers
++    // of 2880x2880 are 63 MiB), and a hardware composer that composes every layer itself needs
++    // it only while some layer must be composed here (a video's YUV pictures, for one). The
++    // next frame that needs it allocates the buffers again.
++    static constexpr nsecs_t kReleaseIdleBuffersAfter = 1'000'000'000; // 1 s
++    // When the last buffer was acquired (systemTime), 0 for none yet.
++    nsecs_t mLastClientFrameTime = 0;
++    // The frame being committed composed nothing here, and the last that did is old enough.
++    bool mReleaseWhenCommitted = false;
++    // The buffers were given back since takeBuffersReleased last asked.
++    bool mBuffersReleased = false;
++
++    // Gives the current buffer back to the queue and frees every buffer the queue holds.
++    void releaseIdleBuffers();
+ };
+ 
+ // ---------------------------------------------------------------------------
+diff --git a/services/surfaceflinger/DisplayHardware/LegacyFramebufferSurface.cpp b/services/surfaceflinger/DisplayHardware/LegacyFramebufferSurface.cpp
+--- a/services/surfaceflinger/DisplayHardware/LegacyFramebufferSurface.cpp
++++ b/services/surfaceflinger/DisplayHardware/LegacyFramebufferSurface.cpp
+@@ -26,6 +26,9 @@
+ #include <stdlib.h>
+ #include <string.h>
+ 
++#include <cinttypes>
++#include <utility>
++
+ #include <log/log.h>
+ #include <utils/String8.h>
+ 
+@@ -101,12 +104,19 @@
+     status_t err = acquireBufferLocked(&item, 0);
+     if (err == BufferQueue::NO_BUFFER_AVAILABLE) {
+         mDataspace = Dataspace::UNKNOWN;
++        // Nothing was composed into this surface for this frame. Once that has been so for a
++        // while, the buffers go back when the frame is committed: the display stops showing
++        // the client target with it.
++        mReleaseWhenCommitted = mCurrentBuffer != nullptr &&
++                systemTime(SYSTEM_TIME_MONOTONIC) - mLastClientFrameTime >= kReleaseIdleBuffersAfter;
+         return NO_ERROR;
+     } else if (err != NO_ERROR) {
+         ALOGE("error acquiring buffer: %s (%d)", strerror(-err), err);
+         mDataspace = Dataspace::UNKNOWN;
+         return err;
+     }
++    mLastClientFrameTime = systemTime(SYSTEM_TIME_MONOTONIC);
++    mReleaseWhenCommitted = false;
+ 
+     // If the BufferQueue has freed and reallocated a buffer in mCurrentSlot
+     // then we may have acquired the slot we already own.  If we had released
+@@ -169,6 +179,45 @@
+         mPreviousBuffer.clear();
+         mHasPendingRelease = false;
+     }
++    if (mReleaseWhenCommitted) {
++        mReleaseWhenCommitted = false;
++        releaseIdleBuffers();
++    }
++}
++
++void LegacyFramebufferSurface::releaseIdleBuffers() {
++    // The frame just presented did not show the client target, so the display is done with it
++    // once that frame's present fence signals.
++    if (mCurrentBuffer != nullptr && mCurrentBufferSlot != BufferQueue::INVALID_BUFFER_SLOT) {
++        sp<Fence> fence = mHwc.getPresentFence(mDisplayId);
++        if (fence->isValid()) {
++            status_t result = addReleaseFence(mCurrentBufferSlot, mCurrentBuffer, fence);
++            ALOGE_IF(result != NO_ERROR, "releaseIdleBuffers: failed to add the fence: %s (%d)",
++                     strerror(-result), result);
++        }
++        status_t result = releaseBufferLocked(mCurrentBufferSlot, mCurrentBuffer);
++        ALOGE_IF(result != NO_ERROR, "releaseIdleBuffers: error releasing buffer: %s (%d)",
++                 strerror(-result), result);
++    }
++    mCurrentBufferSlot = BufferQueue::INVALID_BUFFER_SLOT;
++    mCurrentBuffer.clear();
++    mCurrentFence = Fence::NO_FENCE;
++    // Frees the buffers the queue holds; the renderer's surface forgets them too. A buffer
++    // allocated again in a slot is a new one, so it goes to HWC whole.
++    status_t result = discardFreeBuffers();
++    ALOGE_IF(result != NO_ERROR, "releaseIdleBuffers: error discarding buffers: %s (%d)",
++             strerror(-result), result);
++    for (auto& id : mHwcBufferIds) {
++        id = UINT64_MAX;
++    }
++    mBuffersReleased = true;
++    ALOGI("%s: nothing composed into the client target for %" PRId64 " ms; its buffers are freed",
++          to_string(mDisplayId).c_str(),
++          ns2ms(systemTime(SYSTEM_TIME_MONOTONIC) - mLastClientFrameTime));
++}
++
++bool LegacyFramebufferSurface::takeBuffersReleased() {
++    return std::exchange(mBuffersReleased, false);
+ }
+ 
+ ui::Size LegacyFramebufferSurface::limitSize(const ui::Size& size) {

@@ -7,7 +7,16 @@
     <string name="print_printer_name">Desktop printers</string>
     <string name="print_unavailable">DSA\'s agent is not running, so the document cannot reach the desktop.</string>
     <string name="accessibility_service_name">DSA host accessibility</string>
+    <string name="backup_destination">This computer\'s DSA Backup folder</string>
+    <string name="passkey_provider_name">This computer</string>
+    <string name="passkey_provider_account">This computer</string>
+    <string name="passkey_provider_note">Uses this computer\'s passkeys, with its own sign-in prompt.</string>
+    <string name="passkey_type_name">Passkey</string>
     <string name="accessibility_service_description">Lets screen readers and other accessibility tools on the host read and use the apps in their windows.</string>
+    <string name="tts_engine_name">Desktop voices</string>
+    <string name="recognition_service_name">Desktop speech recognition</string>
+    <string name="spell_checker_name">Desktop spell checker</string>
+    <string name="spell_checker_subtype">%s</string>
     <string name="share_target_name">Share on PC</string>
     <string name="share_unavailable">The PC cannot be reached, so this cannot be shared there.</string>
     <string name="share_failed">The PC could not share this: %1$s</string>

@@ -36,6 +36,46 @@ class HostRequestsTest {
         .setSetTaskDensity(SetTaskDensity.newBuilder().setTaskId(taskId).setDensityDpi(densityDpi))
         .build().toByteArray()
 
+    private fun launchShortcut(packageName: String, shortcutId: String) = Envelope.newBuilder()
+        .setLaunchShortcut(
+            io.github.thisisthepy.dsa.control.v1.LaunchShortcut.newBuilder().setPackageName(packageName).setShortcutId(shortcutId),
+        )
+        .build().toByteArray()
+
+    @Test
+    fun fr7_launch_shortcut_starts_the_apps_shortcut() {
+        actions.startableShortcuts = setOf("org.example.chat" to "new-chat")
+
+        assertEquals(
+            RequestResult.ShortcutLaunched("org.example.chat", "new-chat"),
+            requests.handle(launchShortcut("org.example.chat", "new-chat")),
+        )
+        assertEquals(listOf("org.example.chat" to "new-chat"), actions.shortcutsLaunched)
+        assertTrue(actions.launched.isEmpty())
+    }
+
+    @Test
+    fun fr7_a_shortcut_that_cannot_start_opens_its_app_instead() {
+        actions.launchable = setOf("org.example.chat")
+
+        assertEquals(
+            RequestResult.ShortcutLaunched("org.example.chat", "gone", appInstead = true),
+            requests.handle(launchShortcut("org.example.chat", "gone")),
+        )
+        assertEquals(listOf("org.example.chat"), actions.launched)
+        assertTrue(requests.handle(launchShortcut("org.example.missing", "gone")) is RequestResult.LaunchFailed)
+    }
+
+    @Test
+    fun fr7_launch_shortcut_naming_no_package_no_shortcut_or_the_agent_starts_nothing() {
+        assertTrue(requests.handle(launchShortcut("", "new-chat")) is RequestResult.Malformed)
+        assertTrue(requests.handle(launchShortcut("not a/package", "new-chat")) is RequestResult.Malformed)
+        assertTrue(requests.handle(launchShortcut("org.example.chat", "")) is RequestResult.Malformed)
+        assertTrue(requests.handle(launchShortcut(AGENT, "new-chat")) is RequestResult.LaunchFailed)
+        assertTrue(actions.shortcutsLaunched.isEmpty())
+        assertTrue(actions.launched.isEmpty())
+    }
+
     @Test
     fun fr4_a_resize_and_a_density_for_a_reported_task_are_handed_back() {
         reported += 3

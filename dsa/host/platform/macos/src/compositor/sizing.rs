@@ -124,9 +124,9 @@ mod tests {
     fn fr4_a_task_that_keeps_its_density_is_shown_at_its_windows_scale() {
         // One to one on a Retina display.
         assert_eq!(contents_scale(2.0, (1, 1)), 2.0);
-        // A 96 dpi task on a Retina display: two device pixels a task pixel, one point.
+        // A task at 1x on a Retina display: two device pixels a task pixel, one point.
         assert_eq!(contents_scale(2.0, (2, 1)), 1.0);
-        // A 192 dpi task on a display at 1x: half a device pixel a task pixel.
+        // A task at twice the density of a display at 1x: half a device pixel a task pixel.
         assert_eq!(contents_scale(1.0, (1, 2)), 2.0);
         assert_eq!(contents_scale(f64::NAN, (0, 0)), 1.0);
     }

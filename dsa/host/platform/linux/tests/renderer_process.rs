@@ -24,12 +24,17 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use dsa_host_core::renderer::{spawn_supervisor, RendererHandler, ADDRESS_VARIABLE};
+use dsa_host_core::renderer::{
+    spawn_supervisor, DeviceWatch, RendererHandler, RendererLink, ADDRESS_VARIABLE,
+};
 use dsa_host_linux::compositor::frames::{LatestFrames, Shown};
-use dsa_host_linux::compositor::gfxstream::{FrameSink, GpuImages};
+use dsa_host_linux::compositor::gfxstream::{
+    serve_port, FrameSink, GpuImages, Listen, Renderer, COMMAND_PORT, PROCESS_PIPE_PORT,
+};
 use dsa_host_linux::compositor::wayland::Wake;
 use dsa_host_linux::renderer::client::RendererClient;
 use dsa_host_unix::renderer_launch::{CurrentFds, UnixLauncher};
+use dsa_protocol::renderer::types::envelope::Body;
 
 const WAIT: Duration = Duration::from_secs(60);
 const DISPLAY: u32 = 7;
@@ -194,6 +199,7 @@ struct Guest {
 
 impl Guest {
     const RC_GET_RENDERER_VERSION: u32 = 10000;
+    const RC_CREATE_COLOR_BUFFER: u32 = 10012;
     const RC_OPEN_COLOR_BUFFER_2: u32 = 10025;
     const RC_SET_PUID: u32 = 10033;
     const RC_SET_DISPLAY_COLOR_BUFFER: u32 = 10040;
@@ -349,4 +355,200 @@ fn nfr5_killing_the_renderer_keeps_the_window_and_its_frame_and_frames_resume() 
     }
     let log = compositor.log();
     assert!(log.contains(&format!("pid {first}) ended")), "{log}");
+}
+
+/// How long a renderer in this process has to stop its streams and threads.
+const SHUTDOWN: Duration = Duration::from_secs(10);
+
+/// A renderer in this test process, shut down when it goes, also when the test fails: a
+/// backend thread still running when the process ends uses what the libraries' teardown
+/// frees, and the whole test program dies with SIGSEGV after its tests pass.
+struct Here(Arc<Renderer>);
+
+impl std::ops::Deref for Here {
+    type Target = Renderer;
+    fn deref(&self) -> &Renderer {
+        &self.0
+    }
+}
+
+impl Drop for Here {
+    fn drop(&mut self) {
+        if let Err(why) = self.0.shutdown(SHUTDOWN) {
+            eprintln!("the renderer in this test did not stop: {why}");
+        }
+    }
+}
+
+/// The renderer in this process, on Unix sockets in `sockets`, its frames into `frames` and
+/// `images` as the compositor takes them.
+fn renderer_here(
+    backend: &Path,
+    sockets: &Path,
+    frames: &Arc<Mutex<LatestFrames>>,
+    images: &GpuImages,
+) -> Here {
+    let sink = Arc::new(FrameSink {
+        frames: Arc::clone(frames),
+        waker: Arc::new(Wakes(AtomicUsize::new(0))),
+        images: Some(Arc::clone(images)),
+    });
+    let renderer = Arc::new(Renderer::load(backend, None, sink).expect("the renderer starts"));
+    let listen = Listen::UnixDir(sockets.to_path_buf());
+    let log: Arc<dyn Fn(&str) + Send + Sync> = Arc::new(|line: &str| eprintln!("{line}"));
+    for port in [COMMAND_PORT, PROCESS_PIPE_PORT] {
+        serve_port(
+            Arc::clone(&renderer),
+            listen.clone(),
+            port,
+            Arc::clone(&log),
+        );
+    }
+    Here(renderer)
+}
+
+#[test]
+fn nfr5_a_lost_device_reaches_the_compositor_at_once_guest_calls_fail_fast_and_frames_resume() {
+    let Some(backend) = std::env::var_os("GFXSTREAM_BACKEND_PATH")
+        .map(PathBuf::from)
+        .filter(|path| path.is_file())
+    else {
+        eprintln!("skipping: GFXSTREAM_BACKEND_PATH does not name libgfxstream_backend.so");
+        return;
+    };
+    let sockets = std::env::temp_dir().join(format!("dsa-gfx-lost-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&sockets);
+    std::fs::create_dir_all(&sockets).unwrap();
+    let frames = Arc::new(Mutex::new(LatestFrames::new()));
+    let images: GpuImages = Arc::default();
+    let renderer = renderer_here(&backend, &sockets, &frames, &images);
+    let taken = |last: &mut Option<Shown>| {
+        let mut latest = frames.lock().unwrap().take();
+        match latest.remove(&DISPLAY) {
+            Some(frame) => {
+                *last = Some(frame);
+                true
+            }
+            None => false,
+        }
+    };
+    let mut last = None;
+    let mut guest = Guest::connect(&sockets);
+    guest.post_frame();
+    assert!(
+        wait_until(WAIT, || taken(&mut last)),
+        "the first frame shows"
+    );
+
+    // What the renderer process does every 50 ms: nothing to tell before the loss.
+    let mut watch = DeviceWatch::new();
+    let counts = || (renderer.device_losses(), renderer.device_generation());
+    let (losses, generation) = counts();
+    assert_eq!(watch.look(losses, generation), None);
+    let before = generation;
+
+    // What a GPU reset does to every device on the GPU: their queue and fence calls fail.
+    assert!(
+        renderer.simulate_device_loss(),
+        "the renderer can lose its devices"
+    );
+    // A call that needs the renderer's device is answered at once, not after the device is
+    // made again (which waits for the GPU to come back from its reset).
+    let asked = Instant::now();
+    let made = guest.call(Guest::RC_CREATE_COLOR_BUFFER, &[64, 64, Guest::GL_RGBA]);
+    assert!(
+        asked.elapsed() < Duration::from_secs(1),
+        "a call during the remake is answered at once ({:?})",
+        asked.elapsed()
+    );
+    // The compositor is told: the loss, then the new device. A frame posted meanwhile has the
+    // renderer's own copy find the loss too.
+    let mut told = Vec::new();
+    let remade = wait_until(WAIT, || {
+        guest.call(
+            Guest::RC_SET_DISPLAY_COLOR_BUFFER,
+            &[DISPLAY, Guest::BUFFER],
+        );
+        let (losses, generation) = counts();
+        if let Some(state) = watch.look(losses, generation) {
+            told.push(state);
+        }
+        generation > before
+    });
+    assert!(remade, "the renderer makes its device again");
+    let (losses, generation) = counts();
+    if let Some(state) = watch.look(losses, generation) {
+        told.push(state);
+    }
+    assert!(!told.is_empty(), "the compositor hears of the loss");
+    assert!(told.iter().all(|state| state.losses >= 1));
+    let client = RendererClient::new(
+        FrameSink {
+            frames: Arc::new(Mutex::new(LatestFrames::new())),
+            waker: Arc::new(Wakes(AtomicUsize::new(0))),
+            images: None,
+        },
+        CurrentFds::default(),
+        String::new(),
+        Box::new(|_: &str| {}),
+    );
+    let seen = client.device_changes();
+    for state in told {
+        RendererHandler::message(
+            &*client,
+            Body::DeviceState(state),
+            &RendererLink::detached(),
+        );
+    }
+    assert_ne!(client.device_changes(), seen, "the change is a GPU reset");
+
+    // A buffer asked for during the remake is made now if it was not then (the same stream
+    // answers: the failed call did not end it), and the guest's next frame reaches the window
+    // on the new device. The generation counts the new device a moment before it is usable,
+    // so the call is asked again until then.
+    if made == 0 {
+        assert!(
+            wait_until(WAIT, || {
+                guest.call(Guest::RC_CREATE_COLOR_BUFFER, &[64, 64, Guest::GL_RGBA]) != 0
+            }),
+            "a ColorBuffer is made on the new device"
+        );
+    }
+    let resumed = wait_until(WAIT, || {
+        guest.post_frame();
+        taken(&mut last)
+    });
+    assert!(resumed, "frames resume after the GPU reset");
+
+    // The renderer stops before the process ends, with the guest still connected: its streams
+    // end, and the backend is torn down, which joins its render threads, its presentation
+    // thread and the thread that made the device again.
+    assert_eq!(
+        renderer.streams(),
+        2,
+        "the guest's pipe and stream are served"
+    );
+    renderer
+        .shutdown(SHUTDOWN)
+        .expect("the renderer stops its streams and threads");
+    assert_eq!(
+        renderer.streams(),
+        0,
+        "no stream is served after the shutdown"
+    );
+    assert!(renderer.is_torn_down(), "the backend is torn down");
+    guest
+        .stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let mut rest = Vec::new();
+    let ended = guest.stream.read_to_end(&mut rest);
+    assert!(
+        !matches!(&ended, Err(error) if matches!(
+            error.kind(),
+            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+        )),
+        "the guest's stream ends with the renderer: {ended:?}"
+    );
+    let _ = std::fs::remove_dir_all(&sockets);
 }

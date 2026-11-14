@@ -21,6 +21,8 @@
 	<string>Apps in Desktop Subsystem for Android use the camera when you allow them to.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Apps in Desktop Subsystem for Android record sound when you allow them to.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Apps in Desktop Subsystem for Android recognise what you say when you allow them to.</string>
 	<key>NSLocationUsageDescription</key>
 	<string>Apps in Desktop Subsystem for Android use your location when you allow them to.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>

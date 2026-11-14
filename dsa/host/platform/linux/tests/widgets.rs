@@ -1,11 +1,15 @@
 //! A desktop widget placed on the real Android image, end to end: the service boots the image
 //! under crosvm, a client places the digital clock widget through the local API, and the
-//! widget's pictures reach the client.
+//! widget's pictures reach the client. Then it installs the widget probe
+//! (`dsa/guest/widget-probe/`), whose widgets need a setup, and places each: the setup must
+//! open as the probe's own focused task window on the desktop, not in a task the host has no
+//! window for, and its answer must decide whether the widget is placed.
 //!
 //! Runs when CI gives it what it needs: `DSA_CROSVM` names the crosvm to run,
-//! `DSA_WIDGET_TEST_IMAGE` the image folder built from the commit under test, and
-//! `DSA_WIDGET_TEST_KERNEL` the kernel to boot it with when the folder carries none. It needs
-//! `/dev/kvm` and `/dev/vhost-vsock`, and is skipped without them.
+//! `DSA_WIDGET_TEST_IMAGE` the image folder built from the commit under test,
+//! `DSA_WIDGET_TEST_KERNEL` the kernel to boot it with when the folder carries none, and
+//! `DSA_WIDGET_PROBE` the widget probe's APK. It needs `/dev/kvm` and `/dev/vhost-vsock`, and
+//! is skipped without them.
 //!
 //! The agent's unit tests run against fakes of Android's widget host, so they cannot catch a
 //! widget that Android's own classes fail to draw. This test can: it fails when no picture
@@ -26,14 +30,21 @@ use boot_check::{lock, Process as Service, Watchdog};
 use dsa_host_core::apk_info::inflate::inflate;
 use dsa_host_core::guest_log::LogFilter;
 use dsa_host_core::host_api::HostApiClient;
-use dsa_host_core::widgets::{WidgetEvent, WidgetFrame};
+use dsa_host_core::tasks::{Task, TaskEvent};
+use dsa_host_core::widgets::{Widget, WidgetEvent, WidgetFrame};
 use dsa_host_unix::socket::UnixLocalConnector;
 
 /// The widget placed: the digital clock of AOSP's clock app, which needs no setup and redraws
 /// every minute.
 const CLOCK: &str = "com.android.deskclock/com.android.alarmclock.DigitalAppWidgetProvider";
-/// The whole test, boot included, stays under ten minutes.
-const BUDGET: Duration = Duration::from_secs(570);
+/// The whole test, boot included, stays under thirteen minutes.
+const BUDGET: Duration = Duration::from_secs(750);
+/// The widget probe's package.
+const PROBE: &str = "io.github.thisisthepy.dsa.widgetprobe";
+/// What the probe's widgets take, from its install to the last widget placed.
+const SETUPS: Duration = Duration::from_secs(180);
+/// A setup's window shows this soon after its widget is asked for.
+const SETUP_WINDOW: Duration = Duration::from_secs(60);
 /// The first picture comes this soon after the widget is placed.
 const FIRST_FRAME: Duration = Duration::from_secs(60);
 /// A clock that shows minutes draws a new picture within this long.
@@ -298,6 +309,233 @@ fn fr12_the_picture_check_tells_a_drawn_widget_from_a_blank_one() {
     assert!(opaque_everywhere(&frame(png([[255, 255, 255, 255], [0, 0, 0, 255]]))).is_some());
 }
 
+/// The probe's task window of a setup, as the task watch told it.
+#[derive(Default)]
+struct SetupWindow {
+    /// The window, if one showed.
+    task: Option<Task>,
+    /// Whether it had the focus at some point.
+    focused: bool,
+    /// Whether it went.
+    closed: bool,
+    /// The tasks there were before the widget was asked for, which are not its setup's.
+    before: Vec<i32>,
+}
+
+impl SetupWindow {
+    fn saw(&mut self, event: TaskEvent) {
+        match event {
+            TaskEvent::Updated(task)
+                if task.package_name == PROBE
+                    && !self.before.contains(&task.task_id)
+                    && task.bounds.width() > 0
+                    && task.bounds.height() > 0 =>
+            {
+                self.focused |= task.focused;
+                self.task = Some(task);
+            }
+            TaskEvent::Removed { task_id }
+                if self.task.as_ref().is_some_and(|t| t.task_id == task_id) =>
+            {
+                self.closed = true;
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Places a widget of `provider`, watching the tasks meanwhile for the window of its setup.
+fn place_with_setup(socket: &Path, provider: &str) -> (Result<Widget, String>, SetupWindow) {
+    let mut tasks = client(socket, Duration::from_secs(10))
+        .watch_tasks()
+        .expect("watching the tasks");
+    let placing = {
+        let socket = socket.to_path_buf();
+        let provider = provider.to_string();
+        std::thread::spawn(move || {
+            client(&socket, Duration::from_secs(10))
+                .add_widget(&provider, SETUP_WINDOW * 2)
+                .map_err(|why| why.to_string())
+        })
+    };
+    let mut window = SetupWindow {
+        before: tasks.current().tasks.iter().map(|t| t.task_id).collect(),
+        ..SetupWindow::default()
+    };
+    let until = Instant::now() + SETUP_WINDOW * 2 + Duration::from_secs(10);
+    while !placing.is_finished() && Instant::now() < until {
+        match tasks.next(Duration::from_millis(250)) {
+            Ok(Some(event)) => window.saw(event),
+            Ok(None) => {}
+            Err(_) => break,
+        }
+    }
+    let placed = placing
+        .join()
+        .unwrap_or_else(|_| Err("placing the widget panicked".into()));
+    // The window goes a moment after the setup answers.
+    let until = Instant::now() + Duration::from_secs(20);
+    while window.task.is_some() && !window.closed && Instant::now() < until {
+        match tasks.next(Duration::from_millis(250)) {
+            Ok(Some(event)) => window.saw(event),
+            Ok(None) => {}
+            Err(_) => break,
+        }
+    }
+    (placed, window)
+}
+
+/// Why the probe's widgets were not placed as their setups answer; Ok when they were.
+fn check_setups(socket: &Path, probe: &Path) -> Result<(), String> {
+    let apk = std::fs::read(probe).map_err(|e| format!("reading {}: {e}", probe.display()))?;
+    let outcome = client(socket, Duration::from_secs(10))
+        .install_apk("dsa-widget-probe.apk", apk.len() as u64, &mut &apk[..])
+        .map_err(|e| format!("installing the widget probe: {e}"))?;
+    if !outcome.installed() {
+        return Err(format!(
+            "Android did not install the widget probe: {outcome:?}"
+        ));
+    }
+    // The gallery lists a new app's widgets a moment after it is installed.
+    let until = Instant::now() + Duration::from_secs(30);
+    let offered = loop {
+        let offered: Vec<_> = client(socket, Duration::from_secs(10))
+            .widget_providers()
+            .map_err(|e| format!("listing the widgets: {e}"))?
+            .into_iter()
+            .filter(|p| p.package_name == PROBE)
+            .collect();
+        if offered.len() >= 4 || Instant::now() >= until {
+            break offered;
+        }
+        std::thread::sleep(Duration::from_secs(1));
+    };
+    let find = |class: &str| {
+        offered
+            .iter()
+            .find(|p| p.provider.ends_with(&format!(".{class}")))
+            .cloned()
+            .ok_or_else(|| format!("the gallery does not list the probe's {class}: {offered:?}"))
+    };
+    let ok = find("OkWidget")?;
+    let cancel = find("CancelWidget")?;
+    let at_once = find("AtOnceWidget")?;
+    let optional = find("OptionalWidget")?;
+    for needs in [&ok, &cancel, &at_once] {
+        if !needs.needs_configuration {
+            return Err(format!(
+                "{} has a setup, but the gallery says it needs none",
+                needs.provider
+            ));
+        }
+    }
+    if optional.needs_configuration {
+        return Err(format!(
+            "{} says its setup is optional, but the gallery says it needs one",
+            optional.provider
+        ));
+    }
+
+    // Finished: placed, after its setup showed in the probe's own focused window.
+    let (placed, window) = place_with_setup(socket, &ok.provider);
+    let Some(task) = &window.task else {
+        return Err(format!(
+            "the setup of {} opened no task window on the desktop (placing it: {:?})",
+            ok.provider,
+            placed.as_ref().map(|w| w.widget_id)
+        ));
+    };
+    eprintln!(
+        "the setup of {} showed in task {} at {:?}, titled {:?}",
+        ok.provider, task.task_id, task.bounds, task.label
+    );
+    if !window.focused {
+        return Err(format!(
+            "the setup window of {} never had the focus",
+            ok.provider
+        ));
+    }
+    if let Err(why) = &placed {
+        return Err(format!(
+            "{} was not placed after its setup finished: {why}",
+            ok.provider
+        ));
+    }
+    if !window.closed {
+        return Err(format!(
+            "the setup window of {} stayed after its setup finished",
+            ok.provider
+        ));
+    }
+
+    // Canceled: not placed, and said to be canceled.
+    let (placed, window) = place_with_setup(socket, &cancel.provider);
+    if window.task.is_none() {
+        return Err(format!(
+            "the setup of {} opened no task window on the desktop",
+            cancel.provider
+        ));
+    }
+    match &placed {
+        Ok(widget) => {
+            return Err(format!(
+                "{} was placed (widget {}) although its setup was canceled",
+                cancel.provider, widget.widget_id
+            ))
+        }
+        Err(why) if !why.contains("canceled") => {
+            return Err(format!(
+                "{} was not placed, but not as canceled: {why}",
+                cancel.provider
+            ))
+        }
+        Err(_) => {}
+    }
+
+    // Finished at once: placed.
+    let (placed, _) = place_with_setup(socket, &at_once.provider);
+    if let Err(why) = &placed {
+        return Err(format!(
+            "{} was not placed though its setup finished at once: {why}",
+            at_once.provider
+        ));
+    }
+
+    // Optional: placed without a setup.
+    let (placed, window) = place_with_setup(socket, &optional.provider);
+    if let Err(why) = &placed {
+        return Err(format!("{} was not placed: {why}", optional.provider));
+    }
+    if let Some(task) = &window.task {
+        return Err(format!(
+            "{} ran its setup in task {} though its app says the setup is optional",
+            optional.provider, task.task_id
+        ));
+    }
+
+    let (placed, _) = client(socket, Duration::from_secs(10))
+        .widgets()
+        .map_err(|e| format!("listing the placed widgets: {e}"))?;
+    let mut probes: Vec<&str> = placed
+        .iter()
+        .filter(|w| w.provider.package_name == PROBE)
+        .map(|w| w.provider.provider.as_str())
+        .collect();
+    probes.sort_unstable();
+    let mut expected = vec![
+        ok.provider.as_str(),
+        at_once.provider.as_str(),
+        optional.provider.as_str(),
+    ];
+    expected.sort_unstable();
+    if probes != expected {
+        return Err(format!(
+            "the placed probe widgets are {probes:?}; expected {expected:?}"
+        ));
+    }
+    Ok(())
+}
+
 #[test]
 fn fr12_a_placed_clock_widget_draws_on_the_real_image_and_ticks() {
     let (Some(crosvm), Some(image)) = (
@@ -308,6 +546,12 @@ fn fr12_a_placed_clock_widget_draws_on_the_real_image_and_ticks() {
         return;
     };
     let kernel = std::env::var_os("DSA_WIDGET_TEST_KERNEL").map(PathBuf::from);
+    let probe = std::env::var_os("DSA_WIDGET_PROBE")
+        .map(PathBuf::from)
+        .filter(|apk| apk.is_file())
+        .expect(
+            "DSA_WIDGET_PROBE names no widget probe APK (dsa/guest/widget-probe/build.sh), so no widget with a setup can be placed",
+        );
     let started = Instant::now();
     let deadline = started + BUDGET;
     let _watchdog = Watchdog::start("the widget boot check", BUDGET + OVERRUN);
@@ -372,7 +616,9 @@ fn fr12_a_placed_clock_widget_draws_on_the_real_image_and_ticks() {
             }
         });
     }
-    let boot = deadline.saturating_duration_since(Instant::now()) - FIRST_FRAME - NEXT_FRAME;
+    let boot = deadline
+        .saturating_duration_since(Instant::now())
+        .saturating_sub(FIRST_FRAME + NEXT_FRAME + SETUPS);
     let ready = first.ensure_running(boot, Duration::from_secs(2), |state| {
         eprintln!("{} s: Android is {state:?}", started.elapsed().as_secs());
     });
@@ -465,6 +711,16 @@ fn fr12_a_placed_clock_widget_draws_on_the_real_image_and_ticks() {
             ),
         }
     }
+
+    // The widgets that need a setup.
+    let setups = Instant::now();
+    if let Err(why) = check_setups(&socket, &probe) {
+        fail(why, &service, &log);
+    }
+    eprintln!(
+        "the probe's widgets were set up in {} s",
+        setups.elapsed().as_secs()
+    );
 
     // Records take a moment to come from the guest.
     std::thread::sleep(Duration::from_secs(3));

@@ -1,0 +1,477 @@
+Subject: KeyMint: take the root key of key blobs from the DSA host
+
+The nonsecure KeyMint TA wraps every key blob under a fixed all-zero root key
+(soft::Keys::root_kek), so a copy of the device's disk gives up every key on it. DSA's host
+gives its guest a root key of its own once per boot; the guest's control daemon leaves it on
+tmpfs as /dev/dsa_keymint/root_key, one line: "key <64 lowercase hex digits>" or
+"none <reason>".
+
+ta/host_key.rs (HostKeys) reads that file the first time the TA needs a root key, waiting for
+it at most 30 seconds from the start of the service, and keeps the result for the life of the
+process. A file in any other form counts as no key. With the host's key:
+
+- new blobs are wrapped under it and carry the KEK context "dsa-host-root-key-v1";
+- a blob with that context opens only under the host's key, and fails in a boot without one;
+- a blob with an empty context (made under the built-in key) still opens, and is reported
+  outdated (kek_context_is_outdated), so the TA answers KEY_REQUIRES_UPGRADE and upgradeKey
+  wraps it again under the host's key. Keystore and vold upgrade every blob they use on that
+  answer, so an existing install keeps all its keys.
+
+Without it the TA behaves exactly as before: built-in key, empty context, no upgrades. The key
+agreement key and the unique ID key stay soft::Keys'.
+
+Android.bp builds the same service as dsa-keymint, with its Rust crates linked in, which DSA's
+image installs as /vendor/bin/hw/dsa-keymint in place of the
+com.android.hardware.keymint.rust_nonsecure APEX: the vendor partition has none of the Rust
+shared libraries the APEX carries. The APEX module is left out, since the reduced tree DSA
+builds in has neither its key nor its certificate. libkmr_ta_nonsecure takes libzeroize, to wipe
+the file contents it reads.
+
+Applies to hardware/interfaces at 0162af698935100a590b7359581ac8b1b80693e5 (Android 17).
+---
+diff --git a/security/keymint/aidl/default/Android.bp b/security/keymint/aidl/default/Android.bp
+index 30b4987c..015e81a2 100644
+--- a/security/keymint/aidl/default/Android.bp
++++ b/security/keymint/aidl/default/Android.bp
+@@ -109,6 +109,33 @@ rust_binary {
+     ],
+ }
+ 
++// DSA (Desktop Subsystem for Android): the service above, built for DSA's guest image, which
++// installs it as a plain vendor file, /vendor/bin/hw/dsa-keymint, in place of the
++// com.android.hardware.keymint.rust_nonsecure APEX. Its TA takes the root key of key blobs from
++// the DSA host (ta/host_key.rs). The Rust crates are linked in (prefer_rlib), because the vendor
++// partition carries none of the Rust shared libraries the APEX holds beside its binary. The image
++// brings the init script and the VINTF fragments.
++rust_binary {
++    name: "dsa-keymint",
++    relative_install_path: "hw",
++    vendor: true,
++    defaults: [
++        "keymint_use_latest_hal_aidl_rust",
++    ],
++    srcs: [
++        "main.rs",
++    ],
++    prefer_rlib: true,
++    rustlibs: [
++        "libandroid_logger",
++        "libbinder_rs",
++        "liblog_rust",
++        "libkmr_hal",
++        "libkmr_hal_nonsecure",
++        "libkmr_ta_nonsecure",
++    ],
++}
++
+ // The following target declares the latest version of KeyMint.
+ prebuilt_etc {
+     name: "android.hardware.hardware_keystore.xml",
+@@ -207,6 +234,7 @@ rust_library {
+         "libkmr_crypto_boring",
+         "libkmr_ta",
+         "libkmr_wire",
++        "libzeroize",
+     ],
+     srcs: ["ta/lib.rs"],
+     // Limit visibility because this is a nonsecure library that should only be used in
+@@ -219,22 +247,9 @@ rust_library {
+     ],
+ }
+ 
+-apex {
+-    name: "com.android.hardware.keymint.rust_nonsecure",
+-    manifest: "manifest.json",
+-    file_contexts: "file_contexts",
+-    key: "com.google.cf.apex.key",
+-    certificate: ":com.android.hardware.certificate",
+-    soc_specific: true,
+-    updatable: false,
+-    binaries: [
+-        "android.hardware.security.keymint-service.nonsecure",
+-    ],
+-    prebuilts: [
+-        "keymint_aidl_nonsecure_init_rc",
+-        "android.hardware.hardware_keystore.xml", // permissions
+-    ],
+-}
++// DSA: the com.android.hardware.keymint.rust_nonsecure APEX is left out. DSA's image installs
++// dsa-keymint above in its place, and the reduced tree DSA builds it in has neither the
++// APEX's key nor its certificate.
+ 
+ prebuilt_etc {
+     name: "keymint_aidl_nonsecure_init_rc",
+diff --git a/security/keymint/aidl/default/ta/host_key.rs b/security/keymint/aidl/default/ta/host_key.rs
+new file mode 100644
+index 00000000..3f5d9576
+--- /dev/null
++++ b/security/keymint/aidl/default/ta/host_key.rs
+@@ -0,0 +1,345 @@
++//
++// Copyright (C) 2026 The Desktop Subsystem for Android Authors
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++//      http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++//! Root key retrieval for DSA (Desktop Subsystem for Android), whose host gives the root key.
++//!
++//! [`crate::soft::Keys`] wraps every key blob under a fixed all-zero root key, so a copy of the
++//! device's disk gives up every key on it. DSA runs this service in a virtual machine whose host
++//! keeps a root key of its own, sealed on the host, and gives it to the guest once per boot. The
++//! guest's control daemon (`dsa-channeld --keymint-key`) fetches it before Android unlocks its
++//! storage and leaves it on tmpfs, readable only by this service's user, in [`HOST_KEY_FILE`].
++//! The file holds exactly one line:
++//!
++//! - `key <64 lowercase hex digits>\n`: the host's 32-byte root key, or
++//! - `none <reason>\n`: the host gave no key this boot, and why.
++//!
++//! With the host's key, every new key blob is wrapped under it and carries [`HOST_KEK_CONTEXT`]
++//! as its KEK context. A blob with that context opens only under the host's key: in a boot without
++//! one it fails, and the built-in key is never tried for it. A blob made before (empty context,
++//! built-in key) still opens, and the TA answers KEY_REQUIRES_UPGRADE for it
++//! (`kek_context_is_outdated`). Keystore and vold upgrade every blob they use on that answer, and
++//! upgradeKey wraps it again under the host's key, so an existing install keeps all its keys.
++//!
++//! Without the host's key (the file says `none`, is not in the form above, or does not appear in
++//! time) the service behaves exactly as upstream's: built-in key, empty context, no upgrades.
++
++use crate::soft;
++use kmr_common::{crypto, km_err, Error};
++use kmr_ta::device::RetrieveKeyMaterial;
++use log::{error, info, warn};
++use std::fmt;
++use std::io::ErrorKind;
++use std::path::PathBuf;
++use std::sync::OnceLock;
++use std::time::{Duration, Instant};
++use zeroize::Zeroize;
++
++/// Where DSA's control daemon leaves the root key the host gave for this boot.
++pub const HOST_KEY_FILE: &str = "/dev/dsa_keymint/root_key";
++
++/// How long after the service starts the file may take to appear. The daemon asks the host for at
++/// most 25 seconds and then writes `none`, so the file is normally there within a second or two of
++/// boot, and always before this.
++pub const HOST_KEY_WAIT: Duration = Duration::from_secs(30);
++
++/// How often the file is looked for while it is not there yet.
++const HOST_KEY_POLL: Duration = Duration::from_millis(50);
++
++/// The KEK context of a key blob wrapped under the host's root key. Upstream's blobs have an
++/// empty context. The version names this way of using the host's key, so that another can be told
++/// from it later.
++pub const HOST_KEK_CONTEXT: &[u8] = b"dsa-host-root-key-v1";
++
++/// The length of the host's root key, in bytes.
++pub const HOST_KEY_LEN: usize = 32;
++
++/// What the host key file says.
++#[derive(PartialEq, Eq)]
++pub enum HostKeyFile {
++    /// The host's root key.
++    Key(crypto::hmac::Key),
++    /// The host gave no key, for this reason.
++    NoKey(String),
++}
++
++impl fmt::Debug for HostKeyFile {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        match self {
++            // Never the key itself, which a log line would otherwise carry.
++            HostKeyFile::Key(_) => write!(f, "Key(..)"),
++            HostKeyFile::NoKey(reason) => write!(f, "NoKey({reason:?})"),
++        }
++    }
++}
++
++/// Reads the contents of the host key file. Anything but exactly one line in one of its two forms
++/// is refused, with what is wrong with it.
++pub fn parse_host_key_file(data: &[u8]) -> Result<HostKeyFile, String> {
++    let line = data.strip_suffix(b"\n").ok_or("it does not end with a newline")?;
++    if line.contains(&b'\n') {
++        return Err("it has more than one line".into());
++    }
++    if let Some(hex) = line.strip_prefix(b"key ") {
++        if hex.len() != 2 * HOST_KEY_LEN {
++            return Err(format!("its key has {} hex digits, not {}", hex.len(), 2 * HOST_KEY_LEN));
++        }
++        // Built in place, so that the key is wiped when it is dropped on the way out too.
++        let mut key = crypto::hmac::Key(Vec::with_capacity(HOST_KEY_LEN));
++        for pair in hex.chunks(2) {
++            match (lowercase_hex_digit(pair[0]), lowercase_hex_digit(pair[1])) {
++                (Some(high), Some(low)) => key.0.push((high << 4) | low),
++                _ => return Err("its key is not lowercase hex".into()),
++            }
++        }
++        Ok(HostKeyFile::Key(key))
++    } else if let Some(reason) = line.strip_prefix(b"none ") {
++        Ok(HostKeyFile::NoKey(String::from_utf8_lossy(reason).into_owned()))
++    } else {
++        Err("it starts with neither `key ` nor `none `".into())
++    }
++}
++
++fn lowercase_hex_digit(c: u8) -> Option<u8> {
++    match c {
++        b'0'..=b'9' => Some(c - b'0'),
++        b'a'..=b'f' => Some(c - b'a' + 10),
++        _ => None,
++    }
++}
++
++/// Root key retrieval with the DSA host's root key when it gave one this boot, and upstream's
++/// fake keys ([`soft::Keys`]) for everything else: the key agreement key, the unique ID key, and
++/// the root key of the blobs made before.
++pub struct HostKeys {
++    file: PathBuf,
++    deadline: Instant,
++    key: OnceLock<Option<crypto::hmac::Key>>,
++}
++
++impl Default for HostKeys {
++    fn default() -> Self {
++        Self::new()
++    }
++}
++
++impl HostKeys {
++    /// Reads the host's key from [`HOST_KEY_FILE`], waiting at most [`HOST_KEY_WAIT`] from now (the
++    /// TA is built as the service starts).
++    pub fn new() -> Self {
++        Self::with_file(HOST_KEY_FILE, HOST_KEY_WAIT)
++    }
++
++    /// Reads the host's key from `file`, waiting at most `wait` from now for it to appear.
++    pub fn with_file(file: impl Into<PathBuf>, wait: Duration) -> Self {
++        Self { file: file.into(), deadline: Instant::now() + wait, key: OnceLock::new() }
++    }
++
++    /// The host's root key, read the first time the TA needs a root key, and kept for the life of
++    /// the process: the host gives it once per boot.
++    fn host_key(&self) -> Option<&crypto::hmac::Key> {
++        self.key.get_or_init(|| self.read_host_key()).as_ref()
++    }
++
++    fn read_host_key(&self) -> Option<crypto::hmac::Key> {
++        let file = self.file.display();
++        loop {
++            match std::fs::read(&self.file) {
++                Ok(mut data) => {
++                    let parsed = parse_host_key_file(&data);
++                    data.zeroize();
++                    return match parsed {
++                        Ok(HostKeyFile::Key(key)) => {
++                            info!("key blobs are wrapped under the DSA host's root key from {file}");
++                            Some(key)
++                        }
++                        Ok(HostKeyFile::NoKey(reason)) => {
++                            warn!(
++                                "the DSA host gave no root key this boot ({reason}); key blobs \
++                                 stay under the built-in root key"
++                            );
++                            None
++                        }
++                        Err(why) => {
++                            error!(
++                                "{file} does not hold a root key ({why}); key blobs stay under the \
++                                 built-in root key"
++                            );
++                            None
++                        }
++                    };
++                }
++                Err(e) if e.kind() == ErrorKind::NotFound && Instant::now() < self.deadline => {
++                    std::thread::sleep(HOST_KEY_POLL);
++                }
++                Err(e) if e.kind() == ErrorKind::NotFound => {
++                    error!(
++                        "{file} did not appear in time, so the DSA host's root key is not known; \
++                         key blobs stay under the built-in root key"
++                    );
++                    return None;
++                }
++                Err(e) => {
++                    error!("{file} cannot be read ({e}); key blobs stay under the built-in root key");
++                    return None;
++                }
++            }
++        }
++    }
++}
++
++impl RetrieveKeyMaterial for HostKeys {
++    fn root_kek(&self, context: &[u8]) -> Result<crypto::OpaqueOr<crypto::hmac::Key>, Error> {
++        if context.is_empty() {
++            // A blob made under the built-in key: before the host gave a key, or in a boot without
++            // one.
++            return soft::Keys.root_kek(context);
++        }
++        if context != HOST_KEK_CONTEXT {
++            return Err(km_err!(
++                InvalidKeyBlob,
++                "the key blob's KEK context is not one this KeyMint makes"
++            ));
++        }
++        match self.host_key() {
++            Some(key) => Ok(key.clone().into()),
++            // Never the built-in key: the blob was wrapped under the host's.
++            None => Err(km_err!(
++                HardwareNotYetAvailable,
++                "the key blob is wrapped under the DSA host's root key, which the host did not give \
++                 this boot"
++            )),
++        }
++    }
++
++    fn kek_context(&self) -> Result<Vec<u8>, Error> {
++        Ok(if self.host_key().is_some() { HOST_KEK_CONTEXT.to_vec() } else { Vec::new() })
++    }
++
++    fn kek_context_is_outdated(&self, kek_context: &[u8]) -> Result<bool, Error> {
++        // A blob under the built-in key is upgraded once the host has given its key.
++        Ok(kek_context.is_empty() && self.host_key().is_some())
++    }
++
++    fn kak(&self) -> Result<crypto::OpaqueOr<crypto::aes::Key>, Error> {
++        soft::Keys.kak()
++    }
++
++    fn unique_id_hbk(&self, ckdf: &dyn crypto::Ckdf) -> Result<crypto::hmac::Key, Error> {
++        soft::Keys.unique_id_hbk(ckdf)
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use std::time::{SystemTime, UNIX_EPOCH};
++
++    const KEY_HEX: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
++
++    fn key_bytes() -> Vec<u8> {
++        (0u8..32).collect()
++    }
++
++    fn explicit(key: crypto::OpaqueOr<crypto::hmac::Key>) -> Vec<u8> {
++        match key {
++            crypto::OpaqueOr::Explicit(key) => key.0.clone(),
++            crypto::OpaqueOr::Opaque(_) => panic!("opaque root key"),
++        }
++    }
++
++    fn file_with(contents: Option<&[u8]>) -> PathBuf {
++        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
++        let path = std::env::temp_dir()
++            .join(format!("dsa-keymint-root-key-{}-{nanos}", std::process::id()));
++        if let Some(contents) = contents {
++            std::fs::write(&path, contents).unwrap();
++        }
++        path
++    }
++
++    #[test]
++    fn fr36_host_key_line_is_parsed() {
++        let parsed = parse_host_key_file(format!("key {KEY_HEX}\n").as_bytes()).unwrap();
++        assert_eq!(parsed, HostKeyFile::Key(crypto::hmac::Key(key_bytes())));
++        let parsed = parse_host_key_file(b"none no credential store\n").unwrap();
++        assert_eq!(parsed, HostKeyFile::NoKey("no credential store".into()));
++    }
++
++    #[test]
++    fn fr36_malformed_host_key_file_is_refused() {
++        for bad in [
++            format!("key {KEY_HEX}"),
++            format!("key {}\n", KEY_HEX.to_uppercase()),
++            format!("key {}\n", &KEY_HEX[2..]),
++            format!("key {KEY_HEX}0\n"),
++            format!("key {KEY_HEX}\nnone x\n"),
++            format!("key  {KEY_HEX}\n"),
++            "none\n".to_string(),
++            "\n".to_string(),
++            String::new(),
++            format!("KEY {KEY_HEX}\n"),
++        ] {
++            assert!(parse_host_key_file(bad.as_bytes()).is_err(), "{bad:?} was taken");
++        }
++    }
++
++    #[test]
++    fn fr36_without_host_key_behaves_as_upstream() {
++        for contents in [Some(&b"none the host has no key\n"[..]), Some(&b"garbage\n"[..]), None] {
++            let file = file_with(contents);
++            let keys = HostKeys::with_file(&file, Duration::ZERO);
++            assert_eq!(keys.kek_context().unwrap(), Vec::<u8>::new());
++            assert!(!keys.kek_context_is_outdated(&[]).unwrap());
++            assert_eq!(explicit(keys.root_kek(&[]).unwrap()), vec![0; 16]);
++            assert!(keys.root_kek(HOST_KEK_CONTEXT).is_err());
++            let _ = std::fs::remove_file(&file);
++        }
++    }
++
++    #[test]
++    fn fr36_host_key_seals_new_blobs_and_upgrades_old_ones() {
++        let file = file_with(Some(format!("key {KEY_HEX}\n").as_bytes()));
++        let keys = HostKeys::with_file(&file, Duration::ZERO);
++        assert_eq!(keys.kek_context().unwrap(), HOST_KEK_CONTEXT.to_vec());
++        assert_eq!(explicit(keys.root_kek(HOST_KEK_CONTEXT).unwrap()), key_bytes());
++        // Old blobs still open under the built-in key, and ask to be upgraded.
++        assert_eq!(explicit(keys.root_kek(&[]).unwrap()), vec![0; 16]);
++        assert!(keys.kek_context_is_outdated(&[]).unwrap());
++        assert!(!keys.kek_context_is_outdated(HOST_KEK_CONTEXT).unwrap());
++        assert!(keys.root_kek(b"another context").is_err());
++        // Read once, and kept: the file going away later changes nothing.
++        std::fs::remove_file(&file).unwrap();
++        assert_eq!(explicit(keys.root_kek(HOST_KEK_CONTEXT).unwrap()), key_bytes());
++    }
++
++    #[test]
++    fn fr36_host_key_is_waited_for() {
++        let file = file_with(None);
++        let keys = HostKeys::with_file(&file, Duration::from_secs(10));
++        let writer = {
++            let file = file.clone();
++            std::thread::spawn(move || {
++                std::thread::sleep(Duration::from_millis(200));
++                // As the daemon writes it: whole, then renamed into place.
++                let temp = file.with_extension("tmp");
++                std::fs::write(&temp, format!("key {KEY_HEX}\n")).unwrap();
++                std::fs::rename(temp, file).unwrap();
++            })
++        };
++        assert_eq!(keys.kek_context().unwrap(), HOST_KEK_CONTEXT.to_vec());
++        writer.join().unwrap();
++        let _ = std::fs::remove_file(&file);
++    }
++}
+diff --git a/security/keymint/aidl/default/ta/lib.rs b/security/keymint/aidl/default/ta/lib.rs
+index 130ccec6..26d85b2f 100644
+--- a/security/keymint/aidl/default/ta/lib.rs
++++ b/security/keymint/aidl/default/ta/lib.rs
+@@ -32,6 +32,7 @@ use log::info;
+ 
+ pub mod attest;
+ pub mod clock;
++pub mod host_key;
+ pub mod rpc;
+ pub mod soft;
+ 
+@@ -71,7 +72,9 @@ pub fn build_ta_with(rpc: Box<dyn kmr_ta::device::RetrieveRpcArtifacts>) -> kmr_
+     };
+ 
+     let sign_info = attest::CertSignInfo::new();
+-    let keys: Box<dyn kmr_ta::device::RetrieveKeyMaterial> = Box::new(soft::Keys);
++    // DSA: the root key of key blobs comes from the DSA host when it gives one.
++    let keys: Box<dyn kmr_ta::device::RetrieveKeyMaterial> =
++        Box::new(host_key::HostKeys::new());
+     let dev = Implementation {
+         keys,
+         sign_info: Some(Box::new(sign_info)),

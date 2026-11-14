@@ -3,7 +3,7 @@ import Foundation
 /// A widget on offer as the Widgets page lists it.
 public struct WidgetOfferRow: Equatable, Identifiable, Sendable {
     public var provider, label, app, detail: String
-    /// The widget's preview, nil when it has none.
+    /// The widget's preview, else its app's icon; nil when it has neither.
     public var preview: Data?
     public var id: String { provider }
 }
@@ -29,6 +29,8 @@ public final class WidgetsViewModel: ObservableObject {
     @Published public private(set) var error: String?
     @Published public private(set) var message: String?
     @Published public private(set) var isBusy = false
+    /// The icons of the apps whose widgets have no preview, by package, which stand in for it.
+    @Published public private(set) var appIcons: [String: Data] = [:]
 
     public init(service: DsaService, text: TextSource, stream: LogStream? = nil) {
         self.service = service
@@ -55,8 +57,34 @@ public final class WidgetsViewModel: ObservableObject {
                 app: WidgetsViewModel.appName($0.appLabel, $0.package),
                 detail: text.format("Widgets_Size", $0.defaultWidthDp, $0.defaultHeightDp)
                     + ($0.needsConfiguration ? " · " + text.get("Widgets_Setup") : ""),
-                preview: $0.previewPng.isEmpty ? nil : $0.previewPng)
+                preview: !$0.previewPng.isEmpty ? $0.previewPng : appIcons[WidgetsViewModel.packageOf($0)])
         }
+    }
+
+    /// The package of the app that offers `offer`: its own, else its provider's.
+    private static func packageOf(_ offer: WidgetOffer) -> String {
+        offer.package.isEmpty ? packageOf(offer.provider) : offer.package
+    }
+
+    /// Reads the icons of the apps whose widgets have no preview, when the page has none of
+    /// them yet. A list it cannot read leaves the stand-in icon.
+    private func readAppIcons() async {
+        let wanted = Set((list?.offers ?? []).filter { $0.previewPng.isEmpty }.map { WidgetsViewModel.packageOf($0) })
+        if wanted.isEmpty || wanted.isSubset(of: Set(appIcons.keys)) {
+            return
+        }
+        guard let apps = try? await service.runJson(["apps", "list"]) else {
+            return
+        }
+        var icons = appIcons
+        for app in apps["apps"].items {
+            let package = app.string("package")
+            let icon = app.base64("icon_png")
+            if wanted.contains(package) && !icon.isEmpty {
+                icons[package] = icon
+            }
+        }
+        appIcons = icons
     }
 
     public var placed: [PlacedWidgetRow] {
@@ -78,6 +106,7 @@ public final class WidgetsViewModel: ObservableObject {
             message = try await work()
             list = try await service.widgets()
             error = nil
+            await readAppIcons()
         } catch {
             self.error = Format.problem(text, error)
         }

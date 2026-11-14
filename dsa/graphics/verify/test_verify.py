@@ -90,6 +90,44 @@ class QpaTests(unittest.TestCase):
             "dEQP-VK.draw.renderpass.simple_draw.simple_draw_triangle_list": "Crash",
         })
 
+    def test_pr3_the_case_a_log_begins_but_never_ends_is_unfinished(self):
+        self.assertEqual(verify.parse_qpa(QPA).unfinished,
+                         "dEQP-VK.draw.renderpass.simple_draw.simple_draw_triangle_list")
+        self.assertIsNone(verify.parse_qpa(QPA.rsplit("#beginTestCaseResult", 1)[0]).unfinished)
+
+    def test_pr3_a_crash_fails_its_case_and_the_cases_after_it_still_run(self):
+        cases = ["dEQP-VK.info.build", "dEQP-VK.api.smoke.triangle",
+                 "dEQP-VK.api.smoke.asm_triangle", "dEQP-VK.synchronization.smoke.fences"]
+        first = verify.parse_qpa(
+            "#beginTestCaseResult dEQP-VK.info.build\n<Result StatusCode=\"Pass\">x</Result>\n"
+            "#endTestCaseResult\n#beginTestCaseResult dEQP-VK.api.smoke.triangle\n")
+        merged = verify.CtsResults()
+        crashed = verify.merge_run(merged, first, cases, still_running=False)
+        self.assertEqual(crashed, "dEQP-VK.api.smoke.triangle")
+        left = verify.cases_left(cases, merged)
+        self.assertEqual(left, cases[2:])
+        second = verify.parse_qpa(
+            "#beginTestCaseResult dEQP-VK.api.smoke.asm_triangle\n"
+            "<Result StatusCode=\"Pass\">x</Result>\n#endTestCaseResult\n"
+            "#beginTestCaseResult dEQP-VK.synchronization.smoke.fences\n"
+            "<Result StatusCode=\"Pass\">x</Result>\n#endTestCaseResult\n#endSession\n")
+        self.assertIsNone(verify.merge_run(merged, second, left, still_running=False))
+        self.assertEqual(verify.cases_left(cases, merged), [])
+        report = verify.cts_report(cases, merged, {}, False)
+        self.assertEqual([entry["status"] for entry in report], ["Pass", "Crash", "Pass", "Pass"])
+        self.assertEqual(verify.CtsResults(statuses=merged.statuses).failed(),
+                         {"dEQP-VK.api.smoke.triangle": "Crash"})
+
+    def test_pr3_a_case_still_running_when_the_time_runs_out_is_a_timeout(self):
+        run = verify.parse_qpa("#beginTestCaseResult dEQP-VK.api.smoke.triangle\n")
+        merged = verify.CtsResults()
+        self.assertIsNone(verify.merge_run(merged, run, ["dEQP-VK.api.smoke.triangle"],
+                                           still_running=True))
+        self.assertEqual(merged.statuses, {"dEQP-VK.api.smoke.triangle": "Timeout"})
+
+    def test_pr3_the_cts_process_is_looked_up_by_its_own_name(self):
+        self.assertIn(f"{verify.DEQP_PACKAGE}:testercore", verify.DEQP_PROCESSES.split())
+
     def test_pr3_a_finished_session_is_recognised(self):
         self.assertTrue(verify.parse_qpa("#beginSession\n#endSession\n").session_complete)
 
@@ -197,6 +235,26 @@ class AdbTests(unittest.TestCase):
             self.assertEqual(verify.adb_program(), "/opt/platform-tools/adb")
         with mock.patch.dict(os.environ, {}, clear=True):
             self.assertEqual(verify.adb_program(), "adb")
+
+
+class RepositoryTests(unittest.TestCase):
+    def test_pr3_the_test_apps_come_from_the_repository_named_with_repo(self):
+        self.assertEqual(verify.repository("someone/dsa-fork", environ={}, origin_url=""), "someone/dsa-fork")
+
+    def test_pr3_in_ci_the_test_apps_come_from_the_runs_own_repository(self):
+        self.assertEqual(verify.repository(environ={"GITHUB_REPOSITORY": "someone/fork"}, origin_url=""), "someone/fork")
+
+    def test_pr3_a_forks_clone_takes_the_test_apps_from_the_fork(self):
+        for url in ("https://github.com/someone/desktop-subsystem-for-android.git",
+                    "git@github.com:someone/desktop-subsystem-for-android.git",
+                    "ssh://git@github.com/someone/desktop-subsystem-for-android",
+                    "https://github.com/someone/desktop-subsystem-for-android\n"):
+            self.assertEqual(verify.repository(environ={}, origin_url=url), "someone/desktop-subsystem-for-android", url)
+
+    def test_pr3_without_a_github_origin_the_official_repository_is_used(self):
+        self.assertEqual(verify.repository(environ={}, origin_url="https://example.com/x/y.git"),
+                         verify.OFFICIAL_REPOSITORY)
+        self.assertEqual(verify.repository(environ={}, origin_url=""), verify.OFFICIAL_REPOSITORY)
 
 
 if __name__ == "__main__":

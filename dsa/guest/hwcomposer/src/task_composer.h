@@ -25,6 +25,7 @@
 
 #include "channel_messages.h"
 #include "compose_request.h"
+#include "cpu_upload.h"
 #include "frame_pipeline.h"
 #include "host_renderer.h"
 #include "resize_trace.h"
@@ -50,14 +51,26 @@ struct FrameLayer {
     int32_t transform = 0;
 };
 
+// A layer whose buffer a CPU writes, for the copy of its picture up to the host.
+struct CpuLayer {
+    int64_t id = 0;
+    BufferRef buffer;
+    // The layer's buffer changed since the last copy pass: it holds a new picture.
+    bool fresh = false;
+    UniqueFd acquireFence;
+};
+
 struct Frame {
     Rect display;
     // In no particular order; z decides.
     std::vector<FrameLayer> layers;
     BufferRef clientTarget;
     UniqueFd clientTargetFence;
-    // Every gralloc buffer SurfaceFlinger may still show again: the ones in the slots.
+    // Every gralloc buffer SurfaceFlinger may still show again: the ones in the layers' slots.
     std::set<uint32_t> liveBuffers;
+    // The buffers in the client target's slots, held only while SurfaceFlinger composes into
+    // them (clientTargetHeld).
+    std::set<uint32_t> clientBuffers;
 };
 
 class TaskComposer {
@@ -89,6 +102,10 @@ class TaskComposer {
     // gives a buffer back to its app only when the present after the one that showed it
     // returns, so none needs a release fence.
     void present(Frame& frame);
+    // Copies what a CPU wrote into these layers' buffers up to their host ColorBuffers, and
+    // returns once the host holds it: SurfaceFlinger draws its client layers from them next,
+    // and the host composes the others.
+    void uploadCpuWritten(std::vector<CpuLayer>& layers);
     // Returns once the host has finished with every frame handed over.
     void drain();
 
@@ -109,7 +126,26 @@ class TaskComposer {
         // Two ColorBuffers, so the host can show one while the next is composed.
         uint32_t targets[2] = {0, 0};
         int next = 0;
+        // Steady clock milliseconds since the task has had no layer (minimized, or its app
+        // hidden); 0 while it has one.
+        int64_t withoutLayersSinceMs = 0;
     };
+
+   public:
+    // How long a task may have no layer before its ColorBuffers are let go. The window keeps
+    // its last frame in its own buffers, so the host needs them only for the next frame, and
+    // a minimized window kept two frames of its size on the host for nothing. A layer gone
+    // for a moment (an activity being replaced) keeps them.
+    static constexpr int64_t kReleaseWithoutLayersMs = 2000;
+    // How long after SurfaceFlinger last composed something itself the client target's
+    // ColorBuffers are kept. A frame is asked for when it is up, on which SurfaceFlinger lets
+    // go of its own buffers too.
+    static constexpr int64_t kReleaseClientTargetMs = 2000;
+
+   private:
+    // Lets go of the ColorBuffers of tasks without a layer for kReleaseWithoutLayersMs, and
+    // returns when the next one is due (steady clock milliseconds), if any.
+    std::optional<int64_t> releaseTasksWithoutLayersLocked(const Layout& layout, int64_t now);
 
     // Composes and posts every task's frame, on the pipeline's thread. `presentedMs` is when
     // SurfaceFlinger handed the frame over, on the trace's clock.
@@ -133,6 +169,13 @@ class TaskComposer {
     std::map<int32_t, Output> mOutputs;
     // Shared ColorBuffers this process holds open, by gralloc buffer ID.
     std::map<uint32_t, uint32_t> mShared;
+    // Buffers copied up for a frame not yet composed: a frame still being composed does not
+    // know them, and must not let go of their ColorBuffers.
+    std::set<uint32_t> mUploadedAhead;
+    // When SurfaceFlinger last composed into the client target, and when the frame that lets
+    // go of it is due.
+    ClientTargetUse mClientTarget{kReleaseClientTargetMs};
+    CpuUploads mUploads;
     bool mWarnedNoDisplay = false;
 
     std::mutex mCallbackMutex;

@@ -1,0 +1,50 @@
+; Desktop Subsystem for Android (DSA)
+; Widevine, when the user installed it (dsa-widevine-early.rc, dsa-widevine.rc). The image is
+; widevine.img on the user's add-on disk: an erofs image whose one file is Google's
+; com.google.android.widevine APEX, unchanged. init mounts it at early-init with its files
+; labelled as the vendor's APEXes are and lays it over /vendor/apex, where apexd-bootstrap finds
+; it and activates it as a vendor APEX, checking its signature as for the vendor's own. The module's service then runs in hal_drm_widevine and
+; keeps its device certificates in /data/vendor/mediadrm (mediadrm_vendor_data_file): the vendor
+; policy's types, or widevine-hal.cil's where the vendor policy has none.
+
+; The image's superblock: an fs_type for the platform's "allow domain fs_type:filesystem
+; getattr", as statfs through the overlay is checked against it, and a contextmount_type, the
+; only fs_types the platform lets anything relabel to.
+(type dsa_widevine_fs)
+(roletype object_r dsa_widevine_fs)
+(typeattributeset fs_type (dsa_widevine_fs))
+(typeattributeset contextmount_type (dsa_widevine_fs))
+; init mounts the image with fscontext=dsa_widevine_fs and context=vendor_apex_file: the
+; superblock relabelled from erofs's own type, the files given the vendor APEX type, which
+; associates with the image's type, and the mount checked against it. vendor_apex_file is a file
+; type, not an fs_type, so the platform's neverallow on an fs_type associating with a file type
+; does not reach it.
+(allow init labeledfs (filesystem (relabelfrom)))
+(allow init dsa_widevine_fs (filesystem (mount relabelfrom relabelto)))
+(allow vendor_apex_file dsa_widevine_fs (filesystem (associate)))
+(allow init tmpfs (dir (mounton)))
+; The overlay over /vendor/apex: init mounts on the folder, and overlayfs looks every file up and
+; reads it with init's credentials, whichever process (apexd) asked for it.
+(allow init vendor_apex_file (dir (mounton search read open getattr)))
+(allow init vendor_apex_file (file (read open getattr map)))
+
+; A boot after the user removed the module removes the device certificates it kept
+; (dsa-widevine.rc). init runs the vendor's toybox for it, as root, in a domain of its own that
+; may only remove what is in that folder: a vendor domain, because the platform keeps the
+; system's own domains out of vendor data. root needs dac_override for a folder media owns.
+(type dsa_widevine_reset)
+(roletype object_r dsa_widevine_reset)
+(typeattributeset domain (dsa_widevine_reset))
+(allow init dsa_widevine_reset (process (transition siginh rlimitinh)))
+(dontaudit init dsa_widevine_reset (process (noatsecure)))
+(allow dsa_widevine_reset vendor_toolbox_exec (file (entrypoint read getattr map execute open)))
+(allow dsa_widevine_reset init (fd (use)))
+(allow dsa_widevine_reset kmsg_device (chr_file (write append getattr)))
+(allow dsa_widevine_reset self (capability (dac_override dac_read_search fowner)))
+(allow dsa_widevine_reset system_data_root_file (dir (search)))
+(allow dsa_widevine_reset vendor_data_file (dir (search getattr write remove_name)))
+(allow dsa_widevine_reset mediadrm_vendor_data_file (dir (getattr open read search write remove_name rmdir)))
+(allow dsa_widevine_reset mediadrm_vendor_data_file (file (getattr unlink)))
+(allow dsa_widevine_reset mediadrm_vendor_data_file (lnk_file (getattr unlink)))
+; init makes the folder again, empty, and labels it.
+(allow init mediadrm_vendor_data_file (dir (create search getattr setattr open read write add_name relabelto)))

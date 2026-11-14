@@ -34,6 +34,7 @@ fn main() {
             "--no-print" => which.print = false,
             "--no-links" => which.links = false,
             "--no-settings" => which.settings = false,
+            "--no-language" => which.language = false,
             "--no-geocoding" => which.geocoding = false,
             "--no-share" => which.share = false,
             "--no-device-ports" => ports = false,
@@ -66,7 +67,7 @@ fn main() {
     });
     let mut threads = Vec::new();
     if ports {
-        threads.extend(devices::start_guest_ports(&stop, &log));
+        threads.extend(devices::start_guest_ports(&connect, &stop, &log));
     }
     threads.extend(devices::start_followers(connect, which, &stop, &log));
     threads.extend(devices::start_monitor_refresh(&stop, &log));
@@ -82,7 +83,7 @@ fn main() {
 
 #[cfg(target_os = "linux")]
 const HELP: &str = "usage: dsa-devices [--socket <path>] [--no-location] [--no-print] \
-                    [--no-links] [--no-settings] [--no-geocoding] [--no-share] \
+                    [--no-links] [--no-settings] [--no-language] [--no-geocoding] [--no-share] \
                     [--no-device-ports]";
 
 #[cfg(target_os = "linux")]

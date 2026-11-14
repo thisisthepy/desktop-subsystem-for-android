@@ -762,6 +762,48 @@ std::map<std::string, v1::Envelope> Cases() {
     pointer->set_action(v1::POINTER_ACTION_DOWN);
     pointer->set_x(10.5f);
     pointer->set_y(20.25f);
+    v1::ReconfigureWidget* reconfigure =
+        cases["widget_reconfigure"].mutable_reconfigure_widget();
+    reconfigure->set_request_id(7);
+    reconfigure->set_widget_id(12);
+    v1::WidgetReconfigured* reconfigured =
+        cases["widget_reconfigured"].mutable_widget_reconfigured();
+    reconfigured->set_request_id(7);
+    reconfigured->set_widget_id(12);
+    reconfigured->set_finished(true);
+  }
+  {
+    v1::SpeakText* speak = cases["speak_text"].mutable_speak_text();
+    speak->set_request_id(3);
+    speak->set_text("hello");
+    speak->set_voice_id("aria");
+    speak->set_language_tag("en-US");
+    speak->set_rate(1.5f);
+    speak->set_pitch(0.8f);
+  }
+  {
+    v1::SpeechAudio* audio = cases["speech_audio"].mutable_speech_audio();
+    audio->set_request_id(3);
+    audio->set_sample_rate_hz(24000);
+    audio->set_channel_count(1);
+    audio->set_pcm(std::string("\x01\x00\x02\x00", 4));
+  }
+  {
+    v1::RecognitionEvent* event = cases["recognition_event"].mutable_recognition_event();
+    event->set_request_id(9);
+    event->set_kind(v1::RECOGNITION_EVENT_KIND_FINAL);
+    event->add_texts("hello world");
+    event->add_confidences(0.9f);
+  }
+  {
+    v1::SpellingResult* result = cases["spelling_result"].mutable_spelling_result();
+    result->set_request_id(5);
+    v1::SpellingMistake* mistake = result->add_texts()->add_mistakes();
+    mistake->set_start(6);
+    mistake->set_length(3);
+    mistake->add_suggestions("the");
+    mistake->set_recommended(true);
+    result->set_supported(true);
   }
   return cases;
 }

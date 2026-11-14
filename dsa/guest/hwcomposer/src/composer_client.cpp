@@ -169,6 +169,12 @@ void ComposerClient::executeDisplayCommand(const composer3::DisplayCommand& comm
     }
     if (command.validateDisplay || command.presentOrValidateDisplay) {
         const auto changes = mDisplay.validate();
+        // SurfaceFlinger draws its client layers once this answers, and only the guest's
+        // memory holds what a CPU wrote into a buffer: it goes up to the host first.
+        if (mDisplay.powerMode() != composer3::PowerMode::OFF) {
+            std::vector<CpuLayer> written = mDisplay.cpuWrittenLayers(false);
+            mTasks->uploadCpuWritten(written);
+        }
         if (!changes.empty()) {
             composer3::ChangedCompositionTypes changed;
             changed.display = kDisplayId;
@@ -197,6 +203,11 @@ void ComposerClient::executeDisplayCommand(const composer3::DisplayCommand& comm
 }
 
 void ComposerClient::present(int64_t displayId, std::vector<CommandResultPayload>* results) {
+    if (mDisplay.powerMode() != composer3::PowerMode::OFF) {
+        // Any layer whose buffer changed after the validate that copied the others up.
+        std::vector<CpuLayer> written = mDisplay.cpuWrittenLayers(true);
+        mTasks->uploadCpuWritten(written);
+    }
     Frame frame = mDisplay.takeFrame();
     if (mDisplay.powerMode() != composer3::PowerMode::OFF) {
         mTasks->present(frame);

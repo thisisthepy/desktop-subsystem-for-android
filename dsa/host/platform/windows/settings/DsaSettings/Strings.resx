@@ -107,13 +107,16 @@
     <value>Android {0} is chosen. DSA downloads it now, and it is used the next time Android starts.</value>
   </data>
   <data name="UpdateNotice_AndroidRolledBack" xml:space="preserve">
-    <value>Android {0} did not start ({1}), so Android {2} is in use again. Android {0} is not tried again until a newer build of it or a new version of DSA is available.</value>
+    <value>Android {0} did not start ({1}), so Android {2} is in use again.
+Android {0} is tried again once a newer build of it or a new DSA version is out.</value>
   </data>
   <data name="UpdateNotice_AndroidRolledBackNotReady" xml:space="preserve">
-    <value>Android {0} did not start ({1}), so Android {2} is in use again, but it has not finished starting yet ({3}). Start Android again to boot Android {2}.</value>
+    <value>Android {0} did not start ({1}), so Android {2} is in use again.
+Android {2} has not finished starting yet ({3}). Start Android again to boot it.</value>
   </data>
   <data name="UpdateNotice_AndroidGaveUp" xml:space="preserve">
-    <value>Android {0} did not start ({1}), and no other image is installed. DSA downloads another image if there is one, and the next version of DSA tries this one again.</value>
+    <value>Android {0} did not start ({1}), and no other image is installed.
+DSA downloads another image if there is one. The next DSA version tries this one again.</value>
   </data>
   <data name="UpdateNotice_AndroidOnTrial" xml:space="preserve">
     <value>Android {0} is kept on trial and is not to blame: {1}</value>
@@ -293,7 +296,7 @@
     <value>Render GPU</value>
   </data>
   <data name="RenderGpuCard.Description" xml:space="preserve">
-    <value>The GPU that draws Android apps. By default it is the one that drives the primary monitor, so frames never cross between GPUs and a laptop's discrete GPU can sleep.</value>
+    <value>The GPU that draws Android apps. By default, the main monitor's GPU, so frames stay on one GPU and a laptop's discrete GPU can sleep.</value>
   </data>
   <data name="Gpu_Display" xml:space="preserve">
     <value>The GPU of the primary monitor (recommended)</value>
@@ -320,7 +323,8 @@
     <value>Turn off Windows touch gestures in DSA app windows</value>
   </data>
   <data name="TouchGesturesCard.Description" xml:space="preserve">
-    <value>On by default. While a DSA app window is in front, Windows' three- and four-finger touch gestures are off, so games and drawing apps get up to ten fingers. Other apps keep the gestures as you set them in Windows Settings.</value>
+    <value>While a DSA window is in front, Windows' three- and four-finger gestures are off, so apps get up to ten fingers.
+On by default. Other apps keep the gestures you set in Windows Settings.</value>
   </data>
   <data name="TouchGestures_Failed" xml:space="preserve">
     <value>This setting can't be used: Windows refused to change its touch gestures ({0}). You can turn them off for every app in Windows Settings.</value>
@@ -344,7 +348,9 @@
     <value>Restart the window manager?</value>
   </data>
   <data name="RestartWindowManagerBody" xml:space="preserve">
-    <value>The windows of Android apps close for a moment. Android and its apps keep running.</value>
+    <value>The windows of Android apps close for a moment.
+
+Android and its apps keep running.</value>
   </data>
   <data name="RestartWindowManagerAction" xml:space="preserve">
     <value>Restart</value>
@@ -365,7 +371,8 @@
     <value>Get pre-release versions</value>
   </data>
   <data name="PrereleaseUpdatesCard.Description" xml:space="preserve">
-    <value>Also install versions that are still being finished, as well as stable releases. Every release before 1.0 is a pre-release. Turning this off never moves DSA back to an older version: it waits for a stable release newer than the one installed.</value>
+    <value>Also install versions still being finished. Every release before 1.0 is a pre-release.
+Turning this off never moves DSA back: it waits for a newer stable release.</value>
   </data>
   <data name="ImageUpdatesCard.Header" xml:space="preserve">
     <value>Update the Android image automatically</value>
@@ -374,13 +381,15 @@
     <value>Download signed security updates and new versions of Android. They apply when Android restarts, as the setting below says.</value>
   </data>
   <data name="UpdatesMachineNote.Text" xml:space="preserve">
-    <value>These settings apply to every user of this PC, and only an administrator can change them. A switch that stays off is not offered by this installation.</value>
+    <value>These settings apply to every user of this PC, so only an administrator can change them.
+A switch that stays off is not offered by this installation.</value>
   </data>
   <data name="AdminBar.Title" xml:space="preserve">
     <value>Administrator rights needed</value>
   </data>
   <data name="AdminBar.Message" xml:space="preserve">
-    <value>The update settings apply to every user of this PC, so only an administrator can change them. Use Change as administrator, and Windows asks for permission.</value>
+    <value>Update settings apply to every user of this PC, so only an administrator can change them.
+Use Change as administrator, and Windows asks for permission.</value>
   </data>
   <data name="AdminShield.ToolTip" xml:space="preserve">
     <value>Only an administrator can change this setting.</value>
@@ -410,7 +419,9 @@
     <value>Install the newest version now?</value>
   </data>
   <data name="UpdateNowBody" xml:space="preserve">
-    <value>DSA stops every user's Android and installs the newest version. The DSA service restarts when setup is done.</value>
+    <value>DSA stops every user's Android and installs the newest version.
+
+The DSA service restarts when setup is done.</value>
   </data>
   <data name="UpdateNowAction" xml:space="preserve">
     <value>Install</value>
@@ -464,7 +475,8 @@
     <value>Share Windows folders with Android</value>
   </data>
   <data name="FileSharingCard.Description" xml:space="preserve">
-    <value>On by default: the folders chosen below show in Android's shared storage, in the Host folder, so Android apps can open and save files there. Android apps reach them only with Android's storage permission, and Windows lets them do only what your own account may do.</value>
+    <value>Shows the folders chosen below in Android's shared storage, in the Host folder. On by default.
+Android apps need Android's storage permission, and can do only what your Windows account may do.</value>
   </data>
   <data name="SharedFoldersCard.Header" xml:space="preserve">
     <value>Shared folders</value>
@@ -494,7 +506,8 @@
     <value>Android files</value>
   </data>
   <data name="AndroidFilesCard.Description" xml:space="preserve">
-    <value>Opens Android's shared storage in File Explorer: the files Android apps saved, such as photos and downloads. Android starts if it is not running. Android in File Explorer's navigation pane does the same.</value>
+    <value>Opens the files Android apps saved, such as photos and downloads, in File Explorer. Android starts if it is not running.
+Android in File Explorer's navigation pane opens them too.</value>
   </data>
   <data name="FilesDropCard.Header" xml:space="preserve">
     <value>Send files to Android apps</value>
@@ -506,7 +519,8 @@
     <value>Open web links in Android apps</value>
   </data>
   <data name="LinksCard.Description" xml:space="preserve">
-    <value>Off by default: a web link you tap in an Android app opens in your default browser in Windows. On, it opens in an Android app, as on a phone. A link an installed app has verified as its own opens in that app either way.</value>
+    <value>Off by default: links you tap in Android apps open in your Windows browser. On, they open in an Android app, as on a phone.
+A link an installed app has verified as its own always opens in that app.</value>
   </data>
   <data name="ArmHeader.Text" xml:space="preserve">
     <value>ARM apps</value>
@@ -515,7 +529,9 @@
     <value>Run apps built only for ARM</value>
   </data>
   <data name="ArmCard.Description" xml:space="preserve">
-    <value>Many Android apps contain code only for ARM processors. They install and run here only through an ARM translator. Android uses the open source translator that comes with it, unless you install another ARM translation package (dsa arm-translation install) or Google's translator. This switch decides whether Android uses a translator at all; it applies from the next start of Android. Only 64-bit ARM apps (arm64-v8a) can run.</value>
+    <value>Lets apps built only for ARM processors install and run here, through an ARM translator. Applies from the next start of Android.
+Only 64-bit ARM apps (arm64-v8a) run.
+Android uses its built-in open source translator, unless you install Google's below or another with dsa arm-translation install.</value>
   </data>
   <data name="ArmRestartBar.Title" xml:space="preserve">
     <value>Restart Android to apply</value>
@@ -530,7 +546,8 @@
     <value>Use</value>
   </data>
   <data name="Arm_DefaultDescription" xml:space="preserve">
-    <value>{0} {1} ({2}) comes with this Android and is used unless you install another translator. Going back to it removes the package installed in its place, from the next start of Android.</value>
+    <value>{0} {1} ({2}) comes with this Android and is used unless you install another translator.
+Going back to it removes the installed package, from the next start of Android.</value>
   </data>
   <data name="Arm_SupportedDefault" xml:space="preserve">
     <value>Supported by {0} {1} ({2}), the translator that comes with this Android.</value>
@@ -569,7 +586,9 @@
     <value>Google's ARM translator</value>
   </data>
   <data name="ArmGoogleCard.Description" xml:space="preserve">
-    <value>Gets the ARM translator from the Android emulator image Google offers for this Android version and installs it as a translation package. DSA does not include or pass on Google's translator: your computer downloads the image from Google, under Google's Android SDK License, keeps only the translator and deletes the rest (about 2 GB). Nothing is downloaded until you agree. A package built from another translator, such as Digitalis, does the same job.</value>
+    <value>Installs the ARM translator from Google's Android emulator image for this Android version.
+Downloads about 2 GB from Google, keeps only the translator and deletes the rest. Nothing is downloaded until you agree.
+A package built from another translator, such as Digitalis, does the same job.</value>
   </data>
   <data name="ArmGoogleButton.Content" xml:space="preserve">
     <value>Get</value>
@@ -584,7 +603,14 @@
     <value>Accept and download</value>
   </data>
   <data name="ArmGoogle_Notice" xml:space="preserve">
-    <value>DSA downloads the Android emulator image for this Android version from Google's SDK repository ({0}) and takes out only its ARM translator. The translator is Google's software, offered under the Android SDK License ({1}); by downloading it you accept those terms. DSA does not ship or pass it on. The image is about 2 GB and is deleted afterwards. The translator works from the next start of Android.</value>
+    <value>DSA downloads the Android emulator image for this Android version from Google and takes out only its ARM translator.
+
+• Download: about 2 GB, deleted afterwards.
+• Source: {0}
+• Terms: the translator is Google's software under the Android SDK License ({1}). By downloading it, you accept those terms.
+• The translator works from the next start of Android.
+
+DSA does not ship or pass on the translator.</value>
   </data>
   <data name="ArmGoogleFetchingBar.Title" xml:space="preserve">
     <value>Getting Google's ARM translator</value>
@@ -599,7 +625,8 @@
     <value>Google Play services and Play Store</value>
   </data>
   <data name="GappsCard.Description" xml:space="preserve">
-    <value>DSA does not include Google's apps. When you ask, it downloads LiteGapps Core, a public package of Google Play services, the Play Store and the account sync components made for this Android version, and installs it. It applies from the next start of Android.</value>
+    <value>Installs LiteGapps Core, a public package with Google Play services, the Play Store and account sync for this Android version.
+DSA does not include Google's apps. Applies from the next start of Android.</value>
   </data>
   <data name="GappsInstallButton.Content" xml:space="preserve">
     <value>Install</value>
@@ -620,7 +647,8 @@
     <value>Remove Google Play</value>
   </data>
   <data name="GappsRemoveCard.Description" xml:space="preserve">
-    <value>Deletes Google's apps from your add-on disk. They are gone from the next start of Android. Apps you installed from the Play Store stay, but those that need Google Play services may stop working.</value>
+    <value>Deletes Google's apps from your add-on disk, from the next start of Android.
+Apps from the Play Store stay, but those that need Google Play services may stop working.</value>
   </data>
   <data name="GappsRemoveButton.Content" xml:space="preserve">
     <value>Remove</value>
@@ -629,7 +657,8 @@
     <value>Google's terms</value>
   </data>
   <data name="GappsTermsCard.Description" xml:space="preserve">
-    <value>Google Play services and the Play Store are Google's software and follow Google's terms. DSA does not distribute them: it downloads the public LiteGapps package only when you ask for it.</value>
+    <value>Google Play services and the Play Store are Google's software and follow Google's terms.
+DSA does not distribute them. It downloads the public LiteGapps package only when you ask.</value>
   </data>
   <data name="GappsTermsLink.Content" xml:space="preserve">
     <value>Google Terms of Service</value>
@@ -638,7 +667,10 @@
     <value>Register this device with Google</value>
   </data>
   <data name="GappsRegisterCard.Description" xml:space="preserve">
-    <value>Google has not certified Android here, so Google may refuse to sign you in until you register this device. Open the registration page, sign in with your Google account, and enter this device's Android ID. Then restart Android and sign in again.</value>
+    <value>Android here is not Google-certified, so Google may refuse to sign you in until you register this device.
+1. Open the registration page and sign in with your Google account.
+2. Enter this device's Android ID.
+3. Restart Android and sign in again.</value>
   </data>
   <data name="GappsRegisterLink.Content" xml:space="preserve">
     <value>Open the registration page</value>
@@ -659,7 +691,8 @@
     <value>Removed: Google's apps leave Android at its next start.</value>
   </data>
   <data name="Gapps_ReinstallNeeded" xml:space="preserve">
-    <value>Made by an older DSA: LiteGapps Core {0} for Android {1} ({2}) is no longer used, and Android starts without Google's apps. Install Google Play again.</value>
+    <value>LiteGapps Core {0} for Android {1} ({2}), from an older DSA, is no longer used, so Android starts without Google's apps.
+Install Google Play again.</value>
   </data>
   <data name="Gapps_Source" xml:space="preserve">
     <value>Downloaded from LiteGapps: {0}</value>
@@ -677,13 +710,15 @@
     <value>Developer mode</value>
   </data>
   <data name="DeveloperModeCard.Description" xml:space="preserve">
-    <value>Off by default. When on, adb on this PC can connect to Android without asking in Android, through a port only this PC can reach. Turn it off when you are done.</value>
+    <value>Lets adb on this PC connect to Android without asking in Android, through a port only this PC can reach.
+Off by default. Turn it off when you are done.</value>
   </data>
   <data name="AdbAutoConnectCard.Header" xml:space="preserve">
     <value>Connect adb automatically</value>
   </data>
   <data name="AdbAutoConnectCard.Description" xml:space="preserve">
-    <value>On by default. While developer mode is on, Android shows up in adb devices and Android Studio without running adb connect. If you run adb disconnect, it stays off until the adb server restarts.</value>
+    <value>While developer mode is on, Android shows up in adb devices and Android Studio without adb connect. On by default.
+After adb disconnect, it stays off until the adb server restarts.</value>
   </data>
   <data name="AdbAutoConnect_Off" xml:space="preserve">
     <value>Not connecting: developer mode or automatic connection is off.</value>
@@ -716,13 +751,15 @@
     <value>Share the clipboard with Android</value>
   </data>
   <data name="ClipboardCard.Description" xml:space="preserve">
-    <value>On by default: text you copy in Windows can be pasted in Android apps, and text copied in Android can be pasted in Windows. Images stay where they were copied.</value>
+    <value>Text you copy in Windows can be pasted in Android apps, and the other way round. On by default.
+Images stay where they were copied.</value>
   </data>
   <data name="FreezeCard.Header" xml:space="preserve">
     <value>Freeze Android when idle</value>
   </data>
   <data name="FreezeCard.Description" xml:space="preserve">
-    <value>Off by default: an idle Android dozes and still receives notifications. Frozen, it uses no CPU but receives nothing until you open an app.</value>
+    <value>Off by default: an idle Android dozes and still receives notifications.
+Frozen, it uses no CPU but receives nothing until you open an app.</value>
   </data>
   <data name="FreezeNowCard.Header" xml:space="preserve">
     <value>Freeze Android now</value>
@@ -737,7 +774,8 @@
     <value>Memory limit</value>
   </data>
   <data name="MemoryLimitCard.Description" xml:space="preserve">
-    <value>The most memory Android may grow to. Android takes memory only as it needs it and returns it at once when it no longer does. Automatic sets no fixed limit: Android can grow up to this PC's memory less what Windows keeps. Takes effect the next time Android starts.</value>
+    <value>The most memory Android may grow to. Android takes memory only as needed and returns it when done.
+Automatic: up to this PC's memory less what Windows keeps. Applies from the next start of Android.</value>
   </data>
   <data name="MemoryLimit_Auto" xml:space="preserve">
     <value>Automatic</value>
@@ -794,7 +832,7 @@
     <value>Input trace</value>
   </data>
   <data name="InputTraceCard.Description" xml:space="preserve">
-    <value>Every DSA process writes when each touch, click and key reaches it, so the delay from your input to the picture can be measured. Off by default.</value>
+    <value>Every DSA process logs when each touch, click and key reaches it, so the delay from input to picture can be measured. Off by default.</value>
   </data>
   <data name="ResizeTraceCard.Header" xml:space="preserve">
     <value>Resize trace</value>
@@ -803,7 +841,8 @@
     <value>Every DSA process writes each stage of each window resize, to find where a resize is slow or flickers. Off by default.</value>
   </data>
   <data name="DiagnosticsNote.Text" xml:space="preserve">
-    <value>The traces go to the DSA logs below and make them grow, so turn them on only to report a problem. They apply to every user of this PC, so only an administrator can change them.</value>
+    <value>The traces go to the DSA logs below and make them grow, so turn them on only to report a problem.
+They apply to every user of this PC, so only an administrator can change them.</value>
   </data>
   <data name="LogsHeader.Text" xml:space="preserve">
     <value>Logs</value>
@@ -860,7 +899,8 @@
     <value>Source code</value>
   </data>
   <data name="AboutIndependent.Text" xml:space="preserve">
-    <value>Desktop Subsystem for Android is an independent open source project. It is not affiliated with, endorsed by or sponsored by Microsoft or Google.</value>
+    <value>Desktop Subsystem for Android is an independent open source project.
+It is not affiliated with, endorsed by or sponsored by Microsoft or Google.</value>
   </data>
   <data name="AboutTrademark.Text" xml:space="preserve">
     <value>Android is a trademark of Google LLC.</value>
@@ -932,7 +972,10 @@
     <value>Refresh</value>
   </data>
   <data name="WidgetsIntro.Text" xml:space="preserve">
-    <value>Place the widgets your Android apps offer on your desktop. Each widget gets a window of its own below your other windows. Drag the band along its top to move it, and its edges to resize it. Right-click a widget to resize or remove it. Android starts when you open this page.</value>
+    <value>Place the widgets your Android apps offer on your desktop. Android starts when you open this page.
+• Each widget gets a window of its own, below your other windows.
+• Press and hold a widget to edit it: drag it to move it, and drag its handles to resize it.
+• Right-click a widget for its settings, its sizes and Remove.</value>
   </data>
   <data name="WidgetsErrorBar.Title" xml:space="preserve">
     <value>Widgets could not be read or changed</value>
@@ -1007,10 +1050,12 @@
     <value>{0} version {1} is installed already. This installs the same version again. Its data stays.</value>
   </data>
   <data name="ApkWindow_SummaryDowngrade" xml:space="preserve">
-    <value>{0} version {1} is installed, and this file is the older version {2}. Android does not install an older version over a newer one. To use this file, uninstall the app in Android first.</value>
+    <value>{0} version {1} is installed, and this file is the older version {2}. Android does not install an older version over a newer one.
+To use this file, uninstall the app in Android first.</value>
   </data>
   <data name="ApkWindow_SummarySignature" xml:space="preserve">
-    <value>{0} is installed already, signed with another key than this file. Android does not let an app signed by someone else replace it, which keeps the app's data safe. To use this file, uninstall the app in Android first.</value>
+    <value>{0} is installed already, signed with another key than this file. To keep the app's data safe, Android does not let it be replaced.
+To use this file, uninstall the app in Android first.</value>
   </data>
   <data name="ApkWindow_FactPackage" xml:space="preserve">
     <value>Package</value>
@@ -1133,10 +1178,12 @@
     <value>Android did not install the app.</value>
   </data>
   <data name="ApkWindow_AbiWarning" xml:space="preserve">
-    <value>This app has code only for {0} processors, not for this PC's. Android runs it only with an ARM translation package, and may refuse to install it.</value>
+    <value>This app has code only for {0} processors, not for this PC's.
+Android runs it only with an ARM translation package, and may refuse to install it.</value>
   </data>
   <data name="ApkWindow_Abi32Warning" xml:space="preserve">
-    <value>This app has code only for {0} processors. The ARM translator runs only 64-bit ARM (arm64-v8a) code, so Android may refuse to install it or it may not start.</value>
+    <value>This app has code only for {0} processors.
+The ARM translator runs only 64-bit ARM (arm64-v8a) code, so Android may refuse to install it, or it may not start.</value>
   </data>
   <data name="ApkWindow_LaunchFailedAfterInstall" xml:space="preserve">
     <value>{0} is installed, but it did not open. {1}</value>
@@ -1151,7 +1198,8 @@
     <value>Logs</value>
   </data>
   <data name="LogsNote.Text" xml:space="preserve">
-    <value>Android sends its log only while this page is open, and nothing is written to disk. Save diagnostics gathers what a problem report needs into one zip file.</value>
+    <value>Android sends its log only while this page is open, and nothing is written to disk.
+Save diagnostics gathers what a problem report needs into one zip file.</value>
   </data>
   <data name="LogsSaveButton.Content" xml:space="preserve">
     <value>Save diagnostics</value>
@@ -1208,13 +1256,15 @@
     <value>Device identity</value>
   </data>
   <data name="IdentityIntro.Text" xml:space="preserve">
-    <value>The names and build fingerprint Android reports to apps. Leave a box empty to keep the value shown in it. Android reads these when it starts, so a change applies from its next start.</value>
+    <value>The names and build fingerprint Android reports to apps. Leave a box empty to keep the value shown in it.
+Changes apply from the next start of Android.</value>
   </data>
   <data name="IdentityWarning.Title" xml:space="preserve">
     <value>Apps may notice</value>
   </data>
   <data name="IdentityWarning.Message" xml:space="preserve">
-    <value>Changing the model or the fingerprint can change how apps behave: some check the device before they run, and payment and integrity checks may fail.</value>
+    <value>Changing the model or the fingerprint can change how apps behave.
+Some apps check the device before they run, and payment and integrity checks may fail.</value>
   </data>
   <data name="IdentityDoneBar.Title" xml:space="preserve">
     <value>Device identity</value>
@@ -1232,7 +1282,9 @@
     <value>Reset the device identity?</value>
   </data>
   <data name="IdentityResetConfirmBody" xml:space="preserve">
-    <value>Every value goes back to its default: this computer's, or DSA's own where the computer does not say. It applies from the next start of Android.</value>
+    <value>Every value goes back to its default: this computer's, or DSA's own where the computer does not say.
+
+It applies from the next start of Android.</value>
   </data>
   <data name="IdentityNamesHeader.Text" xml:space="preserve">
     <value>Device</value>
@@ -1271,7 +1323,8 @@
     <value>From this computer</value>
   </data>
   <data name="IdentityComputerNote.Text" xml:space="preserve">
-    <value>These follow this computer and are read again each time Android starts, so a renamed computer is followed from the next start. Android's own Settings shows the device name and the chip; the model name is shown only here, as Android's Settings has no place for it.</value>
+    <value>These follow this computer and are read again at each start of Android, so a renamed computer is followed from the next start.
+Android's Settings shows the device name and the chip. The model name shows only here.</value>
   </data>
   <data name="Identity_model_name" xml:space="preserve">
     <value>Model name</value>
@@ -1400,7 +1453,8 @@
     <value>Whole fingerprint</value>
   </data>
   <data name="Identity_fingerprint_Description" xml:space="preserve">
-    <value>brand/name/device:release/id/incremental:type/tags. When set, it is Build.FINGERPRINT, whatever the parts above say.</value>
+    <value>brand/name/device:release/id/incremental:type/tags
+When set, it is Build.FINGERPRINT, whatever the parts above say.</value>
   </data>
   <data name="Identity_fingerprint_Invalid" xml:space="preserve">
     <value>Write it as brand/name/device:release/id/incremental:type/tags, with the type user, userdebug or eng.</value>
@@ -1415,7 +1469,9 @@
     <value>Refresh</value>
   </data>
   <data name="AppsIntro.Text" xml:space="preserve">
-    <value>The Android apps installed on this PC. Open an app, change its permissions, storage and notifications in App info, or uninstall an app you installed. They are also listed in Windows Settings under Apps &gt; Installed apps. Android starts when you open this page.</value>
+    <value>The Android apps installed on this PC. Android starts when you open this page.
+Open an app, change its permissions, storage and notifications in App info, or uninstall an app you installed.
+They are also listed in Windows Settings under Apps &gt; Installed apps.</value>
   </data>
   <data name="AppsErrorBar.Title" xml:space="preserve">
     <value>The apps could not be read or changed</value>
@@ -1447,6 +1503,12 @@
   <data name="AppsInfoButton.Content" xml:space="preserve">
     <value>App info</value>
   </data>
+  <data name="AppsDesktopShortcutButton.Content" xml:space="preserve">
+    <value>Create desktop shortcut</value>
+  </data>
+  <data name="Apps_DesktopShortcutMade" xml:space="preserve">
+    <value>A shortcut to {0} is on the desktop.</value>
+  </data>
   <data name="AppsUninstallButton.Content" xml:space="preserve">
     <value>Uninstall</value>
   </data>
@@ -1454,7 +1516,9 @@
     <value>Uninstall {0}?</value>
   </data>
   <data name="AppsUninstallConfirmBody" xml:space="preserve">
-    <value>{0} and its data will be removed from Android. This cannot be undone.</value>
+    <value>{0} and its data will be removed from Android.
+
+This cannot be undone.</value>
   </data>
   <data name="Apps_Count" xml:space="preserve">
     <value>{0} apps</value>
@@ -1532,7 +1596,8 @@
     <value>Refresh</value>
   </data>
   <data name="BackgroundIntro.Text" xml:space="preserve">
-    <value>These Android apps keep running after their windows close, because they play music, download files, keep a VPN on or do other work in the background. Each also has an icon in the notification area of the taskbar. Stopping an app ends what it is doing and frees the memory it used.</value>
+    <value>These Android apps keep running after their windows close, to play music, download files, keep a VPN on or do other work.
+Each has an icon in the taskbar's notification area. Stopping an app ends its work and frees its memory.</value>
   </data>
   <data name="BackgroundErrorBar.Title" xml:space="preserve">
     <value>The apps that run in the background could not be read or changed</value>
@@ -1601,7 +1666,12 @@
     <value>Scaling on another monitor</value>
   </data>
   <data name="AppsDpiScaling.ToolTip" xml:space="preserve">
-    <value>Who scales this app when its window moves to a monitor of another scale. App: the app redraws at the new scale, and text stays sharp; for an app that does not say it handles this, Android recreates its screen and restores its state, so it may redraw briefly when it moves. System: the app keeps its scale and DSA scales its window to the same physical size; text can look a little blurry. Automatic picks App for apps that say they handle it, and System for the others. Automatic and System never restart the app.</value>
+    <value>Who scales this app when its window moves to a monitor of another scale.
+• App: the app redraws at the new scale, and text stays sharp.
+• App, for an app that does not say it handles this: Android recreates its screen and keeps its state, so it may redraw briefly.
+• System: the app keeps its scale and DSA scales its window to the same physical size. Text can look a little blurry.
+• Automatic: App for apps that say they handle it, System for the others.
+Automatic and System never restart the app.</value>
   </data>
   <data name="Apps_DpiScaling_Auto" xml:space="preserve">
     <value>Scaling: automatic</value>
@@ -1619,7 +1689,8 @@
     <value>Scaling performed by: system (forced), not available yet</value>
   </data>
   <data name="Apps_DpiScaling_SystemForcedTip" xml:space="preserve">
-    <value>System (forced) gives the app the new scale without restarting it, even if it does not say it handles one. It is not available yet: it needs a change to Android's framework that this build does not have, so until then it works like System.</value>
+    <value>System (forced) gives the app the new scale without restarting it, even if it does not say it handles one.
+Not available yet: it needs an Android framework change this build lacks, so for now it works like System.</value>
   </data>
   <data name="NavNetwork.Content" xml:space="preserve">
     <value>Network</value>
@@ -1648,11 +1719,17 @@
   <data name="Network_None" xml:space="preserve">
     <value>None</value>
   </data>
+  <data name="Network_DnsHost" xml:space="preserve">
+    <value>Answered by this PC's resolver, so its hosts file, VPN and DNS filters apply to Android apps.</value>
+  </data>
+  <data name="Network_DnsFallback" xml:space="preserve">
+    <value>This PC's resolver does not answer, so Android asks the network's DNS servers: {0}</value>
+  </data>
   <data name="NetworkAddressLabel.Text" xml:space="preserve">
     <value>Address</value>
   </data>
   <data name="NetworkDnsLabel.Text" xml:space="preserve">
-    <value>DNS servers</value>
+    <value>DNS</value>
   </data>
   <data name="NetworkGatewayLabel.Text" xml:space="preserve">
     <value>Gateway</value>
@@ -1667,13 +1744,216 @@
     <value>Advanced networking</value>
   </data>
   <data name="AdvancedNetworkingCard.Description" xml:space="preserve">
-    <value>Off by default. When on, Android joins this PC's network as a device of its own: other devices on the network can reach Android apps, and Android apps can reach them directly. Programs on this PC can always reach a server in Android at the address above.</value>
+    <value>Android joins this PC's network as its own device: other devices reach Android apps, and Android apps reach them. Off by default.
+Programs on this PC can always reach a server in Android at the address above.</value>
   </data>
   <data name="NetworkRestartBar.Title" xml:space="preserve">
     <value>Restart Android to apply</value>
   </data>
   <data name="NetworkRestartBar.Message" xml:space="preserve">
     <value>The change applies the next time Android starts. Stop Android on the General page, then open an app.</value>
+  </data>
+  <data name="NetworkCertificatesHeader.Text" xml:space="preserve">
+    <value>Trusted certificates</value>
+  </data>
+  <data name="HostCertificatesCard.Header" xml:space="preserve">
+    <value>Use this PC's added root certificates</value>
+  </data>
+  <data name="HostCertificatesCard.Description" xml:space="preserve">
+    <value>Android apps trust root certificates added to this PC, such as your company's or a security program's. On by default.
+Root certificates that come with Windows are not listed. A change applies at once.</value>
+  </data>
+  <data name="CertificatesNone.Text" xml:space="preserve">
+    <value>No added root certificates were found on this PC.</value>
+  </data>
+  <data name="Certificate_IssuedBy" xml:space="preserve">
+    <value>Issued by {0}</value>
+  </data>
+  <data name="Certificate_SourceMachine" xml:space="preserve">
+    <value>This PC's Trusted Root Certification Authorities</value>
+  </data>
+  <data name="Certificate_SourceMachineGroupPolicy" xml:space="preserve">
+    <value>This PC's Trusted Root Certification Authorities, set by Group Policy</value>
+  </data>
+  <data name="Certificate_SourceMachineEnterprise" xml:space="preserve">
+    <value>This PC's Trusted Root Certification Authorities, set by your organization</value>
+  </data>
+  <data name="Certificate_SourceUser" xml:space="preserve">
+    <value>Your Trusted Root Certification Authorities</value>
+  </data>
+  <data name="Certificate_SourceUserGroupPolicy" xml:space="preserve">
+    <value>Your Trusted Root Certification Authorities, set by Group Policy</value>
+  </data>
+  <data name="Certificate_SourceAdmin" xml:space="preserve">
+    <value>Added by an administrator of this PC</value>
+  </data>
+  <data name="Certificate_SourceSystem" xml:space="preserve">
+    <value>Added to the system's certificate store</value>
+  </data>
+  <data name="BackupHeader.Text" xml:space="preserve">
+    <value>Backup</value>
+  </data>
+  <data name="BackupUnavailableBar.Title" xml:space="preserve">
+    <value>Backups cannot be used now</value>
+  </data>
+  <data name="BackupErrorBar.Title" xml:space="preserve">
+    <value>That did not work</value>
+  </data>
+  <data name="BackupResultBar.Title" xml:space="preserve">
+    <value>Done</value>
+  </data>
+  <data name="BackupCard.Header" xml:space="preserve">
+    <value>Back up apps' data</value>
+  </data>
+  <data name="BackupCard.Description" xml:space="preserve">
+    <value>Android backs up its apps' data to your user folder, encrypted with a key Windows keeps for you.
+Restore it after a data reset, or on another PC with the recovery key.</value>
+  </data>
+  <data name="BackupNowButton.Content" xml:space="preserve">
+    <value>Back up now</value>
+  </data>
+  <data name="BackupRestoreButton.Content" xml:space="preserve">
+    <value>Restore</value>
+  </data>
+  <data name="BackupRestoreConfirm.Title" xml:space="preserve">
+    <value>Restore apps' data from the backup?</value>
+  </data>
+  <data name="BackupRestoreConfirm.Action" xml:space="preserve">
+    <value>Restore</value>
+  </data>
+  <data name="RecoveryKeyCard.Header" xml:space="preserve">
+    <value>Recovery key</value>
+  </data>
+  <data name="RecoveryKeyCard.Description" xml:space="preserve">
+    <value>The recovery key opens your backup on another PC, or after Windows is reinstalled.
+Without it, only this Windows account on this PC can read the backup.</value>
+  </data>
+  <data name="RecoveryKeyShowButton.Content" xml:space="preserve">
+    <value>Show recovery key</value>
+  </data>
+  <data name="RecoveryKeyHideButton.Content" xml:space="preserve">
+    <value>Hide</value>
+  </data>
+  <data name="UseRecoveryKeyCard.Header" xml:space="preserve">
+    <value>Use a recovery key</value>
+  </data>
+  <data name="UseRecoveryKeyCard.Description" xml:space="preserve">
+    <value>To restore a backup made on another PC, copy its DSA Backup folder into your user folder and enter the recovery key it was made with.</value>
+  </data>
+  <data name="UseRecoveryKeyCard.Placeholder" xml:space="preserve">
+    <value>Recovery key</value>
+  </data>
+  <data name="UseRecoveryKeyButton.Content" xml:space="preserve">
+    <value>Use key</value>
+  </data>
+  <data name="Backup_NoService" xml:space="preserve">
+    <value>The DSA service did not say where your backup stands. Open this page again in a moment.</value>
+  </data>
+  <data name="Backup_Unavailable" xml:space="preserve">
+    <value>The backup folder or its key cannot be used now.</value>
+  </data>
+  <data name="Backup_Folder" xml:space="preserve">
+    <value>Folder: {0}</value>
+  </data>
+  <data name="Backup_Last" xml:space="preserve">
+    <value>Last backup: {0}</value>
+  </data>
+  <data name="Backup_Never" xml:space="preserve">
+    <value>never</value>
+  </data>
+  <data name="Backup_Apps" xml:space="preserve">
+    <value>Apps in the backup: {0} ({1})</value>
+  </data>
+  <data name="Backup_LastError" xml:space="preserve">
+    <value>Last problem: {0}</value>
+  </data>
+  <data name="Backup_Done" xml:space="preserve">
+    <value>Backed up the data of {0} apps.</value>
+  </data>
+  <data name="Backup_DoneSome" xml:space="preserve">
+    <value>Backed up the data of {0} apps; {1} could not be backed up.</value>
+  </data>
+  <data name="Backup_Restored" xml:space="preserve">
+    <value>Restored the data of {0} apps and installed {1} apps.</value>
+  </data>
+  <data name="Backup_RestoredSome" xml:space="preserve">
+    <value>Restored the data of {0} apps and installed {1} apps; {2} could not be restored.</value>
+  </data>
+  <data name="Backup_RestoreWarning" xml:space="preserve">
+    <value>Each app in the backup gets the backup's data in place of what it has now.
+
+• Apps that are missing are installed again.
+• Android starts if it is not running.</value>
+  </data>
+  <data name="Backup_KeyAdvice" xml:space="preserve">
+    <value>Write the key down or keep it in a password manager, away from this PC. Anyone with the key and your backup folder can read the backup.</value>
+  </data>
+  <data name="Backup_KeyEmpty" xml:space="preserve">
+    <value>Enter the recovery key first.</value>
+  </data>
+  <data name="Backup_KeyUsed" xml:space="preserve">
+    <value>The recovery key is kept as your backup key. The backup folder made with it can now be restored here.</value>
+  </data>
+  <data name="BackupSwitchCard.Header" xml:space="preserve">
+    <value>Back up apps' data to this PC</value>
+  </data>
+  <data name="BackupSwitchCard.Description" xml:space="preserve">
+    <value>Keeps an encrypted second copy of your Android apps' user data on this PC, to restore after a data reset or on another PC.
+Off until you turn it on.</value>
+  </data>
+  <data name="Backup_Off" xml:space="preserve">
+    <value>Backup is off. No backup is made, and nothing of the apps' data is kept on this PC.</value>
+  </data>
+  <data name="Backup_OffKept" xml:space="preserve">
+    <value>Backup is off. Earlier backups of {0} apps ({1}) are still kept in your DSA Backup folder.</value>
+  </data>
+  <data name="Backup_DeleteQuestion" xml:space="preserve">
+    <value>The backups of {0} apps ({1}) are still kept on this PC.
+
+Delete them and their key as well, or keep them for a later restore?</value>
+  </data>
+  <data name="BackupOffConfirm.Title" xml:space="preserve">
+    <value>Turn off backup</value>
+  </data>
+  <data name="BackupOffConfirm.Delete" xml:space="preserve">
+    <value>Delete backups</value>
+  </data>
+  <data name="BackupOffConfirm.Keep" xml:space="preserve">
+    <value>Keep them</value>
+  </data>
+  <data name="Backup_TurnedOn" xml:space="preserve">
+    <value>Backup is on. Android backs up its apps' data to this PC from now on.</value>
+  </data>
+  <data name="Backup_TurnedOff" xml:space="preserve">
+    <value>Backup is off. The backups made so far are kept.</value>
+  </data>
+  <data name="Backup_TurnedOffDeleted" xml:space="preserve">
+    <value>Backup is off, and the backups and their key were deleted.</value>
+  </data>
+  <data name="KeyProtectionCard.Header" xml:space="preserve">
+    <value>Protection of Android's keys</value>
+  </data>
+  <data name="KeyProtection_None" xml:space="preserve">
+    <value>Android's keys get their protection the first time Android starts.</value>
+  </data>
+  <data name="KeyProtection_Tpm" xml:space="preserve">
+    <value>Sealed by this PC's TPM. A copy of Android's disk cannot open the apps' keys or Android's encrypted storage anywhere else.</value>
+  </data>
+  <data name="KeyProtection_Dpapi" xml:space="preserve">
+    <value>Kept by Windows for your account only, as this PC has no usable TPM. A copy of Android's disk cannot open the keys without your account.
+Once a TPM works, DSA seals the keys with it.</value>
+  </data>
+  <data name="KeyProtection_Hardware" xml:space="preserve">
+    <value>Sealed by {0}.</value>
+  </data>
+  <data name="KeyProtection_Store" xml:space="preserve">
+    <value>Kept by {0}.</value>
+  </data>
+  <data name="KeyProtection_Why" xml:space="preserve">
+    <value>Why not the TPM: {0}</value>
+  </data>
+  <data name="KeyProblemBar.Title" xml:space="preserve">
+    <value>Android's keys could not be opened</value>
   </data>
   <data name="ResetDataHeader.Text" xml:space="preserve">
     <value>Reset</value>
@@ -1682,7 +1962,8 @@
     <value>Reset Android's data</value>
   </data>
   <data name="ResetDataCard.Description" xml:space="preserve">
-    <value>Erases every app you installed, your accounts and the data of every app, so Android starts as it was first installed. The Android image and these settings stay.</value>
+    <value>Erases every app you installed, your accounts and all app data, so Android starts as when first installed.
+The Android image and these settings stay.</value>
   </data>
   <data name="ResetDataButton.Content" xml:space="preserve">
     <value>Reset</value>
@@ -1694,7 +1975,14 @@
     <value>Reset</value>
   </data>
   <data name="ResetData_Warning" xml:space="preserve">
-    <value>This erases every app you installed in Android, the accounts you signed in to and the data of every app. Android stops now, and its next start is as it was first installed. The Android image and DSA's settings stay. This cannot be undone.</value>
+    <value>This erases from Android:
+• every app you installed
+• the accounts you signed in to
+• the data of every app
+
+Android stops now, and starts next time as it was first installed. The Android image and DSA's settings stay.
+
+This cannot be undone.</value>
   </data>
   <data name="ResetDoneBar.Title" xml:space="preserve">
     <value>Android's data was reset</value>
@@ -1751,13 +2039,16 @@
     <value>Change</value>
   </data>
   <data name="AndroidChooseNote.Text" xml:space="preserve">
-    <value>Every user of this computer runs the same Android version, so changing it needs an administrator. Security updates for the chosen version keep coming. When a version stops being supported, DSA moves to the next one and keeps your apps.</value>
+    <value>Every user of this computer runs the same Android version, so changing it needs an administrator.
+The chosen version keeps getting security updates. When its support ends, DSA moves to the next version and keeps your apps.</value>
   </data>
   <data name="AndroidUpConfirm.Title" xml:space="preserve">
     <value>Move to a newer Android?</value>
   </data>
   <data name="AndroidUpConfirm.Body" xml:space="preserve">
-    <value>Android {0} is downloaded and used the next time Android starts. Your apps and their data move along. Moving back later erases the data.</value>
+    <value>Android {0} is downloaded and used from the next start of Android. Your apps and their data move along.
+
+Moving back later erases the data.</value>
   </data>
   <data name="AndroidDownConfirm.Title" xml:space="preserve">
     <value>Erase Android data to move to an older version?</value>
@@ -1766,7 +2057,16 @@
     <value>Erase data and change</value>
   </data>
   <data name="Android_DownWarning" xml:space="preserve">
-    <value>Android {0} is older than the Android {1} that runs now, and Android cannot read data a newer version wrote. Moving erases the Android data of every user of this computer: every app they installed, the accounts they signed in to and the data of every app. Each user's Android then starts as it was first installed. DSA's settings stay. This cannot be undone.</value>
+    <value>Android {0} is older than the Android {1} that runs now, and cannot read data a newer version wrote.
+
+Moving erases the Android data of every user of this computer:
+• every app they installed
+• the accounts they signed in to
+• the data of every app
+
+Each user's Android then starts as it was first installed. DSA's settings stay.
+
+This cannot be undone.</value>
   </data>
   <data name="ApkWindow_AbiWarningTitle" xml:space="preserve">
     <value>This app may not run on this PC</value>
@@ -1802,7 +2102,9 @@
     <value>Erase {0}'s data?</value>
   </data>
   <data name="AppsRunAsArmEraseBody" xml:space="preserve">
-    <value>Android cannot change how {0} runs and keep its data. Installing it again erases its data: sign-ins, settings and files it keeps for itself.</value>
+    <value>Android cannot change how {0} runs and keep its data.
+
+Installing it again erases its data: sign-ins, settings and files it keeps for itself.</value>
   </data>
   <data name="AppsRunAsArmEraseButton" xml:space="preserve">
     <value>Erase and install again</value>
@@ -1879,6 +2181,10 @@
   <data name="ApkWindow_Reason_invalid-bundle" xml:space="preserve">
     <value>The bundle is not one app that Android can install.</value>
   </data>
+  <data name="ApkWindow_Reason_translation-off" xml:space="preserve">
+    <value>The app runs only as ARM code (arm64-v8a), and ARM translation is not on.
+Turn it on under ARM apps, restart Android, and install the app again.</value>
+  </data>
   <data name="UpdatesAndroidHeader.Text" xml:space="preserve">
     <value>Android</value>
   </data>
@@ -1913,13 +2219,16 @@
     <value>Restart Android now?</value>
   </data>
   <data name="AndroidRestartConfirm.Body" xml:space="preserve">
-    <value>Android restarts into Android {0}. Its app windows close; open the apps again once it has started.</value>
+    <value>Android restarts into Android {0}.
+
+Its app windows close. Open the apps again once it has started.</value>
   </data>
   <data name="ImageAutoRestartCard.Header" xml:space="preserve">
     <value>Restart Android into updates by itself</value>
   </data>
   <data name="ImageAutoRestartCard.Description" xml:space="preserve">
-    <value>On by default. With no app window open, Android restarts into a downloaded update at once. With windows open, DSA asks first, or waits until you close them. Off, an update is used the next time you start Android.</value>
+    <value>Restarts Android into a downloaded update at once when no app window is open. Otherwise DSA asks first, or waits until you close them.
+On by default. Off, an update is used the next time you start Android.</value>
   </data>
   <data name="IdentitySpecsCard.Header" xml:space="preserve">
     <value>Device specifications</value>
@@ -1944,6 +2253,10 @@
   </data>
   <data name="Apps_Root_remember" xml:space="preserve">
     <value>Root: remember (no asking)</value>
+  </data>
+  <data name="Apps_RootGroup" xml:space="preserve">
+    <value>Shares its user ID with {0}. Android cannot tell these apps apart, so they share one root access setting.
+Changing it here changes it for all. If any of them is Not allowed, none of them can use su.</value>
   </data>
   <data name="Apps_RootTip_unavailable" xml:space="preserve">
     <value>Root access is off for this PC. An administrator turns it on in Advanced.</value>
@@ -1970,7 +2283,10 @@
     <value>No app can use su. An administrator of this PC can turn root access on in Advanced, and then you choose each app's level here.</value>
   </data>
   <data name="AppsRootNote.Text" xml:space="preserve">
-    <value>Root access: Not allowed hides su from the app. Ask each time shows an administrator prompt with the app's name for each request, and after an approval the app is not asked again for 15 minutes. Remember approves without asking, so choosing it needs an administrator's approval.</value>
+    <value>Root access:
+• Not allowed hides su from the app.
+• Ask each time shows an administrator prompt with the app's name for each request. An approval lasts 15 minutes.
+• Remember approves without asking, so choosing it needs an administrator's approval.</value>
   </data>
   <data name="RootHeader.Text" xml:space="preserve">
     <value>Root access</value>
@@ -1979,10 +2295,12 @@
     <value>Let Android apps ask for root</value>
   </data>
   <data name="RootElevationCard.Description" xml:space="preserve">
-    <value>An app you allow on the Apps page can run commands as root once an administrator of this PC approves, as sudo does. Off by default. The Android image, its build properties and SELinux stay as they are.</value>
+    <value>An app you allow on the Apps page can run commands as root once an administrator of this PC approves, as with sudo. Off by default.
+The Android image, its build properties and SELinux stay as they are.</value>
   </data>
   <data name="RootElevationAdminReason.Text" xml:space="preserve">
-    <value>Only an administrator can change this, because it applies to every user of this PC. Use Change as administrator, and Windows asks for permission.</value>
+    <value>Only an administrator can change this, because it applies to every user of this PC.
+Use Change as administrator, and Windows asks for permission.</value>
   </data>
   <data name="RootElevationRestartBar.Title" xml:space="preserve">
     <value>Restart Android to apply</value>
@@ -2003,4 +2321,77 @@
     <value>Choose each app's level on the Apps page. Each user chooses for the apps in their own Android.</value>
   </data>
   <data name="AppsAdbShell.Text" xml:space="preserve"><value>adb shell</value></data>
+  <data name="WidevineHeader.Text" xml:space="preserve">
+    <value>Protected content</value>
+  </data>
+  <data name="WidevineCard.Header" xml:space="preserve">
+    <value>Widevine</value>
+  </data>
+  <data name="WidevineCard.Description" xml:space="preserve">
+    <value>Lets streaming apps play protected video. Applies from the next start of Android.
+Downloads about 2 GB from Google under the Android SDK License, keeps only Widevine and deletes the rest.</value>
+  </data>
+  <data name="WidevineInstallButton.Content" xml:space="preserve">
+    <value>Get</value>
+  </data>
+  <data name="WidevineConfirm.Title" xml:space="preserve">
+    <value>Get Widevine from Google?</value>
+  </data>
+  <data name="WidevineConfirm.Action" xml:space="preserve">
+    <value>Accept and download</value>
+  </data>
+  <data name="Widevine_Notice" xml:space="preserve">
+    <value>DSA downloads the Android emulator image for this Android version from Google and takes out only its Widevine module, unchanged.
+
+• Download: about 2 GB, deleted afterwards.
+• Source: {0}
+• Terms: Widevine is Google's software under the Android SDK License ({1}). By downloading it, you accept those terms.
+• Quality: security level L3, so streaming services send standard definition (SD) at most.
+• Widevine works from the next start of Android.
+
+DSA does not ship or pass on Widevine.</value>
+  </data>
+  <data name="WidevineInstallingBar.Title" xml:space="preserve">
+    <value>Getting Widevine</value>
+  </data>
+  <data name="WidevineInstallingBar.Message" xml:space="preserve">
+    <value>Downloading about 2 GB from Google and taking Widevine out. This takes a few minutes.</value>
+  </data>
+  <data name="WidevineRestartBar.Title" xml:space="preserve">
+    <value>Restart Android to apply</value>
+  </data>
+  <data name="WidevineRestartBar.Message" xml:space="preserve">
+    <value>Android uses the change from its next start.</value>
+  </data>
+  <data name="WidevineQualityCard.Header" xml:space="preserve">
+    <value>Standard definition only</value>
+  </data>
+  <data name="Widevine_Quality" xml:space="preserve">
+    <value>Widevine here is security level L3, so streaming services send standard definition (SD) at most.
+For high definition, use this computer's own browser or app.</value>
+  </data>
+  <data name="WidevineRemoveCard.Header" xml:space="preserve">
+    <value>Remove Widevine</value>
+  </data>
+  <data name="WidevineRemoveCard.Description" xml:space="preserve">
+    <value>Removes the module and the device certificates it kept, from the next start of Android.</value>
+  </data>
+  <data name="WidevineRemoveButton.Content" xml:space="preserve">
+    <value>Remove</value>
+  </data>
+  <data name="WidevineTermsLink.Content" xml:space="preserve">
+    <value>Android SDK License</value>
+  </data>
+  <data name="Widevine_NotInstalled" xml:space="preserve">
+    <value>Not installed.</value>
+  </data>
+  <data name="Widevine_Installed" xml:space="preserve">
+    <value>Installed: from Google's image {0} for Android {1} ({2}).</value>
+  </data>
+  <data name="Widevine_InstalledPending" xml:space="preserve">
+    <value>Installed: from Google's image {0} for Android {1} ({2}). It is used from the next start of Android.</value>
+  </data>
+  <data name="Widevine_RemovedPending" xml:space="preserve">
+    <value>Removed. Android uses it until its next start.</value>
+  </data>
 </root>

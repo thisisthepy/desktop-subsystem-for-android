@@ -86,7 +86,7 @@ fn registry_text(key: &str, name: &str) -> String {
 
 /// The computer's name as Settings shows it (its DNS host name, as the user typed it).
 #[cfg(windows)]
-fn computer_name() -> String {
+pub fn computer_name() -> String {
     use windows_sys::Win32::System::SystemInformation::{
         ComputerNameDnsHostname, GetComputerNameExW,
     };

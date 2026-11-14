@@ -278,12 +278,24 @@ pub struct Note {
 /// Window manager to renderer: end now. The renderer closes the guest's streams and exits.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Stop {}
+/// Renderer to window manager: the renderer found its Vulkan device lost (a GPU reset), or
+/// made it again. Sent at once each time either count goes up, so the window manager learns of
+/// a reset the moment the renderer does, not when its own Direct3D device fails later.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct DeviceState {
+    /// How many times the renderer found its device lost since it started.
+    #[prost(uint64, tag = "1")]
+    pub losses: u64,
+    /// How many times it made its device again since it started.
+    #[prost(uint64, tag = "2")]
+    pub generation: u64,
+}
 /// The one message type on the wire. Each frame carries exactly one.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -327,6 +339,8 @@ pub mod envelope {
         Note(super::Note),
         #[prost(message, tag = "18")]
         Stop(super::Stop),
+        #[prost(message, tag = "19")]
+        DeviceState(super::DeviceState),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.

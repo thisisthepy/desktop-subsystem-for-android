@@ -3,6 +3,7 @@
 //! system's light or dark style and its accent colour.
 
 mod apps;
+mod backup;
 mod common;
 mod logs;
 mod status;

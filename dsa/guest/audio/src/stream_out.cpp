@@ -43,6 +43,7 @@ StreamOut::StreamOut(int32_t portConfigId, int64_t bufferFrames,
       mData(1, static_cast<size_t>(bufferFrames) * kFrameBytes, false) {}
 
 std::shared_ptr<StreamOut> StreamOut::create(int32_t portConfigId, int64_t bufferFrames,
+                                             std::string name,
                                              std::function<void(int32_t)> onClosed,
                                              StreamDescriptor* descriptor) {
     auto stream = ndk::SharedRefBase::make<StreamOut>(portConfigId, bufferFrames, std::move(onClosed));
@@ -63,7 +64,7 @@ std::shared_ptr<StreamOut> StreamOut::create(int32_t portConfigId, int64_t buffe
         auto open = weak.lock();
         return open != nullptr && open->close();
     });
-    stream->mHost = std::make_unique<HostLink>("primary", static_cast<uint32_t>(bufferFrames),
+    stream->mHost = std::make_unique<HostLink>(std::move(name), static_cast<uint32_t>(bufferFrames),
                                                connectToHost);
     stream->mWorker = std::thread([raw = stream.get()] { raw->work(); });
     return stream;

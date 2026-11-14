@@ -8,22 +8,36 @@
 //! buffer each time the device asks, from the stream's jitter buffer, and never waits on
 //! the guest. When the user picks another default device, or the device goes away, the
 //! stream moves to the new default within a second.
+//!
+//! Windows' volume mixer is the only volume the guest's sound has: the guest sends every
+//! output at full scale. Each output's client is in an audio session of the app it plays
+//! ([`AppVolumes`]). The session's identity comes from the app's package, so the mixer keeps
+//! one line for the app across runs, and the line has the app's name and the icon of the app's
+//! own window program. The session plays at the volume Android gives the app, and takes a new
+//! one when the app sets its volume or a volume key is pressed in Android. A volume or a mute
+//! the user sets on the line is heard through the session's events and goes back to Android.
+//! The guest's shared output, which every sound of an app without an output of its own plays
+//! on, is DSA's line.
 
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use dsa_host_core::app_audio::{session_id, AppStream, AppVolumes};
 use dsa_host_core::audio::{
     AudioDevice, CaptureSink, DeviceFormat, Playback, Recording, Renderer, SampleType,
     SharedBuffer, CHANNELS, SAMPLE_RATE,
 };
-use windows::core::PWSTR;
+use windows::core::{implement, BOOL, GUID, PCWSTR, PWSTR};
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::Media::Audio::{
-    eConsole, eRender, IAudioClient, IAudioRenderClient, IMMDevice, IMMDeviceEnumerator,
-    MMDeviceEnumerator, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
+    eConsole, eRender, AudioSessionDisconnectReason, AudioSessionState, IAudioClient,
+    IAudioRenderClient, IAudioSessionControl, IAudioSessionEvents, IAudioSessionEvents_Impl,
+    IMMDevice, IMMDeviceEnumerator, ISimpleAudioVolume, MMDeviceEnumerator,
+    AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
     AUDCLNT_STREAMFLAGS_EVENTCALLBACK, AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, WAVEFORMATEX,
     WAVE_FORMAT_PCM,
 };
@@ -50,16 +64,25 @@ const DEFAULT_CHECK: Duration = Duration::from_secs(1);
 /// How long the stream waits before it opens a device again after one failed.
 const RETRY: Duration = Duration::from_millis(500);
 
+/// How often the stream looks at which app its output plays and how loud.
+const APP_CHECK: Duration = Duration::from_millis(50);
+
+/// The context the window manager's own changes of a session carry, so the session's events
+/// tell them apart from the user's.
+const OWN_CHANGE: GUID = GUID::from_u128(0x3c1f5a2e_8d47_4b6a_9e0f_d5a17c2b6e94);
+
 /// The user's default output device, and their default capture device for the guest's
 /// microphone.
 pub struct DefaultOutput {
     log: Arc<dyn Fn(&str) + Send + Sync>,
+    volumes: Arc<AppVolumes>,
 }
 
 impl DefaultOutput {
-    /// Plays on the default output device; `log` takes lines for the window manager's log.
-    pub fn new(log: Arc<dyn Fn(&str) + Send + Sync>) -> DefaultOutput {
-        DefaultOutput { log }
+    /// Plays on the default output device, each output as the app `volumes` says it plays;
+    /// `log` takes lines for the window manager's log.
+    pub fn new(log: Arc<dyn Fn(&str) + Send + Sync>, volumes: Arc<AppVolumes>) -> DefaultOutput {
+        DefaultOutput { log, volumes }
     }
 }
 
@@ -93,10 +116,18 @@ impl AudioDevice for DefaultOutput {
             let stop = Arc::clone(&stop);
             let device_frames = Arc::clone(&device_frames);
             let log = Arc::clone(&self.log);
+            let volumes = Arc::clone(&self.volumes);
             let name = name.to_string();
             thread::Builder::new()
                 .name("dsa-audio-render".into())
-                .spawn(move || render(&name, source, &stop, &device_frames, opened_tx, &*log))
+                .spawn(move || {
+                    let stream = Stream {
+                        name: &name,
+                        volumes: &volumes,
+                        log: &*log,
+                    };
+                    render(&stream, source, &stop, &device_frames, opened_tx)
+                })
                 .map_err(|e| format!("no thread to play on: {e}"))?
         };
         let playback = WasapiPlayback {
@@ -168,6 +199,153 @@ impl Drop for Event {
     }
 }
 
+/// The audio session an output plays in, as its app: its name and icon in the volume mixer,
+/// its volume, and the events that tell of the user's changes.
+struct Session {
+    control: IAudioSessionControl,
+    volume: ISimpleAudioVolume,
+    events: IAudioSessionEvents,
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        // SAFETY: the events this session registered, on this thread's COM.
+        let _ = unsafe {
+            self.control
+                .UnregisterAudioSessionNotification(&self.events)
+        };
+    }
+}
+
+impl Session {
+    /// Sets the session's volume and mute to what Android gives the app.
+    fn apply(&self, app: &AppStream) {
+        // SAFETY: the session's volume, on this thread's COM, with the window manager's context.
+        unsafe {
+            let _ = self.volume.SetMasterVolume(app.volume, &OWN_CHANGE);
+            let _ = self.volume.SetMute(app.muted, &OWN_CHANGE);
+        }
+    }
+}
+
+/// Hears the user's changes of a session's volume and mute in the volume mixer.
+#[implement(IAudioSessionEvents)]
+struct SessionEvents {
+    stream: String,
+    volumes: Arc<AppVolumes>,
+}
+
+impl IAudioSessionEvents_Impl for SessionEvents_Impl {
+    fn OnDisplayNameChanged(&self, _: &PCWSTR, _: *const GUID) -> windows::core::Result<()> {
+        Ok(())
+    }
+
+    fn OnIconPathChanged(&self, _: &PCWSTR, _: *const GUID) -> windows::core::Result<()> {
+        Ok(())
+    }
+
+    fn OnSimpleVolumeChanged(
+        &self,
+        volume: f32,
+        muted: BOOL,
+        context: *const GUID,
+    ) -> windows::core::Result<()> {
+        // SAFETY: Windows passes the change's context, or null for none.
+        let own = !context.is_null() && unsafe { *context } == OWN_CHANGE;
+        if !own {
+            self.volumes
+                .host_changed(&self.stream, volume, muted.as_bool());
+        }
+        Ok(())
+    }
+
+    fn OnChannelVolumeChanged(
+        &self,
+        _: u32,
+        _: *const f32,
+        _: u32,
+        _: *const GUID,
+    ) -> windows::core::Result<()> {
+        Ok(())
+    }
+
+    fn OnGroupingParamChanged(&self, _: *const GUID, _: *const GUID) -> windows::core::Result<()> {
+        Ok(())
+    }
+
+    fn OnStateChanged(&self, _: AudioSessionState) -> windows::core::Result<()> {
+        Ok(())
+    }
+
+    fn OnSessionDisconnected(&self, _: AudioSessionDisconnectReason) -> windows::core::Result<()> {
+        Ok(())
+    }
+}
+
+/// The session identity of `app`: one for each app, and one for DSA's shared output.
+fn session_guid(app: &AppStream) -> GUID {
+    GUID::from_u128(u128::from_be_bytes(session_id(&app.package_name)))
+}
+
+/// The icon the volume mixer shows for `app`: the icon of the app's own window program, as
+/// Windows names a resource of a file (`path,-id`), else this program's own.
+fn icon_path(app: &AppStream) -> String {
+    let own = std::env::current_exe()
+        .map(|path| format!("{},0", path.display()))
+        .unwrap_or_default();
+    if app.is_shared() {
+        return own;
+    }
+    let program: Option<PathBuf> = crate::app_exe::default_apps_dir()
+        .map(|dir| crate::app_exe::program_path(&dir, &app.package_name, &app.app_label));
+    match program {
+        Some(path) if path.is_file() => {
+            format!("{},-{}", path.display(), dsa_exe_resources::ICON_GROUP_ID)
+        }
+        _ => own,
+    }
+}
+
+fn wide(text: &str) -> Vec<u16> {
+    text.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+/// Gives `client`'s session the app's name, icon and volume, and hears the user's changes.
+fn open_session(
+    client: &IAudioClient,
+    app: &AppStream,
+    stream: &Stream,
+) -> Result<Session, String> {
+    // SAFETY: an initialised client of this thread's COM.
+    let control: IAudioSessionControl =
+        unsafe { client.GetService() }.map_err(|e| format!("the session has no controls: {e}"))?;
+    // SAFETY: an initialised client of this thread's COM.
+    let volume: ISimpleAudioVolume =
+        unsafe { client.GetService() }.map_err(|e| format!("the session has no volume: {e}"))?;
+    let name = wide(app.display_name());
+    let icon = wide(&icon_path(app));
+    // SAFETY: NUL-terminated strings that outlive the calls, and the window manager's context.
+    unsafe {
+        let _ = control.SetDisplayName(PCWSTR(name.as_ptr()), &OWN_CHANGE);
+        let _ = control.SetIconPath(PCWSTR(icon.as_ptr()), &OWN_CHANGE);
+    }
+    let events: IAudioSessionEvents = SessionEvents {
+        stream: stream.name.to_string(),
+        volumes: Arc::clone(stream.volumes),
+    }
+    .into();
+    // SAFETY: events that live as long as the session, which unregisters them when it goes.
+    unsafe { control.RegisterAudioSessionNotification(&events) }
+        .map_err(|e| format!("the session tells nothing of its volume: {e}"))?;
+    let session = Session {
+        control,
+        volume,
+        events,
+    };
+    session.apply(app);
+    Ok(session)
+}
+
 /// One shared-mode client of one device, started.
 struct Client {
     id: String,
@@ -175,10 +353,17 @@ struct Client {
     render: IAudioRenderClient,
     buffer_frames: u32,
     event: Event,
+    /// What the client plays as, and the revision of it the session has.
+    app: AppStream,
+    revision: u64,
+    /// The app's session, when Windows gave its controls.
+    session: Option<Session>,
 }
 
 impl Drop for Client {
     fn drop(&mut self) {
+        // The session lets go of its events before the client stops.
+        self.session = None;
         // SAFETY: a started client of this thread's COM.
         let _ = unsafe { self.client.Stop() };
     }
@@ -200,7 +385,16 @@ fn default_device(enumerator: &IMMDeviceEnumerator) -> Result<IMMDevice, String>
         .map_err(|e| format!("there is no default output device: {e}"))
 }
 
-fn open(enumerator: &IMMDeviceEnumerator) -> Result<(Client, u32), String> {
+/// What a render thread plays: the output's name, where it learns which app that is, and
+/// where it logs.
+struct Stream<'a> {
+    name: &'a str,
+    volumes: &'a Arc<AppVolumes>,
+    log: &'a (dyn Fn(&str) + Send + Sync),
+}
+
+fn open(enumerator: &IMMDeviceEnumerator, stream: &Stream) -> Result<(Client, u32), String> {
+    let (app, revision) = stream.volumes.app_of(stream.name);
     let device = default_device(enumerator)?;
     let id = device_id(&device)?;
     // SAFETY: activating the device's audio client on this thread's COM.
@@ -216,7 +410,10 @@ fn open(enumerator: &IMMDeviceEnumerator) -> Result<(Client, u32), String> {
         wBitsPerSample: 16,
         cbSize: 0,
     };
-    // SAFETY: a valid format; Windows converts it to the device's mix format.
+    // The app's own session: every output that plays the app shares its line in the mixer.
+    let session_guid = session_guid(&app);
+    // SAFETY: a valid format; Windows converts it to the device's mix format. The session's
+    // identity outlives the call.
     unsafe {
         client.Initialize(
             AUDCLNT_SHAREMODE_SHARED,
@@ -226,7 +423,7 @@ fn open(enumerator: &IMMDeviceEnumerator) -> Result<(Client, u32), String> {
             BUFFER_DURATION,
             0,
             &format,
-            None,
+            Some(&session_guid as *const GUID),
         )
     }
     .map_err(|e| format!("the default output device refused the guest's format: {e}"))?;
@@ -245,6 +442,17 @@ fn open(enumerator: &IMMDeviceEnumerator) -> Result<(Client, u32), String> {
     let latency = unsafe { client.GetStreamLatency() }.unwrap_or(0).max(0) as u64;
     let device_frames =
         (latency * u64::from(SAMPLE_RATE) / 10_000_000) as u32 + buffer_frames.min(SAMPLE_RATE);
+    // The session is set before the first sound, so nothing plays at another volume.
+    let session = match open_session(&client, &app, stream) {
+        Ok(session) => Some(session),
+        Err(why) => {
+            (stream.log)(&format!(
+                "audio stream {}: plays without its app's line in the volume mixer: {why}",
+                stream.name
+            ));
+            None
+        }
+    };
     // SAFETY: an initialised client.
     unsafe { client.Start() }.map_err(|e| format!("the device did not start: {e}"))?;
     Ok((
@@ -254,6 +462,9 @@ fn open(enumerator: &IMMDeviceEnumerator) -> Result<(Client, u32), String> {
             render,
             buffer_frames,
             event,
+            app,
+            revision,
+            session,
         },
         device_frames,
     ))
@@ -283,14 +494,37 @@ fn fill(client: &Client, renderer: &mut Renderer) -> bool {
     unsafe { client.render.ReleaseBuffer(frames, 0) }.is_ok()
 }
 
+/// Follows what the output plays: a new volume goes to the session, and another app on the
+/// output needs a client in that app's session. False when the client must be opened again.
+fn follow_app(client: &mut Client, stream: &Stream) -> bool {
+    let (app, revision) = stream.volumes.app_of(stream.name);
+    if revision == client.revision {
+        return true;
+    }
+    if !app.same_app(&client.app) {
+        (stream.log)(&format!(
+            "audio stream {} now plays {}",
+            stream.name,
+            app.display_name()
+        ));
+        return false;
+    }
+    if let Some(session) = &client.session {
+        session.apply(&app);
+    }
+    client.app = app;
+    client.revision = revision;
+    true
+}
+
 fn render(
-    name: &str,
+    stream: &Stream,
     source: SharedBuffer,
     stop: &AtomicBool,
     device_frames: &AtomicU32,
     opened: mpsc::Sender<Result<(), String>>,
-    log: &(dyn Fn(&str) + Send + Sync),
 ) {
+    let (name, log) = (stream.name, stream.log);
     let mut opened = Some(opened);
     let report = |opened: &mut Option<mpsc::Sender<Result<(), String>>>, result| {
         if let Some(tx) = opened.take() {
@@ -317,13 +551,15 @@ fn render(
         Err(e) => return report(&mut opened, Err(e)),
     };
     while !stop.load(Ordering::Relaxed) {
-        let client = match open(&enumerator) {
+        let mut client = match open(&enumerator, stream) {
             Ok((client, frames)) => {
                 device_frames.store(frames, Ordering::Relaxed);
                 report(&mut opened, Ok(()));
                 log(&format!(
-                    "audio stream {name} plays on {} ({} frames of device buffer)",
-                    client.id, client.buffer_frames
+                    "audio stream {name} plays as {} on {} ({} frames of device buffer)",
+                    client.app.display_name(),
+                    client.id,
+                    client.buffer_frames
                 ));
                 client
             }
@@ -337,6 +573,7 @@ fn render(
             }
         };
         let mut checked = Instant::now();
+        let mut app_checked = Instant::now();
         while !stop.load(Ordering::Relaxed) {
             client.event.wait(Duration::from_millis(100));
             if !fill(&client, &mut renderer) {
@@ -344,6 +581,12 @@ fn render(
                     "audio stream {name}: the output device went away; moving to the default"
                 ));
                 break;
+            }
+            if app_checked.elapsed() >= APP_CHECK {
+                app_checked = Instant::now();
+                if !follow_app(&mut client, stream) {
+                    break;
+                }
             }
             if checked.elapsed() >= DEFAULT_CHECK {
                 checked = Instant::now();
@@ -360,5 +603,27 @@ fn render(
             }
         }
         drop(client);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fr26_each_app_has_a_session_of_its_own_and_dsa_one_for_the_shared_output() {
+        let music = AppStream {
+            stream: "app 0".into(),
+            package_name: "com.example.music".into(),
+            app_label: "Music".into(),
+            volume: 1.0,
+            muted: false,
+        };
+        let shared = AppStream::unknown("primary");
+        assert_eq!(session_guid(&music), session_guid(&music.clone()));
+        assert_ne!(session_guid(&music), session_guid(&shared));
+        assert_ne!(session_guid(&music), GUID::from_u128(0));
+        // The shared output shows this program's own icon.
+        assert!(icon_path(&shared).ends_with(",0"));
     }
 }

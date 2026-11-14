@@ -15,6 +15,8 @@ use std::ptr::{null, null_mut};
 use dsa_host_core::audio::AUDIO_PORT;
 use dsa_host_core::camera::CAMERA_PORT;
 use dsa_host_core::compositor::{GRAPHICS_COMMAND_PORT, GRAPHICS_PROCESS_PIPE_PORT};
+use dsa_host_core::dns::DNS_PORT;
+use dsa_host_core::keymint_root::KEYMINT_PORT;
 use dsa_host_core::sensors::SENSOR_PORT;
 use dsa_host_core::video::VIDEO_PORT;
 use windows_sys::Win32::Foundation::{LocalFree, ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, HLOCAL};
@@ -77,6 +79,18 @@ pub const SENSORS_ELEMENT_NAME: &str = "Desktop Subsystem for Android Sensors";
 /// Friendly name for the camera service (port 5572), where the apps in the guest use the
 /// computer's cameras.
 pub const CAMERA_ELEMENT_NAME: &str = "Desktop Subsystem for Android Camera";
+
+/// Friendly name for the KeyMint root key service (port 5604), where the guest's control
+/// daemon asks the service for the root key of Android's KeyMint.
+pub const KEYMINT_ELEMENT_NAME: &str = "Desktop Subsystem for Android KeyMint Root Key";
+
+/// Friendly name for the DNS service (port 5605), where the guest's control daemon hands the
+/// guest's DNS queries to the service, which Windows' DNS client answers.
+pub const DNS_ELEMENT_NAME: &str = "Desktop Subsystem for Android DNS";
+
+/// The SDDL of a service only the DSA service (SYSTEM) listens on: SYSTEM and Administrators,
+/// and nobody else, so no process in a user's session is let in where the guest asks for a key.
+pub const SERVICE_ONLY_SDDL: &str = "D:P(A;OICI;GA;;;SY)(A;OICI;GA;;;BA)";
 
 fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
@@ -296,7 +310,9 @@ pub fn unregister_service_guid(guid: Guid) -> Result<(), String> {
 
 /// Registers the graphics command stream (port 5566), process pipe (port 5567), audio (port
 /// 5568), video decoding (port 5569), camera (port 5572) and sensor (port 5580) service GUIDs
-/// under `root` at `base_path`; the window manager serves them all.
+/// under `root` at `base_path`; the window manager serves them all. The KeyMint root key's
+/// (port 5604) and the DNS service's (port 5605), which only the service serves, are registered
+/// beside them with [`SERVICE_ONLY_SDDL`].
 pub fn register_graphics_service_guids_under(
     root: RegistryHive,
     base_path: &str,
@@ -344,6 +360,20 @@ pub fn register_graphics_service_guids_under(
         Guid::vsock_service(CAMERA_PORT),
         CAMERA_ELEMENT_NAME,
         Some(DEFAULT_SERVICE_SDDL),
+    )?;
+    register_service_guid_under(
+        root,
+        base_path,
+        Guid::vsock_service(KEYMINT_PORT),
+        KEYMINT_ELEMENT_NAME,
+        Some(SERVICE_ONLY_SDDL),
+    )?;
+    register_service_guid_under(
+        root,
+        base_path,
+        Guid::vsock_service(DNS_PORT),
+        DNS_ELEMENT_NAME,
+        Some(SERVICE_ONLY_SDDL),
     )?;
     Ok(())
 }

@@ -28,13 +28,39 @@
 //! dsa logs collect -o <file.zip>
 //! dsa arm-translation [status | install <folder> | fetch google [--yes] | remove | use-default]
 //! dsa gapps [status | install [--progress] | remove]
+//! dsa drm widevine [status | install [--yes] | remove]
 //! dsa reset-data --yes
+//! dsa backup [status | on | off [--delete-backups] | now | restore | key show |
+//!             key import <recovery key>]
 //! ```
+//!
+//! Backup is off until the user turns it on with `dsa backup on` (or in the settings app): it
+//! keeps a second copy of the apps' user data on this computer, which is the user's to choose.
+//! Until then no backup runs, and neither the backup folder nor its key is made.
+//! `dsa backup off` stops it: Android stops backing up to the host, and the backups made so
+//! far stay for a later restore; `dsa backup off --delete-backups` removes them and their key
+//! as well.
+//!
+//! `dsa backup status` (or `dsa backup`) says whether backup is on and where it stands: its
+//! folder (`DSA Backup` in the user's home folder), when an app was last backed up, how many
+//! apps it holds, and what went wrong last. `dsa backup now` has Android back up every app at
+//! once. `dsa backup restore` installs the apps of the backup that Android does not have and
+//! restores every app's data, as after `dsa reset-data` or on another computer; both start
+//! Android when it is not running. The folder is encrypted with a key the computer's credential
+//! store keeps. `dsa backup key show` prints its recovery key, to write down; on another
+//! computer, or for another user, `dsa backup key import <recovery key>` lets that folder be
+//! read there. With `--json` they print the report's fields (`recovery_key` for `key show`).
+//! `dsa backup status` also says how the root key of Android's KeyMint is sealed on this
+//! computer (the TPM, the Secure Enclave, or the credential store where there is none), as
+//! `dsa status` does.
+//! `dsa backup status` also says how the root key of Android's KeyMint is sealed on this
+//! computer (the TPM, the Secure Enclave, or the credential store where there is none), as
+//! `dsa status` does.
 //!
 //! `dsa app-window` lists the user's window settings for each app that has any; with a package
 //! it shows that app's, and with `--fixed-size` or `--start-size` changes them: a fixed-size
 //! app's windows cannot be resized or maximized, and an app with a start size opens its windows
-//! at that size, in Android's dp (1/160 inch, 0.6 of a pixel at a scale of 100%).
+//! at that size, in Android's desktop dp (1/117.23 inch, 0.819 of a pixel at a scale of 100%).
 //! `--dpi-scaling` says how the app follows its window to a monitor of another scale: `app`
 //! gives it the new monitor's density and it
 //! redraws (Android recreates the screen of an app that does not say it handles a change of
@@ -79,7 +105,9 @@
 //! `Android/obb/<package>/`. An Android App Bundle (`.aab`), an encrypted bundle and a bundle
 //! whose splits are signed with other keys are refused before Android is started, with
 //! `not installed (app-bundle):`, `(encrypted-bundle):`, `(split-signature-mismatch):` or
-//! `(invalid-bundle):` and the reason. With `--json` it prints `installed`, `status` (`installed`, or the reason:
+//! `(invalid-bundle):` and the reason. An app whose 64-bit code is for arm64-v8a only is
+//! refused with `not installed (translation-off):` while the running Android does not
+//! translate ARM code, before anything is sent. With `--json` it prints `installed`, `status` (`installed`, or the reason:
 //! `incompatible`, `conflicting-signature`, `invalid-apk`, `insufficient-storage`, `downgrade`,
 //! `blocked` or `other`), `package` and `message`. A refusal's line on standard error starts
 //! with `not installed (<reason>):`. With `--progress` it first prints a line for each step,
@@ -118,13 +146,15 @@
 //! `dsa widgets list` (or `dsa widgets`) lists the widgets the apps in Android offer, each by
 //! its provider (`package/class`), and the widgets placed on the desktop, each by its ID.
 //! `dsa widgets add <provider>` places one; when its app asks the user to set it up first, its
-//! setup shows in a window and the command waits for the user. `dsa widgets remove <id>`
-//! removes one, with its window. Android is started first when it is not running. With
-//! `--json`, `list` prints `providers` (each with `provider`, `package`, `label`,
-//! `preview_png` in base64, its sizes in dp, `resize_mode`, `needs_configuration` and `app`,
-//! the name of the app that offers it) and `widgets` (each with `id`, `provider`, `label`,
-//! `app` and its `placement`), `add` prints the placed widget, and `remove` prints `removed`
-//! with the widget's ID.
+//! setup shows in a window and the command waits for the user. `dsa widgets settings <id>`
+//! opens the setup of a placed widget again, for a widget whose app offers one, and waits for
+//! the user in the same way. `dsa widgets remove <id>` removes one, with its window. Android
+//! is started first when it is not running. With `--json`, `list` prints `providers` (each
+//! with `provider`, `package`, `label`, `preview_png` in base64, its sizes in dp,
+//! `resize_mode`, `needs_configuration`, `reconfigurable` and `app`, the name of the app that
+//! offers it) and `widgets` (each with `id`, `provider`, `label`, `app` and its
+//! `placement`), `add` and `settings` print the widget, and `remove` prints `removed` with
+//! the widget's ID.
 //!
 //! `dsa widgets watch` prints the placed widgets, then a line each time one is placed or
 //! removed, until it is stopped or Android stops. With `--json` each line is one JSON
@@ -165,9 +195,22 @@
 //! (su does not exist for it), `ask` (each su call waits for the computer's administrator
 //! approval) or `remember` (approved without asking, within a 15 minute grace). It needs
 //! `dsa settings set root-elevation on` first, and moving an app to `remember` needs an
-//! administrator. With `--json` it prints `package` and `level`. The level applies to su's
-//! visibility from the next start of Android.
+//! administrator. With `--json` it prints `package` and `level`. The running Android follows
+//! the new level at once. Apps that share an Android user ID (`android:sharedUserId`) are one
+//! group: the level is set for all of them, and one of them set to `off` keeps the whole group
+//! from root. Each app of `list` and `info` says its `root` level (its group's) and its
+//! `shared_user_id`, empty for an app with a user ID of its own.
 //! Use `adb` in place of the package to set the adb shell level while developer mode is on.
+//!
+//! Each app of `list` and `info` also lists its launcher `shortcuts`, each with `id`, `label`,
+//! `long_label`, `in_jump_list` (a static or dynamic shortcut, which the app's jump list shows)
+//! and `pinned`, with `icon_png` in base64 under `--json`. `dsa apps shortcut <package> <id>`
+//! starts one in a window of its own, starting Android first, as its jump list task does.
+//! `dsa apps desktop-shortcut <package>` puts a shortcut to the app on the desktop, the
+//! settings apps' "Create desktop shortcut": a `.lnk` on Windows, a launcher entry in the
+//! desktop folder on Linux, an alias on macOS. It starts the app as its Start menu entry does
+//! and goes when the app is uninstalled. With `--json` it prints `package`, `created` and
+//! `path`.
 //!
 //! `dsa background list` (or `dsa background`) lists the apps that keep running in Android
 //! with no window because they run a foreground service (music playback, a download, a VPN),
@@ -232,6 +275,15 @@
 //! restarts Android into the waiting image now, whatever the setting, and `dsa android
 //! version` says when one waits (`restart_pending` in its JSON; `dsa android restart --json`
 //! prints `restarting`, the image or null, and `detail`).
+//! `dsa android install-image <folder>` installs the Android image in a folder on this
+//! computer, such as a development build's: its signed `images.json` and the files it names.
+//! It runs as administrator, and the image passes the same signature, rule and hash checks as
+//! a downloaded one, then boots on trial the same way.
+//! `host-certificates` (on by default) lets the user's Android trust, as system certificates,
+//! the root certificates a user or an administrator added to this computer, such as those an
+//! internet filter or a company proxy installs; the operating system's own are never given.
+//! It applies at once. `dsa settings` lists the ones found and where (`imported_certificates`
+//! in its JSON: `subject`, `issuer`, `source`, `location`, `sha256`, `not_after`).
 //! `root-elevation` (off by default, the computer's, so an administrator changes it) lets apps
 //! elevate to root through the computer's administrator approval, from the next start of
 //! Android; `dsa apps root <package>` then sets each app's level.
@@ -239,9 +291,11 @@
 //! the switches take `on` or `off`. `dsa memory` shows how much memory the user's Android
 //! takes, on the host and inside Android. `dsa network` shows how the user's Android reaches
 //! the network: NAT, advanced or none while it is not running, its addresses (a program on this
-//! computer reaches a server in Android at any of them), its DNS servers and its gateway. With
-//! `--json` it prints `mode`, `addresses`, `dns_servers`, `gateway` and `problem`. `dsa gpus` lists the GPUs of this machine, for
-//! choosing the render GPU.
+//! computer reaches a server in Android at any of them), who answers its DNS queries (this
+//! computer's resolver, or the DNS servers it shows when that does not answer) and its
+//! gateway. With `--json` it prints `mode`, `addresses`, `dns_servers`, `gateway`, `problem`
+//! and `dns_resolver` (`host`, `network`, or empty while nobody can say). `dsa gpus` lists the
+//! GPUs of this machine, for choosing the render GPU.
 //!
 //! `dsa arm-translation status` (or `dsa arm-translation`) says whether apps built only for
 //! 64-bit ARM (`arm64-v8a`) can be installed and run: which translator Android uses (the
@@ -298,6 +352,26 @@
 //! `abilist` and `device_id`, or null while Android is not running), `restart_needed`,
 //! `terms_url` and `registration_url`.
 //!
+//! `dsa drm widevine status` (or `dsa drm widevine`) says whether Widevine, the DRM module
+//! streaming apps play protected video with, is installed: from which Google image, whether the
+//! next start of Android has it, and whether the running Android was started with it. DSA ships
+//! no Google software. `dsa drm widevine install` reads Google's list of emulator system images,
+//! downloads the Google APIs image of the Android version and the processor this computer's
+//! Android runs, checks it against the list's SHA-1 and size, takes Google's Widevine APEX out
+//! of its vendor partition unchanged, and puts it on the user's add-on disk; the download is
+//! deleted afterwards. An image or an APEX of another architecture or Android version is
+//! refused, and so is an image without Widevine, and nothing is changed then. It first says
+//! where the download comes from and that Google's Android SDK License covers it, and asks
+//! before downloading; `--yes` agrees without asking, as the settings app does after its own
+//! confirmation. `DSA_GOOGLE_REPOSITORY` points at a mirror of Google's repository, as for the
+//! ARM translator. `dsa drm widevine remove` removes it, and with it the device certificates
+//! Widevine kept. Neither needs Android running; both apply from Android's next start, and say
+//! so. Widevine here is L3: streaming services send it standard definition at most, so for high
+//! definition watch in this computer's own browser or app. With `--json` each prints `package`
+//! (`apex`, `version`, `android_major`, `abi`, `source`, `size`, `sha256`, `license`, or null),
+//! `installed`, `on_disk`, `running`, `active`, `restart_needed`, `security_level` and
+//! `terms_url`.
+//!
 //! `dsa settings device` shows the device identity Android reports to its apps: what the user
 //! chose, and each value as Android reports it from its next start.
 //! `dsa settings set device.<field> <value>` changes one value: `manufacturer`, `brand`,
@@ -351,11 +425,12 @@ use dsa_host_core::host_api::{
 };
 use dsa_host_core::memory::MemorySnapshot;
 use dsa_host_core::native_abi;
-use dsa_host_core::session::SessionState;
+use dsa_host_core::session::{KeyMintKeyState, SessionState};
 use dsa_host_core::tasks::{AppInfo, Task};
 use dsa_host_core::touch_gestures::TouchGesturesState;
 use dsa_host_core::update::store::Fetch;
 use dsa_host_core::update::versions::{Channel, VersionReport};
+use dsa_host_core::widevine::{self, WidevineStatus};
 use dsa_host_core::widgets::{Widget, WidgetEvent, WidgetProvider};
 use dsa_transport::Connector;
 use serde_json::{json, Value};
@@ -365,18 +440,23 @@ pub const USAGE: &str = "usage: dsa <status [--no-start] | start | stop | freeze
      install <file.apk> [--progress] | apk-info <file.apk> | open <file> | share <file> | \
      tasks | settings [set <name> <value> | device | reset device[.<field>]] | memory | \
      network | gpus | \
-     widgets [list | add <provider> | remove <id> | watch] | \
+     widgets [list | add <provider> | settings <id> | remove <id> | watch] | \
      apps [list | info <package> | uninstall <package> | settings [<package>] | \
-     run-as-arm <package> on|off [--erase-data] | root <package> off|ask|remember] | \
+     run-as-arm <package> on|off [--erase-data] | root <package> off|ask|remember | \
+     shortcut <package> <id> | desktop-shortcut <package>] | \
      background [list | open <package> | stop <package>] | \
      app-window [<package> [--fixed-size on|off] [--start-size <w>x<h>|auto] \
      [--dpi-scaling app|system|system-forced|auto] | <package> reset] | \
      logcat [-d] [-b <buffers>] [<tag>[:<priority>] ...] | logs collect -o <file.zip> | \
      arm-translation [status | install <folder> | fetch google [--yes] | remove | use-default] | \
-     files [open] | gapps [status | install [--progress] | remove] | reset-data --yes | \
-     android [version | use <major>|latest [--erase-data] | restart]> \
+     files [open] | gapps [status | install [--progress] | remove] | \
+     drm widevine [status | install [--yes] | remove] | reset-data --yes | \
+     backup [status | on | off [--delete-backups] | now | restore | key show | \
+     key import <recovery key>] | \
+     android [version | use <major>|latest [--erase-data] | restart | install-image <folder>]> \
      [--wait] [--timeout <seconds>] [--json] [--pipe <name> | --socket <path>]";
 
+pub mod desktop;
 pub mod device;
 pub mod logs;
 
@@ -438,6 +518,12 @@ pub enum Command {
     GappsInstall,
     /// Remove Google Play.
     GappsRemove,
+    /// Say whether Widevine is installed, and from which image.
+    WidevineStatus,
+    /// Take Widevine out of Google's emulator image and install it.
+    WidevineInstall,
+    /// Remove Widevine.
+    WidevineRemove,
     /// List, describe or uninstall the installed apps, or open their settings in Android
     /// ([`Invocation::apps`]).
     Apps,
@@ -449,12 +535,28 @@ pub enum Command {
     FilesOpen,
     /// Erase the user's Android data, once [`Invocation::yes`] confirms it.
     ResetData,
+    /// Say where the user's app data backup stands.
+    BackupStatus,
+    /// Turn the user's backup on.
+    BackupOn,
+    /// Turn the user's backup off, deleting the backups when [`Invocation::delete_backups`].
+    BackupOff,
+    /// Back up every app now.
+    BackupNow,
+    /// Restore the apps and their data from the backup.
+    BackupRestore,
+    /// Print the backup's recovery key.
+    BackupKeyShow,
+    /// Keep the recovery key [`Invocation::backup_key`] as the backup key.
+    BackupKeyImport,
     /// Show the Android version that runs and the ones that can be chosen.
     AndroidVersion,
     /// Choose the Android version [`Invocation::android`] names.
     AndroidUse,
     /// Restart Android now into the downloaded image that waits for it.
     AndroidRestart,
+    /// Install the Android image in the folder [`Invocation::file`] names.
+    AndroidInstallImage,
 }
 
 /// What `dsa app-window` does.
@@ -518,6 +620,10 @@ pub enum AppsAction {
     RunAsArm(String, bool),
     /// Set how far one app may elevate to root: the package and "off", "ask" or "remember".
     Root(String, String),
+    /// Start one of an app's shortcuts: the package and the shortcut's ID.
+    Shortcut(String, String),
+    /// Put a shortcut of one app on the desktop.
+    DesktopShortcut(String),
 }
 
 /// What `dsa widgets` does.
@@ -529,6 +635,8 @@ pub enum WidgetAction {
     Add(String),
     /// Remove the widget with this ID.
     Remove(i32),
+    /// Open the settings of the widget with this ID again.
+    Settings(i32),
     /// Print the placed widgets, then each change, until stopped.
     Watch,
 }
@@ -576,6 +684,7 @@ pub enum Change {
     AdvancedNetworking(bool),
     TouchGesturesOff(bool),
     ImageAutoRestart(bool),
+    HostCertificates(bool),
     RootElevation(bool),
 }
 
@@ -610,6 +719,7 @@ impl Change {
             "advanced-networking" => switch().map(Change::AdvancedNetworking),
             "touch-gestures-off" => switch().map(Change::TouchGesturesOff),
             "image-auto-restart" => switch().map(Change::ImageAutoRestart),
+            "host-certificates" => switch().map(Change::HostCertificates),
             "adb-port" => match value.parse::<u16>() {
                 Ok(port) if port > 0 => Ok(Change::AdbPort(port)),
                 _ => Err(format!(
@@ -621,7 +731,7 @@ impl Change {
                  clipboard, links-in-android, program-updates, prerelease-updates, \
                  image-updates, input-trace, resize-trace, root-elevation, memory-limit, developer-mode, adb-port, adb-auto-connect, \
                  arm-translation, stop-without-asking, file-sharing, shared-folders, \
-                 advanced-networking, touch-gestures-off, image-auto-restart and \
+                 advanced-networking, touch-gestures-off, image-auto-restart, host-certificates and \
                  device.<field>"
             )),
         }
@@ -807,6 +917,10 @@ pub struct Invocation {
     /// app follows an update this way while setup has stopped the service, so it does not
     /// start the old service again under setup.
     pub no_start: bool,
+    /// `dsa backup key import <key>`: the recovery key to keep.
+    pub backup_key: Option<String>,
+    /// `dsa backup off --delete-backups`: remove the backups made so far and their key.
+    pub delete_backups: bool,
 }
 
 /// Whether `name` can be an Android package name: dot-separated parts of letters, digits
@@ -822,7 +936,7 @@ fn is_package_name(name: &str) -> bool {
 fn takes_yes(command: Option<Command>) -> bool {
     matches!(
         command,
-        Some(Command::ResetData | Command::ArmTranslationFetchGoogle)
+        Some(Command::ResetData | Command::ArmTranslationFetchGoogle | Command::WidevineInstall)
     )
 }
 
@@ -844,6 +958,8 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
     let mut android = None;
     let mut erase_data = false;
     let mut no_start = false;
+    let mut backup_key = None;
+    let mut delete_backups = false;
     let mut progress = false;
     let mut buffers: u32 = 0;
     let mut tags = Vec::new();
@@ -935,6 +1051,37 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
             }
             "settings" if command == Some(Command::Apps) && apps.is_none() => {
                 apps = Some(AppsAction::Settings(None));
+            }
+            "desktop-shortcut" if command == Some(Command::Apps) && apps.is_none() => {
+                let package = args.next().ok_or_else(|| {
+                    "dsa apps desktop-shortcut needs the app's package, such as \
+                     com.example.notes; dsa apps list shows them"
+                        .to_string()
+                })?;
+                if !is_package_name(package) {
+                    return Err(format!(
+                        "{package:?} is not a package name; dsa apps list shows them, such as \
+                         com.example.notes"
+                    ));
+                }
+                apps = Some(AppsAction::DesktopShortcut(package.clone()));
+            }
+            "shortcut" if command == Some(Command::Apps) && apps.is_none() => {
+                let usage = "dsa apps shortcut needs the app's package and the shortcut's ID, \
+                             such as dsa apps shortcut com.example.chat new-chat; dsa apps info \
+                             <package> --json lists them";
+                let package = args.next().ok_or_else(|| usage.to_string())?;
+                if !is_package_name(package) {
+                    return Err(format!(
+                        "{package:?} is not a package name; dsa apps list shows them, such as \
+                         com.example.notes"
+                    ));
+                }
+                let id = args.next().ok_or_else(|| usage.to_string())?;
+                if !dsa_host_core::tasks::is_valid_shortcut_id(id) {
+                    return Err(format!("{id:?} is not a shortcut ID; {usage}"));
+                }
+                apps = Some(AppsAction::Shortcut(package.clone(), id.clone()));
             }
             "run-as-arm" if command == Some(Command::Apps) && apps.is_none() => {
                 let usage = "dsa apps run-as-arm needs the app's package and on or off, such as \
@@ -1031,6 +1178,33 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
                     }
                 });
             }
+            "drm" if command.is_none() => {
+                match args.next().map(String::as_str) {
+                    Some("widevine") => {}
+                    other => {
+                        return Err(format!(
+                            "dsa drm takes widevine, the one DRM module DSA installs, not \
+                             {other:?}\n{USAGE}"
+                        ))
+                    }
+                }
+                // A bare option such as --json belongs to the default action, status.
+                let action = match args.peek() {
+                    Some(next) if next.starts_with("--") => None,
+                    _ => args.next().map(String::as_str),
+                };
+                command = Some(match action {
+                    None | Some("status") => Command::WidevineStatus,
+                    Some("install") => Command::WidevineInstall,
+                    Some("remove") => Command::WidevineRemove,
+                    Some(other) => {
+                        return Err(format!(
+                            "dsa drm widevine takes status, install or remove, not \
+                             {other:?}\n{USAGE}"
+                        ))
+                    }
+                });
+            }
             "gapps" if command.is_none() => {
                 // A bare option such as --json belongs to the default action, status.
                 let action = match args.peek() {
@@ -1044,6 +1218,50 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
                     Some(other) => {
                         return Err(format!(
                             "dsa gapps takes status, install or remove, not {other:?}\n{USAGE}"
+                        ))
+                    }
+                });
+            }
+            "backup" if command.is_none() => {
+                let action = match args.peek() {
+                    Some(next) if next.starts_with("--") => None,
+                    _ => args.next().map(String::as_str),
+                };
+                command = Some(match action {
+                    None | Some("status") => Command::BackupStatus,
+                    Some("on") => Command::BackupOn,
+                    Some("off") => Command::BackupOff,
+                    Some("now") => Command::BackupNow,
+                    Some("restore") => Command::BackupRestore,
+                    Some("key") => match args.next().map(String::as_str) {
+                        Some("show") => Command::BackupKeyShow,
+                        Some("import") => {
+                            // A recovery key may be written with spaces, as several words.
+                            let mut words = Vec::new();
+                            while let Some(word) = args.peek() {
+                                if word.starts_with("--") {
+                                    break;
+                                }
+                                words.push(args.next().unwrap().clone());
+                            }
+                            if words.is_empty() {
+                                return Err(format!(
+                                    "dsa backup key import takes the recovery key\n{USAGE}"
+                                ));
+                            }
+                            backup_key = Some(words.join(" "));
+                            Command::BackupKeyImport
+                        }
+                        other => {
+                            return Err(format!(
+                                "dsa backup key takes show or import, not {other:?}\n{USAGE}"
+                            ))
+                        }
+                    },
+                    Some(other) => {
+                        return Err(format!(
+                            "dsa backup takes status, on, off, now, restore or key, not \
+                             {other:?}\n{USAGE}"
                         ))
                     }
                 });
@@ -1127,16 +1345,22 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
                 }
                 widgets = Some(WidgetAction::Add(provider.clone()));
             }
-            "remove" if command == Some(Command::Widgets) && widgets.is_none() => {
-                let id = args.next().ok_or(
-                    "dsa widgets remove needs the widget's ID; dsa widgets list shows them",
-                )?;
+            verb @ ("remove" | "settings")
+                if command == Some(Command::Widgets) && widgets.is_none() =>
+            {
+                let id = args.next().ok_or_else(|| {
+                    format!("dsa widgets {verb} needs the widget's ID; dsa widgets list shows them")
+                })?;
                 let id: i32 = id
                     .parse()
                     .ok()
                     .filter(|id: &i32| *id > 0)
                     .ok_or_else(|| format!("a widget's ID is a number above 0, not {id:?}"))?;
-                widgets = Some(WidgetAction::Remove(id));
+                widgets = Some(if verb == "remove" {
+                    WidgetAction::Remove(id)
+                } else {
+                    WidgetAction::Settings(id)
+                });
             }
             "list" if command == Some(Command::Background) && background.is_none() => {
                 background = Some(BackgroundAction::List);
@@ -1185,10 +1409,18 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
                         Command::AndroidUse
                     }
                     Some("restart") => Command::AndroidRestart,
+                    Some("install-image") => {
+                        let folder = args.next().filter(|f| !f.starts_with("--")).ok_or(
+                            "dsa android install-image needs the folder that holds the image: \
+                             its signed images.json and the files it names",
+                        )?;
+                        file = Some(std::path::PathBuf::from(folder));
+                        Command::AndroidInstallImage
+                    }
                     Some(other) => {
                         return Err(format!(
-                            "dsa android takes version, use <major> or restart, not \
-                             {other:?}\n{USAGE}"
+                            "dsa android takes version, use <major>, restart or install-image \
+                             <folder>, not {other:?}\n{USAGE}"
                         ))
                     }
                 });
@@ -1200,6 +1432,7 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
                 erase_data = true
             }
             "--no-start" if command == Some(Command::Status) => no_start = true,
+            "--delete-backups" if command == Some(Command::BackupOff) => delete_backups = true,
             "reset-data" if command.is_none() => command = Some(Command::ResetData),
             "--progress" if matches!(command, Some(Command::Install | Command::GappsInstall)) => {
                 progress = true
@@ -1345,6 +1578,8 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
         android,
         erase_data,
         no_start,
+        backup_key,
+        delete_backups,
     })
 }
 
@@ -1385,6 +1620,7 @@ pub fn provider_json(provider: &WidgetProvider) -> Value {
         "max_height_dp": provider.max_height_dp,
         "resize_mode": provider.resize_mode,
         "needs_configuration": provider.needs_configuration,
+        "reconfigurable": provider.reconfigurable,
         "app": provider.app_label,
     })
 }
@@ -1421,10 +1657,11 @@ pub fn describe_widgets(providers: &[WidgetProvider], placed: &[Widget]) -> Stri
                 provider.label,
                 provider.default_width_dp,
                 provider.default_height_dp,
-                if provider.needs_configuration {
-                    ", set up when placed"
-                } else {
-                    ""
+                match (provider.needs_configuration, provider.reconfigurable) {
+                    (true, true) => ", set up when placed and again from its menu",
+                    (true, false) => ", set up when placed",
+                    (false, true) => ", set up from its menu",
+                    (false, false) => "",
                 }
             );
         }
@@ -1460,7 +1697,10 @@ fn widgets(
     let action = invocation.widgets.clone().unwrap_or(WidgetAction::List);
     #[cfg(windows)]
     if invocation.endpoint.is_none()
-        && matches!(action, WidgetAction::Add(_) | WidgetAction::Remove(_))
+        && matches!(
+            action,
+            WidgetAction::Add(_) | WidgetAction::Remove(_) | WidgetAction::Settings(_)
+        )
     {
         ensure_window_manager()?;
     }
@@ -1495,6 +1735,27 @@ fn widgets(
             } else {
                 format!(
                     "Placed {} (widget {})",
+                    if widget.provider.label.is_empty() {
+                        &widget.provider.provider
+                    } else {
+                        &widget.provider.label
+                    },
+                    widget.widget_id
+                )
+            })
+        }
+        WidgetAction::Settings(id) => {
+            let widget = client
+                .reconfigure_widget(
+                    id,
+                    dsa_host_core::host_api::WIDGET_ADD_WAIT + Duration::from_secs(10),
+                )
+                .map_err(|e| format!("the widget's settings did not change it: {e}"))?;
+            Ok(if invocation.json {
+                widget_json(&widget).to_string()
+            } else {
+                format!(
+                    "Set up {} again (widget {})",
                     if widget.provider.label.is_empty() {
                         &widget.provider.provider
                     } else {
@@ -1618,9 +1879,32 @@ pub fn app_json(app: &AppInfo, icon: bool) -> Value {
         "primary_abi": app.primary_abi,
         "native_abis": app.native_libraries.abis().collect::<Vec<_>>(),
         "root": app.root,
+        "shared_user_id": app.shared_user_id,
+        "shortcuts": app
+            .shortcuts
+            .iter()
+            .map(|shortcut| shortcut_json(shortcut, icon))
+            .collect::<Vec<_>>(),
     });
     if icon {
         value["icon_png"] = Value::String(base64(&app.icon_png));
+    }
+    value
+}
+
+/// One of an app's shortcuts as `dsa apps list` and `info` print it: `id`, `label` (what to
+/// show), `long_label`, `in_jump_list` (a static or dynamic one, which the jump list shows),
+/// `pinned`, and with icons `icon_png` in base64 (empty for none).
+pub fn shortcut_json(shortcut: &dsa_host_core::tasks::AppShortcut, icon: bool) -> Value {
+    let mut value = json!({
+        "id": shortcut.id,
+        "label": shortcut.label(),
+        "long_label": shortcut.long_label,
+        "in_jump_list": shortcut.in_jump_list(),
+        "pinned": shortcut.pinned,
+    });
+    if icon {
+        value["icon_png"] = Value::String(base64(&shortcut.icon_png));
     }
     value
 }
@@ -1748,8 +2032,34 @@ fn apps(
     connector: &mut dyn Connector,
 ) -> Result<String, String> {
     let action = invocation.apps.clone().unwrap_or(AppsAction::List);
+    // A desktop shortcut is made from the list the service keeps, which needs no Android.
+    if let AppsAction::DesktopShortcut(package) = &action {
+        let apps = client
+            .installed_apps()
+            .map_err(|e| e.to_string())?
+            .unwrap_or_default();
+        let app = apps
+            .iter()
+            .find(|app| &app.package_name == package)
+            .ok_or_else(|| {
+                format!("no app of {package} is installed in Android; dsa apps list shows them")
+            })?;
+        let path = desktop::place_on_desktop(app)?;
+        return Ok(if invocation.json {
+            json!({ "package": package, "created": true, "path": path.display().to_string() })
+                .to_string()
+        } else {
+            format!(
+                "Put a shortcut to {} on the desktop: {}",
+                app.label,
+                path.display()
+            )
+        });
+    }
     #[cfg(windows)]
-    if invocation.endpoint.is_none() && matches!(action, AppsAction::Settings(_)) {
+    if invocation.endpoint.is_none()
+        && matches!(action, AppsAction::Settings(_) | AppsAction::Shortcut(..))
+    {
         ensure_window_manager()?;
     }
     client
@@ -1880,6 +2190,18 @@ fn apps(
                 format!("{package} may use root: {}", result.level)
             })
         }
+        AppsAction::Shortcut(package, id) => {
+            client
+                .launch_shortcut(&package, &id)
+                .map_err(|e| e.to_string())?;
+            Ok(if invocation.json {
+                json!({ "package": package, "shortcut": id, "started": true }).to_string()
+            } else {
+                format!("Starting the shortcut {id} of {package}")
+            })
+        }
+        // Answered before Android was started.
+        AppsAction::DesktopShortcut(_) => unreachable!("answered above"),
     }
 }
 
@@ -2138,6 +2460,15 @@ pub fn settings_json(report: &SettingsReport) -> Value {
         "advanced_networking": report.settings.advanced_networking,
         "touch_gestures_off": report.settings.touch_gestures_off,
         "image_auto_restart": report.settings.image_auto_restart,
+        "host_certificates": report.settings.host_certificates,
+        "imported_certificates": report.imported_certificates.iter().map(|certificate| json!({
+            "subject": certificate.subject,
+            "issuer": certificate.issuer,
+            "source": certificate.source,
+            "location": certificate.location,
+            "sha256": certificate.sha256,
+            "not_after": certificate.not_after,
+        })).collect::<Vec<_>>(),
         "touch_gestures_state": report.touch_gestures.as_str(),
         "touch_gestures_problem": report.touch_gestures.problem(),
         "network": network_json(report.network.as_ref()),
@@ -2150,8 +2481,28 @@ pub fn settings_json(report: &SettingsReport) -> Value {
     })
 }
 
-/// The network as one JSON object (`mode`, `addresses`, `dns_servers`, `gateway`, `problem`),
-/// or null from a service that does not report it.
+/// Where a root certificate the service found was, in words.
+pub fn describe_certificate_source(source: &str, location: &str) -> String {
+    use dsa_host_core::host_certificates::source;
+    let store = match source {
+        source::MACHINE => "this computer's trusted root store",
+        source::MACHINE_GROUP_POLICY => "this computer's group policy",
+        source::MACHINE_ENTERPRISE => "this computer's enterprise roots",
+        source::USER => "your own trusted roots",
+        source::USER_GROUP_POLICY => "your group policy",
+        source::ADMIN => "the administrator's trust settings",
+        source::SYSTEM => "the system's certificate store",
+        other => other,
+    };
+    if location.is_empty() {
+        store.to_string()
+    } else {
+        format!("{store}, {location}")
+    }
+}
+
+/// The network as one JSON object (`mode`, `addresses`, `dns_servers`, `gateway`, `problem`,
+/// `dns_resolver`), or null from a service that does not report it.
 pub fn network_json(network: Option<&NetworkStatus>) -> Value {
     match network {
         Some(network) => json!({
@@ -2160,6 +2511,7 @@ pub fn network_json(network: Option<&NetworkStatus>) -> Value {
             "dns_servers": network.dns_servers,
             "gateway": network.gateway,
             "problem": network.problem,
+            "dns_resolver": network.dns_resolver,
         }),
         None => Value::Null,
     }
@@ -2190,7 +2542,14 @@ pub fn describe_network(report: &SettingsReport) -> String {
     let mut lines = vec![setting, format!("Network: {mode}")];
     if network.mode != NetworkStatus::OFF {
         lines.push(format!("Addresses: {}", list(&network.addresses)));
-        lines.push(format!("DNS servers: {}", list(&network.dns_servers)));
+        lines.push(match network.dns_resolver.as_str() {
+            NetworkStatus::DNS_HOST => "DNS: answered by this computer's resolver".to_string(),
+            NetworkStatus::DNS_NETWORK => format!(
+                "DNS: this computer's resolver does not answer, so Android asks {}",
+                list(&network.dns_servers)
+            ),
+            _ => format!("DNS servers: {}", list(&network.dns_servers)),
+        });
         if !network.gateway.is_empty() {
             lines.push(format!("Gateway: {}", network.gateway));
         }
@@ -2274,6 +2633,215 @@ fn reset_data(invocation: &Invocation, client: &mut HostApiClient) -> Result<Str
     })
 }
 
+/// `dsa backup`: where the backup stands, backing up and restoring, and its recovery key.
+fn backup(invocation: &Invocation, client: &mut HostApiClient) -> Result<String, String> {
+    let report = match invocation.command {
+        Command::BackupKeyShow => {
+            let key = client.backup_recovery_key().map_err(|e| e.to_string())?;
+            return Ok(if invocation.json {
+                json!({ "recovery_key": key }).to_string()
+            } else {
+                format!(
+                    "Recovery key: {key}\nWrite it down and keep it safe. With it, the backup \
+                     folder can be restored on another computer (dsa backup key import)."
+                )
+            });
+        }
+        Command::BackupKeyImport => {
+            let key = invocation.backup_key.as_deref().unwrap_or_default();
+            client
+                .set_backup_recovery_key(key)
+                .map_err(|e| e.to_string())?
+        }
+        Command::BackupNow | Command::BackupRestore => {
+            start_for_gapps(invocation, client)?;
+            if invocation.command == Command::BackupNow {
+                client.backup_now()
+            } else {
+                client.restore_backup()
+            }
+            .map_err(|e| e.to_string())?
+        }
+        Command::BackupOn | Command::BackupOff => client
+            .set_backup(
+                invocation.command == Command::BackupOn,
+                invocation.delete_backups,
+            )
+            .map_err(|e| e.to_string())?,
+        _ => client.backup().map_err(|e| e.to_string())?,
+    };
+    // How KeyMint's root key is sealed, from a service that says.
+    let keymint = client.key_protection().ok();
+    Ok(if invocation.json {
+        backup_json(&report, keymint.as_ref()).to_string()
+    } else {
+        let mut text = describe_backup(invocation.command, &report);
+        if invocation.command == Command::BackupStatus {
+            if let Some(keymint) = &keymint {
+                text.push('\n');
+                text.push_str(&describe_keymint_key(keymint));
+            }
+        }
+        text
+    })
+}
+
+/// The JSON `dsa backup --json` prints, with how KeyMint's root key is sealed when the service
+/// said.
+pub fn backup_json(
+    report: &dsa_host_core::backup::BackupReport,
+    keymint: Option<&KeyMintKeyState>,
+) -> Value {
+    json!({
+        "enabled": report.enabled,
+        "available": report.available,
+        "problem": report.problem,
+        "folder": report.folder.display().to_string(),
+        "last_backup_unix_ms": report.last_backup_ms,
+        "last_restore_unix_ms": report.last_restore_ms,
+        "packages": report.packages,
+        "size": report.size,
+        "last_error": report.last_error,
+        "succeeded": report.succeeded,
+        "failed": report.failed,
+        "installed": report.installed,
+        "keymint_key": keymint.map(keymint_key_json),
+    })
+}
+
+/// How KeyMint's root key is sealed, as `dsa status --json` and `dsa backup --json` print it.
+pub fn keymint_key_json(state: &KeyMintKeyState) -> Value {
+    let protection = state.protection.clone().unwrap_or_default();
+    json!({
+        "kept": state.protection.is_some(),
+        "sealed_by": protection.sealed_by,
+        "hardware": protection.hardware,
+        "description": protection.description,
+        "fallback_reason": protection.fallback_reason,
+        "problem": state.problem,
+    })
+}
+
+/// How KeyMint's root key is sealed, in words.
+pub fn describe_keymint_key(state: &KeyMintKeyState) -> String {
+    let mut line = match &state.protection {
+        None => {
+            "Android's key protection: no root key yet (made when Android first starts)".to_string()
+        }
+        Some(protection) if protection.hardware => format!(
+            "Android's key protection: sealed by {}",
+            protection.description
+        ),
+        Some(protection) => format!(
+            "Android's key protection: kept by {} only{}",
+            protection.description,
+            if protection.fallback_reason.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", protection.fallback_reason)
+            }
+        ),
+    };
+    if !state.problem.is_empty() {
+        let _ = write!(line, "\nAndroid's key problem: {}", state.problem);
+    }
+    line
+}
+
+/// When, in words: `never`, or the UTC date and time.
+fn when(unix_ms: i64) -> String {
+    if unix_ms <= 0 {
+        return "never".into();
+    }
+    let secs = unix_ms / 1000;
+    let (days, rest) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
+    // Days to a civil date (Howard Hinnant's algorithm).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!(
+        "{year:04}-{month:02}-{day:02} {:02}:{:02} UTC",
+        rest / 3600,
+        rest % 3600 / 60
+    )
+}
+
+/// `dsa backup` in words.
+pub fn describe_backup(command: Command, report: &dsa_host_core::backup::BackupReport) -> String {
+    let mut lines = Vec::new();
+    match command {
+        Command::BackupNow => lines.push(format!(
+            "Backed up {} apps{}",
+            report.succeeded,
+            if report.failed > 0 {
+                format!("; {} could not be backed up", report.failed)
+            } else {
+                String::new()
+            }
+        )),
+        Command::BackupRestore => lines.push(format!(
+            "Restored the data of {} apps and installed {} apps{}",
+            report.succeeded,
+            report.installed,
+            if report.failed > 0 {
+                format!("; {} could not be restored", report.failed)
+            } else {
+                String::new()
+            }
+        )),
+        Command::BackupKeyImport => {
+            lines.push("The recovery key is kept; the backup folder is read with it".into())
+        }
+        Command::BackupOn => lines.push(
+            "Backup is on: Android backs the apps' data up to this computer, which keeps a \
+             second copy of it, encrypted"
+                .into(),
+        ),
+        Command::BackupOff if report.packages > 0 => lines.push(format!(
+            "Backup is off. The backups of {} apps ({} MiB) are still kept in {}; delete them \
+             with dsa backup off --delete-backups",
+            report.packages,
+            report.size / (1024 * 1024),
+            report.folder.display()
+        )),
+        Command::BackupOff => lines.push("Backup is off; no backups are kept".into()),
+        _ => {}
+    }
+    if !report.enabled {
+        if command != Command::BackupOff {
+            lines.push(
+                "Backup: off (turn it on with dsa backup on; it keeps a second copy of the \
+                 apps' user data on this computer)"
+                    .into(),
+            );
+        }
+    } else if !report.available {
+        lines.push(format!("Backup: on, but unavailable ({})", report.problem));
+    } else {
+        lines.push("Backup: on".into());
+    }
+    lines.push(format!("Folder: {}", report.folder.display()));
+    lines.push(format!("Last backup: {}", when(report.last_backup_ms)));
+    lines.push(format!(
+        "Apps: {} ({} MiB before encryption)",
+        report.packages,
+        report.size / (1024 * 1024)
+    ));
+    if report.last_restore_ms > 0 {
+        lines.push(format!("Last restore: {}", when(report.last_restore_ms)));
+    }
+    if !report.last_error.is_empty() {
+        lines.push(format!("Last problem: {}", report.last_error));
+    }
+    lines.join("\n")
+}
+
 /// What moving to an older Android major erases, as the command line and the settings app
 /// say it.
 pub const OLDER_ANDROID_WARNING: &str = "Android cannot read data a newer version wrote, so \
@@ -2353,6 +2921,61 @@ fn android_restart(invocation: &Invocation, client: &mut HostApiClient) -> Resul
     } else {
         detail
     })
+}
+
+/// `dsa android install-image <folder>`: installs the Android image in the folder (a signed
+/// `images.json` and the files it names, as a development build leaves them) into the image
+/// store the service boots from. The service program beside this one does it, reading the
+/// installed configuration: the list's signature is checked against the keys the service
+/// trusts, and the image goes through the update rules and hash checks. The image store is
+/// the machine's, so it needs an administrator.
+fn android_install_image(invocation: &Invocation) -> Result<String, String> {
+    let folder = invocation
+        .file
+        .as_deref()
+        .ok_or("dsa android install-image needs the folder that holds the image")?;
+    let folder = std::path::absolute(folder).map_err(|e| format!("{}: {e}", folder.display()))?;
+    if !folder.join("images.json").is_file() {
+        return Err(format!(
+            "{} has no images.json; name the folder that holds the image's signed list and \
+             its files",
+            folder.display()
+        ));
+    }
+    #[cfg(windows)]
+    {
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let service = exe.with_file_name("dsa-hostd.exe");
+        if !service.is_file() {
+            return Err(format!(
+                "{} is missing; dsa android install-image runs the service program installed \
+                 beside dsa",
+                service.display()
+            ));
+        }
+        let status = std::process::Command::new(&service)
+            .arg("install-image")
+            .arg(&folder)
+            .status()
+            .map_err(|e| format!("running {}: {e}", service.display()))?;
+        if status.success() {
+            Ok(String::new())
+        } else {
+            Err(format!(
+                "the image in {} was not installed (the reason is above); run dsa from a \
+                 prompt started as administrator, as the image is shared by every user",
+                folder.display()
+            ))
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        Err(format!(
+            "the image in {} was not installed: dsa android install-image installs the image \
+             of a Windows development build, and this host's service has no such command",
+            folder.display()
+        ))
+    }
 }
 
 /// `dsa android version` and `dsa android use`.
@@ -2486,6 +3109,11 @@ pub fn describe_settings(report: &SettingsReport) -> String {
             on_off(settings.advanced_networking)
         ),
         format!(
+            "Trust the root certificates added to this computer: {} ({} found)",
+            on_off(settings.host_certificates),
+            report.imported_certificates.len()
+        ),
+        format!(
             "Restart into a downloaded Android image by itself: {} (image-auto-restart)",
             on_off(settings.image_auto_restart)
         ),
@@ -2502,6 +3130,14 @@ pub fn describe_settings(report: &SettingsReport) -> String {
             "Touch gestures off in DSA app windows: {} ({})",
             on_off(settings.touch_gestures_off),
             describe_touch_gestures(&report.touch_gestures)
+        ));
+    }
+    for certificate in &report.imported_certificates {
+        lines.push(format!(
+            "  Root certificate: {} (issued by {}; from {})",
+            certificate.subject,
+            certificate.issuer,
+            describe_certificate_source(&certificate.source, &certificate.location)
         ));
     }
     lines.push(format!("Service version: {}", facts.version));
@@ -2521,6 +3157,12 @@ pub fn describe_settings(report: &SettingsReport) -> String {
 /// processes cost: resident pages, plus what zram holds of theirs at its measured compression,
 /// never the swapped-out size their PSS counts. `compressed_kb` is null when zram's
 /// compression could not be measured. `google_play` is null while none of its processes runs.
+///
+/// `page_reporting` is null when Android's kernel does not say what it reported. Otherwise it
+/// has the free memory the host has back now and the free memory it does not, the memory
+/// reported since boot, how fast it went back since the report before (`reported_kb_per_minute`,
+/// null for the first report), and the reported free memory the host took back in with a
+/// neighbour and the guest reported again.
 pub fn memory_json(memory: &MemorySnapshot) -> Value {
     fn share(share: &dsa_host_core::memory::MemoryShare) -> Value {
         json!({
@@ -2571,6 +3213,13 @@ pub fn memory_json(memory: &MemorySnapshot) -> Value {
                 "unaccounted_kb": guest.unaccounted_kb(),
                 "reserved_at_boot_kb": guest.reserved_at_boot_kb(),
             },
+            "page_reporting": guest.page_reporting.map(|r| json!({
+                "free_reported_kb": r.free_reported_kb,
+                "free_not_reported_kb": guest.free_not_reported_kb(),
+                "reported_total_kb": r.reported_total_kb,
+                "reported_kb_per_minute": r.reported_kb_per_minute,
+                "refaulted_total_kb": r.refaulted_total_kb,
+            })),
             "age_seconds": report.age.as_secs(),
             "top_processes": guest.top_processes.iter().map(|p| {
                 let cost = guest.process_share(p);
@@ -2593,8 +3242,11 @@ pub fn memory_json(memory: &MemorySnapshot) -> Value {
             "pid": p.pid,
             "working_set_kb": p.working_set_kb,
             "private_kb": p.private_kb,
+            "mapped_kb": p.mapped_kb,
         })).collect::<Vec<_>>(),
         "host_total_kb": memory.host_total_kb(),
+        "host_mapped_kb": memory.host_mapped_kb(),
+        "host_own_kb": memory.host_own_kb(),
         "vm_beyond_guest_kb": memory.vm_beyond_guest_kb(),
     })
 }
@@ -2756,6 +3408,7 @@ fn settings(invocation: &Invocation, client: &mut HostApiClient) -> Result<Strin
             Change::AdvancedNetworking(on) => wanted.advanced_networking = *on,
             Change::TouchGesturesOff(on) => wanted.touch_gestures_off = *on,
             Change::ImageAutoRestart(on) => wanted.image_auto_restart = *on,
+            Change::HostCertificates(on) => wanted.host_certificates = *on,
             Change::RootElevation(on) => wanted.root_elevation = *on,
         }
         report = client.set_settings(&wanted).map_err(|e| e.to_string())?;
@@ -3032,7 +3685,7 @@ fn host_density() -> u32 {
     dsa_host_windows::monitors::system_density()
 }
 
-/// Apps draw at a 100% monitor's density (96) where the screen's is not known here.
+/// Apps draw at a 100% monitor's density (130) where the screen's is not known here.
 #[cfg(not(windows))]
 fn host_density() -> u32 {
     dsa_host_core::compositor::window_sizing::DENSITY_AT_BASE_DPI
@@ -3098,6 +3751,11 @@ fn install(
     client
         .ensure_running(invocation.timeout, Duration::from_millis(250), |_| {})
         .map_err(|e| format!("Android did not start: {e}"))?;
+    // An app whose 64-bit code is for arm64-v8a only needs the running Android to translate
+    // ARM code. While it does not, the app is refused with that reason before anything is
+    // sent, judged by every APK of a bundle, whichever splits it would send.
+    file.check_translation(client.arm_translation().ok().as_ref())
+        .map_err(|refusal| describe_file_refusal(path, &refusal))?;
     let (name, outcome) = match file {
         InstallFile::Apk(mut apk) => {
             drop(client);
@@ -3214,6 +3872,158 @@ pub fn google_notice(image: &google::SdkImage) -> String {
         image.path,
         google::TERMS
     )
+}
+
+/// What `dsa drm widevine install` says before it downloads, and asks to agree to.
+pub fn widevine_notice(image: &google::SdkImage) -> String {
+    format!(
+        "DSA downloads Google's emulator system image from Google's SDK repository:\n  {} ({} \
+         MiB, {})\nIt is Google's software, offered under the Android SDK License: {}\nDSA takes \
+         only the Widevine module from it, unchanged, installs it for Android, and deletes the \
+         rest. DSA does not ship or pass on Google's Widevine.",
+        image.url,
+        image.size >> 20,
+        image.path,
+        widevine::TERMS
+    )
+}
+
+/// What every Widevine status says about the security level.
+pub const WIDEVINE_HD_NOTICE: &str = "Widevine here is L3: streaming services send it standard \
+     definition (SD) at most. For high definition, watch in this computer's own browser or app";
+
+/// `dsa drm widevine install`: finds the image for this computer's Android in Google's list,
+/// asks (unless `--yes`), takes Widevine's APEX out of it in a folder of its own and installs
+/// it. The folder, with the download, is removed whatever happens. Android need not run.
+fn install_widevine(
+    invocation: &Invocation,
+    mut client: HostApiClient,
+    connector: &mut dyn Connector,
+) -> Result<String, String> {
+    let major = android_major(&mut client);
+    let abi = widevine::guest_abi();
+    let fetch = web_fetch();
+    let repository = std::env::var(widevine::REPOSITORY_ENV);
+    let repository = repository.unwrap_or_else(|_| widevine::REPOSITORY.to_string());
+    let image = widevine::find_image(&*fetch, &repository, major, abi)?;
+    if !invocation.yes && !agree(&widevine_notice(&image)) {
+        return Err(
+            "Google's image was not downloaded, and nothing was changed. dsa drm widevine \
+             install --yes agrees to Google's terms without asking"
+                .into(),
+        );
+    }
+    let id = std::process::id();
+    // The process ID between dashes keeps the folder while this run uses it.
+    let base = user_tmp()?.join(format!("dsa-widevine-{id}-0"));
+    let _ = std::fs::remove_dir_all(&base);
+    let apex = base.join("module.apex");
+    let quiet = invocation.json;
+    let mut shown = None;
+    let mut progress = |step: google::Progress| {
+        if quiet {
+            return;
+        }
+        match step {
+            google::Progress::Downloading { done, total } => {
+                let percent = (done * 100).checked_div(total).unwrap_or(100);
+                if shown != Some(percent / 5) {
+                    shown = Some(percent / 5);
+                    eprint!("\rDownloading: {} of {} MiB", done >> 20, total >> 20);
+                }
+            }
+            google::Progress::Extracting => eprintln!("\nTaking out the vendor partition"),
+            google::Progress::Building => eprintln!("Taking out the Widevine module"),
+        }
+    };
+    // The download takes minutes; the connection is opened again for the install.
+    drop(client);
+    let work = base.join("download");
+    let taken = widevine::take_apex(&*fetch, &image, major, abi, &work, &apex, &mut progress);
+    let installed = taken.and_then(|package| {
+        let mut file = std::fs::File::open(&apex)
+            .map_err(|e| format!("{} cannot be read: {e}", apex.display()))?;
+        let status = connect(connector, None, false, Duration::from_secs(10))?
+            .install_widevine(&package, &mut file)
+            .map_err(|e| format!("Widevine was not installed: {e}"))?;
+        let done = format!(
+            "Installed Widevine from Google's image {} for Android {} ({})",
+            package.version, package.android_major, package.abi
+        );
+        Ok(show_widevine(invocation, &status, Some(&done)))
+    });
+    let _ = std::fs::remove_dir_all(&base);
+    installed
+}
+
+/// Where Widevine stands as one JSON object.
+pub fn widevine_json(status: &WidevineStatus) -> Value {
+    json!({
+        "package": status.package.as_ref().map(|package| json!({
+            "apex": package.apex,
+            "version": package.version,
+            "android_major": package.android_major,
+            "abi": package.abi,
+            "source": package.source,
+            "size": package.size,
+            "sha256": package.sha256,
+            "license": package.license,
+        })),
+        "installed": status.package.is_some(),
+        "on_disk": status.on_disk,
+        "running": status.running,
+        "active": status.active,
+        "restart_needed": status.restart_needed,
+        "security_level": widevine::SECURITY_LEVEL,
+        "terms_url": widevine::TERMS,
+    })
+}
+
+/// Where Widevine stands, one fact per line, after `done` when an action was taken.
+pub fn describe_widevine(status: &WidevineStatus, done: Option<&str>) -> String {
+    let mut lines: Vec<String> = done.map(str::to_string).into_iter().collect();
+    lines.push(match &status.package {
+        None => "Widevine: not installed (dsa drm widevine install takes it from Google's \
+                 emulator image)"
+            .to_string(),
+        Some(package) => format!(
+            "Widevine: {} from Google's image {} for Android {} ({}), from {}",
+            package.apex, package.version, package.android_major, package.abi, package.source
+        ),
+    });
+    if status.package.is_some() && !status.on_disk {
+        lines.push(
+            "The module is not on this user's add-on disk; install it again (dsa drm widevine \
+             install)"
+                .to_string(),
+        );
+    }
+    lines.push(if !status.running {
+        "Android is not running".to_string()
+    } else if status.active {
+        "Android: runs with Widevine in this boot".to_string()
+    } else {
+        "Android: runs without Widevine in this boot".to_string()
+    });
+    if status.restart_needed {
+        lines.push("Restart Android to apply this (dsa stop --wait, then dsa start)".to_string());
+    }
+    lines.push(format!("{WIDEVINE_HD_NOTICE}."));
+    if status.package.is_some() {
+        lines.push(format!(
+            "Widevine is Google's software under Google's terms ({}); DSA does not distribute it",
+            widevine::TERMS
+        ));
+    }
+    lines.join("\n")
+}
+
+fn show_widevine(invocation: &Invocation, status: &WidevineStatus, done: Option<&str>) -> String {
+    if invocation.json {
+        widevine_json(status).to_string()
+    } else {
+        describe_widevine(status, done)
+    }
 }
 
 /// Starts Android when it is not running, as `dsa gapps install` needs it.
@@ -3919,7 +4729,11 @@ fn read_install_file(path: &std::path::Path) -> Result<(ApkInfo, Option<Bundle>)
         .and_then(|name| name.to_str())
         .is_some_and(|name| dsa_host_core::apk::check_name(name).is_ok());
     if named_apk {
-        return Ok((ApkInfo::read(path)?, None));
+        let info = ApkInfo::read(path)?;
+        // An app whose native code the guest cannot run is refused as `dsa install` refuses it.
+        dsa_host_core::apk_bundle::check_native_code(path)
+            .map_err(|refusal| describe_file_refusal(path, &refusal))?;
+        return Ok((info, None));
     }
     let file = InstallFile::open(path, &user_tmp()?);
     match file.map_err(|refusal| describe_file_refusal(path, &refusal))? {
@@ -4277,6 +5091,9 @@ pub fn run_with_starter(
     if invocation.command == Command::ApkInfo {
         return apk_info(invocation, connector);
     }
+    if invocation.command == Command::AndroidInstallImage {
+        return android_install_image(invocation);
+    }
     if invocation.command == Command::Gpus {
         let gpus = gpus_json();
         return Ok(if invocation.json {
@@ -4346,6 +5163,16 @@ pub fn run_with_starter(
         }
         Command::GappsInstall => return install_gapps(invocation, client, connector),
         Command::GappsRemove => return remove_gapps(invocation, client),
+        Command::WidevineStatus => {
+            let status = client.widevine().map_err(|e| e.to_string())?;
+            return Ok(show_widevine(invocation, &status, None));
+        }
+        Command::WidevineInstall => return install_widevine(invocation, client, connector),
+        Command::WidevineRemove => {
+            let status = client.remove_widevine().map_err(|e| e.to_string())?;
+            let done = "Removed Widevine and the device certificates it kept";
+            return Ok(show_widevine(invocation, &status, Some(done)));
+        }
         Command::Widgets => return widgets(invocation, client, connector),
         Command::Apps => return apps(invocation, client, connector),
         Command::Background => return background(invocation, client),
@@ -4368,6 +5195,13 @@ pub fn run_with_starter(
             });
         }
         Command::ResetData => return reset_data(invocation, &mut client),
+        Command::BackupStatus
+        | Command::BackupOn
+        | Command::BackupOff
+        | Command::BackupNow
+        | Command::BackupRestore
+        | Command::BackupKeyShow
+        | Command::BackupKeyImport => return backup(invocation, &mut client),
         Command::AndroidVersion | Command::AndroidUse => {
             return android_version(invocation, &mut client)
         }
@@ -4390,10 +5224,28 @@ pub fn run_with_starter(
             let path = invocation.output.clone().unwrap_or_default();
             return logs::collect(client, &path);
         }
-        Command::Gpus | Command::ApkInfo => unreachable!("answered before connecting"),
+        Command::Gpus | Command::ApkInfo | Command::AndroidInstallImage => {
+            unreachable!("answered before connecting")
+        }
     }
     .map_err(|e| e.to_string())?;
-    if !invocation.wait || matches!(invocation.command, Command::Status | Command::Freeze) {
+    if invocation.command == Command::Status {
+        // How Android's KeyMint root key is sealed here, from a service that says.
+        let keymint = client.key_protection().ok();
+        return Ok(if invocation.json {
+            let mut value = status_json(&status);
+            value["keymint_key"] = keymint.as_ref().map(keymint_key_json).into();
+            value.to_string()
+        } else {
+            match &keymint {
+                Some(keymint) => {
+                    format!("{}\n{}", describe(&status), describe_keymint_key(keymint))
+                }
+                None => describe(&status),
+            }
+        });
+    }
+    if !invocation.wait || invocation.command == Command::Freeze {
         return Ok(show(&status));
     }
     let deadline = Instant::now() + invocation.timeout;

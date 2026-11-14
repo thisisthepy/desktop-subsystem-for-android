@@ -1,0 +1,37 @@
+; Desktop Subsystem for Android (DSA)
+; The host's root certificates among Android's system certificates. Android reads its system
+; certificates from /apex/com.android.conscrypt/cacerts and /system/etc/security/cacerts, which
+; are read only. At boot, before the zygote starts, dsa-cacerts.rc makes /dev/dsa_cacerts (a
+; tmpfs folder vendor_file_contexts labels dsa_cacerts_file), has dsa-channeld --cacerts-setup
+; copy Android's certificates into a folder of it for each, and binds each folder over Android's.
+; From then on dsa-channeld adds the roots the host sends there, and takes them away, as files
+; of its own; a file or folder made there takes the folder's type.
+
+(type dsa_cacerts_file)
+(roletype object_r dsa_cacerts_file)
+(typeattributeset file_type (dsa_cacerts_file))
+(allow dsa_cacerts_file tmpfs (filesystem (associate)))
+
+; init makes the folder, and binds its folders over Android's: the bind reads the folder it
+; lays over the other, and mounts on Android's own folder, which both places label
+; system_security_cacerts_file. Android's policy gives init no mounton on that type, so without
+; the second rule both binds fail with "Permission denied" and the copies are never used.
+(allow init dsa_cacerts_file (dir (create search getattr setattr open read write add_name relabelto mounton)))
+(allow init system_security_cacerts_file (dir (mounton)))
+
+; The daemon: --cacerts-setup copies Android's certificates (system files, which every domain
+; reads; the APEX's folder is under /apex) into a folder it makes under another name and then
+; renames, so init binds only a whole copy. The daemon proper writes the host's roots, each
+; through a file beside it renamed into place, keeps the list of the files it added, and
+; unlinks those the host no longer names.
+(allow dsa_channeld device (dir (search)))
+(allow dsa_channeld apex_mnt_dir (dir (search getattr)))
+(allow dsa_channeld system_file (dir (search getattr read open)))
+(allow dsa_channeld system_file (file (read open getattr)))
+(allow dsa_channeld dsa_cacerts_file (dir (search getattr read open create write add_name remove_name rename reparent rmdir setattr)))
+(allow dsa_channeld dsa_cacerts_file (file (create read write open getattr setattr rename unlink)))
+
+; Every process that checks a certificate (the apps, system_server, the network stack) reads
+; the folders and the certificates in them, as it reads Android's own.
+(allow domain dsa_cacerts_file (dir (search getattr read open)))
+(allow domain dsa_cacerts_file (file (read open getattr map)))

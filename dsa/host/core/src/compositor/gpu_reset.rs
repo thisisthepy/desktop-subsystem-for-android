@@ -114,6 +114,17 @@ impl GpuResetWindows {
         self.kept.contains_key(&window)
     }
 
+    /// The apps whose kept windows wait for their next task, each once.
+    pub fn kept_packages(&self) -> Vec<String> {
+        let mut packages: Vec<String> = Vec::new();
+        for kept in self.kept.values() {
+            if !packages.contains(&kept.package) {
+                packages.push(kept.package.clone());
+            }
+        }
+        packages
+    }
+
     /// The task rules' changes that did not come from the guest ending a task (the user closed
     /// a window, a window's size settled): they go to the window hosts as they are, with
     /// window IDs.
@@ -189,6 +200,11 @@ impl GpuResetWindows {
                             outcome
                                 .adopted
                                 .push((task_id, self.sizes.get(&window).copied()));
+                            // What the window sends Android itself goes to the new task.
+                            outcome.changes.push(WindowChange::ShownTask {
+                                task_id: window,
+                                shown_task_id: task_id,
+                            });
                             // The window is there already; only its title may be new.
                             outcome.changes.push(WindowChange::Retitle {
                                 task_id: window,
@@ -363,6 +379,8 @@ impl GpuResetWindows {
                 task_id: window(task_id),
                 back,
             },
+            // Made here, by window ID already.
+            shown @ WindowChange::ShownTask { .. } => shown,
         }
     }
 }
@@ -382,13 +400,14 @@ fn with_task_id(report: FromHost, task_id: i32) -> FromHost {
         FromHost::Shown { shown, .. } => FromHost::Shown { task_id, shown },
         FromHost::Caption { band, .. } => FromHost::Caption { task_id, band },
         FromHost::MenuChosen { action, .. } => FromHost::MenuChosen { task_id, action },
+        FromHost::MediaButton { button, .. } => FromHost::MediaButton { task_id, button },
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compositor::window_hosts::{HostAction, HostId, WindowHosts};
+    use crate::compositor::window_hosts::{HostAction, HostId, ToHost, WindowHosts};
     use crate::tasks::AppInfo;
 
     const PLAY: &str = "com.android.vending";
@@ -472,10 +491,14 @@ mod tests {
             now + Duration::from_secs(3),
         );
         assert_eq!(outcome.adopted, vec![(14, Some((1166, 1033)))]);
-        // No second window: the kept one takes the new task's title.
+        // No second window: the kept one shows the new task and takes its title.
         assert_eq!(
             outcome.changes,
             vec![
+                WindowChange::ShownTask {
+                    task_id: 9,
+                    shown_task_id: 14
+                },
                 WindowChange::Retitle {
                     task_id: 9,
                     title: "Google Play Store".into()
@@ -491,6 +514,14 @@ mod tests {
             .iter()
             .all(|action| !matches!(action, HostAction::Disconnect { .. })));
         assert_eq!(hosts.tasks_of(HostId(1)), vec![9]);
+        // The window program is told which task its window shows now.
+        assert!(actions.contains(&HostAction::Send {
+            host: HostId(1),
+            message: ToHost::ShownTask {
+                task_id: 9,
+                shown_task_id: 14
+            }
+        }));
         // The window's reports reach the new task, and the task's changes the window.
         assert_eq!(
             resets.report(FromHost::Focus {

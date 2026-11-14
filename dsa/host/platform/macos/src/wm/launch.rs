@@ -10,9 +10,9 @@
 
 use std::path::{Path, PathBuf};
 
-use dsa_host_core::tasks::AppInfo;
+use dsa_host_core::tasks::{jump_list_shortcuts, AppInfo, PinShortcutRequest};
 
-use crate::shell::app_stubs::{self, AppEntry, EXECUTABLE};
+use crate::shell::app_stubs::{self, AppEntry, StubShortcut, EXECUTABLE};
 
 /// The argument that tells a window host the window manager started it.
 pub const SHOWN_BY_WINDOW_MANAGER: &str = "--shown-by-window-manager";
@@ -37,6 +37,13 @@ pub fn app_entry(app: &AppInfo) -> AppEntry {
         },
         version: app.version_name.clone(),
         icon_png: app.icon_png.clone(),
+        shortcuts: jump_list_shortcuts(&app.shortcuts)
+            .into_iter()
+            .map(|shortcut| StubShortcut {
+                id: shortcut.id.clone(),
+                label: shortcut.label().to_string(),
+            })
+            .collect(),
     }
 }
 
@@ -88,6 +95,8 @@ pub struct AppLauncher {
     pub folder: PathBuf,
     /// The window host program each bundle copies.
     pub window_host: Option<PathBuf>,
+    /// The user's Desktop, where desktop shortcuts are links to the bundles.
+    pub desktop: Option<PathBuf>,
 }
 
 impl AppLauncher {
@@ -149,6 +158,42 @@ impl AppLauncher {
         Ok(())
     }
 
+    /// Puts the shortcut of `request`, which the user agreed to pin, on the Desktop: a
+    /// bundle that starts it, and a link to the bundle.
+    pub fn pin(&self, request: &PinShortcutRequest) -> Result<PathBuf, String> {
+        let window_host = self
+            .window_host
+            .as_ref()
+            .ok_or("dsa-app-window is not installed beside dsa-wm")?;
+        let desktop = self
+            .desktop
+            .as_ref()
+            .ok_or("the Desktop is not known: HOME is not set")?;
+        let link = app_stubs::place_pinned_in(
+            &self.folder,
+            desktop,
+            &request.package_name,
+            &request.shortcut,
+            window_host,
+        )?;
+        #[cfg(target_os = "macos")]
+        {
+            let bundle = app_stubs::pinned_bundle_path(
+                &self.folder,
+                &request.package_name,
+                &request.shortcut.id,
+            );
+            let report = app_stubs::SyncReport {
+                written: vec![bundle],
+                removed: Vec::new(),
+            };
+            if let Err(why) = app_stubs::register(&report) {
+                super::log(&why);
+            }
+        }
+        Ok(link)
+    }
+
     /// Makes the bundles match the apps installed in the guest.
     pub fn sync(&self, apps: &[AppInfo]) -> Result<(), String> {
         let Some(window_host) = &self.window_host else {
@@ -157,6 +202,11 @@ impl AppLauncher {
         let entries: Vec<AppEntry> = apps.iter().map(app_entry).collect();
         let report = app_stubs::sync(&self.folder, &entries, window_host)
             .map_err(|e| format!("updating the app bundles: {e}"))?;
+        // The Desktop's links follow: an app that is gone takes its desktop shortcuts.
+        let packages: Vec<String> = apps.iter().map(|app| app.package_name.clone()).collect();
+        for link in app_stubs::sync_desktop(&self.folder, &packages) {
+            super::log(&format!("removed the desktop shortcut {}", link.display()));
+        }
         #[cfg(target_os = "macos")]
         app_stubs::register(&report)?;
         #[cfg(not(target_os = "macos"))]

@@ -1,0 +1,217 @@
+diff --git a/host/FrameBuffer.cpp b/host/FrameBuffer.cpp
+index 7774217..7e9f871 100644
+--- a/host/FrameBuffer.cpp
++++ b/host/FrameBuffer.cpp
+@@ -65,6 +65,7 @@
+ #include "vulkan/DisplayVk.h"
+ #include "vulkan/PostWorkerVk.h"
+ #include "vulkan/VkCommonOperations.h"
++#include "vulkan/VkFormatUtils.h"
+ #include "vulkan/VkDecoderGlobalState.h"
+ 
+ namespace gfxstream {
+@@ -1693,6 +1694,41 @@ bool FrameBuffer::updateColorBuffer(HandleType p_colorbuffer,
+     return true;
+ }
+ 
++bool FrameBuffer::supportsDsaYuvColorBuffers() {
++    return m_emulationVk && !m_emulationGl &&
++           m_emulationVk->supportsYuvColorBuffer(FRAMEWORK_FORMAT_YV12) &&
++           m_emulationVk->supportsYuvColorBuffer(FRAMEWORK_FORMAT_NV12);
++}
++
++bool FrameBuffer::updateColorBufferFromDsaPackedYuv(HandleType p_colorbuffer, const void* bytes,
++                                                    size_t size) {
++    AutoLock mutex(m_lock);
++    ColorBufferPtr colorBuffer = findColorBuffer(p_colorbuffer);
++    if (!colorBuffer) {
++        return false;
++    }
++    const FrameworkFormat frameworkFormat = colorBuffer->getFrameworkFormat();
++    VkFormat vkFormat;
++    if (frameworkFormat == FRAMEWORK_FORMAT_YV12) {
++        vkFormat = VK_FORMAT_G8_B8_R8_3PLANE_420_UNORM;
++    } else if (frameworkFormat == FRAMEWORK_FORMAT_NV12) {
++        vkFormat = VK_FORMAT_G8_B8R8_2PLANE_420_UNORM;
++    } else {
++        return false;
++    }
++    const uint32_t width = colorBuffer->getWidth();
++    const uint32_t height = colorBuffer->getHeight();
++    VkDeviceSize expected = 0;
++    if (!vk::getFormatTransferInfo(vkFormat, width, height, &expected, nullptr) ||
++        expected != size) {
++        ERR("ColorBuffer %u (%ux%u YUV) was sent %zu bytes of planes, not %llu", p_colorbuffer,
++            width, height, size, static_cast<unsigned long long>(expected));
++        return false;
++    }
++    return colorBuffer->updateFromBytes(0, 0, static_cast<int>(width), static_cast<int>(height),
++                                        frameworkFormat, GL_RGBA, GL_UNSIGNED_BYTE, bytes);
++}
++
+ bool FrameBuffer::updateColorBufferFromFrameworkFormat(HandleType p_colorbuffer, int x, int y,
+                                                        int width, int height,
+                                                        FrameworkFormat fwkFormat, GLenum format,
+diff --git a/host/FrameBuffer.h b/host/FrameBuffer.h
+index dba4535..9b0dbbc 100644
+--- a/host/FrameBuffer.h
++++ b/host/FrameBuffer.h
+@@ -312,6 +312,16 @@ class FrameBuffer : public android::base::EventNotificationSupport<FrameBufferCh
+                                               int height, FrameworkFormat fwkFormat, GLenum format,
+                                               GLenum type, void* pixels, void* metadata = nullptr);
+ 
++    // Whether this host makes the YUV ColorBuffers DSA's guest asks for (both 4:2:0 layouts:
++    // three planes and two).
++    bool supportsDsaYuvColorBuffers();
++    // Writes a YUV ColorBuffer whole from a guest's planes, packed one after the other in
++    // the plane order and size the ColorBuffer's image has: no row padding, the chroma
++    // planes at half width and height. False, and nothing written, when the ColorBuffer is
++    // not YUV or `size` is not exactly that size.
++    bool updateColorBufferFromDsaPackedYuv(HandleType p_colorbuffer, const void* bytes,
++                                           size_t size);
++
+     bool getColorBufferInfo(HandleType p_colorbuffer, int* width, int* height,
+                             GLint* internalformat,
+                             FrameworkFormat* frameworkFormat = nullptr);
+diff --git a/host/RenderControl.cpp b/host/RenderControl.cpp
+index 353b275..205157f 100644
+--- a/host/RenderControl.cpp
++++ b/host/RenderControl.cpp
+@@ -194,6 +194,18 @@ static const char* kGLESDynamicVersion_3_1 = "ANDROID_EMU_gles_max_version_3_1";
+ static const char* kHostCompositionV1 = "ANDROID_EMU_host_composition_v1";
+ static const char* kHostCompositionV2 = "ANDROID_EMU_host_composition_v2";
+ 
++// DSA's guest has no virtio-gpu device, so a gralloc buffer a CPU writes (a video decoder's
++// pictures, a camera's frames, a layer drawn in software) reaches its ColorBuffer only when
++// the guest uploads it. A YUV buffer needs a YUV ColorBuffer for that, which a guest asks
++// rcCreateColorBufferWithHandle for with these internal formats, and only from a host that
++// lists the extension. Each upload is one rcUpdateColorBuffer of the planes packed one
++// after the other: GL_LUMINANCE bytes, `width` of them, on one row.
++static const char* kDsaYuvColorBuffers = "ANDROID_EMU_dsa_yuv_color_buffers";
++static constexpr GLenum kDsaYuv420ThreePlane = 0x44534133;  // 'DSA3'
++static constexpr GLenum kDsaYuv420TwoPlane = 0x44534132;    // 'DSA2'
++static constexpr GLenum kDsaPackedYuvFormat = 0x1909;       // GL_LUMINANCE
++static constexpr GLenum kDsaPackedYuvType = 0x1401;         // GL_UNSIGNED_BYTE
++
+ // Vulkan
+ static const char* kVulkanFeatureStr = "ANDROID_EMU_vulkan";
+ static const char* kDeferredVulkanCommands = "ANDROID_EMU_deferred_vulkan_commands";
+@@ -538,6 +550,11 @@ static EGLint rcGetGLString(EGLenum name, void* buffer, EGLint bufferSize) {
+         glStr += " ";
+     }
+ 
++    if (name == GL_EXTENSIONS && fb->supportsDsaYuvColorBuffers()) {
++        glStr += kDsaYuvColorBuffers;
++        glStr += " ";
++    }
++
+     if (vulkanEnabled && name == GL_EXTENSIONS) {
+         glStr += kVulkanFeatureStr;
+         glStr += " ";
+@@ -1012,6 +1029,23 @@ static int rcUpdateColorBuffer(uint32_t colorBuffer,
+         return -1;
+     }
+ 
++    int yuvWidth = 0;
++    int yuvHeight = 0;
++    GLint yuvInternalFormat = 0;
++    FrameworkFormat yuvFormat = FRAMEWORK_FORMAT_GL_COMPATIBLE;
++    if (x == 0 && y == 0 && height == 1 && width > 0 && format == kDsaPackedYuvFormat &&
++        type == kDsaPackedYuvType &&
++        fb->getColorBufferInfo(colorBuffer, &yuvWidth, &yuvHeight, &yuvInternalFormat,
++                               &yuvFormat) &&
++        (yuvFormat == FRAMEWORK_FORMAT_YV12 || yuvFormat == FRAMEWORK_FORMAT_NV12)) {
++        // A DSA guest's packed planes for a YUV ColorBuffer (kDsaYuvColorBuffers).
++        const bool written = fb->updateColorBufferFromDsaPackedYuv(
++            colorBuffer, pixels, static_cast<size_t>(width));
++        GRSYNC_DPRINT("unlock gralloc cb lock");
++        sGrallocSync()->unlockColorBufferPrepare();
++        return written ? 0 : -1;
++    }
++
+     fb->updateColorBuffer(colorBuffer, x, y, width, height, format, type, pixels);
+ 
+     GRSYNC_DPRINT("unlock gralloc cb lock");
+@@ -1381,8 +1415,21 @@ static void rcCreateColorBufferWithHandle(
+         return;
+     }
+ 
+-    fb->createColorBufferWithResourceHandle(width, height, internalFormat,
+-                                            FRAMEWORK_FORMAT_GL_COMPATIBLE, handle);
++    FrameworkFormat frameworkFormat = FRAMEWORK_FORMAT_GL_COMPATIBLE;
++    if (internalFormat == kDsaYuv420ThreePlane || internalFormat == kDsaYuv420TwoPlane) {
++        // A YUV ColorBuffer for a DSA guest's YUV gralloc buffer. A ColorBuffer the host
++        // cannot make ends the renderer, so a host without them gives RGBA, as before.
++        const FrameworkFormat yuv = internalFormat == kDsaYuv420ThreePlane
++                                        ? FRAMEWORK_FORMAT_YV12
++                                        : FRAMEWORK_FORMAT_NV12;
++        internalFormat = GL_RGBA;
++        if (fb->supportsDsaYuvColorBuffers()) {
++            frameworkFormat = yuv;
++        }
++    }
++
++    fb->createColorBufferWithResourceHandle(width, height, internalFormat, frameworkFormat,
++                                            handle);
+ }
+ 
+ static uint32_t rcCreateBuffer2(uint64_t size, uint32_t memoryProperty) {
+diff --git a/host/vulkan/VkCommonOperations.cpp b/host/vulkan/VkCommonOperations.cpp
+index a5cf669..20767f1 100644
+--- a/host/vulkan/VkCommonOperations.cpp
++++ b/host/vulkan/VkCommonOperations.cpp
+@@ -3364,6 +3364,39 @@ bool VkEmulation::createVkColorBufferLocked(uint32_t width, uint32_t height, GLe
+     return true;
+ }
+ 
++bool VkEmulation::supportsYuvColorBuffer(FrameworkFormat frameworkFormat) const {
++    VkFormat vkFormat;
++    switch (frameworkFormat) {
++        case FrameworkFormat::FRAMEWORK_FORMAT_NV12:
++            vkFormat = VK_FORMAT_G8_B8R8_2PLANE_420_UNORM;
++            break;
++        case FrameworkFormat::FRAMEWORK_FORMAT_YV12:
++            vkFormat = VK_FORMAT_G8_B8_R8_3PLANE_420_UNORM;
++            break;
++        default:
++            return false;
++    }
++    constexpr VkFormatFeatureFlags kNeeded =
++        VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
++    // Sampled and written by a copy, as a 2D image of optimal tiling, with the external
++    // memory every ColorBuffer is made with where the device exports memory.
++    bool sampled = false;
++    bool written = false;
++    for (const auto& supportInfo : mImageSupportInfo) {
++        if (supportInfo.format != vkFormat || !supportInfo.supported ||
++            supportInfo.type != VK_IMAGE_TYPE_2D ||
++            supportInfo.tiling != VK_IMAGE_TILING_OPTIMAL ||
++            (supportInfo.formatProps2.formatProperties.optimalTilingFeatures & kNeeded) !=
++                kNeeded ||
++            (mDeviceInfo.supportsExternalMemoryExport && !supportInfo.supportsExternalMemory)) {
++            continue;
++        }
++        sampled = sampled || supportInfo.usageFlags == VK_IMAGE_USAGE_SAMPLED_BIT;
++        written = written || supportInfo.usageFlags == VK_IMAGE_USAGE_TRANSFER_DST_BIT;
++    }
++    return sampled && written;
++}
++
+ bool VkEmulation::isFormatSupported(GLenum format) {
+     VkFormat vkFormat = glFormat2VkFormat(format);
+     bool supported = !gfxstream::vk::formatIsDepthOrStencil(vkFormat);
+diff --git a/host/vulkan/VkCommonOperations.h b/host/vulkan/VkCommonOperations.h
+index 96f8a77..3553987 100644
+--- a/host/vulkan/VkCommonOperations.h
++++ b/host/vulkan/VkCommonOperations.h
+@@ -247,6 +247,10 @@ class VkEmulation {
+                                                                             VkImageTiling tiling);
+ 
+     bool isFormatSupported(GLenum format);
++    // Whether a ColorBuffer of this YUV layout can be made and written: a sampled image the
++    // host copies a guest's planes into. DSA's guest asks for one only when this holds for
++    // both layouts, since a ColorBuffer that cannot be made would end the renderer.
++    bool supportsYuvColorBuffer(FrameworkFormat frameworkFormat) const;
+ 
+     bool createVkColorBuffer(uint32_t width, uint32_t height, GLenum format,
+                              FrameworkFormat frameworkFormat, uint32_t colorBufferHandle,

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A widget with a setup its app says may be skipped and run later. -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:configure="io.github.thisisthepy.dsa.widgetprobe.SetupActivity"
+    android:initialLayout="@layout/widget"
+    android:minHeight="40dp"
+    android:minWidth="110dp"
+    android:resizeMode="horizontal|vertical"
+    android:updatePeriodMillis="0"
+    android:widgetFeatures="reconfigurable|configuration_optional" />

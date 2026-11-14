@@ -11,8 +11,9 @@
 //!
 //! The guest's editor shows the composition itself, underlined where the text is, so no
 //! composition window is drawn over it. The candidate list (Hanja, say) is the input
-//! method's, placed beside the cursor of the guest's editor, which the guest reports in the
-//! task's pixels; those are the window's client pixels.
+//! method's, placed beside the cursor of the guest's editor. The guest reports it in the
+//! task's pixels, and the window manager gives it in the window's client pixels: the task's
+//! at the scale the window shows the task at, told again when that scale changes.
 //!
 //! A key that types a character without the input method (any keyboard layout, with no input
 //! method composing) arrives as `WM_CHAR`, and goes as text alone: `KeyWindow` gives the guest

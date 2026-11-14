@@ -1,0 +1,163 @@
+diff --git a/src/gfxstream/guest/vulkan_enc/ResourceTracker.cpp b/src/gfxstream/guest/vulkan_enc/ResourceTracker.cpp
+--- a/src/gfxstream/guest/vulkan_enc/ResourceTracker.cpp
++++ b/src/gfxstream/guest/vulkan_enc/ResourceTracker.cpp
+@@ -7,6 +7,9 @@
+ 
+ #include "dsa_shadow_blocks.h"
+ #include "dsa_shadow_memory.h"
++
++#include <algorithm>
++#include <atomic>
+ #if DETECT_OS_ANDROID
+ #include <sys/system_properties.h>
+ #endif
+@@ -1642,9 +1645,46 @@ void ResourceTracker::flushShadowedMemory(VkEncoder* enc, VkDevice device) {
+     }
+ }
+ 
++// What the guest read back, for the input trace's driver.readback line.
++static std::atomic<uint64_t> sReadBackReceived{0};
++static std::atomic<uint64_t> sReadBackTaken{0};
++
++void ResourceTracker::receiveReadBack(VkDeviceMemory memory, uint64_t offset, const uint8_t* data,
++                                      uint64_t size) {
++    std::lock_guard<std::recursive_mutex> lock(mLock);
++    auto it = info_VkDeviceMemory.find(memory);
++    if (it == info_VkDeviceMemory.end() || !it->second.ptr) return;
++    auto& info = it->second;
++    const uint64_t mappedSize = info.allocationSize;
++    if (offset >= mappedSize) return;
++    if (size > mappedSize - offset) size = mappedSize - offset;
++    sReadBackReceived.fetch_add(size, std::memory_order_relaxed);
++    if (!info.shadowBlocks) {
++        memcpy(info.ptr + offset, data, size);
++        sReadBackTaken.fetch_add(size, std::memory_order_relaxed);
++        return;
++    }
++    // Block by block: what the device changed comes in, what the app wrote since its last
++    // submit stays and goes to the host at the next one (dsa_shadow_blocks.h).
++    sReadBackTaken.fetch_add(info.shadowBlocks->receive(info.ptr, offset, data, size),
++                             std::memory_order_relaxed);
++}
++
+ void ResourceTracker::invalidateShadowedMemory(VkEncoder* enc, VkDevice device) {
+     // Only memory the host caches for reading comes back: reading back memory the guest
+     // only writes would overwrite what it wrote since its last submit.
++    //
++    // This runs at every fence the app sees signalled, so it must cost what the device
++    // wrote, not what the app has mapped. Each allocation is asked for in pieces: the host
++    // renderer sends a piece only when the device changed it since the guest last had it,
++    // and size 0 for the others, which leaves the guest's copy as it is. A renderer that
++    // sends every piece is read correctly too, at the old cost.
++    static constexpr VkDeviceSize kReadBackPiece = 64 * 1024;
++    const bool traced = inputTraceRequested();
++    const auto started = std::chrono::steady_clock::now();
++    const uint64_t receivedBefore = sReadBackReceived.load(std::memory_order_relaxed);
++    const uint64_t takenBefore = sReadBackTaken.load(std::memory_order_relaxed);
++    uint64_t asked = 0;
+     std::vector<VkMappedMemoryRange> ranges;
+     {
+         std::lock_guard<std::recursive_mutex> lock(mLock);
+@@ -1661,20 +1701,44 @@ void ResourceTracker::invalidateShadowedMemory(VkEncoder* enc, VkDevice device)
+                   VK_MEMORY_PROPERTY_HOST_CACHED_BIT)) {
+                 continue;
+             }
+-            ranges.push_back({VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE, nullptr, memory, 0,
+-                              VK_WHOLE_SIZE});
++            for (VkDeviceSize offset = 0; offset < info.allocationSize; offset += kReadBackPiece) {
++                const VkDeviceSize size =
++                    std::min<VkDeviceSize>(kReadBackPiece, info.allocationSize - offset);
++                ranges.push_back(
++                    {VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE, nullptr, memory, offset, size});
++            }
++            asked += info.allocationSize;
+         }
+     }
+-    if (!ranges.empty()) {
+-        enc->vkInvalidateMappedMemoryRanges(device, ranges.size(), ranges.data(),
+-                                            true /* do lock */);
+-        // The copies now hold what the host sent; the next flush need not send it back.
+-        std::lock_guard<std::recursive_mutex> lock(mLock);
+-        for (const VkMappedMemoryRange& range : ranges) {
+-            auto it = info_VkDeviceMemory.find(range.memory);
+-            if (it != info_VkDeviceMemory.end() && it->second.shadowBlocks) {
+-                it->second.shadowBlocks->refresh(it->second.ptr);
+-            }
++    if (ranges.empty()) return;
++    // The encoder hands each piece the host sent to receiveReadBack, which keeps the copies'
++    // block hashes in step with what came in.
++    enc->vkInvalidateMappedMemoryRanges(device, ranges.size(), ranges.data(), true /* do lock */);
++    if (traced) {
++        // One line per batch of read backs, so tracing does not add to what it measures.
++        static constexpr uint32_t kTraceEvery = 120;
++        static std::mutex traceMutex;
++        static uint32_t reads = 0;
++        static uint64_t askedTotal = 0;
++        static uint64_t receivedTotal = 0;
++        static uint64_t takenTotal = 0;
++        static double readMs = 0;
++        using Ms = std::chrono::duration<double, std::milli>;
++        std::lock_guard<std::mutex> lock(traceMutex);
++        reads++;
++        askedTotal += asked;
++        receivedTotal += sReadBackReceived.load(std::memory_order_relaxed) - receivedBefore;
++        takenTotal += sReadBackTaken.load(std::memory_order_relaxed) - takenBefore;
++        readMs += Ms(std::chrono::steady_clock::now() - started).count();
++        if (reads == kTraceEvery) {
++            mesa_logi(
++                "input-trace stage=driver.readback reads=%u asked_mb_per_read=%.2f "
++                "received_kb_per_read=%.1f taken_kb_per_read=%.1f ms_per_read=%.2f",
++                reads, askedTotal / (1048576.0 * reads), receivedTotal / (1024.0 * reads),
++                takenTotal / (1024.0 * reads), readMs / reads);
++            reads = 0;
++            askedTotal = receivedTotal = takenTotal = 0;
++            readMs = 0;
+         }
+     }
+ }
+diff --git a/src/gfxstream/guest/vulkan_enc/ResourceTracker.h b/src/gfxstream/guest/vulkan_enc/ResourceTracker.h
+--- a/src/gfxstream/guest/vulkan_enc/ResourceTracker.h
++++ b/src/gfxstream/guest/vulkan_enc/ResourceTracker.h
+@@ -553,6 +553,11 @@ class ResourceTracker {
+     void setThreadingCallbacks(const ThreadingCallbacks& callbacks);
+     bool hostSupportsVulkan() const;
+     bool usingDirectMapping() const;
++    // A piece of a read back the host sent for `offset` of `memory`: the blocks of the
++    // guest's copy the device changed take it, and the others keep what the app wrote
++    // since its last submit. The encoder calls it for each piece with bytes in it.
++    void receiveReadBack(VkDeviceMemory memory, uint64_t offset, const uint8_t* data,
++                         uint64_t size);
+     void flushShadowedMemory(VkEncoder* enc, VkDevice device);
+     void invalidateShadowedMemory(VkEncoder* enc, VkDevice device);
+     // What the device wrote into the guest's copies, read back once the app learns that its
+diff --git a/src/gfxstream/guest/vulkan_enc/VkEncoder.cpp b/src/gfxstream/guest/vulkan_enc/VkEncoder.cpp
+--- a/src/gfxstream/guest/vulkan_enc/VkEncoder.cpp
++++ b/src/gfxstream/guest/vulkan_enc/VkEncoder.cpp
+@@ -34,6 +34,7 @@
+ #include <algorithm>
+ #include <memory>
+ #include <optional>
++#include <vector>
+ #include <string>
+ #include <unordered_map>
+ #include <vector>
+@@ -2254,7 +2255,18 @@ VkResult VkEncoder::vkInvalidateMappedMemoryRanges(VkDevice device, uint32_t mem
+             uint64_t copied = 0;
+             if (hostPtr && offset < mappedSize) {
+                 copied = std::min<uint64_t>(streamSize, mappedSize - offset);
+-                if (copied) stream->read(hostPtr + offset, copied);
++                // Through a buffer, in pieces that end on the same boundaries the guest asks
++                // in: the tracker decides block by block what of it the guest's copy takes.
++                static constexpr uint64_t kPiece = 64 * 1024;
++                std::vector<uint8_t> piece;
++                for (uint64_t done = 0; done < copied;) {
++                    const uint64_t at = offset + done;
++                    const uint64_t length = std::min<uint64_t>(copied - done, kPiece - at % kPiece);
++                    if (piece.size() < length) piece.resize(length);
++                    stream->read(piece.data(), length);
++                    sResourceTracker->receiveReadBack(memory, at, piece.data(), length);
++                    done += length;
++                }
+             }
+             uint8_t discard[4096];
+             for (uint64_t left = streamSize - copied; left != 0;) {

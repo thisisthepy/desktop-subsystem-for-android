@@ -25,8 +25,7 @@ struct GappsSection: View {
                 Task { await vm.remove() }
             }
             VStack(alignment: .leading, spacing: 4) {
-                Text(T("GappsTerms.Text")).font(.callout).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                Note(text: T("GappsTerms.Text"))
                 if let terms = URL(string: vm.termsUrl) {
                     Link(T("GappsTermsLink.Text"), destination: terms).font(.callout)
                 }
@@ -44,8 +43,7 @@ struct GappsSection: View {
                     RowLabel(title: T("GappsDeviceIdCard.Header"), detail: T("GappsDeviceIdCard.Description"))
                 }
             } else {
-                Text(T("GappsDeviceIdUnknown.Text")).font(.callout).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                Note(text: T("GappsDeviceIdUnknown.Text"))
             }
         }
         .task { await vm.load() }

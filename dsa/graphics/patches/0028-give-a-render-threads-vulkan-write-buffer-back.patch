@@ -1,0 +1,59 @@
+Subject: Give a render thread's Vulkan write buffer back after a large reply
+
+The Vulkan decoder buffers each reply in VulkanStream's write buffer, which grows to twice the
+largest reply the render thread ever sent and never shrank. A copy of host-visible memory
+travels back to the guest in one reply (0003, 0020), so after a large readback a thread kept
+tens of MiB for its whole life. A reply that fits 256 KiB, sent once no larger reply has gone
+out for 2 s, gives the buffer back down to 256 KiB (dsa_reply_buffer.h, which only
+VulkanStream.cpp includes: the cereal library includes VulkanStream.h without that folder).
+Replies that stay large, as a video's readbacks do every frame, keep the buffer and never
+reallocate.
+
+Applies after 0027 on gfxstream d047a57228332d995d36600792fa9ccc26cf8ae6.
+---
+diff --git a/host/vulkan/VulkanStream.cpp b/host/vulkan/VulkanStream.cpp
+--- a/host/vulkan/VulkanStream.cpp
++++ b/host/vulkan/VulkanStream.cpp
+@@ -19,6 +19,7 @@
+ 
+ #include "render-utils/IOStream.h"
+ #include "aemu/base/BumpPool.h"
++#include "dsa_reply_buffer.h"
+ #include "host-common/GfxstreamFatalError.h"
+ #include "host-common/feature_control.h"
+ 
+@@ -162,7 +163,12 @@ void VulkanStream::commitWrite() {
+         GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
+             << "Did not write exactly " << mWritePos << " bytes!";
+     }
++    const size_t sent = mWritePos;
+     mWritePos = 0;
++    if (dsa::replyBufferShrinks(sent, mWriteBuffer.capacity(), dsa::ReplyClock::now(),
++                                mLastLargeWrite, mSeenLargeWrite)) {
++        dsa::shrinkReplyBuffer(mWriteBuffer);
++    }
+ }
+ 
+ void VulkanStream::clearPool() { mPool.freeAll(); }
+diff --git a/host/vulkan/VulkanStream.h b/host/vulkan/VulkanStream.h
+--- a/host/vulkan/VulkanStream.h
++++ b/host/vulkan/VulkanStream.h
+@@ -15,6 +15,7 @@
+ 
+ #include <inttypes.h>
+ 
++#include <chrono>
+ #include <memory>
+ #include <vector>
+ 
+@@ -82,6 +83,10 @@ class VulkanStream : public android::base::Stream {
+     android::base::BumpPool mPool;
+     size_t mWritePos = 0;
+     std::vector<uint8_t> mWriteBuffer;
++    // When the last reply too large for the write buffer's normal size went out, if one has:
++    // the buffer goes back to that size once replies are small again (dsa_reply_buffer.h).
++    std::chrono::steady_clock::time_point mLastLargeWrite{};
++    bool mSeenLargeWrite = false;
+     IOStream* mStream = nullptr;
+     DefaultHandleMapping mDefaultHandleMapping;
+     VulkanHandleMapping* mCurrentHandleMapping;

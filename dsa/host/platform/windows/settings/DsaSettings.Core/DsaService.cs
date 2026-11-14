@@ -151,7 +151,25 @@ public sealed partial class DsaService
         ReadTouchGesturesState(OptionalString(json, "touch_gestures_state")),
         OptionalString(json, "touch_gestures_problem") is { Length: > 0 } problem ? problem : null,
         Bool(json, "root_elevation"),
-        Bool(json, "image_auto_restart", missing: true));
+        Bool(json, "image_auto_restart", missing: true),
+        Bool(json, "host_certificates", missing: true),
+        ReadImportedCertificates(json));
+
+    /// <summary>The root certificates a user or an administrator added to this computer, as the
+    /// settings list them. An older service lists none.</summary>
+    private static IReadOnlyList<ImportedCertificate> ReadImportedCertificates(JsonElement json) =>
+        json.TryGetProperty("imported_certificates", out var list) && list.ValueKind == JsonValueKind.Array
+            ? list.EnumerateArray()
+                .Where(item => item.ValueKind == JsonValueKind.Object)
+                .Select(item => new ImportedCertificate(
+                    String(item, "subject"),
+                    String(item, "issuer"),
+                    String(item, "source"),
+                    String(item, "location"),
+                    String(item, "sha256"),
+                    Long(item, "not_after")))
+                .ToList()
+            : Array.Empty<ImportedCertificate>();
 
     /// <summary>The touch gestures state a name stands for. An empty or unknown name, as an
     /// older service gives, is unknown.</summary>
@@ -194,7 +212,13 @@ public sealed partial class DsaService
         Strings(json, "addresses"),
         Strings(json, "dns_servers"),
         String(json, "gateway"),
-        OptionalString(json, "problem") is { Length: > 0 } problem ? problem : null);
+        OptionalString(json, "problem") is { Length: > 0 } problem ? problem : null,
+        OptionalString(json, "dns_resolver") switch
+        {
+            "host" => DnsResolver.Host,
+            "network" => DnsResolver.Network,
+            _ => DnsResolver.Unknown,
+        });
 
     /// <summary>Android's network as it stands now.</summary>
     public async Task<NetworkInfo> NetworkAsync() =>
@@ -204,6 +228,11 @@ public sealed partial class DsaService
     /// start.</summary>
     public Task<SettingsInfo> SetAdvancedNetworkingAsync(bool on) =>
         SetAsync("advanced-networking", on ? "on" : "off");
+
+    /// <summary>Whether Android trusts the root certificates a user or an administrator added to
+    /// this computer. It applies at once.</summary>
+    public Task<SettingsInfo> SetHostCertificatesAsync(bool on) =>
+        SetAsync("host-certificates", on ? "on" : "off");
 
     public async Task<SettingsInfo> SettingsAsync() =>
         ReadSettings(await RunJsonAsync("settings").ConfigureAwait(true));
@@ -367,7 +396,8 @@ public sealed partial class DsaService
             {
                 if (ParseRole(OptionalString(p, "role")) is { } role)
                 {
-                    host.Add(new HostProcess(role, (uint)Number(p, "pid"), Number(p, "working_set_kb"), Number(p, "private_kb")));
+                    host.Add(new HostProcess(role, (uint)Number(p, "pid"), Number(p, "working_set_kb"), Number(p, "private_kb"),
+                        Number(p, "mapped_kb")));
                 }
             }
         }

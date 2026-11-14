@@ -10,7 +10,8 @@
 //! [`resize_latency`] measures how long a resized window waits for a frame of its new
 //! size, [`frame_buffers`] keeps a window's buffers at one size while it is resized,
 //! [`shown_windows`] says whether any window is shown, which lets the guest sleep, and
-//! [`visible_change`] when a press first visibly changes a window;
+//! [`visible_change`] when a press first visibly changes a window, and [`frame_stall`] when
+//! the guest has drawn nothing since a GPU reset, so Android is restarted;
 //! [`caption`] lays out and draws the title bar a window draws over its app;
 //! [`early_frames`] keeps a task's first frames until its window host connects, and
 //! [`splash`] draws what a window shows before its first frame;
@@ -18,11 +19,14 @@
 //! the platform only carries it out.
 
 pub mod caption;
+pub mod caption_icon;
 pub mod early_frames;
 pub mod frame_buffers;
 pub mod frame_follow;
+pub mod frame_stall;
 pub mod gpu_reset;
 pub mod present_watch;
+pub mod program_exit;
 pub mod resize_latency;
 pub mod resize_pacing;
 pub mod shown_windows;
@@ -32,6 +36,7 @@ pub mod visible_change;
 pub mod window_hosts;
 pub mod window_mode;
 pub mod window_sizing;
+pub mod window_tasks;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;

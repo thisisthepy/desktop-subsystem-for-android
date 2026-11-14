@@ -89,15 +89,35 @@ nothing. Its one activity is the guest's home, which draws nothing (see "The hom
   It lists the installed widgets for the host's gallery (`WidgetProviders`, in parts under
   256 KiB, with previews of at most 160 pixels and 48 KiB), and places one the host asks for
   (`AddWidget`): it allocates a widget ID, binds it without asking (`BIND_APPWIDGET`), and
-  runs the widget's setup when its app has one, through `WidgetConfigureActivity`; the setup
-  shows as a task window. Each widget's view lives in a presentation on a private virtual
+  runs the widget's setup when its app has one, through `WidgetConfigureActivity`. That
+  activity opens a freeform task of its own (an affinity of its own, `NEW_TASK` and
+  `MULTIPLE_TASK`), never the agent's home task, which has no host window, and the setup runs
+  above it; the agent reports that task as the app's, so the host shows the setup as the
+  app's focused window. `RESULT_OK` places the widget, also from a setup that finishes at
+  once; any other result, Back and a closed window cancel it, and a setup that cannot start
+  is reported as such, not as a cancel. A widget whose app says it is reconfigurable and its
+  setup optional is placed without one. A widget whose app says it is reconfigurable, and
+  that has a setup, is described as such (`reconfigurable`), and the host's Widget settings
+  (`ReconfigureWidget`) runs its setup again the same way for the same widget ID; the answer
+  (`WidgetReconfigured`) says whether the user finished it, and a finished one describes and
+  draws the widget anew. Each widget's view lives in a presentation on a private virtual
   display of the widget's size, which keeps its views running, and is drawn by the agent's
   own hardware renderer into PNG frames (`WidgetFrame`), only when it changes, at most ten
   times a second, and at most once a second while the guest dozes. That drawing does not use
   the guest's display, so it goes on while the screen is off. A clock is drawn again at each
   minute (or second) even when nothing asks. A size from the host (`ResizeWidget`) redraws
-  the widget at that size and tells its app the size in dp
-  (`AppWidgetHostView.updateAppWidgetSize`). Pointer input (`WidgetPointer`) goes to the
+  the widget at that size and tells its app the size in dp through the widget's options
+  (`OPTION_APPWIDGET_MIN`/`MAX_WIDTH`/`HEIGHT` and `OPTION_APPWIDGET_SIZES`), exactly the
+  window's size: the widget's view has no padding, so the 8 dp a side that
+  `AppWidgetHostView.updateAppWidgetSize` takes off for a launcher's padding is not taken. A
+  widget is described with a default size in whole launcher cells, as a launcher places it:
+  the cells its app asks for (`targetCellWidth`/`Height`), else the fewest that hold its
+  minimum (n cells hold 70n - 30 dp), each 74 dp with 16 dp between them, at most 5. When a
+  widget's views still reach past its size on any side, as when its text is larger than its
+  app planned for (Android centres a widget's content, so it overflows at the top as much as
+  at the bottom), the agent never sends an image that cuts them off: it draws the widget shrunk just
+  enough to show whole, and describes it again with a default that holds its content (kept
+  across restarts, and only ever grown), so a window the user has not sized grows to it. Pointer input (`WidgetPointer`) goes to the
   widget's view; a click opens its app on the guest's display. The widget IDs outlive the
   agent and the guest, and the size each was drawn at is kept in the agent's preferences.
   Each connection hears of every placed widget (`WidgetUpdated`, then `WidgetList`).
@@ -153,6 +173,14 @@ nothing. Its one activity is the guest's home, which draws nothing (see "The hom
   service is not available. The host answers a position from administrative boundary data it
   keeps (country, province, city, district and neighbourhood, with no street or house number)
   and an address with no positions; nothing goes to a server.
+- **The host's root certificates.** The control daemon adds the root certificates a user or
+  administrator added to the host to Android's system certificates, and takes away those the
+  host no longer names, before the agent hears of it (`HostCertificates`). An app that starts
+  afterwards reads them as it reads Android's own, but a running process keeps every trust
+  anchor it has looked up, so the agent (`network/HostCertificates.kt`) sends
+  `KeyChain.ACTION_TRUST_STORE_CHANGED`. The activity manager then has every process reset its
+  network security config and TrustManager, and a root the host took away stops being trusted
+  at once. It is a protected broadcast, which the agent may send as a persistent app.
 - **Host sleep.** When the host wakes from sleep it sends `HostSleep` with its wall clock, and
   the agent sets the guest's time to it with `AlarmManager.setTime` (the privileged
   `SET_TIME` permission), since the guest's clock stood still or drifted while the host slept.
@@ -166,6 +194,35 @@ nothing. Its one activity is the guest's home, which draws nothing (see "The hom
   the service with the agent's `DEVICE_POWER` permission, which they check; they need no
   shell or debuggable build. The image's `sepolicy/agent.cil` lets system_server use the
   descriptors the call hands it.
+- **Speech and spelling.** The agent is the guest's text-to-speech engine
+  (`HostTextToSpeechService`), speech recognition service (`HostRecognitionService`) and spell
+  checker (`HostSpellCheckerService`), and makes them the defaults at boot
+  (`tts_default_synth`, `voice_recognition_service`, `selected_spell_checker`,
+  `spell_checker_enabled`) unless the user picked another one that is still installed. None
+  keeps an engine or a dictionary in the guest: the engine lists the host's voices
+  (`ListSpeechVoices`) and speaks with them (`SpeakText`, the sound back as `SpeechAudio`
+  pieces and `SpeechDone`), the recognizer asks the host to listen (`StartRecognition`, then
+  `RecognitionEvent`s with partial and final results), and the spell checker sends each
+  sentence an editor asks about (`CheckSpelling`, answered by `SpellingResult`). An app
+  without the permission to record gets the recognizer's permission error before the host
+  is asked; the host's own microphone privacy settings apply there. A host that cannot
+  answer fails the request at once, so no app waits.
+- **Sound volume.** The host's volume mixer is the only place the guest's sound is turned
+  down: the audio module sends every output at full scale (see `dsa/guest/audio`). The agent
+  registers an audio policy (`MODIFY_AUDIO_ROUTING`) and gives each app with a window an app
+  output of its own, by attaching a mix whose rule matches the app's uid and which plays on
+  that output's bus device (`dsa_app_0` to `dsa_app_7`). It tells the host which app each
+  output plays and the app's volume (`AppAudio`, the whole list, on each connection and each
+  change), and the host plays the output as that app in its mixer. An app's volume is what
+  Android's media volume says while the app is the one it stands for: the app whose window
+  has the focus, or the last one that had it. An app that sets its volume and the volume keys
+  change it; when the focus moves, the media volume becomes the focused app's, so each app
+  reads its own. A volume or mute the user sets in the host's mixer (`SetAppVolume`) becomes
+  the app's, and the media volume while the app has the focus. Each app's volume is kept in
+  the agent's preferences, and a new app starts at full volume. An app keeps its output after
+  its windows close, so music it plays on keeps its name in the mixer; when all are taken, the
+  app that had a window longest ago and plays nothing gives its output up. An app without one
+  plays on the shared output, DSA's line in the mixer, which has a volume of its own.
 - **The channel.** It reaches the host through the control daemon's binder service,
   `io.github.thisisthepy.dsa.channel.IChannel/default` (`dsa/guest/aidl/`). It looks for
   the service every second until the daemon is up, subscribes, and sends every app task
@@ -218,15 +275,18 @@ change.
 
 The host shows each task 1:1 in its window, so a window's client size in host pixels is the
 task's size in guest pixels, and the task's density keeps the app the size it should be on
-the window's monitor (96 dpi at 100%, 192 at 200%: a dp is 1/160 inch and a host pixel at
-100% 1/96 inch). Android starts at the density of the user's main monitor, so a window that
+the window's monitor (130 dpi at 100%, 262 at 200%: Android's desktop dp is 48 dp for
+10.4 mm, 1/117.23 inch, and a host pixel at 100% 1/96 inch, so the density is 131 times the
+monitor's scale, rounded to an even number). Android starts at the density of the user's main monitor, so a window that
 opens there asks for nothing. A task whose top activity does not say it handles a change of
 density is never asked for another one: its window shows it scaled instead, and its client
 size is the task's size at that scale.
 
-Text keeps the size of the host's text. Android scales text by its font scale, apart from
-everything else, so the host's `SystemSettings` carries a font scale of 160/96 times the
-host's text size setting, which the agent writes to `Settings.System.FONT_SCALE`. A change of
+Text follows the same ratio as everything else, so body text of 16 sp is about 13 host
+pixels at 100%, near the host's own body text. Android scales text by its font scale, apart
+from everything else, and the host's `SystemSettings` carries a font scale of the host's text
+size setting alone (1 at 100%, 1.5 at 150%), which the agent writes to
+`Settings.System.FONT_SCALE`. A change of
 font scale makes Android restart every activity that does not say it handles one (its
 `configChanges` include `fontScale`), so while an app task is open whose top or root activity
 does not, the agent holds the new scale, logs which apps it waits for, and applies it as soon
@@ -297,6 +357,29 @@ Each `InstalledApp` also carries the app's version, when it was first installed 
 updated, whether it is part of the Android image, and its size (code, data and cache, from
 `StorageStatsManager`). The host's `RefreshApps` makes the agent read them again and send the
 list even when nothing changed, because the host waits for it.
+
+### App shortcuts
+
+The host shows each app's launcher shortcuts the desktop's way: the static and dynamic ones
+as tasks of the app's jump list (Dock menu, desktop entry actions), and the pinned ones as
+desktop shortcuts. The agent is the guest's default launcher, so `LauncherApps` lets it read
+every app's shortcuts and start them without a permission of its own
+(`platform/AndroidShortcuts.kt`). After each list of apps it sends `AppShortcuts` for every
+app with shortcuts: the static and dynamic ones by rank, then the pinned ones, each with its
+labels and its icon as a PNG of 256 pixels. It sends them again when Android says an app's
+shortcuts changed (`LauncherApps.Callback.onShortcutsChanged`), and an empty list once an app
+has none left. Turned-off shortcuts are left out.
+
+`LaunchShortcut` starts a shortcut through `LauncherApps.startShortcut`, in a freeform window
+like any app the host launches. A shortcut that is gone or turned off opens its app instead.
+
+An app's `requestPinShortcut` reaches the default launcher's activity for
+`CONFIRM_PIN_SHORTCUT`, which the agent declares (`platform/PinShortcutActivity.kt`), so
+`isRequestPinShortcutSupported` is true for apps. The activity shows nothing and finishes at
+once; it is in the agent's package, which the host never shows a window for. The agent sends
+`PinShortcutRequest` with an ID, the app's name and the shortcut, and keeps Android's request.
+`PinShortcutAnswer` with yes accepts it, which pins the shortcut; no lets it go. A request
+with no answer lapses after five minutes, and a new connection drops the ones before it.
 
 The host can uninstall an app (`UninstallApp`). The agent refuses an app that is part of the
 image, itself, and a package that is not installed, each with its reason, and uninstalls any
@@ -524,6 +607,78 @@ All of it runs on a thread of its own (`dsa-splash`), not on the main thread of 
 activity. If the organizer cannot be registered, apps start without a splash screen and
 everything else works as before.
 
+## App data backups
+
+The agent is the guest's backup transport (`platform/HostBackupTransport.kt`, a
+`BackupTransport` its service `HostBackupTransportService` returns to the backup manager).
+Android's backup manager keeps each app's data with it, and the host keeps that data in the
+user's DSA Backup folder, encrypted with a key the guest never holds. A data reset replaces only
+the guest's disk, so the folder survives it, and so does a move to another computer once its
+recovery key is entered there.
+
+- **Only when the user turns it on.** Backup keeps a second copy of the apps' data on the
+  computer, so it is off until the user turns it on on the host (the settings app, or
+  `dsa backup on`). The host says which (`BackupSetting`) each time the agent connects and
+  whenever the user changes it. Until it says on, the agent keeps Android's backup manager off,
+  automatic restore too, while the host's transport, AOSP's local one or none is selected, so
+  nothing is backed up and nothing is scheduled; a transport of another app the user chose
+  (Google's) is left to that app. The host's `BackupRun` and `BackupRestore` are refused then.
+- **Which transport.** The backup manager binds a transport only of a privileged app that a
+  sysconfig file lists. The image installs `sysconfig-dsa-agent.xml` in
+  `system_ext/etc/sysconfig/`, and the service has the `android.backup.TRANSPORT_HOST` action. It
+  is not exported: only the system binds it. While backup is on, at each change and every five
+  minutes after, the agent turns backup and automatic restore on and selects its transport
+  (`backup/BackupRuns.kt`, through `IBackupManager`), so a transport another app selects (Google
+  Play services, if the user installs it) does not take the user's data elsewhere.
+- **Backing up.** A key-value backup is read from the app's `BackupDataInput` and sent as
+  records (a big-endian key length, the key, a value length, -1 for a deleted key, the value);
+  an incremental one only changes what the host holds. A full backup's tar stream goes as
+  Android writes it. Every piece is at most 256 KiB, and the next goes only once the host has
+  answered the last (`BackupUpload`, then `BackupCommit`). When the host has no APKs of the app's
+  version, it says so in its answer, and the agent sends `base.apk` and the split APKs, except of
+  an app the image carries: a new disk has those already. The quotas are the host's: 64 MiB of
+  key-value data and 4 GiB of full backup per app.
+- **Restoring.** The host offers one restore set, its backup folder (`BackupQuery`). Android
+  restores the package manager's metadata (`@pm@`) first and then each app in the order it asks,
+  as key-value records written to `BackupDataOutput` or as the full backup's tar stream, which
+  the agent reads from the host piece by piece as Android consumes it (`BackupFetch`). After a
+  data reset the host installs the apps it holds APKs of and sends `BackupRestore`; the agent
+  starts a restore session and answers `BackupRunResult` with how many apps came back. The
+  host's `BackupRun` backs up every app now, as `bmgr backupnow --all` does.
+- **Waiting.** The backup manager calls the transport on its own threads and expects the answer
+  from the call, so each call blocks until the host answers (`channel/HostCalls.kt`), at most a
+  minute or two. Without the host every call fails and the backup manager tries again later.
+  The control daemon passes backup messages only from the agent.
+
+## Passkeys
+
+The agent is a credential provider (`platform/HostCredentialProvider.kt`) offering passkeys
+only: "This computer" in Android's credential selector. Picking it opens `PasskeyActivity`,
+which shows nothing, sends the request to the host (`passkeys/HostPasskeys.kt`, `PasskeyRequest`)
+and returns the result: a `CreateCredentialResponse` with the registration JSON, a
+`GetCredentialResponse` with the authentication JSON, or the exception type an app built with
+androidx.credentials expects (canceled, `NotAllowedError`, no credential, unknown). The host
+checks the app against the relying party's Digital Asset Links and runs its own
+authenticator's prompt (Windows Hello, macOS passkeys). Its answer can take minutes, so the
+request waits on a thread of its own.
+
+The trust boundary is the caller's identity, because the host decides from it which relying
+party a request may name. It comes only from the credential manager's `CallingAppInfo`, never
+from the app: its package, the SHA-256 of each certificate it is signed with now (every signer
+of an app with several, otherwise the newest of its signing history), and an origin only as the
+credential manager reports it. Any app may hold `CREDENTIAL_MANAGER_SET_ORIGIN` (a normal
+permission) and set an origin, so an origin, and a client data hash with it, is passed on only
+for a browser on the list of privileged browsers credential providers use
+(`passkeys/PrivilegedBrowsers.kt`, by package and certificate) or a browser the image carries.
+From any other app the request is refused before it reaches the host. An origin written into the
+request JSON is never read.
+
+The provider is a system provider: the agent holds `PROVIDE_DEFAULT_ENABLED_CREDENTIAL_SERVICE`
+and its service has the system provider action, so the credential manager lists it whatever
+other providers write. The agent also keeps it in the `credential_service` setting, and makes it
+the primary provider only while none is (`AndroidCredentialSetup`), so a provider the user
+chose stays first.
+
 ## Framework interfaces outside the SDK
 
 A platform app may use framework interfaces the SDK does not publish. The agent uses:
@@ -538,6 +693,8 @@ A platform app may use framework interfaces the SDK does not publish. The agent 
 | `ServiceManager.checkService` | The control daemon's service (reflection) |
 | `ActivityManager.forceStopPackage` | Stopping an app the user stops on the host (reflection) |
 | `Binder.markVintfStability` | Marking the listener the daemon calls as a stable interface (reflection) |
+| `BackupTransport`, `RestoreSet`, `RestoreDescription`, `BackupDataInput(FileDescriptor)`, `BackupDataOutput(FileDescriptor)` | The backup transport (reflection for the two constructors) |
+| `IBackupManager`, `IRestoreSession`, `IRestoreObserver`, `IBackupObserver`, `ServiceManager.getService` | Selecting the transport, backing up every app and restoring |
 | `InputManager.injectInputEvent`, `MotionEvent.setActionButton`, `InputEvent.setDisplayId` | Injecting the host's pointer and key input (reflection) |
 | `IActivityTaskManager.setFocusedTask` | Giving a task the input focus before its keys |
 | `TaskOrganizer`, `StartingWindowInfo`, `TaskInfo.positionInParent`, `IActivityTaskManager.onSplashScreenViewCopyFinished` | Drawing starting windows and placing organized tasks' surfaces (reflection for the fields and the copy answer) |
@@ -592,8 +749,11 @@ The release APK, `build/outputs/apk/release/dsa-agent-release-unsigned.apk`, is 
 | `src/main/kotlin/.../agent/background/` | The apps that run in the background, their media sessions, and stopping them |
 | `src/main/kotlin/.../agent/widgets/` | The widgets placed on the host's desktop |
 | `src/main/kotlin/.../agent/install/` | Installing the APKs the host sends |
+| `src/main/kotlin/.../agent/backup/` | App data backups kept by the host, and restoring them |
+| `src/main/kotlin/.../agent/passkeys/` | Passkeys made and used by the host's authenticator |
 | `src/main/kotlin/.../agent/platform/` | The framework side: the application, task source, actions, windowing, input injection, the input method, binder channel, power controls |
 | `src/test/` | The unit tests |
 | `hidden-api/` | Compile-only declarations of framework classes outside the SDK |
 | `privapp-permissions-dsa-agent.xml` | The agent's privileged permissions |
 | `default-permissions-dsa-agent.xml` | The runtime permissions the image grants the agent |
+| `sysconfig-dsa-agent.xml` | The sysconfig that lets the backup manager use the agent's transport |

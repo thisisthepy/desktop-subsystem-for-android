@@ -31,6 +31,9 @@ pub enum Response {
     Notification(NotificationAction),
     /// Chose [Restart now] on DSA's question: the service restarts Android into the new image.
     RestartForUpdate,
+    /// Answered an app's request to pin a shortcut: [Add to desktop] (`accepted`), or
+    /// [Cancel] or a dismissal.
+    Pin { request_id: u32, accepted: bool },
 }
 
 /// How loudly a notification arrives (`UNNotificationInterruptionLevel`).
@@ -129,6 +132,8 @@ mod center {
 
     use super::{content, Response, CATEGORY, RESTART_CATEGORY};
     use crate::objc::{class, file_url, ns_string, string_of};
+    use crate::shell::pin_shortcuts::{self, PIN_CATEGORY};
+    use dsa_host_core::tasks::PinShortcutRequest;
 
     #[link(name = "UserNotifications", kind = "framework")]
     extern "C" {}
@@ -157,7 +162,17 @@ mod center {
             let notification: *mut AnyObject = msg_send![response, notification];
             let request: *mut AnyObject = msg_send![notification, request];
             let key = string_of(msg_send![request, identifier]);
-            let action = match string_of(action).as_str() {
+            let action_id = string_of(action);
+            let pin = pin_shortcuts::request_of(&key).and_then(|request_id| {
+                pin_shortcuts::answer(&action_id, action_id == DISMISS_ACTION).map(|accepted| {
+                    Response::Pin {
+                        request_id,
+                        accepted,
+                    }
+                })
+            });
+            let action = match action_id.as_str() {
+                _ if pin_shortcuts::request_of(&key).is_some() => pin,
                 DEFAULT_ACTION => Some(Response::Notification(NotificationAction::Open { key })),
                 DISMISS_ACTION => Some(Response::Notification(NotificationAction::Dismiss { key })),
                 RESTART_NOW if is_update_key(&key) => Some(Response::RestartForUpdate),
@@ -286,11 +301,40 @@ mod center {
                     intentIdentifiers: empty,
                     options: CUSTOM_DISMISS
                 ];
+                // An app's request to pin a shortcut: [Add to desktop] and [Cancel], which
+                // also run in the background.
+                let (add_label, cancel_label) = pin_shortcuts::buttons(korean);
+                let pin_buttons: *mut AnyObject = msg_send![mutable_array_class, array];
+                for (id, title) in [
+                    (pin_shortcuts::ADD, add_label),
+                    (pin_shortcuts::CANCEL, cancel_label),
+                ] {
+                    let action: *mut AnyObject = msg_send![
+                        action_class,
+                        actionWithIdentifier: &*ns_string(id),
+                        title: &*ns_string(title),
+                        options: 0usize
+                    ];
+                    if !action.is_null() {
+                        let _: () = msg_send![pin_buttons, addObject: action];
+                    }
+                }
+                let pin_id = ns_string(PIN_CATEGORY);
+                let pin_category: *mut AnyObject = msg_send![
+                    category_class,
+                    categoryWithIdentifier: &*pin_id,
+                    actions: pin_buttons,
+                    intentIdentifiers: empty,
+                    options: CUSTOM_DISMISS
+                ];
                 let set_class = class(c"NSSet")?;
                 let both: *mut AnyObject = msg_send![mutable_array_class, array];
                 let _: () = msg_send![both, addObject: category];
                 if !restart_category.is_null() {
                     let _: () = msg_send![both, addObject: restart_category];
+                }
+                if !pin_category.is_null() {
+                    let _: () = msg_send![both, addObject: pin_category];
                 }
                 let categories: *mut AnyObject = msg_send![set_class, setWithArray: both];
                 let _: () = msg_send![&*center, setNotificationCategories: categories];
@@ -312,18 +356,18 @@ mod center {
         /// The icon's attachment, written to the icons folder under a name made from the
         /// notification's key.
         fn attachment(&self, notification: &Notification) -> Option<Retained<AnyObject>> {
-            if notification.icon_png.is_empty() {
+            self.attachment_of(&notification.key, &notification.icon_png)
+        }
+
+        /// The attachment of the icon `png`, written under a name made from `key`.
+        fn attachment_of(&self, key: &str, png: &[u8]) -> Option<Retained<AnyObject>> {
+            if png.is_empty() {
                 return None;
             }
             std::fs::create_dir_all(&self.icons).ok()?;
-            let name: String = notification
-                .key
-                .bytes()
-                .map(|b| format!("{b:02x}"))
-                .take(64)
-                .collect();
+            let name: String = key.bytes().map(|b| format!("{b:02x}")).take(64).collect();
             let path = self.icons.join(format!("{name}.png"));
-            std::fs::write(&path, &notification.icon_png).ok()?;
+            std::fs::write(&path, png).ok()?;
             unsafe {
                 let class = class(c"UNNotificationAttachment").ok()?;
                 let url = file_url(&path).ok()?;
@@ -383,6 +427,47 @@ mod center {
                 let _: () = msg_send![
                     &*self.center,
                     addNotificationRequest: request,
+                    withCompletionHandler: std::ptr::null::<Block<dyn Fn(*mut AnyObject)>>()
+                ];
+            }
+            Ok(())
+        }
+
+        /// Asks the user about an app's request to pin a shortcut: a banner with
+        /// [Add to desktop] and [Cancel], in Korean when `korean`.
+        pub fn ask_pin(&self, request: &PinShortcutRequest, korean: bool) -> Result<(), String> {
+            let (title, body) = pin_shortcuts::texts(request, korean);
+            let identifier = pin_shortcuts::identifier(request.request_id);
+            unsafe {
+                let content_class = class(c"UNMutableNotificationContent")?;
+                let banner: Option<Retained<AnyObject>> = msg_send![content_class, new];
+                let banner = banner.ok_or("no notification content could be made")?;
+                let _: () = msg_send![&*banner, setTitle: &*ns_string(&title)];
+                let _: () = msg_send![&*banner, setBody: &*ns_string(&body)];
+                let _: () =
+                    msg_send![&*banner, setThreadIdentifier: &*ns_string(&request.package_name)];
+                let _: () = msg_send![&*banner, setCategoryIdentifier: &*ns_string(PIN_CATEGORY)];
+                if let Some(attachment) =
+                    self.attachment_of(&identifier, &request.shortcut.icon_png)
+                {
+                    let array_class = class(c"NSArray")?;
+                    let attachments: *mut AnyObject =
+                        msg_send![array_class, arrayWithObject: &*attachment];
+                    let _: () = msg_send![&*banner, setAttachments: attachments];
+                }
+                let request_class = class(c"UNNotificationRequest")?;
+                let asked: *mut AnyObject = msg_send![
+                    request_class,
+                    requestWithIdentifier: &*ns_string(&identifier),
+                    content: &*banner,
+                    trigger: std::ptr::null::<AnyObject>()
+                ];
+                if asked.is_null() {
+                    return Err("the question could not be made".into());
+                }
+                let _: () = msg_send![
+                    &*self.center,
+                    addNotificationRequest: asked,
                     withCompletionHandler: std::ptr::null::<Block<dyn Fn(*mut AnyObject)>>()
                 ];
             }

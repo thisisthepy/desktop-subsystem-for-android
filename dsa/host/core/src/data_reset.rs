@@ -5,7 +5,9 @@
 //! fresh data disk in place of theirs ([`UserDataReset`]). The fresh disk comes from the
 //! Android image, as a new user's does, so the next start boots Android as it was first
 //! installed. The system image is not touched, and neither are DSA's settings, which the
-//! service keeps in its own folder.
+//! service keeps in its own folder, nor the app data backup. The KeyMint root key goes with
+//! the old disk: nothing on the fresh one is wrapped under it, so the next start makes a new
+//! one.
 //!
 //! [`TemplateDataDisk`] is the part every platform shares: the old disk is moved aside, a new
 //! one is made, and only then is the old one removed. A new disk that cannot be made puts the
@@ -60,7 +62,12 @@ pub fn reset_user_data(
             thread::sleep(POLL);
         }
     }
-    reset.replace_disk(user)
+    reset.replace_disk(user)?;
+    // The fresh disk holds no key wrapped under the old KeyMint root key, so a new one is made
+    // at the next start. That is also how a root key that can no longer be opened (its TPM
+    // was cleared) stops keeping Android from starting.
+    android.forget_keymint_root_key();
+    Ok(())
 }
 
 /// Finds the data disk of a user.

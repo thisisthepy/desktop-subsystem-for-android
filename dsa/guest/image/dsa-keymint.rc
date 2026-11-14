@@ -1,0 +1,9 @@
+# The guest's KeyMint (dsa-keymint, from the Framework build): the nonsecure KeyMint whose root
+# key of key blobs comes from the host, which dsa-channeld leaves in /dev/dsa_keymint/root_key
+# each boot. It takes the place of the KeyMint APEX, which the image does not select, under that
+# service's name and class, so Keystore, vold and the shared secret negotiation find it as they
+# found the APEX's. The key file is the user nobody's, and readable by it alone.
+service vendor.keymint-default /vendor/bin/hw/dsa-keymint
+    class early_hal
+    user nobody
+    group nobody

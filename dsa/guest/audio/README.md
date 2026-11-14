@@ -1,17 +1,20 @@
 # guest/audio
 
 `dsa-audio` is the guest's primary audio module (`android.hardware.audio.core.IModule/default`,
-version 4). audioserver mixes every app's sound into its one output stream, as on any
-device, and the module sends that sound to the host, which plays it on the user's default
-output device. Its input is the host's microphone: what the user's default capture device
+version 4). audioserver mixes the sound of each app with a window into an output of the app's
+own, and every other sound into the shared output, and the module sends each output to the
+host, which plays it on the user's default output device as that app, in the host's own
+volume mixer. Its input is the host's microphone: what the user's default capture device
 records reaches apps that record, through the same port.
 
 ## How sound travels
 
-1. audioserver asks the module for its ports and routes. There is one mix port, `primary
-   output` (48 kHz, stereo, 16-bit), and one device port, `Speaker`, the default output
-   device. The mixer converts every app's sound to that format before it reaches the module.
-2. audioserver opens a stream on the mix port. The module answers with three shared
+1. audioserver asks the module for its ports and routes. The shared output is the mix port
+   `primary output` (48 kHz, stereo, 16-bit) and the device port `Speaker`, the default
+   output device. Each app output (eight, `src/app_outputs.h`) is a mix port of the same
+   format and a bus device of its own (`dsa_app_0` to `dsa_app_7`). The mixer converts every
+   app's sound to that format before it reaches the module.
+2. audioserver opens a stream on each mix port. The module answers with three shared
    memory queues, laid out the way the platform's fast message queue lays them out
    (`src/shared_queue.h`): commands, replies and sound.
 3. A thread of the stream takes each command (`src/output_stream_logic.cpp`). A burst's
@@ -20,7 +23,8 @@ records reaches apps that record, through the same port.
    the host, so a slow or absent host never holds up the mixer.
 4. Each stream has its own connection to the host's audio port, vsock port 5568
    (`src/host_link.cpp`). It says `Hello` as the guest's audio HAL, opens the stream with
-   `AudioOutputOpen` and then sends `AudioPcm` and `AudioOutputControl`. The messages are
+   `AudioOutputOpen`, named `primary` or `app 0` to `app 7`, and then sends `AudioPcm` and
+   `AudioOutputControl`. The messages are
    the ones `dsa/protocol/control.proto` defines, through the generated codec.
 5. On the host, the window manager plays each stream in the user's session (see
    `dsa/host/platform/windows/src/compositor/audio.rs`), after a 40 ms queue that absorbs
@@ -30,9 +34,22 @@ While the host is not there (the user signed out, the window manager restarts), 
 stream's sound is dropped and the module connects again each second. The guest plays on,
 silent, and nothing in it waits.
 
-The volume and the mute stay the mixer's: the module says it has neither, so audioserver
-applies them to the sound before the module sees it. The module has no external devices
-and no direct or offloaded outputs.
+## Volume
+
+The host's volume is the only one the guest's sound has, so the sound is never turned down
+twice. Every output device has a gain for volume (`AudioGain.useForVolume`). Audio policy then
+sets each stream's volume as the device's gain, through `setAudioPortConfig`, and leaves the
+mixer at full scale: an app's sound leaves the guest as the app made it, whatever Android's
+media volume is. The module keeps the gain it is given and never applies it. It has no master
+volume or mute.
+
+Android's media volume still works for apps: `setStreamVolume`, `getStreamVolume` and the
+volume keys behave as on a phone. The agent routes each app with a window to an app output
+(an audio policy that matches the app's uid to the output's bus device), tells the host which
+app each output plays and the volume Android gives it (`AppAudio`), and makes a volume the
+user sets in the host's mixer Android's media volume (`SetAppVolume`). See the agent's README.
+
+The module has no external devices and no direct or offloaded outputs.
 
 ## How the microphone travels
 

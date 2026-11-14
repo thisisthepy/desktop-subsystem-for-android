@@ -678,6 +678,40 @@ public final class VectorsTest {
                         .setOutcome(PrintOutcome.PRINT_OUTCOME_FAILED)
                         .setMessage("out of paper"))
                 .build());
+        cases.put("speak_text", Envelope.newBuilder()
+                .setSpeakText(SpeakText.newBuilder()
+                        .setRequestId(3)
+                        .setText("hello")
+                        .setVoiceId("aria")
+                        .setLanguageTag("en-US")
+                        .setRate(1.5f)
+                        .setPitch(0.8f))
+                .build());
+        cases.put("speech_audio", Envelope.newBuilder()
+                .setSpeechAudio(SpeechAudio.newBuilder()
+                        .setRequestId(3)
+                        .setSampleRateHz(24000)
+                        .setChannelCount(1)
+                        .setPcm(ByteString.copyFrom(new byte[] {1, 0, 2, 0})))
+                .build());
+        cases.put("recognition_event", Envelope.newBuilder()
+                .setRecognitionEvent(RecognitionEvent.newBuilder()
+                        .setRequestId(9)
+                        .setKind(RecognitionEventKind.RECOGNITION_EVENT_KIND_FINAL)
+                        .addTexts("hello world")
+                        .addConfidences(0.9f))
+                .build());
+        cases.put("spelling_result", Envelope.newBuilder()
+                .setSpellingResult(SpellingResult.newBuilder()
+                        .setRequestId(5)
+                        .addTexts(SpellingText.newBuilder()
+                                .addMistakes(SpellingMistake.newBuilder()
+                                        .setStart(6)
+                                        .setLength(3)
+                                        .addSuggestions("the")
+                                        .setRecommended(true)))
+                        .setSupported(true))
+                .build());
         cases.put("sensor_list", Envelope.newBuilder()
                 .setSensorList(SensorList.newBuilder()
                         .addSensors(SensorDescription.newBuilder()
@@ -763,6 +797,17 @@ public final class VectorsTest {
                         .setAction(PointerAction.POINTER_ACTION_DOWN)
                         .setX(10.5f)
                         .setY(20.25f))
+                .build());
+        cases.put("widget_reconfigure", Envelope.newBuilder()
+                .setReconfigureWidget(ReconfigureWidget.newBuilder()
+                        .setRequestId(7)
+                        .setWidgetId(12))
+                .build());
+        cases.put("widget_reconfigured", Envelope.newBuilder()
+                .setWidgetReconfigured(WidgetReconfigured.newBuilder()
+                        .setRequestId(7)
+                        .setWidgetId(12)
+                        .setFinished(true))
                 .build());
         return cases;
     }

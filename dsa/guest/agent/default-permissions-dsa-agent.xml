@@ -4,11 +4,14 @@
   The image installs this file in system_ext/etc/default-permissions/, which the framework
   reads for its privileged apps. The storage permissions let the agent put the expansion
   (OBB) files of an app the host installs in the app's folder under Android/obb/, which
-  Android opens to an installer only while it holds them.
+  Android opens to an installer only while it holds them. Recording lets the agent be the
+  guest's speech recognition service, which Android hands an app's recognition only while it
+  may record; the sound is recorded on the host.
 -->
 <exceptions>
     <exception package="io.github.thisisthepy.dsa.agent">
         <permission name="android.permission.READ_EXTERNAL_STORAGE" fixed="false" />
         <permission name="android.permission.WRITE_EXTERNAL_STORAGE" fixed="false" />
+        <permission name="android.permission.RECORD_AUDIO" fixed="false" />
     </exception>
 </exceptions>

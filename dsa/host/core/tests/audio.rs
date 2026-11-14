@@ -1,16 +1,20 @@
 //! The guest's sound on the host: the jitter buffer, the conversion to the device's format,
-//! and a stream on the audio port over the in-memory transport, against a fake device.
+//! and a stream on the audio port over the in-memory transport, against a fake device; and
+//! each app's output under its own volume, which only the host sets.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+use dsa_host_core::app_audio::{self, AppStream, AppVolumes, VolumeChange};
 use dsa_host_core::audio::{
     serve_port, serve_stream, AudioDevice, CaptureSink, DeviceFormat, JitterBuffer, Playback,
     Recording, Renderer, SampleType, SharedBuffer, StreamEnd, BYTES_PER_FRAME, MAX_BUFFER_FRAMES,
     MAX_STREAMS, TARGET_BUFFER_FRAMES,
 };
+use dsa_host_core::host_api::HostApiClient;
+use dsa_host_core::host_api_conformance::{sample_app_stream, FakeAndroids, RunningService};
 use dsa_protocol::control::envelope::Body;
 use dsa_protocol::control::{
     AudioInputOpen, AudioInputOpened, AudioOutputCommand, AudioOutputControl, AudioOutputOpen,
@@ -18,6 +22,7 @@ use dsa_protocol::control::{
 };
 use dsa_protocol::handshake::local_hello;
 use dsa_protocol::{decode, encode};
+use dsa_transport::local;
 use dsa_transport::memory;
 use dsa_transport::{Connection, Connector, Listener, TransportError};
 
@@ -674,4 +679,185 @@ fn fr26_recorded_sound_the_guest_does_not_take_is_dropped_not_waited_on() {
     let end = handle.join().unwrap().unwrap();
     let accounted = end.stats.received_frames + end.stats.dropped_frames;
     assert!(accounted > 0 && accounted <= 480_000, "{accounted}");
+}
+
+/// A device that plays each output as its app, at the app's volume, as a host's per-app
+/// mixer does: it reads what the output plays from the [`AppVolumes`] the platform follows.
+#[derive(Clone)]
+struct MixerDevice {
+    volumes: Arc<AppVolumes>,
+    /// Each output it was asked to play, as the app and volume it opened its session with.
+    sessions: Arc<Mutex<Vec<(AppStream, SharedBuffer)>>>,
+}
+
+impl AudioDevice for MixerDevice {
+    fn play(&self, name: &str, source: SharedBuffer) -> Result<Box<dyn Playback>, String> {
+        let (app, _) = self.volumes.app_of(name);
+        self.sessions.lock().unwrap().push((app, source));
+        Ok(Box::new(FakePlayback(Arc::new(Mutex::new(0)))))
+    }
+}
+
+fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
+    let deadline = std::time::Instant::now() + WAIT;
+    while !done() {
+        assert!(std::time::Instant::now() < deadline, "{what}");
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+
+#[test]
+fn fr26_volume_is_controlled_on_the_host_only() {
+    // The service, with the caller's Android, and the platform's player following it.
+    let (listener, connector) = local::pair();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(Box::new(listener), androids.clone());
+    let volumes = AppVolumes::new();
+    let guest_changes: Arc<Mutex<Vec<AppStream>>> = Arc::default();
+    let stop = Arc::new(AtomicBool::new(false));
+    let follower = {
+        let (volumes, stop, guest_changes) = (
+            Arc::clone(&volumes),
+            Arc::clone(&stop),
+            Arc::clone(&guest_changes),
+        );
+        let mut connector = connector.clone();
+        thread::spawn(move || {
+            app_audio::follow(
+                &mut connector,
+                "dsa-wm test",
+                &volumes,
+                &stop,
+                &|_: &str| {},
+                &|changed: &[AppStream]| guest_changes.lock().unwrap().extend_from_slice(changed),
+            )
+        })
+    };
+    let mut client = {
+        let mut connector = connector.clone();
+        HostApiClient::connect(&mut connector, "test client", WAIT).unwrap()
+    };
+    client.start().unwrap();
+    let android = androids.of("test").expect("the caller's Android");
+    // The agent says the app plays on "app 0" at Android's volume of 40%.
+    android.list_app_audio(vec![
+        sample_app_stream(app_audio::PRIMARY_STREAM, "", 1.0),
+        sample_app_stream("app 0", "com.example.music", 0.4),
+    ]);
+    wait_until("the platform heard which app plays on app 0", || {
+        volumes.app_of("app 0").0.package_name == "com.example.music"
+    });
+
+    // The guest's sound reaches the host as the app made it, at full scale: the host neither
+    // applies Android's volume nor any of its own to the samples it queues.
+    let device = MixerDevice {
+        volumes: Arc::clone(&volumes),
+        sessions: Arc::default(),
+    };
+    let (mut listener, mut audio) = memory::pair();
+    let mut guest = audio.connect(WAIT).unwrap();
+    let mut host = listener.accept(WAIT).unwrap();
+    let handle = {
+        let device = device.clone();
+        thread::spawn(move || serve_stream(host.as_mut(), &device, "dsa-wm test", &|_: &str| {}))
+    };
+    send(guest.as_mut(), Body::Hello(guest_hello()));
+    assert!(matches!(recv(guest.as_mut()), Some(Body::HelloAccepted(_))));
+    send(
+        guest.as_mut(),
+        Body::AudioOutputOpen(AudioOutputOpen {
+            name: "app 0".into(),
+            ..open_message()
+        }),
+    );
+    assert!(matches!(
+        recv(guest.as_mut()),
+        Some(Body::AudioOutputReady(_))
+    ));
+    send(guest.as_mut(), control(AudioOutputCommand::Start));
+    for burst in 0..3u64 {
+        send(
+            guest.as_mut(),
+            Body::AudioPcm(AudioPcm {
+                position: burst * 960,
+                data: pcm(960, 8000),
+            }),
+        );
+    }
+    wait_until("the stream played", || {
+        !device.sessions.lock().unwrap().is_empty()
+    });
+    wait_until("the sound was queued", || {
+        device.sessions.lock().unwrap()[0]
+            .1
+            .lock()
+            .buffered_frames()
+            == 2880
+    });
+    {
+        let sessions = device.sessions.lock().unwrap();
+        let (app, source) = &sessions[0];
+        // The output plays as its app, at the volume Android gives the app, in the host's mixer.
+        assert_eq!(app.package_name, "com.example.music");
+        assert_eq!(app.app_label, "Music");
+        assert!((app.volume - 0.4).abs() < 1e-6);
+        let mut queued = source.lock();
+        let mut out = vec![0i16; 2880 * 2];
+        queued.pull(&mut out);
+        assert!(
+            out.chunks_exact(2).all(|frame| frame == [8000, -8000]),
+            "every sample reached the host as the app made it"
+        );
+        assert_eq!(queued.stats().peak, 8000);
+    }
+
+    // The app sets its volume (or a volume key is pressed): its session's volume follows.
+    android.list_app_audio(vec![
+        sample_app_stream(app_audio::PRIMARY_STREAM, "", 1.0),
+        sample_app_stream("app 0", "com.example.music", 0.7),
+    ]);
+    wait_until("the app's session took Android's new volume", || {
+        (volumes.app_of("app 0").0.volume - 0.7).abs() < 1e-6
+    });
+    {
+        let changed = guest_changes.lock().unwrap();
+        assert_eq!(changed.len(), 1, "{changed:?}");
+        assert_eq!(changed[0].stream, "app 0");
+    }
+
+    // The user sets the app's volume in the host's mixer: it goes back to Android, once.
+    assert!(volumes.host_changed("app 0", 0.25, false));
+    assert!(!volumes.host_changed("app 0", 0.25, false));
+    wait_until("the host's volume reached Android", || {
+        !android.app_volumes.lock().unwrap().is_empty()
+    });
+    assert_eq!(
+        *android.app_volumes.lock().unwrap(),
+        vec![VolumeChange {
+            package_name: "com.example.music".into(),
+            volume: 0.25,
+            muted: false,
+        }]
+    );
+    // And a mute, too.
+    assert!(volumes.host_changed("app 0", 0.25, true));
+    wait_until("the host's mute reached Android", || {
+        android.app_volumes.lock().unwrap().len() == 2
+    });
+    assert!(android.app_volumes.lock().unwrap()[1].muted);
+
+    guest.close();
+    let end = handle.join().unwrap().unwrap();
+    assert_eq!(end.stats.peak, 8000);
+    stop.store(true, Ordering::Relaxed);
+    follower.join().unwrap();
+}
+
+#[test]
+fn fr26_the_peak_is_the_largest_sample_the_guest_sent() {
+    let mut buffer = JitterBuffer::new(1, 100);
+    buffer.push(0, &pcm(2, 100));
+    buffer.push(2, &pcm(2, -32767));
+    buffer.push(4, &pcm(2, 5));
+    assert_eq!(buffer.stats().peak, 32767);
 }

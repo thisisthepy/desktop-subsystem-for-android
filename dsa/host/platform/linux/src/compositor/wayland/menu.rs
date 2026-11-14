@@ -264,6 +264,12 @@ impl State {
 
     /// Input on the X11 window menu, or Alt+Space in an X11 picture-in-picture window.
     pub fn x11_menu_input(&mut self, input: MenuInput) {
+        // The menu's X11 window shows a widget's menu too, on a desktop where widgets are
+        // X11 windows.
+        if self.widget_menu_is_x11() {
+            self.x11_widget_menu_input(input);
+            return;
+        }
         let serial = self.serial;
         match input {
             MenuInput::Open { task_id } => self.open_x11_menu(task_id),
@@ -565,7 +571,9 @@ impl State {
         let Some(window) = self.windows.get(&task_id) else {
             return;
         };
-        let band = window.model.caption_height();
+        // The frame is the task's, in its pixels: the band covers fewer or more of its rows
+        // when the window shows it at another scale.
+        let band = window.model.caption_rows_in_frame();
         // A GPU frame is read back from under the band only; a frame in memory has it all.
         let last_gpu = window.last_gpu;
         let frame = match last_gpu {

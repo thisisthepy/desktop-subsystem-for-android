@@ -441,6 +441,21 @@
                     <PermissionEx Sddl="D:P(A;OICI;GA;;;SY)(A;OICI;GA;;;BA)(A;OICI;GA;;;OW)(A;OICI;GR;;;IU)(A;OICI;GR;;;AU)" />
                 </RegistryKey>
             </Component>
+            <!-- The KeyMint root key port (5604), where the guest's control daemon asks the
+                 service for KeyMint's root key. Only the service listens on it, so only SYSTEM
+                 and Administrators are let in. -->
+            <Component Id="GuestCommunicationKeyMintService" Guid="c0c956ea-1d99-4e1a-9142-20b8ad16813a">
+                <RegistryKey Root="HKLM"
+                             Key="SOFTWARE\Microsoft\Windows NT\CurrentVersion\Virtualization\GuestCommunicationServices\000015e4-facb-11e6-bd58-64006a7986d3"
+                             ForceCreateOnInstall="yes"
+                             ForceDeleteOnUninstall="yes">
+                    <RegistryValue Name="ElementName"
+                                   Type="string"
+                                   Value="Desktop Subsystem for Android KeyMint Root Key"
+                                   KeyPath="yes" />
+                    <PermissionEx Sddl="D:P(A;OICI;GA;;;SY)(A;OICI;GA;;;BA)" />
+                </RegistryKey>
+            </Component>
             <Component Id="NoticeFile" Guid="*">
                 <File Id="NoticeFile" Source="$(SourceDir)\NOTICE.txt" KeyPath="yes" />
             </Component>

@@ -2,8 +2,8 @@
 //!
 //! Every app starts at the guest display's density, and Android relaunches an activity whose
 //! density changes unless the app says it handles that itself. So Android starts at the
-//! density a window on the user's main monitor gives its task (96 dpi at a scale of 100%, 144
-//! at 150%), and the apps that open there are never asked for another one right after they
+//! density a window on the user's main monitor gives its task (130 dpi at a scale of 100%,
+//! 196 at 150%), and the apps that open there are never asked for another one right after they
 //! start.
 //!
 //! The service runs as root outside the user's graphical session and cannot ask the desktop
@@ -114,18 +114,18 @@ mod tests {
     #[test]
     fn fr4_android_starts_at_the_main_monitors_density() {
         let dir = empty_dir("record");
-        assert_eq!(boot_density(&dir), 96, "no record is a 100% monitor");
+        assert_eq!(boot_density(&dir), 130, "no record is a 100% monitor");
         let mut recorder = DensityRecorder::new(Some(dir.clone()));
         // The first output announced is the main one, whatever the others' scales.
         recorder.record([(12, 1), (7, 2)]).unwrap();
         assert_eq!(read_record(&dir), Some(192));
-        assert_eq!(boot_density(&dir), 192);
+        assert_eq!(boot_density(&dir), 262);
         assert_eq!(
             with_boot_density(
-                "androidboot.dsa.display_dpi=96 androidboot.lcd_density=96",
+                "androidboot.dsa.display_dpi=130 androidboot.lcd_density=130",
                 &dir
             ),
-            "androidboot.dsa.display_dpi=192 androidboot.lcd_density=192"
+            "androidboot.dsa.display_dpi=262 androidboot.lcd_density=262"
         );
         // No outputs leave the record as it was.
         recorder.record([]).unwrap();

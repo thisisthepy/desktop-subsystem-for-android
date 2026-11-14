@@ -2,6 +2,7 @@ package io.github.thisisthepy.dsa.agent
 
 import io.github.thisisthepy.dsa.agent.channel.ChannelEndpoint
 import io.github.thisisthepy.dsa.agent.channel.ChannelLocator
+import io.github.thisisthepy.dsa.agent.requests.InsetGiven
 import io.github.thisisthepy.dsa.agent.requests.ResizeOutcome
 import io.github.thisisthepy.dsa.agent.input.InjectedKey
 import io.github.thisisthepy.dsa.agent.input.InjectedMotion
@@ -51,6 +52,11 @@ class FakeScheduler : Scheduler {
 
     override fun postDelayed(delayMillis: Long, work: () -> Unit) {
         queue += Item(now + delayMillis, order++, work)
+    }
+
+    /** Ahead of everything waiting, in the order such work was posted. */
+    override fun postFirst(work: () -> Unit) {
+        queue += Item(Long.MIN_VALUE, order++, work)
     }
 
     /** Runs everything that is due, including what that work posts. */
@@ -166,6 +172,38 @@ class FakeLauncherApps : io.github.thisisthepy.dsa.agent.tasks.LauncherApps {
     }
 }
 
+/** The apps' shortcuts, by package; an app missing from [byPackage] has none. */
+class FakeShortcuts : io.github.thisisthepy.dsa.agent.tasks.ShortcutSource {
+    var byPackage = mapOf<String, List<io.github.thisisthepy.dsa.agent.tasks.LauncherShortcut>>()
+    private var onChange: ((String) -> Unit)? = null
+
+    override fun shortcuts(packageName: String) = byPackage[packageName].orEmpty()
+
+    override fun listen(onChange: (String) -> Unit) {
+        this.onChange = onChange
+    }
+
+    fun change(packageName: String, shortcuts: List<io.github.thisisthepy.dsa.agent.tasks.LauncherShortcut>) {
+        byPackage = byPackage + (packageName to shortcuts)
+        onChange!!.invoke(packageName)
+    }
+}
+
+/** An app's pin request; [accepted] counts the times it was accepted. */
+class FakePinRequest(
+    override val packageName: String,
+    override val shortcut: io.github.thisisthepy.dsa.agent.tasks.LauncherShortcut,
+    override val appLabel: String = packageName.substringAfterLast('.'),
+    var valid: Boolean = true,
+) : io.github.thisisthepy.dsa.agent.tasks.PinRequest {
+    var accepted = 0
+
+    override fun accept(): Boolean {
+        accepted++
+        return valid
+    }
+}
+
 class FakeActions : TaskActions {
     val launched = mutableListOf<String>()
     val closed = mutableListOf<Int>()
@@ -196,6 +234,15 @@ class FakeActions : TaskActions {
     override fun launchNewWindow(packageName: String): Boolean {
         newWindows += packageName
         return packageName in launchable
+    }
+
+    /** Each shortcut started, as package and ID, and the ones that can start. */
+    val shortcutsLaunched = mutableListOf<Pair<String, String>>()
+    var startableShortcuts = setOf<Pair<String, String>>()
+
+    override fun launchShortcut(packageName: String, shortcutId: String): Boolean {
+        shortcutsLaunched += packageName to shortcutId
+        return (packageName to shortcutId) in startableShortcuts
     }
 
     /** Each app whose settings were opened; null for the list of every app. */
@@ -265,6 +312,22 @@ class FakeActions : TaskActions {
         captionInsets += taskId to frame
         captionBoundingRects += boundingRects
         return insetsTaken
+    }
+
+    /** The framework's status bar height at each density; 0 for any other. */
+    var statusBarHeights = mapOf<Int, Int>()
+
+    override fun statusBarHeight(densityDpi: Int): Int = statusBarHeights[densityDpi] ?: 0
+
+    /** Each navigation bar inset given: the task and its frame, null for a removal. */
+    val navigationBarInsets = mutableListOf<Pair<Int, TaskBounds?>>()
+
+    /** What the framework does with a navigation bar inset it is given. */
+    var navigationBarGiven = InsetGiven.FOLLOWS_TASK
+
+    override fun setNavigationBarInset(taskId: Int, frame: TaskBounds?): InsetGiven {
+        navigationBarInsets += taskId to frame
+        return navigationBarGiven
     }
 }
 

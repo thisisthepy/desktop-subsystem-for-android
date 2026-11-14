@@ -1,16 +1,18 @@
 // Copyright 2026 The DSA Authors
 // SPDX-License-Identifier: Apache-2.0
 //
-// The primary audio module (IModule/default): one output, the speaker, which is the host's
-// default output device, and one input, the built-in microphone, which is the host's default
-// capture device. Each has one mix port of 48 kHz stereo 16-bit sound, the format the host's
-// audio port carries, so the framework converts everything else on its side. There is no
-// external device.
+// The primary audio module (IModule/default): the shared output, the speaker, which is the
+// host's default output device, an output for each app with a window (app_outputs.h), and
+// one input, the built-in microphone, which is the host's default capture device. Each has
+// one mix port of 48 kHz stereo 16-bit sound, the format the host's audio port carries, so
+// the framework converts everything else on its side. There is no external device.
 //
 // The framework learns the module's ports and routes from here, builds audio policy from
-// them, and then asks for a configuration of the mix port, a patch from it to the speaker,
-// and a stream on the configuration. The volume stays the framework's: the module says it
-// has no master volume or mute, so the mixer applies them.
+// them, and then asks for a configuration of each mix port, a patch from it to its device,
+// and a stream on the configuration. The volume is the host's: every output device has a
+// gain for volume, so audio policy gives the stream volume to the device as its gain and
+// leaves the mixer at full scale. The module keeps that gain and never applies it, and it
+// has no master volume or mute.
 
 #pragma once
 
@@ -113,6 +115,12 @@ class Module final : public core::BnModule {
 
    private:
     const media::AudioPort* findPort(int32_t id) const;
+    // Whether `portId` is the mix port of an output: the shared one or an app's.
+    static bool isOutputMix(int32_t portId);
+    // The device output mix port `mixPortId` plays on, or 0 for none.
+    static int32_t deviceOfMix(int32_t mixPortId);
+    // Whether a stream plays on mix port `portId` now.
+    bool streamOnPort(int32_t portId);
     std::vector<media::AudioPortConfig>::iterator findConfig(int32_t id);
     bool configInUse(int32_t id) const;
     void streamClosed(int32_t portConfigId);

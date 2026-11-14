@@ -3,7 +3,8 @@
 //!
 //! ```text
 //! dsa-devices [--socket <path>] [--no-location] [--no-print] [--no-links]
-//!             [--no-settings] [--no-gamepads] [--no-geocoding] [--no-share] [--no-device-ports]
+//!             [--no-settings] [--no-gamepads] [--no-passkeys] [--no-language] [--no-geocoding]
+//!             [--no-share] [--no-device-ports]
 //! dsa-devices version
 //! ```
 //!
@@ -15,8 +16,11 @@
 //! DSA folder (`vsock/<port>.sock`), and follows the local API at the user's socket (or
 //! `--socket <path>`).
 //!
+//! The passkey prompts of the user's Android apps come here too: the Mac's passkeys are used
+//! through AuthenticationServices, whose prompt needs a window of the user's session.
+//!
 //! The main thread runs AppKit, as an app without a Dock icon, so CoreLocation, the game
-//! controllers and the print panel have their run loop. It runs until it is stopped (SIGTERM,
+//! controllers, the print panel and the passkey prompt have their run loop. It runs until it is stopped (SIGTERM,
 //! which launchd sends at logout, or SIGINT), and logs to standard error, which its agent
 //! sends to `dsa-devices.log` in the user's DSA logs.
 //!
@@ -50,7 +54,8 @@ fn main() -> std::process::ExitCode {
     use objc2::runtime::AnyObject;
 
     const HELP: &str = "usage: dsa-devices [--socket <path>] [--no-location] [--no-print] \
-                        [--no-links] [--no-settings] [--no-gamepads] [--no-geocoding] [--no-share] [--no-device-ports] \
+                        [--no-links] [--no-settings] [--no-gamepads] [--no-passkeys] [--no-language] \
+                        [--no-geocoding] [--no-share] [--no-device-ports] \
                         | version";
 
     static STOP: OnceLock<Arc<AtomicBool>> = OnceLock::new();
@@ -75,9 +80,11 @@ fn main() -> std::process::ExitCode {
             },
             "--no-location" => which.location = false,
             "--no-print" => which.print = false,
+            "--no-passkeys" => which.passkeys = false,
             "--no-links" => which.links = false,
             "--no-settings" => which.settings = false,
             "--no-gamepads" => which.gamepads = false,
+            "--no-language" => which.language = false,
             "--no-geocoding" => which.geocoding = false,
             "--no-share" => which.share = false,
             "--no-device-ports" => ports = false,
@@ -156,7 +163,7 @@ fn main() -> std::process::ExitCode {
     });
     let mut threads = Vec::new();
     if ports {
-        threads.extend(devices::start_guest_ports(&user, &stop, &log));
+        threads.extend(devices::start_guest_ports(&connect, &user, &stop, &log));
     }
     threads.extend(devices::start_followers(connect, which, &stop, &log));
     eprintln!(

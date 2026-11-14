@@ -1,0 +1,8 @@
+{
+  "recorded": "not yet: copy the \"baseline\" values of a develop run's memory.json here, with the run and the image it measured",
+  "host_total_mib": null,
+  "vm_mib": null,
+  "guest_used_mib": null,
+  "guest_kernel_mib": null,
+  "processes_mib": null
+}

@@ -19,6 +19,7 @@ use std::cell::{Cell, RefCell};
 use std::sync::mpsc::Sender;
 
 use crate::compositor::log::{input_trace, input_trace_on};
+use dsa_host_core::compositor::window_sizing::{frame_placement, FramePlacement};
 use dsa_host_core::drag::{DragOut, LeaveWatch};
 use dsa_host_core::input::{
     buttons, Capture, ContactPhase, InputEvent, MouseButton, PointerAction, PointerMapper,
@@ -293,6 +294,12 @@ pub struct PointerWindow {
     mapper: RefCell<PointerMapper>,
     /// The size of the task the window shows, in guest pixels.
     task_size: Cell<(u32, u32)>,
+    /// Window pixels per task pixels, as the window shows the task's frames: 1:1 unless the
+    /// task keeps its density on a monitor of another scale.
+    scale: Cell<(u32, u32)>,
+    /// Whether the window holds the size the desktop gave it, and so shows a frame of another
+    /// size in its middle ([`frame_placement`]).
+    held: Cell<bool>,
     /// Whether Windows will say when the mouse leaves the window.
     tracking_leave: Cell<bool>,
     events: Sender<InputEvent>,
@@ -313,6 +320,8 @@ impl PointerWindow {
             task_id,
             mapper: RefCell::new(PointerMapper::new(task_id)),
             task_size: Cell::new(task_size),
+            scale: Cell::new((1, 1)),
+            held: Cell::new(false),
             tracking_leave: Cell::new(false),
             events,
             leave: RefCell::new(LeaveWatch::default()),
@@ -329,9 +338,10 @@ impl PointerWindow {
         let Some(inside) = self.leave.borrow_mut().moved(position, client) else {
             return;
         };
-        let geometry = WindowGeometry {
-            client,
-            task: self.task_size.get(),
+        let (geometry, placement) = self.geometry(client);
+        let inside = match placement {
+            Some(placement) => placement.to_frame(inside, client),
+            None => inside,
         };
         let (x, y) = geometry.to_guest(inside);
         drags(
@@ -349,6 +359,56 @@ impl PointerWindow {
     /// The guest resized the task the window shows.
     pub fn task_resized(&self, task_size: (u32, u32)) {
         self.task_size.set(task_size);
+    }
+
+    /// The window shows the task's frames at `scale` (window pixels per task pixels) from now
+    /// on, so a point in the window is that point over the scale in the task.
+    pub fn set_scale(&self, scale: (u32, u32)) {
+        self.scale.set(scale);
+    }
+
+    /// The window holds the size the desktop gave it (maximised, snapped, full screen), or
+    /// takes the size of its frames again.
+    pub fn set_held(&self, held: bool) {
+        self.held.set(held);
+    }
+
+    /// Where a window that holds its size shows its task's frame in a client area of
+    /// `client`; `None` while the window has its frame's size, and shows it at its top left.
+    pub fn placement(&self, client: (u32, u32)) -> Option<FramePlacement> {
+        if !self.held.get() {
+            return None;
+        }
+        Some(frame_placement(
+            self.task_size.get(),
+            client,
+            self.scale.get(),
+            true,
+        ))
+    }
+
+    /// What the window's points are converted with, for a client area of `client`, and where
+    /// the frame is in it when that is not its top left at the window's size: a point is then
+    /// first made a point of the frame ([`FramePlacement::to_frame`]).
+    fn geometry(&self, client: (u32, u32)) -> (WindowGeometry, Option<FramePlacement>) {
+        match self.placement(client) {
+            Some(placement) => (
+                WindowGeometry {
+                    client: placement.size,
+                    task: self.task_size.get(),
+                    scale: placement.scale,
+                },
+                Some(placement),
+            ),
+            None => (
+                WindowGeometry {
+                    client,
+                    task: self.task_size.get(),
+                    scale: self.scale.get(),
+                },
+                None,
+            ),
+        }
     }
 
     /// Handles a mouse, touch or pen message. `None` for any other message, or one that
@@ -503,9 +563,11 @@ impl PointerWindow {
     }
 
     unsafe fn deliver(&self, hwnd: HWND, input: WindowInput) {
-        let geometry = WindowGeometry {
-            client: client_size(hwnd),
-            task: self.task_size.get(),
+        let client = client_size(hwnd);
+        let (geometry, placement) = self.geometry(client);
+        let input = match placement {
+            Some(placement) => on_frame(input, placement, client),
+            None => input,
         };
         let mapped = match self.mapper.try_borrow_mut() {
             Ok(mut mapper) => mapper.handle(input, geometry),
@@ -531,6 +593,48 @@ impl PointerWindow {
             // The sender ends only when the compositor stops; input then has nowhere to go.
             let _ = self.events.send(InputEvent::Pointer(event));
         }
+    }
+}
+
+/// `input` with its position made a point of the frame `placement` shows in a client area of
+/// `client`.
+fn on_frame(input: WindowInput, placement: FramePlacement, client: (u32, u32)) -> WindowInput {
+    let at = |position: (f64, f64)| placement.to_frame(position, client);
+    match input {
+        WindowInput::MouseMove { position } => WindowInput::MouseMove {
+            position: at(position),
+        },
+        WindowInput::MouseButton {
+            button,
+            down,
+            position,
+        } => WindowInput::MouseButton {
+            button,
+            down,
+            position: at(position),
+        },
+        WindowInput::Wheel { position, notches } => WindowInput::Wheel {
+            position: at(position),
+            notches,
+        },
+        WindowInput::Contact {
+            tool,
+            pointer_id,
+            phase,
+            position,
+            pressure,
+            buttons,
+            tilt,
+        } => WindowInput::Contact {
+            tool,
+            pointer_id,
+            phase,
+            position: at(position),
+            pressure,
+            buttons,
+            tilt,
+        },
+        WindowInput::MouseLeave | WindowInput::CaptureLost => input,
     }
 }
 

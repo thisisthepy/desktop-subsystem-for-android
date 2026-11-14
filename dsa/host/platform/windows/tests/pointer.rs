@@ -286,10 +286,7 @@ fn fr5_a_fingers_pointer_message_is_a_touch_contact_in_client_pixels() {
 #[test]
 fn fr5_at_200_percent_a_finger_lands_on_the_task_pixel_under_it() {
     let origin = (2000, 800);
-    let geometry = WindowGeometry {
-        client: (1600, 1200),
-        task: (1600, 1200),
-    };
+    let geometry = WindowGeometry::one_to_one((1600, 1200), (1600, 1200));
     let mut mapper = PointerMapper::new(3);
     for (screen, expected) in [
         ((2000, 800), (0.0, 0.0)),
@@ -304,15 +301,59 @@ fn fr5_at_200_percent_a_finger_lands_on_the_task_pixel_under_it() {
     }
 }
 
+/// The setup the offset was reported on: a main monitor at 100% at the origin, and a second
+/// monitor at 125% above it and to the right, whose top is above the main monitor's
+/// (negative screen coordinates). The Settings task keeps the main monitor's density, so its
+/// window on the second monitor shows each task pixel at 164 dpi over 130 dpi.
+#[test]
+fn fr4_on_a_monitor_of_another_scale_above_the_main_one_a_click_lands_on_the_task_pixel_under_it() {
+    use dsa_host_core::compositor::window_sizing::{
+        density_for_dpi, scale_between, to_window_size,
+    };
+    let scale = scale_between(density_for_dpi(120), density_for_dpi(96));
+    let task = (810, 1661);
+    let geometry = WindowGeometry {
+        client: to_window_size(task, scale),
+        task,
+        scale,
+    };
+    // The client area begins above the main monitor's top edge.
+    let origin = (2900, -880);
+    let mut mapper = PointerMapper::new(6);
+    for (screen, expected) in [
+        ((2900, -880), (0.0, 0.0)),
+        // 820 by 1640 window pixels in: 650 by 1300 task pixels at 82:65.
+        ((2900 + 820, -880 + 1640), (650.0, 1300.0)),
+        ((2900 + 164, -880 + 82), (130.0, 65.0)),
+    ] {
+        let input = touch_input(WM_POINTERDOWN, &touch_info(9, DOWN, screen), origin)
+            .expect("a finger down is a contact");
+        let event = mapper.handle(input, geometry).events[0];
+        assert_eq!((event.x, event.y), expected, "a finger at {screen:?}");
+        let lifted = touch_input(WM_POINTERUP, &touch_info(9, LIFTED, screen), origin)
+            .expect("a finger up is a contact");
+        mapper.handle(lifted, geometry);
+    }
+    // The mouse's messages carry client coordinates; the same point lands on the same pixel.
+    let mut mouse = PointerMapper::new(6);
+    let down = mouse.handle(
+        WindowInput::MouseButton {
+            button: MouseButton::Left,
+            down: true,
+            position: message_point(lparam(820, 1640)),
+        },
+        geometry,
+    );
+    let pressed = down.events.last().expect("a press");
+    assert_eq!((pressed.x, pressed.y), (650.0, 1300.0));
+}
+
 /// Ten fingers, a pinch, and every finger lifted: each finger keeps its own pointer from
 /// the window's messages to the control channel, in the order the fingers touched.
 #[test]
 fn fr5_ten_fingers_and_a_pinch_reach_the_control_channel_finger_by_finger() {
     let origin = (300, 200);
-    let geometry = WindowGeometry {
-        client: (800, 600),
-        task: (800, 600),
-    };
+    let geometry = WindowGeometry::one_to_one((800, 600), (800, 600));
     let mut mapper = PointerMapper::new(7);
     let mut sent = Vec::new();
     let mut feed = |message: u32, touch: POINTER_TOUCH_INFO| {

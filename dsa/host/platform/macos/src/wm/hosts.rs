@@ -170,6 +170,7 @@ fn serve(
         host: id,
         package: attach.package_name,
         launch: attach.launch,
+        shortcut: attach.shortcut_id,
     };
     if events.send(attached).is_ok() {
         read(&mut *connection, &link, &events, &presenter, &stop);

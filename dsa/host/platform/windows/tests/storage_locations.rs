@@ -27,6 +27,14 @@ const FORBIDDEN: &[&str] = &[
 ];
 
 /// The files allowed to name those folders: the paths modules themselves.
+/// The host API conformance kit lives in the core's `src` so every platform's tests can run
+/// it, but only tests call it, and its scratch folders are a test's own.
+fn is_test_kit(path: &Path) -> bool {
+    path.to_string_lossy()
+        .replace('\\', "/")
+        .ends_with("core/src/host_api_conformance.rs")
+}
+
 fn is_paths_module(path: &Path) -> bool {
     let text = path.to_string_lossy().replace('\\', "/");
     text.ends_with("platform/windows/src/paths.rs")
@@ -83,7 +91,10 @@ fn fr19_production_code_builds_runtime_paths_only_in_the_paths_module() {
         host.display()
     );
     let mut found = Vec::new();
-    for file in files.iter().filter(|f| !is_paths_module(f)) {
+    for file in files
+        .iter()
+        .filter(|f| !is_paths_module(f) && !is_test_kit(f))
+    {
         let Ok(text) = std::fs::read_to_string(file) else {
             continue;
         };
@@ -136,7 +147,7 @@ fn fr19_every_file_has_its_place_in_one_of_the_two_roots() {
     let user = UserRoot::in_local_app_data(Path::new(r"C:\Users\alice\AppData\Local"));
     let under = |rest: &str| PathBuf::from(format!(r"C:\Users\alice\AppData\Local\DSA\{rest}"));
     assert_eq!(user.android_disk(), under("android.vhdx"));
-    assert_eq!(user.pstore_disk(), under("pstore.vhd"));
+    assert_eq!(user.old_pstore_disk(), under("pstore.vhd"));
     assert_eq!(user.apps(), under("apps"));
     assert_eq!(user.notifications(), under("notifications"));
     assert_eq!(user.window_manager_log(), under(r"logs\dsa-wm.log"));
@@ -232,7 +243,7 @@ fn fr19_uninstalling_leaves_only_the_users_android_disk() {
     std::fs::create_dir_all(&programs).unwrap();
     std::fs::write(user.android_disk(), b"disk").unwrap();
     std::fs::write(user.android_disk_version(), b"16").unwrap();
-    std::fs::write(user.pstore_disk(), b"pstore").unwrap();
+    std::fs::write(user.old_pstore_disk(), b"pstore").unwrap();
     std::fs::write(user.window_manager_log(), b"log").unwrap();
     std::fs::write(user.compositor_settings(), b"{}").unwrap();
     std::fs::write(user.monitors(), b"1920x1080").unwrap();
@@ -264,6 +275,25 @@ fn fr19_uninstalling_leaves_only_the_users_android_disk() {
     std::fs::create_dir_all(empty.logs()).unwrap();
     remove_user_files(&empty, &programs);
     assert!(!empty.dir().exists(), "a folder with no disk goes entirely");
+}
+
+#[test]
+fn fr36_uninstalling_keeps_the_sealed_keys_with_the_disk() {
+    let dir = scratch("uninstall-keys");
+    let user = UserRoot::in_local_app_data(&dir.join("local"));
+    let programs = dir.join("programs");
+    std::fs::create_dir_all(user.keys()).unwrap();
+    std::fs::create_dir_all(&programs).unwrap();
+    std::fs::write(user.android_disk(), b"disk").unwrap();
+    std::fs::write(user.keys().join("keymint-root-key.sealed"), b"sealed").unwrap();
+    std::fs::write(user.window_manager_log(), b"log").ok();
+
+    assert_eq!(remove_user_files(&user, &programs), Vec::<String>::new());
+    assert_eq!(
+        std::fs::read(user.keys().join("keymint-root-key.sealed")).unwrap(),
+        b"sealed"
+    );
+    assert!(user.keys().starts_with(user.dir()));
 }
 
 #[test]

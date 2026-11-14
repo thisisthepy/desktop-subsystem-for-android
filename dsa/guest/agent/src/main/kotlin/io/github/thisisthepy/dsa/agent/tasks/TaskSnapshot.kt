@@ -43,8 +43,9 @@ data class TaskSnapshot(
     val minWidth: Int = 0,
     val minHeight: Int = 0,
     /**
-     * What the task's app told the system about its status bar's icons, which the host's
-     * caption buttons follow.
+     * What the task's app tells the system about its status bar's icons now, which the host's
+     * caption buttons follow: filled in by the agent from the window manager's live reports
+     * ([SystemBarAppearances]); unknown while the app has expressed nothing.
      */
     val statusBar: StatusBarAppearance = StatusBarAppearance.UNKNOWN,
     /** The status bar color the app set, as ARGB; 0 when it set none. */
@@ -60,8 +61,16 @@ data class TaskSnapshot(
      * background), as apps do on Android's own desktop windows.
      */
     val transparentCaption: Boolean = false,
-    /** Whether the task is past its first activity, so Back has somewhere to go. */
+    /**
+     * Whether Back in the task lands on a screen the user saw, so the host draws the back
+     * arrow: filled in by the agent from [stack] ([BackStacks]).
+     */
     val canGoBack: Boolean = false,
+    /**
+     * The task's activities as far as Back is concerned; null for a task whose Back the agent
+     * never offers (a widget's setup), which keeps [canGoBack] as it is.
+     */
+    val stack: TaskStack? = null,
     /**
      * Whether the task's top activity says it handles a change of density itself (its
      * manifest's configChanges include density), so Android redraws it at a new density

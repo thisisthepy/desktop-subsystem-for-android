@@ -135,7 +135,7 @@ pub struct ResizeTask {
     pub live: bool,
 }
 /// A task's window moved to a monitor of another scale: asks the caller's Android to draw
-/// the task at `density_dpi` (96 at a scale of 100%, where a dp is 0.6 of a host pixel).
+/// the task at `density_dpi` (130 at a scale of 100%, where a dp is 0.819 of a host pixel).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct SetTaskDensity {
     #[prost(int32, tag = "1")]
@@ -175,6 +175,15 @@ pub struct StreamInput {}
 pub struct SetWindowsShown {
     #[prost(bool, tag = "1")]
     pub shown: bool,
+}
+/// Says which tasks of the caller's Android have their window shown: open and not minimized.
+/// The window manager sends it on each change. The caller's Android keeps less memory for an
+/// app whose windows are all minimized. The service keeps the latest value while the Android is
+/// not running, for its next start.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SetTasksShown {
+    #[prost(int32, repeated, tag = "1")]
+    pub task_ids: ::prost::alloc::vec::Vec<i32>,
 }
 /// Says whether the caller's window manager can turn the host's three- and four-finger touch
 /// gestures off (Settings.touch_gestures_off): `state` is "unsupported", "available" or
@@ -395,6 +404,27 @@ pub struct LocationFix {
     /// Milliseconds since the Unix epoch (UTC).
     #[prost(uint64, tag = "11")]
     pub unix_time_ms: u64,
+}
+/// Turns the connection into the speech and spelling of the caller's Android: after the
+/// answer (Done), the service sends a LanguageServiceFrame for each request the Android's
+/// text-to-speech engine, speech recognition service or spell checker makes (ListSpeechVoices,
+/// SpeakText, StopSpeaking, StartRecognition, StopRecognition, CancelRecognition and
+/// CheckSpelling), and the client answers each with LanguageServiceFrame messages of its own
+/// (SpeechVoices, SpeechAudio, SpeechDone, RecognitionEvent and SpellingResult), which the
+/// service passes to the Android. The client runs the host's speech synthesis, speech
+/// recognition and spell checker in the user's session, where the user's voices, dictionaries
+/// and privacy settings are. Requests go to the first client still connected; when its
+/// connection ends, every request it had not finished fails in the Android. The connection
+/// lasts across restarts of the Android.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ServeLanguageServices {}
+/// One message of control.proto (an encoded Envelope of dsa.control.v1), on a connection that
+/// serves speech and spelling. The service checks each one the client sends is an answer and
+/// passes it on unchanged, so the messages are defined once, where the Android reads them.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct LanguageServiceFrame {
+    #[prost(bytes = "vec", tag = "1")]
+    pub control: ::prost::alloc::vec::Vec<u8>,
 }
 /// A notification of the caller's Android, on a connection that watches them
 /// (WatchNotifications). One with the key of an earlier one replaces it.
@@ -745,6 +775,48 @@ pub struct ControlMedia {
     #[prost(enumeration = "MediaCommand", tag = "2")]
     pub command: i32,
 }
+/// One output of the caller's Android's sound, and the app it plays. Android sends every
+/// output at full scale; the host plays it at `volume`, under the app's name and icon.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct AppAudioStream {
+    /// The output, as the audio port names it ("app 0", "primary").
+    #[prost(string, tag = "1")]
+    pub stream: ::prost::alloc::string::String,
+    /// Empty for the shared output, which every sound of an app without its own plays on.
+    #[prost(string, tag = "2")]
+    pub package_name: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub app_label: ::prost::alloc::string::String,
+    /// From 0 (silent) to 1 (full).
+    #[prost(float, tag = "4")]
+    pub volume: f32,
+    #[prost(bool, tag = "5")]
+    pub muted: bool,
+}
+/// The outputs of the caller's Android's sound, the whole list.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct AppAudio {
+    #[prost(message, repeated, tag = "1")]
+    pub streams: ::prost::alloc::vec::Vec<AppAudioStream>,
+}
+/// Watches which app each output of the caller's Android's sound plays, and its volume. The
+/// answer is AppAudio, and the connection then carries an AppAudio each time it changes; an
+/// Android that stops gives an empty one. The client sends nothing more on it. The watch lasts
+/// across restarts of the Android.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WatchAppAudio {}
+/// The user set an app's volume or mute in the host's volume mixer: it becomes the volume
+/// Android gives the app. Empty `package_name` is the shared output. Answered with Done.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SetAppVolume {
+    #[prost(string, tag = "1")]
+    pub package_name: ::prost::alloc::string::String,
+    /// From 0 to 1.
+    #[prost(float, tag = "2")]
+    pub volume: f32,
+    #[prost(bool, tag = "3")]
+    pub muted: bool,
+}
 /// Asks for the widgets the apps in the caller's Android offer. The answer is WidgetProviders.
 /// Needs the caller's Android to be running.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
@@ -785,6 +857,10 @@ pub struct WidgetProvider {
     /// The name of the app that offers the widget, as a launcher shows it. Empty when unknown.
     #[prost(string, tag = "13")]
     pub app_label: ::prost::alloc::string::String,
+    /// Whether a placed widget can be set up again (ReconfigureWidget): its app says so and it
+    /// has a setup. Its menu offers its settings only then.
+    #[prost(bool, tag = "14")]
+    pub reconfigurable: bool,
 }
 /// The answer to ListWidgetProviders, in label order.
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -803,6 +879,16 @@ pub struct AddWidget {
 /// Removes a widget: Android forgets it, its window closes, and its place is forgotten.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct RemoveWidget {
+    #[prost(int32, tag = "1")]
+    pub widget_id: i32,
+}
+/// Opens the setup of a placed widget whose app says it can be set up again, as the app's
+/// window, for the same widget. The answer waits for the user: the Widget once they finish the
+/// setup, which the widget then shows, or ERROR_CODE_WIDGET_REFUSED with the reason when they
+/// cancel it, when it could not start, or when the widget cannot be set up again. The widget
+/// stays where it is either way.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ReconfigureWidget {
     #[prost(int32, tag = "1")]
     pub widget_id: i32,
 }
@@ -893,8 +979,8 @@ pub struct PlaceWidget {
     pub widget_id: i32,
     #[prost(message, optional, tag = "2")]
     pub placement: ::core::option::Option<WidgetPlacement>,
-    /// The window's size in its monitor's pixels, and Android's density for it (96 at a scale of
-    /// 100%).
+    /// The window's size in its monitor's pixels, and Android's density for it (130 at a scale
+    /// of 100%).
     #[prost(uint32, tag = "3")]
     pub width: u32,
     #[prost(uint32, tag = "4")]
@@ -1194,7 +1280,7 @@ pub struct Task {
     /// Whether the task has input focus in Android.
     #[prost(bool, tag = "5")]
     pub focused: bool,
-    /// The density the task's app draws at, in dots per inch (96 at a scale of 100%). 0 when
+    /// The density the task's app draws at, in dots per inch (130 at a scale of 100%). 0 when
     /// unknown.
     #[prost(uint32, tag = "6")]
     pub density_dpi: u32,
@@ -1314,6 +1400,74 @@ pub struct AppInfo {
     /// the whole computer, so the level cannot be set. Set it with SetAppRoot.
     #[prost(string, tag = "16")]
     pub root: ::prost::alloc::string::String,
+    /// The app's launcher shortcuts, in the list of installed apps: the static and dynamic ones
+    /// in rank order, then the pinned ones. Empty for a task's app.
+    #[prost(message, repeated, tag = "17")]
+    pub shortcuts: ::prost::alloc::vec::Vec<AppShortcut>,
+    /// The user ID the app shares with other apps (its manifest's `android:sharedUserId`), in
+    /// the list of installed apps. Apps with the same value run under one Android uid and are
+    /// one group for root elevation: their level and grace apply to all of them, and a settings
+    /// app shows them together. Empty for an app with a user ID of its own, and for a task's app.
+    #[prost(string, tag = "18")]
+    pub shared_user_id: ::prost::alloc::string::String,
+}
+/// One of an app's launcher shortcuts in Android: a static one from its manifest, a dynamic
+/// one it published, or one pinned at its request. The host's jump list (Dock menu, desktop
+/// entry actions) shows the static and dynamic ones; a pinned one is a desktop shortcut.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AppShortcut {
+    /// Unique within its app.
+    #[prost(string, tag = "1")]
+    pub id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub short_label: ::prost::alloc::string::String,
+    /// Empty when the app gave none.
+    #[prost(string, tag = "3")]
+    pub long_label: ::prost::alloc::string::String,
+    /// A square PNG image; empty when the shortcut has none, and the app's icon stands in.
+    #[prost(bytes = "vec", tag = "4")]
+    pub icon_png: ::prost::alloc::vec::Vec<u8>,
+    /// Lowest first.
+    #[prost(uint32, tag = "5")]
+    pub rank: u32,
+    #[prost(bool, tag = "6")]
+    pub manifest: bool,
+    #[prost(bool, tag = "7")]
+    pub dynamic: bool,
+    #[prost(bool, tag = "8")]
+    pub pinned: bool,
+}
+/// Starts one of an app's shortcuts in the caller's Android as a task in its own window, as
+/// its jump list task or desktop shortcut does. Answered with Done once Android has been
+/// asked.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct LaunchShortcut {
+    #[prost(string, tag = "1")]
+    pub package_name: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub shortcut_id: ::prost::alloc::string::String,
+}
+/// An app of the caller's Android asks for one of its shortcuts on the desktop
+/// (requestPinShortcut). Sent as a TaskEvent to every watcher of the tasks; the window manager
+/// asks the user and answers with AnswerPinShortcut. A request nobody answers lapses.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PinShortcutRequest {
+    #[prost(uint32, tag = "1")]
+    pub request_id: u32,
+    #[prost(string, tag = "2")]
+    pub package_name: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub app_label: ::prost::alloc::string::String,
+    #[prost(message, optional, tag = "4")]
+    pub shortcut: ::core::option::Option<AppShortcut>,
+}
+/// The user's answer to a PinShortcutRequest. Answered with Done.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct AnswerPinShortcut {
+    #[prost(uint32, tag = "1")]
+    pub request_id: u32,
+    #[prost(bool, tag = "2")]
+    pub accepted: bool,
 }
 /// Installs an app of the caller's Android again from the APKs it has there, with its native
 /// code for arm64-v8a (`on`, run through the ARM translator) or for x86_64. Android must be
@@ -1384,7 +1538,7 @@ pub struct InstalledApps {
 /// A change to the tasks of the caller's Android, sent after the answer to WatchTasks.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct TaskEvent {
-    #[prost(oneof = "task_event::Body", tags = "1, 2, 3, 4, 5, 7, 6")]
+    #[prost(oneof = "task_event::Body", tags = "1, 2, 3, 4, 5, 7, 6, 8")]
     pub body: ::core::option::Option<task_event::Body>,
 }
 /// Nested message and enum types in `TaskEvent`.
@@ -1407,6 +1561,10 @@ pub mod task_event {
         /// The apps installed in the caller's Android changed: the whole list, as it is now.
         #[prost(message, tag = "6")]
         Installed(super::InstalledApps),
+        /// An app asks for one of its shortcuts on the desktop. It is passed on as it comes and is
+        /// not part of the tasks a late watcher starts from.
+        #[prost(message, tag = "8")]
+        PinShortcut(super::PinShortcutRequest),
     }
 }
 /// The answer to ListTasks and WatchTasks: the tasks there are now.
@@ -1515,6 +1673,23 @@ pub struct GuestMemory {
     pub google_play_pss_kb: u64,
     #[prost(uint64, tag = "27")]
     pub google_play_swap_pss_kb: u64,
+    /// Free page reporting, as the control channel's GuestMemory says: the free memory the host
+    /// has taken back now, the memory reported since boot, and the reported free memory the
+    /// host took back in again with a neighbour since boot. All 0 when the guest could not read
+    /// them.
+    #[prost(uint64, tag = "28")]
+    pub free_reported_kb: u64,
+    #[prost(uint64, tag = "29")]
+    pub reported_total_kb: u64,
+    #[prost(uint64, tag = "30")]
+    pub refaulted_total_kb: u64,
+    /// How fast memory went back to the host between the report before this one and this one,
+    /// in KiB a minute, when reported_rate_known is set: the growth of reported_total_kb over
+    /// the time between the two.
+    #[prost(uint64, tag = "31")]
+    pub reported_kb_per_minute: u64,
+    #[prost(bool, tag = "32")]
+    pub reported_rate_known: bool,
 }
 /// One host process that runs the caller's Android: its VM's memory process, the window
 /// manager, an app window.
@@ -1531,6 +1706,11 @@ pub struct HostProcessMemory {
     /// The memory committed to it alone, in KiB.
     #[prost(uint64, tag = "4")]
     pub private_kb: u64,
+    /// Of working_set_kb, the pages of the disk files the VM maps directly (the host's
+    /// direct-mapped mode), in KiB: clean file pages the host drops without writing anything.
+    /// 0 for every other process, and from a service that does not count them.
+    #[prost(uint64, tag = "5")]
+    pub mapped_kb: u64,
 }
 /// The answer to GetMemory.
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -1685,14 +1865,14 @@ pub struct GetSettings {}
 /// an update setting, which applies to every user, needs a caller acting as an administrator
 /// (on Windows, an elevated process); otherwise nothing changes and the answer is
 /// ERROR_CODE_NOT_ALLOWED.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct SetSettings {
     #[prost(message, optional, tag = "1")]
     pub settings: ::core::option::Option<Settings>,
 }
 /// The settings of the caller's DSA. `render_gpu`, `freeze`, `clipboard` and `links_in_android` are
 /// the caller's own; the update and trace settings are the machine's, shared by every user of it.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Settings {
     /// The GPU the caller's window manager renders on: "display" (the GPU that drives the
     /// primary monitor, the default), "integrated", "discrete", or part of a GPU's name. The
@@ -1845,6 +2025,42 @@ pub struct Settings {
     /// next time the user starts Android.
     #[prost(bool, tag = "39")]
     pub image_auto_restart: bool,
+    /// Whether the caller's Android trusts, as system certificates, the root certificates a user
+    /// or an administrator added to this computer (imported_certificates). On unless the user
+    /// turned it off; a client sends back the value it read. It applies at once, without
+    /// restarting Android.
+    #[prost(bool, tag = "40")]
+    pub host_certificates: bool,
+    /// The root certificates the service found added to this computer's trust stores for the
+    /// caller, whether or not host_certificates is on. Those the operating system ships are left
+    /// out. A client cannot change it.
+    #[prost(message, repeated, tag = "41")]
+    pub imported_certificates: ::prost::alloc::vec::Vec<ImportedCertificate>,
+}
+/// One root certificate the service found added to the computer's trust stores.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ImportedCertificate {
+    /// Who the certificate is for and who signed it, as distinguished names ("CN=Example Root,
+    /// O=Example").
+    #[prost(string, tag = "1")]
+    pub subject: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub issuer: ::prost::alloc::string::String,
+    /// Where it was found: "machine" (the computer's trusted root store), "machine_group_policy",
+    /// "machine_enterprise", "user" (the caller's own trusted root store), "user_group_policy",
+    /// "admin" (the computer's administrator trust settings) or "system" (a certificate added to
+    /// the system's certificate store).
+    #[prost(string, tag = "3")]
+    pub source: ::prost::alloc::string::String,
+    /// The store or file it was found in, as the operating system names it.
+    #[prost(string, tag = "4")]
+    pub location: ::prost::alloc::string::String,
+    /// The SHA-256 fingerprint of the certificate, in lower-case hexadecimal.
+    #[prost(string, tag = "5")]
+    pub sha256: ::prost::alloc::string::String,
+    /// When it stops being valid, in seconds since the Unix epoch; 0 when unknown.
+    #[prost(int64, tag = "6")]
+    pub not_after: i64,
 }
 /// How the caller's Android reaches the network.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -1867,6 +2083,12 @@ pub struct NetworkStatus {
     /// network. Empty when there is none.
     #[prost(string, tag = "5")]
     pub problem: ::prost::alloc::string::String,
+    /// Who answers the guest's DNS queries: "host" while this host's resolver answers them (so
+    /// the host's hosts file, VPN and DNS filters apply to Android's apps), "network" while the
+    /// host's resolver does not answer and Android asks `dns_servers` itself. Empty while Android
+    /// is not running or still booting, and from a service that cannot say.
+    #[prost(string, tag = "6")]
+    pub dns_resolver: ::prost::alloc::string::String,
 }
 /// Erases the caller's Android data: the apps they installed, their accounts and every app's
 /// data. The service stops the caller's Android, waits for it to stop, and replaces their data
@@ -1874,6 +2096,220 @@ pub struct NetworkStatus {
 /// they are. The answer is Done once the new disk is in place; the next start boots it.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct ResetData {}
+/// Backs up every app of the caller's Android now, into the caller's backup folder, encrypted
+/// with the key the host's credential store keeps for them. Android has to be running
+/// (ERROR_CODE_NOT_RUNNING otherwise). The answer is BackupReport once Android's backup
+/// manager has finished.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct BackupNow {}
+/// Asks where the caller's backup stands. The service answers BackupReport. It reads only the
+/// backup folder, so it answers while Android is stopped too.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetBackup {}
+/// Restores the caller's Android from their backup folder: installs each app the backup holds
+/// the APKs of and Android does not have, then has Android restore every app's data. It is
+/// how the data comes back after a data reset, or on another computer once the folder and
+/// the recovery key are there. Android has to be running (ERROR_CODE_NOT_RUNNING otherwise).
+/// Answered with BackupReport.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RestoreBackup {}
+/// Asks for the caller's backup recovery key: the key their backup folder is encrypted with,
+/// as text to write down. With it the folder can be restored on another computer or under
+/// another user. Answered with BackupRecoveryKey.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetBackupRecoveryKey {}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct BackupRecoveryKey {
+    /// Groups of letters and digits with a check at the end, such as `ABCD-EFGH-...`.
+    #[prost(string, tag = "1")]
+    pub key: ::prost::alloc::string::String,
+}
+/// Keeps `key`, a recovery key GetBackupRecoveryKey gave, as the caller's backup key, so a
+/// backup folder made on another computer or under another user can be read here. Text that
+/// is not a recovery key, or one the folder was not made with, is ERROR_CODE_INVALID_SETTING.
+/// Answered with BackupReport.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SetBackupRecoveryKey {
+    #[prost(string, tag = "1")]
+    pub key: ::prost::alloc::string::String,
+}
+/// Where the caller's backup stands.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct BackupReport {
+    /// Whether backups can be made and read now.
+    #[prost(bool, tag = "1")]
+    pub available: bool,
+    /// Why not, in words a person can act on; empty when they can.
+    #[prost(string, tag = "2")]
+    pub problem: ::prost::alloc::string::String,
+    /// The backup folder.
+    #[prost(string, tag = "3")]
+    pub folder: ::prost::alloc::string::String,
+    /// When an app was last backed up, in milliseconds since the Unix epoch; 0 for never.
+    #[prost(int64, tag = "4")]
+    pub last_backup_unix_ms: i64,
+    /// The apps the backup holds, and the bytes their data and APKs take before encryption.
+    #[prost(uint32, tag = "5")]
+    pub packages: u32,
+    #[prost(uint64, tag = "6")]
+    pub size: u64,
+    /// What went wrong in the last backup or restore; empty when nothing did.
+    #[prost(string, tag = "7")]
+    pub last_error: ::prost::alloc::string::String,
+    /// BackupNow and RestoreBackup: the apps backed up or restored, those that failed, and the
+    /// apps a restore installed.
+    #[prost(uint32, tag = "8")]
+    pub succeeded: u32,
+    #[prost(uint32, tag = "9")]
+    pub failed: u32,
+    #[prost(uint32, tag = "10")]
+    pub installed: u32,
+    /// When the backup was last restored, in milliseconds since the Unix epoch; 0 for never.
+    #[prost(int64, tag = "11")]
+    pub last_restore_unix_ms: i64,
+    /// Whether the user turned backup on. Off by default: until the user turns it on, no backup
+    /// runs, and neither the backup folder nor its key is made. While it is off `available` is
+    /// false with no problem, and what an earlier backup left in the folder is still counted.
+    #[prost(bool, tag = "12")]
+    pub enabled: bool,
+}
+/// Turns the caller's backup on or off. On, Android's backup manager backs the apps' data up to
+/// the host on its own schedule, and BackupNow and RestoreBackup work. Off, Android's backup
+/// manager stops backing up to the host, and the host takes no more backups; with
+/// `delete_backups` the backup folder's files and the backup key are removed as well, else
+/// they stay for a later restore. Answered with BackupReport.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SetBackup {
+    #[prost(bool, tag = "1")]
+    pub enabled: bool,
+    #[prost(bool, tag = "2")]
+    pub delete_backups: bool,
+}
+/// Asks how the root key of the caller's Android's KeyMint is protected on this computer.
+/// Answered with KeyProtection. It reads only what the key's file records, so it never asks
+/// for a password and answers while Android is stopped.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetKeyProtection {}
+/// How the root key of the guest's KeyMint is sealed on this computer.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct KeyProtection {
+    /// Whether a root key is kept yet: one is made the first time Android starts.
+    #[prost(bool, tag = "1")]
+    pub kept: bool,
+    /// What sealed it: "tpm" (the computer's TPM), "secure-enclave" (the Mac's Secure Enclave),
+    /// "dpapi" (Windows DPAPI under the user's account), "secret-service" (the user's Secret
+    /// Service keyring) or "keychain" (the user's login keychain). Empty while none is kept.
+    #[prost(string, tag = "2")]
+    pub sealed_by: ::prost::alloc::string::String,
+    /// Whether hardware of this computer (a TPM or the Secure Enclave) holds what seals it.
+    #[prost(bool, tag = "3")]
+    pub hardware: bool,
+    /// What sealed it, in words, such as "the computer's TPM 2.0 and DPAPI under your account".
+    #[prost(string, tag = "4")]
+    pub description: ::prost::alloc::string::String,
+    /// When it is not sealed by hardware: why this computer's hardware could not be used.
+    #[prost(string, tag = "5")]
+    pub fallback_reason: ::prost::alloc::string::String,
+    /// Why the kept key could not be opened for the latest start of Android, and what to do;
+    /// empty when it opened (or no start has asked for it yet).
+    #[prost(string, tag = "6")]
+    pub problem: ::prost::alloc::string::String,
+}
+/// Turns the connection into a watch of the passkey ceremonies of the caller's Android: after
+/// the answer (Done), the service sends a PasskeyCeremony for each request of an app that the
+/// service has checked (the app's signature against the relying party's Digital Asset Links,
+/// or a browser's origin against the relying party), and a PasskeyCeremonyWithdrawn when
+/// Android no longer waits for one. Requests that fail the check never reach a watcher. The
+/// watcher, which runs in the user's desktop session, brings up the host's passkey prompt and
+/// answers each ceremony with ReportPasskeyCeremony, on another connection, and sends
+/// nothing on this one.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WatchPasskeys {}
+/// A passkey ceremony the host's authenticator is to perform, already checked.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PasskeyCeremony {
+    #[prost(uint64, tag = "1")]
+    pub ceremony_id: u64,
+    #[prost(enumeration = "PasskeyOperation", tag = "2")]
+    pub operation: i32,
+    #[prost(string, tag = "3")]
+    pub rp_id: ::prost::alloc::string::String,
+    /// CREATE only: the relying party's name and the account the passkey is for.
+    #[prost(string, tag = "4")]
+    pub rp_name: ::prost::alloc::string::String,
+    #[prost(bytes = "vec", tag = "5")]
+    pub user_id: ::prost::alloc::vec::Vec<u8>,
+    #[prost(string, tag = "6")]
+    pub user_name: ::prost::alloc::string::String,
+    #[prost(string, tag = "7")]
+    pub user_display_name: ::prost::alloc::string::String,
+    /// The client data the authenticator signs the hash of (WebAuthn's CollectedClientData
+    /// JSON); empty when a browser gave only its hash.
+    #[prost(bytes = "vec", tag = "8")]
+    pub client_data_json: ::prost::alloc::vec::Vec<u8>,
+    /// SHA-256 of client_data_json, or the browser's own hash.
+    #[prost(bytes = "vec", tag = "9")]
+    pub client_data_hash: ::prost::alloc::vec::Vec<u8>,
+    /// CREATE only: the COSE algorithms the relying party takes, the one it prefers first.
+    #[prost(int32, repeated, tag = "10")]
+    pub algorithms: ::prost::alloc::vec::Vec<i32>,
+    /// CREATE: the passkeys the authenticator must not already hold. GET: the passkeys it may
+    /// use; empty for any of the relying party's.
+    #[prost(bytes = "vec", repeated, tag = "11")]
+    pub credential_ids: ::prost::alloc::vec::Vec<::prost::alloc::vec::Vec<u8>>,
+    /// CREATE only: "required", "preferred" or "discouraged".
+    #[prost(string, tag = "12")]
+    pub resident_key: ::prost::alloc::string::String,
+    /// "required", "preferred" or "discouraged".
+    #[prost(string, tag = "13")]
+    pub user_verification: ::prost::alloc::string::String,
+    /// How long the relying party waits; 0 for the authenticator's own default.
+    #[prost(uint32, tag = "14")]
+    pub timeout_ms: u32,
+    /// The app that asked, for the prompt.
+    #[prost(string, tag = "15")]
+    pub app_label: ::prost::alloc::string::String,
+    #[prost(string, tag = "16")]
+    pub package: ::prost::alloc::string::String,
+    /// The origin the client data names: the browser's https origin, or the app's
+    /// android:apk-key-hash origin.
+    #[prost(string, tag = "17")]
+    pub origin: ::prost::alloc::string::String,
+    /// CREATE only: "none", "indirect", "direct" or "enterprise".
+    #[prost(string, tag = "18")]
+    pub attestation: ::prost::alloc::string::String,
+}
+/// The ceremony is no longer wanted: its app went away, or Android stopped.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct PasskeyCeremonyWithdrawn {
+    #[prost(uint64, tag = "1")]
+    pub ceremony_id: u64,
+}
+/// Tells the caller's Android what became of a passkey ceremony. Answered with Done.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ReportPasskeyCeremony {
+    #[prost(uint64, tag = "1")]
+    pub ceremony_id: u64,
+    #[prost(enumeration = "PasskeyResult", tag = "2")]
+    pub result: i32,
+    #[prost(string, tag = "3")]
+    pub message: ::prost::alloc::string::String,
+    #[prost(bytes = "vec", tag = "4")]
+    pub credential_id: ::prost::alloc::vec::Vec<u8>,
+    /// CREATE: the attestation object (CBOR), and the transports the passkey can be reached by.
+    #[prost(bytes = "vec", tag = "5")]
+    pub attestation_object: ::prost::alloc::vec::Vec<u8>,
+    #[prost(string, repeated, tag = "6")]
+    pub transports: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// GET: the authenticator data, the signature over it and the client data hash, and the
+    /// passkey's user handle.
+    #[prost(bytes = "vec", tag = "7")]
+    pub authenticator_data: ::prost::alloc::vec::Vec<u8>,
+    #[prost(bytes = "vec", tag = "8")]
+    pub signature: ::prost::alloc::vec::Vec<u8>,
+    #[prost(bytes = "vec", tag = "9")]
+    pub user_handle: ::prost::alloc::vec::Vec<u8>,
+}
 /// Asks which Android version runs and which can be chosen. The service answers
 /// AndroidVersions.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
@@ -2027,6 +2463,76 @@ pub struct ArmTranslation {
     /// when guest_known.
     #[prost(bool, tag = "10")]
     pub guest_left_on_data: bool,
+}
+/// The Widevine module a user installed: the com.google.android.widevine APEX of Google's
+/// emulator system image for their Android version and architecture, which the client
+/// downloaded from Google's SDK repository and took out unchanged. DSA does not ship it.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WidevinePackage {
+    /// The APEX's file name in the image's /vendor/apex, such as
+    /// "com.google.android.widevine.apex". The guest's apexd reads it from there.
+    #[prost(string, tag = "1")]
+    pub apex: ::prost::alloc::string::String,
+    /// The image it came from: its build, API level and revision, such as
+    /// "BE2A.250530.026.F3 (API 36, r7)".
+    #[prost(string, tag = "2")]
+    pub version: ::prost::alloc::string::String,
+    /// The Android major version and the ABI ("x86_64", "arm64-v8a") of that image, which are
+    /// the caller's Android's.
+    #[prost(uint32, tag = "3")]
+    pub android_major: u32,
+    #[prost(string, tag = "4")]
+    pub abi: ::prost::alloc::string::String,
+    /// The system image archive it was taken from, on Google's download server.
+    #[prost(string, tag = "5")]
+    pub source: ::prost::alloc::string::String,
+    /// The APEX's size in bytes and its SHA-256 digest, as the image holds it.
+    #[prost(uint64, tag = "6")]
+    pub size: u64,
+    #[prost(bytes = "vec", tag = "7")]
+    pub sha256: ::prost::alloc::vec::Vec<u8>,
+    /// The licence Google offers the image under, as its list names it.
+    #[prost(string, tag = "8")]
+    pub license: ::prost::alloc::string::String,
+}
+/// Installs Widevine for the caller's Android. The service answers at once: Done when it takes
+/// an APEX with this description, or an error. After Done the client sends the APEX, exactly
+/// as the image holds it, package.size bytes, in ApkChunk frames, and the service answers the
+/// same request id once more: Widevine once the APEX is on the caller's add-on disk, or an
+/// error. The connection then ends. Android need not run: the module is used from its next
+/// start.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct InstallWidevine {
+    #[prost(message, optional, tag = "1")]
+    pub package: ::core::option::Option<WidevinePackage>,
+}
+/// Asks where Widevine stands for the caller. Answered with Widevine.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetWidevine {}
+/// Removes the caller's Widevine module. Answered with Widevine. From Android's next start the
+/// module is gone, and so are the device certificates Widevine kept in /data/vendor/mediadrm.
+/// A running Android keeps the module it booted with until it restarts.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RemoveWidevine {}
+/// Where Widevine stands for the caller.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct Widevine {
+    /// The module the caller installed; absent when there is none.
+    #[prost(message, optional, tag = "1")]
+    pub package: ::core::option::Option<WidevinePackage>,
+    /// The caller's add-on disk holds the module, for Android's next start.
+    #[prost(bool, tag = "2")]
+    pub on_disk: bool,
+    /// The caller's Android runs now: the two fields below hold only then.
+    #[prost(bool, tag = "3")]
+    pub running: bool,
+    /// The running Android was started with Widevine.
+    #[prost(bool, tag = "4")]
+    pub active: bool,
+    /// What is installed differs from what the running Android was started with, so it applies
+    /// once Android starts again.
+    #[prost(bool, tag = "5")]
+    pub restart_needed: bool,
 }
 /// The Google apps package a user installed: LiteGapps' Core build for their Android, which the
 /// service downloaded from LiteGapps' file host.
@@ -2504,7 +3010,7 @@ pub struct Request {
     pub id: u64,
     #[prost(
         oneof = "request::Body",
-        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 25, 26, 22, 23, 24, 27, 29, 30, 31, 32, 33, 34, 28, 35, 36, 39, 38, 45, 70, 71, 37, 120, 121, 200, 72, 73, 74, 80, 81, 41, 42, 43, 44, 300, 301, 302, 303, 90, 310, 320, 321, 322, 330, 331, 332, 400, 401, 402, 340, 341, 350, 470, 471, 472, 473"
+        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 47, 21, 25, 26, 22, 23, 24, 27, 29, 30, 31, 46, 32, 33, 34, 28, 35, 36, 39, 38, 45, 70, 71, 37, 120, 121, 200, 72, 73, 74, 80, 81, 41, 42, 43, 44, 300, 301, 302, 303, 90, 310, 320, 321, 322, 330, 331, 332, 400, 401, 402, 340, 341, 350, 620, 470, 471, 472, 473, 640, 641, 642, 643, 644, 645, 646, 647, 648, 660, 661, 680, 681, 700, 701, 702"
     )]
     pub body: ::core::option::Option<request::Body>,
 }
@@ -2546,6 +3052,8 @@ pub mod request {
         SetSettings(super::SetSettings),
         #[prost(message, tag = "20")]
         SetWindowsShown(super::SetWindowsShown),
+        #[prost(message, tag = "47")]
+        SetTasksShown(super::SetTasksShown),
         #[prost(message, tag = "21")]
         FreezeSession(super::FreezeSession),
         #[prost(message, tag = "25")]
@@ -2566,6 +3074,8 @@ pub mod request {
         AddWidget(super::AddWidget),
         #[prost(message, tag = "31")]
         RemoveWidget(super::RemoveWidget),
+        #[prost(message, tag = "46")]
+        ReconfigureWidget(super::ReconfigureWidget),
         #[prost(message, tag = "32")]
         ListWidgets(super::ListWidgets),
         #[prost(message, tag = "33")]
@@ -2650,6 +3160,8 @@ pub mod request {
         SetAppRoot(super::SetAppRoot),
         #[prost(message, tag = "350")]
         ReportTouchGestures(super::ReportTouchGestures),
+        #[prost(message, tag = "620")]
+        ServeLanguageServices(super::ServeLanguageServices),
         #[prost(message, tag = "470")]
         WatchGeocoding(super::WatchGeocoding),
         #[prost(message, tag = "471")]
@@ -2658,6 +3170,38 @@ pub mod request {
         WatchShares(super::WatchShares),
         #[prost(message, tag = "473")]
         ReportShare(super::ReportShare),
+        #[prost(message, tag = "640")]
+        BackupNow(super::BackupNow),
+        #[prost(message, tag = "641")]
+        GetBackup(super::GetBackup),
+        #[prost(message, tag = "642")]
+        RestoreBackup(super::RestoreBackup),
+        #[prost(message, tag = "643")]
+        GetBackupRecoveryKey(super::GetBackupRecoveryKey),
+        #[prost(message, tag = "644")]
+        SetBackupRecoveryKey(super::SetBackupRecoveryKey),
+        #[prost(message, tag = "645")]
+        WatchPasskeys(super::WatchPasskeys),
+        #[prost(message, tag = "646")]
+        ReportPasskeyCeremony(super::ReportPasskeyCeremony),
+        #[prost(message, tag = "647")]
+        SetBackup(super::SetBackup),
+        #[prost(message, tag = "648")]
+        GetKeyProtection(super::GetKeyProtection),
+        #[prost(message, tag = "660")]
+        WatchAppAudio(super::WatchAppAudio),
+        #[prost(message, tag = "661")]
+        SetAppVolume(super::SetAppVolume),
+        #[prost(message, tag = "680")]
+        LaunchShortcut(super::LaunchShortcut),
+        #[prost(message, tag = "681")]
+        AnswerPinShortcut(super::AnswerPinShortcut),
+        #[prost(message, tag = "700")]
+        InstallWidevine(super::InstallWidevine),
+        #[prost(message, tag = "701")]
+        GetWidevine(super::GetWidevine),
+        #[prost(message, tag = "702")]
+        RemoveWidevine(super::RemoveWidevine),
     }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -2666,7 +3210,7 @@ pub struct Response {
     pub id: u64,
     #[prost(
         oneof = "response::Body",
-        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 80, 17, 18, 300, 90, 320, 321, 330, 332, 400, 401, 340, 341"
+        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 80, 17, 18, 300, 90, 320, 321, 330, 332, 400, 401, 340, 341, 620, 621, 622, 660, 700"
     )]
     pub body: ::core::option::Option<response::Body>,
 }
@@ -2730,6 +3274,16 @@ pub mod response {
         RunAsArmResult(super::RunAsArmResult),
         #[prost(message, tag = "341")]
         AppRootResult(super::AppRootResult),
+        #[prost(message, tag = "620")]
+        BackupReport(super::BackupReport),
+        #[prost(message, tag = "621")]
+        BackupRecoveryKey(super::BackupRecoveryKey),
+        #[prost(message, tag = "622")]
+        KeyProtection(super::KeyProtection),
+        #[prost(message, tag = "660")]
+        AppAudio(super::AppAudio),
+        #[prost(message, tag = "700")]
+        Widevine(super::Widevine),
     }
 }
 /// The one message type on the wire. Each frame carries exactly one.
@@ -2737,7 +3291,7 @@ pub mod response {
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 333, 334, 335, 12, 13, 11, 15, 16, 14, 17, 18, 19, 20, 50, 51, 120, 121, 122, 200, 201, 202, 21, 300, 301, 470, 471"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 333, 334, 335, 12, 13, 11, 15, 16, 14, 17, 18, 19, 20, 50, 51, 120, 121, 122, 200, 201, 202, 21, 300, 301, 620, 470, 471, 640, 641, 660"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -2813,10 +3367,18 @@ pub mod envelope {
         GamepadEvent(super::GamepadEvent),
         #[prost(message, tag = "301")]
         GamepadRumble(super::GamepadRumble),
+        #[prost(message, tag = "620")]
+        LanguageServiceFrame(super::LanguageServiceFrame),
         #[prost(message, tag = "470")]
         GeocodeQuery(super::GeocodeQuery),
         #[prost(message, tag = "471")]
         ShareOffer(super::ShareOffer),
+        #[prost(message, tag = "640")]
+        PasskeyCeremony(super::PasskeyCeremony),
+        #[prost(message, tag = "641")]
+        PasskeyCeremonyWithdrawn(super::PasskeyCeremonyWithdrawn),
+        #[prost(message, tag = "660")]
+        AppAudio(super::AppAudio),
     }
 }
 /// The protocol version. CURRENT goes up when the meaning of existing messages changes.
@@ -3800,6 +4362,81 @@ impl ProgramUpdatePhase {
             "PROGRAM_UPDATE_PHASE_RESTARTING" => Some(Self::Restarting),
             "PROGRAM_UPDATE_PHASE_APPLIED" => Some(Self::Applied),
             "PROGRAM_UPDATE_PHASE_FAILED" => Some(Self::Failed),
+            _ => None,
+        }
+    }
+}
+/// Which passkey ceremony.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum PasskeyOperation {
+    Unspecified = 0,
+    /// Make a new passkey.
+    Create = 1,
+    /// Sign in with a passkey.
+    Get = 2,
+}
+impl PasskeyOperation {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "PASSKEY_OPERATION_UNSPECIFIED",
+            Self::Create => "PASSKEY_OPERATION_CREATE",
+            Self::Get => "PASSKEY_OPERATION_GET",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "PASSKEY_OPERATION_UNSPECIFIED" => Some(Self::Unspecified),
+            "PASSKEY_OPERATION_CREATE" => Some(Self::Create),
+            "PASSKEY_OPERATION_GET" => Some(Self::Get),
+            _ => None,
+        }
+    }
+}
+/// What became of a passkey ceremony on the host.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum PasskeyResult {
+    Unspecified = 0,
+    Ok = 1,
+    /// The person canceled the prompt, or it timed out.
+    Canceled = 2,
+    /// The host has no authenticator, or the person turned passkeys off.
+    Unavailable = 3,
+    /// The authenticator failed; the message says why.
+    Error = 4,
+    /// CREATE: the authenticator already holds an excluded passkey. GET: it holds none allowed.
+    NotAllowed = 5,
+}
+impl PasskeyResult {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Unspecified => "PASSKEY_RESULT_UNSPECIFIED",
+            Self::Ok => "PASSKEY_RESULT_OK",
+            Self::Canceled => "PASSKEY_RESULT_CANCELED",
+            Self::Unavailable => "PASSKEY_RESULT_UNAVAILABLE",
+            Self::Error => "PASSKEY_RESULT_ERROR",
+            Self::NotAllowed => "PASSKEY_RESULT_NOT_ALLOWED",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "PASSKEY_RESULT_UNSPECIFIED" => Some(Self::Unspecified),
+            "PASSKEY_RESULT_OK" => Some(Self::Ok),
+            "PASSKEY_RESULT_CANCELED" => Some(Self::Canceled),
+            "PASSKEY_RESULT_UNAVAILABLE" => Some(Self::Unavailable),
+            "PASSKEY_RESULT_ERROR" => Some(Self::Error),
+            "PASSKEY_RESULT_NOT_ALLOWED" => Some(Self::NotAllowed),
             _ => None,
         }
     }

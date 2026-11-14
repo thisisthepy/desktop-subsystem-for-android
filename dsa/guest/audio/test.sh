@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Builds and runs the audio module's tests on the build machine: the output and input
-# streams' commands and pacing, the shared queues, the bytes waiting for the host's socket,
-# the queue of the host's recorded sound, the input stream's connection to a fake host, and
-# the audio port's messages through the generated codec.
+# Builds and runs the audio module's tests on the build machine: the app outputs and their
+# volume gain, the output and input streams' commands and pacing, the shared queues, the
+# bytes waiting for the host's socket, the queue of the host's recorded sound, the input
+# stream's connection to a fake host, and the audio port's messages through the generated
+# codec.
 #
 #   dsa/guest/audio/test.sh
 #
@@ -29,6 +30,10 @@ mkdir -p "$out"
 "$cxx" "${flags[@]}" "$here/src/output_stream_logic.cpp" "$here/tests/output_stream_logic_test.cpp" \
     -o "$out/output_stream_logic_test"
 "$out/output_stream_logic_test"
+
+"$cxx" "${flags[@]}" "$here/src/app_outputs.cpp" "$here/tests/app_outputs_test.cpp" \
+    -o "$out/app_outputs_test"
+"$out/app_outputs_test"
 
 "$cxx" "${flags[@]}" "$here/src/outbound.cpp" "$here/tests/outbound_test.cpp" -o "$out/outbound_test"
 "$out/outbound_test"

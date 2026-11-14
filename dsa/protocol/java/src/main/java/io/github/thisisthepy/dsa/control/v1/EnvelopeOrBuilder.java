@@ -371,6 +371,17 @@ public interface EnvelopeOrBuilder extends
   io.github.thisisthepy.dsa.control.v1.ScreenState getScreenState();
 
   /**
+   * <code>.dsa.control.v1.TasksShown tasks_shown = 46;</code>
+   * @return Whether the tasksShown field is set.
+   */
+  boolean hasTasksShown();
+  /**
+   * <code>.dsa.control.v1.TasksShown tasks_shown = 46;</code>
+   * @return The tasksShown.
+   */
+  io.github.thisisthepy.dsa.control.v1.TasksShown getTasksShown();
+
+  /**
    * <code>.dsa.control.v1.PowerState power_state = 41;</code>
    * @return Whether the powerState field is set.
    */
@@ -1108,6 +1119,28 @@ public interface EnvelopeOrBuilder extends
   io.github.thisisthepy.dsa.control.v1.AudioInputOpened getAudioInputOpened();
 
   /**
+   * <code>.dsa.control.v1.AppAudio app_audio = 106;</code>
+   * @return Whether the appAudio field is set.
+   */
+  boolean hasAppAudio();
+  /**
+   * <code>.dsa.control.v1.AppAudio app_audio = 106;</code>
+   * @return The appAudio.
+   */
+  io.github.thisisthepy.dsa.control.v1.AppAudio getAppAudio();
+
+  /**
+   * <code>.dsa.control.v1.SetAppVolume set_app_volume = 107;</code>
+   * @return Whether the setAppVolume field is set.
+   */
+  boolean hasSetAppVolume();
+  /**
+   * <code>.dsa.control.v1.SetAppVolume set_app_volume = 107;</code>
+   * @return The setAppVolume.
+   */
+  io.github.thisisthepy.dsa.control.v1.SetAppVolume getSetAppVolume();
+
+  /**
    * <code>.dsa.control.v1.VideoCapabilities video_capabilities = 120;</code>
    * @return Whether the videoCapabilities field is set.
    */
@@ -1669,6 +1702,138 @@ public interface EnvelopeOrBuilder extends
   io.github.thisisthepy.dsa.control.v1.NativeLibraryCrash getNativeLibraryCrash();
 
   /**
+   * <code>.dsa.control.v1.ListSpeechVoices list_speech_voices = 620;</code>
+   * @return Whether the listSpeechVoices field is set.
+   */
+  boolean hasListSpeechVoices();
+  /**
+   * <code>.dsa.control.v1.ListSpeechVoices list_speech_voices = 620;</code>
+   * @return The listSpeechVoices.
+   */
+  io.github.thisisthepy.dsa.control.v1.ListSpeechVoices getListSpeechVoices();
+
+  /**
+   * <code>.dsa.control.v1.SpeechVoices speech_voices = 621;</code>
+   * @return Whether the speechVoices field is set.
+   */
+  boolean hasSpeechVoices();
+  /**
+   * <code>.dsa.control.v1.SpeechVoices speech_voices = 621;</code>
+   * @return The speechVoices.
+   */
+  io.github.thisisthepy.dsa.control.v1.SpeechVoices getSpeechVoices();
+
+  /**
+   * <code>.dsa.control.v1.SpeakText speak_text = 622;</code>
+   * @return Whether the speakText field is set.
+   */
+  boolean hasSpeakText();
+  /**
+   * <code>.dsa.control.v1.SpeakText speak_text = 622;</code>
+   * @return The speakText.
+   */
+  io.github.thisisthepy.dsa.control.v1.SpeakText getSpeakText();
+
+  /**
+   * <code>.dsa.control.v1.SpeechAudio speech_audio = 623;</code>
+   * @return Whether the speechAudio field is set.
+   */
+  boolean hasSpeechAudio();
+  /**
+   * <code>.dsa.control.v1.SpeechAudio speech_audio = 623;</code>
+   * @return The speechAudio.
+   */
+  io.github.thisisthepy.dsa.control.v1.SpeechAudio getSpeechAudio();
+
+  /**
+   * <code>.dsa.control.v1.SpeechDone speech_done = 624;</code>
+   * @return Whether the speechDone field is set.
+   */
+  boolean hasSpeechDone();
+  /**
+   * <code>.dsa.control.v1.SpeechDone speech_done = 624;</code>
+   * @return The speechDone.
+   */
+  io.github.thisisthepy.dsa.control.v1.SpeechDone getSpeechDone();
+
+  /**
+   * <code>.dsa.control.v1.StopSpeaking stop_speaking = 625;</code>
+   * @return Whether the stopSpeaking field is set.
+   */
+  boolean hasStopSpeaking();
+  /**
+   * <code>.dsa.control.v1.StopSpeaking stop_speaking = 625;</code>
+   * @return The stopSpeaking.
+   */
+  io.github.thisisthepy.dsa.control.v1.StopSpeaking getStopSpeaking();
+
+  /**
+   * <code>.dsa.control.v1.StartRecognition start_recognition = 626;</code>
+   * @return Whether the startRecognition field is set.
+   */
+  boolean hasStartRecognition();
+  /**
+   * <code>.dsa.control.v1.StartRecognition start_recognition = 626;</code>
+   * @return The startRecognition.
+   */
+  io.github.thisisthepy.dsa.control.v1.StartRecognition getStartRecognition();
+
+  /**
+   * <code>.dsa.control.v1.StopRecognition stop_recognition = 627;</code>
+   * @return Whether the stopRecognition field is set.
+   */
+  boolean hasStopRecognition();
+  /**
+   * <code>.dsa.control.v1.StopRecognition stop_recognition = 627;</code>
+   * @return The stopRecognition.
+   */
+  io.github.thisisthepy.dsa.control.v1.StopRecognition getStopRecognition();
+
+  /**
+   * <code>.dsa.control.v1.CancelRecognition cancel_recognition = 628;</code>
+   * @return Whether the cancelRecognition field is set.
+   */
+  boolean hasCancelRecognition();
+  /**
+   * <code>.dsa.control.v1.CancelRecognition cancel_recognition = 628;</code>
+   * @return The cancelRecognition.
+   */
+  io.github.thisisthepy.dsa.control.v1.CancelRecognition getCancelRecognition();
+
+  /**
+   * <code>.dsa.control.v1.RecognitionEvent recognition_event = 629;</code>
+   * @return Whether the recognitionEvent field is set.
+   */
+  boolean hasRecognitionEvent();
+  /**
+   * <code>.dsa.control.v1.RecognitionEvent recognition_event = 629;</code>
+   * @return The recognitionEvent.
+   */
+  io.github.thisisthepy.dsa.control.v1.RecognitionEvent getRecognitionEvent();
+
+  /**
+   * <code>.dsa.control.v1.CheckSpelling check_spelling = 630;</code>
+   * @return Whether the checkSpelling field is set.
+   */
+  boolean hasCheckSpelling();
+  /**
+   * <code>.dsa.control.v1.CheckSpelling check_spelling = 630;</code>
+   * @return The checkSpelling.
+   */
+  io.github.thisisthepy.dsa.control.v1.CheckSpelling getCheckSpelling();
+
+  /**
+   * <code>.dsa.control.v1.SpellingResult spelling_result = 631;</code>
+   * @return Whether the spellingResult field is set.
+   */
+  boolean hasSpellingResult();
+  /**
+   * <code>.dsa.control.v1.SpellingResult spelling_result = 631;</code>
+   * @return The spellingResult.
+   */
+  io.github.thisisthepy.dsa.control.v1.SpellingResult getSpellingResult();
+
+  /**
    * <code>.dsa.control.v1.GeocodeRequest geocode_request = 470;</code>
    * @return Whether the geocodeRequest field is set.
    */
@@ -1711,6 +1876,292 @@ public interface EnvelopeOrBuilder extends
    * @return The shareResult.
    */
   io.github.thisisthepy.dsa.control.v1.ShareResult getShareResult();
+
+  /**
+   * <code>.dsa.control.v1.BackupUpload backup_upload = 640;</code>
+   * @return Whether the backupUpload field is set.
+   */
+  boolean hasBackupUpload();
+  /**
+   * <code>.dsa.control.v1.BackupUpload backup_upload = 640;</code>
+   * @return The backupUpload.
+   */
+  io.github.thisisthepy.dsa.control.v1.BackupUpload getBackupUpload();
+
+  /**
+   * <code>.dsa.control.v1.BackupCommit backup_commit = 641;</code>
+   * @return Whether the backupCommit field is set.
+   */
+  boolean hasBackupCommit();
+  /**
+   * <code>.dsa.control.v1.BackupCommit backup_commit = 641;</code>
+   * @return The backupCommit.
+   */
+  io.github.thisisthepy.dsa.control.v1.BackupCommit getBackupCommit();
+
+  /**
+   * <code>.dsa.control.v1.BackupDiscard backup_discard = 642;</code>
+   * @return Whether the backupDiscard field is set.
+   */
+  boolean hasBackupDiscard();
+  /**
+   * <code>.dsa.control.v1.BackupDiscard backup_discard = 642;</code>
+   * @return The backupDiscard.
+   */
+  io.github.thisisthepy.dsa.control.v1.BackupDiscard getBackupDiscard();
+
+  /**
+   * <code>.dsa.control.v1.BackupClear backup_clear = 643;</code>
+   * @return Whether the backupClear field is set.
+   */
+  boolean hasBackupClear();
+  /**
+   * <code>.dsa.control.v1.BackupClear backup_clear = 643;</code>
+   * @return The backupClear.
+   */
+  io.github.thisisthepy.dsa.control.v1.BackupClear getBackupClear();
+
+  /**
+   * <code>.dsa.control.v1.BackupAnswer backup_answer = 644;</code>
+   * @return Whether the backupAnswer field is set.
+   */
+  boolean hasBackupAnswer();
+  /**
+   * <code>.dsa.control.v1.BackupAnswer backup_answer = 644;</code>
+   * @return The backupAnswer.
+   */
+  io.github.thisisthepy.dsa.control.v1.BackupAnswer getBackupAnswer();
+
+  /**
+   * <code>.dsa.control.v1.BackupQuery backup_query = 645;</code>
+   * @return Whether the backupQuery field is set.
+   */
+  boolean hasBackupQuery();
+  /**
+   * <code>.dsa.control.v1.BackupQuery backup_query = 645;</code>
+   * @return The backupQuery.
+   */
+  io.github.thisisthepy.dsa.control.v1.BackupQuery getBackupQuery();
+
+  /**
+   * <code>.dsa.control.v1.BackupContents backup_contents = 646;</code>
+   * @return Whether the backupContents field is set.
+   */
+  boolean hasBackupContents();
+  /**
+   * <code>.dsa.control.v1.BackupContents backup_contents = 646;</code>
+   * @return The backupContents.
+   */
+  io.github.thisisthepy.dsa.control.v1.BackupContents getBackupContents();
+
+  /**
+   * <code>.dsa.control.v1.BackupFetch backup_fetch = 647;</code>
+   * @return Whether the backupFetch field is set.
+   */
+  boolean hasBackupFetch();
+  /**
+   * <code>.dsa.control.v1.BackupFetch backup_fetch = 647;</code>
+   * @return The backupFetch.
+   */
+  io.github.thisisthepy.dsa.control.v1.BackupFetch getBackupFetch();
+
+  /**
+   * <code>.dsa.control.v1.BackupFetchData backup_fetch_data = 648;</code>
+   * @return Whether the backupFetchData field is set.
+   */
+  boolean hasBackupFetchData();
+  /**
+   * <code>.dsa.control.v1.BackupFetchData backup_fetch_data = 648;</code>
+   * @return The backupFetchData.
+   */
+  io.github.thisisthepy.dsa.control.v1.BackupFetchData getBackupFetchData();
+
+  /**
+   * <code>.dsa.control.v1.BackupRun backup_run = 649;</code>
+   * @return Whether the backupRun field is set.
+   */
+  boolean hasBackupRun();
+  /**
+   * <code>.dsa.control.v1.BackupRun backup_run = 649;</code>
+   * @return The backupRun.
+   */
+  io.github.thisisthepy.dsa.control.v1.BackupRun getBackupRun();
+
+  /**
+   * <code>.dsa.control.v1.BackupRestore backup_restore = 650;</code>
+   * @return Whether the backupRestore field is set.
+   */
+  boolean hasBackupRestore();
+  /**
+   * <code>.dsa.control.v1.BackupRestore backup_restore = 650;</code>
+   * @return The backupRestore.
+   */
+  io.github.thisisthepy.dsa.control.v1.BackupRestore getBackupRestore();
+
+  /**
+   * <code>.dsa.control.v1.BackupRunResult backup_run_result = 651;</code>
+   * @return Whether the backupRunResult field is set.
+   */
+  boolean hasBackupRunResult();
+  /**
+   * <code>.dsa.control.v1.BackupRunResult backup_run_result = 651;</code>
+   * @return The backupRunResult.
+   */
+  io.github.thisisthepy.dsa.control.v1.BackupRunResult getBackupRunResult();
+
+  /**
+   * <code>.dsa.control.v1.PasskeyRequest passkey_request = 652;</code>
+   * @return Whether the passkeyRequest field is set.
+   */
+  boolean hasPasskeyRequest();
+  /**
+   * <code>.dsa.control.v1.PasskeyRequest passkey_request = 652;</code>
+   * @return The passkeyRequest.
+   */
+  io.github.thisisthepy.dsa.control.v1.PasskeyRequest getPasskeyRequest();
+
+  /**
+   * <code>.dsa.control.v1.PasskeyResponse passkey_response = 653;</code>
+   * @return Whether the passkeyResponse field is set.
+   */
+  boolean hasPasskeyResponse();
+  /**
+   * <code>.dsa.control.v1.PasskeyResponse passkey_response = 653;</code>
+   * @return The passkeyResponse.
+   */
+  io.github.thisisthepy.dsa.control.v1.PasskeyResponse getPasskeyResponse();
+
+  /**
+   * <code>.dsa.control.v1.KeyMintRootKeyRequest keymint_root_key_request = 654;</code>
+   * @return Whether the keymintRootKeyRequest field is set.
+   */
+  boolean hasKeymintRootKeyRequest();
+  /**
+   * <code>.dsa.control.v1.KeyMintRootKeyRequest keymint_root_key_request = 654;</code>
+   * @return The keymintRootKeyRequest.
+   */
+  io.github.thisisthepy.dsa.control.v1.KeyMintRootKeyRequest getKeymintRootKeyRequest();
+
+  /**
+   * <code>.dsa.control.v1.KeyMintRootKey keymint_root_key = 655;</code>
+   * @return Whether the keymintRootKey field is set.
+   */
+  boolean hasKeymintRootKey();
+  /**
+   * <code>.dsa.control.v1.KeyMintRootKey keymint_root_key = 655;</code>
+   * @return The keymintRootKey.
+   */
+  io.github.thisisthepy.dsa.control.v1.KeyMintRootKey getKeymintRootKey();
+
+  /**
+   * <code>.dsa.control.v1.BackupSetting backup_setting = 656;</code>
+   * @return Whether the backupSetting field is set.
+   */
+  boolean hasBackupSetting();
+  /**
+   * <code>.dsa.control.v1.BackupSetting backup_setting = 656;</code>
+   * @return The backupSetting.
+   */
+  io.github.thisisthepy.dsa.control.v1.BackupSetting getBackupSetting();
+
+  /**
+   * <code>.dsa.control.v1.ReconfigureWidget reconfigure_widget = 657;</code>
+   * @return Whether the reconfigureWidget field is set.
+   */
+  boolean hasReconfigureWidget();
+  /**
+   * <code>.dsa.control.v1.ReconfigureWidget reconfigure_widget = 657;</code>
+   * @return The reconfigureWidget.
+   */
+  io.github.thisisthepy.dsa.control.v1.ReconfigureWidget getReconfigureWidget();
+
+  /**
+   * <code>.dsa.control.v1.WidgetReconfigured widget_reconfigured = 658;</code>
+   * @return Whether the widgetReconfigured field is set.
+   */
+  boolean hasWidgetReconfigured();
+  /**
+   * <code>.dsa.control.v1.WidgetReconfigured widget_reconfigured = 658;</code>
+   * @return The widgetReconfigured.
+   */
+  io.github.thisisthepy.dsa.control.v1.WidgetReconfigured getWidgetReconfigured();
+
+  /**
+   * <code>.dsa.control.v1.AppShortcuts app_shortcuts = 680;</code>
+   * @return Whether the appShortcuts field is set.
+   */
+  boolean hasAppShortcuts();
+  /**
+   * <code>.dsa.control.v1.AppShortcuts app_shortcuts = 680;</code>
+   * @return The appShortcuts.
+   */
+  io.github.thisisthepy.dsa.control.v1.AppShortcuts getAppShortcuts();
+
+  /**
+   * <code>.dsa.control.v1.LaunchShortcut launch_shortcut = 681;</code>
+   * @return Whether the launchShortcut field is set.
+   */
+  boolean hasLaunchShortcut();
+  /**
+   * <code>.dsa.control.v1.LaunchShortcut launch_shortcut = 681;</code>
+   * @return The launchShortcut.
+   */
+  io.github.thisisthepy.dsa.control.v1.LaunchShortcut getLaunchShortcut();
+
+  /**
+   * <code>.dsa.control.v1.PinShortcutRequest pin_shortcut_request = 682;</code>
+   * @return Whether the pinShortcutRequest field is set.
+   */
+  boolean hasPinShortcutRequest();
+  /**
+   * <code>.dsa.control.v1.PinShortcutRequest pin_shortcut_request = 682;</code>
+   * @return The pinShortcutRequest.
+   */
+  io.github.thisisthepy.dsa.control.v1.PinShortcutRequest getPinShortcutRequest();
+
+  /**
+   * <code>.dsa.control.v1.PinShortcutAnswer pin_shortcut_answer = 683;</code>
+   * @return Whether the pinShortcutAnswer field is set.
+   */
+  boolean hasPinShortcutAnswer();
+  /**
+   * <code>.dsa.control.v1.PinShortcutAnswer pin_shortcut_answer = 683;</code>
+   * @return The pinShortcutAnswer.
+   */
+  io.github.thisisthepy.dsa.control.v1.PinShortcutAnswer getPinShortcutAnswer();
+
+  /**
+   * <code>.dsa.control.v1.HostCertificates host_certificates = 684;</code>
+   * @return Whether the hostCertificates field is set.
+   */
+  boolean hasHostCertificates();
+  /**
+   * <code>.dsa.control.v1.HostCertificates host_certificates = 684;</code>
+   * @return The hostCertificates.
+   */
+  io.github.thisisthepy.dsa.control.v1.HostCertificates getHostCertificates();
+
+  /**
+   * <code>.dsa.control.v1.DnsQuery dns_query = 690;</code>
+   * @return Whether the dnsQuery field is set.
+   */
+  boolean hasDnsQuery();
+  /**
+   * <code>.dsa.control.v1.DnsQuery dns_query = 690;</code>
+   * @return The dnsQuery.
+   */
+  io.github.thisisthepy.dsa.control.v1.DnsQuery getDnsQuery();
+
+  /**
+   * <code>.dsa.control.v1.DnsAnswer dns_answer = 691;</code>
+   * @return Whether the dnsAnswer field is set.
+   */
+  boolean hasDnsAnswer();
+  /**
+   * <code>.dsa.control.v1.DnsAnswer dns_answer = 691;</code>
+   * @return The dnsAnswer.
+   */
+  io.github.thisisthepy.dsa.control.v1.DnsAnswer getDnsAnswer();
 
   public io.github.thisisthepy.dsa.control.v1.Envelope.BodyCase getBodyCase();
 }

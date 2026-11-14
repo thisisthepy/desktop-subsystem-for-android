@@ -206,7 +206,7 @@ pub fn memory(ctx: &Shared) -> gtk::Widget {
         let (ctx, page, current_limit) = (ctx.clone(), page.clone(), current_limit.clone());
         Combo::new(
             &tr("Memory limit"),
-            &tr("The most memory Android may grow to. Android takes memory only as it needs it and returns it at once when it no longer does. Automatic sets no fixed limit: Android can grow up to this computer's memory less what Linux keeps. Takes effect the next time Android starts."),
+            &tr("The most memory Android may grow to. Android takes only what it needs and returns the rest at once.\nAutomatic sets no fixed limit: up to this computer's memory less what Linux keeps.\nTakes effect the next time Android starts."),
             move |index| {
                 let choices = view::memory_limit_choices(current_limit.get());
                 let Some((_, mb)) = choices.get(index as usize).cloned() else {
@@ -246,7 +246,7 @@ pub fn memory(ctx: &Shared) -> gtk::Widget {
                     kernel_rows.clear();
                     process_rows.clear();
                     let Ok(memory) = r else { return };
-                    total_label.set_label(&view::size_kb(memory.host_total_kb));
+                    total_label.set_label(&view::size_kb(view::host_own_kb(&memory)));
                     vm_label.set_label(
                         &match (view::vm_size_kb(&memory), memory.vm_beyond_guest_kb) {
                             (Some(vm), Some(beyond)) => trf(
@@ -350,7 +350,7 @@ pub fn display(ctx: &Shared) -> gtk::Widget {
         let (ctx, page, setting) = (ctx.clone(), page.clone(), setting.clone());
         Combo::new(
             &tr("Render GPU"),
-            &tr("The GPU that draws Android apps. By default it is the one that drives the primary monitor, so frames never cross between GPUs and a laptop's discrete GPU can sleep."),
+            &tr("The GPU that draws Android apps.\nThe default, the primary monitor's GPU, keeps frames on one GPU and lets a laptop's discrete GPU sleep."),
             move |index| {
                 let choices = view::render_gpu_choices();
                 let value = match choices.get(index as usize) {
@@ -473,7 +473,7 @@ fn android_groups(ctx: &Shared, page: &Rc<Page>, image: &adw::PreferencesGroup) 
         let (ctx, page) = (ctx.clone(), page.clone());
         Switch::new(
             &tr("Restart Android into updates by itself"),
-            &tr("On by default. With no app window open, Android restarts into a downloaded update at once. With windows open, DSA asks first, or waits until you close them. Off, an update is used the next time you start Android."),
+            &tr("On by default. With no app window open, Android restarts into a downloaded update at once.\nWith windows open, DSA asks first or waits until you close them.\nOff, an update is used the next time you start Android."),
             move |on| {
                 let page = page.clone();
                 request(
@@ -504,7 +504,7 @@ fn android_groups(ctx: &Shared, page: &Rc<Page>, image: &adw::PreferencesGroup) 
 
     let choose = group(
         &tr("Android version"),
-        Some(&tr("Every user of this computer runs the same Android version, so changing it needs an administrator. Security updates for the chosen version keep coming. When a version stops being supported, DSA moves to the next one and keeps your apps.")),
+        Some(&tr("Every user of this computer runs the same Android version, so changing it needs an administrator.\nThe chosen version keeps getting security updates.\nWhen its support ends, DSA moves to the next version and keeps your apps.")),
     );
     let info: Rc<RefCell<Option<AndroidVersion>>> = Rc::default();
     let picked = Rc::new(std::cell::Cell::new(0u32));
@@ -600,7 +600,7 @@ fn android_groups(ctx: &Shared, page: &Rc<Page>, image: &adw::PreferencesGroup) 
                 &ctx,
                 &tr("Restart Android now?"),
                 &trf(
-                    "Android restarts into Android {0}. Its app windows close; open the apps again once it has started.",
+                    "Android restarts into Android {0}.\n\nIts app windows close. Open the apps again once it has started.",
                     &[version.as_str()],
                 ),
                 &tr("Restart now"),
@@ -640,7 +640,7 @@ fn android_groups(ctx: &Shared, page: &Rc<Page>, image: &adw::PreferencesGroup) 
                     &ctx,
                     &tr("Move to a newer Android?"),
                     &trf(
-                        "Android {0} is downloaded and used the next time Android starts. Your apps and their data move along. Moving back later erases the data.",
+                        "Android {0} is downloaded and used the next time Android starts.\n\nYour apps and their data move along. Moving back later erases the data.",
                         &[&choice.major.to_string()],
                     ),
                     &tr("Change"),
@@ -651,7 +651,7 @@ fn android_groups(ctx: &Shared, page: &Rc<Page>, image: &adw::PreferencesGroup) 
                     &ctx,
                     &tr("Erase Android data to move to an older version?"),
                     &trf(
-                        "Android {0} is older than the Android {1} that runs now, and Android cannot read data a newer version wrote. Moving erases the Android data of every user of this computer: every app they installed, the accounts they signed in to and the data of every app. Each user's Android then starts as it was first installed. DSA's settings stay. This cannot be undone.",
+                        "Android {0} is older than the Android {1} that runs now. Android cannot read data a newer version wrote.\n\nMoving erases the Android data of every user of this computer:\n• every app they installed\n• the accounts they signed in to\n• the data of every app\n\nEach user's Android then starts as it was first installed. DSA's settings stay.\n\nThis cannot be undone.",
                         &[&choice.major.to_string(), &version.major.to_string()],
                     ),
                     &tr("Erase data and change"),
@@ -701,7 +701,7 @@ pub fn updates(ctx: &Shared) -> gtk::Widget {
     let page = Rc::new(Page::new());
     let program = group(
         &tr("DSA"),
-        Some(&tr("New versions of DSA come through the system's package manager and software center, with the computer's other updates. Installing DSA added its signed package repository.")),
+        Some(&tr("New versions of DSA come through the system's package manager and software center, with the other updates.\nInstalling DSA added its signed package repository.")),
     );
     let software = link_row(
         &tr("Open software updates"),
@@ -714,7 +714,7 @@ pub fn updates(ctx: &Shared) -> gtk::Widget {
         let (ctx, page, cell) = (ctx.clone(), page.clone(), channel_switch.clone());
         Switch::new(
             &tr("Get pre-release versions"),
-            &tr("Also install versions that are still being finished, as well as stable releases. Every release before 1.0 is a pre-release. The package manager then reads DSA's pre-release repository. Turning this off never moves DSA back to an older version: it waits for a stable release newer than the one installed."),
+            &tr("Also install versions that are still being finished. Every release before 1.0 is a pre-release.\nThe package manager then reads DSA's pre-release repository.\nTurning this off never moves DSA back: it waits for a stable release newer than the one installed."),
             move |on| {
                 let page = page.clone();
                 let cell = cell.clone();
@@ -759,7 +759,7 @@ pub fn updates(ctx: &Shared) -> gtk::Widget {
         let (ctx, page, cell) = (ctx.clone(), page.clone(), image_switch.clone());
         Switch::new(
             &tr("Update the Android image automatically"),
-            &tr("Download signed security updates and new versions of Android. They apply when Android restarts, as the Android update settings above say."),
+            &tr("Download signed security updates and new versions of Android.\nThey apply when Android restarts, as the Android update settings above say."),
             move |on| {
                 let page = page.clone();
                 let cell = cell.clone();
@@ -907,11 +907,7 @@ fn program_progress(ctx: &Shared, program: &adw::PreferencesGroup) {
 pub fn about(ctx: &Shared) -> gtk::Widget {
     let page = Rc::new(Page::new());
     let product = group("", None);
-    let header = adw::ActionRow::builder()
-        .title("Desktop Subsystem for Android™")
-        .subtitle("Thisisthepy")
-        .use_markup(false)
-        .build();
+    let header = action_row("Desktop Subsystem for Android™", "Thisisthepy");
     header.add_prefix(&{
         let image = gtk::Image::from_icon_name(crate::APP_ID);
         image.set_pixel_size(48);
@@ -953,7 +949,7 @@ pub fn about(ctx: &Shared) -> gtk::Widget {
         "",
         Some(&format!(
             "{}\n{}",
-            tr("Desktop Subsystem for Android is an independent open source project. It is not affiliated with, endorsed by or sponsored by Microsoft or Google."),
+            tr("Desktop Subsystem for Android is an independent open source project.\nIt is not affiliated with, endorsed by or sponsored by Microsoft or Google."),
             "Android is a trademark of Google LLC."
         )),
     );

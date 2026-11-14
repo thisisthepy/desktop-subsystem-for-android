@@ -102,6 +102,57 @@ pub fn remove_start_menu_shortcuts(note: &Path, programs: &Path) -> Result<usize
     Ok(removed)
 }
 
+/// Removes the desktop shortcuts to apps that the window manager and `dsa` made for one user:
+/// the ones its note (`desktop-shortcuts.json` in the user's `%LOCALAPPDATA%\DSA`) names, and
+/// then the note. Only absolute paths to `.lnk` files are removed, so a damaged note cannot
+/// remove anything else. Returns how many shortcuts were removed; a user with no note has none.
+pub fn remove_desktop_shortcuts(note: &Path) -> Result<usize, String> {
+    let text = match std::fs::read_to_string(note) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(error) => return Err(format!("reading {}: {error}", note.display())),
+    };
+    let parsed: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("reading {}: {e}", note.display()))?;
+    let mut paths = Vec::new();
+    for made in parsed
+        .get("apps")
+        .and_then(|apps| apps.as_object())
+        .into_iter()
+        .flat_map(|apps| apps.values())
+    {
+        paths.extend(made.get("app").and_then(|path| path.as_str()));
+        if let Some(shortcuts) = made.get("shortcuts").and_then(|s| s.as_object()) {
+            paths.extend(shortcuts.values().filter_map(|path| path.as_str()));
+        }
+    }
+    let mut removed = 0;
+    for path in paths {
+        let plain = is_absolute_windows_path(path)
+            && path.to_ascii_lowercase().ends_with(".lnk")
+            && !path.ends_with("\\.lnk");
+        if !plain {
+            continue;
+        }
+        match std::fs::remove_file(path) {
+            Ok(()) => removed += 1,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("removing {path}: {error}")),
+        }
+    }
+    std::fs::remove_file(note).map_err(|e| format!("removing {}: {e}", note.display()))?;
+    Ok(removed)
+}
+
+/// Whether `path` is an absolute Windows path (`C:\...` or `\\server\...`), told by its text so
+/// the check is the same on every system the tests run on.
+fn is_absolute_windows_path(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    let drive =
+        bytes.len() > 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'\\';
+    drive || path.starts_with("\\\\")
+}
+
 fn remove_entry(path: &Path) -> Result<(), String> {
     let result = if path.is_dir() {
         std::fs::remove_dir_all(path)
@@ -116,12 +167,15 @@ fn remove_entry(path: &Path) -> Result<(), String> {
 }
 
 /// Removes one user's DSA files: the Start menu shortcuts the window manager made (in
-/// `programs`), then everything in their DSA folder but the Android disk and the image version
-/// recorded with it. The folder itself goes when nothing is left in it. Returns what could not
-/// be removed, to report; the rest is removed either way.
+/// `programs`) and the desktop shortcuts to apps, then everything in their DSA folder but the
+/// Android disk and the image version recorded with it. The folder itself goes when nothing is
+/// left in it. Returns what could not be removed, to report; the rest is removed either way.
 pub fn remove_user_files(root: &UserRoot, programs: &Path) -> Vec<String> {
     let mut problems = Vec::new();
     if let Err(why) = remove_start_menu_shortcuts(&root.start_menu_note(), programs) {
+        problems.push(why);
+    }
+    if let Err(why) = remove_desktop_shortcuts(&root.desktop_shortcuts_note()) {
         problems.push(why);
     }
     if let Ok(entries) = std::fs::read_dir(root.dir()) {
@@ -141,12 +195,18 @@ pub fn remove_user_files(root: &UserRoot, programs: &Path) -> Vec<String> {
 
 /// Removes what the service made in the machine's DSA folder besides the images and the
 /// downloaded setup files (which [`remove_downloaded_images`] and [`remove_downloaded_updates`]
-/// remove): the settings, the logs, the `tmp` folder and the trace switch files of earlier
+/// remove): the settings, the logs, the `tmp` folder, the direct-mapped mode's system disks and
+/// the trace switch files of earlier
 /// releases. A `users` folder, where the first releases kept each user's Android disk, stays,
 /// since a disk that could not be moved into its user's profile is still there. Returns what
 /// could not be removed.
 pub fn remove_machine_files(root: &MachineRoot) -> Vec<String> {
-    let mut paths = vec![root.settings(), root.logs(), root.tmp()];
+    let mut paths = vec![
+        root.settings(),
+        root.logs(),
+        root.tmp(),
+        root.direct_mapped(),
+    ];
     paths.extend(root.old_trace_markers());
     paths
         .iter()

@@ -1,5 +1,5 @@
 {
-  "comment": "The published AOSP build inputs each guest image is made from, pinned by build number and SHA-256, one entry per Android major and guest architecture (x86_64, or arm64 with no 32-bit ARM). Change a build number (and the hashes) to move to a newer build. Each image the release workflow makes gets the next revision no release has (make-image.py --next-revision); revision and the version suffix here are the lowest it uses, and what a local make-image.py run names its image.",
+  "comment": "The published AOSP build inputs each guest image is made from, pinned by build number and SHA-256, one entry per Android major and guest architecture (x86_64, or arm64 with no 32-bit ARM). Change a build number (and the hashes) to move to a newer build. A file with a url is not one of the build's own outputs but a source file at the frameworks/base commit the build was made from (base64 encoded by the source server, so fetch.sh decodes it before it checks the size and SHA-256): services.jar's ART profile, which the image compiles the edited services.jar with. Move its commit with the build. Each image the release workflow makes gets the next revision no release has (make-image.py --next-revision); revision and the version suffix here are the lowest it uses, and what a local make-image.py run names its image.",
   "images": [
     {
       "android_major": 17,
@@ -25,6 +25,20 @@
           "name": "dexpreopt_tools.zip",
           "size": 209169640,
           "sha256": "4d17c4f9524ac0fe8f6819387ce84b40eb24cad21f6bf4850707f697005dd8b7"
+        },
+        "services_profile": {
+          "name": "services-art-profile",
+          "url": "https://android.googlesource.com/platform/frameworks/base/+/94b4c163b7dfe5ce3607f7bb8456f9573f7de57d/services/art-profile?format=TEXT",
+          "encoding": "base64",
+          "size": 856598,
+          "sha256": "5c4f90e53a47d0cb24c7807c1cc5452b8d3ea0c7f8d2e2da145f6263a039018a"
+        },
+        "services_profile_extra": {
+          "name": "services-art-profile-extra",
+          "url": "https://android.googlesource.com/platform/frameworks/base/+/94b4c163b7dfe5ce3607f7bb8456f9573f7de57d/services/art-profile-extra?format=TEXT",
+          "encoding": "base64",
+          "size": 1455,
+          "sha256": "ad31d4596635aacd6ae382888068e766183b3742b2f8d3979600fbc6becd78a2"
         }
       }
     },
@@ -52,6 +66,20 @@
           "name": "dexpreopt_tools.zip",
           "size": 209169640,
           "sha256": "4d17c4f9524ac0fe8f6819387ce84b40eb24cad21f6bf4850707f697005dd8b7"
+        },
+        "services_profile": {
+          "name": "services-art-profile",
+          "url": "https://android.googlesource.com/platform/frameworks/base/+/94b4c163b7dfe5ce3607f7bb8456f9573f7de57d/services/art-profile?format=TEXT",
+          "encoding": "base64",
+          "size": 856598,
+          "sha256": "5c4f90e53a47d0cb24c7807c1cc5452b8d3ea0c7f8d2e2da145f6263a039018a"
+        },
+        "services_profile_extra": {
+          "name": "services-art-profile-extra",
+          "url": "https://android.googlesource.com/platform/frameworks/base/+/94b4c163b7dfe5ce3607f7bb8456f9573f7de57d/services/art-profile-extra?format=TEXT",
+          "encoding": "base64",
+          "size": 1455,
+          "sha256": "ad31d4596635aacd6ae382888068e766183b3742b2f8d3979600fbc6becd78a2"
         }
       }
     },
@@ -79,6 +107,20 @@
           "name": "dexpreopt_tools.zip",
           "size": 216058332,
           "sha256": "1687e9b36e6a22e5af88d99b304e3fa530458db2704d17e16b08f2ef1b4a6140"
+        },
+        "services_profile": {
+          "name": "services-art-profile",
+          "url": "https://android.googlesource.com/platform/frameworks/base/+/45034f0663f960d9ee5fb0a101a4732b71f6e2f4/services/art-profile?format=TEXT",
+          "encoding": "base64",
+          "size": 1030683,
+          "sha256": "2425daf222e5241d67d1ff749c915ad54f9445cc9b64c0669ea09f00ca55fffe"
+        },
+        "services_profile_extra": {
+          "name": "services-art-profile-extra",
+          "url": "https://android.googlesource.com/platform/frameworks/base/+/45034f0663f960d9ee5fb0a101a4732b71f6e2f4/services/art-profile-extra?format=TEXT",
+          "encoding": "base64",
+          "size": 1455,
+          "sha256": "ad31d4596635aacd6ae382888068e766183b3742b2f8d3979600fbc6becd78a2"
         }
       }
     },
@@ -106,6 +148,20 @@
           "name": "dexpreopt_tools.zip",
           "size": 216058332,
           "sha256": "1687e9b36e6a22e5af88d99b304e3fa530458db2704d17e16b08f2ef1b4a6140"
+        },
+        "services_profile": {
+          "name": "services-art-profile",
+          "url": "https://android.googlesource.com/platform/frameworks/base/+/45034f0663f960d9ee5fb0a101a4732b71f6e2f4/services/art-profile?format=TEXT",
+          "encoding": "base64",
+          "size": 1030683,
+          "sha256": "2425daf222e5241d67d1ff749c915ad54f9445cc9b64c0669ea09f00ca55fffe"
+        },
+        "services_profile_extra": {
+          "name": "services-art-profile-extra",
+          "url": "https://android.googlesource.com/platform/frameworks/base/+/45034f0663f960d9ee5fb0a101a4732b71f6e2f4/services/art-profile-extra?format=TEXT",
+          "encoding": "base64",
+          "size": 1455,
+          "sha256": "ad31d4596635aacd6ae382888068e766183b3742b2f8d3979600fbc6becd78a2"
         }
       }
     }

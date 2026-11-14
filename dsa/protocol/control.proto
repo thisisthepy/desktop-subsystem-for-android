@@ -245,7 +245,7 @@ message ResizeTask {
 }
 
 // Host to guest: the task's window is on a monitor of another scale; the task's app draws
-// at `density_dpi` (96 at a scale of 100%). The host sends the matching ResizeTask right
+// at `density_dpi` (130 at a scale of 100%). The host sends the matching ResizeTask right
 // after it, and the agent applies both together, so the app relays out once.
 message SetTaskDensity {
   int32 task_id = 1;
@@ -325,6 +325,11 @@ message InstalledApp {
   // The native libraries the app's APKs on the device hold, base and splits together, by
   // ABI, in ABI order. Empty for an app without native code.
   repeated NativeLibraries native_libraries = 13;
+  // The user ID the app shares with other apps (its manifest's `android:sharedUserId`), such
+  // as "com.example.shared". Apps with the same value run under one Android uid, so the host
+  // treats them as one group wherever only the uid tells them apart, as root elevation does.
+  // Empty for an app with a user ID of its own.
+  string shared_user_id = 14;
 }
 
 // The native libraries of one ABI: the file names under `lib/<abi>/` of an APK, or of an APK
@@ -460,6 +465,68 @@ message UninstallResult {
 // of its own, so no message has to carry every icon at once.
 message InstalledApps {
   repeated string package_names = 1;
+}
+
+// One of an app's launcher shortcuts, as Android's ShortcutManager keeps them: a static one
+// from the app's manifest, a dynamic one the app published, or one pinned at the app's
+// request. The host shows the static and dynamic ones as tasks of the app's jump list (or
+// Dock menu, or desktop entry actions), and a pinned one as a desktop shortcut.
+message AppShortcut {
+  // The shortcut's ID, unique within its app.
+  string id = 1;
+  // The shortcut's name, as a launcher shows it.
+  string short_label = 2;
+  // The longer name a launcher shows when it has room. Empty when the app gave none.
+  string long_label = 3;
+  // The shortcut's icon, as a square PNG image of at most 256 pixels on a side. Empty when
+  // the shortcut has none the agent could draw; the host shows the app's icon then.
+  bytes icon_png = 4;
+  // The shortcut's place among the app's shortcuts, lowest first, as the app ranks them.
+  uint32 rank = 5;
+  // From the app's manifest.
+  bool manifest = 6;
+  // Published by the app while it runs.
+  bool dynamic = 7;
+  // Pinned at the app's request (requestPinShortcut), after the user agreed.
+  bool pinned = 8;
+}
+
+// Guest to host, from the agent: every launcher shortcut of one app, the static and dynamic
+// ones in rank order and then the pinned ones. It replaces what the host had for the app.
+// The agent sends it on each connection for every app InstalledApps names that has any, and
+// again whenever an app's shortcuts change (LauncherApps.Callback.onShortcutsChanged), with
+// an empty list once an app has none left.
+message AppShortcuts {
+  string package_name = 1;
+  repeated AppShortcut shortcuts = 2;
+}
+
+// Host to guest: start one of an app's shortcuts (LauncherApps.startShortcut) as a task in
+// its own window, as a jump list task or a desktop shortcut does. The agent answers with
+// TaskUpdated once the task is there; a shortcut that is gone or turned off starts the app
+// instead.
+message LaunchShortcut {
+  string package_name = 1;
+  string shortcut_id = 2;
+}
+
+// Guest to host, from the agent, which as the guest's default launcher receives the app's
+// requestPinShortcut (LauncherApps.PinItemRequest): an app asks for one of its shortcuts on
+// the desktop. The host asks the user and answers with PinShortcutAnswer of the same
+// `request_id`; on yes it makes a desktop shortcut that starts it.
+message PinShortcutRequest {
+  uint32 request_id = 1;
+  string package_name = 2;
+  // The app's own name, for the question.
+  string app_label = 3;
+  AppShortcut shortcut = 4;
+}
+
+// Host to guest: the user's answer to a PinShortcutRequest. The agent accepts the request
+// when `accepted`, which pins the shortcut in Android, and lets it go otherwise.
+message PinShortcutAnswer {
+  uint32 request_id = 1;
+  bool accepted = 2;
 }
 
 // What a pointer did.
@@ -668,6 +735,15 @@ message ImeSetComposingRegion {
 // sends this on each change after that.
 message ScreenState {
   bool on = 1;
+}
+
+// Host to guest, to the control daemon: the tasks whose window the host shows now, open and
+// not minimized; every other task's window is minimized. Sent after the connection opens and
+// on each change. The daemon keeps less page cache for a minimized task's app than for a shown
+// one, since it draws nothing and reads few files; until it is told, every task counts as
+// shown.
+message TasksShown {
+  repeated int32 task_ids = 1;
 }
 
 // Host to guest: the host computer's power, which the agent makes the guest's battery state
@@ -1327,6 +1403,16 @@ message GuestMemory {
   uint32 google_play_processes = 24;
   uint64 google_play_pss_kb = 25;
   uint64 google_play_swap_pss_kb = 26;
+  // Free page reporting, as the guest's kernel counts it: the free memory marked reported
+  // now, which the host has taken back (mem_free_kb less it is free memory the VM still
+  // holds); the memory reported to the host since boot, whose growth between two reports is
+  // how fast freed memory goes back; and the reported free memory the host took back in again
+  // since boot because a page beside it in the host's fault cluster was used, which the guest
+  // then reported again. All 0 when the guest cannot read them (reported_total_kb is never 0
+  // once reporting runs, since the first pass after boot reports every free page).
+  uint64 free_reported_kb = 27;
+  uint64 reported_total_kb = 28;
+  uint64 refaulted_total_kb = 29;
 }
 
 // From the agent to the guest's control daemon, on each connection to it: the agent has
@@ -1695,6 +1781,10 @@ message VideoPacket {
 // plane then the interleaved chroma plane (NV12), each row `stride` bytes long. `width` and
 // `height` are the visible size; the planes are `stride` by `height` and `stride` by
 // `height / 2` (rounded up) bytes. A frame with `end_of_stream` set carries no picture.
+// A frame with no size and no planes, and without `end_of_stream`, says the packet of
+// `frame_index` gives no picture: the host did not decode it, since it refers to pictures
+// the decoder does not have (it came after a flush or the stream's start and before a key
+// frame).
 message VideoFrame {
   uint64 frame_index = 1;
   int64 timestamp_us = 2;
@@ -1817,6 +1907,10 @@ message WidgetProvider {
   bool needs_configuration = 12;
   // The name of the app that offers the widget, as a launcher shows it. Empty when unknown.
   string app_label = 13;
+  // Whether the widget can be set up again once placed: it has a configuration activity, and
+  // its app says so (the reconfigurable widget feature). The widget's menu then offers its
+  // settings, which ReconfigureWidget opens.
+  bool reconfigurable = 14;
 }
 
 // Guest to host, from the agent: part of the answer to ListWidgetProviders. Each message is
@@ -1864,8 +1958,28 @@ message RemoveWidget {
   int32 widget_id = 1;
 }
 
+// Host to guest: the user chose the settings of a placed widget. The agent runs the widget's
+// configuration activity again for the same widget ID, as AddWidget does for a new one (it
+// shows as the app's task window), and answers with WidgetReconfigured once the user is done.
+// When they finish it, the agent describes the widget again (WidgetUpdated) and draws it anew,
+// so the widget shows what they chose.
+message ReconfigureWidget {
+  uint32 request_id = 1;
+  int32 widget_id = 2;
+}
+
+// Guest to host, from the agent: the answer to ReconfigureWidget. `finished` says the user
+// finished the setup; otherwise they canceled it, or it could not start, and `error` says, in
+// words a person can act on, which. The widget stays placed either way.
+message WidgetReconfigured {
+  uint32 request_id = 1;
+  int32 widget_id = 2;
+  bool finished = 3;
+  string error = 4;
+}
+
 // Host to guest: the size of the widget's host window. The agent draws the widget at `width`
-// by `height` pixels at `density_dpi` (96 at a scale of 100%), and tells the widget's app
+// by `height` pixels at `density_dpi` (130 at a scale of 100%), and tells the widget's app
 // its size in dp, so a widget with layouts for several sizes picks the one that fits.
 message ResizeWidget {
   int32 widget_id = 1;
@@ -2107,6 +2221,43 @@ enum AudioOutputCommand {
 // Guest to host: a change of the stream's state.
 message AudioOutputControl {
   AudioOutputCommand command = 1;
+}
+
+// The volume of the guest's sound is the host's to set, so it is set once. The audio module
+// sends every output at full scale: Android's media volume never makes the sound quieter on
+// its way to the host. Each app with a window gets an output of its own ("app 0", "app 1",
+// ...), and every other sound plays on the shared output ("primary"). The agent says which
+// app each output plays and the volume Android gives that app, and the host plays the output
+// as that app, at that volume, in its own volume mixer. A change the user makes there comes
+// back as SetAppVolume, and becomes the volume Android's apps read.
+
+// One output of the audio module, and the app it plays.
+message AppAudioStream {
+  // The output, as its AudioOutputOpen names it on the audio port ("app 0", "primary").
+  string stream = 1;
+  // The app that plays on it. Empty for the shared output.
+  string package_name = 2;
+  // The app's name as a launcher shows it. Empty for the shared output.
+  string app_label = 3;
+  // The app's volume, from 0 (silent) to 1 (full): Android's media volume index over its
+  // largest index, while the app is the one Android's media volume stands for.
+  float volume = 4;
+  bool muted = 5;
+}
+
+// Guest to host, from the agent: the outputs and the apps they play, the whole list. Sent on
+// each connection and whenever any of it changes.
+message AppAudio {
+  repeated AppAudioStream streams = 1;
+}
+
+// Host to guest: the user set an app's volume or mute on the host. Empty `package_name` is the
+// shared output. The agent keeps it as the app's volume, and makes it Android's media volume
+// while that app is the one it stands for.
+message SetAppVolume {
+  string package_name = 1;
+  float volume = 2;
+  bool muted = 3;
 }
 
 // The guest's log, as logd keeps it in memory. A record's buffer is logd's log ID plus one,
@@ -2387,11 +2538,10 @@ message SystemSettings {
   // The host's accent color as 0xAARRGGBB, which becomes the seed of the guest's dynamic
   // colors. 0 when the host has none.
   fixed32 accent_color = 7;
-  // The guest's font scale (Settings.System.FONT_SCALE), so text in Android apps is the size
-  // of the host's text. Android draws at 96 dpi at a host scale of 100%, where a dp is 0.6 of
-  // a host pixel, and scales text separately from everything else, so this is 160/96 times
-  // the host's text size setting: about 1.667 at a text size of 100%, 2.5 at 150%. 0 leaves
-  // the guest's as it is.
+  // The guest's font scale (Settings.System.FONT_SCALE): the host's text size setting, 1 at
+  // a text size of 100% and 1.5 at 150%. Android draws at 130 dpi at a host scale of 100%,
+  // where a dp is 0.819 of a host pixel, and text follows the same ratio as everything else.
+  // 0 leaves the guest's as it is.
   float font_scale = 8;
 }
 
@@ -2472,6 +2622,499 @@ message GamepadRumble {
   uint32 duration_ms = 4;
 }
 
+// What the host says of a request of the agent's backup transport.
+enum BackupStatus {
+  BACKUP_STATUS_UNSPECIFIED = 0;
+  BACKUP_STATUS_OK = 1;
+  // The host could not store or read it; the message says why.
+  BACKUP_STATUS_ERROR = 2;
+  // The package's data is larger than the host keeps for one app.
+  BACKUP_STATUS_QUOTA_EXCEEDED = 3;
+  // The host keeps no backup now: it has no credential store for the key, or the folder was
+  // made with another key. The message says which, and what to do.
+  BACKUP_STATUS_NOT_AVAILABLE = 4;
+  // The backup holds nothing of that kind for the package.
+  BACKUP_STATUS_NOT_FOUND = 5;
+}
+
+// The kinds of data a package's backup holds.
+enum BackupDataKind {
+  BACKUP_DATA_KIND_UNSPECIFIED = 0;
+  // A key-value backup: records, each a key and its value or its deletion. A record is a
+  // 32-bit big-endian key length, the key in UTF-8, a 32-bit big-endian value length (-1 for
+  // a deleted key) and the value.
+  BACKUP_DATA_KIND_KEY_VALUE = 1;
+  // A full backup: the tar stream Android's backup manager writes for the package.
+  BACKUP_DATA_KIND_FULL = 2;
+  // One APK file of the package, so a restore after a data reset can install the app first.
+  BACKUP_DATA_KIND_APK = 3;
+}
+
+// Guest to host, from the agent's backup transport: one piece of an upload, at most 256 KiB,
+// in order from offset 0. Each piece is answered with BackupAnswer before the next is sent.
+message BackupUpload {
+  // The upload's number, the agent's own, unique while the agent runs.
+  uint64 request_id = 1;
+  uint64 offset = 2;
+  bytes data = 3;
+}
+
+// Guest to host: the upload `request_id` is whole. The host keeps it as the package's data of
+// that kind, encrypted, and answers BackupAnswer. An upload of size 0 needs no BackupUpload.
+message BackupCommit {
+  uint64 request_id = 1;
+  string package = 2;
+  BackupDataKind kind = 3;
+  uint64 size = 4;
+  // KEY_VALUE only: the records change what the host keeps for the package, rather than
+  // replace it.
+  bool incremental = 5;
+  // The package's version code when it was backed up.
+  int64 version_code = 6;
+  // APK only: the file's name in the package's install, such as base.apk or
+  // split_config.en.apk.
+  string apk_name = 7;
+  // APK only: every APK name of the package at this version, so the host drops the files of
+  // an older version that this one no longer has.
+  repeated string apk_names = 8;
+}
+
+// Guest to host: drops the upload or the read `request_id` under way, and keeps nothing of it.
+message BackupDiscard {
+  uint64 request_id = 1;
+}
+
+// Guest to host: removes everything the backup holds for a package (the backup manager's
+// clearBackupData). Answered with BackupAnswer.
+message BackupClear {
+  uint64 request_id = 1;
+  string package = 2;
+}
+
+// Host to guest: the answer to BackupUpload, BackupCommit and BackupClear.
+message BackupAnswer {
+  uint64 request_id = 1;
+  BackupStatus status = 2;
+  // Why it failed, in words a person can act on; empty when it did not.
+  string message = 3;
+  // BackupCommit of KEY_VALUE or FULL only: the host holds no APKs of the package at this
+  // version, so the agent sends them.
+  bool apks_wanted = 4;
+}
+
+// Guest to host: what the backup holds, for a restore. Answered with BackupContents.
+message BackupQuery {
+  uint64 request_id = 1;
+}
+
+// One package in the backup.
+message BackupPackage {
+  string package = 1;
+  bool key_value = 2;
+  bool full = 3;
+  int64 version_code = 4;
+  // The APK files the backup holds for the package at version_code; empty when it holds none.
+  repeated string apk_names = 5;
+  // When its data was last backed up, in milliseconds since the Unix epoch.
+  int64 backed_up_unix_ms = 6;
+  // The bytes its data and APKs take, before encryption.
+  uint64 size = 7;
+}
+
+// Host to guest: what the backup holds. There is one restore set, the user's backup folder.
+message BackupContents {
+  uint64 request_id = 1;
+  BackupStatus status = 2;
+  string message = 3;
+  // The restore set's token: the same for the folder wherever it is moved.
+  uint64 token = 4;
+  // The restore set's name, as Android shows it: the computer it was made on.
+  string name = 5;
+  repeated BackupPackage packages = 6;
+}
+
+// Guest to host: the next piece of a package's data, from `offset`. Answered with
+// BackupFetchData. The agent asks for each piece after the last one came, so the host never
+// sends faster than the agent reads.
+message BackupFetch {
+  uint64 request_id = 1;
+  uint64 token = 2;
+  string package = 3;
+  BackupDataKind kind = 4;
+  // APK only: which file.
+  string apk_name = 5;
+  uint64 offset = 6;
+}
+
+// Host to guest: one piece of the data asked for, at most 256 KiB, or why there is none.
+message BackupFetchData {
+  uint64 request_id = 1;
+  BackupStatus status = 2;
+  string message = 3;
+  // The whole data's size.
+  uint64 size = 4;
+  uint64 offset = 5;
+  bytes data = 6;
+  // This piece reaches the end of the data.
+  bool last = 7;
+}
+
+// Host to guest, to the agent: back up every app now, as `bmgr backupnow --all` does.
+// Answered with BackupRunResult once the backup manager has finished.
+message BackupRun {
+  uint64 request_id = 1;
+}
+
+// Host to guest, to the agent: restore the packages from the restore set `token`. The host
+// has installed the apps the backup holds APKs of first. Answered with BackupRunResult.
+message BackupRestore {
+  uint64 request_id = 1;
+  uint64 token = 2;
+  repeated string packages = 3;
+}
+
+// Guest to host: how a BackupRun or a BackupRestore ended.
+message BackupRunResult {
+  uint64 request_id = 1;
+  BackupStatus status = 2;
+  string message = 3;
+  // The packages backed up or restored, and those that failed.
+  uint32 succeeded = 4;
+  uint32 failed = 5;
+}
+
+// Host to guest, to the agent: whether the user turned backup to the host on. Sent each time
+// the agent connects and whenever the user changes it. Until the agent hears it is on, it keeps
+// Android's backup manager from backing up to the host (backup off, automatic restore off),
+// so a user who never turned backup on has nothing backed up and nothing scheduled.
+message BackupSetting {
+  bool enabled = 1;
+}
+
+// Host to guest, to the control daemon: the root certificates a user or an administrator added
+// to the host's trust store (the host leaves out those its operating system ships), which
+// Android trusts as system certificates beside its own. Internet filters and company proxies
+// that inspect HTTPS install such a root on the computer, and apps reach the internet there only
+// if Android trusts it too. The daemon adds them to Android's system certificate folders without
+// a restart and takes away those it added before that are no longer named; Android's own
+// certificates are never touched. With `enabled` false it takes away every one it added. The
+// agent hears it too, once the folders are in step, and has every running app forget the trust
+// anchors it has looked up, so a root taken away stops being trusted at once. The host sends
+// it each time the daemon connects, again when the agent connects, and whenever the host's
+// store or the user's setting changes. A guest boots trusting none of them.
+message HostCertificates {
+  bool enabled = 1;
+  // Each certificate, DER-encoded X.509. Empty while `enabled` is false.
+  repeated bytes certificates = 2;
+}
+
+// Which passkey ceremony an app asks for.
+enum PasskeyOperation {
+  PASSKEY_OPERATION_UNSPECIFIED = 0;
+  // Make a new passkey (navigator.credentials.create).
+  PASSKEY_OPERATION_CREATE = 1;
+  // Sign in with a passkey (navigator.credentials.get).
+  PASSKEY_OPERATION_GET = 2;
+}
+
+// How a passkey request ended.
+enum PasskeyStatus {
+  PASSKEY_STATUS_UNSPECIFIED = 0;
+  PASSKEY_STATUS_OK = 1;
+  // The app may not use passkeys of that relying party: its signature is not in the
+  // relying party's Digital Asset Links, or the origin a browser gave does not belong to it.
+  PASSKEY_STATUS_REJECTED = 2;
+  // The person canceled the host's prompt.
+  PASSKEY_STATUS_CANCELED = 3;
+  // This computer has no passkeys, or they are turned off.
+  PASSKEY_STATUS_UNAVAILABLE = 4;
+  // The host's authenticator failed; the message says why.
+  PASSKEY_STATUS_ERROR = 5;
+  // The authenticator holds no passkey the request allows, or already holds one it excludes.
+  PASSKEY_STATUS_NOT_ALLOWED = 6;
+}
+
+// Guest to host, from the agent's credential provider: an app asks to make or use a passkey.
+// What names the app comes from Android's credential manager (CallingAppInfo), never from the
+// app itself. Answered with PasskeyResponse.
+message PasskeyRequest {
+  uint64 request_id = 1;
+  PasskeyOperation operation = 2;
+  // The app's request: WebAuthn's PublicKeyCredentialCreationOptionsJSON or
+  // PublicKeyCredentialRequestOptionsJSON, as Android's credential manager passes it.
+  string request_json = 3;
+  // The calling app's package.
+  string package = 4;
+  // The SHA-256 of each certificate the calling app is signed with now (its signing
+  // certificate, or every signer of an app with several).
+  repeated bytes signer_sha256 = 5;
+  // The web origin the credential manager reports, only for a browser the agent recognises
+  // by its package and signing certificate (a privileged browser, or one the image
+  // carries); empty for any other app, whose request is checked as an app's.
+  string origin = 6;
+  // The hash of the client data a browser made itself; empty when it gave none.
+  bytes client_data_hash = 7;
+  // The app's name, for the host's prompt.
+  string app_label = 8;
+}
+
+// Host to guest: what became of a PasskeyRequest.
+message PasskeyResponse {
+  uint64 request_id = 1;
+  PasskeyStatus status = 2;
+  // OK only: WebAuthn's RegistrationResponseJSON or AuthenticationResponseJSON.
+  string response_json = 3;
+  // Why it did not succeed, in words a person can act on.
+  string message = 4;
+}
+
+// Guest to host, on the KeyMint port, from the control daemon after the handshake: the root
+// key the guest's KeyMint wraps its keys with. Asked once each boot, before Android's storage
+// is unlocked. Answered with KeyMintRootKey.
+message KeyMintRootKeyRequest {}
+
+// Host to guest: the KeyMint root key, which the host keeps sealed by the user's credential
+// store (and the computer's TPM where it has one), so the guest's disk alone never holds it.
+message KeyMintRootKey {
+  // 32 bytes; empty when the host has no root key to give, and KeyMint then keeps the keys
+  // it made without one.
+  bytes key = 1;
+  // Why it is empty.
+  string message = 2;
+}
+
+// Guest to host, on the DNS port, from the control daemon after the handshake: one DNS query
+// that a program in the guest made, as a whole DNS message (RFC 1035) with one question. The
+// host answers it with its operating system's resolver, so the host's hosts file, its name
+// resolution policy, a VPN's split DNS and a DNS filter apply to Android's apps as they do to
+// the host's own programs. Answered with the DnsAnswer that carries the same id; the queries
+// on one connection are answered in any order.
+message DnsQuery {
+  // The daemon's number for this query, unique among its unanswered queries.
+  uint32 id = 1;
+  // The DNS message as the program sent it.
+  bytes message = 2;
+  // Whether the program asked over TCP, so the answer may be as large as a DNS message can
+  // be. Over UDP, an answer larger than the program's buffer comes truncated (TC set), and the
+  // program asks again over TCP.
+  bool tcp = 3;
+}
+
+// Host to guest, on the DNS port: the answer to the DnsQuery with the same id, a whole DNS
+// message with the query's ID and question. When the host's resolver fails or takes too long
+// the answer says SERVFAIL, so a program in the guest never waits for an answer that does not
+// come.
+message DnsAnswer {
+  uint32 id = 1;
+  bytes message = 2;
+}
+
+// Speech and spelling from the host. The agent's text-to-speech engine, speech recognition
+// service and spell checker answer apps with the host's own: the host's voices speak, the
+// host's speech recognition listens, and the host's spell checker checks. The guest keeps no
+// engine or dictionary of its own. Each request carries the agent's number for it, unique
+// among the agent's requests of its kind while its connection lasts, and every answer names
+// it. A host that cannot serve a request answers it at once with the failure, so an app never
+// waits for nothing.
+
+// Guest to host: asks for the host's voices. The host answers with SpeechVoices.
+message ListSpeechVoices {}
+
+// One of the host's voices.
+message SpeechVoice {
+  // The host's name for the voice, which SpeakText gives back. Opaque to the guest.
+  string id = 1;
+  // The voice's name as the host shows it, such as "Microsoft Heami".
+  string name = 2;
+  // The voice's language as a BCP 47 tag, such as "ko-KR".
+  string language_tag = 3;
+  // A neural voice that sounds natural, such as Windows' natural voices.
+  bool natural = 4;
+  // The voice needs the network to speak.
+  bool needs_network = 5;
+}
+
+// Host to guest: the host's voices, in answer to ListSpeechVoices, and again whenever the
+// host's speech service comes or goes. At most 512.
+message SpeechVoices {
+  repeated SpeechVoice voices = 1;
+  // The voice the host speaks with when none is named; empty when it has none.
+  string default_voice_id = 2;
+  // Whether the host can speak at all. False when it has no speech synthesis, or no session
+  // of the user's is open to run it in.
+  bool available = 3;
+}
+
+// Guest to host: speaks `text`. The host answers with SpeechAudio pieces, then SpeechDone.
+message SpeakText {
+  uint32 request_id = 1;
+  // At most 4000 characters, as Android's TextToSpeech takes.
+  string text = 2;
+  // The voice to speak with, from SpeechVoices; empty for the host's voice for the language.
+  string voice_id = 3;
+  // The language to speak in as a BCP 47 tag; empty for the host's own.
+  string language_tag = 4;
+  // How fast and how high, where 1 is the voice's own. The host keeps them in the range its
+  // voices can take.
+  float rate = 5;
+  float pitch = 6;
+}
+
+// Host to guest: a piece of the spoken text's sound, as 16-bit signed little-endian PCM,
+// channels interleaved, at most 64 KiB. Every piece of a request has the same format. A host
+// whose speech service plays the sound itself and gives programs none sends no piece, only
+// SpeechDone once the sound has played.
+message SpeechAudio {
+  uint32 request_id = 1;
+  uint32 sample_rate_hz = 2;
+  uint32 channel_count = 3;
+  bytes pcm = 4;
+}
+
+// How a SpeakText ended.
+enum SpeechOutcome {
+  SPEECH_OUTCOME_UNSPECIFIED = 0;
+  // Every piece of the sound was sent.
+  SPEECH_OUTCOME_DONE = 1;
+  // StopSpeaking stopped it.
+  SPEECH_OUTCOME_STOPPED = 2;
+  // The host has no voice for the language, or no speech synthesis.
+  SPEECH_OUTCOME_UNAVAILABLE = 3;
+  // The host's speech service failed; the message says why.
+  SPEECH_OUTCOME_FAILED = 4;
+}
+
+// Host to guest: a SpeakText is over. No SpeechAudio of it follows.
+message SpeechDone {
+  uint32 request_id = 1;
+  SpeechOutcome outcome = 2;
+  string message = 3;
+}
+
+// Guest to host: stops a SpeakText. The host answers with SpeechDone (STOPPED), unless the
+// request was already over.
+message StopSpeaking {
+  uint32 request_id = 1;
+}
+
+// Guest to host: listens to the host's microphone and recognises what is said. The host
+// answers with RecognitionEvent messages until one of kind FINAL or ERROR. The guest sends it
+// only for an app that holds Android's microphone permission; the host's own microphone
+// privacy settings apply as well.
+message StartRecognition {
+  uint32 request_id = 1;
+  // The language to recognise as a BCP 47 tag; empty for the host's own.
+  string language_tag = 2;
+  // Whether the app wants what is recognised while the user still speaks (PARTIAL events).
+  bool partial_results = 3;
+  // The most alternatives a FINAL event carries; 0 is 1.
+  uint32 max_results = 4;
+  // Whether the app prefers recognition that stays on the computer.
+  bool prefer_offline = 5;
+}
+
+// Guest to host: the user has stopped speaking; the host stops listening and sends what it
+// recognised as the FINAL event.
+message StopRecognition {
+  uint32 request_id = 1;
+}
+
+// Guest to host: drops a recognition. The host stops listening and sends nothing more for it.
+message CancelRecognition {
+  uint32 request_id = 1;
+}
+
+// What a RecognitionEvent says.
+enum RecognitionEventKind {
+  RECOGNITION_EVENT_KIND_UNSPECIFIED = 0;
+  // The host listens: the user may speak.
+  RECOGNITION_EVENT_KIND_READY = 1;
+  // The host hears speech.
+  RECOGNITION_EVENT_KIND_SPEECH_BEGAN = 2;
+  // The speech has stopped.
+  RECOGNITION_EVENT_KIND_SPEECH_ENDED = 3;
+  // What is recognised so far, while the user still speaks.
+  RECOGNITION_EVENT_KIND_PARTIAL = 4;
+  // What was recognised, best first. The recognition is over.
+  RECOGNITION_EVENT_KIND_FINAL = 5;
+  // The recognition failed, for `error`. It is over.
+  RECOGNITION_EVENT_KIND_ERROR = 6;
+}
+
+// Why a recognition failed.
+enum RecognitionError {
+  RECOGNITION_ERROR_UNSPECIFIED = 0;
+  // Nothing that was said was recognised.
+  RECOGNITION_ERROR_NO_MATCH = 1;
+  // Nobody spoke before the host stopped waiting.
+  RECOGNITION_ERROR_SPEECH_TIMEOUT = 2;
+  // The host's privacy settings keep DSA from the microphone, or from speech recognition.
+  RECOGNITION_ERROR_DENIED = 3;
+  // The host has no microphone, or it could not be opened.
+  RECOGNITION_ERROR_NO_MICROPHONE = 4;
+  // The host does not recognise the language.
+  RECOGNITION_ERROR_LANGUAGE_UNSUPPORTED = 5;
+  // The host has no speech recognition, or no session of the user's is open to run it in.
+  RECOGNITION_ERROR_UNAVAILABLE = 6;
+  // The host's recognition needs the network, which failed.
+  RECOGNITION_ERROR_NETWORK = 7;
+  // The host is already recognising for another request.
+  RECOGNITION_ERROR_BUSY = 8;
+  // Anything else; the message says what.
+  RECOGNITION_ERROR_OTHER = 9;
+}
+
+// Host to guest: what became of a StartRecognition so far.
+message RecognitionEvent {
+  uint32 request_id = 1;
+  RecognitionEventKind kind = 2;
+  // For PARTIAL, the text so far; for FINAL, the alternatives, best first.
+  repeated string texts = 3;
+  // For FINAL, how sure the host is of each alternative, from 0 to 1, in the same order;
+  // empty when the host does not say.
+  repeated float confidences = 4;
+  // For ERROR.
+  RecognitionError error = 5;
+  string message = 6;
+}
+
+// Guest to host: checks the spelling of each of `texts`, at most 64 of at most 4096
+// characters each. The host answers with SpellingResult.
+message CheckSpelling {
+  uint32 request_id = 1;
+  // The language as a BCP 47 tag, such as "en-US".
+  string language_tag = 2;
+  repeated string texts = 3;
+  // The most suggestions for each mistake; 0 is 5.
+  uint32 max_suggestions = 4;
+}
+
+// A word the host's spell checker finds wrong.
+message SpellingMistake {
+  // Where the word is in its text, in UTF-16 code units, as Android counts.
+  uint32 start = 1;
+  uint32 length = 2;
+  // What to write instead, best first. An empty suggestion means the word is to be deleted,
+  // as a word written twice.
+  repeated string suggestions = 3;
+  // The host is sure of its first suggestion, as when it would correct the word itself.
+  bool recommended = 4;
+}
+
+// The mistakes in one text, in order.
+message SpellingText {
+  repeated SpellingMistake mistakes = 1;
+}
+
+// Host to guest: the mistakes in each text of a CheckSpelling, one SpellingText each, in the
+// same order.
+message SpellingResult {
+  uint32 request_id = 1;
+  repeated SpellingText texts = 2;
+  // False when the host has no spell checker for the language; `texts` is empty then.
+  bool supported = 3;
+}
+
 // The one message type on the wire. Each frame carries exactly one.
 message Envelope {
   oneof body {
@@ -2508,6 +3151,7 @@ message Envelope {
     ClockProbe clock_probe = 28;
     ClockAnswer clock_answer = 29;
     ScreenState screen_state = 40;
+    TasksShown tasks_shown = 46;
     PowerState power_state = 41;
     DisplayRefresh display_refresh = 407;
     PowerHint power_hint = 110;
@@ -2575,6 +3219,8 @@ message Envelope {
     AudioOutputControl audio_output_control = 103;
     AudioInputOpen audio_input_open = 104;
     AudioInputOpened audio_input_opened = 105;
+    AppAudio app_audio = 106;
+    SetAppVolume set_app_volume = 107;
     VideoCapabilities video_capabilities = 120;
     VideoDecoderOpen video_decoder_open = 121;
     VideoDecoderOpened video_decoder_opened = 122;
@@ -2626,9 +3272,47 @@ message Envelope {
     ReinstallApp reinstall_app = 380;
     ReinstallResult reinstall_result = 381;
     NativeLibraryCrash native_library_crash = 382;
+    ListSpeechVoices list_speech_voices = 620;
+    SpeechVoices speech_voices = 621;
+    SpeakText speak_text = 622;
+    SpeechAudio speech_audio = 623;
+    SpeechDone speech_done = 624;
+    StopSpeaking stop_speaking = 625;
+    StartRecognition start_recognition = 626;
+    StopRecognition stop_recognition = 627;
+    CancelRecognition cancel_recognition = 628;
+    RecognitionEvent recognition_event = 629;
+    CheckSpelling check_spelling = 630;
+    SpellingResult spelling_result = 631;
     GeocodeRequest geocode_request = 470;
     GeocodeResult geocode_result = 471;
     ShareToHost share_to_host = 472;
     ShareResult share_result = 473;
+    BackupUpload backup_upload = 640;
+    BackupCommit backup_commit = 641;
+    BackupDiscard backup_discard = 642;
+    BackupClear backup_clear = 643;
+    BackupAnswer backup_answer = 644;
+    BackupQuery backup_query = 645;
+    BackupContents backup_contents = 646;
+    BackupFetch backup_fetch = 647;
+    BackupFetchData backup_fetch_data = 648;
+    BackupRun backup_run = 649;
+    BackupRestore backup_restore = 650;
+    BackupRunResult backup_run_result = 651;
+    PasskeyRequest passkey_request = 652;
+    PasskeyResponse passkey_response = 653;
+    KeyMintRootKeyRequest keymint_root_key_request = 654;
+    KeyMintRootKey keymint_root_key = 655;
+    BackupSetting backup_setting = 656;
+    ReconfigureWidget reconfigure_widget = 657;
+    WidgetReconfigured widget_reconfigured = 658;
+    AppShortcuts app_shortcuts = 680;
+    LaunchShortcut launch_shortcut = 681;
+    PinShortcutRequest pin_shortcut_request = 682;
+    PinShortcutAnswer pin_shortcut_answer = 683;
+    HostCertificates host_certificates = 684;
+    DnsQuery dns_query = 690;
+    DnsAnswer dns_answer = 691;
   }
 }

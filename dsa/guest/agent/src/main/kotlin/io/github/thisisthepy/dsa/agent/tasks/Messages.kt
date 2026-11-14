@@ -3,6 +3,9 @@ package io.github.thisisthepy.dsa.agent.tasks
 import com.google.protobuf.ByteString
 import io.github.thisisthepy.dsa.agent.windowing.Size
 import io.github.thisisthepy.dsa.control.v1.AppInfo
+import io.github.thisisthepy.dsa.control.v1.AppShortcut
+import io.github.thisisthepy.dsa.control.v1.AppShortcuts
+import io.github.thisisthepy.dsa.control.v1.PinShortcutRequest
 import io.github.thisisthepy.dsa.control.v1.Envelope
 import io.github.thisisthepy.dsa.control.v1.InstalledApp
 import io.github.thisisthepy.dsa.control.v1.InstalledApps
@@ -85,12 +88,48 @@ object Messages {
             .setCacheBytes(maxOf(0L, app.cacheBytes))
             .setPrimaryAbi(app.primaryAbi)
             .addAllNativeLibraries(io.github.thisisthepy.dsa.agent.install.NativeLibraries.messages(app.nativeLibraries))
+            .setSharedUserId(app.sharedUserId)
         return Envelope.newBuilder().setInstalledApp(info).build().toByteArray()
     }
 
     fun installedApps(packageNames: List<String>): ByteArray =
         Envelope.newBuilder()
             .setInstalledApps(InstalledApps.newBuilder().addAllPackageNames(packageNames))
+            .build()
+            .toByteArray()
+
+    /** [shortcut] as the host reads it. */
+    fun shortcut(shortcut: LauncherShortcut): AppShortcut =
+        AppShortcut.newBuilder()
+            .setId(shortcut.id)
+            .setShortLabel(shortcut.shortLabel)
+            .setLongLabel(shortcut.longLabel)
+            .setIconPng(ByteString.copyFrom(shortcut.iconPng))
+            .setRank(maxOf(0, shortcut.rank))
+            .setManifest(shortcut.manifest)
+            .setDynamic(shortcut.dynamic)
+            .setPinned(shortcut.pinned)
+            .build()
+
+    fun appShortcuts(packageName: String, shortcuts: List<LauncherShortcut>): ByteArray =
+        Envelope.newBuilder()
+            .setAppShortcuts(
+                AppShortcuts.newBuilder()
+                    .setPackageName(packageName)
+                    .addAllShortcuts(shortcuts.map { shortcut(it) }),
+            )
+            .build()
+            .toByteArray()
+
+    fun pinShortcutRequest(requestId: Int, packageName: String, appLabel: String, pinned: LauncherShortcut): ByteArray =
+        Envelope.newBuilder()
+            .setPinShortcutRequest(
+                PinShortcutRequest.newBuilder()
+                    .setRequestId(requestId)
+                    .setPackageName(packageName)
+                    .setAppLabel(appLabel)
+                    .setShortcut(shortcut(pinned)),
+            )
             .build()
             .toByteArray()
 

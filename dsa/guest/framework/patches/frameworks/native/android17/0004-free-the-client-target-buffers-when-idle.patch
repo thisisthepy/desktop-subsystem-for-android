@@ -1,0 +1,166 @@
+Subject: SurfaceFlinger: free the client target's buffers when nothing is composed into them
+
+FramebufferSurface keeps the client target's buffers (two, each the size of the display) for as
+long as SurfaceFlinger runs, once it has composed into them once. A desktop display is large
+(2880x2880 makes them 63 MiB), and DSA's hardware composer composes every layer on the host
+except the ones it cannot (a video's YUV pictures), so the buffers sit unused most of the time.
+
+When a frame composes nothing into the client target and the last one that did is a second old,
+FramebufferSurface gives its current buffer back once that frame is presented and discards
+every free buffer in its queue (the producer side forgets them through onBuffersDiscarded).
+RenderSurface then drops the textures it kept for them. The next frame with client composition
+dequeues, and so allocates, new buffers and sends them to HWC whole. Screenshots and screen
+capture render into buffers of their own and are not affected.
+
+Applies to frameworks/native at ae266dcb706d083868578cfedce381ef44488a07 (Android 17).
+---
+diff --git a/services/surfaceflinger/CompositionEngine/include/compositionengine/DisplaySurface.h b/services/surfaceflinger/CompositionEngine/include/compositionengine/DisplaySurface.h
+--- a/services/surfaceflinger/CompositionEngine/include/compositionengine/DisplaySurface.h
++++ b/services/surfaceflinger/CompositionEngine/include/compositionengine/DisplaySurface.h
+@@ -81,6 +81,11 @@
+ 
+     // Returns true if the render surface supports client composition prediction.
+     virtual bool supportsCompositionStrategyPrediction() const;
++
++    // Returns true once after the surface gave its buffers back to be freed, which it does
++    // when nothing has been composed into them for a while. Whoever keeps textures of those
++    // buffers lets go of them too, so that their memory goes.
++    virtual bool takeBuffersReleased() { return false; }
+ };
+ 
+ } // namespace compositionengine
+diff --git a/services/surfaceflinger/CompositionEngine/src/RenderSurface.cpp b/services/surfaceflinger/CompositionEngine/src/RenderSurface.cpp
+--- a/services/surfaceflinger/CompositionEngine/src/RenderSurface.cpp
++++ b/services/surfaceflinger/CompositionEngine/src/RenderSurface.cpp
+@@ -249,6 +249,11 @@
+ 
+ void RenderSurface::onPresentDisplayCompleted() {
+     mDisplaySurface->onFrameCommitted();
++    if (mDisplaySurface->takeBuffersReleased() && mTexture == nullptr) {
++        // The surface discarded its buffers; the textures kept for them are the last holders.
++        // The next client composition dequeues new buffers and makes new textures.
++        mTextureCache.clear();
++    }
+ }
+ 
+ void RenderSurface::dump(std::string& out) const {
+diff --git a/services/surfaceflinger/DisplayHardware/FramebufferSurface.h b/services/surfaceflinger/DisplayHardware/FramebufferSurface.h
+--- a/services/surfaceflinger/DisplayHardware/FramebufferSurface.h
++++ b/services/surfaceflinger/DisplayHardware/FramebufferSurface.h
+@@ -27,6 +27,7 @@
+ #include <ui/DisplayId.h>
+ #include <ui/Size.h>
+ #include <utils/Mutex.h>
++#include <utils/Timers.h>
+ 
+ #include "DisplayHardware/HwcSlotTracker.h"
+ 
+@@ -56,6 +57,8 @@
+     const sp<Surface>& getSurface() { return mRendererSurface; }
+ 
+     virtual const sp<Fence>& getClientTargetAcquireFence() const override;
++
++    bool takeBuffersReleased() override;
+ 
+ private:
+     friend class FramebufferSurfaceTest;
+@@ -109,6 +112,22 @@
+ 
+     // Slot tracker to map buffers to HWC slot IDs
+     HwcSlotTracker mHwcSlotTracker GUARDED_BY(mMutex);
++
++    // How long after the last frame composed into this surface its buffers are given back.
++    // The client target is as large as the display, which on a desktop is large (two buffers
++    // of 2880x2880 are 63 MiB), and a hardware composer that composes every layer itself needs
++    // it only while some layer must be composed here (a video's YUV pictures, for one). The
++    // next frame that needs it allocates the buffers again.
++    static constexpr nsecs_t kReleaseIdleBuffersAfter = 1'000'000'000; // 1 s
++    // When the last buffer was acquired (systemTime), 0 for none yet.
++    nsecs_t mLastClientFrameTime GUARDED_BY(mMutex) = 0;
++    // The frame being committed composed nothing here, and the last that did is old enough.
++    bool mReleaseWhenCommitted GUARDED_BY(mMutex) = false;
++    // The buffers were given back since takeBuffersReleased last asked.
++    bool mBuffersReleased GUARDED_BY(mMutex) = false;
++
++    // Gives the current buffer back to the queue and frees every buffer the queue holds.
++    void releaseIdleBuffersLocked() REQUIRES(mMutex);
+ };
+ 
+ // ---------------------------------------------------------------------------
+diff --git a/services/surfaceflinger/DisplayHardware/FramebufferSurface.cpp b/services/surfaceflinger/DisplayHardware/FramebufferSurface.cpp
+--- a/services/surfaceflinger/DisplayHardware/FramebufferSurface.cpp
++++ b/services/surfaceflinger/DisplayHardware/FramebufferSurface.cpp
+@@ -25,6 +25,9 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
++
++#include <cinttypes>
++#include <utility>
+ 
+ #include <com_android_graphics_libgui_flags.h>
+ #include <gui/BufferItem.h>
+@@ -99,6 +102,11 @@
+                                                     });
+     if (err == BufferQueue::NO_BUFFER_AVAILABLE) {
+         mDataspace = Dataspace::UNKNOWN;
++        // Nothing was composed into this surface for this frame. Once that has been so for a
++        // while, the buffers go back when the frame is committed: the display stops showing
++        // the client target with it.
++        mReleaseWhenCommitted = mFrameData &&
++                systemTime(SYSTEM_TIME_MONOTONIC) - mLastClientFrameTime >= kReleaseIdleBuffersAfter;
+         return NO_ERROR;
+     } else if (err != NO_ERROR) {
+         ALOGE("error acquiring buffer: %s (%d)", strerror(-err), err);
+@@ -110,6 +118,8 @@
+         mPreviousFrameData.swap(mFrameData);
+     }
+     mFrameData = {item.mGraphicBuffer, item.mFence};
++    mLastClientFrameTime = systemTime(SYSTEM_TIME_MONOTONIC);
++    mReleaseWhenCommitted = false;
+     mDataspace = static_cast<Dataspace>(item.mDataSpace);
+ 
+     // If HWC hasn't seen the buffer before, or the buffer has changed, send it to HWC. Otherwise,
+@@ -147,6 +157,42 @@
+ 
+         mPreviousFrameData.reset();
+     }
++    if (mReleaseWhenCommitted) {
++        mReleaseWhenCommitted = false;
++        releaseIdleBuffersLocked();
++    }
++}
++
++void FramebufferSurface::releaseIdleBuffersLocked() {
++    const auto onBufferFreed = [&](const sp<GraphicBuffer>& buffer) {
++        ASSERT_MUTEX(mMutex);
++        onBufferFreedLocked(buffer);
++    };
++    // The frame just presented did not show the client target, so the display is done with it
++    // once that frame's present fence signals.
++    if (mFrameData) {
++        sp<Fence> fence = Fence::merge("FramebufferSurface-Idle", mFrameData->mFence,
++                                       mHwc.getPresentFence(mDisplayId));
++        status_t result = mRendererConsumer->releaseBuffer(mFrameData->mBuffer, fence,
++                                                           onBufferFreed);
++        ALOGE_IF(result != NO_ERROR, "releaseIdleBuffers: error releasing buffer: %s (%d)",
++                 strerror(-result), result);
++        mFrameData.reset();
++    }
++    // Frees the buffers the queue holds; the renderer's surface forgets them too, and the slot
++    // tracker forgets them through onBufferFreed, so the next one goes to HWC whole.
++    status_t result = mRendererConsumer->discardFreeBuffers(onBufferFreed);
++    ALOGE_IF(result != NO_ERROR, "releaseIdleBuffers: error discarding buffers: %s (%d)",
++             strerror(-result), result);
++    mBuffersReleased = true;
++    ALOGI("%s: nothing composed into the client target for %" PRId64 " ms; its buffers are freed",
++          to_string(mDisplayId).c_str(),
++          ns2ms(systemTime(SYSTEM_TIME_MONOTONIC) - mLastClientFrameTime));
++}
++
++bool FramebufferSurface::takeBuffersReleased() {
++    Mutex::Autolock lock(mMutex);
++    return std::exchange(mBuffersReleased, false);
+ }
+ 
+ ui::Size FramebufferSurface::limitSize(const ui::Size& size) {

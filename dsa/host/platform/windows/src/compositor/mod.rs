@@ -24,7 +24,9 @@
 //! the apps in Android ([`geocode`]), and shows what they share with the PC in Windows' share
 //! window ([`share`]). It plays the sound of the user's
 //! Android on their default output device ([`audio`]), and records their default capture
-//! device for its microphone ([`microphone`]).
+//! device for its microphone ([`microphone`]). It answers the text-to-speech engine, speech
+//! recognition service and spell checker of the user's Android with Windows' own
+//! ([`language`]).
 
 pub mod adapter;
 pub mod audio;
@@ -34,16 +36,20 @@ pub mod committed;
 pub mod device_recovery;
 pub mod display_gpu;
 pub mod fluent;
+pub mod fluent_dialog;
 pub mod fluent_menu;
 pub mod frames;
 pub mod gamepads;
 pub mod geocode;
 pub mod hosts;
+pub mod language;
 pub mod links;
 pub mod location;
 pub mod log;
 pub mod microphone;
 pub mod notifications;
+pub mod passkeys;
+pub mod pin_shortcuts;
 pub mod present;
 pub mod print;
 pub mod share;
@@ -65,7 +71,9 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use dsa_host_core::app_audio::{self, AppStream, AppVolumes};
 use dsa_host_core::audio::{serve_port as serve_audio_port, AudioDevice, AUDIO_PORT};
+use dsa_host_core::compositor::frame_stall::{restart_in_background, SharedConnector, Stall};
 use dsa_host_core::compositor::{
     GraphicsRenderer, GraphicsStreamKind, StreamTracker, GRAPHICS_COMMAND_PORT,
     GRAPHICS_PROCESS_PIPE_PORT,
@@ -133,6 +141,9 @@ pub struct Compositor {
     /// Binds the video port, where the guest's codec HAL has its streams decoded. None in
     /// tests, which have no GPU decoders.
     bind_video: Option<BindFn>,
+    /// Set when the last video decoder closed and its device was let go, so the idle trim
+    /// gives back the memory that freed.
+    video_let_go: Arc<AtomicBool>,
     /// Binds the sensor port, where the guest's sensors HAL reads this computer's sensors.
     /// None in tests, which read no sensors.
     bind_sensors: Option<BindFn>,
@@ -159,8 +170,12 @@ pub struct Compositor {
     show_widgets: bool,
     /// Whether the documents the user's Android prints are printed here.
     print_jobs: bool,
+    /// Whether the passkeys the apps in the user's Android make and use go to Windows Hello.
+    passkeys: bool,
     /// Whether the user's Android gets the computer's location from Windows.
     give_location: bool,
+    /// Whether the user's Android speaks, recognises speech and checks spelling with Windows.
+    serve_language: bool,
     /// Whether the address lookups of the user's Android are answered here, and what its apps
     /// share with the PC is shown in Windows' share window.
     host_services: bool,
@@ -170,6 +185,39 @@ pub struct Compositor {
     /// Turns Windows' touch gestures off while a task window is in front, when the user's
     /// setting says so. None leaves them alone.
     touch_gestures: Option<touch_gestures::TouchGestureSetup>,
+    /// What joins the media sessions the tray follows to the media buttons in the taskbar
+    /// previews of the task windows.
+    media_windows: MediaWindows,
+    /// DSA's own news the window manager raises, which the notifications' thread shows.
+    dsa_news: notifications::DsaNews,
+}
+
+/// The way between the media sessions the tray follows and the media buttons in the task
+/// windows' taskbar previews: each session goes to the manager, which tells the app's window
+/// host, and each press of a button comes back to the tray's connection to the service, which
+/// sends it to the app's session as it sends a media key's.
+struct MediaWindows {
+    /// The manager's events, once the task windows have started.
+    events: Arc<Mutex<Option<mpsc::Sender<ManagerEvent>>>>,
+    /// Where the manager sends a press.
+    pressed_tx: mpsc::Sender<MediaPress>,
+    /// Where the tray's thread reads the presses; taken when it starts.
+    pressed_rx: Mutex<Option<mpsc::Receiver<MediaPress>>>,
+}
+
+/// A media button pressed in a task window's taskbar preview: the app's package and what the
+/// button asks of its media session.
+type MediaPress = (String, dsa_host_core::background::MediaCommand);
+
+impl MediaWindows {
+    fn new() -> MediaWindows {
+        let (pressed_tx, pressed_rx) = mpsc::channel();
+        MediaWindows {
+            events: Arc::new(Mutex::new(None)),
+            pressed_tx,
+            pressed_rx: Mutex::new(Some(pressed_rx)),
+        }
+    }
 }
 
 /// The installed apps an event from the watch of the tasks carries, if it carries them.
@@ -181,6 +229,18 @@ pub fn installed_in(event: &ManagerEvent) -> Option<Vec<AppInfo>> {
         }),
         ManagerEvent::Task(event) => match &**event {
             TaskEvent::Installed(apps) => Some(apps.clone()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// The request to pin a shortcut an event from the watch of the tasks carries, if it carries
+/// one. Only a live event does: a request is never part of the tasks a watch starts from.
+pub fn pin_request_in(event: &ManagerEvent) -> Option<dsa_host_core::tasks::PinShortcutRequest> {
+    match event {
+        ManagerEvent::Task(event) => match &**event {
+            TaskEvent::PinShortcut(request) => Some(request.clone()),
             _ => None,
         },
         _ => None,
@@ -258,6 +318,7 @@ impl Compositor {
             renderer,
             tracker: Arc::new(StreamTracker::new()),
             vm_id_slot: VmIdSlot::default(),
+            video_let_go: Arc::new(AtomicBool::new(false)),
             local_api_connector,
             bind_command: Some(bind_command),
             bind_process_pipe: Some(bind_process_pipe),
@@ -276,10 +337,14 @@ impl Compositor {
             show_notifications: true,
             show_widgets: true,
             print_jobs: true,
+            passkeys: true,
             give_location: true,
+            serve_language: true,
             host_services: true,
             show_background: true,
             touch_gestures: touch_gestures::TouchGestureSetup::for_this_user(),
+            media_windows: MediaWindows::new(),
+            dsa_news: notifications::DsaNews::default(),
         }
     }
 
@@ -296,6 +361,7 @@ impl Compositor {
             renderer,
             tracker: Arc::new(StreamTracker::new()),
             vm_id_slot: VmIdSlot::default(),
+            video_let_go: Arc::new(AtomicBool::new(false)),
             local_api_connector,
             bind_command: Some(bind_command),
             bind_process_pipe: Some(bind_process_pipe),
@@ -314,10 +380,14 @@ impl Compositor {
             show_notifications: false,
             show_widgets: false,
             print_jobs: false,
+            passkeys: false,
             give_location: false,
+            serve_language: false,
             host_services: false,
             show_background: false,
             touch_gestures: None,
+            media_windows: MediaWindows::new(),
+            dsa_news: notifications::DsaNews::default(),
         }
     }
 
@@ -438,11 +508,13 @@ impl Compositor {
         let links_thread = self.start_links(&stop);
         let clipboard_thread = self.start_clipboard(&stop);
         let location_thread = self.start_location(&stop);
+        let language_thread = self.start_language(&stop);
         let notifications_thread = self.start_notifications(&stop);
         let widgets_thread = self.start_widgets(&stop);
         let background_thread = self.start_background(&stop);
         let video_thread = self.start_video(&stop);
         let print_thread = self.start_print(&stop);
+        let passkeys_thread = self.start_passkeys(&stop);
         let geocode_thread = self.start_geocoding(&stop);
         let share_thread = self.start_shares(&stop);
         let audio_thread = self.start_audio(&stop);
@@ -645,6 +717,9 @@ impl Compositor {
         if let Some(thread) = location_thread {
             let _ = thread.join();
         }
+        if let Some(thread) = language_thread {
+            let _ = thread.join();
+        }
         if let Some(thread) = notifications_thread {
             let _ = thread.join();
         }
@@ -658,6 +733,9 @@ impl Compositor {
             let _ = thread.join();
         }
         if let Some(thread) = print_thread {
+            let _ = thread.join();
+        }
+        if let Some(thread) = passkeys_thread {
             let _ = thread.join();
         }
         if let Some(thread) = geocode_thread {
@@ -695,6 +773,7 @@ impl Compositor {
         let listener = VmBoundListener::new(Arc::clone(&self.vm_id_slot), bind);
         let stop = Arc::clone(stop);
         let logger = self.logger.clone();
+        let let_go = Arc::clone(&self.video_let_go);
         thread::Builder::new()
             .name("dsa-wm-video".into())
             .spawn(move || {
@@ -704,9 +783,11 @@ impl Compositor {
                     }
                 });
                 let probe_log = Arc::clone(&log);
-                let decoders = crate::video_decoder::MediaFoundationDecoders::lazy(Box::new(
-                    move |line: &str| probe_log(line),
-                ));
+                let decoders = crate::video_decoder::MediaFoundationDecoders::lazy(
+                    Box::new(move |line: &str| probe_log(line)),
+                    // The trim gives back what the decoders freed a few seconds later.
+                    Box::new(move || let_go.store(true, Ordering::SeqCst)),
+                );
                 let build = format!("dsa-wm {}", crate::VERSION);
                 dsa_host_core::video::serve(
                     Box::new(listener),
@@ -722,10 +803,13 @@ impl Compositor {
     /// Starts playing the sound of the user's Android on their default output device, on a
     /// thread of its own that ends with `stop`: it listens on the audio port of the user's
     /// VM, and plays each stream the guest opens there. A device that cannot play is logged
-    /// and the stream goes on unheard, so the guest is never held up.
+    /// and the stream goes on unheard, so the guest is never held up. Each app's output plays
+    /// as that app in Windows' volume mixer, at the volume Android gives it, and a volume the
+    /// user sets there goes back to Android; a second thread follows that over the local API.
     fn start_audio(&mut self, stop: &Arc<AtomicBool>) -> Option<thread::JoinHandle<()>> {
         let bind = self.bind_audio.take()?;
         let mut listener = VmBoundListener::new(Arc::clone(&self.vm_id_slot), bind);
+        let mut connector = (self.local_api_connector)();
         let stop = Arc::clone(stop);
         let logger = self.logger.clone();
         let failed = self.logger.clone();
@@ -734,10 +818,41 @@ impl Compositor {
             .spawn(move || {
                 let log: Arc<dyn Fn(&str) + Send + Sync> =
                     Arc::new(move |line: &str| note(logger.as_deref(), line));
-                let device: Arc<dyn AudioDevice> =
-                    Arc::new(audio::DefaultOutput::new(Arc::clone(&log)));
                 let build = format!("dsa-wm {}", crate::VERSION);
+                let volumes = AppVolumes::new();
+                let follower = {
+                    let (volumes, stop, log, build) = (
+                        Arc::clone(&volumes),
+                        Arc::clone(&stop),
+                        Arc::clone(&log),
+                        build.clone(),
+                    );
+                    thread::Builder::new()
+                        .name("dsa-wm-app-audio".into())
+                        .spawn(move || {
+                            app_audio::follow(
+                                &mut *connector,
+                                &build,
+                                &volumes,
+                                &stop,
+                                &*log,
+                                &|_: &[AppStream]| {},
+                            )
+                        })
+                };
+                if let Err(e) = &follower {
+                    log(&format!(
+                        "could not start the app volumes' thread; every app plays as one: {e}"
+                    ));
+                }
+                let device: Arc<dyn AudioDevice> = Arc::new(audio::DefaultOutput::new(
+                    Arc::clone(&log),
+                    Arc::clone(&volumes),
+                ));
                 serve_audio_port(&mut listener, device, &build, &stop, log);
+                if let Ok(follower) = follower {
+                    let _ = follower.join();
+                }
             })
             .map_err(|e| {
                 note(
@@ -908,6 +1023,29 @@ impl Compositor {
             .ok()
     }
 
+    /// Starts answering the speech and spelling requests of the user's Android with Windows'
+    /// voices, speech recognition and spell checker, on a thread of its own that ends with
+    /// `stop`. Each of the three runs on a thread of its own besides.
+    fn start_language(&self, stop: &Arc<AtomicBool>) -> Option<thread::JoinHandle<()>> {
+        if !self.serve_language {
+            return None;
+        }
+        let connector = (self.local_api_connector)();
+        let stop = Arc::clone(stop);
+        let logger = self.logger.clone();
+        let failed = self.logger.clone();
+        thread::Builder::new()
+            .name("dsa-wm-language".into())
+            .spawn(move || language::serve(connector, stop, logger))
+            .map_err(|e| {
+                note(
+                    failed.as_deref(),
+                    &format!("could not start the speech and spelling thread: {e}"),
+                )
+            })
+            .ok()
+    }
+
     /// Starts showing the widgets of the user's Android on the desktop, on a thread of its own
     /// that ends with `stop`. Windows that cannot open are logged; the rest of the window
     /// manager goes on.
@@ -954,6 +1092,13 @@ impl Compositor {
         let stop = Arc::clone(stop);
         let logger = self.logger.clone();
         let failed = self.logger.clone();
+        let events = Arc::clone(&self.media_windows.events);
+        let pressed = self
+            .media_windows
+            .pressed_rx
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
         thread::Builder::new()
             .name("dsa-wm-background".into())
             .spawn(move || {
@@ -967,7 +1112,26 @@ impl Compositor {
                         return;
                     }
                 };
-                background::sync(connector, &mut tray, stop, logger);
+                let Some(pressed) = pressed else {
+                    background::sync(connector, &mut tray, stop, logger);
+                    return;
+                };
+                // Each media session also reaches its app's windows, for the media buttons in
+                // their taskbar previews, and those buttons' presses come back here.
+                let mut linked = background::WithWindowMedia {
+                    tray: &mut tray,
+                    windows: Box::new(move |package: &str, media| {
+                        let events = events.lock().unwrap_or_else(|e| e.into_inner());
+                        if let Some(events) = events.as_ref() {
+                            let _ = events.send(ManagerEvent::Media {
+                                package: package.to_string(),
+                                media,
+                            });
+                        }
+                    }),
+                    pressed,
+                };
+                background::sync(connector, &mut linked, stop, logger);
             })
             .map_err(|e| {
                 note(
@@ -1048,6 +1212,32 @@ impl Compositor {
             .ok()
     }
 
+    /// Starts performing the passkey ceremonies of the user's Android with Windows Hello, on
+    /// a thread of its own that ends with `stop`. Each ceremony runs on a thread of its own
+    /// besides.
+    fn start_passkeys(&self, stop: &Arc<AtomicBool>) -> Option<thread::JoinHandle<()>> {
+        if !self.passkeys {
+            return None;
+        }
+        let connector = (self.local_api_connector)();
+        let stop = Arc::clone(stop);
+        let logger = self.logger.clone();
+        let failed = self.logger.clone();
+        thread::Builder::new()
+            .name("dsa-wm-passkeys".into())
+            .spawn(move || {
+                let hello = Arc::new(passkeys::WindowsHello);
+                passkeys::serve(connector, hello, stop, logger);
+            })
+            .map_err(|e| {
+                note(
+                    failed.as_deref(),
+                    &format!("could not start the passkeys' thread: {e}"),
+                )
+            })
+            .ok()
+    }
+
     /// Starts showing the notifications of the user's Android as toasts, on a thread of its
     /// own that ends with `stop`. The protocol a click on a toast launches is registered for
     /// this program first; a problem with either is logged, and the rest of the window manager
@@ -1087,6 +1277,7 @@ impl Compositor {
         let stop = Arc::clone(stop);
         let logger = self.logger.clone();
         let failed = self.logger.clone();
+        let news = Arc::clone(&self.dsa_news);
         thread::Builder::new()
             .name("dsa-wm-notifications".into())
             .spawn(move || {
@@ -1097,6 +1288,7 @@ impl Compositor {
                     connector,
                     &mut toasts,
                     notifications::default_icon_dir(),
+                    news,
                     stop,
                     logger,
                 );
@@ -1108,6 +1300,36 @@ impl Compositor {
                 )
             })
             .ok()
+    }
+
+    /// What the manager does when the guest's compositor did not recover from a GPU reset:
+    /// tells the user, as DSA's own news, and restarts Android through the service on a
+    /// thread of its own, opening the apps that had windows again.
+    fn recovery(&self) -> hosts::Recovery {
+        let connector = Arc::new(Mutex::new((self.local_api_connector)()));
+        let news = Arc::clone(&self.dsa_news);
+        let logger = self.logger.clone();
+        Box::new(move |stall: &Stall, packages: Vec<String>| {
+            news.lock().unwrap_or_else(|e| e.into_inner()).push_back(
+                stall
+                    .notice()
+                    .notification(notifications::user_reads_korean()),
+            );
+            if !stall.restart {
+                return;
+            }
+            let said = logger.clone();
+            let log: Arc<dyn Fn(&str) + Send + Sync> =
+                Arc::new(move |line: &str| note(said.as_deref(), line));
+            if let Err(why) = restart_in_background(
+                Box::new(SharedConnector(Arc::clone(&connector))),
+                "dsa-wm restart after a GPU reset".into(),
+                packages,
+                Arc::clone(&log),
+            ) {
+                log(&format!("could not start restarting Android: {why}"));
+            }
+        })
     }
 
     /// Starts the task windows: the manager, the listener for the app window hosts, the watch
@@ -1219,7 +1441,15 @@ impl Compositor {
             renderer_generation: self.presenter.clone().map(|presenter| {
                 Box::new(move || presenter.device_generation()) as Box<dyn Fn() -> u64 + Send>
             }),
+            media_pressed: Some(self.media_windows.pressed_tx.clone()),
+            recover: Some(self.recovery()),
         };
+        // The media sessions the tray follows reach the windows through the manager.
+        *self
+            .media_windows
+            .events
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(events_tx.clone());
         let manager = thread::Builder::new()
             .name("dsa-wm-manager".into())
             .spawn(move || hosts::manage(setup))
@@ -1241,6 +1471,22 @@ impl Compositor {
         // apps' programs and shortcuts takes a while and the windows must not wait on it.
         let mut start_menu = None;
         let mut installed_tx = None;
+        // An app's request to pin a shortcut on the desktop is asked about on a thread of its
+        // own, which waits on the user; it ends when the watch of tasks does.
+        let mut pin_tx = None;
+        if self.start_menu.is_some() {
+            let (tx, rx) = mpsc::channel();
+            let pin_connector = (self.local_api_connector)();
+            let pin_logger = self.logger.clone();
+            if thread::Builder::new()
+                .name("dsa-wm-pin-shortcuts".into())
+                .spawn(move || pin_shortcuts::serve(rx, pin_connector, pin_logger))
+                .map_err(|e| log(&format!("could not start the pin requests' thread: {e}")))
+                .is_ok()
+            {
+                pin_tx = Some(tx);
+            }
+        }
         if let Some(setup) = self.start_menu.take() {
             let (tx, rx) = mpsc::channel();
             let menu_logger = self.logger.clone();
@@ -1252,6 +1498,7 @@ impl Compositor {
             installed_tx = Some(tx);
         }
         let trim_idle = Arc::clone(&idle);
+        let trim_let_go = Arc::clone(&self.video_let_go);
         let trim_stop = Arc::clone(&manager_stop);
         let trim_logger = self.logger.clone();
         let trimmer = thread::Builder::new()
@@ -1263,6 +1510,7 @@ impl Compositor {
                     trim_gpu,
                     trim_renderer,
                     quiet_for,
+                    trim_let_go,
                     trim_stop,
                     trim_logger,
                 )
@@ -1282,6 +1530,9 @@ impl Compositor {
                     |event| {
                         if let (Some(tx), Some(apps)) = (&installed_tx, installed_in(&event)) {
                             let _ = tx.send(apps);
+                        }
+                        if let (Some(tx), Some(request)) = (&pin_tx, pin_request_in(&event)) {
+                            let _ = tx.send((request, Instant::now()));
                         }
                         note_tasks(&idle, &event);
                         watch_events.send(event).is_ok()

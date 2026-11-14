@@ -22,6 +22,10 @@ dsa-host-windows = { path = "../platform/windows" }
 [target.'cfg(unix)'.dependencies]
 dsa-host-unix = { path = "../platform/unix" }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# The launcher entries, which dsa apps desktop-shortcut puts on the desktop.
+dsa-host-linux = { path = "../platform/linux" }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 dsa-host-macos = { path = "../platform/macos" }
 

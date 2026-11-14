@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Xml.Linq;
 using Xunit;
 
 namespace Dsa.Settings.Core.Tests;
@@ -40,6 +41,32 @@ public class NetworkViewModelTests
         Assert.Equal("172.28.16.1", vm.NetworkGateway);
         Assert.False(vm.HasNetworkProblem);
         Assert.False(vm.NetworkRestartNeeded);
+    }
+
+    [Fact]
+    public async Task Fr28_the_page_says_this_pcs_resolver_answers_androids_names_and_when_it_does_not()
+    {
+        var host = Nat.Replace("\"problem\":null", "\"problem\":null,\"dns_resolver\":\"host\"");
+        var fallback = Nat.Replace("\"problem\":null", "\"problem\":null,\"dns_resolver\":\"network\"");
+        var cli = Cli(Settings(false, host)).Answer("network --json", fallback);
+        var vm = new SettingsViewModel(new DsaService(cli), new KeyText());
+        await vm.LoadAsync();
+        Assert.Equal(DnsResolver.Host, vm.Network!.DnsResolver);
+        Assert.Equal("Network_DnsHost", vm.NetworkDns);
+
+        // The guest no longer reaches this PC's resolver: Android asks the network's servers.
+        await vm.RefreshNetworkAsync();
+        Assert.Equal(DnsResolver.Network, vm.Network!.DnsResolver);
+        Assert.Equal("dns fallback: 172.28.16.1", vm.NetworkDns);
+    }
+
+    [Fact]
+    public async Task Fr28_a_service_that_does_not_say_who_answers_names_shows_the_dns_servers()
+    {
+        var vm = new SettingsViewModel(new DsaService(Cli(Settings(false, Nat))), new KeyText());
+        await vm.LoadAsync();
+        Assert.Equal(DnsResolver.Unknown, vm.Network!.DnsResolver);
+        Assert.Equal("172.28.16.1", vm.NetworkDns);
     }
 
     [Fact]
@@ -95,5 +122,141 @@ public class NetworkViewModelTests
         Assert.Null(vm.Network);
         Assert.Equal("Network_ModeUnknown", vm.NetworkModeText);
         Assert.False(vm.AdvancedNetworking);
+    }
+
+    private const string Certificates =
+        "[{\"subject\":\"CN=Example Root, O=Example\",\"issuer\":\"CN=Example Root, O=Example\"," +
+        "\"source\":\"machine\",\"location\":\"HKLM\\\\SOFTWARE\\\\Microsoft\\\\SystemCertificates\\\\ROOT\"," +
+        "\"sha256\":\"0a1b2c\",\"not_after\":1893456000}," +
+        "{\"subject\":\"CN=Proxy CA\",\"issuer\":\"CN=Corp Issuing CA\",\"source\":\"user_group_policy\"," +
+        "\"location\":\"HKCU\\\\SOFTWARE\\\\Policies\\\\Microsoft\\\\SystemCertificates\\\\Root\"," +
+        "\"sha256\":\"ffee\",\"not_after\":0}," +
+        "{\"subject\":\"CN=Future\",\"issuer\":\"CN=Future\",\"source\":\"somewhere_new\",\"location\":\"\"," +
+        "\"sha256\":\"00\",\"not_after\":0}]";
+
+    private static string CertificateSettings(bool on, string list) =>
+        Settings(false, Nat)[..^1] + $",\"host_certificates\":{(on ? "true" : "false")},\"imported_certificates\":{list}}}";
+
+    [Fact]
+    public async Task Fr28_host_certificates_switch_sends_the_setting_and_applies_at_once()
+    {
+        var cli = Cli(CertificateSettings(true, Certificates))
+            .Answer("settings set host-certificates off --json", CertificateSettings(false, Certificates))
+            .Answer("settings set host-certificates on --json", CertificateSettings(true, Certificates));
+        var vm = new SettingsViewModel(new DsaService(cli), new KeyText());
+        await vm.LoadAsync();
+        Assert.True(vm.HostCertificates);
+
+        await vm.SetHostCertificatesAsync(false);
+        Assert.Contains("settings set host-certificates off --json", cli.Calls);
+        Assert.False(vm.HostCertificates);
+        Assert.False(vm.HasError);
+        // The change applies at once, so nothing asks for a restart.
+        Assert.False(vm.NetworkRestartNeeded);
+        // The list stays: it says what Android would trust when the switch is on again.
+        Assert.Equal(3, vm.ImportedCertificates.Count);
+
+        await vm.SetHostCertificatesAsync(true);
+        Assert.Contains("settings set host-certificates on --json", cli.Calls);
+        Assert.True(vm.HostCertificates);
+
+        // Setting what is already set sends nothing.
+        await vm.SetHostCertificatesAsync(true);
+        Assert.Equal(2, cli.Calls.Count(call => call.Contains("host-certificates")));
+    }
+
+    [Fact]
+    public async Task Fr28_imported_certificates_are_listed_with_their_subject_issuer_and_source()
+    {
+        var vm = new SettingsViewModel(new DsaService(Cli(CertificateSettings(true, Certificates))), new KeyText());
+        await vm.LoadAsync();
+        Assert.False(vm.HasNoImportedCertificates);
+        var rows = vm.ImportedCertificates;
+        Assert.Equal(3, rows.Count);
+
+        Assert.Equal("CN=Example Root, O=Example", rows[0].Subject);
+        Assert.Equal("CN=Example Root, O=Example", rows[0].Issuer);
+        Assert.Equal("issued by CN=Example Root, O=Example", rows[0].IssuedByText);
+        Assert.Equal("Certificate_SourceMachine", rows[0].SourceText);
+        Assert.Equal("HKLM\\SOFTWARE\\Microsoft\\SystemCertificates\\ROOT", rows[0].Location);
+        Assert.Equal("0a1b2c", rows[0].Sha256);
+
+        Assert.Equal("CN=Proxy CA", rows[1].Subject);
+        Assert.Equal("issued by CN=Corp Issuing CA", rows[1].IssuedByText);
+        Assert.Equal("Certificate_SourceUserGroupPolicy", rows[1].SourceText);
+
+        // A store a newer service names is shown as it is, and an empty location has no tooltip.
+        Assert.Equal("somewhere_new", rows[2].SourceText);
+        Assert.Null(rows[2].Location);
+    }
+
+    [Theory]
+    [InlineData("machine", "Certificate_SourceMachine")]
+    [InlineData("machine_group_policy", "Certificate_SourceMachineGroupPolicy")]
+    [InlineData("machine_enterprise", "Certificate_SourceMachineEnterprise")]
+    [InlineData("user", "Certificate_SourceUser")]
+    [InlineData("user_group_policy", "Certificate_SourceUserGroupPolicy")]
+    [InlineData("admin", "Certificate_SourceAdmin")]
+    [InlineData("system", "Certificate_SourceSystem")]
+    public void Fr28_every_certificate_source_the_service_names_has_a_localized_name(string source, string key)
+    {
+        var vm = new SettingsViewModel(new DsaService(new FakeCli()), new KeyText());
+        Assert.Equal(key, vm.CertificateSourceText(source));
+    }
+
+    [Fact]
+    public async Task Fr28_missing_certificate_keys_read_as_on_and_empty()
+    {
+        var vm = new SettingsViewModel(new DsaService(Cli(Settings(false, Nat))), new KeyText());
+        Assert.True(vm.HostCertificates);
+        await vm.LoadAsync();
+        Assert.True(vm.HostCertificates);
+        Assert.Empty(vm.ImportedCertificates);
+        Assert.True(vm.HasNoImportedCertificates);
+    }
+
+    [Fact]
+    public async Task Fr28_an_empty_certificate_list_says_none_were_found()
+    {
+        var vm = new SettingsViewModel(new DsaService(Cli(CertificateSettings(false, "[]"))), new KeyText());
+        Assert.False(vm.HasNoImportedCertificates);
+        await vm.LoadAsync();
+        Assert.False(vm.HostCertificates);
+        Assert.True(vm.HasNoImportedCertificates);
+    }
+
+    private static XDocument Strings(string file)
+    {
+        // The tests run from dsa/target/settings/..., outside the source tree, so each folder
+        // above is tried both as the settings folder and as the repository's dsa folder.
+        string[] relative = { Path.Combine("DsaSettings", file),
+            Path.Combine("host", "platform", "windows", "settings", "DsaSettings", file) };
+        string? found = null;
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null && found is null; dir = dir.Parent)
+        {
+            found = relative.Select(r => Path.Combine(dir.FullName, r)).FirstOrDefault(File.Exists);
+        }
+        Assert.True(found is not null, file + " was not found above " + AppContext.BaseDirectory);
+        return XDocument.Load(found!);
+    }
+
+    [Theory]
+    [InlineData("Strings.resx")]
+    [InlineData("Strings.ko.resx")]
+    public void Fr28_every_trusted_certificate_text_is_in_both_languages(string file)
+    {
+        var names = Strings(file).Descendants("data")
+            .Select(d => (string?)d.Attribute("name"))
+            .ToHashSet();
+        foreach (var key in new[]
+        {
+            "NetworkCertificatesHeader.Text", "HostCertificatesCard.Header", "HostCertificatesCard.Description",
+            "CertificatesNone.Text", "Certificate_IssuedBy", "Certificate_SourceMachine",
+            "Certificate_SourceMachineGroupPolicy", "Certificate_SourceMachineEnterprise", "Certificate_SourceUser",
+            "Certificate_SourceUserGroupPolicy", "Certificate_SourceAdmin", "Certificate_SourceSystem",
+        })
+        {
+            Assert.Contains(key, names);
+        }
     }
 }

@@ -13,11 +13,13 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use dsa_host_core::app_windows::AppWindowSettings;
+use dsa_host_core::compositor::frame_stall::{restart_in_background, Stall};
 use dsa_host_core::compositor::window_hosts::{to_wire, HostId, ToHost};
 use dsa_host_core::compositor::GraphicsStreamKind;
 use dsa_host_core::guest_display::display_or_smallest;
 use dsa_host_core::host_api::HostApiClient;
-use dsa_host_core::tasks::{AppInfo, TaskRequest};
+use dsa_host_core::notifications::Notification;
+use dsa_host_core::tasks::{AppInfo, PinShortcutRequest, TaskRequest};
 use dsa_host_unix::socket::UnixLocalConnector;
 
 use super::hosts::{self, Links, BUILD};
@@ -126,6 +128,12 @@ struct MacPlatform {
     launcher: Arc<AppLauncher>,
     /// Held while the app bundles are being brought up to date.
     syncing: Arc<Mutex<()>>,
+    /// Where the apps' requests to pin a shortcut go to be asked about.
+    pins: Sender<PinShortcutRequest>,
+    /// The service's local API, which restarts Android when its graphics did not recover.
+    host_api: PathBuf,
+    /// DSA's own news for the Notification Center.
+    news: Sender<Notification>,
 }
 
 impl MacPlatform {
@@ -179,6 +187,16 @@ impl Platform for MacPlatform {
             });
     }
 
+    fn pin_requested(&mut self, request: &PinShortcutRequest) {
+        if self.pins.send(request.clone()).is_err() {
+            // Nobody asks the user: the app hears no at once.
+            self.request(TaskRequest::AnswerPinShortcut {
+                request_id: request.request_id,
+                accepted: false,
+            });
+        }
+    }
+
     fn open_app_page(&mut self, package: &str) -> Result<(), String> {
         // Through the settings app's URL scheme, which reaches it whether it runs already
         // (in the menu bar) or has to start; arguments would reach only a new copy.
@@ -195,6 +213,34 @@ impl Platform for MacPlatform {
                 let _ = child.wait();
             });
         Ok(())
+    }
+
+    fn frames_shown(&mut self) -> u64 {
+        self.presenter.frames_shown()
+    }
+
+    fn recover(&mut self, stall: &Stall, packages: Vec<String>) {
+        let notice = stall
+            .notice()
+            .notification(crate::compositor::menu_bar::korean());
+        if self.news.send(notice).is_err() {
+            log("the notifications have ended; the user is not told that Android restarts");
+        }
+        if !stall.restart {
+            return;
+        }
+        let connector = UnixLocalConnector {
+            path: self.host_api.clone(),
+        };
+        let told: Arc<dyn Fn(&str) + Send + Sync> = Arc::new(|line: &str| log(line));
+        if let Err(why) = restart_in_background(
+            Box::new(connector),
+            format!("{BUILD} restart after a GPU reset"),
+            packages,
+            told,
+        ) {
+            log(&format!("could not start restarting Android: {why}"));
+        }
     }
 
     fn log(&mut self, line: &str) {
@@ -308,7 +354,9 @@ fn serve_requests(
         });
 }
 
-/// Runs the window manager until `stop` is set.
+/// Runs the window manager until `stop` is set, on the main thread: the widgets placed on the
+/// desktop are AppKit panels, which the main thread runs ([`super::widgets`]), and the rest
+/// runs on a thread of its own.
 pub fn run(places: Places, stop: Arc<AtomicBool>) -> Result<(), String> {
     // One window manager per user: a second one leaves the first in charge.
     if std::os::unix::net::UnixStream::connect(&places.window_manager).is_ok() {
@@ -323,7 +371,30 @@ pub fn run(places: Places, stop: Arc<AtomicBool>) -> Result<(), String> {
             std::env::set_var("VK_ICD_FILENAMES", driver);
         }
     }
+    let host_api = places.host_api.clone();
+    let done = Arc::new(AtomicBool::new(false));
+    let manager = {
+        let (stop, done) = (Arc::clone(&stop), Arc::clone(&done));
+        thread::Builder::new()
+            .name("dsa-wm-manager".into())
+            .spawn(move || {
+                let served = serve(places, stop);
+                done.store(true, Ordering::Relaxed);
+                served
+            })
+            .map_err(|e| format!("the window manager could not start: {e}"))?
+    };
+    // The widget panels run until the window manager stops or its manager ends.
+    if let Err(why) = super::widgets::run_main(host_api, Arc::clone(&stop), Arc::clone(&done)) {
+        log(&format!("the widgets are not shown on the desktop: {why}"));
+    }
+    manager
+        .join()
+        .map_err(|_| "the window manager's thread failed".to_string())?
+}
 
+/// The window manager but its widget panels, until `stop` is set.
+fn serve(places: Places, stop: Arc<AtomicBool>) -> Result<(), String> {
     let ports = match SurfacePorts::check_in(WM_LABEL) {
         Ok(ports) => Some(ports),
         Err(why) => {
@@ -374,28 +445,44 @@ pub fn run(places: Places, stop: Arc<AtomicBool>) -> Result<(), String> {
     watch_tasks(places.host_api.clone(), events.clone());
     watch_app_windows(places.host_api.clone(), events.clone(), Arc::clone(&stop));
     drop(events);
-    super::notifications::show(
-        places.host_api.clone(),
-        places.user.root.join("notifications"),
-        Arc::clone(&stop),
-    );
-
-    let launcher = AppLauncher {
+    let launcher = Arc::new(AppLauncher {
         folder: places.apps.clone(),
         window_host: std::env::current_exe()
             .ok()
             .and_then(|exe| installed_window_host(&exe)),
-    };
+        desktop: std::env::var_os("HOME")
+            .map(|home| crate::shell::app_stubs::default_desktop(Path::new(&home))),
+    });
+    let (pins, pin_requests) = channel();
+    let (news, news_posted) = channel();
+    super::notifications::show(
+        places.host_api.clone(),
+        places.user.root.join("notifications"),
+        Arc::clone(&stop),
+        pin_requests,
+        news_posted,
+        Arc::clone(&launcher),
+    );
     let platform = MacPlatform {
         links: Arc::clone(&links),
         presenter: Arc::clone(&presenter),
         requests,
-        launcher: Arc::new(launcher),
+        launcher,
         syncing: Arc::default(),
+        pins,
+        host_api: places.host_api.clone(),
+        news,
     };
     let mut manager = Manager::new(platform);
     let mut last_tick = Instant::now();
+    // The renderer's word on its device: any change is a GPU reset, followed at once.
+    let mut device_changes = client.device_changes();
     while !stop.load(Ordering::Relaxed) {
+        let changes = client.device_changes();
+        if changes != device_changes {
+            device_changes = changes;
+            manager.handle(ManagerEvent::GpuReset, Instant::now());
+        }
         match received.recv_timeout(PRESENT_TICK) {
             Ok(event) => {
                 // A failure in the rules must not end the window manager; the event is lost.

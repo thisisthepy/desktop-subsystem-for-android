@@ -527,6 +527,15 @@ pub fn keep(
     let mut waiting = false;
     // What was logged at the last sync, so a retry says only what is new.
     let mut told: BTreeSet<String> = BTreeSet::new();
+    // Each app's jump list follows its shortcuts, and its desktop shortcuts go with it.
+    // Kept in a note, so a restart neither commits an unchanged list again nor forgets the
+    // list of an app uninstalled while the window manager was not running.
+    let mut jump_lists = match crate::jump_list::default_note() {
+        Some(note) => crate::jump_list::Committed::in_note(note),
+        None => crate::jump_list::Committed::new(),
+    };
+    let texts = crate::jump_list::Texts::for_user();
+    let desktop = crate::desktop_shortcuts::Desktop::default_for_user();
     loop {
         let received = if waiting {
             installed.recv_timeout(RETRY_WHILE_IN_USE)
@@ -548,8 +557,20 @@ pub fn keep(
         while let Ok(newer) = installed.try_recv() {
             apps = newer;
         }
-        let (problems, still_waiting) = setup.sync_waiting(&apps, &ShellLinks);
+        let (mut problems, still_waiting) = setup.sync_waiting(&apps, &ShellLinks);
         waiting = still_waiting;
+        // After the Start menu, whose programs the jump lists' tasks run.
+        problems.extend(
+            crate::jump_list::sync_apps(
+                &apps,
+                &setup.apps_dir,
+                &texts,
+                &mut jump_lists,
+                &crate::jump_list::ShellJumpLists,
+            )
+            .into_iter()
+            .map(|why| format!("jump list: {why}")),
+        );
         let now_told: BTreeSet<String> = problems.iter().cloned().collect();
         for problem in &problems {
             if !told.contains(problem) {
@@ -569,6 +590,11 @@ pub fn keep(
             }
         }
         let now: BTreeSet<String> = apps.iter().map(|app| app.package_name.clone()).collect();
+        if let Some(desktop) = &desktop {
+            for problem in desktop.keep_only(&now) {
+                note(logger.as_deref(), &format!("Desktop: {problem}"));
+            }
+        }
         if let Some(previous) = &previous {
             setup.remove_programs(&previous.difference(&now).cloned().collect());
         }

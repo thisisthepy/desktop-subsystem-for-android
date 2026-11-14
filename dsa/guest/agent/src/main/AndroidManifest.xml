@@ -12,9 +12,15 @@
   is enabled only while a host accessibility client watches a task. It is also the guest's
   widget host (platform/AndroidWidgets.kt), which draws the widgets the user placed on the
   host's desktop. Its print service (platform/HostPrintService.kt) sends what apps print to the
-  host's printers. It is the guest's network location provider, and without Google Play its
+  host's printers. Its text-to-speech engine (platform/HostTextToSpeechService.kt), speech
+  recognition service (platform/HostRecognitionService.kt) and spell checker
+  (platform/HostSpellCheckerService.kt) are the guest's defaults and answer with the host's
+  voices, speech recognition and spell checker. It is the guest's network location provider, and without Google Play its
   geocode provider, both answered by the host (platform/HostNetworkLocationService.kt,
   platform/HostGeocodeService.kt), and "Share on PC" in the share sheet (platform/ShareActivity.kt).
+  Its backup transport (platform/HostBackupTransport.kt) keeps app data in the
+  host's backup folder, and its credential provider (platform/HostCredentialProvider.kt) makes
+  and uses passkeys with the host's authenticator.
   Every permission here is also in privapp-permissions-dsa-agent.xml, but for the runtime
   permissions, which default-permissions-dsa-agent.xml grants instead.
 -->
@@ -40,6 +46,11 @@
     <uses-permission android:name="android.permission.INJECT_EVENTS" />
     <!-- Hearing the Escapes no app takes (key gesture events), which become Back. -->
     <uses-permission android:name="android.permission.MANAGE_KEY_GESTURES" />
+    <!--
+      Being the status bar the window manager reports the system bars' live appearance to,
+      which the host's caption buttons follow: the guest has no SystemUI to be it.
+    -->
+    <uses-permission android:name="android.permission.STATUS_BAR_SERVICE" />
     <!-- Reading the label and launcher activity of any app. -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
     <!--
@@ -53,8 +64,12 @@
       and setting the battery and battery saver to the host's.
     -->
     <uses-permission android:name="android.permission.DEVICE_POWER" />
-    <!-- Ending cached apps when the guest goes to sleep with no task open. -->
+    <!--
+      Ending cached apps when the guest goes to sleep with no task open, and ending another
+      app's processes that stay cached with no window: killBackgroundProcesses takes both.
+    -->
     <uses-permission android:name="android.permission.KILL_ALL_BACKGROUND_PROCESSES" />
+    <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
     <!-- Ending an app's processes when its last window closes, or when the host says Stop. -->
     <uses-permission android:name="android.permission.FORCE_STOP_PACKAGES" />
     <!-- Turning off the phone-only apps a desktop does not use, if the build has them. -->
@@ -128,16 +143,38 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <uses-permission android:name="android.permission.NETWORK_SETTINGS" />
     <!--
+      Being the guest's speech recognition service: Android hands an app's recognition only to
+      a recognizer that may record, as it checks the app may. The sound is recorded on the
+      host. It is a runtime permission, which the image grants by default.
+    -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!--
       Keeping the activity manager's cached process limit, which it reads from the device
       configuration (DeviceConfig), and setting it again when something else changes it.
     -->
     <uses-permission android:name="android.permission.READ_DEVICE_CONFIG" />
     <uses-permission android:name="android.permission.WRITE_DEVICE_CONFIG" />
     <!--
+      Making the agent's backup transport Android's, turning backup and automatic restore on,
+      and running the backups and restores the host asks for.
+    -->
+    <uses-permission android:name="android.permission.BACKUP" />
+    <!--
+      Being a system credential provider, which the credential manager lists whatever other
+      providers write into its settings.
+    -->
+    <uses-permission android:name="android.permission.PROVIDE_DEFAULT_ENABLED_CREDENTIAL_SERVICE" />
+    <!--
       Being the guest's network location provider and geocode provider, which the location
       manager binds only in a package that holds this.
     -->
     <uses-permission android:name="android.permission.INSTALL_LOCATION_PROVIDER" />
+    <!--
+      Routing each app with a window to an output of its own (an audio policy), and setting
+      Android's media volume to the one the user set for the app on the host.
+    -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_ROUTING" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
     <application
         android:name=".platform.AgentApplication"
@@ -166,6 +203,26 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.HOME" />
                 <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <!--
+          An app's request to pin a shortcut (requestPinShortcut), which Android hands to the
+          default launcher: it shows nothing, hands the request to the agent, which asks the
+          host, and finishes at once. Having it makes ShortcutManager.isRequestPinShortcutSupported
+          true for the apps. It runs in a task of its own, in the agent's package, which the
+          host never shows a window for, so the app that asked keeps its window. Only the
+          system starts it, so it is not exported.
+        -->
+        <activity
+            android:name=".platform.PinShortcutActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:taskAffinity="io.github.thisisthepy.dsa.agent.pinshortcut"
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.content.pm.action.CONFIRM_PIN_SHORTCUT" />
             </intent-filter>
         </activity>
 
@@ -215,14 +272,21 @@
 
         <!--
           Runs a widget's setup when the user places it: it shows nothing, starts the setup of
-          the widget's app, which shows as a task window, and finishes with its answer. It is
-          not exported: only the agent starts it.
+          the widget's app above it, and finishes with its answer. It opens a freeform task of
+          its own, never the agent's home task, which has no window on the host: an affinity
+          of its own, and the agent starts it with NEW_TASK and MULTIPLE_TASK. The host shows
+          that task as the app's window. It handles its own configuration changes, so a
+          window moved or resized during the setup keeps it. It is not exported: only the
+          agent starts it.
         -->
         <activity
             android:name=".platform.WidgetConfigureActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|density|keyboard|keyboardHidden|navigation|uiMode|fontScale|locale|layoutDirection"
             android:excludeFromRecents="true"
             android:exported="false"
             android:noHistory="false"
+            android:resizeableActivity="true"
+            android:taskAffinity="io.github.thisisthepy.dsa.agent.widgetsetup"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
         <!--
@@ -284,6 +348,76 @@
         </service>
 
         <!--
+          The guest's text-to-speech engine: it lists the host's voices and speaks with them,
+          the host sending back each text's sound (platform/HostTextToSpeechService.kt). The
+          text to speech manager binds it for any app that speaks.
+        -->
+        <service
+            android:name=".platform.HostTextToSpeechService"
+            android:exported="true"
+            android:label="@string/tts_engine_name">
+            <intent-filter>
+                <action android:name="android.intent.action.TTS_SERVICE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <meta-data
+                android:name="android.speech.tts"
+                android:resource="@xml/host_tts_engine" />
+        </service>
+
+        <!--
+          Answers an app's or Settings' check of the engine's voice data: every language the
+          host speaks is installed. It shows nothing.
+        -->
+        <activity
+            android:name=".platform.HostTtsDataActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.speech.tts.engine.CHECK_TTS_DATA" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <!--
+          The guest's speech recognition service: the host's speech recognition listens to the
+          host's microphone (platform/HostRecognitionService.kt). Any app may bind it, as any
+          recognizer; Android checks the app may record before the service is asked.
+        -->
+        <service
+            android:name=".platform.HostRecognitionService"
+            android:exported="true"
+            android:label="@string/recognition_service_name">
+            <intent-filter>
+                <action android:name="android.speech.RecognitionService" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <meta-data
+                android:name="android.speech"
+                android:resource="@xml/host_recognition_service" />
+        </service>
+
+        <!--
+          The guest's spell checker: the host's spell checker checks what editors ask about
+          (platform/HostSpellCheckerService.kt). BIND_TEXT_SERVICE keeps every caller but the
+          text services manager out.
+        -->
+        <service
+            android:name=".platform.HostSpellCheckerService"
+            android:exported="true"
+            android:label="@string/spell_checker_name"
+            android:permission="android.permission.BIND_TEXT_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.textservice.SpellCheckerService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.view.textservice.scs"
+                android:resource="@xml/host_spell_checker" />
+        </service>
+
+        <!--
           The guest's network location provider: the image names the agent as the provider,
           and the location manager binds it for the network provider, which reports the host's
           location (platform/HostNetworkLocationService.kt). WRITE_SECURE_SETTINGS keeps every
@@ -337,5 +471,53 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/host_accessibility_service" />
         </service>
+
+        <!--
+          The guest's backup transport (platform/HostBackupTransport.kt): app data backups go
+          to the host's backup folder and come back from it. The backup manager binds it with
+          android.backup.TRANSPORT_HOST, and uses it only because the image's sysconfig
+          (sysconfig-dsa-agent.xml) lists it and the agent is privileged. Not exported: only the
+          system binds it.
+        -->
+        <service
+            android:name=".platform.HostBackupTransportService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.backup.TRANSPORT_HOST" />
+            </intent-filter>
+        </service>
+
+        <!--
+          The guest's passkey provider (platform/HostCredentialProvider.kt): the host's
+          authenticator makes and uses passkeys. Only the credential manager may bind it. The
+          second action makes it a system provider, which the credential manager lists without
+          the user enabling it.
+        -->
+        <service
+            android:name=".platform.HostCredentialProvider"
+            android:exported="true"
+            android:label="@string/passkey_provider_name"
+            android:permission="android.permission.BIND_CREDENTIAL_PROVIDER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.credentials.CredentialProviderService" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.service.credentials.system.CredentialProviderService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.credentials.provider"
+                android:resource="@xml/host_credential_provider" />
+        </service>
+
+        <!--
+          Hands a passkey request the person sent to "this computer" to the host and returns
+          the result (platform/PasskeyActivity.kt). It shows nothing, and only the credential
+          provider's pending intents start it.
+        -->
+        <activity
+            android:name=".platform.PasskeyActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
     </application>
 </manifest>

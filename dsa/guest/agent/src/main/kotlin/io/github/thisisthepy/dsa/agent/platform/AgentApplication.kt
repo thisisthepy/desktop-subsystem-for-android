@@ -16,7 +16,14 @@ import io.github.thisisthepy.dsa.agent.trace.SurfaceFlingerTrace
 class AgentApplication : Application() {
     override fun onCreate() {
         super.onCreate()
-        val thread = HandlerThread("dsa-agent").apply { start() }
+        // The agent's thread gives tasks the sizes their windows ask for and tells the host
+        // where its tasks are, which the user waits on while resizing a window. At the default
+        // priority it lost the processors to the app being resized, whose UI and render threads
+        // the framework raises above THREAD_PRIORITY_DISPLAY: on a guest with two processors,
+        // handing a size to the framework took 15 ms while the guest was quiet and 200 to
+        // 300 ms while the app was busy laying itself out and having its tree read. It runs at
+        // the priority of the window manager's own display threads.
+        val thread = HandlerThread("dsa-agent", Process.THREAD_PRIORITY_DISPLAY).apply { start() }
         // Pointer input has a thread of its own, at the priority of the framework's input
         // threads, so it waits neither behind the agent's binder calls nor behind apps.
         val input = HandlerThread("dsa-input", Process.THREAD_PRIORITY_URGENT_DISPLAY).apply { start() }
@@ -66,6 +73,7 @@ class AgentApplication : Application() {
                 android.util.Log.isLoggable("DsaResizeTrace", android.util.Log.DEBUG)
             }),
             launcherApps = AndroidLauncherApps(this, log),
+            shortcuts = AndroidShortcuts(this, log),
             memory = AndroidMemorySource(this),
             inputScheduler = HandlerScheduler(input.looper),
             inputTrace = InputTrace(log, enabled = traced),
@@ -78,6 +86,7 @@ class AgentApplication : Application() {
             fileStore = io.github.thisisthepy.dsa.agent.files.TransferStore(hostFilesDir(this)),
             fileOpener = AndroidFileOpener(this),
             mediaScan = AndroidMediaScan(this),
+            trustStoreNotice = AndroidTrustStoreNotice(this),
             clipboard = AndroidClipboard(this, log),
             notifications = AndroidNotifications(this, log),
             media = AndroidMediaSessions(this, log, android.os.Handler(thread.looper)),
@@ -97,11 +106,20 @@ class AgentApplication : Application() {
             componentStates = AndroidComponentStates(this),
             widgets = AndroidWidgets(this, log),
             appProcesses = AndroidAppProcesses(this),
+            backgroundProcesses = AndroidBackgroundProcesses(this),
             widgetStore = AndroidWidgetStore(this),
             accessibility = AndroidAccessibilitySource(this, log),
+            // Reading an app's accessibility tree waits on the app's UI thread for each node,
+            // so it has a thread of its own and never holds up the host's requests.
+            accessibilityReader = HandlerScheduler(HandlerThread("dsa-accessibility").apply { start() }.looper),
             diagnostics = AndroidDiagnostics(this),
             wifi = AndroidWifi(this),
+            privateDns = AndroidPrivateDns(this),
             dragCatcher = dragCatcher,
+            backupManager = AndroidBackupManager(this, log),
+            languageSetup = AndroidLanguageServicesSetup(this),
+            appAudio = AndroidAppAudio(this, log),
+            appVolumes = AndroidAppVolumeStore(this),
             shareNotice = { reason ->
                 val main = android.os.Handler(mainLooper)
                 main.post {
@@ -124,6 +142,8 @@ class AgentApplication : Application() {
             android.os.SystemClock::elapsedRealtime,
             log,
         ).start()
+        // The host's passkeys stay a credential provider whatever another provider writes.
+        AndroidCredentialSetup(this, log).start()
         // Starting windows draw on a thread of their own, so a slow app theme never holds up
         // the agent's work or the home activity on the main thread.
         val splash = HandlerThread("dsa-splash").apply { start() }

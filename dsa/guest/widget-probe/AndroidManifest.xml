@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The widget probe: an ordinary third-party app whose widgets need a setup, for the widget
+  boot check (dsa/host/platform/linux/tests/widgets.rs). Its setup screen answers by itself,
+  by the widget it sets up:
+
+  - OkWidget: finishes with RESULT_OK two seconds after its window has the focus, so it is
+    placed only once the setup showed in a focused window on the desktop;
+  - CancelWidget: the same, with RESULT_CANCELED, so the widget is not placed;
+  - AtOnceWidget: finishes with RESULT_OK as it starts, before it draws anything;
+  - OptionalWidget: has the same setup, but says it is reconfigurable and its setup optional,
+    so it is placed without one.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="io.github.thisisthepy.dsa.widgetprobe">
+
+    <application android:label="DSA widget probe" android:hasCode="true">
+        <activity android:name=".SetupActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+
+        <receiver android:name=".OkWidget" android:exported="true" android:label="Probe OK">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/setup_widget" />
+        </receiver>
+        <receiver android:name=".CancelWidget" android:exported="true" android:label="Probe cancel">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/setup_widget" />
+        </receiver>
+        <receiver android:name=".AtOnceWidget" android:exported="true" android:label="Probe at once">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/setup_widget" />
+        </receiver>
+        <receiver android:name=".OptionalWidget" android:exported="true" android:label="Probe optional">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/optional_widget" />
+        </receiver>
+    </application>
+</manifest>

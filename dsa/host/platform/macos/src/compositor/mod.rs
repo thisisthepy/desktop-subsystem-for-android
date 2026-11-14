@@ -20,6 +20,8 @@ pub mod title_bar;
 pub mod window_menu;
 
 #[cfg(target_os = "macos")]
+pub mod dock_menu;
+#[cfg(target_os = "macos")]
 pub mod menu_bar;
 #[cfg(target_os = "macos")]
 pub mod metal;

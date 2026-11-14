@@ -9,26 +9,33 @@ import org.junit.Test
  * bitmap at least that large, so it is never scaled up on a 125% or 200% monitor.
  */
 class SplashIconSizeTest {
-    private fun dpiOf(percent: Int) = SplashIconSize.BASE_DENSITY * percent / 100
+    /** The density a task draws at on a monitor at [percent]: 131 x the scale, rounded to an even density. */
+    private fun dpiOf(percent: Int) = when (percent) {
+        100 -> 130
+        125 -> 164
+        200 -> 262
+        else -> error("no density for $percent%")
+    }
 
     @Test
     fun fr3_the_splash_icon_is_its_size_in_pixels_at_100_125_and_200_percent() {
         // The masked adaptive icon (160 dp) and the splash theme's icon (240 dp, 288 dp).
-        assertEquals(160, SplashIconSize.pixels(160, dpiOf(100)))
-        assertEquals(200, SplashIconSize.pixels(160, dpiOf(125)))
-        assertEquals(320, SplashIconSize.pixels(160, dpiOf(200)))
-        assertEquals(300, SplashIconSize.pixels(240, dpiOf(125)))
-        assertEquals(576, SplashIconSize.pixels(288, dpiOf(200)))
+        assertEquals(130, SplashIconSize.pixels(160, dpiOf(100)))
+        assertEquals(164, SplashIconSize.pixels(160, dpiOf(125)))
+        assertEquals(262, SplashIconSize.pixels(160, dpiOf(200)))
+        assertEquals(246, SplashIconSize.pixels(240, dpiOf(125)))
+        assertEquals(472, SplashIconSize.pixels(288, dpiOf(200)))
     }
 
     @Test
     fun fr4_the_splash_is_drawn_at_the_tasks_density_not_the_displays() {
-        // The guest display is 160 dpi; a task on a 200% monitor draws at 320.
-        assertEquals(320, SplashIconSize.drawDensity(taskDensityDpi = 320, displayDensityDpi = 160))
-        assertEquals(200, SplashIconSize.drawDensity(taskDensityDpi = 200, displayDensityDpi = 160))
+        // The guest display is 130 dpi on a 100% main monitor; a task on a 200% monitor draws
+        // at 262.
+        assertEquals(262, SplashIconSize.drawDensity(taskDensityDpi = 262, displayDensityDpi = 130))
+        assertEquals(164, SplashIconSize.drawDensity(taskDensityDpi = 164, displayDensityDpi = 130))
         // A task the host has not given a density yet draws at the display's.
-        assertEquals(160, SplashIconSize.drawDensity(taskDensityDpi = null, displayDensityDpi = 160))
-        assertEquals(160, SplashIconSize.drawDensity(taskDensityDpi = 0, displayDensityDpi = 160))
+        assertEquals(130, SplashIconSize.drawDensity(taskDensityDpi = null, displayDensityDpi = 130))
+        assertEquals(130, SplashIconSize.drawDensity(taskDensityDpi = 0, displayDensityDpi = 130))
     }
 
     @Test
@@ -43,7 +50,9 @@ class SplashIconSizeTest {
             // Loaded there, it is at least as large as the square it is drawn into.
             assertTrue(SplashIconSize.pixels(72, load) >= pixels)
         }
-        assertEquals(712, SplashIconSize.loadDensity(320, 144, 320))
+        // 320 x 319.5 / 143.5, rounded up: an icon of 143.5 px at 320 dpi, which rounds to 144,
+        // is still 320 px there.
+        assertEquals(713, SplashIconSize.loadDensity(320, 144, 320))
     }
 
     @Test

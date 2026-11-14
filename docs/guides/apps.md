@@ -16,6 +16,24 @@ When another program's Start menu entry already has the app's name, DSA adds the
 the name, such as `Clock (com.example.clock)`. DSA changes or removes only the entries it
 made.
 
+## Desktop shortcuts and jump lists
+
+App icons work the way Windows apps' do, not the way an Android home screen does.
+
+- **Desktop shortcut.** On the **Apps** page of DSA Settings, select **Create desktop
+  shortcut** next to the app. You can also right-click the app's taskbar button and select
+  **Create desktop shortcut**. From the command line: `dsa apps desktop-shortcut <package>`.
+  The shortcut opens the app as its Start menu entry does.
+- **App shortcuts.** The shortcuts an Android app offers, such as a messenger's new chat,
+  show when you right-click the app's taskbar button or its Start menu entry. Selecting one
+  opens that screen of the app in a window, starting Android first when it is not running.
+  When the app changes its shortcuts, the list follows. From the command line:
+  `dsa apps shortcut <package> <id>`; `dsa apps info <package> --json` lists the IDs.
+- **Shortcuts an app asks for.** When an app asks to add one of its shortcuts to your
+  desktop, DSA asks you first and adds it only if you agree.
+
+Uninstalling an app removes its desktop shortcuts too.
+
 ## Work with app windows
 
 - Each task has its own window, taskbar button and Alt+Tab entry, with the app's name and
@@ -96,13 +114,15 @@ windows, stays when you show the desktop, and is not in the taskbar or Alt+Tab.
 1. Open the **Widgets** page of DSA Settings.
 2. Under **Widgets your apps offer**, select **Add to desktop** next to a widget. If the app
    asks you to set the widget up, its setup opens in a window.
-3. To move a widget, drag the round **More** button that appears at its top right corner
-   when you point at it. You can also press anywhere on the widget, hold still for half a
-   second, and then drag. A quick drag stays the widget's own, so its lists still scroll.
-   Drag its edges to resize it. DSA remembers where you put it.
-4. Select the **More** button, or right-click the widget, for **Resize**, to pick one of
-   the sizes it allows, and **Remove**. The arrow keys, Enter and Esc work in this menu
-   too, and a letter picks an item: R for **Resize** and M for **Remove**.
+3. To move a widget, press anywhere on it and hold still for half a second. It lifts, with a
+   border and a handle on each edge it can be resized along. Drag it to move it, or drag a
+   handle to resize it. A quick drag stays the widget's own, so its lists still scroll. You
+   can also drag an edge of the widget to resize it without lifting it first; only the edges
+   it can be resized along do this. DSA remembers where you put it and how large.
+4. Right-click the widget, or let go after the long press, for **Widget settings** (when the
+   widget can be set up again), **Resize**, to pick one of the sizes it allows, and
+   **Remove**. The menu key and Shift+F10 open it too. The arrow keys, Enter and Esc work in
+   this menu, and a letter picks an item: R for **Resize** and M for **Remove**.
 
 From the command line: `dsa widgets list`, `dsa widgets add <provider>` and
 `dsa widgets remove <id>`.

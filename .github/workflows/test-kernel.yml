@@ -12,28 +12,41 @@ name: Kernel test
 
 on:
   # Only develop is built and tested: features are integrated there and fixed there.
-  push:
-    branches: [develop]
-    paths:
-      - "dsa/kernel/**"
-      - ".github/workflows/test-kernel.yml"
-      - ".github/actions/guest-kernel/**"
+  # Paused by the owner's decision (2026-11-14): while memory and resizing are fixed on
+  # the owner's PC, tests run only by hand (workflow_dispatch), so a push to develop does
+  # not take the runners the Development and Framework builds wait for. Uncomment to resume.
+  # push:
+  #   branches: [develop]
+  #   paths:
+  #     - "dsa/kernel/**"
+  #     - ".github/workflows/test-kernel.yml"
+  #     - ".github/actions/guest-kernel/**"
   workflow_dispatch:
     inputs:
       tag:
         description: "A WSL kernel tag to build instead of the pinned one, to try a newer tag"
         required: false
         default: ""
+  # Checks (checks.yml) runs it as one of its jobs, with every other test, in one run.
+  workflow_call:
+    inputs:
+      tag:
+        description: "A WSL kernel tag to build instead of the pinned one, to try a newer tag"
+        type: string
+        required: false
+        default: ""
   schedule:
     - cron: "17 3 * * 1"
 
 concurrency:
-  # On develop a run in progress finishes and only the newest waiting run stays: GitHub
-  # keeps one pending run per group, so a newer merge replaces the one still waiting.
-  # The newest run tests everything the dropped ones held. Anywhere else, such as a pull
-  # request, a newer run still replaces the older one.
-  group: kernel-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/develop' }}
+  # A run in progress always finishes, and only the newest waiting run stays: GitHub keeps
+  # one pending run per group, so a newer run replaces the one still waiting, and the newest
+  # tests everything the dropped ones held. The group is the workflow and the branch (or
+  # the pull request), never the run, so manual runs replace each other too. Called from
+  # Checks, github.workflow names Checks, so a Checks run neither waits on nor replaces a
+  # run started on its own.
+  group: kernel-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read

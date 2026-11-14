@@ -12,6 +12,8 @@
 
 #include <cros_gralloc/cros_gralloc_handle.h>
 
+#include "cpu_upload.h"
+#include "cpu_upload_policy.h"
 #include "log.h"
 
 namespace dsa::hwc {
@@ -68,12 +70,34 @@ BufferRef bufferRefFromHandle(const aidl::android::hardware::common::NativeHandl
     if (cros->magic != kCrosGrallocMagic) {
         return {};
     }
-    return BufferRef{cros->id, cros->width, cros->height, cros->format};
+    BufferRef ref;
+    ref.id = cros->id;
+    ref.width = cros->width;
+    ref.height = cros->height;
+    ref.format = cros->format;
+    ref.usage = static_cast<uint64_t>(cros->usage);
+    ref.androidFormat = cros->droid_format;
+    ref.pixelStride = cros->pixel_stride;
+    // Copied out first: the handle is packed, and a reference to one of its fields is not.
+    const uint32_t planes = cros->num_planes;
+    ref.planeCount = planes < 4 ? planes : 4;
+    for (uint32_t i = 0; i < 4; ++i) {
+        ref.offsets[i] = cros->offsets[i];
+        ref.strides[i] = cros->strides[i];
+    }
+    ref.planeBytes = cros->total_size > cros->reserved_region_size
+                         ? cros->total_size - cros->reserved_region_size
+                         : 0;
+    return ref;
 }
 
 BufferRef BufferSlots::apply(const composer3::Buffer& buffer) {
     if (buffer.handle) {
-        const BufferRef ref = bufferRefFromHandle(*buffer.handle);
+        BufferRef ref = bufferRefFromHandle(*buffer.handle);
+        // A buffer a CPU writes keeps its descriptors, for the copies up to the host.
+        if (ref.valid() && dsa::wantsCpuUpload(ref.usage)) {
+            ref.handle = GrallocHandle::from(*buffer.handle);
+        }
         mSlots[buffer.slot] = ref;
         return ref;
     }
@@ -98,7 +122,31 @@ int64_t Display::createLayer() {
 
 bool Display::destroyLayer(int64_t id) {
     mValidated = false;
+    mPictures.forget(id);
     return mLayers.erase(id) != 0;
+}
+
+std::vector<CpuLayer> Display::cpuWrittenLayers(bool changedOnly) {
+    using composer3::Composition;
+    std::vector<CpuLayer> layers;
+    for (auto& [id, layer] : mLayers) {
+        if (layer.composition == Composition::INVALID ||
+            layer.composition == Composition::SOLID_COLOR ||
+            layer.composition == Composition::SIDEBAND || !layer.buffer.cpuWritten()) {
+            continue;
+        }
+        const bool fresh = mPictures.show(id, layer.buffer.id);
+        if (changedOnly && !fresh) {
+            continue;
+        }
+        CpuLayer out;
+        out.id = id;
+        out.buffer = layer.buffer;
+        out.fresh = fresh;
+        out.acquireFence.reset(layer.acquireFence.ok() ? dup(layer.acquireFence.get()) : -1);
+        layers.push_back(std::move(out));
+    }
+    return layers;
 }
 
 Layer* Display::layer(int64_t id) {
@@ -173,13 +221,21 @@ std::vector<composer3::ChangedCompositionLayer> Display::validate() {
         Composition wanted = layer.composition;
         switch (layer.composition) {
             case Composition::DEVICE:
+                // A YUV buffer (a video's pictures) is one the host cannot compose.
+                if (layer.hasLuts || (layer.buffer.valid() && !hostComposes(layer.buffer.format))) {
+                    wanted = Composition::CLIENT;
+                }
+                break;
             case Composition::SOLID_COLOR:
                 if (layer.hasLuts) {
                     wanted = Composition::CLIENT;
                 }
                 break;
             case Composition::CURSOR:
-                wanted = layer.hasLuts ? Composition::CLIENT : Composition::DEVICE;
+                wanted = (layer.hasLuts ||
+                          (layer.buffer.valid() && !hostComposes(layer.buffer.format)))
+                             ? Composition::CLIENT
+                             : Composition::DEVICE;
                 break;
             case Composition::SIDEBAND:
             case Composition::DISPLAY_DECORATION:
@@ -239,7 +295,7 @@ Frame Display::takeFrame() {
         out.transform = layer.transform;
         frame.layers.push_back(std::move(out));
     }
-    mClientSlots.collect(&frame.liveBuffers);
+    mClientSlots.collect(&frame.clientBuffers);
     frame.clientTarget = mClientTarget;
     frame.clientTargetFence = std::move(mClientTargetFence);
     return frame;

@@ -89,6 +89,18 @@ pub fn local_app_data(sid: &str) -> Result<PathBuf, String> {
     Ok(resolve(&profile, moved.as_deref()))
 }
 
+/// The profile folder (home folder, `C:\Users\<name>`) of the user with SID `sid`.
+pub fn profile_folder(sid: &str) -> Result<PathBuf, String> {
+    read_string(
+        HKEY_LOCAL_MACHINE,
+        &format!(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\{sid}"),
+        "ProfileImagePath",
+        true,
+    )?
+    .map(PathBuf::from)
+    .ok_or_else(|| format!("Windows has no profile folder for {sid}; sign in once first"))
+}
+
 /// The profile folder of every user Windows has one for.
 pub fn profile_folders() -> Vec<PathBuf> {
     profiles().into_iter().map(|(_, folder)| folder).collect()

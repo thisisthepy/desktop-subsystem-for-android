@@ -15,7 +15,7 @@
         </Grid>
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
             <StackPanel Style="{StaticResource PageContent}">
-                <ui:CardControl Margin="0,0,0,4">
+                <ui:CardControl>
                     <ui:CardControl.Header>
                         <StackPanel Orientation="Horizontal">
                             <Image Source="pack://application:,,,/Assets/logo.png" Width="32" Height="32" Margin="0,0,16,0" />
@@ -27,19 +27,19 @@
                     </ui:CardControl.Header>
                     <TextBlock x:Name="HeaderVersion" Style="{StaticResource CardValue}" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                 </ui:CardControl>
-                <ui:CardControl Margin="0,0,0,4">
+                <ui:CardControl>
                     <ui:CardControl.Header>
                         <TextBlock Text="{l:Text AboutAppVersionCard.Header}" Style="{StaticResource CardTitle}" />
                     </ui:CardControl.Header>
                     <TextBlock x:Name="AppVersionText" Style="{StaticResource CardValue}" />
                 </ui:CardControl>
-                <ui:CardControl Margin="0,0,0,4">
+                <ui:CardControl>
                     <ui:CardControl.Header>
                         <TextBlock Text="{l:Text AboutServiceVersionCard.Header}" Style="{StaticResource CardTitle}" />
                     </ui:CardControl.Header>
                     <TextBlock Text="{Binding ServiceVersion, Mode=OneWay}" Style="{StaticResource CardValue}" />
                 </ui:CardControl>
-                <ui:CardControl Margin="0,0,0,4" IsEnabled="{Binding HasAndroidVersion, Mode=OneWay}">
+                <ui:CardControl IsEnabled="{Binding HasAndroidVersion, Mode=OneWay}">
                     <ui:CardControl.Header>
                         <StackPanel>
                             <TextBlock Text="{l:Text AboutAndroidVersionCard.Header}" Style="{StaticResource CardTitle}" />
@@ -48,13 +48,13 @@
                     </ui:CardControl.Header>
                     <TextBlock Text="{Binding AndroidVersion, Mode=OneWay}" Style="{StaticResource CardValue}" />
                 </ui:CardControl>
-                <ui:CardAction Click="OnOpenLicenses" Margin="0,0,0,4">
+                <ui:CardAction Click="OnOpenLicenses">
                     <StackPanel>
                         <TextBlock Text="{l:Text AboutLicenseCard.Header}" Style="{StaticResource CardTitle}" />
                         <TextBlock Text="{l:Text AboutLicenseCard.Description}" Style="{StaticResource CardDescription}" />
                     </StackPanel>
                 </ui:CardAction>
-                <ui:CardControl Margin="0,0,0,4">
+                <ui:CardControl>
                     <ui:CardControl.Header>
                         <TextBlock Text="{l:Text AboutSourceCard.Header}" Style="{StaticResource CardTitle}" />
                     </ui:CardControl.Header>

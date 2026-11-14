@@ -16,9 +16,9 @@
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
             <StackPanel Style="{StaticResource PageContent}">
                 <ui:InfoBar Title="{l:Text SettingsErrorBar.Title}" Severity="Error" IsClosable="False"
-                            IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" Margin="0,0,0,4" />
+                            IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" />
 
-                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Clipboard24}">
+                <ui:CardControl Icon="{ui:SymbolIcon Clipboard24}">
                     <ui:CardControl.Header>
                         <StackPanel>
                             <TextBlock Text="{l:Text ClipboardCard.Header}" Style="{StaticResource CardTitle}" />
@@ -30,7 +30,7 @@
                 </ui:CardControl>
 
                 <TextBlock Text="{l:Text FilesHeader.Text}" Style="{StaticResource SectionHeader}" />
-                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon FolderLink24}">
+                <ui:CardControl Icon="{ui:SymbolIcon FolderLink24}">
                     <ui:CardControl.Header>
                         <StackPanel>
                             <TextBlock Text="{l:Text FileSharingCard.Header}" Style="{StaticResource CardTitle}" />
@@ -40,7 +40,7 @@
                     <ui:ToggleSwitch x:Name="FileSharingSwitch" IsChecked="{Binding FileSharing, Mode=OneWay}"
                                      IsEnabled="{Binding CanChange, Mode=OneWay}" Click="OnFileSharingToggled" />
                 </ui:CardControl>
-                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon FolderOpen24}">
+                <ui:CardControl Icon="{ui:SymbolIcon FolderOpen24}">
                     <ui:CardControl.Header>
                         <StackPanel>
                             <TextBlock Text="{l:Text SharedFoldersCard.Header}" Style="{StaticResource CardTitle}" />
@@ -68,14 +68,14 @@
                         </StackPanel>
                     </ui:CardControl.Header>
                 </ui:CardControl>
-                <ui:CardAction Icon="{ui:SymbolIcon FolderPeople24}" Click="OnOpenAndroidFiles" Margin="0,0,0,4">
+                <ui:CardAction Icon="{ui:SymbolIcon FolderPeople24}" Click="OnOpenAndroidFiles">
                     <StackPanel>
                         <TextBlock Text="{l:Text AndroidFilesCard.Header}" Style="{StaticResource CardTitle}" />
                         <TextBlock Text="{l:Text AndroidFilesCard.Description}" Style="{StaticResource CardDescription}" />
                     </StackPanel>
                 </ui:CardAction>
                 <!-- A card of its own, so the text wraps inside the page's width like the others. -->
-                <ui:CardControl x:Name="FilesDropCard" Margin="0,0,0,4" Icon="{ui:SymbolIcon ArrowUpload24}">
+                <ui:CardControl x:Name="FilesDropCard" Icon="{ui:SymbolIcon ArrowUpload24}">
                     <ui:CardControl.Header>
                         <StackPanel>
                             <TextBlock Text="{l:Text FilesDropCard.Header}" Style="{StaticResource CardTitle}" />
@@ -84,7 +84,7 @@
                     </ui:CardControl.Header>
                 </ui:CardControl>
 
-                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Snooze24}">
+                <ui:CardControl Icon="{ui:SymbolIcon Snooze24}">
                     <ui:CardControl.Header>
                         <StackPanel>
                             <TextBlock Text="{l:Text FreezeCard.Header}" Style="{StaticResource CardTitle}" />
@@ -95,7 +95,7 @@
                                      IsEnabled="{Binding CanChange, Mode=OneWay}" Click="OnFreezeToggled" />
                 </ui:CardControl>
 
-                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Link24}">
+                <ui:CardControl Icon="{ui:SymbolIcon Link24}">
                     <ui:CardControl.Header>
                         <StackPanel>
                             <TextBlock Text="{l:Text LinksCard.Header}" Style="{StaticResource CardTitle}" />
@@ -106,10 +106,116 @@
                                      IsEnabled="{Binding CanChange, Mode=OneWay}" Click="OnLinksToggled" />
                 </ui:CardControl>
 
+                <TextBlock Text="{l:Text BackupHeader.Text}" Style="{StaticResource SectionHeader}" />
+                <ui:InfoBar Title="{l:Text BackupUnavailableBar.Title}" Message="{Binding BackupProblem, Mode=OneWay}"
+                            Severity="Warning" IsClosable="False" IsOpen="{Binding HasBackupProblem, Mode=OneWay}" />
+                <ui:InfoBar Title="{l:Text BackupErrorBar.Title}" Message="{Binding BackupError, Mode=OneWay}"
+                            Severity="Error" IsClosable="False" IsOpen="{Binding HasBackupError, Mode=OneWay}" />
+                <ui:InfoBar Title="{l:Text BackupResultBar.Title}" Message="{Binding BackupResult, Mode=OneWay}"
+                            Severity="Success" IsClosable="False" IsOpen="{Binding HasBackupResult, Mode=OneWay}" />
+                <ui:CardControl Icon="{ui:SymbolIcon DocumentCopy24}">
+                    <ui:CardControl.Header>
+                        <StackPanel>
+                            <TextBlock Text="{l:Text BackupSwitchCard.Header}" Style="{StaticResource CardTitle}" />
+                            <TextBlock Text="{l:Text BackupSwitchCard.Description}" Style="{StaticResource CardDescription}" />
+                            <TextBlock Text="{Binding BackupOffNote, Mode=OneWay}" Style="{StaticResource CardDescription}"
+                                       Visibility="{Binding HasBackupOffNote, Converter={StaticResource Visible}}" />
+                        </StackPanel>
+                    </ui:CardControl.Header>
+                    <ui:ToggleSwitch x:Name="BackupSwitch" IsChecked="{Binding BackupEnabled, Mode=OneWay}"
+                                     IsEnabled="{Binding CanToggleBackup, Mode=OneWay}" Click="OnBackupToggled"
+                                     AutomationProperties.Name="{l:Text BackupSwitchCard.Header}" />
+                </ui:CardControl>
+                <ui:CardControl Icon="{ui:SymbolIcon CloudArrowUp24}"
+                                Visibility="{Binding BackupEnabled, Converter={StaticResource Visible}}">
+                    <ui:CardControl.Header>
+                        <StackPanel>
+                            <TextBlock Text="{l:Text BackupCard.Header}" Style="{StaticResource CardTitle}" />
+                            <TextBlock Text="{l:Text BackupCard.Description}" Style="{StaticResource CardDescription}" />
+                            <TextBlock Text="{Binding BackupFolder, Mode=OneWay}" Style="{StaticResource CardDescription}"
+                                       Visibility="{Binding HasBackupFolder, Converter={StaticResource Visible}}" />
+                            <TextBlock Text="{Binding BackupLast, Mode=OneWay}" Style="{StaticResource CardDescription}"
+                                       Visibility="{Binding HasBackup, Converter={StaticResource Visible}}" />
+                            <TextBlock Text="{Binding BackupApps, Mode=OneWay}" Style="{StaticResource CardDescription}"
+                                       Visibility="{Binding HasBackup, Converter={StaticResource Visible}}" />
+                            <TextBlock Text="{Binding BackupLastError, Mode=OneWay}" Style="{StaticResource CardDescription}"
+                                       Visibility="{Binding HasBackupLastError, Converter={StaticResource Visible}}" />
+                        </StackPanel>
+                    </ui:CardControl.Header>
+                    <StackPanel Style="{StaticResource CardControls}">
+                        <ui:ProgressRing IsIndeterminate="True" Width="20" Height="20" Margin="0,0,12,0"
+                                         Visibility="{Binding IsBackingUpOrRestoring, Converter={StaticResource Visible}}" />
+                        <ui:Button Content="{l:Text BackupRestoreButton.Content}" Click="OnRestoreBackup" Margin="0,0,8,0"
+                                   IsEnabled="{Binding CanRestoreBackup, Mode=OneWay}" />
+                        <ui:Button Content="{l:Text BackupNowButton.Content}" Click="OnBackUpNow" Appearance="Primary"
+                                   IsEnabled="{Binding CanBackUpNow, Mode=OneWay}" />
+                    </StackPanel>
+                </ui:CardControl>
+                <ui:CardControl Icon="{ui:SymbolIcon Key24}"
+                                Visibility="{Binding BackupEnabled, Converter={StaticResource Visible}}">
+                    <ui:CardControl.Header>
+                        <StackPanel>
+                            <TextBlock Text="{l:Text RecoveryKeyCard.Header}" Style="{StaticResource CardTitle}" />
+                            <TextBlock Text="{l:Text RecoveryKeyCard.Description}" Style="{StaticResource CardDescription}" />
+                            <Border Style="{StaticResource CodeBlock}"
+                                    Visibility="{Binding HasRecoveryKey, Converter={StaticResource Visible}}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox x:Name="RecoveryKeyBox" Style="{StaticResource SelectableCode}" VerticalAlignment="Center"
+                                             TextWrapping="Wrap" Text="{Binding RecoveryKey, Mode=OneWay}"
+                                             AutomationProperties.Name="{l:Text RecoveryKeyCard.Header}" />
+                                    <ui:Button x:Name="RecoveryKeyCopyButton" Grid.Column="1" Margin="8,0,0,0" MinWidth="32" Width="32" Height="32" Padding="0"
+                                               Appearance="Transparent" Icon="{ui:SymbolIcon Copy24}" Click="OnCopyRecoveryKey"
+                                               ToolTip="{l:Text CopyButton.ToolTip}" AutomationProperties.Name="{l:Text CopyButton.ToolTip}" />
+                                </Grid>
+                            </Border>
+                            <TextBlock Text="{Binding RecoveryKeyAdvice, Mode=OneWay}" Style="{StaticResource CardDescription}"
+                                       Visibility="{Binding HasRecoveryKey, Converter={StaticResource Visible}}" />
+                        </StackPanel>
+                    </ui:CardControl.Header>
+                    <StackPanel Style="{StaticResource CardControls}">
+                        <ui:Button Content="{l:Text RecoveryKeyHideButton.Content}" Click="OnHideRecoveryKey"
+                                   Visibility="{Binding HasRecoveryKey, Converter={StaticResource Visible}}" />
+                        <ui:Button Content="{l:Text RecoveryKeyShowButton.Content}" Click="OnShowRecoveryKey"
+                                   IsEnabled="{Binding CanShowRecoveryKey, Mode=OneWay}"
+                                   Visibility="{Binding ShowsRecoveryKeyButton, Converter={StaticResource Visible}}" />
+                    </StackPanel>
+                </ui:CardControl>
+                <ui:CardControl Icon="{ui:SymbolIcon History24}"
+                                Visibility="{Binding BackupEnabled, Converter={StaticResource Visible}}">
+                    <ui:CardControl.Header>
+                        <StackPanel>
+                            <TextBlock Text="{l:Text UseRecoveryKeyCard.Header}" Style="{StaticResource CardTitle}" />
+                            <TextBlock Text="{l:Text UseRecoveryKeyCard.Description}" Style="{StaticResource CardDescription}" />
+                            <ui:TextBox x:Name="RecoveryKeyEntry" Margin="0,6,0,0" PlaceholderText="{l:Text UseRecoveryKeyCard.Placeholder}"
+                                        IsEnabled="{Binding CanUseRecoveryKey, Mode=OneWay}"
+                                        AutomationProperties.Name="{l:Text UseRecoveryKeyCard.Header}" />
+                        </StackPanel>
+                    </ui:CardControl.Header>
+                    <ui:Button Content="{l:Text UseRecoveryKeyButton.Content}" Click="OnUseRecoveryKey"
+                               IsEnabled="{Binding CanUseRecoveryKey, Mode=OneWay}" />
+                </ui:CardControl>
+                <ui:InfoBar Title="{l:Text KeyProblemBar.Title}" Message="{Binding KeyProblem, Mode=OneWay}"
+                            Severity="Error" IsClosable="False" IsOpen="{Binding HasKeyProblem, Mode=OneWay}" />
+                <ui:CardControl Icon="{ui:SymbolIcon ShieldKeyhole24}"
+                                Visibility="{Binding HasKeyProtection, Converter={StaticResource Visible}}">
+                    <ui:CardControl.Header>
+                        <StackPanel>
+                            <TextBlock Text="{l:Text KeyProtectionCard.Header}" Style="{StaticResource CardTitle}" />
+                            <TextBlock Text="{Binding KeyProtectionText, Mode=OneWay}" Style="{StaticResource CardDescription}" />
+                            <TextBlock Text="{Binding KeyProtectionDetail, Mode=OneWay}" Style="{StaticResource CardDescription}"
+                                       Visibility="{Binding HasKeyProtectionDetail, Converter={StaticResource Visible}}" />
+                        </StackPanel>
+                    </ui:CardControl.Header>
+                </ui:CardControl>
+
                 <TextBlock Text="{l:Text ResetDataHeader.Text}" Style="{StaticResource SectionHeader}" />
                 <ui:InfoBar Title="{l:Text ResetDoneBar.Title}" Message="{l:Text ResetDoneBar.Message}"
-                            Severity="Success" IsClosable="False" IsOpen="{Binding ResetDone, Mode=OneWay}" Margin="0,0,0,4" />
-                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon ArrowReset24}">
+                            Severity="Success" IsClosable="False" IsOpen="{Binding ResetDone, Mode=OneWay}" />
+                <ui:CardControl Icon="{ui:SymbolIcon ArrowReset24}">
                     <ui:CardControl.Header>
                         <StackPanel>
                             <TextBlock Text="{l:Text ResetDataCard.Header}" Style="{StaticResource CardTitle}" />
@@ -125,7 +231,7 @@
                 </ui:CardControl>
 
                 <TextBlock Text="{l:Text ArmHeader.Text}" Style="{StaticResource SectionHeader}" />
-                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Apps24}">
+                <ui:CardControl Icon="{ui:SymbolIcon Apps24}">
                     <ui:CardControl.Header>
                         <StackPanel>
                             <TextBlock Text="{l:Text ArmCard.Header}" Style="{StaticResource CardTitle}" />
@@ -139,8 +245,8 @@
                 </ui:CardControl>
                 <ui:InfoBar Title="{l:Text ArmRestartBar.Title}" Message="{l:Text ArmRestartBar.Message}"
                             Severity="Informational" IsClosable="False"
-                            IsOpen="{Binding ArmRestartNeeded, Mode=OneWay}" Margin="0,0,0,4" />
-                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon ArrowDownload24}"
+                            IsOpen="{Binding ArmRestartNeeded, Mode=OneWay}" />
+                <ui:CardControl Icon="{ui:SymbolIcon ArrowDownload24}"
                                 Visibility="{Binding ShowsGoogleArm, Converter={StaticResource Visible}}">
                     <ui:CardControl.Header>
                         <StackPanel>
@@ -159,8 +265,8 @@
                 </ui:CardControl>
                 <ui:InfoBar Title="{l:Text ArmGoogleFetchingBar.Title}" Message="{l:Text ArmGoogleFetchingBar.Message}"
                             Severity="Informational" IsClosable="False"
-                            IsOpen="{Binding IsFetchingGoogleArm, Mode=OneWay}" Margin="0,0,0,4" />
-                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon ArrowReset24}"
+                            IsOpen="{Binding IsFetchingGoogleArm, Mode=OneWay}" />
+                <ui:CardControl Icon="{ui:SymbolIcon ArrowReset24}"
                                 Visibility="{Binding HasArmDefault, Converter={StaticResource Visible}}">
                     <ui:CardControl.Header>
                         <StackPanel>
@@ -171,7 +277,7 @@
                     <ui:Button Content="{l:Text ArmDefaultButton.Content}" Click="OnUseDefaultArmTranslator"
                                IsEnabled="{Binding CanUseDefaultArmTranslator, Mode=OneWay}" />
                 </ui:CardControl>
-                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Delete24}"
+                <ui:CardControl Icon="{ui:SymbolIcon Delete24}"
                                 Visibility="{Binding ShowsArmRemove, Converter={StaticResource Visible}}">
                     <ui:CardControl.Header>
                         <StackPanel>
@@ -184,7 +290,7 @@
                 </ui:CardControl>
 
                 <TextBlock Text="{l:Text GappsHeader.Text}" Style="{StaticResource SectionHeader}" />
-                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon ShoppingBag24}">
+                <ui:CardControl Icon="{ui:SymbolIcon ShoppingBag24}">
                     <ui:CardControl.Header>
                         <StackPanel>
                             <TextBlock Text="{l:Text GappsCard.Header}" Style="{StaticResource CardTitle}" />
@@ -203,11 +309,11 @@
                 </ui:CardControl>
                 <ui:InfoBar Title="{l:Text GappsInstallingBar.Title}" Message="{l:Text GappsInstallingBar.Message}"
                             Severity="Informational" IsClosable="False"
-                            IsOpen="{Binding IsInstallingGapps, Mode=OneWay}" Margin="0,0,0,4" />
+                            IsOpen="{Binding IsInstallingGapps, Mode=OneWay}" />
                 <ui:InfoBar Title="{l:Text GappsRestartBar.Title}" Message="{l:Text GappsRestartBar.Message}"
                             Severity="Informational" IsClosable="False"
-                            IsOpen="{Binding GappsRestartNeeded, Mode=OneWay}" Margin="0,0,0,4" />
-                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Delete24}">
+                            IsOpen="{Binding GappsRestartNeeded, Mode=OneWay}" />
+                <ui:CardControl Icon="{ui:SymbolIcon Delete24}">
                     <ui:CardControl.Header>
                         <StackPanel>
                             <TextBlock Text="{l:Text GappsRemoveCard.Header}" Style="{StaticResource CardTitle}" />
@@ -217,7 +323,7 @@
                     <ui:Button Content="{l:Text GappsRemoveButton.Content}" Click="OnRemoveGapps"
                                IsEnabled="{Binding CanRemoveGapps, Mode=OneWay}" />
                 </ui:CardControl>
-                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Info24}">
+                <ui:CardControl Icon="{ui:SymbolIcon Info24}">
                     <ui:CardControl.Header>
                         <StackPanel>
                             <TextBlock Text="{l:Text GappsTermsCard.Header}" Style="{StaticResource CardTitle}" />
@@ -226,7 +332,7 @@
                     </ui:CardControl.Header>
                     <ui:HyperlinkButton Content="{l:Text GappsTermsLink.Content}" Click="OnOpenGappsTerms" />
                 </ui:CardControl>
-                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon PersonAccounts24}">
+                <ui:CardControl Icon="{ui:SymbolIcon PersonAccounts24}">
                     <ui:CardControl.Header>
                         <StackPanel>
                             <TextBlock Text="{l:Text GappsRegisterCard.Header}" Style="{StaticResource CardTitle}" />
@@ -253,8 +359,50 @@
                     <ui:HyperlinkButton Content="{l:Text GappsRegisterLink.Content}" Click="OnOpenGappsRegistration" />
                 </ui:CardControl>
 
+                <TextBlock Text="{l:Text WidevineHeader.Text}" Style="{StaticResource SectionHeader}" />
+                <ui:CardControl Icon="{ui:SymbolIcon VideoClip24}">
+                    <ui:CardControl.Header>
+                        <StackPanel>
+                            <TextBlock Text="{l:Text WidevineCard.Header}" Style="{StaticResource CardTitle}" />
+                            <TextBlock Text="{Binding WidevineStatus, Mode=OneWay}" Style="{StaticResource CardDescription}" />
+                            <TextBlock Text="{l:Text WidevineCard.Description}" Style="{StaticResource CardDescription}" />
+                        </StackPanel>
+                    </ui:CardControl.Header>
+                    <StackPanel Style="{StaticResource CardControls}">
+                        <ui:ProgressRing IsIndeterminate="True" Width="20" Height="20" Margin="0,0,12,0"
+                                         Visibility="{Binding IsInstallingWidevine, Converter={StaticResource Visible}}" />
+                        <ui:HyperlinkButton Content="{l:Text WidevineTermsLink.Content}" Click="OnOpenWidevineTerms" Margin="0,0,8,0" />
+                        <ui:Button Content="{l:Text WidevineInstallButton.Content}" Click="OnInstallWidevine"
+                                   IsEnabled="{Binding CanInstallWidevine, Mode=OneWay}" />
+                    </StackPanel>
+                </ui:CardControl>
+                <ui:InfoBar Title="{l:Text WidevineInstallingBar.Title}" Message="{l:Text WidevineInstallingBar.Message}"
+                            Severity="Informational" IsClosable="False"
+                            IsOpen="{Binding IsInstallingWidevine, Mode=OneWay}" />
+                <ui:InfoBar Title="{l:Text WidevineRestartBar.Title}" Message="{l:Text WidevineRestartBar.Message}"
+                            Severity="Informational" IsClosable="False"
+                            IsOpen="{Binding WidevineRestartNeeded, Mode=OneWay}" />
+                <ui:CardControl Icon="{ui:SymbolIcon Info24}">
+                    <ui:CardControl.Header>
+                        <StackPanel>
+                            <TextBlock Text="{l:Text WidevineQualityCard.Header}" Style="{StaticResource CardTitle}" />
+                            <TextBlock Text="{Binding WidevineQualityNotice, Mode=OneWay}" Style="{StaticResource CardDescription}" />
+                        </StackPanel>
+                    </ui:CardControl.Header>
+                </ui:CardControl>
+                <ui:CardControl Icon="{ui:SymbolIcon Delete24}">
+                    <ui:CardControl.Header>
+                        <StackPanel>
+                            <TextBlock Text="{l:Text WidevineRemoveCard.Header}" Style="{StaticResource CardTitle}" />
+                            <TextBlock Text="{l:Text WidevineRemoveCard.Description}" Style="{StaticResource CardDescription}" />
+                        </StackPanel>
+                    </ui:CardControl.Header>
+                    <ui:Button Content="{l:Text WidevineRemoveButton.Content}" Click="OnRemoveWidevine"
+                               IsEnabled="{Binding CanRemoveWidevine, Mode=OneWay}" />
+                </ui:CardControl>
+
                 <TextBlock Text="{l:Text RootHeader.Text}" Style="{StaticResource SectionHeader}" />
-                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon ShieldKeyhole24}">
+                <ui:CardControl Icon="{ui:SymbolIcon ShieldKeyhole24}">
                     <ui:CardControl.Header>
                         <StackPanel>
                             <StackPanel Orientation="Horizontal">
@@ -277,8 +425,8 @@
                 </ui:CardControl>
                 <ui:InfoBar Title="{l:Text RootElevationRestartBar.Title}" Message="{l:Text RootElevationRestartBar.Message}"
                             Severity="Informational" IsClosable="False"
-                            IsOpen="{Binding RootElevationRestartNeeded, Mode=OneWay}" Margin="0,0,0,4" />
-                <ui:CardAction Icon="{ui:SymbolIcon DocumentBulletList24}" Click="OnOpenServiceLogs" Margin="0,0,0,4">
+                            IsOpen="{Binding RootElevationRestartNeeded, Mode=OneWay}" />
+                <ui:CardAction Icon="{ui:SymbolIcon DocumentBulletList24}" Click="OnOpenServiceLogs">
                     <StackPanel>
                         <TextBlock Text="{l:Text RootLogCard.Header}" Style="{StaticResource CardTitle}" />
                         <TextBlock Text="{Binding RootElevationLog, Mode=OneWay}" Style="{StaticResource CardDescription}" />
@@ -287,7 +435,7 @@
                 <TextBlock Text="{l:Text RootNote.Text}" Style="{StaticResource Note}" />
 
                 <TextBlock Text="{l:Text DiagnosticsHeader.Text}" Style="{StaticResource SectionHeader}" />
-                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Bug24}">
+                <ui:CardControl Icon="{ui:SymbolIcon Bug24}">
                     <ui:CardControl.Header>
                         <StackPanel>
                             <StackPanel Orientation="Horizontal">
@@ -305,7 +453,7 @@
                                          IsEnabled="{Binding CanChangeTraces, Mode=OneWay}" Click="OnInputTraceToggled" />
                     </StackPanel>
                 </ui:CardControl>
-                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon ResizeLarge24}">
+                <ui:CardControl Icon="{ui:SymbolIcon ResizeLarge24}">
                     <ui:CardControl.Header>
                         <StackPanel>
                             <StackPanel Orientation="Horizontal">
@@ -326,7 +474,7 @@
                 <TextBlock Text="{l:Text DiagnosticsNote.Text}" Style="{StaticResource Note}" />
 
                 <TextBlock Text="{l:Text LogsHeader.Text}" Style="{StaticResource SectionHeader}" />
-                <ui:CardAction Icon="{ui:SymbolIcon Folder24}" Click="OnOpenUserLogs" Margin="0,0,0,4">
+                <ui:CardAction Icon="{ui:SymbolIcon Folder24}" Click="OnOpenUserLogs">
                     <StackPanel>
                         <TextBlock Text="{l:Text UserLogsCard.Header}" Style="{StaticResource CardTitle}" />
                         <TextBlock Text="{l:Text UserLogsCard.Description}" Style="{StaticResource CardDescription}" />
@@ -340,7 +488,7 @@
                 </ui:CardAction>
 
                 <TextBlock Text="{l:Text CommandLineHeader.Text}" Style="{StaticResource SectionHeader}" />
-                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon WindowConsole20}">
+                <ui:CardControl Icon="{ui:SymbolIcon WindowConsole20}">
                     <ui:CardControl.Header>
                         <StackPanel>
                             <TextBlock Text="{l:Text CommandLineCard.Header}" Style="{StaticResource CardTitle}" />

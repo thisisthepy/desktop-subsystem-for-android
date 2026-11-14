@@ -27,6 +27,8 @@ Recommends:     power-profiles-daemon
 Recommends:     iio-sensor-proxy
 Recommends:     xdg-utils
 Recommends:     polkit
+Recommends:     speech-dispatcher
+Recommends:     enchant2
 AutoReqProv:    no
 
 # The programs are built and stripped by cargo; nothing is rebuilt or post-processed here.

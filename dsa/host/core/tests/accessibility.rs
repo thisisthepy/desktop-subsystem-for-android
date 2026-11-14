@@ -8,6 +8,8 @@ use dsa_host_core::accessibility::{
     NodeRange, NodeStates, PresenceChange, Role, Tree, TreeError, TreeUpdate, MAX_NODES,
     MAX_TEXT_CHARS,
 };
+use dsa_host_core::compositor::window_sizing::{density_for_dpi, scale_between, to_window_size};
+use dsa_host_core::input::WindowGeometry;
 use dsa_host_core::tasks::Bounds;
 use dsa_protocol::control;
 
@@ -378,29 +380,113 @@ fn fr18_names_values_and_passwords() {
 #[test]
 fn fr18_bounds_go_to_the_screen_through_the_window() {
     // A 1:1 window whose client area starts at (100, 50).
-    let rect = to_screen(bounds(10, 20, 110, 70), (400, 600), (400, 600), (100, 50));
+    let window = WindowGeometry::one_to_one((400, 600), (400, 600));
+    let rect = to_screen(bounds(10, 20, 110, 70), window, (100, 50));
     assert_eq!(
         (rect.left, rect.top, rect.width, rect.height),
         (110.0, 70.0, 100.0, 50.0)
     );
     // A task smaller than its window for a moment: frames are shown 1:1, never stretched,
     // and so are the bounds.
-    let rect = to_screen(bounds(10, 20, 110, 70), (400, 600), (800, 1200), (0, 0));
+    let grown = WindowGeometry::one_to_one((800, 1200), (400, 600));
+    let rect = to_screen(bounds(10, 20, 110, 70), grown, (0, 0));
     assert_eq!(
         (rect.left, rect.top, rect.width, rect.height),
         (10.0, 20.0, 100.0, 50.0)
     );
     // Cut to the client area.
-    let rect = to_screen(bounds(-50, 550, 450, 700), (400, 600), (400, 600), (0, 0));
+    let rect = to_screen(bounds(-50, 550, 450, 700), window, (0, 0));
     assert_eq!(
         (rect.left, rect.top, rect.width, rect.height),
         (0.0, 550.0, 400.0, 50.0)
     );
     // And back.
+    assert_eq!(from_screen((110.0, 70.0), grown, (100, 50)), (10, 20));
+}
+
+/// A task that keeps the density of a main monitor at 100% (130 dpi), shown on a monitor at
+/// 125% (164 dpi): its window shows each task pixel at 164 window pixels per 130.
+fn kept_at_100_percent_on_125_percent(task: (u32, u32)) -> WindowGeometry {
+    let scale = scale_between(density_for_dpi(120), density_for_dpi(96));
+    WindowGeometry {
+        client: to_window_size(task, scale),
+        task,
+        scale,
+    }
+}
+
+#[test]
+fn fr18_on_a_monitor_of_another_scale_bounds_are_where_the_window_shows_the_node() {
+    let window = kept_at_100_percent_on_125_percent((1300, 900));
+    assert_eq!(window.scale, (82, 65));
+    // A button 130 by 65 task pixels at (650, 325) is shown 164 by 82 window pixels at
+    // (820, 410), not where the task has it.
+    let rect = to_screen(bounds(650, 325, 780, 390), window, (100, 50));
     assert_eq!(
-        from_screen((110.0, 70.0), (400, 600), (800, 1200), (100, 50)),
-        (10, 20)
+        (rect.left, rect.top, rect.width, rect.height),
+        (920.0, 460.0, 164.0, 82.0)
     );
+    // The whole task covers the whole client area, and no more.
+    let rect = to_screen(bounds(0, 0, 1300, 900), window, (0, 0));
+    assert_eq!(
+        (rect.left, rect.top, rect.width, rect.height),
+        (
+            0.0,
+            0.0,
+            f64::from(window.client.0),
+            f64::from(window.client.1)
+        )
+    );
+    // A point on the button's shown middle hits the button's middle in the task.
+    assert_eq!(
+        from_screen((100.0 + 902.0, 50.0 + 451.0), window, (100, 50)),
+        (715, 357)
+    );
+    // Every edge maps back to the pixel it came from.
+    for (x, y) in [(0, 0), (650, 325), (1299, 899)] {
+        let shown = to_screen(bounds(x, y, x + 1, y + 1), window, (0, 0));
+        assert_eq!(
+            from_screen((shown.left + 0.5, shown.top + 0.5), window, (0, 0)),
+            (x, y)
+        );
+    }
+}
+
+#[test]
+fn fr18_on_a_monitor_above_and_left_of_the_main_one_a_hit_test_lands_on_the_node_shown() {
+    // The 125% monitor is left of and above the main one: its client area starts at
+    // negative screen coordinates.
+    let window = kept_at_100_percent_on_125_percent((810, 1661));
+    let origin = (-2900, -880);
+    let mut tree = Tree::new();
+    let mut search = node(2, &[], "android.widget.Button", "Search");
+    search.bounds = bounds(650, 1300, 780, 1365);
+    let mut root = node(1, &[2], "android.widget.FrameLayout", "");
+    root.bounds = bounds(0, 0, 810, 1661);
+    tree.apply(TreeUpdate {
+        task_id: 6,
+        epoch: 1,
+        full: true,
+        nodes: vec![root, search],
+        removed: vec![],
+        roots: vec![1],
+        focused: None,
+    })
+    .unwrap();
+    // The button is shown at 820 by 1640 window pixels into the client area.
+    let rect = to_screen(bounds(650, 1300, 780, 1365), window, origin);
+    assert_eq!((rect.left, rect.top), (-2900.0 + 820.0, -880.0 + 1640.0));
+    assert_eq!((rect.width, rect.height), (164.0, 82.0));
+    // A point just inside its shown corner is on the button; one just above it is not, though
+    // at 1:1 it would have been far below the button's top.
+    let inside = from_screen((rect.left + 1.0, rect.top + 1.0), window, origin);
+    assert_eq!(tree.hit(inside.0, inside.1), Some(2));
+    let above = from_screen((rect.left + 1.0, rect.top - 2.0), window, origin);
+    assert_eq!(tree.hit(above.0, above.1), Some(1));
+    // At the task's own coordinates (1:1) the shown corner would have missed the button.
+    let one_to_one = WindowGeometry::one_to_one(window.client, window.task);
+    let wrong = from_screen((rect.left + 1.0, rect.top + 1.0), one_to_one, origin);
+    assert_eq!(tree.hit(wrong.0, wrong.1), None);
 }
 
 #[test]

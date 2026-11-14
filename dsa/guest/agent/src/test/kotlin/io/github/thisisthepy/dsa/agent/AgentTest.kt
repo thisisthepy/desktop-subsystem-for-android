@@ -5,6 +5,7 @@ import io.github.thisisthepy.dsa.agent.tasks.ScreenDp
 import io.github.thisisthepy.dsa.agent.tasks.TaskBounds
 import io.github.thisisthepy.dsa.agent.tasks.TaskKind
 import io.github.thisisthepy.dsa.agent.tasks.TaskSource
+import io.github.thisisthepy.dsa.agent.windowing.CaptionInsets
 import io.github.thisisthepy.dsa.agent.windowing.WINDOWING_MODE_FREEFORM
 import io.github.thisisthepy.dsa.control.v1.CloseTask
 import io.github.thisisthepy.dsa.control.v1.Envelope
@@ -51,6 +52,14 @@ class AgentTest {
         return agent
     }
 
+    /**
+     * The task reports [endpoint] heard, alone. A connection also carries what other parts of
+     * the agent tell the host at once (the apps' sound streams, the request for the host's
+     * voices), which these tests are not about.
+     */
+    private fun taskUpdates(endpoint: FakeEndpoint = daemon) =
+        endpoint.sentMessages().filter { it.hasTaskUpdated() }.map { it.taskUpdated }
+
     @Test
     fun fr2_the_agent_tells_the_daemon_it_is_there_each_time_it_connects() {
         started()
@@ -64,7 +73,7 @@ class AgentTest {
         started()
 
         assertEquals(WINDOWING_MODE_FREEFORM, windowing.mode)
-        assertEquals(listOf(1), daemon.sentMessages().map { it.taskUpdated.taskId })
+        assertEquals(listOf(1), taskUpdates().map { it.taskId })
     }
 
     @Test
@@ -81,7 +90,7 @@ class AgentTest {
         tasks.change(listOf(appTask(9, packageName = "org.example.mail", label = "Mail", focused = true)))
         scheduler.runDue()
 
-        val update = daemon.sentMessages().single().taskUpdated
+        val update = taskUpdates().single()
         assertEquals(9, update.taskId)
         assertEquals("org.example.mail", update.packageName)
         assertEquals("Mail", update.label)
@@ -130,7 +139,7 @@ class AgentTest {
         locator.up = restarted
         scheduler.advance(1000)
 
-        assertEquals(listOf(1), restarted.sentMessages().map { it.taskUpdated.taskId })
+        assertEquals(listOf(1), taskUpdates(restarted).map { it.taskId })
     }
 
     private fun launcherApp(packageName: String) =
@@ -194,6 +203,58 @@ class AgentTest {
     }
 
     @Test
+    fun fr7_app_shortcuts_are_jump_list_tasks_and_desktop_shortcuts() {
+        val apps = FakeLauncherApps().apply { installed = listOf(launcherApp("org.example.chat")) }
+        val newChat = io.github.thisisthepy.dsa.agent.tasks.LauncherShortcut("new-chat", "New chat", dynamic = true)
+        val shortcuts = FakeShortcuts().apply { byPackage = mapOf("org.example.chat" to listOf(newChat)) }
+        locator.up = daemon
+        val agent = Agent(
+            AGENT, tasks, actions, locator, windowing, injector, scheduler, log,
+            launcherApps = apps,
+            shortcuts = shortcuts,
+        )
+        agent.start()
+        scheduler.runDue()
+
+        // The app's shortcuts follow the list of apps, so the host builds its jump list.
+        val bodies = daemon.sentMessages().map { it.bodyCase }
+        assertTrue(bodies.indexOf(Envelope.BodyCase.APP_SHORTCUTS) > bodies.indexOf(Envelope.BodyCase.INSTALLED_APPS))
+        val reported = daemon.sentMessages().single { it.hasAppShortcuts() }.appShortcuts
+        assertEquals("org.example.chat", reported.packageName)
+        assertEquals(listOf("New chat"), reported.shortcutsList.map { it.shortLabel })
+
+        // The app publishes another; the host hears of it.
+        shortcuts.change("org.example.chat", listOf(newChat, io.github.thisisthepy.dsa.agent.tasks.LauncherShortcut("ana", "Ana", dynamic = true, rank = 1)))
+        scheduler.runDue()
+        assertEquals(listOf("new-chat", "ana"), daemon.sentMessages().last { it.hasAppShortcuts() }.appShortcuts.shortcutsList.map { it.id })
+
+        // A jump list task starts its shortcut.
+        actions.startableShortcuts = setOf("org.example.chat" to "ana")
+        daemon.deliver(
+            Envelope.newBuilder()
+                .setLaunchShortcut(io.github.thisisthepy.dsa.control.v1.LaunchShortcut.newBuilder().setPackageName("org.example.chat").setShortcutId("ana"))
+                .build().toByteArray(),
+        )
+        scheduler.runDue()
+        assertEquals(listOf("org.example.chat" to "ana"), actions.shortcutsLaunched)
+
+        // The app asks to pin a shortcut: the host asks the user, and yes pins it.
+        val pin = FakePinRequest("org.example.chat", io.github.thisisthepy.dsa.agent.tasks.LauncherShortcut("ana", "Ana", pinned = true), appLabel = "Chat")
+        agent.pinRequested(pin)
+        scheduler.runDue()
+        val asked = daemon.sentMessages().single { it.hasPinShortcutRequest() }.pinShortcutRequest
+        assertEquals("Chat", asked.appLabel)
+        assertEquals("ana", asked.shortcut.id)
+        daemon.deliver(
+            Envelope.newBuilder()
+                .setPinShortcutAnswer(io.github.thisisthepy.dsa.control.v1.PinShortcutAnswer.newBuilder().setRequestId(asked.requestId).setAccepted(true))
+                .build().toByteArray(),
+        )
+        scheduler.runDue()
+        assertEquals(1, pin.accepted)
+    }
+
+    @Test
     fun fr3_two_apps_launched_at_the_same_place_get_places_of_their_own() {
         tasks.running = listOf(appTask(4, bounds = defaultPlace))
         started()
@@ -205,7 +266,7 @@ class AgentTest {
         assertEquals(listOf(5 to target), actions.moved)
         // The host never hears of the two tasks overlapping: the moving task is reported at
         // the place it is going to.
-        val reported = daemon.sentMessages().associate { it.taskUpdated.taskId to it.taskUpdated.bounds }
+        val reported = taskUpdates().associate { it.taskId to it.bounds }
         assertEquals(686, reported.getValue(4).left)
         assertEquals(0, reported.getValue(5).left)
         assertEquals(548, reported.getValue(5).right)
@@ -265,7 +326,7 @@ class AgentTest {
         scheduler.advance(1000)
 
         assertEquals(1, actions.moved.size)
-        assertEquals(listOf(4, 5), daemon.sentMessages().map { it.taskUpdated.taskId }.sorted())
+        assertEquals(listOf(4, 5), taskUpdates().map { it.taskId }.sorted())
     }
 
     @Test
@@ -275,7 +336,7 @@ class AgentTest {
         started()
 
         assertTrue(actions.moved.isEmpty())
-        assertEquals(listOf(4, 5), daemon.sentMessages().map { it.taskUpdated.taskId }.sorted())
+        assertEquals(listOf(4, 5), taskUpdates().map { it.taskId }.sorted())
     }
 
     @Test
@@ -337,6 +398,56 @@ class AgentTest {
         scheduler.runDue()
 
         assertEquals(listOf(Triple(1, TaskBounds(0, 0, 1096, 1080), 320 as Int?)), actions.resized)
+    }
+
+    @Test
+    fun fr4_a_resize_goes_ahead_of_work_already_waiting_for_the_agents_thread() {
+        tasks.running = listOf(appTask(1, bounds = TaskBounds(0, 0, 400, 300)))
+        started()
+        // Work the agent's thread has queued already (a tree to read, a notification), which
+        // on a real guest can take a second.
+        var resizedBefore = -1
+        var reportedBefore = -1
+        scheduler.post {
+            resizedBefore = actions.resizedLive.size
+            reportedBefore = taskUpdates().count { it.bounds.right == 500 }
+        }
+
+        resize(1, 500, 300, live = true)
+        scheduler.runDue()
+
+        // The size reached the framework, and the host heard the task is taking it, first.
+        assertEquals(1, resizedBefore)
+        assertEquals(1, reportedBefore)
+    }
+
+    @Test
+    fun fr4_a_density_and_its_size_ahead_of_other_work_still_go_in_one_change() {
+        tasks.running = listOf(appTask(1, bounds = TaskBounds(0, 0, 548, 974)))
+        started()
+        var resizedBefore = -1
+        scheduler.post { resizedBefore = actions.resized.size }
+
+        density(1, 320)
+        resize(1, 1096, 1080)
+        scheduler.runDue()
+
+        assertEquals(1, resizedBefore)
+        assertEquals(listOf(Triple(1, TaskBounds(0, 0, 1096, 1080), 320 as Int?)), actions.resized)
+    }
+
+    @Test
+    fun fr4_the_resize_trace_says_how_long_a_size_waited_for_the_agents_thread() {
+        tasks.running = listOf(appTask(1, bounds = TaskBounds(0, 0, 400, 300)))
+        started()
+
+        resize(1, 500, 300)
+        tasks.running = listOf(appTask(1, bounds = TaskBounds(0, 0, 500, 300)))
+        scheduler.advance(100)
+
+        val summary = log.lines.single { "stage=agent.summary" in it }
+        assertTrue(summary, summary.contains("size=500x300"))
+        assertTrue(summary, Regex(" queued=\\d+\\.\\d").containsMatchIn(summary))
     }
 
     @Test
@@ -602,6 +713,26 @@ class AgentTest {
     }
 
     @Test
+    fun fr4_a_size_kept_at_the_tasks_smallest_is_summarised_at_the_size_it_landed_at() {
+        val smallest = appTask(1, bounds = TaskBounds(0, 0, 500, 400)).copy(minWidth = 300, minHeight = 250)
+        tasks.running = listOf(smallest)
+        started()
+
+        resize(1, 200, 400)
+        scheduler.runDue()
+        assertEquals(TaskBounds(0, 0, 300, 400), actions.resized.single().second)
+        // The window manager gives the task its smallest width.
+        tasks.running = listOf(smallest.copy(bounds = TaskBounds(0, 0, 300, 400)))
+        scheduler.advance(100)
+
+        assertTrue(log.lines.toString(), log.lines.any { "task 1 takes 300x400, not the 200x400 the host asked for" in it })
+        // The resize ended when the task landed at the size it was given, not never.
+        val summary = log.lines.single { "stage=agent.summary" in it }
+        assertTrue(summary, summary.contains("size=300x400"))
+        assertTrue(summary, summary.contains("asked=200x400"))
+    }
+
+    @Test
     fun fr4_a_size_that_does_not_land_holds_up_the_next_one_only_briefly() {
         tasks.running = listOf(appTask(1, bounds = TaskBounds(0, 0, 500, 400)))
         started()
@@ -669,7 +800,7 @@ class AgentTest {
         tasks.running = listOf(appTask(1).copy(minWidth = 700, minHeight = 500))
         started()
 
-        val update = daemon.sentMessages().single().taskUpdated
+        val update = taskUpdates().single()
         assertEquals(700, update.minWidth)
         assertEquals(500, update.minHeight)
 
@@ -685,7 +816,7 @@ class AgentTest {
         tasks.running = listOf(appTask(1, densityDpi = 240))
         started()
 
-        val update = daemon.sentMessages().single().taskUpdated
+        val update = taskUpdates().single()
         assertEquals(240, update.densityDpi)
         assertEquals(1920, update.maxWidth)
         assertEquals(1080, update.maxHeight)
@@ -718,7 +849,7 @@ class AgentTest {
         tasks.change(listOf(appTask(1), appTask(2)))
         scheduler.runDue()
 
-        assertEquals(listOf(1, 2), daemon.sentMessages().map { it.taskUpdated.taskId })
+        assertEquals(listOf(1, 2), taskUpdates().map { it.taskId })
     }
 
     private fun keyFrame(taskId: Int, action: KeyAction, keyCode: Int, meta: Int = 0): ByteArray =
@@ -923,5 +1054,23 @@ class AgentTest {
         val cursor = daemon.sentMessages().last().imeCursor
         assertEquals(4, cursor.taskId)
         assertEquals(listOf(30, 40, 32, 70), cursor.cursor.let { listOf(it.left, it.top, it.right, it.bottom) })
+    }
+
+    @Test
+    fun fr22_a_windowed_task_gets_a_24_dp_bottom_inset_when_the_host_is_told_of_it() {
+        tasks.running = listOf(
+            appTask(1, densityDpi = 262),
+            appTask(2, bounds = TaskBounds(500, 20, 900, 620)).copy(fullscreen = true),
+            appTask(3, bounds = TaskBounds(1000, 20, 1400, 620)).copy(pictureInPicture = true),
+        )
+        started()
+
+        // Only the task in a window, before its window has said anything of its title bar:
+        // 24 dp at 262 dpi, along the bottom edge the host was first told of. The band follows
+        // the task's bottom edge from there by itself.
+        val given = actions.navigationBarInsets.single()
+        assertEquals(1, given.first)
+        val bottom = taskUpdates().first { it.taskId == 1 }.bounds.bottom
+        assertEquals(TaskBounds(-CaptionInsets.REACH, bottom - 39, CaptionInsets.REACH, bottom), given.second)
     }
 }

@@ -7,7 +7,18 @@
 //! (the system tray) instead. The icon is the app's, and its tooltip is the title and text of
 //! the notification the service keeps shown. A left click opens the app's window; the right
 //! click menu has Open, the notification's actions (Pause and Next for music) and Stop, which
-//! ends the app after the user confirms it, unless they chose not to be asked again.
+//! ends the app after the user confirms it, unless they chose not to be asked again. The menu
+//! is a Windows 11 menu, as the window manager draws for its widgets
+//! ([`crate::compositor::fluent_menu`]): rounded, with the system's shadow and acrylic, the
+//! user's theme or high contrast colours, Segoe UI Variable text and a Segoe Fluent Icons glyph
+//! for each item that has one, hover and keyboard navigation, and it closes when it loses the
+//! foreground. It is never Windows' plain popup menu. The question before a stop is a
+//! Windows 11 dialog in the same look ([`crate::compositor::fluent_dialog`]), never a Win32
+//! dialog box.
+//!
+//! While an app with a media session has a window open, the window's taskbar preview has
+//! previous, play or pause and next buttons ([`WithWindowMedia`] carries the session to the
+//! app's windows and their presses back).
 //!
 //! Each icon has a GUID of its own, made from the app's package ([`tray_guid`]), so Windows
 //! remembers for each app whether its icon shows on the taskbar or in the overflow, as it
@@ -24,6 +35,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -31,10 +43,14 @@ use std::time::Duration;
 use dsa_host_core::background::{
     BackgroundApp, BackgroundCommand, BackgroundEvent, MediaCommand, MediaSession,
 };
+use dsa_host_core::compositor::window_hosts::MediaButtons;
 use dsa_host_core::host_api::HostApiClient;
 use dsa_transport::Connector;
 use sha2::{Digest, Sha256};
 
+use crate::compositor::fluent::glyph;
+use crate::compositor::fluent_dialog::{Answer, DialogText};
+use crate::compositor::fluent_menu::{Anchor, MenuEntry, MenuItem};
 use crate::compositor::log::{note, CompositorLogger};
 
 /// What the window manager calls itself to the service.
@@ -135,62 +151,151 @@ impl Texts {
         }
     }
 
-    /// The question asked before `name` is stopped.
-    pub fn stop_question(&self, name: &str) -> String {
+    /// The question asked before `name` is stopped: the dialog's title.
+    pub fn stop_title(&self, name: &str) -> String {
         if self.korean {
-            format!(
-                "{name}을(를) 중지할까요?\n\n백그라운드에서 하던 일(음악 재생 등)을 모두 \
-                 멈추고, 앱이 쓰던 메모리를 돌려받습니다."
-            )
+            format!("{name}을(를) 중지할까요?")
         } else {
-            format!(
-                "Stop {name}?\n\nIt stops everything it does in the background, such as playing \
-                 music, and the memory it used is freed."
-            )
+            format!("Stop {name}?")
+        }
+    }
+
+    /// What stopping does, under the question.
+    pub fn stop_detail(&self) -> &'static str {
+        if self.korean {
+            "백그라운드에서 하던 일(음악 재생 등)을 모두 멈추고, 앱이 쓰던 메모리를 돌려받습니다."
+        } else {
+            "It stops everything it does in the background, such as playing music, and the \
+             memory it used is freed."
+        }
+    }
+
+    /// The question asked before `name` is stopped, as a Windows 11 dialog shows it: the
+    /// question as its title, what stopping does, the "do not ask again" check box, and Stop
+    /// (the accent, default button) and Cancel. The access keys are D, S and C.
+    pub fn stop_dialog(&self, name: &str) -> DialogText {
+        DialogText {
+            title: self.stop_title(name),
+            body: self.stop_detail().to_string(),
+            check: Some(self.do_not_ask.to_string()),
+            primary: self.stop.to_string(),
+            secondary: self.cancel.to_string(),
+            keys: [Some('D'), Some('S'), Some('C')],
         }
     }
 }
 
-/// One entry of an icon's right click menu: its ID and its text. ID 0 is a separator.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MenuEntry {
-    pub id: u32,
-    pub text: String,
+/// What the user answered to the question asked before a stop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StopAnswer {
+    /// Stop, and keep asking next time.
+    Stop,
+    /// Stop, and never ask again.
+    StopAndNeverAsk,
+    Cancel,
 }
 
-/// The right click menu of `app`'s icon: Open, the notification's actions, and Stop.
+/// The answer of the stop dialog as the tray takes it.
+pub fn stop_answer(answer: Answer) -> StopAnswer {
+    match answer {
+        Answer::Confirmed { checked: true } => StopAnswer::StopAndNeverAsk,
+        Answer::Confirmed { checked: false } => StopAnswer::Stop,
+        Answer::Cancelled => StopAnswer::Cancel,
+    }
+}
+
+/// What a Stop chosen in an icon's menu does: asks first when `ask` says so (`ask` answers the
+/// question), and returns the reports for the service. A stop confirmed with "do not ask again"
+/// also turns the question off, for this run (`ask_before_stop`) and in the user's settings.
+pub fn stop_chosen(
+    package: &str,
+    ask_before_stop: &mut bool,
+    ask: impl FnOnce() -> StopAnswer,
+) -> Vec<TrayReport> {
+    let answer = if *ask_before_stop {
+        ask()
+    } else {
+        StopAnswer::Stop
+    };
+    let stop = TrayReport::Command(package.to_string(), BackgroundCommand::Stop);
+    match answer {
+        StopAnswer::Stop => vec![stop],
+        StopAnswer::StopAndNeverAsk => {
+            *ask_before_stop = false;
+            vec![TrayReport::NeverAskBeforeStop, stop]
+        }
+        StopAnswer::Cancel => Vec::new(),
+    }
+}
+
+/// The Segoe Fluent Icons glyph of a notification action, read from its title as a media
+/// notification names its actions (in English or Korean): play, pause, previous, next, stop.
+/// `None` for any other action, which shows no icon.
+pub fn action_glyph(title: &str) -> Option<char> {
+    let title = title.trim().to_lowercase();
+    let is = |words: &[&str]| words.iter().any(|word| title == *word);
+    if is(&["pause", "일시 정지", "일시정지"]) {
+        Some(glyph::PAUSE)
+    } else if is(&["play", "resume", "재생", "다시 재생"]) {
+        Some(glyph::PLAY)
+    } else if is(&["previous", "prev", "skip to previous", "이전", "이전 곡"]) {
+        Some(glyph::PREVIOUS)
+    } else if is(&["next", "skip", "skip to next", "다음", "다음 곡"]) {
+        Some(glyph::NEXT)
+    } else if is(&["stop", "중지", "정지"]) {
+        Some(glyph::STOP)
+    } else {
+        None
+    }
+}
+
+/// The right click menu of `app`'s icon: Open, the notification's actions, and Stop, as a
+/// Windows 11 menu draws them: each with its Segoe Fluent Icons glyph where it has one, Open
+/// and Stop with their access keys, and the groups apart by separators.
 pub fn menu_entries(app: &BackgroundApp, texts: &Texts) -> Vec<MenuEntry> {
-    let mut entries = vec![MenuEntry {
-        id: MENU_OPEN,
-        text: texts.open.to_string(),
-    }];
+    let open = MenuItem::new(MENU_OPEN, texts.open)
+        .with_glyph(glyph::OPEN_WINDOW)
+        .with_access_key('O');
+    let mut entries = vec![MenuEntry::Item(open)];
     let actions: Vec<MenuEntry> = app
         .actions
         .iter()
         .enumerate()
         .filter(|(_, title)| !title.trim().is_empty())
-        .map(|(index, title)| MenuEntry {
-            id: MENU_FIRST_ACTION + index as u32,
-            // An ampersand would mark the next letter as the item's access key.
-            text: title.trim().replace('&', "&&"),
+        .map(|(index, title)| {
+            let item = MenuItem::new(MENU_FIRST_ACTION + index as u32, title.trim());
+            MenuEntry::Item(match action_glyph(title) {
+                Some(symbol) => item.with_glyph(symbol),
+                None => item,
+            })
         })
         .collect();
     if !actions.is_empty() {
-        entries.push(MenuEntry {
-            id: 0,
-            text: String::new(),
-        });
+        entries.push(MenuEntry::Separator);
         entries.extend(actions);
     }
-    entries.push(MenuEntry {
-        id: 0,
-        text: String::new(),
-    });
-    entries.push(MenuEntry {
-        id: MENU_STOP,
-        text: texts.stop.to_string(),
-    });
+    entries.push(MenuEntry::Separator);
+    let stop = MenuItem::new(MENU_STOP, texts.stop)
+        .with_glyph(glyph::STOP)
+        .with_access_key('S');
+    entries.push(MenuEntry::Item(stop));
     entries
+}
+
+/// Where an icon's menu opens for the point the notification area gives: at the point, as
+/// the system's tray menus open, so on a taskbar at the bottom the menu sits on top of it at
+/// the pointer, on one at the top just below it, and on one at a side beside it (the menu is
+/// kept to the work area, which leaves the taskbar out).
+pub fn tray_anchor(x: i32, y: i32) -> Anchor {
+    Anchor::Point { x, y }
+}
+
+/// Whether the keyboard opened an icon's menu: the notification area then gives the icon's
+/// place, not the pointer's, so the two lie apart. A menu the keyboard opened starts on its
+/// first item with its access keys underlined.
+pub fn opened_by_keyboard(at: (i32, i32), pointer: (i32, i32)) -> bool {
+    const SLACK: i32 = 4;
+    (at.0 - pointer.0).abs() > SLACK || (at.1 - pointer.1).abs() > SLACK
 }
 
 /// What the user chose in a menu, as a request for the service: `None` for nothing.
@@ -239,6 +344,44 @@ pub trait Tray {
     fn command(&mut self, command: TrayCommand);
     /// What the user did since the last call.
     fn reports(&mut self) -> Vec<TrayReport>;
+}
+
+/// What hears of a package's media buttons: `Some` when its session changes, `None` when it
+/// ends.
+pub type MediaListener<'a> = Box<dyn FnMut(&str, Option<MediaButtons>) + 'a>;
+
+/// A tray that also tells the apps' task windows of each media session, for the media buttons
+/// (previous, play or pause, next) in their taskbar previews, and passes the presses of those
+/// buttons on to the service as it passes the media keys'.
+pub struct WithWindowMedia<'a> {
+    pub tray: &'a mut dyn Tray,
+    /// Told of a package's media buttons when its session changes, and `None` when it ends.
+    pub windows: MediaListener<'a>,
+    /// The media buttons the user clicked in a window's taskbar preview.
+    pub pressed: Receiver<(String, MediaCommand)>,
+}
+
+impl Tray for WithWindowMedia<'_> {
+    fn command(&mut self, command: TrayCommand) {
+        match &command {
+            TrayCommand::Media(session) => {
+                (self.windows)(&session.package_name, Some(MediaButtons::of(session)))
+            }
+            TrayCommand::MediaGone(package) => (self.windows)(package, None),
+            _ => {}
+        }
+        self.tray.command(command);
+    }
+
+    fn reports(&mut self) -> Vec<TrayReport> {
+        let mut reports = self.tray.reports();
+        reports.extend(
+            self.pressed
+                .try_iter()
+                .map(|(package, command)| TrayReport::Media(package, command)),
+        );
+        reports
+    }
 }
 
 /// Shows the apps that run in the background in the user's Android until `stop`,
@@ -377,107 +520,6 @@ fn handle_reports(
     }
 }
 
-/// The dialog template of the question asked before a stop, as `DialogBoxIndirectParamW`
-/// takes it: a `DLGTEMPLATE` with its font, then a static text, the "do not ask again" check
-/// box, and the Stop and Cancel buttons, each a `DLGITEMTEMPLATE` on a 4-byte boundary.
-pub fn stop_dialog_template(question: &str, texts: &Texts, title: &str) -> Vec<u32> {
-    fn word(out: &mut Vec<u8>, value: u16) {
-        out.extend_from_slice(&value.to_le_bytes());
-    }
-    fn dword(out: &mut Vec<u8>, value: u32) {
-        out.extend_from_slice(&value.to_le_bytes());
-    }
-    fn text(out: &mut Vec<u8>, value: &str) {
-        for unit in value.encode_utf16() {
-            word(out, unit);
-        }
-        word(out, 0);
-    }
-    fn align(out: &mut Vec<u8>) {
-        while out.len() % 4 != 0 {
-            out.push(0);
-        }
-    }
-    const DS_SETFONT: u32 = 0x40;
-    const DS_MODALFRAME: u32 = 0x80;
-    const DS_CENTER: u32 = 0x0800;
-    const WS_POPUP: u32 = 0x8000_0000;
-    const WS_CAPTION: u32 = 0x00C0_0000;
-    const WS_SYSMENU: u32 = 0x0008_0000;
-    const WS_CHILD: u32 = 0x4000_0000;
-    const WS_VISIBLE: u32 = 0x1000_0000;
-    const WS_TABSTOP: u32 = 0x0001_0000;
-    const WS_EX_TOPMOST: u32 = 0x0000_0008;
-    const BS_DEFPUSHBUTTON: u32 = 0x1;
-    const BS_AUTOCHECKBOX: u32 = 0x3;
-    const BUTTON: u16 = 0x0080;
-    const STATIC: u16 = 0x0082;
-    type Item<'a> = (u32, [i16; 4], u16, u16, &'a str);
-    let items: [Item<'_>; 4] = [
-        (0, [10, 10, 240, 52], STATIC_ID, STATIC, question),
-        (
-            BS_AUTOCHECKBOX | WS_TABSTOP,
-            [10, 68, 240, 12],
-            DO_NOT_ASK_ID,
-            BUTTON,
-            texts.do_not_ask,
-        ),
-        (
-            BS_DEFPUSHBUTTON | WS_TABSTOP,
-            [146, 88, 50, 14],
-            STOP_ID,
-            BUTTON,
-            texts.stop,
-        ),
-        (
-            WS_TABSTOP,
-            [200, 88, 50, 14],
-            CANCEL_ID,
-            BUTTON,
-            texts.cancel,
-        ),
-    ];
-    let mut out = Vec::new();
-    dword(
-        &mut out,
-        DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU,
-    );
-    dword(&mut out, WS_EX_TOPMOST);
-    word(&mut out, items.len() as u16);
-    for value in [0i16, 0, 260, 110] {
-        word(&mut out, value as u16);
-    }
-    word(&mut out, 0); // no menu
-    word(&mut out, 0); // the standard dialog class
-    text(&mut out, title);
-    word(&mut out, 9); // points
-    text(&mut out, "Segoe UI");
-    for (style, place, id, class, caption) in items {
-        align(&mut out);
-        dword(&mut out, WS_CHILD | WS_VISIBLE | style);
-        dword(&mut out, 0);
-        for value in place {
-            word(&mut out, value as u16);
-        }
-        word(&mut out, id);
-        word(&mut out, 0xFFFF);
-        word(&mut out, class);
-        text(&mut out, caption);
-        word(&mut out, 0); // no creation data
-    }
-    align(&mut out);
-    out.chunks(4)
-        .map(|chunk| u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
-        .collect()
-}
-
-/// The controls of the question asked before a stop.
-pub const STATIC_ID: u16 = 100;
-pub const DO_NOT_ASK_ID: u16 = 101;
-/// `IDOK` and `IDCANCEL`, so Enter stops and Escape cancels.
-pub const STOP_ID: u16 = 1;
-pub const CANCEL_ID: u16 = 2;
-
 /// The notification area icons and media controls of the window manager: Win32 windows on a
 /// thread of their own, which the watch drives through a channel.
 #[cfg(windows)]
@@ -561,7 +603,6 @@ mod win {
         DIB_RGB_COLORS,
     };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-    use windows_sys::Win32::UI::Controls::{IsDlgButtonChecked, BST_CHECKED};
     use windows_sys::Win32::UI::HiDpi::{
         GetDpiForWindow, GetSystemMetricsForDpi, SetThreadDpiAwarenessContext,
         DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
@@ -571,19 +612,16 @@ mod win {
         NIM_DELETE, NIM_MODIFY, NIM_SETVERSION, NOTIFYICONDATAW, NOTIFYICON_VERSION_4,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        AppendMenuW, CreateIconIndirect, CreatePopupMenu, CreateWindowExW, DefWindowProcW,
-        DestroyIcon, DestroyMenu, DestroyWindow, DialogBoxIndirectParamW, DispatchMessageW,
-        EndDialog, GetCursorPos, GetMessageW, LoadIconW, PostMessageW, PostQuitMessage,
-        RegisterClassExW, RegisterWindowMessageW, SetForegroundWindow, SetMenuDefaultItem,
-        TrackPopupMenuEx, TranslateMessage, HICON, ICONINFO, IDI_APPLICATION, MF_SEPARATOR,
-        MF_STRING, MSG, SM_CXSMICON, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_APP,
-        WM_CLOSE, WM_COMMAND, WM_CONTEXTMENU, WM_DESTROY, WM_INITDIALOG, WM_NULL, WM_SETTINGCHANGE,
-        WNDCLASSEXW, WS_POPUP,
+        CreateIconIndirect, CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyWindow,
+        DispatchMessageW, GetCursorPos, GetMessageW, LoadIconW, PostMessageW, PostQuitMessage,
+        RegisterClassExW, RegisterWindowMessageW, TranslateMessage, HICON, ICONINFO,
+        IDI_APPLICATION, MSG, SM_CXSMICON, WM_APP, WM_CLOSE, WM_CONTEXTMENU, WM_DESTROY,
+        WM_SETTINGCHANGE, WNDCLASSEXW, WS_POPUP,
     };
 
     use super::{
-        app_name, chosen, menu_entries, stop_dialog_template, tooltip, tray_guid, Texts,
-        TrayCommand, TrayReport, CANCEL_ID, DO_NOT_ASK_ID, STOP_ID,
+        app_name, chosen, menu_entries, opened_by_keyboard, stop_answer, stop_chosen, tooltip,
+        tray_anchor, tray_guid, Texts, TrayCommand, TrayReport,
     };
     use crate::compositor::log::{note, CompositorLogger};
 
@@ -801,7 +839,11 @@ mod win {
                         WM_CONTEXTMENU => {
                             let x = (wparam & 0xffff) as u16 as i16 as i32;
                             let y = ((wparam >> 16) & 0xffff) as u16 as i16 as i32;
-                            show_menu(hwnd, &package, x, y);
+                            let mut pointer = POINT { x: 0, y: 0 };
+                            // SAFETY: a plain read of the pointer's position.
+                            unsafe { GetCursorPos(&mut pointer) };
+                            let keyboard = opened_by_keyboard((x, y), (pointer.x, pointer.y));
+                            show_menu(hwnd, &package, x, y, keyboard);
                         }
                         _ => {}
                     }
@@ -1158,8 +1200,12 @@ mod win {
         }
     }
 
-    /// Shows the icon's menu at (`x`, `y`) and acts on what the user picks.
-    fn show_menu(hwnd: HWND, package: &str, x: i32, y: i32) {
+    /// Shows the icon's menu at (`x`, `y`), the place the notification area gives (the
+    /// pointer, or the icon when the keyboard opened it), and acts on what the user picks.
+    /// The menu is a Windows 11 menu ([`crate::compositor::fluent_menu`]): it opens beside the
+    /// point, above the taskbar when the taskbar is below, as the system's own tray menus do,
+    /// and closes when it loses the foreground.
+    fn show_menu(hwnd: HWND, package: &str, x: i32, y: i32, keyboard: bool) {
         let Some(Some((app, texts))) = with_state(|s| {
             s.icons
                 .get(package)
@@ -1168,121 +1214,49 @@ mod win {
             return;
         };
         let entries = menu_entries(&app, &texts);
-        // SAFETY: a menu made, shown and destroyed here, with NUL-terminated texts that
-        // outlive the calls.
-        let picked = unsafe {
-            let menu = CreatePopupMenu();
-            if menu.is_null() {
-                return;
-            }
-            for entry in &entries {
-                if entry.id == 0 {
-                    AppendMenuW(menu, MF_SEPARATOR, 0, null());
-                } else {
-                    let text = wide(&entry.text);
-                    AppendMenuW(menu, MF_STRING, entry.id as usize, text.as_ptr());
-                }
-            }
-            SetMenuDefaultItem(menu, super::MENU_OPEN, 0);
-            let (x, y) = if x == 0 && y == 0 {
-                let mut point = POINT { x: 0, y: 0 };
-                GetCursorPos(&mut point);
-                (point.x, point.y)
-            } else {
-                (x, y)
-            };
-            // The menu closes when the user clicks elsewhere only if its window is in front.
-            SetForegroundWindow(hwnd);
-            let picked = TrackPopupMenuEx(
-                menu,
-                TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY,
-                x,
-                y,
-                hwnd,
-                null(),
-            );
-            PostMessageW(hwnd, WM_NULL, 0, 0);
-            DestroyMenu(menu);
-            picked as u32
+        let (x, y) = if x == 0 && y == 0 {
+            let mut point = POINT { x: 0, y: 0 };
+            // SAFETY: a plain read of the pointer's position.
+            unsafe { GetCursorPos(&mut point) };
+            (point.x, point.y)
+        } else {
+            (x, y)
+        };
+        // No state is borrowed while the menu is open: it runs this thread's messages.
+        let picked =
+            crate::compositor::fluent_menu::show(crate::compositor::fluent_menu::Request {
+                owner: hwnd as isize,
+                anchor: tray_anchor(x, y),
+                entries: &entries,
+                name: app_name(&app),
+                keyboard,
+            });
+        let Some(picked) = picked else {
+            return;
         };
         match chosen(picked) {
             Some(BackgroundCommand::Stop) => {
-                if confirm_stop(hwnd, app_name(&app), &texts) {
-                    report(TrayReport::Command(
-                        package.to_string(),
-                        BackgroundCommand::Stop,
-                    ));
+                // The question is asked with nothing of the tray's state borrowed: the dialog
+                // runs this thread's messages while it is open.
+                let mut ask = with_state(|s| s.ask_before_stop).unwrap_or(true);
+                let reports = stop_chosen(package, &mut ask, || {
+                    let text = texts.stop_dialog(app_name(&app));
+                    stop_answer(crate::compositor::fluent_dialog::show(
+                        crate::compositor::fluent_dialog::Request {
+                            text: &text,
+                            timeout: None,
+                        },
+                    ))
+                });
+                with_state(|s| s.ask_before_stop = ask);
+                for each in reports {
+                    report(each);
                 }
             }
             Some(command) => report(TrayReport::Command(package.to_string(), command)),
             None => {}
         }
     }
-
-    /// Asks before a stop, unless the user chose not to be asked. True to stop.
-    fn confirm_stop(hwnd: HWND, name: &str, texts: &Texts) -> bool {
-        if !with_state(|s| s.ask_before_stop).unwrap_or(true) {
-            return true;
-        }
-        let template = stop_dialog_template(
-            &texts.stop_question(name),
-            texts,
-            "Desktop Subsystem for Android",
-        );
-        // SAFETY: a modal dialog from a template that outlives it.
-        let answer = unsafe {
-            DialogBoxIndirectParamW(
-                GetModuleHandleW(null()),
-                template.as_ptr() as *const _,
-                hwnd,
-                Some(stop_dialog_proc),
-                0,
-            )
-        };
-        match answer {
-            2 => {
-                with_state(|s| s.ask_before_stop = false);
-                report(TrayReport::NeverAskBeforeStop);
-                true
-            }
-            1 => true,
-            _ => false,
-        }
-    }
-
-    unsafe extern "system" fn stop_dialog_proc(
-        hwnd: HWND,
-        msg: u32,
-        wparam: WPARAM,
-        _lparam: LPARAM,
-    ) -> isize {
-        match msg {
-            WM_INITDIALOG => {
-                // SAFETY: brings the question in front of the window that asked it.
-                unsafe { SetForegroundWindow(hwnd) };
-                1
-            }
-            WM_COMMAND => {
-                let id = (wparam & 0xffff) as u16;
-                if id == STOP_ID {
-                    // SAFETY: a control of this dialog.
-                    let never =
-                        unsafe { IsDlgButtonChecked(hwnd, DO_NOT_ASK_ID as i32) } == BST_CHECKED;
-                    // SAFETY: ends this modal dialog.
-                    unsafe { EndDialog(hwnd, if never { 2 } else { 1 }) };
-                    1
-                } else if id == CANCEL_ID {
-                    // SAFETY: as above.
-                    unsafe { EndDialog(hwnd, 0) };
-                    1
-                } else {
-                    0
-                }
-            }
-            _ => 0,
-        }
-    }
-
     /// Shows a media session in Windows' media controls, or changes it.
     fn media(session: MediaSession) {
         let package = session.package_name.clone();
@@ -1617,20 +1591,29 @@ mod tests {
         assert_eq!(tooltip(&unnamed), "com.example.music");
     }
 
+    /// The menu's IDs in order, 0 for a separator.
+    fn ids(entries: &[MenuEntry]) -> Vec<u32> {
+        entries
+            .iter()
+            .map(|entry| entry.item().map_or(0, |item| item.id))
+            .collect()
+    }
+
     #[test]
     fn fr24_the_menu_is_open_the_actions_and_stop() {
         let texts = Texts::english();
         let entries = menu_entries(&music(&["Pause", "Next", "R&B"]), &texts);
-        let ids: Vec<u32> = entries.iter().map(|e| e.id).collect();
-        assert_eq!(ids, vec![MENU_OPEN, 0, 100, 101, 102, 0, MENU_STOP]);
-        assert_eq!(entries[0].text, "Open");
-        assert_eq!(entries[4].text, "R&&B");
-        assert_eq!(entries[6].text, "Stop");
-        let plain = menu_entries(&music(&[]), &texts);
         assert_eq!(
-            plain.iter().map(|e| e.id).collect::<Vec<_>>(),
-            vec![MENU_OPEN, 0, MENU_STOP]
+            ids(&entries),
+            vec![MENU_OPEN, 0, 100, 101, 102, 0, MENU_STOP]
         );
+        let label = |index: usize| entries[index].item().unwrap().label.clone();
+        assert_eq!(label(0), "Open");
+        // A label is drawn as it is: an ampersand marks no access key.
+        assert_eq!(label(4), "R&B");
+        assert_eq!(label(6), "Stop");
+        let plain = menu_entries(&music(&[]), &texts);
+        assert_eq!(ids(&plain), vec![MENU_OPEN, 0, MENU_STOP]);
         assert_eq!(chosen(MENU_OPEN), Some(BackgroundCommand::Open));
         assert_eq!(chosen(101), Some(BackgroundCommand::Action(1)));
         assert_eq!(chosen(MENU_STOP), Some(BackgroundCommand::Stop));
@@ -1639,35 +1622,162 @@ mod tests {
     }
 
     #[test]
-    fn fr24_the_stop_question_names_the_app_in_the_users_language() {
-        assert!(Texts::english()
-            .stop_question("Music")
-            .starts_with("Stop Music?"));
-        assert!(Texts::korean().stop_question("Music").starts_with("Music"));
-        assert_ne!(Texts::korean().stop, Texts::english().stop);
+    fn fr24_the_tray_menu_looks_like_windows_11() {
+        use crate::compositor::fluent_menu::{layout, metrics, place};
+        use crate::compositor::widgets::px_of_dip;
+
+        // Each item has its Segoe Fluent Icons glyph where it has one, and Open and Stop
+        // their access keys.
+        let entries = menu_entries(&music(&["Pause", "Next", "R&B"]), &Texts::english());
+        let item = |index: usize| entries[index].item().unwrap().clone();
+        assert_eq!(item(0).glyph, Some(glyph::OPEN_WINDOW));
+        assert_eq!(item(0).access_key, Some('O'));
+        assert_eq!(item(2).glyph, Some(glyph::PAUSE));
+        assert_eq!(item(3).glyph, Some(glyph::NEXT));
+        assert_eq!(item(4).glyph, None);
+        assert_eq!(item(6).glyph, Some(glyph::STOP));
+        assert_eq!(item(6).access_key, Some('S'));
+        assert_eq!(entries[1], MenuEntry::Separator);
+        assert_eq!(entries[5], MenuEntry::Separator);
+        assert!(entries
+            .iter()
+            .filter_map(MenuEntry::item)
+            .all(|i| i.enabled));
+        // The same in Korean, with a Korean media action's glyph.
+        let korean = menu_entries(&music(&["일시 정지", "다음"]), &Texts::korean());
+        let labels: Vec<&str> = korean
+            .iter()
+            .filter_map(MenuEntry::item)
+            .map(|i| i.label.as_str())
+            .collect();
+        assert_eq!(labels, ["열기", "일시 정지", "다음", "중지"]);
+        assert_eq!(korean[2].item().unwrap().glyph, Some(glyph::PAUSE));
+        assert_eq!(action_glyph(" Previous "), Some(glyph::PREVIOUS));
+        assert_eq!(action_glyph("Play"), Some(glyph::PLAY));
+        assert_eq!(action_glyph("Like"), None);
+
+        // Laid out at WinUI's MenuFlyout metrics at any scale: every label starts after the
+        // icon column, so the labels line up, and each item is a rounded highlight's height.
+        for dpi in [96, 144, 192] {
+            let widths = vec![40; entries.len()];
+            let laid = layout(&entries, &widths, dpi);
+            let px = |dip: u32| px_of_dip(dip, dpi);
+            assert!(laid.width >= px(metrics::MIN_WIDTH));
+            let items: Vec<_> = laid.rows.iter().filter(|row| !row.separator).collect();
+            assert_eq!(items.len(), 5);
+            assert!(items.iter().all(|row| row.glyph.is_some()));
+            assert!(items.iter().all(|row| row.text.x == items[0].text.x));
+            assert!(items
+                .iter()
+                .all(|row| row.highlight.h == px(metrics::ITEM_HEIGHT)));
+            assert!(items[0].text.x >= px(metrics::GLYPH_COLUMN));
+        }
+
+        // It opens at the pointer, as the system's tray menus do, and stays on the work area:
+        // above a taskbar at the bottom, below one at the top, beside one at the right.
+        let size = (200, 150);
+        let bottom = place(tray_anchor(1800, 1050), size, (0, 0, 1920, 1032), 4);
+        assert_eq!(bottom, (1600, 1032 - 150));
+        let top = place(tray_anchor(1800, 20), size, (0, 48, 1920, 1080), 4);
+        assert_eq!(top, (1600, 48));
+        let right = place(tray_anchor(1890, 1000), size, (0, 0, 1872, 1080), 4);
+        assert_eq!(right, (1672, 850));
+
+        // The keyboard opens it at the icon, away from the pointer.
+        assert!(!opened_by_keyboard((100, 100), (102, 99)));
+        assert!(opened_by_keyboard((100, 100), (400, 90)));
+
+        // Never Windows' plain popup menu: the tray calls none of its functions.
+        let calls = [
+            ["Track", "PopupMenu"].concat(),
+            ["Create", "PopupMenu"].concat(),
+            ["Append", "MenuW"].concat(),
+            ["SetMenu", "DefaultItem"].concat(),
+        ];
+        let source = include_str!("background.rs");
+        for call in &calls {
+            assert!(!source.contains(call.as_str()), "the tray calls {call}");
+        }
     }
 
     #[test]
-    fn fr24_the_stop_question_is_a_dialog_with_a_do_not_ask_again_box() {
-        let texts = Texts::english();
-        let template = stop_dialog_template("Stop Music?", &texts, "DSA");
-        let bytes: Vec<u8> = template.iter().flat_map(|d| d.to_le_bytes()).collect();
-        // Four controls.
-        assert_eq!(u16::from_le_bytes([bytes[8], bytes[9]]), 4);
-        let utf16: Vec<u16> = bytes
-            .chunks(2)
-            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
-            .collect();
-        let contains = |text: &str| {
-            let needle: Vec<u16> = text.encode_utf16().collect();
-            utf16.windows(needle.len()).any(|w| w == needle.as_slice())
-        };
-        assert!(contains("Stop Music?"));
-        assert!(contains("Do not ask again"));
-        assert!(contains("Cancel"));
-        assert!(contains("Segoe UI"));
+    fn fr24_the_stop_question_names_the_app_in_the_users_language() {
+        assert_eq!(Texts::english().stop_title("Music"), "Stop Music?");
+        assert!(Texts::korean().stop_title("Music").starts_with("Music"));
+        assert_ne!(Texts::korean().stop, Texts::english().stop);
+        assert_ne!(
+            Texts::korean().stop_detail(),
+            Texts::english().stop_detail()
+        );
     }
 
+    #[test]
+    fn fr24_the_stop_question_is_a_windows_11_dialog_with_a_do_not_ask_again_box() {
+        for texts in [Texts::english(), Texts::korean()] {
+            let dialog = texts.stop_dialog("Music");
+            assert_eq!(dialog.title, texts.stop_title("Music"));
+            assert_eq!(dialog.body, texts.stop_detail());
+            assert_eq!(dialog.check.as_deref(), Some(texts.do_not_ask));
+            // Stop is the accent, default button; Cancel the other.
+            assert_eq!(dialog.primary, texts.stop);
+            assert_eq!(dialog.secondary, texts.cancel);
+            assert_eq!(dialog.keys, [Some('D'), Some('S'), Some('C')]);
+        }
+        assert_eq!(
+            stop_answer(Answer::Confirmed { checked: false }),
+            StopAnswer::Stop
+        );
+        assert_eq!(
+            stop_answer(Answer::Confirmed { checked: true }),
+            StopAnswer::StopAndNeverAsk
+        );
+        assert_eq!(stop_answer(Answer::Cancelled), StopAnswer::Cancel);
+        // The tray never shows a Win32 dialog for it.
+        let calls = [
+            ["DialogBox", "IndirectParamW"].concat(),
+            ["End", "Dialog"].concat(),
+            ["IsDlg", "ButtonChecked"].concat(),
+        ];
+        let source = include_str!("background.rs");
+        for call in &calls {
+            assert!(!source.contains(call.as_str()), "the tray calls {call}");
+        }
+    }
+
+    #[test]
+    fn fr24_stop_asks_first_until_the_user_says_not_to() {
+        use dsa_host_core::background::BackgroundCommand::Stop;
+        let stop = TrayReport::Command("com.example.music".into(), Stop);
+        // Asked, and cancelled: nothing is stopped, and it asks again next time.
+        let mut ask = true;
+        let mut asked = 0;
+        let reports = stop_chosen("com.example.music", &mut ask, || {
+            asked += 1;
+            StopAnswer::Cancel
+        });
+        assert!(reports.is_empty());
+        assert!(ask);
+        // Asked, and confirmed: the app stops, and it still asks.
+        let reports = stop_chosen("com.example.music", &mut ask, || {
+            asked += 1;
+            StopAnswer::Stop
+        });
+        assert_eq!(reports, vec![stop.clone()]);
+        assert!(ask);
+        // Confirmed with "do not ask again": the setting is saved and the app stops.
+        let reports = stop_chosen("com.example.music", &mut ask, || {
+            asked += 1;
+            StopAnswer::StopAndNeverAsk
+        });
+        assert_eq!(reports, vec![TrayReport::NeverAskBeforeStop, stop.clone()]);
+        assert!(!ask);
+        assert_eq!(asked, 3);
+        // From then on it stops without asking.
+        let reports = stop_chosen("com.example.music", &mut ask, || {
+            panic!("asked although the user said not to")
+        });
+        assert_eq!(reports, vec![stop]);
+    }
     #[derive(Default)]
     struct Recorded {
         commands: Vec<TrayCommand>,
@@ -1744,6 +1854,102 @@ mod tests {
         wait("the app's icon was never removed", &|r| {
             r.commands
                 .contains(&TrayCommand::Remove("com.example.music".into()))
+        });
+        stop.store(true, Ordering::Relaxed);
+        syncing.join().unwrap();
+    }
+
+    #[test]
+    fn fr24_the_taskbar_preview_buttons_follow_the_session_and_reach_it() {
+        use dsa_host_core::background::Playback;
+        use dsa_host_core::host_api::UserAndroid;
+        use dsa_host_core::host_api_conformance::{FakeAndroids, RunningService};
+        use dsa_host_core::session::BackgroundRequest;
+        use std::sync::mpsc;
+        use std::time::Instant;
+
+        let (listener, connector) = dsa_transport::local::pair();
+        let androids = Arc::new(FakeAndroids::default());
+        let _service = RunningService::start(Box::new(listener), androids.clone());
+        let recorded = Arc::new(std::sync::Mutex::new(Recorded::default()));
+        let told = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (press, pressed) = mpsc::channel();
+        let stop = Arc::new(AtomicBool::new(false));
+        let syncing = {
+            let mut tray = Arc::clone(&recorded);
+            let told = Arc::clone(&told);
+            let stop = Arc::clone(&stop);
+            thread::spawn(move || {
+                let mut linked = WithWindowMedia {
+                    tray: &mut tray,
+                    windows: Box::new(move |package: &str, media| {
+                        told.lock().unwrap().push((package.to_string(), media));
+                    }),
+                    pressed,
+                };
+                sync(Box::new(connector), &mut linked, stop, None)
+            })
+        };
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let android = loop {
+            if let Some(android) = androids.androids.lock().unwrap().values().next().cloned() {
+                break android;
+            }
+            assert!(Instant::now() < deadline, "the apps were never watched");
+            thread::sleep(Duration::from_millis(10));
+        };
+        thread::sleep(Duration::from_millis(100));
+        android.start();
+        let session = MediaSession {
+            package_name: "com.example.music".into(),
+            app_label: "Music".into(),
+            playback: Playback::Playing,
+            can_pause: true,
+            can_next: true,
+            ..MediaSession::default()
+        };
+        android.background_event(BackgroundEvent::Media(session.clone()));
+        let wait = |what: &str, done: &dyn Fn() -> bool| {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while !done() {
+                assert!(Instant::now() < deadline, "{what}");
+                thread::sleep(Duration::from_millis(10));
+            }
+        };
+        let buttons = MediaButtons::of(&session);
+        wait("the windows never heard of the session", &|| {
+            told.lock()
+                .unwrap()
+                .contains(&("com.example.music".to_string(), Some(buttons)))
+        });
+        // The media controls hear of it too, as before.
+        assert!(recorded
+            .lock()
+            .unwrap()
+            .commands
+            .contains(&TrayCommand::Media(session.clone())));
+        // A click on Next in a window's preview reaches the session, as the Next key does.
+        press
+            .send(("com.example.music".to_string(), MediaCommand::Next))
+            .unwrap();
+        wait("the press never reached Android", &|| {
+            !android.background_requests.lock().unwrap().is_empty()
+        });
+        assert_eq!(
+            *android.background_requests.lock().unwrap(),
+            vec![BackgroundRequest::Media(
+                "com.example.music".into(),
+                MediaCommand::Next
+            )]
+        );
+        // The session's end hides the buttons.
+        android.background_event(BackgroundEvent::MediaRemoved {
+            package_name: "com.example.music".into(),
+        });
+        wait("the windows never heard the session end", &|| {
+            told.lock()
+                .unwrap()
+                .contains(&("com.example.music".to_string(), None))
         });
         stop.store(true, Ordering::Relaxed);
         syncing.join().unwrap();

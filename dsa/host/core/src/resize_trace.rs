@@ -86,6 +86,8 @@ pub struct ResizeTrace {
     stages: HashMap<(i32, &'static str), (u32, u32)>,
     /// When each task's last summary went out, and how many were left out since.
     summaries: HashMap<i32, (Instant, usize)>,
+    /// The size each task was last given live, and when.
+    live: HashMap<i32, ((u32, u32), Instant)>,
 }
 
 impl ResizeTrace {
@@ -97,6 +99,7 @@ impl ResizeTrace {
             origin,
             stages: HashMap::new(),
             summaries: HashMap::new(),
+            live: HashMap::new(),
         }
     }
 
@@ -156,10 +159,27 @@ impl ResizeTrace {
         Some(self.line(task_id, stage, size, &detail, now, wall))
     }
 
+    /// `task_id` was given `size` live at `now`.
+    pub fn live_sent(&mut self, task_id: i32, size: (u32, u32), now: Instant) {
+        self.live.insert(task_id, (size, now));
+    }
+
+    /// How long ago `task_id` was given `size` live, when that was the last size it was given
+    /// live: the host gives a window's new size live first and reconfigures the task at that
+    /// size once the guest took it, and only the second is summarised, so this tells when the
+    /// first went.
+    pub fn since_live(&self, task_id: i32, size: (u32, u32), now: Instant) -> Option<Duration> {
+        match self.live.get(&task_id) {
+            Some((live, at)) if *live == size => Some(now.saturating_duration_since(*at)),
+            _ => None,
+        }
+    }
+
     /// The task has ended: what was kept for it goes.
     pub fn forget(&mut self, task_id: i32) {
         self.stages.retain(|(task, _), _| *task != task_id);
         self.summaries.remove(&task_id);
+        self.live.remove(&task_id);
     }
 
     fn line(
@@ -212,6 +232,23 @@ mod tests {
             utc_stamp(Duration::from_secs(951_782_400)),
             "2000-02-29T00:00:00.000Z"
         );
+    }
+
+    #[test]
+    fn fr4_the_reconfiguring_request_says_how_long_ago_its_size_went_live() {
+        let start = Instant::now();
+        let mut trace = ResizeTrace::new(false, start);
+        assert_eq!(trace.since_live(3, (800, 600), start), None);
+        trace.live_sent(3, (800, 600), start);
+        assert_eq!(
+            trace.since_live(3, (800, 600), start + ms(140)),
+            Some(ms(140))
+        );
+        // Another size, or another task, went live at no known time.
+        assert_eq!(trace.since_live(3, (810, 600), start + ms(140)), None);
+        assert_eq!(trace.since_live(4, (800, 600), start + ms(140)), None);
+        trace.forget(3);
+        assert_eq!(trace.since_live(3, (800, 600), start + ms(150)), None);
     }
 
     #[test]

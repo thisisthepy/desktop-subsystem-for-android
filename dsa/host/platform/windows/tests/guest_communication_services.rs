@@ -115,6 +115,39 @@ fn pr1_unregistered_service_guid_is_reported_not_registered() {
 }
 
 #[test]
+fn fr36_the_keymint_root_key_port_is_registered_for_the_service_only() {
+    use dsa_host_core::keymint_root::KEYMINT_PORT;
+    use dsa_host_windows::guest_communication_services::{KEYMINT_ELEMENT_NAME, SERVICE_ONLY_SDDL};
+    let base_key = format!("{}_keymint", test_base_key());
+    let guid = Guid::vsock_service(KEYMINT_PORT);
+    assert_eq!(guid.to_string(), "000015e4-facb-11e6-bd58-64006a7986d3");
+    register_graphics_service_guids_under(RegistryHive::CurrentUser, &base_key)
+        .expect("register the service GUIDs");
+    assert_eq!(
+        read_service_element_name_under(RegistryHive::CurrentUser, &base_key, guid).as_deref(),
+        Some(KEYMINT_ELEMENT_NAME)
+    );
+    assert!(!SERVICE_ONLY_SDDL.contains(";IU)") && !SERVICE_ONLY_SDDL.contains(";AU)"));
+    let _ = unregister_service_guid_under(RegistryHive::CurrentUser, &base_key, guid);
+}
+
+#[test]
+fn fr28_the_dns_port_is_registered_for_the_service_only() {
+    use dsa_host_core::dns::DNS_PORT;
+    use dsa_host_windows::guest_communication_services::DNS_ELEMENT_NAME;
+    let base_key = format!("{}_dns", test_base_key());
+    let guid = Guid::vsock_service(DNS_PORT);
+    assert_eq!(guid.to_string(), "000015e5-facb-11e6-bd58-64006a7986d3");
+    register_graphics_service_guids_under(RegistryHive::CurrentUser, &base_key)
+        .expect("register the service GUIDs");
+    assert_eq!(
+        read_service_element_name_under(RegistryHive::CurrentUser, &base_key, guid).as_deref(),
+        Some(DNS_ELEMENT_NAME)
+    );
+    let _ = unregister_service_guid_under(RegistryHive::CurrentUser, &base_key, guid);
+}
+
+#[test]
 fn pr4_the_audio_port_is_registered_beside_the_graphics_ports() {
     // dsa-wm listens on the audio port in the user's session, which Windows allows only for
     // a registered service.

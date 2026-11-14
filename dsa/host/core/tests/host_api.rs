@@ -146,6 +146,7 @@ fn fr28_advanced_networking_is_the_users_and_the_network_is_reported_with_the_se
             dns_servers: vec!["172.28.0.1".into()],
             gateway: "172.28.0.1".into(),
             problem: None,
+            dns_resolver: String::new(),
         })
     });
     let service = HostApiService::new(Arc::new(FakeAndroids::default()), "test service")
@@ -180,6 +181,64 @@ fn fr28_advanced_networking_is_the_users_and_the_network_is_reported_with_the_se
         bob.settings().unwrap().network.unwrap().mode,
         NetworkStatus::OFF
     );
+}
+
+#[test]
+fn fr28_the_network_says_whether_the_hosts_resolver_answers_androids_names() {
+    use dsa_host_core::host_api::{HostApiService, NetworkSource, NetworkStatus, ServiceFacts};
+    use dsa_host_core::settings::Settings;
+    let (listener, connector) = local::pair();
+    // Alice's Android runs; Bob's is not running.
+    let network: NetworkSource = Arc::new(|user: &str, _: &Settings| {
+        (user == "alice").then(|| NetworkStatus {
+            mode: NetworkStatus::NAT.into(),
+            addresses: vec!["172.28.0.2".into()],
+            dns_servers: vec!["172.28.0.1".into()],
+            gateway: "172.28.0.1".into(),
+            ..NetworkStatus::default()
+        })
+    });
+    let androids = Arc::new(FakeAndroids::default());
+    let service = HostApiService::new(androids.clone(), "test service")
+        .with_settings(
+            Arc::new(dsa_host_core::settings::MemorySettings::default()),
+            ServiceFacts::default(),
+        )
+        .with_network(network);
+    let _service = RunningService::start_service(Box::new(listener), service);
+    let mut alice =
+        HostApiClient::connect(&mut AsAdmin(connector.clone(), "alice", false), "a", WAIT).unwrap();
+
+    // Still booting: nobody can say yet.
+    let status = alice.settings().unwrap().network.unwrap();
+    assert_eq!(status.dns_resolver, "");
+
+    // The guest's control daemon holds the DNS port: the host's resolver answers.
+    *androids
+        .of("alice")
+        .unwrap()
+        .dns_answered_by_host
+        .lock()
+        .unwrap() = Some(true);
+    let status = alice.settings().unwrap().network.unwrap();
+    assert_eq!(status.dns_resolver, NetworkStatus::DNS_HOST);
+
+    // It does not reach the host's DNS service: Android asks its network's DNS servers.
+    *androids
+        .of("alice")
+        .unwrap()
+        .dns_answered_by_host
+        .lock()
+        .unwrap() = Some(false);
+    let status = alice.settings().unwrap().network.unwrap();
+    assert_eq!(status.dns_resolver, NetworkStatus::DNS_NETWORK);
+    assert_eq!(status.dns_servers, vec!["172.28.0.1"]);
+
+    // A stopped Android has no network, so nothing answers its names.
+    let mut bob = HostApiClient::connect(&mut AsAdmin(connector, "bob", false), "b", WAIT).unwrap();
+    let status = bob.settings().unwrap().network.unwrap();
+    assert_eq!(status.mode, NetworkStatus::OFF);
+    assert_eq!(status.dns_resolver, "");
 }
 
 #[test]
@@ -926,9 +985,14 @@ fn fr35_the_running_android_is_given_each_change_to_root_elevation() {
     }];
     assert_eq!(android_of("alice").last(), Some((true, ask.clone())));
 
-    // Set back to off, the app is no longer listed.
+    // Set back to off, the app is listed as off, so the guest keeps any app that shares its
+    // user ID from root too.
     alice.set_app_root("com.example.root", "off").unwrap();
-    assert_eq!(android_of("alice").last(), Some((true, Vec::new())));
+    let off = vec![AppLevel {
+        package: "com.example.root".into(),
+        level: Level::Off,
+    }];
+    assert_eq!(android_of("alice").last(), Some((true, off)));
     alice.set_app_root("com.example.root", "ask").unwrap();
 
     // The administrator turns the feature off: every user's Android is told, not only theirs.

@@ -17,14 +17,18 @@ on:
       - ".github/workflows/test-graphics.yml"
       - "scripts/tests/graphics-workflow.test.sh"
   workflow_dispatch:
+  # Checks (checks.yml) runs it as one of its jobs, with every other test, in one run.
+  workflow_call:
 
 concurrency:
-  # On develop a run in progress finishes and only the newest waiting run stays: GitHub
-  # keeps one pending run per group, so a newer merge replaces the one still waiting.
-  # The newest run tests everything the dropped ones held. Anywhere else, such as a pull
-  # request, a newer run still replaces the older one.
-  group: test-graphics-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/develop' }}
+  # A run in progress always finishes, and only the newest waiting run stays: GitHub keeps
+  # one pending run per group, so a newer run replaces the one still waiting, and the newest
+  # tests everything the dropped ones held. The group is the workflow and the branch (or
+  # the pull request), never the run, so manual runs replace each other too. Called from
+  # Checks, github.workflow names Checks, so a Checks run neither waits on nor replaces a
+  # run started on its own.
+  group: test-graphics-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -446,6 +450,36 @@ jobs:
           GFXSTREAM_BACKEND_PATH: ${{ github.workspace }}\.scratch\build-host\dist\bin\gfxstream_backend.dll
         run: |
           cargo test -p dsa-host-windows --test window_manager -- nfr5_a_lost_device_is_reported_to_the_guest_and_made_again --nocapture
+
+      - name: Check the renderer's memory count follows every device, also after a lost one
+        shell: pwsh
+        working-directory: dsa
+        env:
+          VK_ICD_FILENAMES: ${{ env.LVP_ICD }}
+          VK_DRIVER_FILES: ${{ env.LVP_ICD }}
+          GFXSTREAM_BACKEND_PATH: ${{ github.workspace }}\.scratch\build-host\dist\bin\gfxstream_backend.dll
+        run: |
+          cargo test -p dsa-host-windows --test window_manager -- nfr1_the_renderer_counts_every_device_after_a_lost_device --nocapture
+
+      - name: Check a closed color buffer's memory is freed without another call
+        shell: pwsh
+        working-directory: dsa
+        env:
+          VK_ICD_FILENAMES: ${{ env.LVP_ICD }}
+          VK_DRIVER_FILES: ${{ env.LVP_ICD }}
+          GFXSTREAM_BACKEND_PATH: ${{ github.workspace }}\.scratch\build-host\dist\bin\gfxstream_backend.dll
+        run: |
+          cargo test -p dsa-host-windows --test window_manager -- nfr2_a_destroyed_color_buffer_is_freed_without_another_call --nocapture
+
+      - name: Check the staging buffer is made for a copy and freed when idle
+        shell: pwsh
+        working-directory: dsa
+        env:
+          VK_ICD_FILENAMES: ${{ env.LVP_ICD }}
+          VK_DRIVER_FILES: ${{ env.LVP_ICD }}
+          GFXSTREAM_BACKEND_PATH: ${{ github.workspace }}\.scratch\build-host\dist\bin\gfxstream_backend.dll
+        run: |
+          cargo test -p dsa-host-windows --test window_manager -- nfr1_the_staging_buffer_is_made_for_a_copy_and_freed_when_idle --nocapture
 
       - name: Check killing the renderer process keeps the windows and frames resume
         shell: pwsh

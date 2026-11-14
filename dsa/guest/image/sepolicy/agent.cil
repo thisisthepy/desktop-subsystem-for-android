@@ -36,3 +36,10 @@
 (allow platform_app cpuinfo_service (service_manager (find)))
 (allow platform_app power_service (service_manager (find)))
 (allow platform_app dropbox_service (service_manager (find)))
+
+; The status bar service, which the agent registers with as the status bar, since the guest has
+; no SystemUI: the window manager then reports the system bars' live appearance to it, which
+; the host's caption buttons follow. Every app may find the service already; the rule is here
+; so the captions do not depend on that. system_server calls the agent back over binder, as it
+; calls every app's callbacks.
+(allow platform_app statusbar_service (service_manager (find)))

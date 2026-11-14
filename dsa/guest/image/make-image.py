@@ -17,7 +17,11 @@ It takes the pinned target_files, otatools and dexpreopt_tools (fetch.sh downloa
 5. compiles the system apps users open (COMPILED_APPS) with the build's own dex2oat
    (dexpreopt_tools.zip), against the guest's boot image, so they do not run interpreted, and
    compiles again, with its own filter, any app the published build shipped compiled whose
-   dex no longer matches its odex (PREBUILT_OAT_RECORD);
+   dex no longer matches its odex (PREBUILT_OAT_RECORD), and services.jar, whose window
+   manager it edits so a freeform window gets its status bar and navigation bar insets
+   (SERVICES_INSETS_CODE), whose package manager it edits so an app with arm64-v8a code
+   only installs while ARM translation is on (SERVICES_ABI_CODE), and whose WebView service it
+   edits so the WebView zygote starts with the first renderer (SERVICES_WEBVIEW_ZYGOTE_CODE);
 6. builds the images, and lays them out on the template of a user's Android disk.
 
 The results go to dsa/target/image/<version>/:
@@ -36,8 +40,11 @@ The results go to dsa/target/image/<version>/:
   start while the user has installed no package of their own.
 
 With --framework, the system partition carries the patched SurfaceFlinger, libhwui and libEGL
-that recover from a GPU device loss, in place of the build's own (FRAMEWORK_FILES), and
-image.json describes them under "framework".
+that recover from a GPU device loss, and libandroid_runtime, which gives Google Play the
+computer's memory, in place of the build's own (FRAMEWORK_FILES), and
+image.json describes them under "framework". When the framework build has DSA's KeyMint
+(KEYMINT_FILES), whose root key of key blobs comes from the host, the vendor partition carries it
+in place of the KeyMint APEX, which the image then does not select.
 """
 
 import argparse
@@ -73,11 +80,11 @@ SHELL_APPS = ["Launcher3QuickStep", "SystemUI", "LatinIME"]
 # Kept on purpose, because apps rely on them: WebView, every content provider (contacts,
 # calendar, media, downloads, settings, telephony's database), PackageInstaller,
 # PermissionController, DocumentsUI, the print spooler, the sound picker, Settings, Provision
-# (it marks the device set up), Telecom and TeleService (system_server binds them at boot),
-# CarrierConfig, the browser, the camera and the clock. The browser stays although web links
-# go to the host's browser by default (the agent holds the browser role then): an app may
-# start it by name, the user can choose to keep links in Android, which gives the role back
-# to it, and a link that cannot reach the host opens in it.
+# (it marks the device set up), Telecom (system_server binds it at boot, and calling apps place
+# their own calls through it), CarrierConfig, the browser, the camera and the clock. The browser
+# stays although web links go to the host's browser by default (the agent holds the browser
+# role then): an app may start it by name, the user can choose to keep links in Android, which
+# gives the role back to it, and a link that cannot reach the host opens in it.
 UNNEEDED_APPS = [
     # Telephony without a modem (the radio HAL is removed): calls, SMS, the SIM toolkit, MMS,
     # emergency information, IMS entitlement and the carrier's captive portal app.
@@ -88,6 +95,21 @@ UNNEEDED_APPS = [
     "EmergencyInfo",
     "ImsServiceEntitlement",
     "CarrierDefaultApp",
+    # TeleService, the com.android.phone process: persistent, so the activity manager starts it
+    # at boot and again whenever it ends, and it held about 8.5 MiB. Without the telephony
+    # feature (unavailable-features.xml) it sets nothing up (PhoneGlobals returns at once), so
+    # it publishes none of the phone, subscription or carrier config services and system_server
+    # already runs without them, as an Android TV build, which has no TeleService, does.
+    # Telecom stays for apps that place their own calls. The telephony provider, which runs
+    # under the same name, stays and starts only when an app asks it something.
+    "TeleService",
+    # The opportunistic network service (com.android.ons) chooses between the SIMs of a
+    # modem, which this VM does not have. It goes with TeleService: it shares the phone's
+    # user ID and process, is persistent and starts at boot, and the network permissions it
+    # uses are declared only by TeleService. Left alone it crashes on its first network
+    # callback, the activity manager restarts it at once, and after a few crashes the rescue
+    # party reboots Android within a minute of every boot.
+    "ONS",
     # Screen savers and wallpapers: the host draws the desktop, and the guest's display is
     # never seen, so there is no screen to save or wallpaper to show (SystemUI, which draws
     # it, is removed above).
@@ -114,6 +136,10 @@ UNNEEDED_APPS = [
     # Developer and demo apps.
     "Traceur",
     "EasterEgg",
+    # A text-to-speech engine of the guest's own, when a build has one: the agent's engine
+    # speaks with the host's voices and is the default, and an engine here would hold its
+    # voices in the guest's memory.
+    "PicoTts",
 ]
 
 REMOVED_APPS = SHELL_APPS + UNNEEDED_APPS
@@ -130,6 +156,56 @@ REMOVED_APEXES = [
     "com.android.hardware.threadnetwork",
     "com.google.cf.nfc",
     "com.google.cf.rild",
+] + [
+    # Cuttlefish's example HALs for devices a desktop VM does not have. Each ran as a process
+    # of its own from boot (about 1 MiB of PSS, plus its page tables, kernel stacks and binder
+    # threads in the guest's kernel) and answered with fixed values or nothing. Each is
+    # optional to the framework, which runs without it as a device without that hardware does:
+    # - authsecret and rebootescrow: secrets for a secure element and for resuming an update
+    #   after a reboot; the user's credential and the host's image updates do without them.
+    # - cas: conditional access for broadcast television tuners.
+    # - contexthub: a phone's sensor hub; its feature goes too (unavailable-features.xml).
+    # - input.processor: a model that classifies touch input; input then goes unclassified,
+    #   as on every device without one.
+    # - ir (com.google.cf.ir): an infrared blaster; its feature goes too, because the
+    #   consumer IR service refuses to start with the feature but no HAL.
+    # - memtrack: per-process GPU memory for dumpsys; the example reported none anyway.
+    # - net.nlinterceptor and tetheroffload: a modem's netlink filter and tethering offloaded
+    #   to a modem.
+    # - neuralnetworks: three sample NNAPI drivers on the CPU; the NNAPI runtime falls back to
+    #   its own CPU path, which they only imitated.
+    # - secure_element: the HAL behind the SecureElement app, which is removed above.
+    # - usb: a phone's USB-C port roles; USB devices the host lends need no port HAL.
+    # - vibrator: a phone's vibration motor; Android then reports no vibrator.
+    "com.android.hardware.authsecret",
+    "com.android.hardware.rebootescrow",
+    "com.android.hardware.cas",
+    "com.android.hardware.contexthub",
+    "com.android.hardware.input.processor",
+    "com.google.cf.ir",
+    "com.android.hardware.memtrack",
+    "com.android.hardware.net.nlinterceptor",
+    "com.android.hardware.tetheroffload",
+    "com.android.hardware.neuralnetworks",
+    "com.android.hardware.secure_element",
+    "com.android.hardware.usb",
+    "com.android.hardware.vibrator",
+]
+
+# The virtual face and fingerprint HALs, installed as plain vendor files. They fake a sensor
+# no PC has, so Settings offered face and fingerprint unlock that nothing could complete,
+# and system_server started both HALs for it. With them go the features that make
+# system_server start the biometric services (unavailable-features.xml as well, in case
+# another permissions file declares them).
+REMOVED_VENDOR_FILES = [
+    "VENDOR/bin/hw/android.hardware.biometrics.face-service.default",
+    "VENDOR/bin/hw/android.hardware.biometrics.fingerprint-service.default",
+    "VENDOR/etc/init/face-default.rc",
+    "VENDOR/etc/init/fingerprint-default.rc",
+    "VENDOR/etc/vintf/manifest/face-default.xml",
+    "VENDOR/etc/vintf/manifest/fingerprint-default.xml",
+    "VENDOR/etc/permissions/android.hardware.biometrics.face.xml",
+    "VENDOR/etc/permissions/android.hardware.fingerprint.xml",
 ]
 
 # Settings controllers that crash without the Bluetooth service. With the Bluetooth features
@@ -210,144 +286,134 @@ SETTINGS_CODE_WITHOUT_BLUETOOTH = {
     ],
 }
 
-# Room below the last row of the lists in Settings, the permission screens and Files, about
-# what a phone's navigation bar leaves there. A DSA window has no navigation bar, and the
-# guest reports no bottom inset, which is the only space these lists keep below their last
-# row, so it sat on the window's bottom edge. The space is the list's own padding with
-# clipToPadding off, so rows still scroll to the edge and only the end of the list stops
-# short of it; nothing tells apps there is a navigation bar.
-LIST_BOTTOM_MARGIN_DP = 24
-ANDROID_PADDING_BOTTOM = 0x010100D9  # android:paddingBottom
-
-# Settings code that sets the list padding itself, over the layout's (the Settings overlay
-# gives its preference lists the room above), edited in Settings.apk's dex files:
-#
-# - Android 16's home page (TopLevelSettings.onCreateRecyclerView) calls
-#   setPadding(mPaddingHorizontal, 0, mPaddingHorizontal, 0) on its list. That build never
-#   sets mPaddingHorizontal (its two pane padding is compiled out), so the call only drops
-#   the layout's bottom padding: the list's style pads it 0 on each side and the layout 0 on
-#   top. The call is skipped, and the list keeps the layout's room below its last row.
-# - Android 17's home page pads its list's bottom by dashboard_padding_bottom only when
-#   isRunningInFreeformWindow, which asks whether the window shows a caption bar. A DSA
-#   window is a freeform window whose caption the host draws, outside the guest, so the
-#   method says so, and Android's own padding applies; the Settings overlay sets it to
-#   LIST_BOTTOM_MARGIN_DP like the other lists. Android 17 reads nothing else from that dimen.
-SETTINGS_CODE_LIST_MARGIN = {
-    "Lcom/android/settings/homepage/TopLevelSettings;->onCreateRecyclerView": [
-        ("skip call", "Landroid/view/ViewGroup;->setPadding"),
-    ],
-    "Lcom/android/settings/homepage/TopLevelSettings;->isRunningInFreeformWindow": ("return true", None),
-}
-SETTINGS_HOME_PADDING_DIMEN = "dashboard_padding_bottom"
-# Settings' All apps list sets no padding in code, and its layout none: the list gets room
-# below its last row in the compiled layout itself. An overlay could not reach it without
-# copying the whole ConstraintLayout and naming each of its ids and attributes.
-SETTINGS_LIST_DIMENSIONS = {
-    "res/layout/manage_applications_apps.xml": [
-        ("androidx.recyclerview.widget.RecyclerView", ANDROID_PADDING_BOTTOM, LIST_BOTTOM_MARGIN_DP),
-    ],
+# Settings code that pads its home list's bottom itself, edited in Settings.apk's dex files.
+# Android 17's home page (TopLevelSettings.setPaddingHorizontal) pads its list's bottom by
+# dashboard_padding_bottom (16 dp) when isRunningInFreeformWindow, which asks whether the
+# window shows a caption bar. That padding stands in for the navigation bar inset Android's
+# own desktop windows lack. A DSA window shows the agent's caption bar inset, so the method
+# said yes, but the task also has the navigation bar inset a gesture navigation phone gives,
+# which SettingsLib's EdgeToEdgeUtils already pads the page by: the list would end 40 dp above
+# the window's bottom edge, where every other Settings list ends 24 dp above it. The method
+# says no, so the inset alone keeps the end of the list clear, as on a phone. Android 16's
+# home page has no such method, and nothing changes there.
+SETTINGS_CODE_FREEFORM_PADDING = {
+    "Lcom/android/settings/homepage/TopLevelSettings;->isRunningInFreeformWindow": ("return false", None),
 }
 
-# PermissionController lists its rows in androidx.preference's preference_recyclerview with
-# paddingBottom 0dp, as Settings did. It declares <overlayable>, so idmap2 lets no overlay
-# replace that layout; the compiled layout in the APK is edited instead. The app lives in the
-# permission APEX, which is unpacked, edited and packed again before signing (see
-# edit_permission_apex).
+# PermissionController lives in the permission APEX, which is unpacked, edited and packed
+# again before signing (see edit_permission_apex).
 PERMISSION_CONTROLLER_APK = "PermissionController.apk"
-PERMISSION_CONTROLLER_DIMENSIONS = {
-    "res/layout/preference_recyclerview.xml": [
-        ("androidx.recyclerview.widget.RecyclerView", ANDROID_PADDING_BOTTOM, LIST_BOTTOM_MARGIN_DP),
-    ],
-}
 PERMISSION_APEXES = ["SYSTEM/apex/com.android.permission.apex", "SYSTEM/apex/com.android.permission.capex"]
 
+# The host window's title bar is Android's status bar. A task's window draws its caption over
+# the task's top band, and the agent gives the task status bar and caption bar inset sources
+# as high as that band. An app that draws edge to edge then lays out below the band as it lays
+# out below a phone's status bar, and draws its own status bar background under the caption;
+# an app that does not gets the status bar background Android draws for it there. Along the
+# task's bottom edge the agent gives navigation bar and tappable element sources 24 dp high,
+# the inset a gesture navigation phone's navigation bar gives, so phone apps keep their bottom
+# bars and the ends of their lists clear of the window's bottom edge.
+#
+# Android hands a window in a floating windowing mode (freeform, as every DSA task is, or
+# picture-in-picture) only its caption bar and IME insets: InsetsPolicy's
+# enforceInsetsPolicyForTarget keeps WindowInsets.Type.captionBar() (and the IME) and drops
+# the rest. The status bar source the agent gives the task never reached its app, so an app
+# that pads its toolbar by its status bar inset, as most edge-to-edge apps do (FLO's player
+# screen, for one), got 0 and drew its toolbar under the caption, its buttons under the
+# window's close button, and the navigation bar band would have been dropped the same way. The
+# call that names the kept types names all() instead, so the app receives every source the
+# agent gives its task, with the insets a phone gives it: status bars, navigation bars and the
+# caption bar (systemBars() would do for those), and the tappable element, which no narrower
+# type names beside them. The guest has no navigation bar, no status bar and no system UI of
+# its own, and its display no cutout, so the only other source is the IME's, which a floating
+# window now keeps whether or not it is the IME's target, as Android 15 and earlier kept it. The
+# host's keyboard shows no view in the guest, so that source is never visible and insets no
+# window; a keyboard app the user installs insets the windows behind it too. Only the first call
+# after isFloating changes: Android 16 and 17 have no other caption bar call before it, and a
+# later Android that tests a source's type against captionBar() before it keeps that test.
+#
+# services.jar is compiled ahead of time (services.odex, .vdex and .art beside it), for its
+# dex: the edited jar is compiled again with the published build's filter, class loader
+# context and profile (SERVICES_PROFILE), as compile_apps compiles an edited app.
+SERVICES_JAR = "SYSTEM/framework/services.jar"
+SERVICES_INSETS_CODE = {
+    "Lcom/android/server/wm/InsetsPolicy;->enforceInsetsPolicyForTarget": ("replace call", {
+        "after": "Landroid/app/WindowConfiguration;->isFloating",
+        "old": "Landroid/view/WindowInsets$Type;->captionBar",
+        "new": "Landroid/view/WindowInsets$Type;->all",
+    }),
+}
 
-def float_bits(value):
-    """The 32 bits of a float, as const/high16 loads them."""
-    return struct.unpack("<I", struct.pack("<f", value))[0]
-
-
-# Files (DocumentsUI) sets its list's padding in code: on Android 16 the bottom is the height
-# of the bar below the list (getSaveLayoutHeight: the save bar, or with Material 3 the
-# breadcrumb and save bar), and 0 where the window has none, as in wide windows. That method
-# now returns at least LIST_BOTTOM_MARGIN_DP in pixels for the display's density, rounded as
-# getDimensionPixelSize rounds. Android 17's list keeps 48 dp of its own
-# (list_container_padding_bottom) and has no such method.
-DOCUMENTSUI_APK = "/priv-app/DocumentsUI/DocumentsUI.apk"
-_DOCS = "Lcom/android/documentsui"
-
-
-def _documentsui_bar_height(bar, label):
-    """Android 16's lookup of the bar below the list, in getSaveLayoutHeight: its height, or
-    0 (v1) when the window has no such bar."""
-    return [
-        f"invoke-virtual {{v2}}, {_DOCS}/dirlist/DirectoryFragment;->getBaseActivity",
-        "move-result-object v2",
-        f"sget v0, {_DOCS}/R$id;->{bar}",
-        f"invoke-static {{v0}}, {_DOCS}/util/Material3Config;->getRes",
-        "move-result v0",
-        "invoke-virtual {v2, v0}, Landroidx/appcompat/app/AppCompatActivity;->findViewById",
-        "move-result-object v2",
-        f"if-nez v2, :{label}",
-        "return v1",
-        f":{label}",
-        "invoke-virtual {v2}, Landroid/view/View;->getHeight",
-        "move-result v2",
-        "return v2",
-    ]
-
-
-DOCUMENTSUI_CODE = {
-    f"{_DOCS}/dirlist/DirectoryFragment;->getSaveLayoutHeight": ("replace code", {
-        # Android 16 (BP4A.251205.006), as d8 compiled it: this is v2.
+# An app whose native code is for arm64-v8a only installs while ARM translation is on, whatever
+# its manifest says. PackageAbiHelperImpl.derivePackageAbi chooses the ABI of a multiArch app
+# (android:multiArch="true") that targets Android 15 or later, installed without an ABI
+# override, from the "natively supported" 64-bit ABIs only: Build.SUPPORTED_64_BIT_ABIS
+# without each ABI a native bridge translates (ro.dalvik.vm.isa.<isa> set). Its libraries
+# must cover one of those, or Android refuses the app with
+# INSTALL_FAILED_MULTI_ARCH_NOT_MATCH_ALL_NATIVE_ABIS ("The multiArch app's native libs don't
+# support all the natively supported ABIs of the device"). With translation on, the guest's
+# 64-bit ABIs are x86_64 and arm64-v8a (arm-translation-on.prop), arm64-v8a through the bridge,
+# so that list was x86_64 alone, and Google Play's arm64-v8a-only multiArch apps were refused
+# although the translator runs them, as it runs every other arm64-v8a app.
+#
+# getNativelySupported64BitAbis returns Build.SUPPORTED_64_BIT_ABIS instead, in its order:
+# x86_64 first, then arm64-v8a while translation is on. Android takes the first of them the
+# app's libraries have, so an app with x86_64 code is installed as x86_64 as before, and one
+# with arm64-v8a code only is installed as arm64-v8a and runs through the translator. With
+# translation off the list is x86_64 alone (arm-translation-off.prop), so nothing changes:
+# Android refuses an arm64-v8a-only app, and the host says why before it reaches Android (the
+# translation-off refusal). The guest is 64-bit only: Build.SUPPORTED_32_BIT_ABIS is empty and
+# the 32-bit list is left as it is, so an app with only 32-bit code is still refused.
+_ABI_HELPER = "Lcom/android/server/pm/PackageAbiHelperImpl;"
+SERVICES_ABI_CODE = {
+    f"{_ABI_HELPER}->getNativelySupported64BitAbis": ("replace code", {
+        # As d8 compiles Android 16's and 17's: the cached list, or the list derived from
+        # Build.SUPPORTED_64_BIT_ABIS and cached.
         "old": [
-            f"invoke-static {{}}, {_DOCS}/util/FlagUtils;->isUseMaterial3FlagEnabled",
-            "move-result v0",
-            "const/4 v1, 0",
-            "if-eqz v0, :legacy",
-            *_documentsui_bar_height("bottom_container", "bottom"),
-            ":legacy",
-            *_documentsui_bar_height("container_save", "save"),
+            f"sget-object v0, {_ABI_HELPER}->sNativelySupported64BitAbis",
+            "if-eqz v0, :derive",
+            "return-object v0",
+            ":derive",
+            "sget-object v0, Landroid/os/Build;->SUPPORTED_64_BIT_ABIS",
+            f"invoke-static {{v0}}, {_ABI_HELPER}->getNativelySupportedAbis",
+            "move-result-object v0",
+            f"sput-object v0, {_ABI_HELPER}->sNativelySupported64BitAbis",
+            "return-object v0",
         ],
-        # The same bar, then the larger of its height and the margin: this is v3.
-        "registers": 4,
+        "registers": 1,
         "new": [
-            f"invoke-static {{}}, {_DOCS}/util/FlagUtils;->isUseMaterial3FlagEnabled",
-            "move-result v0",
-            "if-eqz v0, :legacy",
-            f"sget v0, {_DOCS}/R$id;->bottom_container",
-            "goto :find",
-            ":legacy",
-            f"sget v0, {_DOCS}/R$id;->container_save",
-            ":find",
-            f"invoke-static {{v0}}, {_DOCS}/util/Material3Config;->getRes",
-            "move-result v0",
-            f"invoke-virtual {{v3}}, {_DOCS}/dirlist/DirectoryFragment;->getBaseActivity",
-            "move-result-object v1",
-            "invoke-virtual {v1, v0}, Landroidx/appcompat/app/AppCompatActivity;->findViewById",
-            "move-result-object v1",
-            "const/4 v2, 0",
-            "if-eqz v1, :margin",
-            "invoke-virtual {v1}, Landroid/view/View;->getHeight",
-            "move-result v2",
-            ":margin",
-            "invoke-virtual {v3}, Landroidx/fragment/app/Fragment;->getResources",
-            "move-result-object v0",
-            "invoke-virtual {v0}, Landroid/content/res/Resources;->getDisplayMetrics",
-            "move-result-object v0",
-            "iget v0, v0, Landroid/util/DisplayMetrics;->density",
-            f"const/high16 v1, {float_bits(LIST_BOTTOM_MARGIN_DP):#x}",
-            "mul-float/2addr v0, v1",
-            f"const/high16 v1, {float_bits(0.5):#x}",
-            "add-float/2addr v0, v1",
-            "float-to-int v0, v0",
-            "if-ge v2, v0, :bar",
-            "return v0",
-            ":bar",
-            "return v2",
+            "sget-object v0, Landroid/os/Build;->SUPPORTED_64_BIT_ABIS",
+            "return-object v0",
         ],
     }),
 }
+# The WebView zygote starts the first time an app needs a WebView renderer, not at boot.
+# WebViewUpdateService started it on a background thread as soon as WebView's RELRO files were
+# made (SystemImpl.ensureZygoteStarted, which only calls WebViewZygote.getProcess), so a boot
+# with no app that shows web content still held the zygote, 5 to 7 MiB of PSS, for the whole
+# session. The call is skipped; WebViewZygote.getProcess, which the activity manager calls to
+# start each renderer (Process.startWebView), starts the zygote when there is none and keeps
+# it from then on, as before. The first WebView of a boot then waits for the zygote's start
+# and its preload of WebView, a few hundred milliseconds once; every later one is as quick as
+# before. A provider change stops and restarts the zygote the same way. R8 may have inlined
+# ensureZygoteStarted into its caller, so the call is skipped there too; check-image refuses a
+# services.jar that still calls getProcess from anywhere.
+WEBVIEW_ZYGOTE_START = "Landroid/webkit/WebViewZygote;->getProcess"
+SERVICES_WEBVIEW_ZYGOTE_CODE = {
+    "Lcom/android/server/webkit/SystemImpl;->ensureZygoteStarted": ("skip call", WEBVIEW_ZYGOTE_START),
+    "Lcom/android/server/webkit/WebViewUpdateServiceImpl2;->startZygoteWhenReady": (
+        "skip call", WEBVIEW_ZYGOTE_START),
+}
+SERVICES_CODE = {**SERVICES_INSETS_CODE, **SERVICES_ABI_CODE, **SERVICES_WEBVIEW_ZYGOTE_CODE}
+# The jars whose dex make-image.py edits, compiled again after the edit like EDITED_APPS.
+EDITED_JARS = [SERVICES_JAR]
+# The profile services.jar was compiled with: frameworks/base's services/art-profile and
+# art-profile-extra, one after the other (the build's art-profile-combined), at the commit the
+# published build was made from. inputs.json names them for each build (services_profile and
+# services_profile_extra), and fetch.sh downloads them beside the build's other inputs.
+# profman turns them into the binary profile dex2oat reads; should it fail, services.jar is
+# compiled with speed, which compiles all of what speed-profile compiles.
+SERVICES_PROFILE_INPUT = "services_profile"
 
 # Cuttlefish's logger writes to a virtio console Hyper-V does not have, so it exits as soon as
 # it starts. init starts it again every five seconds, and each exit runs flags_health_check.
@@ -432,11 +498,24 @@ DROPPED_PROPS = {"persist.adb.tcp.port", "service.adb.tcp.port"}
 # guest thrash through a full zram. Thrashing past 30% of the time reclaiming counts as
 # pressure too, as on Android Go devices, which have the same small-memory, zram-backed shape.
 #
-# ART keeps less free space in each process's heap, with the values of a 1 GiB phone: the
-# heap is 75% full rather than 60% after a collection, with at most 8 MiB free. Cuttlefish's
-# values are for a 4 GiB phone that has nothing else to do with its memory. The cost is more
-# frequent collections in apps that allocate a lot. The limits on how far a heap may grow stay
-# as they are, so no app has less memory to work with.
+# ART keeps less free space in each process's heap: the heap is 75% full rather than 60%
+# after a collection, as on a 1 GiB phone, with at most 4 MiB free, half a 1 GiB phone's 8 and
+# twice a 512 MiB Android Go phone's 2. Cuttlefish's values are for a 4 GiB phone that has
+# nothing else to do with its memory. The free space matters in the processes with the largest
+# heaps, which are the ones that stay: system_server (its heap holds the state of every
+# service), Google Play services and the app on screen each grow by up to that much between
+# two collections, and none of them is in the background, where ART would trim it. The cost
+# is a collection twice as often in those, which ART does concurrently with pauses well under
+# a millisecond, on a desktop's processor. The limits on how far a heap may grow stay as they
+# are, so no app has less memory to work with.
+#
+# Those processes are also the ones ART counts as in the foreground, where it multiplies the
+# free space it keeps after a collection by the foreground heap growth multiplier, plus one it
+# adds for its concurrent compacting collectors: 2 + 1 by default, so system_server could keep
+# 12 MiB free rather than 4. At 1 the factor is 2 (1 + 1), up to 8 MiB, which still leaves the
+# app on screen twice the room a background process gets between collections; system_server
+# and the other foreground heaps keep up to 4 MiB less each. Low-memory Android devices go
+# further, to 1 in all.
 #
 # ro.config.low_ram is not set, whatever it would save: it turns off multi-window, and every
 # task here is a freeform window.
@@ -449,13 +528,25 @@ MEMORY_PROPS = {
     "ro.lmk.thrashing_limit": "30",
     "dalvik.vm.heaptargetutilization": "0.75",
     "dalvik.vm.heapminfree": "512k",
-    "dalvik.vm.heapmaxfree": "8m",
+    "dalvik.vm.heapmaxfree": "4m",
+    "dalvik.vm.foreground-heap-growth-multiplier": "1.0",
+}
+
+# Isolated compilation recompiles the system server's and the boot image's code inside a
+# protected VM of Android's own virtualization framework, which needs KVM in the guest. A
+# Hyper-V guest has none, so the service system_server starts for it, and the daily job it
+# schedules to start composd and the VM manager, could never complete. Without the property,
+# system_server does not start the service; on-device compilation by odrefresh, which needs no
+# VM, is unchanged.
+SERVICE_PROPS = {
+    "ro.config.isolated_compilation_enabled": "false",
 }
 
 # The density of the freeform display every task window lives on, by default: a 100% monitor's.
 # The host replaces it on the kernel command line at each boot with the density of the user's
-# main monitor (144 at 150%: a dp is 1/160 inch and a host pixel at 100% 1/96 inch), the
-# density a task window there asks its task to draw at. The
+# main monitor (196 at 150%: Android's desktop dp is 1/117.23 inch and a host pixel at 100%
+# 1/96 inch, so the density is 131 times the scale, rounded to an even number), the density a
+# task window there asks its task to draw at. The
 # hwcomposer reports it (ro.boot.dsa.display_dpi) and SurfaceFlinger takes it from
 # ro.sf.lcd_density alone, which dsa-display.rc sets from androidboot.lcd_density. Without
 # ro.sf.lcd_density SurfaceFlinger falls back to 213 dpi ("ro.sf.lcd_density must be defined as
@@ -464,7 +555,7 @@ MEMORY_PROPS = {
 # was destroyed before its first window that way and crashed in its own clean-up. No build.prop
 # may set it: init reads them before any script, and the first value of a read-only property
 # stays, so a build.prop value would hold every boot at this default.
-DISPLAY_DPI = 96
+DISPLAY_DPI = 130
 
 # The OpenGL ES version Android reports to apps and to app stores: 3.2 (0x30002), which ANGLE
 # provides on the host GPU's Vulkan for every app. PackageManager reports it as reqGlEsVersion,
@@ -475,12 +566,47 @@ DISPLAY_DPI = 96
 # YouTube incompatible and left YouTube and Chrome out of its search.
 OPENGLES_VERSION = 0x30002
 
+# Where ANGLE puts GL buffers, through its own feature switches (read from these properties in
+# every process, SurfaceFlinger's too). The guest Vulkan driver shares no memory with the host
+# here: it reports each cached host-visible type twice, non-coherent first, read back only when
+# the app invalidates, and as a coherent twin read back each time the app's work finishes, which
+# ANGLE's renderer learns at every frame. ANGLE takes the coherent twin wherever it prefers
+# coherence, so:
+# - preferDeviceLocalMemoryHostVisible off: on a GPU whose device memory is host visible
+#   (integrated, or a virtual GPU with such a heap), a static buffer went to host-visible
+#   coherent memory, where the guest keeps a copy of it and reads it back at every frame. Off,
+#   it stays in device memory and is uploaded through ANGLE's non-coherent staging, as on a
+#   discrete GPU.
+# - preferCachedNoncoherentForDynamicStreamBufferUsage on: buffers the device writes and the
+#   app reads (DYNAMIC_READ, STREAM_COPY and the like) go to the non-coherent cached type, which
+#   ANGLE invalidates before the app reads it, instead of the twin.
+# Buffers the app streams to the device (DYNAMIC_DRAW, STREAM_DRAW) and glReadPixels' staging
+# still prefer coherence, and ANGLE has no switch for them.
+#
+# One more switch is not about memory: supportsAndroidNativeFenceSync off. Without a virtio-gpu
+# device or a goldfish sync device, the guest Vulkan driver has no way to make a sync fd the
+# host signals, so vkGetFenceFdKHR and vkGetSemaphoreFdKHR succeed and give back -1. ANGLE
+# offered EGL_ANDROID_native_fence_sync on top of that, and every eglDupNativeFenceFDANDROID
+# returned EGL_NO_NATIVE_FENCE_FD_ANDROID with no error: SurfaceFlinger logged "failed to dup
+# EGL native fence sync: 0x3000" for each frame it composed itself (thousands an hour), and
+# GLConsumer's release fence failed outright. With no fd, RenderEngine waits for the GPU on the
+# CPU before handing the frame on, which is what it does without the extension too, so turning
+# it off changes nothing but the noise; GLConsumer moves to EGL_KHR_fence_sync. Upstream ANGLE
+# turns it off on Lavapipe for the same reason.
+ANGLE_MEMORY_PROPS = {
+    "debug.angle.feature_overrides_disabled": (
+        "preferDeviceLocalMemoryHostVisible:supportsAndroidNativeFenceSync"
+    ),
+    "debug.angle.feature_overrides_enabled": "preferCachedNoncoherentForDynamicStreamBufferUsage",
+}
+
 GRAPHICS_PROPS = {
     "ro.hardware.egl": "angle",
     "ro.hardware.vulkan": "ranchu",
     "ro.hardware.gralloc": "minigbm",
     "ro.cpuvulkan.version": "0",
     "ro.opengles.version": str(OPENGLES_VERSION),
+    **ANGLE_MEMORY_PROPS,
 }
 
 # Properties no build.prop may set, whatever the input build's files say: the boot sets them.
@@ -692,6 +818,7 @@ def removed(name, hwcomposer=False, power=False, gnss=False, sensors=False, came
     """Whether a target_files member belongs to an app, a HAL or a service the guest must not have."""
     return (
         name in REMOVED_INIT_SCRIPTS
+        or name in REMOVED_VENDOR_FILES
         or any(f"/{app}/" in name for app in REMOVED_APPS)
         or any(
             name in (f"VENDOR/apex/{apex}.apex", f"VENDOR/apex/{apex}.capex")
@@ -866,6 +993,9 @@ DSA_SERVED_INSTANCES = {
     "VENDOR/bin/hw/dsa-sensors": ("aidl", "android.hardware.sensors", "ISensors", "default"),
     "VENDOR/bin/hw/dsa-camera": ("aidl", "android.hardware.camera.provider", "ICameraProvider", "internal/0"),
     "VENDOR/bin/hw/dsa-audio": ("aidl", "android.hardware.audio.core", "IModule", "default"),
+    # It serves the remotely provisioned component, the secure clock and the shared secret too,
+    # which the same fragments declare.
+    "VENDOR/bin/hw/dsa-keymint": ("aidl", "android.hardware.security.keymint", "IKeyMintDevice", "default"),
 }
 
 
@@ -986,8 +1116,11 @@ def build_overlay(aapt2, framework_res, sources, apk):
     compiled = sources / "compiled.zip"
     run(aapt2, "compile", "--dir", sources / "res", "-o", compiled)
     assets = ["-A", sources / "assets"] if (sources / "assets").is_dir() else []
+    # An overlay's value for a narrower configuration has to stay even when it equals the
+    # wider one: the target's own value there (navigation_bar_height at sw900dp) would win
+    # over the overlay's default. aapt2 drops such values by default.
     run(aapt2, "link", "-o", apk, "--manifest", sources / "AndroidManifest.xml", "-I", framework_res,
-        *assets, compiled)
+        "--no-resource-deduping", *assets, compiled)
     return apk
 
 
@@ -1114,6 +1247,8 @@ def framework_overlay_sources(dest, record=None):
         f"res/layout/{DIALOG_BUTTON_BAR_LAYOUT}.xml": dialog_button_bar(),
         f"res/layout/{TOAST_LAYOUT}.xml": toast_layout(),
         f"res/drawable/{TOAST_FRAME}.xml": toast_frame(),
+        **status_bar_overlay_files(),
+        **navigation_bar_overlay_files(),
     })
     write_overlay_record(dest, record)
 
@@ -1124,6 +1259,8 @@ def framework_overlaid():
     return ([f"integer/{name}" for name in FRAMEWORK_OVERLAY_INTEGERS]
             + [f"bool/{name}" for name in FRAMEWORK_OVERLAY_BOOLEANS]
             + [f"string/{name}" for name in FRAMEWORK_OVERLAY_STRINGS]
+            + [f"dimen/{name}" for name in STATUS_BAR_DIMENS]
+            + [f"dimen/{name}" for name in NAVIGATION_BAR_DIMENS]
             + FRAMEWORK_DESIGN_OVERLAID)
 
 
@@ -1135,27 +1272,23 @@ def build_framework_overlay(aapt2, framework_res, work, record=None):
     return build_overlay(aapt2, framework_res, sources, sources / "DsaFrameworkOverlay.apk")
 
 
-def settings_overlay_sources(dest, home_padding=False, record=None):
-    """Writes the Settings overlay's manifest, its resource map, its back button drawables,
-    its preference list layout and the design's resources (cards, large titles, the home
-    page) into `dest`, with `home_padding` the home list's bottom padding
-    (SETTINGS_HOME_PADDING_DIMEN), for a Settings that has it, and what it was built against
-    when `record` says."""
+def settings_overlay_sources(dest, record=None):
+    """Writes the Settings overlay's manifest, its resource map, its back button drawables
+    and the design's resources (cards, large titles, the home page) into `dest`, and what it
+    was built against when `record` says."""
     write_overlay_files(dest, {
-        **settings_overlay_files(home_padding),
-        f"res/xml/{SETTINGS_OVERLAY_MAP}.xml": overlay_map(settings_overlay_map(home_padding)),
+        **settings_overlay_files(),
+        f"res/xml/{SETTINGS_OVERLAY_MAP}.xml": overlay_map(settings_overlay_map()),
     })
     write_overlay_record(dest, record)
 
 
-def settings_overlay_map(home_padding=False):
+def settings_overlay_map():
     """What the Settings overlay replaces ("type/name" in Settings) and with which of its own
     resources. The ids and attributes map onto themselves: nothing reads their values, and
     the map makes the framework rewrite the overlay layouts' references to them into
     Settings' ids."""
     mapping = {name: name for name in SETTINGS_OVERLAID}
-    if home_padding:
-        mapping[f"dimen/{SETTINGS_HOME_PADDING_DIMEN}"] = f"dimen/{SETTINGS_HOME_PADDING_DIMEN}"
     mapping.update({f"drawable/{name}": f"drawable/{name}" for name in SETTINGS_CARDS})
     mapping["dimen/settingslib_preference_corner_radius"] = "dimen/settingslib_preference_corner_radius"
     mapping[f"style/{SETTINGS_TITLE_THEME}"] = "style/DsaAppBarTheme"
@@ -1168,7 +1301,7 @@ def settings_overlay_map(home_padding=False):
     return mapping
 
 
-def settings_overlay_files(home_padding=False):
+def settings_overlay_files():
     """The Settings overlay's manifest and resource files, by their path in its sources.
 
     The drawables and values SettingsLib keeps in -v36 folders are here in the same folders:
@@ -1177,12 +1310,8 @@ def settings_overlay_files(home_padding=False):
     files = {
         "AndroidManifest.xml": overlay_manifest(SETTINGS_OVERLAY_PACKAGE, SETTINGS_OVERLAY_TARGET,
                                                 resource_map=True),
-        f"res/layout/{SETTINGS_LIST_LAYOUT}.xml": settings_preference_list(),
         "res/values/dsa.xml": resources_xml(
-            [f'<attr name="{SETTINGS_LIST_STYLE_ATTR}" format="reference" />', *SETTINGS_HOME_ATTRS.values(),
-             '<attr name="expanded" format="boolean" />']
-            + ([f'<dimen name="{SETTINGS_HOME_PADDING_DIMEN}">{SETTINGS_LIST_BOTTOM_MARGIN_DP}dp</dimen>']
-               if home_padding else [])),
+            [*SETTINGS_HOME_ATTRS.values(), '<attr name="expanded" format="boolean" />']),
         "res/values-v36/dsa_design.xml": resources_xml(
             [f'<dimen name="settingslib_preference_corner_radius">{DESIGN_CORNER_DP}dp</dimen>']
             + [design_style(ours, "", f"{size}dp") for ours, size in SETTINGS_TITLE_STYLES.values()]),
@@ -1381,30 +1510,6 @@ def settings_home_layout(large_title):
     )
 
 
-def settings_preference_list():
-    """The RecyclerView every preference screen in Settings lists its rows in.
-
-    androidx.preference's own layout, with room below the last row. Settings takes the space
-    under a list from the navigation bar alone: SettingsLib's EdgeToEdgeUtils pads the
-    content view by the system bar inset, and the list's own bottom padding is 0. A DSA
-    window has no navigation bar, so the last row met the window's bottom edge. The padding
-    is inside the list (clipToPadding is false), so rows still scroll to the edge and only
-    the end of the list stops short of it. The id and the style attribute are Settings' own:
-    the resource map rewrites the overlay's references to them to Settings' ids."""
-    return (
-        '<?xml version="1.0" encoding="utf-8"?>\n'
-        '<androidx.recyclerview.widget.RecyclerView\n'
-        '    xmlns:android="http://schemas.android.com/apk/res/android"\n'
-        '    android:id="@+id/recycler_view"\n'
-        '    android:layout_width="match_parent"\n'
-        '    android:layout_height="match_parent"\n'
-        '    android:paddingTop="0dp"\n'
-        f'    android:paddingBottom="{SETTINGS_LIST_BOTTOM_MARGIN_DP}dp"\n'
-        '    android:clipToPadding="false"\n'
-        f'    style="?attr/{SETTINGS_LIST_STYLE_ATTR}" />\n'
-    )
-
-
 def settings_back_icon(theme):
     """The toolbar back icon with its circle centred in the 56 dp navigation button.
 
@@ -1435,11 +1540,11 @@ def settings_back_icon(theme):
     )
 
 
-def build_settings_overlay(aapt2, framework_res, work, home_padding=False, record=None):
+def build_settings_overlay(aapt2, framework_res, work, record=None):
     """Builds the Settings overlay APK (unsigned; signing gives it the platform key)."""
     sources = work / "settings-overlay"
     shutil.rmtree(sources, ignore_errors=True)
-    settings_overlay_sources(sources, home_padding, record)
+    settings_overlay_sources(sources, record)
     return build_overlay(aapt2, framework_res, sources, sources / "DsaSettingsOverlay.apk")
 
 
@@ -1510,12 +1615,12 @@ def build_design_overlay(aapt2, framework_res, work, apk, record=None):
     return build_overlay(aapt2, framework_res, sources, sources / apk)
 
 
-def overlaid_resources(apk, home_padding=False):
+def overlaid_resources(apk):
     """The resources ("type/name") the overlay file `apk` replaces in the package it overlays."""
     if apk == "DsaFrameworkOverlay.apk":
         return framework_overlaid()
     if apk == "DsaSettingsOverlay.apk":
-        return list(settings_overlay_map(home_padding))
+        return list(settings_overlay_map())
     return list(design_overlay_resources(apk)[1])
 
 
@@ -1548,6 +1653,106 @@ def _arsc_entry_offsets(table, at, flags, count):
         return [(index, 4 * offset) for index, offset in enumerate(offsets) if offset != ARSC_NO_ENTRY16]
     offsets = struct.unpack_from(f"<{count}I", table, at)
     return [(index, offset) for index, offset in enumerate(offsets) if offset != ARSC_NO_ENTRY]
+
+
+ARSC_TYPE_DIMENSION = 0x05
+ARSC_UNIT_DIP = 1
+BASE_DENSITY = 160  # the density at which a dp is one pixel
+ARSC_CONFIG_DENSITY = 14  # where the density sits in a type chunk's configuration
+ARSC_CONFIG_SMALLEST_WIDTH = 30  # where the smallest screen width in dp sits there
+
+
+def complex_dimension(data):
+    """The value and unit of a compiled dimension (Android's complex value format): a signed
+    24-bit mantissa, a radix and a unit."""
+    mantissa = struct.unpack("<i", struct.pack("<I", data & 0xFFFFFF00))[0] / 256
+    return mantissa / (1 << (0, 7, 15, 23)[(data >> 4) & 3]), data & 0xF
+
+
+def arsc_dimensions(table):
+    """{(name, density): (value, unit)} of each dimension a compiled resource table defines,
+    by the density of its configuration (0 where it has none)."""
+    return {(name, density): value for name, density, _, value in arsc_dimension_entries(table)}
+
+
+def arsc_dimension_entries(table):
+    """(name, density, smallest width, (value, unit)) of each dimension a compiled resource
+    table defines, in each configuration: the configuration's density and smallest screen width
+    in dp (each 0 where it has none)."""
+    chunk_type, header_size, _ = struct.unpack_from("<HHI", table, 0)
+    if chunk_type != ARSC_TABLE:
+        raise ValueError("not a compiled resource table")
+    found = []
+    offset = header_size
+    while offset < len(table):
+        chunk_type, header_size, size = struct.unpack_from("<HHI", table, offset)
+        if chunk_type == ARSC_PACKAGE:
+            type_strings, _, key_strings = struct.unpack_from("<III", table, offset + 8 + 4 + 256)
+            types = xml_strings(table, offset + type_strings)
+            keys = xml_strings(table, offset + key_strings)
+            child = offset + header_size
+            while child < offset + size:
+                kind, child_header, child_size = struct.unpack_from("<HHI", table, child)
+                if kind == ARSC_TYPE:
+                    type_id, flags, _, count, entries_start = struct.unpack_from("<BBHII", table, child + 8)
+                    density = struct.unpack_from("<H", table, child + 20 + ARSC_CONFIG_DENSITY)[0]
+                    config_size = struct.unpack_from("<I", table, child + 20)[0]
+                    smallest_width = (struct.unpack_from("<H", table, child + 20 + ARSC_CONFIG_SMALLEST_WIDTH)[0]
+                                      if config_size >= ARSC_CONFIG_SMALLEST_WIDTH + 2 else 0)
+                    if types[type_id - 1] == "dimen":
+                        for _, entry in _arsc_entry_offsets(table, child + child_header, flags, count):
+                            at = child + entries_start + entry
+                            first, entry_flags = struct.unpack_from("<HH", table, at)
+                            if entry_flags & ARSC_ENTRY_COMPACT:
+                                key, data_type, data = first, entry_flags >> 8, struct.unpack_from("<I", table, at + 4)[0]
+                            else:
+                                key = struct.unpack_from("<I", table, at + 4)[0]
+                                data_type, data = struct.unpack_from("<BI", table, at + first + 3)
+                            if data_type == ARSC_TYPE_DIMENSION:
+                                found.append((keys[key], density, smallest_width, complex_dimension(data)))
+                child += child_size
+        offset += size
+    return found
+
+
+def status_bar_overlay_problems(table):
+    """What is wrong with the status bar heights of the framework overlay's resource table:
+    each STATUS_BAR_DIMENS value must be there for every density status_bar_heights names and
+    come to the title bar's pixels there, as getDimensionPixelSize rounds them, and the value
+    without a density must be the highest of them."""
+    found = arsc_dimensions(table)
+    heights = status_bar_heights()
+    problems = []
+    for name in STATUS_BAR_DIMENS:
+        for density, dp in sorted(heights.items()) + [(0, max(heights.values()))]:
+            value = found.get((name, density))
+            wanted = int(dp * (density or BASE_DENSITY) / BASE_DENSITY + 0.5)
+            if value is None:
+                problems.append(f"{name} has no value for {density or 'any'} dpi")
+            elif value[1] != ARSC_UNIT_DIP or int(value[0] * (density or BASE_DENSITY) / BASE_DENSITY + 0.5) != wanted:
+                problems.append(f"{name} is {value[0]:g} (unit {value[1]}) at {density or 'any'} dpi, not "
+                                f"the title bar's {wanted} px there")
+    return problems
+
+
+def navigation_bar_overlay_problems(table):
+    """What is wrong with the navigation bar heights of the framework overlay's resource
+    table: each NAVIGATION_BAR_DIMENS value must be there for every smallest width the
+    framework gives it a value of its own at (NAVIGATION_BAR_SMALLEST_WIDTHS), and be
+    NAVIGATION_BAR_HEIGHT_DP in dp in every configuration it has."""
+    entries = arsc_dimension_entries(table)
+    problems = []
+    for name in NAVIGATION_BAR_DIMENS:
+        values = [(sw, density, value) for found, density, sw, value in entries if found == name]
+        for sw in NAVIGATION_BAR_SMALLEST_WIDTHS:
+            if not any(found_sw == sw and density == 0 for found_sw, density, _ in values):
+                problems.append(f"{name} has no value for {f'a smallest width of {sw} dp' if sw else 'any width'}")
+        for sw, density, (dp, unit) in sorted(values):
+            if unit != ARSC_UNIT_DIP or dp != NAVIGATION_BAR_HEIGHT_DP:
+                where = f"sw{sw}dp" if sw else "any width"
+                problems.append(f"{name} is {dp:g} (unit {unit}) at {where}"
+                                f"{f' and {density} dpi' if density else ''}, not {NAVIGATION_BAR_HEIGHT_DP} dp")
+    return problems
 
 
 def arsc_resource_names(table):
@@ -1707,17 +1912,17 @@ def system_overlay_targets(z, otatools, work, env):
     return tables
 
 
-def system_overlay_sources(dest, apk, home_padding=False, record=None):
+def system_overlay_sources(dest, apk, record=None):
     """Writes the sources of the system screen overlay file `apk` into `dest`."""
     if apk == "DsaFrameworkOverlay.apk":
         framework_overlay_sources(dest, record)
     elif apk == "DsaSettingsOverlay.apk":
-        settings_overlay_sources(dest, home_padding, record)
+        settings_overlay_sources(dest, record)
     else:
         design_overlay_sources(dest, apk, record)
 
 
-def build_system_overlays(aapt2, framework_res, work, tables, home_padding=False):
+def build_system_overlays(aapt2, framework_res, work, tables):
     """Builds every system screen overlay against `framework_res`, each first checked against
     the resource table of the package it overlays (`tables`, by overlay file): an overlay
     that would replace a resource the package lacks was written for another build, and the
@@ -1728,7 +1933,7 @@ def build_system_overlays(aapt2, framework_res, work, tables, home_padding=False
     unlinkable = []
     for overlay in SYSTEM_OVERLAYS:
         apk = overlay["apk"]
-        missing = missing_overlaid(overlaid_resources(apk, home_padding), tables[apk])
+        missing = missing_overlaid(overlaid_resources(apk), tables[apk])
         if missing:
             raise ValueError(f"{apk} replaces {', '.join(missing)}, which {overlay['target']} in this "
                              "image does not have: the overlay was written for another build of it")
@@ -1737,15 +1942,14 @@ def build_system_overlays(aapt2, framework_res, work, tables, home_padding=False
         # all, where aapt2 would stop at the first.
         sources = Path(work) / "overlay-references" / Path(apk).stem
         shutil.rmtree(sources, ignore_errors=True)
-        system_overlay_sources(sources, apk, home_padding)
+        system_overlay_sources(sources, apk)
         unlinkable += [f"{apk}: {problem}" for problem in framework_reference_problems(sources, framework_table)]
         shutil.rmtree(sources, ignore_errors=True)
     if unlinkable:
         raise ValueError("the overlays name framework resources that cannot be linked against this image's "
                          "framework-res:\n  " + "\n  ".join(unlinkable))
     framework_overlay = build_framework_overlay(aapt2, framework_res, work, records["DsaFrameworkOverlay.apk"])
-    settings_overlay = build_settings_overlay(aapt2, framework_res, work, home_padding,
-                                              records["DsaSettingsOverlay.apk"])
+    settings_overlay = build_settings_overlay(aapt2, framework_res, work, records["DsaSettingsOverlay.apk"])
     others = {apk: build_design_overlay(aapt2, framework_res, work, apk, records[apk]) for apk in DESIGN_OVERLAYS}
     return framework_overlay, settings_overlay, others
 
@@ -1774,19 +1978,25 @@ def system_overlay_problems(names, read):
         if target is not None and record.get("target_resources") != table_digest(read(target)):
             problems.append(f"{path} was built for another build of {overlay['target']} than {target}, so "
                             "what it replaces may not be there")
+        if path == FRAMEWORK_OVERLAY_APK:
+            with zipfile.ZipFile(io.BytesIO(read(path))) as apk:
+                table = apk.read("resources.arsc") if "resources.arsc" in apk.namelist() else None
+            try:
+                found = status_bar_overlay_problems(table) if table is not None else ["it has no resource table"]
+            except (ValueError, IndexError, struct.error):
+                found = ["its resource table cannot be read"]
+            if found:
+                problems.append(f"{path}: {'; '.join(found)}, so an app that pads by the status bar's height "
+                                "does not line up with the window's title bar")
+            if table is not None and not found:
+                try:
+                    found = navigation_bar_overlay_problems(table)
+                except (ValueError, IndexError, struct.error):
+                    found = ["its resource table cannot be read"]
+                if found:
+                    problems.append(f"{path}: {'; '.join(found)}, so an app that pads by the navigation bar's "
+                                    "height keeps another space at its bottom than its navigation bar inset")
     return problems
-
-
-def settings_has_home_padding(apk):
-    """Whether a Settings.apk pads its home list by SETTINGS_HOME_PADDING_DIMEN (Android 17's
-    does; Android 16's has no such dimen, and an overlay of it would only log a warning)."""
-    field = f"Lcom/android/settings/R$dimen;->{SETTINGS_HOME_PADDING_DIMEN}"
-    with zipfile.ZipFile(io.BytesIO(apk)) as z:
-        for dex in (n for n in z.namelist() if re.fullmatch(r"classes\d*\.dex", n)):
-            content = z.read(dex)
-            if content[:4] == b"dex\n" and field in dex_ids(content)[2]:
-                return True
-    return False
 
 
 def find_aapt2():
@@ -2112,6 +2322,7 @@ DEX_ASSEMBLY = {
     "goto": (0x28, "10t"), "if-ge": (0x35, "22t"), "if-eqz": (0x38, "21t"),
     "if-nez": (0x39, "21t"),
     "iget": (0x52, "22c"), "iget-object": (0x54, "22c"), "sget": (0x60, "21c"),
+    "sget-object": (0x62, "21c"), "sput-object": (0x69, "21c"),
     "invoke-virtual": (0x6E, "35c"), "invoke-super": (0x6F, "35c"), "invoke-direct": (0x70, "35c"),
     "invoke-static": (0x71, "35c"), "float-to-int": (0x87, "12x"),
     "add-float/2addr": (0xC6, "12x"), "mul-float/2addr": (0xC8, "12x"),
@@ -2202,6 +2413,46 @@ def assemble_dex(lines, dex):
     return struct.pack(f"<{len(code)}H", *code), outs
 
 
+def _method_index(refs, name):
+    """The index of the method "Lclass;->name" a dex file refers to exactly once."""
+    found = [i for i, ref in enumerate(refs) if ref == name]
+    if len(found) != 1:
+        raise ValueError(f"the dex file refers to {name} {len(found)} times, not once")
+    return found[0]
+
+
+def dex_callers(dex, target):
+    """The methods a dex file defines that call the method `target` ("Lclass;->name")."""
+    defined, refs = dex_methods(dex)
+    indexes = [i for i, ref in enumerate(refs) if ref == target]
+    if not indexes:
+        return []
+    needles = [struct.pack("<H", i) for i in indexes]
+
+    def calls(code_off):
+        count = struct.unpack_from("<I", dex, code_off + 12)[0]
+        code = dex[code_off + 16:code_off + 16 + 2 * count]
+        # Most methods never name the index: only those that do are decoded.
+        if not any(needle in code for needle in needles):
+            return False
+        return any(op in DEX_INVOKES and struct.unpack_from("<H", dex, at + 2)[0] in indexes
+                   for at, op in dex_instructions(dex, code_off))
+
+    return sorted(method for method, codes in defined.items() for code_off, _ in codes if calls(code_off))
+
+
+def jar_callers(jar, target):
+    """The methods in a jar's or an APK's dex files that call the method `target`."""
+    callers = set()
+    with zipfile.ZipFile(io.BytesIO(jar)) as z:
+        for name in z.namelist():
+            if re.fullmatch(r"classes\d*\.dex", name):
+                dex = z.read(name)
+                if dex[:4] == b"dex\n":
+                    callers.update(dex_callers(dex, target))
+    return sorted(callers)
+
+
 def edit_dex(dex, edits):
     """Applies {"Lclass;->method": edit, or a list of edits} to a dex file. An edit is
     ("return false", None) or ("return true", None), which makes a method that returns a
@@ -2209,8 +2460,11 @@ def edit_dex(dex, edits):
     that method, whose result is not used, into no-ops; or ("replace code", {"registers": n,
     "old": [...], "new": [...]}), which replaces a method whose code is exactly `old` with
     `new` (Dalvik assembly, see assemble_dex) in n registers, padded with no-ops to the same
-    size. Returns the new file and the methods it changed. A method already edited, or not in
-    this file, is not changed; one whose code is neither `old` nor `new` is refused."""
+    size; or ("replace call", {"after": a, "old": o, "new": n}), which makes the first call to
+    the static method o after the first call to a a call to n, which takes and returns the same
+    types (only the method the instruction names changes). Returns the new file and the
+    methods it changed. A method already edited, or not in this file, is not changed; one
+    whose code is neither `old` nor `new` is refused."""
     defined, refs = dex_methods(dex)
     out = bytearray(dex)
     changed = []
@@ -2267,6 +2521,27 @@ def edit_dex(dex, edits):
                     raise ValueError(f"{method} takes {ins} registers of arguments")
                 struct.pack_into("<HHH", out, code_off, target["registers"], ins, max(outs, new_outs))
                 out[insns:insns + 2 * count] = new
+                changed.append(method)
+            elif kind == "replace call":
+                old_index, new_index = (_method_index(refs, target[k]) for k in ("old", "new"))
+                method_shorty = dex_ids(dex)[1]
+                if method_shorty[old_index] != method_shorty[new_index]:
+                    raise ValueError(f"{target['new']} takes or returns other types than {target['old']}")
+                calls = [(at, refs[struct.unpack_from("<H", dex, at + 2)[0]])
+                         for at, op in dex_instructions(dex, code_off) if op in DEX_INVOKES]
+                after = next((i for i, (_, ref) in enumerate(calls) if ref == target["after"]), None)
+                found = next(((at, ref) for at, ref in calls[after + 1:]
+                              if ref in (target["old"], target["new"])), None) if after is not None else None
+                if found is None:
+                    raise ValueError(f"{method} calls neither {target['old']} nor {target['new']} after "
+                                     f"{target['after']}: it was built from other sources, and the edit "
+                                     "must be written for them")
+                at, ref = found
+                if ref == target["new"]:
+                    continue
+                if out[at] != 0x71:
+                    raise ValueError(f"{method} calls {target['old']} other than as a static method")
+                struct.pack_into("<H", out, at + 2, new_index)
                 changed.append(method)
             else:
                 raise ValueError(f"unknown dex edit {kind}")
@@ -2333,36 +2608,177 @@ def edit_apk(data, name, code=None, controllers=None, dimensions=None, theme_att
 
 def edit_settings_apk(data, name):
     """Settings.apk without the preferences, and the code, that need the Bluetooth service,
-    with room below the last row of the lists that set their own padding, and with its pages'
-    large titles opening expanded or folded as the Settings overlay's theme says
-    (SETTINGS_TITLE_EXPANDED)."""
-    return edit_apk(data, name, code={**SETTINGS_CODE_WITHOUT_BLUETOOTH, **SETTINGS_CODE_LIST_MARGIN},
-                    controllers=SETTINGS_CONTROLLERS_WITHOUT_BLUETOOTH, dimensions=SETTINGS_LIST_DIMENSIONS,
-                    theme_attributes=SETTINGS_TITLE_EXPANDED)
+    with its home list padded by the navigation bar inset alone (SETTINGS_CODE_FREEFORM_PADDING),
+    and with its pages' large titles opening expanded or folded as the Settings overlay's theme
+    says (SETTINGS_TITLE_EXPANDED)."""
+    return edit_apk(data, name, code={**SETTINGS_CODE_WITHOUT_BLUETOOTH, **SETTINGS_CODE_FREEFORM_PADDING},
+                    controllers=SETTINGS_CONTROLLERS_WITHOUT_BLUETOOTH, theme_attributes=SETTINGS_TITLE_EXPANDED)
 
 
-def edit_documentsui_apk(data, name):
-    """DocumentsUI.apk (Files) with room below its list's last row in windows that have no bar
-    below the list."""
-    return edit_apk(data, name, code=DOCUMENTSUI_CODE)
+# System apps that started at every boot to find they had nothing to do, and then stayed as
+# cached processes until the activity manager needed the room: each answered BOOT_COMPLETED
+# with a receiver of its own. Their receivers for the boot go from their manifests; the apps
+# stay, and start as before when the user or another app opens them.
+# - DynamicSystemInstallationService (com.android.dynsystem, two processes, 4.5 MiB of PSS
+#   each in an image test): its receiver starts its service at boot only to post a
+#   notification while a Dynamic System Update image (a GSI booted from /data) is running, and
+#   the service stops itself otherwise. DSA boots its own image from the host and has no
+#   SystemUI to show that notification. Developer options' DSU loader still starts the app.
+# - DeviceDiagnostics (com.android.devicediagnostics, 4.7 MiB): the trade-in diagnostics a
+#   phone runs for a store before resale (screen, touch, battery and attestation checks). Its
+#   receiver resumes a trade-in evaluation after a reboot; a PC's VM is never traded in. The
+#   app and its status provider stay for Settings' entry.
+BOOT_RECEIVER_FREE_APKS = ["/DynamicSystemInstallationService.apk", "/DeviceDiagnostics.apk"]
+BOOT_ACTIONS = {"android.intent.action.BOOT_COMPLETED", "android.intent.action.LOCKED_BOOT_COMPLETED"}
+
+
+def _xml_element(axml, offset, header_size, strings):
+    """The tag of the compiled XML start element at `offset`, and its attributes that hold a
+    string, by name (in any namespace)."""
+    _, name, attribute_start, attribute_size, attribute_count = struct.unpack_from(
+        "<IIHHH", axml, offset + header_size)
+    attributes = {}
+    for i in range(attribute_count):
+        at = offset + header_size + attribute_start + i * attribute_size
+        _, attribute, raw, _, _, data_type, data = struct.unpack_from("<IIIHBBI", axml, at)
+        index = raw if raw != XML_NO_INDEX else (data if data_type == XML_TYPE_STRING else None)
+        if index is not None:
+            attributes[strings[attribute]] = strings[index]
+    return strings[name], attributes
+
+
+def remove_boot_receivers(axml):
+    """Removes from a compiled manifest each <receiver> whose intent filters name only the boot
+    actions (BOOT_ACTIONS), with everything inside it. A receiver that also answers another
+    action stays. Returns the new manifest and the names of the receivers it removed."""
+    file_type, file_header, _ = struct.unpack_from("<HHI", axml, 0)
+    if file_type != XML_FILE:
+        raise ValueError("not a compiled Android XML file")
+    strings = []
+    kept = [axml[:file_header]]
+    removed = []
+    receiver = None
+    offset = file_header
+    while offset < len(axml):
+        chunk_type, header_size, size = struct.unpack_from("<HHI", axml, offset)
+        chunk = axml[offset:offset + size]
+        offset += size
+        if chunk_type == XML_STRING_POOL:
+            strings = xml_strings(axml, offset - size)
+        if receiver is None:
+            if chunk_type == XML_START_ELEMENT:
+                tag, attributes = _xml_element(axml, offset - size, header_size, strings)
+                if tag == "receiver":
+                    receiver = {"chunks": [chunk], "depth": 1, "name": attributes.get("name"), "actions": set()}
+                    continue
+            kept.append(chunk)
+            continue
+        receiver["chunks"].append(chunk)
+        if chunk_type == XML_START_ELEMENT:
+            receiver["depth"] += 1
+            tag, attributes = _xml_element(axml, offset - size, header_size, strings)
+            if tag == "action" and "name" in attributes:
+                receiver["actions"].add(attributes["name"])
+        elif chunk_type == XML_END_ELEMENT:
+            receiver["depth"] -= 1
+            if receiver["depth"] == 0:
+                if receiver["actions"] and receiver["actions"] <= BOOT_ACTIONS:
+                    removed.append(receiver["name"])
+                else:
+                    kept += receiver["chunks"]
+                receiver = None
+    result = b"".join(kept)
+    return result[:4] + struct.pack("<I", len(result)) + result[8:], removed
+
+
+def edit_boot_receivers(data, name):
+    """An APK without the receivers that only start it at boot (remove_boot_receivers). Prints
+    each one; returns the APK as it was when it has none."""
+    with zipfile.ZipFile(io.BytesIO(data)) as apk:
+        manifest, removed = remove_boot_receivers(apk.read("AndroidManifest.xml"))
+        if not removed:
+            return data
+        for receiver in removed:
+            print(f"removing the boot receiver {receiver} from {name}", flush=True)
+        out = io.BytesIO()
+        # Each entry keeps its compression; signing aligns the stored ones again.
+        with zipfile.ZipFile(out, "w") as edited_apk:
+            for info in apk.infolist():
+                edited_apk.writestr(info, manifest if info.filename == "AndroidManifest.xml" else apk.read(info))
+    return out.getvalue()
+
+
+def boot_receivers_left(data):
+    """The receivers of an APK that only start it at boot."""
+    with zipfile.ZipFile(io.BytesIO(data)) as apk:
+        return remove_boot_receivers(apk.read("AndroidManifest.xml"))[1]
+
+
+ZIP_ALIGNMENT_EXTRA = 0xD935  # zipalign's alignment extra field: a 16-bit alignment, then padding
+
+
+def aligned_zip(data, alignment=4):
+    """The zip `data` with the data of each stored member starting at a multiple of
+    `alignment` bytes, as zipalign leaves it. ART maps a jar's stored dex files straight from
+    the file only when they are aligned, and otherwise copies them into memory: 20 MiB of
+    system_server's for services.jar. Members keep their order, names, dates and compression."""
+    out = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(data)) as source, zipfile.ZipFile(out, "w") as aligned:
+        for info in source.infolist():
+            member = zipfile.ZipInfo(info.filename, info.date_time)
+            member.compress_type = info.compress_type
+            member.external_attr = info.external_attr
+            member.create_system = info.create_system
+            if info.compress_type == zipfile.ZIP_STORED:
+                # The local header is 30 bytes, then the name and the extra field.
+                start = out.tell() + 30 + len(info.filename.encode("utf-8")) + 6
+                padding = -start % alignment
+                member.extra = struct.pack("<HHH", ZIP_ALIGNMENT_EXTRA, 2 + padding, alignment) + bytes(padding)
+            aligned.writestr(member, source.read(info))
+    return out.getvalue()
+
+
+def zip_misaligned(data, alignment=4):
+    """The stored dex files (classes*.dex) of the zip `data` whose data does not start at a
+    multiple of `alignment` bytes."""
+    found = []
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
+        for info in z.infolist():
+            if info.compress_type != zipfile.ZIP_STORED or not re.fullmatch(r"classes\d*\.dex", info.filename):
+                continue
+            name_length, extra_length = struct.unpack_from("<HH", data, info.header_offset + 26)
+            if (info.header_offset + 30 + name_length + extra_length) % alignment:
+                found.append(info.filename)
+    return found
+
+
+def edit_services_jar(data, name):
+    """services.jar with InsetsPolicy giving a freeform window its status bar and navigation
+    bar insets (SERVICES_INSETS_CODE), the package manager taking every 64-bit ABI the guest lists for
+    a multiArch app (SERVICES_ABI_CODE) and the WebView zygote starting with the first renderer
+    rather than at boot (SERVICES_WEBVIEW_ZYGOTE_CODE), its stored dex files aligned again.
+    Returns the jar as it was when it already has the edits."""
+    edited = edit_apk(data, name, code=SERVICES_CODE)
+    return data if edited is data else aligned_zip(edited)
 
 
 def edit_permission_controller_apk(data, name):
-    """PermissionController.apk with room below the last row of its preference lists, and
-    those lists grouped in cards with Settings' corners."""
+    """PermissionController.apk with its preference lists grouped in cards with Settings'
+    corners."""
     return edit_apk(data, name, dimensions=permission_controller_edits())
 
 
 def permission_controller_edits():
-    """The compiled XML edits PermissionController.apk gets: its lists' room and its cards."""
-    return {**PERMISSION_CONTROLLER_DIMENSIONS, **PERMISSION_CONTROLLER_CARDS}
+    """The compiled XML edits PermissionController.apk gets: its cards. Its lists keep the
+    room below their last row from the navigation bar inset, as Settings' do."""
+    return dict(PERMISSION_CONTROLLER_CARDS)
 
 
 # Properties the vendor and odm build.prop files may not set. init reads those two files as
 # vendor_init, and the platform's policy gives vendor_init no right to set these: each line
 # was refused, and logged as a denial, on every boot. The system build.prop sets them.
 # adbd's listening address and the USB configuration are the system's to set too.
-VENDOR_FORBIDDEN_PROPS = {*USER_PROPS, *ADB_PROPS, "sys.use_memfd"}
+VENDOR_FORBIDDEN_PROPS = {*USER_PROPS, *ADB_PROPS, "sys.use_memfd", *SERVICE_PROPS}
 VENDOR_PROP_FILES = {"VENDOR/build.prop", "ODM/etc/build.prop"}
 
 # The build's own fingerprint is AOSP's, and it stays the same however often DSA's image
@@ -2515,7 +2931,8 @@ def edit_props(text, codec2=False, vendor=False, build_tag=None, product=False, 
     `build_tag`, the incremental version and the fingerprints carry it. With `product`, it ends
     with the imports of the identity the user chose. With `network`, it is the vendor build.prop
     that chooses how the VM's network adapter reaches Android (NETWORK_PROPS)."""
-    props_to_apply = {**USER_PROPS, **ADB_PROPS, **GRAPHICS_PROPS, **MEMORY_PROPS, **LOADER_PROPS, **FRP_PROPS,
+    props_to_apply = {**USER_PROPS, **ADB_PROPS, **GRAPHICS_PROPS, **MEMORY_PROPS, **SERVICE_PROPS,
+                      **LOADER_PROPS, **FRP_PROPS,
                       **LOG_PROPS, **(CODEC2_PROPS if codec2 else {}), **(NETWORK_PROPS if network else {})}
     if vendor:
         props_to_apply = {k: v for k, v in props_to_apply.items() if k not in VENDOR_FORBIDDEN_PROPS}
@@ -2546,8 +2963,10 @@ def edit_props(text, codec2=False, vendor=False, build_tag=None, product=False, 
 # unmetered Wi-Fi network that NetworkMonitor validates, and ConnectivityManager reports it
 # and each change of it. The address, the route and the DNS servers come by DHCP from the
 # host (Android's IpClient asks), so nothing here is static: a host network change reaches
-# the guest through its next lease, and the NAT gateway's DNS proxy follows the host's own
-# DNS and VPN. Cuttlefish's rename_eth0 would hand eth0 to the radio as rmnet0, and DSA has no
+# the guest through its next lease. While the host answers DNS, the daemon's stub takes every
+# query sent to those servers and the host's own resolver answers it (dns_problems), so the
+# host's hosts file, VPN and DNS filters apply; the DHCP servers are the fallback while it does
+# not. Cuttlefish's rename_eth0 would hand eth0 to the radio as rmnet0, and DSA has no
 # modem, so it is turned off. setup_wifi derives wlan0's MAC address from the boot property
 # wifi_mac_prefix, a number it fails without (see kernel_cmdline).
 NETWORK_PROPS_FILE = "VENDOR/build.prop"
@@ -2650,6 +3069,161 @@ FSTAB_DIRS = {
     "VENDOR/etc/": "META/vendor_filesystem_config.txt",
     "VENDOR_BOOT/RAMDISK/first_stage_ramdisk/system/etc/": "META/vendor_boot_filesystem_config.txt",
 }
+
+# The host's direct-mapped mode (off by default): the host attaches the system disk and the
+# add-on disk as persistent memory, Hyper-V's virtual persistent memory or virtio-pmem, and the
+# guest mounts the read-only partitions with DAX, so each file is read straight from the host's
+# mapping of the image and the guest keeps no page cache of it. The host names this table
+# (androidboot.fstab_suffix) and the persistent memory's platform devices as boot devices on
+# such a boot only. It differs from fstab.dsa in the logical partitions alone: they mount with
+# dax=always, and without dm-verity, which cannot pass DAX through (device-mapper's linear
+# target can, and maps them as before). They are verified on the host instead: the disk is the
+# host's uncompressed copy of the published one, which it checks against the hash image.json
+# gives (direct_mapped.system_disk, which dsa-release direct-mapped records), attached read
+# only. The partitions in DIRECT_MAPPED_VERIFIED keep their entries as they are, dm-verity
+# included, and the host's copy keeps their bytes as they are: first stage init sets up
+# verified boot only for an entry it mounts with dm-verity, so with none it would check no
+# vbmeta and report no AVB version. With one, the verified boot data (vbmeta and its chained
+# images, and the boot images' hashes) is checked as in a normal boot.
+DIRECT_MAPPED_FSTAB_SUFFIX = "dsa_dax"
+# The logical partitions the direct-mapped table still verifies with dm-verity: odm, a few
+# hundred KiB in every image, whose hashtree is in the top-level vbmeta.
+DIRECT_MAPPED_VERIFIED = ("odm",)
+# The system disk's size is a whole number of these: Linux maps persistent memory in 2 MiB
+# sections, and a region of another size gets no page structs, so no DAX.
+SYSTEM_DISK_ALIGNMENT = 2 << 20
+DIRECT_MAPPED_FSTAB = f"fstab.{DIRECT_MAPPED_FSTAB_SUFFIX}"
+DIRECT_MAPPED_MOUNT_OPTION = "dax=always"
+# The fs_mgr flags that set up dm-verity for an entry.
+VERITY_FLAGS = ("avb", "avb_keys")
+DIRECT_MAPPED_FSTAB_HEADER = """\
+# The guest's mount table for a boot whose read-only disks the host maps as persistent memory
+# (the host's direct-mapped mode). Made from fstab.dsa by make-image.py: the logical partitions
+# mount with dax=always and without dm-verity, which cannot pass DAX through, all but odm, which
+# keeps dm-verity so first stage init still checks the verified boot data; everything else is
+# fstab.dsa's. erofs falls back to its page cache, with a line in the kernel log, wherever the
+# device or a file cannot be mapped (a compressed file, a disk on SCSI).
+"""
+
+
+def direct_mapped_entry(uncompressed_erofs):
+    """image.json's "direct_mapped": the mount table the host names for that mode, and whether
+    the read-only partitions were built uncompressed."""
+    return {"fstab_suffix": DIRECT_MAPPED_FSTAB_SUFFIX, "uncompressed_erofs": bool(uncompressed_erofs),
+            "verified_partitions": list(DIRECT_MAPPED_VERIFIED)}
+
+
+# What dsa-release direct-mapped adds to image.json's "direct_mapped": the host's copy of the
+# system disk, its format, size, SHA-256 and super partition size.
+SYSTEM_DISK_KEYS = {"format": int, "bytes": int, "sha256": str, "super_bytes": int}
+
+
+def direct_mapped_fstab(text):
+    """The mount table for the direct-mapped mode, from `text`, fstab.dsa."""
+    lines = [DIRECT_MAPPED_FSTAB_HEADER]
+    for line in text.splitlines(keepends=True):
+        fields = line.split()
+        if (line.startswith("#") or len(fields) < 5 or "logical" not in fields[4].split(",")
+                or fields[0] in DIRECT_MAPPED_VERIFIED):
+            lines.append(line)
+            continue
+        options = [o for o in fields[3].split(",") if o != DIRECT_MAPPED_MOUNT_OPTION]
+        flags = [f for f in fields[4].split(",") if f.split("=", 1)[0] not in VERITY_FLAGS]
+        lines.append(" ".join(fields[:3] + [",".join(options + [DIRECT_MAPPED_MOUNT_OPTION]),
+                                            ",".join(flags)]) + "\n")
+    return "".join(lines)
+
+
+# What --uncompressed-erofs sets in the build's misc_info.txt, which add_img_to_target_files
+# builds the read-only partitions from. erofs maps a file directly (DAX) only when its data is
+# stored whole, a block per block: never a compressed file, and never one whose last block is
+# kept inline in its inode. The published build compresses every file but its APEXes with
+# lz4hc. So no compressor and no compression hints, and 4 KiB chunks (--chunksize 4096 in
+# build_image.py), the chunk-based layout erofs maps directly too, which also stores identical
+# blocks once.
+UNCOMPRESSED_EROFS_PROPS = {
+    "erofs_default_compressor": "none",
+    "erofs_share_dup_blocks": "true",
+}
+# Keys that would bring compression back for one partition or for some files.
+UNCOMPRESSED_EROFS_DROPPED = re.compile(r"^(?:\w+_)?erofs_(?:compressor|compress_hints|default_compress_hints"
+                                        r"|pcluster_size|use_legacy_compression)$")
+MISC_INFO = "META/misc_info.txt"
+
+
+def direct_mapped_problems(names, read, entry):
+    """The problems with an image's direct-mapped mode, given the names in its target files, a
+    function that reads one, and image.json's "direct_mapped": each fstab.dsa has the mapped
+    table beside it, made from it, and image.json says so; an image that says its read-only
+    partitions are uncompressed was built from a misc_info.txt that compresses nothing."""
+    described = {k: v for k, v in entry.items() if k != "system_disk"} if isinstance(entry, dict) else entry
+    if described != direct_mapped_entry(entry.get("uncompressed_erofs") if isinstance(entry, dict) else False):
+        return [f"image.json describes the direct-mapped mode as {entry!r}, not with the mount table "
+                f"{DIRECT_MAPPED_FSTAB}, so the host cannot boot the image with its disks mapped"]
+    problems = []
+    disk = entry.get("system_disk")
+    if disk is not None and (not isinstance(disk, dict) or set(disk) != set(SYSTEM_DISK_KEYS)
+                             or any(not isinstance(disk[k], t) for k, t in SYSTEM_DISK_KEYS.items())
+                             or len(disk["sha256"]) != 64 or disk["bytes"] % SYSTEM_DISK_ALIGNMENT):
+        problems.append(f"image.json describes the host's copy of the system disk as {disk!r}, which the "
+                        "host cannot check its copy against")
+    for directory in FSTAB_DIRS:
+        normal, mapped = directory + "fstab.dsa", directory + DIRECT_MAPPED_FSTAB
+        if normal not in names:
+            continue
+        if mapped not in names:
+            problems.append(f"{mapped} is missing, so a direct-mapped boot finds no mount table")
+            continue
+        text = read(mapped).decode(errors="replace")
+        if text != direct_mapped_fstab(read(normal).decode(errors="replace")):
+            problems.append(f"{mapped} is not the direct-mapped table made from {normal}")
+        for line in text.splitlines():
+            fields = line.split()
+            if line.startswith("#") or len(fields) < 5 or "logical" not in fields[4].split(","):
+                continue
+            if fields[0] in DIRECT_MAPPED_VERIFIED:
+                if DIRECT_MAPPED_MOUNT_OPTION in fields[3].split(",") or "avb" not in [
+                        f.split("=", 1)[0] for f in fields[4].split(",")]:
+                    problems.append(f"{mapped} does not verify {fields[1]} with dm-verity, so first stage "
+                                    "init checks no verified boot data")
+                continue
+            if DIRECT_MAPPED_MOUNT_OPTION not in fields[3].split(","):
+                problems.append(f"{mapped} mounts {fields[1]} without {DIRECT_MAPPED_MOUNT_OPTION}")
+            if any(f.split("=", 1)[0] in VERITY_FLAGS for f in fields[4].split(",")):
+                problems.append(f"{mapped} sets up dm-verity for {fields[1]}, which cannot be mapped")
+    if MISC_INFO in names:
+        info = read(MISC_INFO).decode(errors="replace").splitlines()
+        settings = dict(line.split("=", 1) for line in info if "=" in line)
+        dynamic = settings.get("dynamic_partition_list")
+        for name in DIRECT_MAPPED_VERIFIED:
+            if dynamic is not None and name not in dynamic.split():
+                problems.append(f"the image has no {name} partition, which a direct-mapped boot verifies "
+                                "so first stage init checks the verified boot data")
+    if entry["uncompressed_erofs"] and MISC_INFO in names:
+        info = read(MISC_INFO).decode(errors="replace").splitlines()
+        settings = dict(line.split("=", 1) for line in info if "=" in line)
+        for key, value in UNCOMPRESSED_EROFS_PROPS.items():
+            if settings.get(key) != value:
+                problems.append(f"image.json says the read-only partitions are uncompressed, but "
+                                f"{MISC_INFO} sets {key}={settings.get(key)}")
+        left = sorted(key for key in settings if UNCOMPRESSED_EROFS_DROPPED.match(key))
+        if left:
+            problems.append(f"image.json says the read-only partitions are uncompressed, but "
+                            f"{MISC_INFO} still sets {', '.join(left)}")
+    return problems
+
+
+def uncompressed_erofs_misc_info(text):
+    """`text`, a misc_info.txt, with the read-only erofs partitions built uncompressed and in
+    4 KiB chunks (UNCOMPRESSED_EROFS_PROPS)."""
+    kept = []
+    for line in text.splitlines():
+        key = line.split("=", 1)[0].strip()
+        if key in UNCOMPRESSED_EROFS_PROPS or UNCOMPRESSED_EROFS_DROPPED.match(key):
+            continue
+        kept.append(line)
+    kept += [f"{key}={value}" for key, value in UNCOMPRESSED_EROFS_PROPS.items()]
+    return "\n".join(kept) + "\n"
 
 # The transport library stays in vendor with the rest of the Cuttlefish graphics stack.
 # Supplying it at image-build time keeps the signed target_files archive as the single
@@ -2820,10 +3394,14 @@ TRACE_RC = "SYSTEM/etc/init/dsa-trace.rc"
 # a panic. A system script, because only init itself may write the kernel's printk levels.
 CONSOLE_RC = "SYSTEM/etc/init/dsa-console.rc"
 SU_GUARD_RC = "SYSTEM/etc/init/dsa-su-guard.rc"
+# Makes the folder for zram's backing file (fstab.dsa) and removes the last boot's file. A
+# system script, because only init itself may make a folder at the top of /data.
+ZRAM_BACKING_RC = "SYSTEM/etc/init/dsa-zram-backing.rc"
 SYSTEM_FS_CONFIG = "META/filesystem_config.txt"
 TRACE_FS_CONFIG = [
     "system/etc/init/dsa-trace.rc 0 0 644 capabilities=0x0",
     "system/etc/init/dsa-console.rc 0 0 644 capabilities=0x0",
+    "system/etc/init/dsa-zram-backing.rc 0 0 644 capabilities=0x0",
 ]
 # ARM app translation. The host puts androidboot.dsa.arm_translation=on in the boot's
 # bootconfig while the user has a translation package installed (`dsa arm-translation
@@ -3187,6 +3765,150 @@ FRAMEWORK_FILES = list(framework_lock.OUTPUTS)
 GPU_RESET_PROPERTY = "debug.dsa.gpu.resets"
 GPU_RESET_RULE = "(allow surfaceflinger debug_prop (property_service (set)))"
 
+# DSA's KeyMint, from the same Framework build: the nonsecure KeyMint service whose root key of
+# key blobs comes from the DSA host (dsa-channeld --keymint-key leaves it in
+# /dev/dsa_keymint/root_key each boot), with the libssl it needs and the VINTF fragments and
+# feature file the KeyMint APEX carries. The image installs them as vendor files and selects no
+# KeyMint APEX (bootconfig "none", which apexd takes as "activate none of this module's
+# APEXes"), so one KeyMint serves each instance. init starts it as the APEX's service was
+# started, under the same name, and in the same domain: its label is the one the APEX gave its
+# binary, hal_keymint_default_exec, and hal_keymint_default serves the KeyMint HAL. A framework
+# build from before the KeyMint has none of these files, and the image then keeps the APEX.
+KEYMINT_FILES = list(framework_lock.KEYMINT_FILES)
+KEYMINT_ELF_FILES = list(framework_lock.KEYMINT_OUTPUTS)
+KEYMINT_BINARY = framework_lock.KEYMINT_BINARY
+KEYMINT_RC = "VENDOR/etc/init/dsa-keymint.rc"
+KEYMINT_RC_SOURCE = HERE / "dsa-keymint.rc"
+KEYMINT_CONTEXT = "/vendor/bin/hw/dsa-keymint u:object_r:hal_keymint_default_exec:s0"
+KEYMINT_APEX_MODULE = "com.android.hardware.keymint"
+KEYMINT_APEX_SELECTION = f"androidboot.vendor.apex.{KEYMINT_APEX_MODULE}=none"
+# The instances the KeyMint service registers (kmr_hal's ALL_HALS), each of which a fragment must
+# declare.
+KEYMINT_INSTANCES = [
+    ("aidl", "android.hardware.security.keymint", "IKeyMintDevice", "default"),
+    ("aidl", "android.hardware.security.keymint", "IRemotelyProvisionedComponent", "default"),
+    ("aidl", "android.hardware.security.secureclock", "ISecureClock", "default"),
+    ("aidl", "android.hardware.security.sharedsecret", "ISharedSecret", "default"),
+]
+# The libraries a vendor binary gets from the system partition (the LLNDK) rather than from
+# /vendor/lib64, so need not be in the vendor partition.
+LLNDK_LIBRARIES = {
+    "libc.so", "libm.so", "libdl.so", "liblog.so", "libbinder_ndk.so", "libvndksupport.so",
+    "libsync.so", "libnativewindow.so", "libselinux.so", "libcgrouprc.so", "libandroid_net.so",
+    "libmediandk.so", "libvulkan.so", "libEGL.so", "libGLESv1_CM.so", "libGLESv2.so",
+    "libGLESv3.so", "libstatssocket.so",
+}
+
+
+def framework_has_keymint(names):
+    """Whether a framework build's files (their target_files names) carry DSA's KeyMint."""
+    return KEYMINT_BINARY in names
+
+
+def elf_needed(data):
+    """The DT_NEEDED entries of a little-endian 64-bit ELF file, or None for anything else."""
+    if elf_machine(data[:64]) is None or len(data) < 64:
+        return None
+    shoff = int.from_bytes(data[0x28:0x30], "little")
+    shentsize = int.from_bytes(data[0x3A:0x3C], "little")
+    shnum = int.from_bytes(data[0x3C:0x3E], "little")
+    sections = []
+    for i in range(shnum):
+        at = shoff + i * shentsize
+        if at + 64 > len(data):
+            return None
+        kind = int.from_bytes(data[at + 4:at + 8], "little")
+        offset = int.from_bytes(data[at + 24:at + 32], "little")
+        size = int.from_bytes(data[at + 32:at + 40], "little")
+        link = int.from_bytes(data[at + 40:at + 44], "little")
+        sections.append((kind, offset, size, link))
+    needed = []
+    for kind, offset, size, link in sections:
+        if kind != 6 or link >= len(sections):  # SHT_DYNAMIC, with its string table
+            continue
+        strings = sections[link][1]
+        for at in range(offset, offset + size, 16):
+            tag = int.from_bytes(data[at:at + 8], "little", signed=True)
+            if tag == 0:
+                break
+            if tag == 1:  # DT_NEEDED
+                start = strings + int.from_bytes(data[at + 8:at + 16], "little")
+                needed.append(data[start:data.index(b"\0", start)].decode(errors="replace"))
+    return needed
+
+
+def keymint_library_problems(binary, vendor_names):
+    """The libraries DSA's KeyMint binary needs that neither the vendor partition (by the
+    target_files names in `vendor_names`) nor the LLNDK gives it: without one, the linker stops
+    it, and Android has no KeyMint."""
+    needed = elf_needed(binary)
+    if needed is None:
+        return ["the KeyMint binary is not an ELF file whose libraries can be read"]
+    return [f"the KeyMint binary needs {lib}, which the vendor partition does not carry"
+            for lib in needed if lib not in LLNDK_LIBRARIES and f"VENDOR/lib64/{lib}" not in vendor_names]
+
+
+def selected_vendor_apexes(cmdline):
+    """The vendor APEX each module's bootconfig selection names, by module."""
+    selected = {}
+    for part in cmdline.split():
+        if part.startswith("androidboot.vendor.apex.") and "=" in part:
+            module, value = part[len("androidboot.vendor.apex."):].split("=", 1)
+            selected[module] = value
+    return selected
+
+
+def keymint_problems(manifest, entry, names, read):
+    """The problems with DSA's KeyMint in an image whose framework `entry` (image.json's) names
+    it: its files are the framework build's, init starts it in the APEX's domain, and no KeyMint
+    APEX is active beside it."""
+    problems = []
+    files = entry.get("files") or {}
+    arch = manifest.get("arch") or DEFAULT_ARCH
+    machine = ARCHES.get(arch, {}).get("elf_machine")
+    for name in KEYMINT_FILES:
+        if name not in names:
+            problems.append(f"{name} is missing from the image")
+            continue
+        data = read(name)
+        if hashlib.sha256(data).hexdigest() != files.get(name):
+            problems.append(f"{name} is not the framework build's file that image.json names, so the "
+                            "image's KeyMint is not the one that takes its root key from the host")
+        if name in KEYMINT_ELF_FILES and elf_machine(data[:64]) != machine:
+            problems.append(f"{name} is built for ELF machine {elf_machine(data[:64])}, not {arch}")
+    declared = set()
+    for name in KEYMINT_FILES:
+        if name.startswith("VENDOR/etc/vintf/") and name in names:
+            declared |= vintf_instances(read(name))
+    for instance in KEYMINT_INSTANCES:
+        if instance not in declared:
+            problems.append(f"the KeyMint's fragments do not declare {instance[1]}.{instance[2]}/{instance[3]}, "
+                            "so servicemanager refuses it")
+    if KEYMINT_RC not in names:
+        problems.append(f"{KEYMINT_RC} is missing, so init never starts the KeyMint")
+    elif b"/vendor/bin/hw/dsa-keymint" not in read(KEYMINT_RC):
+        problems.append(f"{KEYMINT_RC} does not start /vendor/bin/hw/dsa-keymint")
+    contexts = "VENDOR/etc/selinux/vendor_file_contexts"
+    if contexts in names and KEYMINT_CONTEXT not in read(contexts).decode(errors="replace").splitlines():
+        problems.append("the KeyMint binary is not labelled hal_keymint_default_exec, so init does not "
+                        "start it in the KeyMint HAL's domain")
+    if "META/file_contexts.bin" in names and b"/vendor/bin/hw/dsa-keymint" not in read("META/file_contexts.bin"):
+        problems.append("META/file_contexts.bin does not label dsa-keymint, so the vendor image gives it "
+                        "another label and init refuses to start it")
+    if KEYMINT_BINARY in names:
+        problems += keymint_library_problems(read(KEYMINT_BINARY), names)
+    cmdline = manifest.get("kernel_cmdline", "")
+    selected = selected_vendor_apexes(cmdline)
+    if selected.get(KEYMINT_APEX_MODULE) != "none":
+        problems.append(f"the kernel command line does not have {KEYMINT_APEX_SELECTION}, so apexd "
+                        "activates a KeyMint APEX beside DSA's KeyMint")
+    for name in vendor_apex_members(names):
+        if apex_module_name(read(name)) != KEYMINT_APEX_MODULE:
+            continue
+        if KEYMINT_APEX_MODULE not in selected or selected[KEYMINT_APEX_MODULE] == apex_file_stem(name):
+            problems.append(f"{name} is active beside DSA's KeyMint")
+    return problems
+
 
 def framework_problems(description, build_id, android_major, arch, read):
     """What makes a framework build's files wrong for an image: its framework.json (parsed),
@@ -3202,10 +3924,11 @@ def framework_problems(description, build_id, android_major, arch, read):
     if description.get("arch") != arch:
         problems.append(f"the framework is built for {description.get('arch')}, not {arch}")
     files = description.get("files") or {}
-    if sorted(files) != sorted(FRAMEWORK_FILES):
-        problems.append(f"the framework has {sorted(files)}, not {sorted(FRAMEWORK_FILES)}")
+    wanted = framework_names(files)
+    if sorted(files) != sorted(wanted):
+        problems.append(f"the framework has {sorted(files)}, not {sorted(wanted)}")
     machine = ARCHES.get(arch, {}).get("elf_machine")
-    for name in FRAMEWORK_FILES:
+    for name in wanted:
         entry = files.get(name) or {}
         data = read(name)
         if data is None:
@@ -3213,10 +3936,19 @@ def framework_problems(description, build_id, android_major, arch, read):
             continue
         if len(data) != entry.get("size") or hashlib.sha256(data).hexdigest() != entry.get("sha256"):
             problems.append(f"the framework's {name} is not the file framework.json describes")
-        if elf_machine(data[:64]) != machine:
+        if name in FRAMEWORK_FILES + KEYMINT_ELF_FILES and elf_machine(data[:64]) != machine:
             problems.append(f"the framework's {name} is built for ELF machine {elf_machine(data[:64])}, "
                             f"not {arch} ({machine})")
     return problems
+
+
+def framework_names(files):
+    """The files a framework build must have, given the names its framework.json lists: the
+    framework's (FRAMEWORK_FILES), and the KeyMint's when it has any of them (a build from before the KeyMint
+    has none)."""
+    if any(name in KEYMINT_FILES for name in files):
+        return FRAMEWORK_FILES + KEYMINT_FILES
+    return list(FRAMEWORK_FILES)
 
 
 def checked_framework(folder, build_id, android_major, arch):
@@ -3232,7 +3964,7 @@ def checked_framework(folder, build_id, android_major, arch):
     problems = framework_problems(description, build_id, android_major, arch, read)
     if problems:
         raise SystemExit("; ".join(problems))
-    return {name: read(name) for name in FRAMEWORK_FILES}, description
+    return {name: read(name) for name in framework_names(description["files"])}, description
 
 
 def framework_entry(description):
@@ -3242,15 +3974,17 @@ def framework_entry(description):
         "build_id": description["build_id"],
         "release": description.get("release", ""),
         "arch": description["arch"],
-        "files": {name: description["files"][name]["sha256"] for name in FRAMEWORK_FILES},
+        "files": {name: description["files"][name]["sha256"]
+                  for name in framework_names(description["files"])},
     }
 
 
 def check_framework(manifest, names, read):
     """The problems with the patched framework in an image, given image.json, the names in its
     target files and a function that reads one: each file image.json names is in the image with
-    that SHA-256, built from the image's own build for its architecture, and SurfaceFlinger may
-    tell the apps about a reset."""
+    that SHA-256, built from the image's own build for its architecture, SurfaceFlinger may
+    tell the apps about a reset, and DSA's KeyMint, when the framework has it, is the one Android
+    runs (keymint_problems)."""
     entry = manifest.get("framework")
     if entry is None:
         return []
@@ -3263,8 +3997,11 @@ def check_framework(manifest, names, read):
     if entry.get("arch") != arch:
         problems.append(f"the framework is built for {entry.get('arch')}, not {arch}")
     files = entry.get("files") or {}
-    if sorted(files) != sorted(FRAMEWORK_FILES):
-        problems.append(f"image.json's framework names {sorted(files)}, not {sorted(FRAMEWORK_FILES)}")
+    wanted = framework_names(files)
+    if sorted(files) != sorted(wanted):
+        problems.append(f"image.json's framework names {sorted(files)}, not {sorted(wanted)}")
+    if framework_has_keymint(files):
+        problems += keymint_problems(manifest, entry, names, read)
     machine = ARCHES.get(arch, {}).get("elf_machine")
     for name in FRAMEWORK_FILES:
         if name not in names:
@@ -3328,6 +4065,75 @@ def addon_disk_problems(names, read):
     return problems
 
 
+# Google Play sees the computer's memory as the device's memory: it hands a device under 8 GB a
+# Chrome whose browser is 32-bit, which this 64-bit only guest cannot start, and the VM, which
+# starts small and grows, is not the computer. The host passes the computer's memory in the
+# bootconfig (kernel.dsa_host_memory.total_kb); dsa-channeld names the Play Store's and Play
+# services' uids in HOST_MEMORY_PROPERTY, and init writes them to the kernel's list. The kernel
+# then shows those apps the computer's memory in /proc/meminfo and sysinfo(), and the framework's
+# libandroid_runtime answers their ActivityManager.getMemoryInfo with it. Only init may write the
+# list and only the daemon may set the property, so no app can name itself.
+HOST_MEMORY_UIDS = "/sys/module/dsa_host_memory/parameters/uids"
+
+
+def host_memory_action():
+    """The init action that hands the daemon's list of apps to the kernel."""
+    return (f"on property:{HOST_MEMORY_PROPERTY}=*\n"
+            f"    write {HOST_MEMORY_UIDS} ${{{HOST_MEMORY_PROPERTY}}}")
+
+
+HOST_MEMORY_RULES = {
+    '(genfscon sysfs "/module/dsa_host_memory" (u object_r dsa_sysfs_host_memory ((s0) (s0))))':
+        "the kernel's list of apps is plain sysfs, which init may not write",
+    "(allow vendor_init dsa_sysfs_host_memory (file (write open getattr)))":
+        "init cannot hand the kernel the apps the daemon names",
+    "(allow system_server dsa_sysfs_host_memory (file (read open getattr)))":
+        "system_server cannot read the computer's memory or the apps, so Play's totalMem stays the VM's",
+    "(allow dsa_channeld dsa_host_memory_prop (property_service (set)))":
+        "dsa-channeld cannot name the Play Store and Play services",
+}
+# The framework's JNI library carries the change that answers getMemoryInfo for the named apps.
+HOST_MEMORY_FRAMEWORK_FILE = "SYSTEM/lib64/libandroid_runtime.so"
+
+
+def host_memory_problems(manifest, names, read):
+    """The problems with how an image shows Google Play the computer's memory, given image.json,
+    the names in its target files and a function that reads one: init hands the daemon's list of
+    apps to the kernel, the property has its type, the policy lets only init write the list,
+    only the daemon set the property and system_server read both parameters, and the patched
+    libandroid_runtime is the framework build's."""
+    problems = []
+    rc = read(MEMORY_RC).decode(errors="replace") if MEMORY_RC in names else ""
+    if host_memory_action() not in rc.replace("\r\n", "\n"):
+        problems.append(f"{MEMORY_RC} does not hand {HOST_MEMORY_PROPERTY} to the kernel ({HOST_MEMORY_UIDS}), "
+                        "so Google Play sees the VM's memory and gets a 32-bit Chrome")
+    contexts = (read(VENDOR_PROPERTY_CONTEXTS).decode(errors="replace").splitlines()
+                if VENDOR_PROPERTY_CONTEXTS in names else [])
+    if HOST_MEMORY_PROPERTY_CONTEXT not in contexts:
+        problems.append(f"{VENDOR_PROPERTY_CONTEXTS} does not give {HOST_MEMORY_PROPERTY} its type, so "
+                        "dsa-channeld cannot set it")
+    policy_name = "SYSTEM/etc/selinux/plat_sepolicy.cil"
+    policy = read(policy_name).decode(errors="replace") if policy_name in names else ""
+    for rule, why in HOST_MEMORY_RULES.items():
+        if rule not in policy:
+            problems.append(f"the SELinux policy lacks {rule}: {why}")
+    writers = re.findall(r"\(allow\s+(\S+)\s+dsa_sysfs_host_memory\s+\(\s*file\s+\([^)]*\b(?:write|append)\b",
+                         policy)
+    for subject in sorted(set(writers) - {"vendor_init"}):
+        problems.append(f"{subject} may write the kernel's list of apps that see the computer's memory, "
+                        "which only init may")
+    setters = re.findall(r"\(allow\s+(\S+)\s+dsa_host_memory_prop\s+\(\s*property_service\s+\([^)]*\bset\b",
+                         policy)
+    for subject in sorted(set(setters) - {"dsa_channeld"}):
+        problems.append(f"{subject} may name the apps that see the computer's memory, which only "
+                        "dsa-channeld may")
+    framework = (manifest.get("framework") or {}).get("files") or {}
+    if framework and HOST_MEMORY_FRAMEWORK_FILE not in framework:
+        problems.append(f"the framework build has no {HOST_MEMORY_FRAMEWORK_FILE}, so Google Play's "
+                        "ActivityManager totalMem stays the VM's")
+    return problems
+
+
 # Google Play, for a user who installs it (`dsa gapps install`). The host puts
 # androidboot.dsa.gapps=on in the boot's bootconfig only while the user has a Google apps image
 # installed. The init script then lays the image over /product and /system_ext before the
@@ -3336,6 +4142,173 @@ def addon_disk_problems(names, read):
 # manager installs the new system apps for every user and grants their default permissions.
 # Without it the "off" file sets nothing. ro.* properties are fixed once read, so this is decided
 # at boot.
+# Widevine, for a user who installs it (`dsa drm widevine install`). DSA ships none of Google's
+# software: the host takes Google's Widevine APEX, unchanged, out of Google's emulator image and
+# puts it on the user's add-on disk as widevine.img. The host puts androidboot.dsa.widevine=on in
+# the boot's bootconfig only while it is there. The image is then laid over /vendor/apex at
+# early-init, before apexd-bootstrap: on Android 17 that one run activates every pre-installed
+# APEX, the vendor's included, and apexd at post-fs-data only takes over its mounts, so a module
+# laid over later is listed but never activated and its HAL never registers. Only actions in the
+# system's init.rc run that early, so dsa-widevine-early.rc is spliced into it, right before
+# apexd-bootstrap. With "off", after the user removed it, dsa-widevine.rc removes the device
+# certificates the module kept. The image carries the SELinux policy the module's service runs
+# under ahead of any install: the vendor policy's own types where it declares them (Cuttlefish's
+# does), widevine-hal.cil's where it does not.
+WIDEVINE_RC = "SYSTEM/etc/init/dsa-widevine.rc"
+WIDEVINE_FS_CONFIG = ["system/etc/init/dsa-widevine.rc 0 0 644 capabilities=0x0"]
+INIT_RC = "SYSTEM/etc/init/hw/init.rc"
+WIDEVINE_EARLY_RC = HERE / "dsa-widevine-early.rc"
+APEXD_BOOTSTRAP = "exec_start apexd-bootstrap"
+WIDEVINE_TRIGGER = "on early-init && property:ro.boot.dsa.widevine=on"
+WIDEVINE_OVERLAY = "mount overlay overlay /vendor/apex ro nodev noexec lowerdir=/mnt/dsa-widevine:/vendor/apex"
+# Where the module's image is mounted from: its file on the add-on disk, or its own partition in
+# the host's direct-mapped mode.
+WIDEVINE_IMAGES = {
+    "disk": "/mnt/dsa-widevine-disk/widevine.img",
+    "dax": "/dev/block/by-name/dsa_widevine",
+}
+WIDEVINE_OFF_TRIGGER = "on post-fs-data && property:ro.boot.dsa.widevine=off"
+WIDEVINE_RESET = ("exec u:r:dsa_widevine_reset:s0 root root -- /vendor/bin/toybox_vendor rm -rf "
+                  "/data/vendor/mediadrm")
+# What the vendor policy must label for the module's service, and the lines that label them
+# where it has none.
+WIDEVINE_HAL_TYPES = ["hal_drm_widevine", "hal_drm_widevine_exec", "mediadrm_vendor_data_file"]
+WIDEVINE_FILE_CONTEXTS = [
+    (r"/data/vendor/mediadrm", r"/data/vendor/mediadrm(/.*)?  u:object_r:mediadrm_vendor_data_file:s0"),
+]
+WIDEVINE_INSTANCE = "android.hardware.drm.IDrmFactory/widevine"
+WIDEVINE_SERVICE_CONTEXT = f"{WIDEVINE_INSTANCE} u:object_r:hal_drm_service:s0"
+
+
+def declares_type(policy, name):
+    """Whether the CIL text `policy` declares the type `name`."""
+    return re.search(rf"\(type {re.escape(name)}\)", policy) is not None
+
+
+def needs_widevine_hal_policy(vendor_policy):
+    """Whether the image must declare the Widevine service's types itself: the vendor policy
+    (its text, or None when the image has none) does not."""
+    return vendor_policy is None or not all(declares_type(vendor_policy, t) for t in WIDEVINE_HAL_TYPES)
+
+
+def with_widevine_file_contexts(fc_text):
+    """vendor_file_contexts with the label of Widevine's certificate folder, where it has none."""
+    lines = fc_text.splitlines()
+    for pattern, rule in WIDEVINE_FILE_CONTEXTS:
+        if not any(line.startswith(pattern) for line in lines):
+            lines.append(rule)
+    return "\n".join(lines) + "\n"
+
+
+def with_widevine_service_context(text):
+    """vendor_service_contexts with the label of Widevine's service, where it has none."""
+    lines = text.splitlines() if text.strip() else []
+    if not any(line.split()[:1] == [WIDEVINE_INSTANCE] for line in lines):
+        lines.append(WIDEVINE_SERVICE_CONTEXT)
+    return "\n".join(lines) + "\n"
+
+
+def rc_sections(rc):
+    """Each section of an init script, in order: its first line (an action's trigger, a service's
+    name) and its command lines."""
+    sections = []
+    for line in rc.splitlines():
+        if line.startswith(("on ", "service ", "import ")):
+            sections.append((line.strip(), []))
+        elif line.strip() and not line.lstrip().startswith("#") and sections:
+            sections[-1][1].append(line.strip())
+    return sections
+
+
+def with_widevine_early(init_rc, fragment=None):
+    """The system's init.rc with dsa-widevine-early.rc's actions spliced into its early-init, right
+    before apexd-bootstrap. init.rc's early-init action is split there and the fragment's actions
+    go between the two halves: init runs one trigger's actions in the order it read them, so they
+    run after ueventd has started and before apexd activates the APEXes. An init.rc that has them
+    already is returned as it is. One without apexd-bootstrap in its early-init is refused: a
+    Widevine module could never be activated on it."""
+    if fragment is None:
+        fragment = WIDEVINE_EARLY_RC.read_text()
+    if WIDEVINE_OVERLAY in init_rc:
+        return init_rc
+    lines = init_rc.splitlines()
+    trigger = None
+    at = None
+    for index, line in enumerate(lines):
+        if line.startswith(("on ", "service ", "import ")):
+            trigger = line.strip()
+        elif line.strip() == APEXD_BOOTSTRAP and trigger == "on early-init":
+            at = index
+            break
+    if at is None:
+        raise ValueError(f'init.rc has no "{APEXD_BOOTSTRAP}" in its early-init, so a Widevine module the '
+                         "user installs could never be laid over /vendor/apex before apexd activates it")
+    # The comment that explains apexd-bootstrap stays with it.
+    while at > 0 and lines[at - 1].lstrip().startswith("#"):
+        at -= 1
+    spliced = lines[:at] + [""] + fragment.rstrip("\n").splitlines() + ["", "on early-init"] + lines[at:]
+    return "\n".join(spliced) + "\n"
+
+
+def widevine_problems(names, read):
+    """The problems with how an image takes the Widevine module a user installs, given the names in
+    its target files and a function that reads one: init.rc mounts the module's image and lays it
+    over /vendor/apex in its early-init before apexd-bootstrap, only when the host says it is
+    installed, and nothing mounts it later; dsa-widevine.rc removes the certificates after it was
+    removed; the policy has the image's superblock type and the service's types, and the service's
+    name is labelled."""
+    if WIDEVINE_RC not in names:
+        return [f"{WIDEVINE_RC} is missing, so a Widevine module the user installs is never activated"]
+    problems = []
+    early = []
+    if INIT_RC in names:
+        for trigger, commands in rc_sections(read(INIT_RC).decode(errors="replace")):
+            if APEXD_BOOTSTRAP in commands:
+                break
+            if trigger.startswith("on early-init"):
+                early.append((trigger, commands))
+        else:
+            early = []
+    if not any(WIDEVINE_OVERLAY in commands for trigger, commands in early if trigger == WIDEVINE_TRIGGER):
+        problems.append("init.rc does not lay the module's image over /vendor/apex in its early-init before "
+                        f"apexd-bootstrap once the host says it is installed ({WIDEVINE_OVERLAY}), so apexd "
+                        "never activates it and its HAL never registers")
+    for kind, image in WIDEVINE_IMAGES.items():
+        trigger = f"{WIDEVINE_TRIGGER} && property:ro.boot.dsa.widevine_image={kind}"
+        if not any(c.startswith(f"mount erofs {image} /mnt/dsa-widevine ")
+                   for t, commands in early if t == trigger for c in commands):
+            problems.append(f"init.rc does not mount the module's image ({image}) before apexd-bootstrap "
+                            f"when the host says it is there ({kind})")
+    for trigger, commands in early:
+        if "widevine=on" not in trigger and any("dsa-widevine" in c for c in commands if c.startswith("mount ")):
+            problems.append(f"init.rc mounts Widevine's image without the host's word: {trigger}")
+    sections = rc_sections(read(WIDEVINE_RC).decode(errors="replace"))
+    if any(c.startswith("mount ") for _, commands in sections for c in commands):
+        problems.append("dsa-widevine.rc mounts something after apexd-bootstrap, where apexd no longer "
+                        "activates what appears in /vendor/apex")
+    if WIDEVINE_RESET not in dict(sections).get(WIDEVINE_OFF_TRIGGER, []):
+        problems.append("dsa-widevine.rc does not remove the certificates a removed module kept")
+    if VENDOR_SERVICE_CONTEXTS in names:
+        services = read(VENDOR_SERVICE_CONTEXTS).decode(errors="replace").splitlines()
+        if not any(line.split()[:1] == [WIDEVINE_INSTANCE] for line in services):
+            problems.append(f"vendor_service_contexts does not label {WIDEVINE_INSTANCE}, so servicemanager "
+                            "refuses the module's service")
+    policy_name = "SYSTEM/etc/selinux/plat_sepolicy.cil"
+    if policy_name in names:
+        plat = read(policy_name).decode(errors="replace")
+        vendor_name = "VENDOR/etc/selinux/vendor_sepolicy.cil"
+        vendor = read(vendor_name).decode(errors="replace") if vendor_name in names else ""
+        if not declares_type(plat, "dsa_widevine_fs"):
+            problems.append("the policy has no dsa_widevine_fs, so the module's image cannot be mounted")
+        for name in WIDEVINE_HAL_TYPES:
+            declared = [p for p in (plat, vendor) if declares_type(p, name)]
+            if not declared:
+                problems.append(f"no policy declares {name}, so Widevine's service cannot start")
+            elif len(declared) > 1:
+                problems.append(f"{name} is declared twice, so the policy does not compile")
+    return problems
+
+
 GAPPS_RC = "SYSTEM/etc/init/dsa-gapps.rc"
 GAPPS_PROPS = {
     "SYSTEM/etc/dsa/gapps-on.prop": HERE / "gapps-on.prop",
@@ -3420,6 +4393,23 @@ TRIM_PROPERTY_CONTEXT = f"{TRIM_PROPERTY} u:object_r:dsa_memory_prop:s0 exact bo
 # How many MiB the next gradual trim takes; the daemon sets it before the trim property.
 TRIM_SIZE_PROPERTY = "vendor.dsa.memory.trim_size"
 TRIM_SIZE_PROPERTY_CONTEXT = f"{TRIM_SIZE_PROPERTY} u:object_r:dsa_memory_prop:s0 exact int"
+# The zram writeback (dsa-channeld.rc): the daemon sets the budget of the run, in 4 KiB pages,
+# and then the property init acts on. init sets how long no app must be open before a
+# writeback and how long a page must go unused before it is written (dsa-memory.rc), from the
+# boot's androidboot values or the defaults, and the daemon reads them. The daemon keeps what it
+# wrote today in the persistent property, so a restart of Android does not start a new day's
+# budget.
+WRITEBACK_PROPERTY_CONTEXTS = {
+    "vendor.dsa.memory.writeback": "vendor.dsa.memory.writeback u:object_r:dsa_memory_prop:s0 exact bool",
+    "vendor.dsa.memory.writeback_pages":
+        "vendor.dsa.memory.writeback_pages u:object_r:dsa_memory_prop:s0 exact int",
+    "vendor.dsa.memory.writeback_after":
+        "vendor.dsa.memory.writeback_after u:object_r:dsa_memory_prop:s0 exact int",
+    "vendor.dsa.memory.writeback_age":
+        "vendor.dsa.memory.writeback_age u:object_r:dsa_memory_prop:s0 exact int",
+    "persist.vendor.dsa.memory.writeback_day":
+        "persist.vendor.dsa.memory.writeback_day u:object_r:dsa_memory_prop:s0 exact string",
+}
 # init sets this when Android has finished booting, and the daemon tells the host.
 BOOT_PROPERTY = "vendor.dsa.boot_completed"
 BOOT_PROPERTY_CONTEXT = f"{BOOT_PROPERTY} u:object_r:dsa_boot_prop:s0 exact bool"
@@ -3438,6 +4428,17 @@ FILES_PROPERTY_CONTEXT = f"{FILES_PROPERTY} u:object_r:dsa_files_prop:s0 exact s
 # to 0 when it is off; dsa-channeld.rc starts and stops the elevation helper to match (su.cil).
 ROOT_ELEVATION_PROPERTY = "vendor.dsa.root_elevation"
 ROOT_ELEVATION_PROPERTY_CONTEXT = f"{ROOT_ELEVATION_PROPERTY} u:object_r:dsa_root_elevation_prop:s0 exact bool"
+# dsa-channeld sets this to "on" while the host answers the guest's DNS queries and to "off"
+# when it stays unreachable; dsa-channeld.rc has dsa-channeld --dns-redirect send every DNS
+# query to the daemon's stub, or stop doing so, to match (channeld.cil).
+DNS_PROPERTY = "vendor.dsa.dns"
+DNS_PROPERTY_CONTEXT = f"{DNS_PROPERTY} u:object_r:dsa_dns_prop:s0 exact enum on off"
+# dsa-channeld names the apps that see the computer's memory as the device's (Google Play) in
+# this, from the package manager's list, and dsa-memory.rc hands it to the kernel (memory.cil).
+HOST_MEMORY_PROPERTY = "vendor.dsa.host_memory.uids"
+HOST_MEMORY_PROPERTY_CONTEXT = f"{HOST_MEMORY_PROPERTY} u:object_r:dsa_host_memory_prop:s0 exact string"
+DNS_REDIRECT_SERVICE = "service dsa_dns_redirect /vendor/bin/dsa-channeld --dns-redirect"
+DNS_REDIRECT_TRIGGER = f"on property:{DNS_PROPERTY}=*"
 # Root elevation's su client. It is a system file, where an app's PATH and the kernel's su
 # guard look for su, labelled with a type of its own so the policy lets apps run that file
 # alone (su.cil). The label goes in only with the daemon, whose policy declares the type.
@@ -3445,6 +4446,11 @@ PLAT_FILE_CONTEXTS = "SYSTEM/etc/selinux/plat_file_contexts"
 SU_CLIENT_BINARY = "SYSTEM/bin/su"
 SU_CLIENT_PATH = "/system/bin/su"
 SU_CLIENT_CONTEXT = f"{SU_CLIENT_PATH} u:object_r:dsa_su_exec:s0"
+# zram's backing file, /data/per_boot/zram_swap (fstab.dsa), and its folder, which
+# dsa-zram-backing.rc makes. A type of its own (memory.cil), so the loop driver may read and
+# write it and nothing else may open it. memory.cil is in every image, so the label is too.
+ZRAM_BACKING_PATH = "/data/per_boot(/.*)?"
+ZRAM_BACKING_CONTEXT = f"{ZRAM_BACKING_PATH} u:object_r:dsa_zram_backing_file:s0"
 # The userdebug target_files build ships AOSP's own setuid su at /system/xbin/su (mode 04750,
 # root:shell). Even when the kernel's su guard hides its inode in LSM hooks, generic VFS
 # permission checks run DAC (generic_permission) before security_inode_permission, so an
@@ -3475,6 +4481,31 @@ CHANNEL_INSTANCE = "io.github.thisisthepy.dsa.channel.IChannel/default"
 CHANNEL_MANIFEST = "VENDOR/etc/vintf/manifest/dsa-channel.xml"
 VENDOR_SERVICE_CONTEXTS = "VENDOR/etc/selinux/vendor_service_contexts"
 CHANNEL_SERVICE_CONTEXT = f"{CHANNEL_INSTANCE} u:object_r:dsa_channel_service:s0"
+# KeyMint's root key from the host: dsa-channeld --keymint-key, which dsa-channeld.rc defines,
+# writes it to a tmpfs folder that a system script makes and starts it for on init (as init:
+# a vendor script's mkdir runs as vendor_init). The folder's label lets only KeyMint's domain
+# read the key (channeld.cil).
+KEYMINT_KEY_RC = "SYSTEM/etc/init/dsa-keymint-key.rc"
+KEYMINT_KEY_SERVICE = "service dsa_keymint_key /vendor/bin/dsa-channeld --keymint-key"
+KEYMINT_KEY_DIR = "/dev/dsa_keymint"
+KEYMINT_KEY_CONTEXT = f"{KEYMINT_KEY_DIR}(/.*)? u:object_r:dsa_keymint_key_file:s0"
+# The root certificates a user or administrator added to the host, among Android's system
+# certificates: a system script (as init, which alone may mount over a system folder) makes a
+# tmpfs folder, runs dsa-channeld --cacerts-setup (dsa-channeld.rc) to copy Android's two
+# certificate folders into it, and binds each copy over the original before the zygote starts.
+# The daemon then adds the host's roots there. The folder's label lets the daemon write in it
+# and every domain read it (cacerts.cil).
+CACERTS_RC = "SYSTEM/etc/init/dsa-cacerts.rc"
+CACERTS_SERVICE = "service dsa_cacerts_setup /vendor/bin/dsa-channeld --cacerts-setup"
+CACERTS_DIR = "/dev/dsa_cacerts"
+CACERTS_CONTEXT = f"{CACERTS_DIR}(/.*)? u:object_r:dsa_cacerts_file:s0"
+CACERTS_SCRIPT = [
+    "on post-fs-data",
+    f"    mkdir {CACERTS_DIR} 0755 system system",
+    "    exec_start dsa_cacerts_setup",
+    f"    mount none {CACERTS_DIR}/conscrypt /apex/com.android.conscrypt/cacerts bind",
+    f"    mount none {CACERTS_DIR}/system /system/etc/security/cacerts bind",
+]
 # The agent: a privileged app in system_ext, signed with the platform key, which reports
 # each app task to the host and starts and ends tasks for it. The framework refuses to boot
 # when a privileged app requests a privileged permission its allowlist does not grant.
@@ -3486,6 +4517,11 @@ AGENT_PERMISSIONS_SOURCE = REPO / "dsa/guest/agent/privapp-permissions-dsa-agent
 # Android/obb/, where the agent puts the expansion files of the apps the host installs.
 AGENT_DEFAULT_PERMISSIONS = "SYSTEM_EXT/etc/default-permissions/default-permissions-dsa-agent.xml"
 AGENT_DEFAULT_PERMISSIONS_SOURCE = REPO / "dsa/guest/agent/default-permissions-dsa-agent.xml"
+# The agent's system configuration: Android's backup manager uses a backup transport only when
+# a sysconfig file lists it, so this one names the agent's, which keeps app data in the host's
+# backup folder.
+AGENT_SYSCONFIG = "SYSTEM_EXT/etc/sysconfig/sysconfig-dsa-agent.xml"
+AGENT_SYSCONFIG_SOURCE = REPO / "dsa/guest/agent/sysconfig-dsa-agent.xml"
 AGENT_APKCERTS = (
     'name="DsaAgent.apk" certificate="build/make/target/product/security/platform.x509.pem" '
     'private_key="build/make/target/product/security/platform.pk8" partition="system_ext"'
@@ -3504,7 +4540,32 @@ FRAMEWORK_OVERLAY_PACKAGE = "io.github.thisisthepy.dsa.overlay.framework"
 # (activity_manager/max_cached_processes, which the agent sets to the same value) and else from
 # this resource; the global setting activity_manager_constants no longer carries it. The
 # resource holds from the first boot, before the agent runs.
-FRAMEWORK_OVERLAY_INTEGERS = {"config_tapTimeoutMillis": 0, "config_customizedMaxCachedProcesses": 8}
+#
+# Nothing is pinned. system_server's PinnerService maps the home app (the agent, here) and
+# WebView into its own memory and locks them there with mlock: up to 60 MiB of the home app's
+# APK and 20 MiB of WebView's, each with its odex, vdex and app image on top, which only a
+# global limit of a tenth of the guest's memory bounds. It is meant to keep a phone's launcher
+# and WebView quick to start under memory pressure. Locked pages are neither reclaimed nor
+# compressed into zram, so the idle reclaim could not hand them back and the host kept them
+# for the whole session, and they counted in system_server's PSS. Unlocked, they are page
+# cache like any app's code: read back from the disk in a few milliseconds when the agent or
+# a WebView needs them again, and given back while Android idles. The global limit at 0 keeps
+# anything else (the camera or assistant pins a device may turn on) from pinning either.
+PINNER_OVERLAY_INTEGERS = {
+    "config_pinnerHomePinBytes": 0,
+    "config_pinnerWebviewPinBytes": 0,
+    "config_pinnerMaxPinnedMemoryPercentage": 0,
+}
+# The navigation bar band along each task's bottom edge is the gesture navigation one
+# (NAVIGATION_BAR_DIMENS: 24 dp), so the navigation mode is gestural too (2, as AOSP's gesture
+# navigation overlay sets it). Left at three-button (0), the framework drew its contrast scrim
+# behind the band of an edge-to-edge app: a translucent white bar under YouTube's dark Shorts
+# player and under the Play Store's and FLO's bottom bars. A gesture phone draws no scrim, so
+# the band shows the app's own colour.
+NAVIGATION_MODE_GESTURAL = 2
+FRAMEWORK_OVERLAY_INTEGERS = {"config_tapTimeoutMillis": 0, "config_customizedMaxCachedProcesses": 8,
+                              "config_navBarInteractionMode": NAVIGATION_MODE_GESTURAL,
+                              **PINNER_OVERLAY_INTEGERS}
 # The user's aspect ratio override of an app, which Settings offers on the app's aspect ratio
 # page and a task window's system menu opens. The window manager applies the override only
 # while this flag is on, and Android leaves it off unless a device turns it on, as large
@@ -3522,11 +4583,25 @@ FRAMEWORK_OVERLAY_INTEGERS = {"config_tapTimeoutMillis": 0, "config_customizedMa
 # service version. The agent is the geocode provider only without Google Play: these values
 # name it, and the Google apps overlay (GAPPS_FRAMEWORK_OVERLAY) names Google's geocoder instead
 # on a boot with the Google apps image.
+#
+# The navigation bar band along each task's bottom edge (see NAVIGATION_BAR_DIMENS) is
+# transparent, as on a gesture navigation phone, so an app's own background reaches the
+# window's bottom edge. An app that does not draw behind the navigation bar gets the
+# background Android draws for it there (DecorView's navigation bar colour view), in the
+# navigation bar colour its theme or code sets. With none set, Android paints it black
+# (navigation_bar_compatible) unless config_navBarDefaultTransparent says the default is
+# transparent, and over a transparent colour it draws a translucent scrim for contrast unless
+# config_navBarNeedsScrim says the bar needs none. AOSP's gesture navigation overlay sets both
+# the way they are here, so the band shows the app's window background, not a black or grey
+# strip. An app that sets a navigation bar colour of its own gets that colour there, as on a
+# gesture navigation phone; one targeting Android 15 or later always draws behind the bar.
 FRAMEWORK_OVERLAY_BOOLEANS = {
     "config_appCompatUserAppAspectRatioSettingsIsEnabled": True,
     "config_checkWallpaperAtBoot": False,
     "config_enableNetworkLocationOverlay": False,
     "config_enableGeocoderOverlay": False,
+    "config_navBarDefaultTransparent": True,
+    "config_navBarNeedsScrim": False,
 }
 # The device configurator: the package the framework lets write DeviceConfig, Android's server
 # flags (WRITE_DEVICE_CONFIG and WRITE_ALLOWLISTED_DEVICE_CONFIG are "configurator"
@@ -3555,6 +4630,81 @@ GAPPS_FRAMEWORK_OVERLAY = {
     "bool/config_enableGeocoderOverlay": False,
     "string/config_geocoderProviderPackageName": GAPPS_GEOCODER_PACKAGE,
 }
+# The host window's title bar is Android's status bar (see SERVICES_INSETS_CODE): many apps
+# take the status bar's height from the framework's resources (getIdentifier("status_bar_height",
+# "dimen", "android"), or SystemBarUtils' status_bar_height_default) rather than from their
+# window's insets, and pad their own status bar background and toolbar by it, as they would on
+# a phone. These resources are the title bar's height, so such an app also stays clear of it.
+#
+# The host draws the title bar at the height a standard window's caption and top border have
+# at the monitor's DPI (STATUS_BAR_TITLE_HEIGHTS, read from AdjustWindowRectExForDpi on the
+# Windows host with the default theme), and Android draws at 131 times the monitor's scale,
+# rounded and made even (status_bar_density, as the host's density_for_dpi). The title bar is
+# then 34.0 to 38.2 dp high depending on the scale (35.4 dp at 200%), so each density Android draws at on a
+# monitor scale gets its own value, which getDimensionPixelSize rounds to the title bar's
+# pixels exactly. Android picks the nearest density for a task that draws at another one (an
+# app that keeps its density on a monitor of another scale), which differs from the title bar
+# by at most a few dp. The values without a density are the highest, at a scale of 100%, so
+# an app never pads less than the title bar.
+STATUS_BAR_TITLE_HEIGHTS = {96: 31, 120: 38, 144: 45, 168: 52, 192: 58, 216: 65, 240: 72, 264: 79,
+                            288: 85, 336: 99, 384: 112, 432: 126, 480: 139}
+STATUS_BAR_DIMENS = ["status_bar_height", "status_bar_height_default", "status_bar_height_portrait",
+                     "status_bar_height_landscape"]
+
+
+def status_bar_density(dpi):
+    """The density Android draws at on a monitor of `dpi`: 131 x the scale, rounded to the
+    nearest dpi and then down to an even number."""
+    return ((dpi * 131 + 48) // 96) & ~1
+
+
+def status_bar_heights():
+    """{density: dp}: the status bar height for each density Android draws at on a monitor
+    scale, the title bar's height there in dp."""
+    return {status_bar_density(dpi): px * BASE_DENSITY / status_bar_density(dpi)
+            for dpi, px in STATUS_BAR_TITLE_HEIGHTS.items()}
+
+
+def status_bar_overlay_files():
+    """The framework overlay's status bar height values: {path: XML}, one values folder per
+    density and the default one."""
+    heights = status_bar_heights()
+
+    def values(dp):
+        return resources_xml([f'<dimen name="{name}">{dp:.4f}dp</dimen>' for name in STATUS_BAR_DIMENS])
+
+    files = {"res/values/dsa_status_bar.xml": values(max(heights.values()))}
+    for density, dp in sorted(heights.items()):
+        files[f"res/values-{density}dpi/dsa_status_bar.xml"] = values(dp)
+    return files
+
+
+# The host has no Android navigation bar, but the agent gives every task a navigation bar inset
+# 24 dp high along its bottom edge, as AOSP's gesture navigation overlay gives a phone
+# (navigation_bar_height 24dp), because phone apps lay out their bottom bars and the ends of
+# their lists for one. Apps that take the navigation bar's height from the framework's
+# resources rather than from their insets read these, so they are 24 dp too. Android sets
+# them to 48 dp, and to 56 dp from a smallest width of 900 dp, which the guest's display has:
+# the device reported 56 dp while the inset was 0. The overlay gives each a value in both of
+# those configurations, so neither of Android's is used. navigation_bar_frame_height (and its
+# landscape value) is what Android's window manager lays the navigation bar window out at, and
+# apps read it as the bar's height as well.
+NAVIGATION_BAR_HEIGHT_DP = 24
+NAVIGATION_BAR_DIMENS = ["navigation_bar_height", "navigation_bar_height_landscape",
+                         "navigation_bar_frame_height", "navigation_bar_frame_height_landscape"]
+# The smallest widths framework-res gives navigation_bar_height a value of its own at (0: any).
+NAVIGATION_BAR_SMALLEST_WIDTHS = [0, 900]
+
+
+def navigation_bar_overlay_files():
+    """The framework overlay's navigation bar height values: {path: XML}, one values folder
+    for each of NAVIGATION_BAR_SMALLEST_WIDTHS."""
+    xml = resources_xml([f'<dimen name="{name}">{NAVIGATION_BAR_HEIGHT_DP}dp</dimen>'
+                         for name in NAVIGATION_BAR_DIMENS])
+    return {f"res/values{f'-sw{sw}dp' if sw else ''}/dsa_navigation_bar.xml": xml
+            for sw in NAVIGATION_BAR_SMALLEST_WIDTHS}
+
+
 FRAMEWORK_OVERLAY_APKCERTS = (
     'name="DsaFrameworkOverlay.apk" certificate="build/make/target/product/security/platform.x509.pem" '
     'private_key="build/make/target/product/security/platform.pk8" partition="vendor"'
@@ -3573,27 +4723,17 @@ SETTINGS_OVERLAY_PACKAGE = "io.github.thisisthepy.dsa.overlay.settings"
 SETTINGS_OVERLAY_TARGET = "com.android.settings"
 SETTINGS_BACK_ICON = "settingslib_expressive_icon_back"
 SETTINGS_BACK_INSET_DP = 8
-# The same overlay gives Settings' preference lists room below their last row, about what a
-# phone's navigation bar leaves there. A DSA window has no navigation bar and the guest
-# reports no bottom inset, and that inset is the only space Settings keeps under a list, so
-# the last row sat on the window's bottom edge. The space is the list's own, like an app's
-# content margin; nothing tells apps there is a navigation bar. The home page
-# (TopLevelSettings) sets its list's padding in code, which replaces this layout's: on Android
-# 16 that call is skipped, and Android 17 takes the padding it gives a freeform window from
-# dashboard_padding_bottom, which this overlay sets too (SETTINGS_CODE_LIST_MARGIN).
-SETTINGS_LIST_LAYOUT = "preference_recyclerview"
-SETTINGS_LIST_STYLE_ATTR = "preferenceFragmentListStyle"
-SETTINGS_LIST_BOTTOM_MARGIN_DP = LIST_BOTTOM_MARGIN_DP
+# Settings' lists keep the room a phone's navigation bar leaves below their last row from the
+# navigation bar inset alone (SettingsLib's EdgeToEdgeUtils pads the content view by it), and
+# every task has that inset, 24 dp, so the overlay leaves their layouts as they are.
+#
 # The overlay names what it replaces in a resource map (android:resourcesMap) instead of by
-# matching names. Only then does the framework rewrite the overlay layout's references to
-# its own id and attribute into Settings' ids, which the code and the theme look up. The
-# id and the attribute map onto themselves: nothing reads their values.
+# matching names. Only then does the framework rewrite the overlay layouts' references to
+# their own ids and attributes into Settings' ids, which the code and the theme look up. The
+# ids and the attributes map onto themselves: nothing reads their values.
 SETTINGS_OVERLAY_MAP = "dsa_overlay"
 SETTINGS_OVERLAID = [
     f"drawable/{SETTINGS_BACK_ICON}",
-    f"layout/{SETTINGS_LIST_LAYOUT}",
-    "id/recycler_view",
-    f"attr/{SETTINGS_LIST_STYLE_ATTR}",
 ]
 # SettingsLib's arrow (packages/SettingsLib/CollapsingToolbarBaseActivity, Android 16).
 SETTINGS_BACK_ARROW = (
@@ -3646,13 +4786,14 @@ FRAMEWORK_RES = "SYSTEM/framework/framework-res.apk"
 SYSTEM_OVERLAYS = [
     {"apk": "DsaFrameworkOverlay.apk", "package": FRAMEWORK_OVERLAY_PACKAGE, "target": "android",
      "target_apk": FRAMEWORK_RES,
-     "without": "a press on a list row shows only after the 100 ms tap timeout, and the framework's "
-                "dialogs, toasts and colours keep Android's own look"},
+     "without": "a press on a list row shows only after the 100 ms tap timeout, the framework's "
+                "dialogs, toasts and colours keep Android's own look, apps that pad by the status or "
+                "navigation bar heights do not line up with the window, and a strip shows along the "
+                "bottom of apps that do not draw behind the navigation bar"},
     {"apk": "DsaSettingsOverlay.apk", "package": SETTINGS_OVERLAY_PACKAGE, "target": SETTINGS_OVERLAY_TARGET,
      "target_apk": "/priv-app/Settings/Settings.apk",
-     "without": "Settings' back button shows its hover and ripple 8 dp left of its circle, the last row "
-                "of a Settings list sits on the window's bottom edge, and Settings has no large title "
-                "or rounded cards"},
+     "without": "Settings' back button shows its hover and ripple 8 dp left of its circle, and Settings "
+                "has no large title or rounded cards"},
     {"apk": "DsaDocumentsUiOverlay.apk", "package": "io.github.thisisthepy.dsa.overlay.documentsui",
      "target": "com.android.documentsui", "target_apk": "/priv-app/DocumentsUI/DocumentsUI.apk",
      "without": "Files keeps its old look instead of the rounded one"},
@@ -3869,12 +5010,14 @@ AGENT_FS_CONFIG = [
     "system_ext/etc/permissions/privapp-permissions-dsa-agent.xml 0 0 644 capabilities=0x0",
     "system_ext/etc/default-permissions 0 0 755 capabilities=0x0",
     "system_ext/etc/default-permissions/default-permissions-dsa-agent.xml 0 0 644 capabilities=0x0",
+    "system_ext/etc/sysconfig 0 0 755 capabilities=0x0",
+    "system_ext/etc/sysconfig/sysconfig-dsa-agent.xml 0 0 644 capabilities=0x0",
 ]
 
 
 def update_vendor_file_contexts(fc_text, channeld=False, hwcomposer=False, power=False, codec2=False,
                                 audio=False, gnss=False, sensors=False,
-                                camera=False):
+                                camera=False, keymint=False):
     """Adds same_process_hal_file contexts for guest graphics libraries if not present, and
     opens the DRM cards to every graphics client.
 
@@ -3897,6 +5040,10 @@ def update_vendor_file_contexts(fc_text, channeld=False, hwcomposer=False, power
         entries.append((r"/vendor/bin/dsa-channeld", CHANNELD_CONTEXT))
         # The elevation helper's sockets: init gives a socket file the label its path has here.
         entries += SU_SOCKET_CONTEXTS
+        # KeyMint's root key, readable only by KeyMint.
+        entries.append((f"{KEYMINT_KEY_DIR}(", KEYMINT_KEY_CONTEXT))
+        # The host's root certificates, which the daemon writes and every domain reads.
+        entries.append((f"{CACERTS_DIR}(", CACERTS_CONTEXT))
     if hwcomposer:
         entries.append((r"/vendor/bin/hw/dsa-hwcomposer", HWCOMPOSER_CONTEXT))
     if power:
@@ -3907,6 +5054,8 @@ def update_vendor_file_contexts(fc_text, channeld=False, hwcomposer=False, power
         entries.append((r"/vendor/bin/hw/dsa-audio", AUDIO_CONTEXT))
     if gnss:
         entries.append((r"/vendor/bin/hw/dsa-gnss", GNSS_CONTEXT))
+    if keymint:
+        entries.append((r"/vendor/bin/hw/dsa-keymint", KEYMINT_CONTEXT))
     if sensors:
         entries.append((r"/vendor/bin/hw/dsa-sensors", SENSORS_CONTEXT))
     if camera:
@@ -3943,6 +5092,9 @@ def update_vendor_property_contexts(text):
         lines.append(TRIM_PROPERTY_CONTEXT)
     if not any(line.split()[:1] == [TRIM_SIZE_PROPERTY] for line in lines):
         lines.append(TRIM_SIZE_PROPERTY_CONTEXT)
+    for name, context in WRITEBACK_PROPERTY_CONTEXTS.items():
+        if not any(line.split()[:1] == [name] for line in lines):
+            lines.append(context)
     if not any(line.split()[:1] == [BOOT_PROPERTY] for line in lines):
         lines.append(BOOT_PROPERTY_CONTEXT)
     if not any(line.split()[:1] == [ADB_PROPERTY] for line in lines):
@@ -3953,9 +5105,21 @@ def update_vendor_property_contexts(text):
         lines.append(FILES_PROPERTY_CONTEXT)
     if not any(line.split()[:1] == [ROOT_ELEVATION_PROPERTY] for line in lines):
         lines.append(ROOT_ELEVATION_PROPERTY_CONTEXT)
+    if not any(line.split()[:1] == [DNS_PROPERTY] for line in lines):
+        lines.append(DNS_PROPERTY_CONTEXT)
+    if not any(line.split()[:1] == [HOST_MEMORY_PROPERTY] for line in lines):
+        lines.append(HOST_MEMORY_PROPERTY_CONTEXT)
     for name, context in GAPPS_COMPILE_PROPERTY_CONTEXTS.items():
         if not any(line.split()[:1] == [name] for line in lines):
             lines.append(context)
+    return "\n".join(lines) + "\n"
+
+
+def with_zram_backing_context(fc_text):
+    """Labels zram's backing folder (ZRAM_BACKING_CONTEXT) in plat_file_contexts. A line the
+    build already has for the same path goes: a second specification for it would conflict."""
+    lines = [line for line in fc_text.splitlines() if line.split()[:1] != [ZRAM_BACKING_PATH]]
+    lines.append(ZRAM_BACKING_CONTEXT)
     return "\n".join(lines) + "\n"
 
 
@@ -4005,7 +5169,7 @@ def add_filesystem_config(fs_config_text, rules):
 
 def update_vendor_filesystem_config(fs_config_text, channeld=False, hwcomposer=False, power=False,
                                     codec2=False, audio=False, gnss=False, sensors=False,
-                                    camera=False):
+                                    camera=False, keymint=False):
     """Adds filesystem configuration entries for the files DSA adds to vendor if not present."""
     lines = fs_config_text.splitlines()
     entries = [
@@ -4015,6 +5179,9 @@ def update_vendor_filesystem_config(fs_config_text, channeld=False, hwcomposer=F
         ("vendor/etc/init/dsa-display.rc", "vendor/etc/init/dsa-display.rc 0 0 644 capabilities=0x0"),
         ("vendor/etc/selinux/vendor_property_contexts",
          "vendor/etc/selinux/vendor_property_contexts 0 0 644 capabilities=0x0"),
+        # Always labels Widevine's service, so it is always there.
+        ("vendor/etc/selinux/vendor_service_contexts",
+         "vendor/etc/selinux/vendor_service_contexts 0 0 644 capabilities=0x0"),
         ("vendor/etc/permissions/dsa-unavailable-features.xml",
          "vendor/etc/permissions/dsa-unavailable-features.xml 0 0 644 capabilities=0x0"),
     ]
@@ -4024,8 +5191,6 @@ def update_vendor_filesystem_config(fs_config_text, channeld=False, hwcomposer=F
             ("vendor/etc/init/dsa-channeld.rc", "vendor/etc/init/dsa-channeld.rc 0 0 644 capabilities=0x0"),
             ("vendor/etc/vintf/manifest/dsa-channel.xml",
              "vendor/etc/vintf/manifest/dsa-channel.xml 0 0 644 capabilities=0x0"),
-            ("vendor/etc/selinux/vendor_service_contexts",
-             "vendor/etc/selinux/vendor_service_contexts 0 0 644 capabilities=0x0"),
         ]
     if hwcomposer:
         entries += [
@@ -4046,6 +5211,11 @@ def update_vendor_filesystem_config(fs_config_text, channeld=False, hwcomposer=F
             ("vendor/bin/hw/dsa-audio", "vendor/bin/hw/dsa-audio 0 2000 755 capabilities=0x0"),
             ("vendor/etc/init/dsa-audio.rc", "vendor/etc/init/dsa-audio.rc 0 0 644 capabilities=0x0"),
         ]
+    if keymint:
+        for name in KEYMINT_FILES + [KEYMINT_RC]:
+            path = "vendor/" + name.split("/", 1)[1]
+            mode = "0 2000 755" if "/bin/" in path else "0 0 644"
+            entries.append((path, f"{path} {mode} capabilities=0x0"))
     for path, rule in entries:
         if not any(line.startswith(path + " ") for line in lines):
             lines.append(rule)
@@ -4072,8 +5242,11 @@ KERNEL_POLICY = HERE / "sepolicy/kernel.cil"
 ARM_TRANSLATION_POLICY = HERE / "sepolicy/arm-translation.cil"
 GAPPS_POLICY = HERE / "sepolicy/gapps.cil"
 ADDONS_POLICY = HERE / "sepolicy/addons.cil"
+WIDEVINE_POLICY = HERE / "sepolicy/widevine.cil"
+WIDEVINE_HAL_POLICY = HERE / "sepolicy/widevine-hal.cil"
 GPU_RESET_POLICY = HERE / "sepolicy/gpu-reset.cil"
 SU_POLICY = HERE / "sepolicy/su.cil"
+CACERTS_POLICY = HERE / "sepolicy/cacerts.cil"
 
 # What root elevation needs of the policy, each with what goes wrong without it.
 ROOT_ELEVATION_RULES = {
@@ -4184,6 +5357,135 @@ def root_elevation_problems(names, read):
             problems.append(f"vendor_file_contexts lacks \"{context}\", so init makes the socket with a label "
                             "its clients may not write")
     return problems
+
+
+def dns_problems(names, read):
+    """Returns what an image with the daemon lacks for the guest's DNS to be answered by the
+    host's resolver: the redirect service that sends DNS queries to the daemon's stub, as root
+    in its own domain and started whenever the daemon switches it, and the type of the property
+    that switches it. A trigger of the vendor script on a service's state (init.svc.*) is named
+    too: vendor_init may not read those properties, so init drops the whole action at boot."""
+    problems = []
+    rc = read(CHANNELD_RC).decode().splitlines() if CHANNELD_RC in names else []
+    for line, why in [
+        (DNS_REDIRECT_SERVICE, "the guest's DNS queries never reach the host's resolver"),
+        ("    user root", "the packet filter cannot be changed"),
+        ("    seclabel u:r:dsa_dns_redirect:s0", "the redirect runs outside its own domain"),
+        (DNS_REDIRECT_TRIGGER, "nothing starts the redirect when the daemon switches it"),
+    ]:
+        if line not in rc:
+            problems.append(f"{CHANNELD_RC} lacks \"{line.strip()}\", so {why}")
+    for line in rc:
+        if line.startswith("on ") and "property:init.svc." in line:
+            problems.append(f"{CHANNELD_RC} has \"{line}\", which init drops as an unexported property "
+                            "trigger, so nothing it lists ever runs")
+    if VENDOR_PROPERTY_CONTEXTS in names and DNS_PROPERTY_CONTEXT not in read(
+            VENDOR_PROPERTY_CONTEXTS).decode().splitlines():
+        problems.append(f"vendor_property_contexts does not give {DNS_PROPERTY} its type, so the daemon "
+                        "cannot switch the guest's DNS to the host's resolver")
+    return problems
+
+
+def keymint_key_problems(names, read):
+    """Returns what an image with the daemon lacks for KeyMint's root key from the host: the
+    service that fetches it, in its own domain as KeyMint's user, the system script that makes
+    its tmpfs folder and starts it before KeyMint, the folder's label, and the policy that lets
+    only KeyMint read the key."""
+    problems = []
+    rc = read(CHANNELD_RC).decode().splitlines() if CHANNELD_RC in names else []
+    for line, why in [
+        (KEYMINT_KEY_SERVICE, "nothing fetches KeyMint's root key from the host"),
+        ("    user nobody", "the key file is not KeyMint's user's"),
+        ("    seclabel u:r:dsa_keymint_key:s0", "the key is fetched outside its own domain"),
+        ("    oneshot", "init would ask the host for the key again, which it refuses"),
+    ]:
+        if line not in rc:
+            problems.append(f"{CHANNELD_RC} lacks \"{line.strip()}\", so {why}")
+    if KEYMINT_KEY_RC not in names:
+        problems.append(f"{KEYMINT_KEY_RC} is missing, so KeyMint's root key has no folder and is never fetched")
+    else:
+        script = read(KEYMINT_KEY_RC).decode().splitlines()
+        for line in ["on init", f"    mkdir {KEYMINT_KEY_DIR} 0700 nobody nobody", "    start dsa_keymint_key"]:
+            if line not in script:
+                problems.append(f"{KEYMINT_KEY_RC} lacks \"{line.strip()}\", so the key is not there "
+                                "before KeyMint starts")
+    contexts = (read("VENDOR/etc/selinux/vendor_file_contexts").decode().splitlines()
+                if "VENDOR/etc/selinux/vendor_file_contexts" in names else [])
+    if KEYMINT_KEY_CONTEXT not in contexts:
+        problems.append(f"vendor_file_contexts lacks \"{KEYMINT_KEY_CONTEXT}\", so the key's folder has a "
+                        "label other domains may read")
+    if "SYSTEM/etc/selinux/plat_sepolicy.cil" in names:
+        policy = read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+        for rule, why in [
+            ("(typeattributeset domain (dsa_keymint_key))", "the key is fetched in no domain of its own"),
+            ("(allow hal_keymint_server dsa_keymint_key_file (file (read open getattr)))",
+             "KeyMint cannot read its key"),
+        ]:
+            if rule not in policy:
+                problems.append(f"the SELinux policy lacks {rule}, so {why}")
+        readers = re.findall(r"\(allow\s+(\S+)\s+dsa_keymint_key_file\s+\(\s*file\s+\(([^)]*)\)", policy)
+        others = sorted({who for who, perms in readers if "read" in perms.split() and who != "hal_keymint_server"})
+        if others:
+            problems.append(f"the SELinux policy lets {', '.join(others)} read KeyMint's root key")
+    return problems
+
+
+def cacerts_problems(names, read):
+    """Returns what an image with the daemon lacks for the host's root certificates among
+    Android's system certificates: the setup service, the system script that makes the tmpfs
+    folder, runs the setup and binds the copies over Android's folders, the folder's label, and
+    the policy that lets the daemon write there and every domain read it."""
+    problems = []
+    rc = read(CHANNELD_RC).decode() if CHANNELD_RC in names else ""
+    service = rc[rc.find(CACERTS_SERVICE):].split("\n\n", 1)[0].splitlines() if CACERTS_SERVICE in rc else []
+    if not service:
+        problems.append(f"{CHANNELD_RC} lacks \"{CACERTS_SERVICE}\", so nothing copies Android's certificates "
+                        "into the folders the host's roots go in")
+    for line, why in [
+        ("    user system", "the daemon, which runs as system, cannot write the copies"),
+        ("    oneshot", "init would copy the certificates again whenever the setup exits"),
+    ]:
+        if service and line not in service:
+            problems.append(f"{CHANNELD_RC} lacks \"{line.strip()}\" for the setup, so {why}")
+    if CACERTS_RC not in names:
+        problems.append(f"{CACERTS_RC} is missing, so Android never trusts the root certificates the host added")
+    else:
+        script = read(CACERTS_RC).decode().splitlines()
+        for line in CACERTS_SCRIPT:
+            if line not in script:
+                problems.append(f"{CACERTS_RC} lacks \"{line.strip()}\", so the host's root certificates do not "
+                                "reach Android's system certificates before the zygote starts")
+    contexts = (read("VENDOR/etc/selinux/vendor_file_contexts").decode().splitlines()
+                if "VENDOR/etc/selinux/vendor_file_contexts" in names else [])
+    if CACERTS_CONTEXT not in contexts:
+        problems.append(f"vendor_file_contexts lacks \"{CACERTS_CONTEXT}\", so the certificate folders have a "
+                        "label apps may not read and the daemon may not write")
+    if "SYSTEM/etc/selinux/plat_sepolicy.cil" in names:
+        policy = read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
+        for rule, why in CACERTS_RULES.items():
+            if rule not in policy:
+                problems.append(f"the SELinux policy lacks {rule}, so {why}")
+        rules = re.findall(r"\(allow\s+(\S+)\s+dsa_cacerts_file\s+\(\s*file\s+\(([^)]*)\)", policy)
+        others = sorted({who for who, perms in rules
+                         if {"write", "create", "append"} & set(perms.split()) and who != "dsa_channeld"})
+        if others:
+            problems.append(f"the SELinux policy lets {', '.join(others)} write Android's system certificates")
+    return problems
+
+
+# What the host's root certificates need of the policy, each with what goes wrong without it.
+CACERTS_RULES = {
+    "(allow dsa_channeld dsa_cacerts_file (file (create read write open getattr setattr rename unlink)))":
+        "the daemon cannot add or take away the host's root certificates",
+    "(allow domain dsa_cacerts_file (file (read open getattr map)))":
+        "apps cannot read Android's system certificates once the copies are bound over them",
+    "(allow domain dsa_cacerts_file (dir (search getattr read open)))":
+        "apps cannot look a certificate up in the bound folders",
+    "(allow init dsa_cacerts_file (dir (create search getattr setattr open read write add_name relabelto mounton)))":
+        "init cannot make the folder or bind it",
+    "(allow init system_security_cacerts_file (dir (mounton)))":
+        "init cannot bind the copies over Android's certificate folders",
+}
 
 
 # Shared memory is a memfd in the guest (memory.cil), labelled with the tmpfs type of the
@@ -4351,6 +5653,20 @@ def policy_sources(cil_map, vendor_version, genfs_version):
     return [key for key in keys if key in cil_map]
 
 
+def conflicting_genfscon(policy_text):
+    """The (filesystem, path) pairs that genfscon labels with two different contexts. secilc
+    refuses a policy with any, so init cannot load it and Android does not boot."""
+    labels = {}
+    twice = []
+    for m in re.finditer(r'^\(genfscon\s+(\S+)\s+"?([^"\s]+)"?\s+(.*)$', policy_text, re.M):
+        pair = (m.group(1), m.group(2))
+        context = " ".join(m.group(3).split())
+        if pair in labels and labels[pair] != context and pair not in twice:
+            twice.append(pair)
+        labels.setdefault(pair, context)
+    return twice
+
+
 def recompile_precompiled_sepolicy(otatools, cil_map, vendor_version, genfs_version, work_dir=None):
     """Recompiles precompiled_sepolicy with secilc from otatools if available."""
     if not otatools:
@@ -4392,7 +5708,10 @@ def recompile_precompiled_sepolicy(otatools, cil_map, vendor_version, genfs_vers
             res = subprocess.run(cmd, capture_output=True, text=True)
             if res.returncode == 0 and out_policy.exists():
                 return out_policy.read_bytes()
-            print(f"secilc failed (code {res.returncode}): {res.stderr}")
+            # init compiles the same CIL at boot when the precompiled policy does not match, and
+            # would fail the same way, so an image that fails here would not boot.
+            raise SystemExit(f"the SELinux policy does not compile (secilc code {res.returncode}), "
+                             f"so Android would not boot: {res.stderr.strip()}")
         except Exception as e:
             print(f"Could not execute secilc: {e}")
         return None
@@ -4402,7 +5721,7 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
            agent=None, hwcomposer=None, framework_overlay=None, settings_overlay=None, power_hal=None,
            codec2=None, audio=None, gnss_hal=None,
            sensors=None, camera=None, arm_translation=None, framework=None, overlays=None, su_client=None,
-           arch=None):
+           arch=None, uncompressed_erofs=False):
     """Copies target_files, removing the shell apps and the published kernel modules,
     switching to a user build and adding the Hyper-V mount table, the control channel
     daemon when `channeld` names one, the agent when `agent` names its APK, DSA's
@@ -4420,8 +5739,12 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
     and the other system screen overlays (DESIGN_OVERLAYS) that `overlays` maps from their file
     names to their APKs. An image for `arch` x86_64 (the default) gets the empty folders, the
     empty file and the links a translation package is reached through; every image gets the
-    folders the Google apps are laid over that the build lacks."""
+    folders the Google apps are laid over that the build lacks. Every image gets the mount table
+    of the host's direct-mapped mode beside fstab.dsa (DIRECT_MAPPED_FSTAB); with
+    `uncompressed_erofs` the read-only partitions are built uncompressed, so that mode maps
+    every file (UNCOMPRESSED_EROFS_PROPS)."""
     fstab = (HERE / "fstab.dsa").read_bytes()
+    mapped_fstab = direct_mapped_fstab(fstab.decode()).encode()
     default_translator = (Path(arm_translation) / ARM_TRANSLATION_IMAGE).read_bytes() if arm_translation else None
     graphics_payload = Path(graphics_library).read_bytes() if graphics_library else None
     vulkan_payload = Path(vulkan_driver).read_bytes() if vulkan_driver else None
@@ -4477,6 +5800,8 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
             for name, source in CAMERA_FILES.items()
         }
     has_camera = camera_payloads is not None
+    # DSA's KeyMint, when the framework build has it, in place of the KeyMint APEX.
+    has_keymint = framework is not None and framework_has_keymint(framework)
     build_tag = image_build_tag([
         graphics_payload, vulkan_payload, channeld_payload, agent_payload, hwcomposer_payload,
         overlay_payload, settings_overlay_payload, *design_payloads.values(),
@@ -4501,6 +5826,12 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                 raise ValueError(f"target_files has no {SYSTEM_EXT_FS_CONFIG}, so there is no system_ext "
                                  "partition to install the agent in")
 
+    if has_keymint:
+        with zipfile.ZipFile(source) as z:
+            problems = keymint_library_problems(framework[KEYMINT_BINARY], set(z.namelist()) | set(framework))
+        if problems:
+            raise ValueError("; ".join(problems))
+
     with zipfile.ZipFile(source) as zin, zipfile.ZipFile(dest, "w", zipfile.ZIP_STORED, allowZip64=True) as zout:
         names = set(zin.namelist())
         # Where a translation package is bound (x86_64 only), and the folders the Google apps
@@ -4511,6 +5842,9 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
             if conflicts:
                 raise ValueError("; ".join(conflicts))
         added_gapps_folders = missing_folders(names, gapps_folders())
+        vendor_policy_name = "VENDOR/etc/selinux/vendor_sepolicy.cil"
+        widevine_hal = needs_widevine_hal_policy(
+            zin.read(vendor_policy_name).decode(errors="replace") if vendor_policy_name in names else None)
         added_fs_config = {}
         if reach:
             for config, rules in ARM_TRANSLATION_REACH_FS_CONFIG.items():
@@ -4537,6 +5871,11 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
             plat_patched += "\n" + GAPPS_POLICY.read_text()
             # init mounting the user's add-on disk, which those images are on.
             plat_patched += "\n" + ADDONS_POLICY.read_text()
+            # init laying a user's Widevine module over /vendor/apex, and its service's types
+            # where the vendor policy has none.
+            plat_patched += "\n" + WIDEVINE_POLICY.read_text()
+            if widevine_hal:
+                plat_patched += "\n" + WIDEVINE_HAL_POLICY.read_text()
             if framework is not None:
                 # SurfaceFlinger telling the apps about a GPU reset.
                 plat_patched += "\n" + GPU_RESET_POLICY.read_text()
@@ -4548,6 +5887,8 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                 # Root elevation: the su client, and the elevation helper, which is the
                 # daemon's program in a mode of its own, with its sockets.
                 plat_patched += "\n" + SU_POLICY.read_text()
+                # The host's root certificates among Android's system certificates.
+                plat_patched += "\n" + CACERTS_POLICY.read_text()
             if has_power:
                 # The power and health HALs reach the daemon.
                 plat_patched += "\n" + POWER_POLICY.read_text()
@@ -4572,6 +5913,12 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
             # DSA's rules for platform_app hold for Android 17's per-SDK app domains too.
             base = len(narrow_vsock_neverallows(plat_orig).rstrip())
             plat_patched = plat_patched[:base] + with_versioned_app_domains(plat_patched[base:], plat_orig)
+            twice = conflicting_genfscon(plat_patched)
+            if twice:
+                raise SystemExit(
+                    "the SELinux policy labels these paths twice, so secilc would refuse it and "
+                    "Android would not boot: " + ", ".join(f"{fs} {path}" for fs, path in twice)
+                )
             new_plat_bytes = plat_patched.encode()
             cil_map["SYSTEM/etc/selinux/plat_sepolicy.cil"] = new_plat_bytes
 
@@ -4601,11 +5948,13 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
         file_contexts = []
         for name in PARTITION_FILE_CONTEXTS:
             text = zin.read(name).decode() if name in names else ""
+            if name == PLAT_FILE_CONTEXTS:
+                text = with_zram_backing_context(text)
             if name == PLAT_FILE_CONTEXTS and channeld_payload is not None:
                 text = update_plat_file_contexts(text)
             if name == "VENDOR/etc/selinux/vendor_file_contexts":
                 text = update_vendor_file_contexts(text, channeld_payload is not None, has_hwcomposer,
-                                                   has_power, codec2=has_codec2, audio=has_audio, gnss=has_gnss, sensors=has_sensors, camera=has_camera)
+                                                   has_power, codec2=has_codec2, audio=has_audio, gnss=has_gnss, sensors=has_sensors, camera=has_camera, keymint=has_keymint)
             file_contexts.append(text if text.endswith("\n") or not text else text + "\n")
         compiled_file_contexts = compile_file_contexts(otatools, "".join(file_contexts))
 
@@ -4682,8 +6031,10 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                     data = edit_wifi_rc(data.decode()).encode()
                 elif name.endswith(SETTINGS_APK):
                     data = edit_settings_apk(data, name)
-                elif name.endswith(DOCUMENTSUI_APK):
-                    data = edit_documentsui_apk(data, name)
+                elif name.endswith(tuple(BOOT_RECEIVER_FREE_APKS)):
+                    data = edit_boot_receivers(data, name)
+                elif name == SERVICES_JAR:
+                    data = edit_services_jar(data, name)
                 elif name in PERMISSION_APEXES:
                     data = edit_permission_apex(data, name, otatools, Path(dest).parent)
                 elif name.endswith("lib/modules/modules.load") or name.endswith("lib/modules/modules.dep"):
@@ -4721,8 +6072,10 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                                                  TRACE_FS_CONFIG + ARM_TRANSLATION_FS_CONFIG
                                                  + (ARM_TRANSLATION_DEFAULT_FS_CONFIG
                                                     if default_translator is not None else [])
-                                                 + GAPPS_FS_CONFIG + ADDONS_FS_CONFIG
+                                                 + GAPPS_FS_CONFIG + ADDONS_FS_CONFIG + WIDEVINE_FS_CONFIG
                                                  + (["system/etc/init/dsa-su-guard.rc 0 0 644 capabilities=0x0",
+                                                     "system/etc/init/dsa-keymint-key.rc 0 0 644 capabilities=0x0",
+                                                     "system/etc/init/dsa-cacerts.rc 0 0 644 capabilities=0x0",
                                                      "system/xbin 0 2000 755 capabilities=0x0"]
                                                     if channeld_payload is not None else [])
                                                  + (["system/bin/su 0 0 755 capabilities=0x0"]
@@ -4744,9 +6097,10 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                             else:
                                 prefix = directory.lower()
                             text += f"{prefix}fstab.dsa 0 0 644 capabilities=0x0\n"
+                            text += f"{prefix}{DIRECT_MAPPED_FSTAB} 0 0 644 capabilities=0x0\n"
                     if name == "META/vendor_filesystem_config.txt":
                         text = update_vendor_filesystem_config(text, channeld_payload is not None, has_hwcomposer,
-                                                               has_power, codec2=has_codec2, audio=has_audio, gnss=has_gnss, sensors=has_sensors, camera=has_camera)
+                                                               has_power, codec2=has_codec2, audio=has_audio, gnss=has_gnss, sensors=has_sensors, camera=has_camera, keymint=has_keymint)
                         if overlay_payload is not None:
                             text = add_filesystem_config(text, FRAMEWORK_OVERLAY_FS_CONFIG)
                         if settings_overlay_payload is not None:
@@ -4754,30 +6108,45 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                         for overlay_name in design_payloads:
                             text = add_filesystem_config(text, overlay_fs_config(overlay_name))
                     data = text.encode()
-                elif name == PLAT_FILE_CONTEXTS and channeld_payload is not None:
-                    data = update_plat_file_contexts(data.decode()).encode()
+                elif name == MISC_INFO and uncompressed_erofs:
+                    data = uncompressed_erofs_misc_info(data.decode()).encode()
+                elif name == PLAT_FILE_CONTEXTS:
+                    text = with_zram_backing_context(data.decode())
+                    if channeld_payload is not None:
+                        text = update_plat_file_contexts(text)
+                    data = text.encode()
                 elif name in ("VENDOR/etc/selinux/vendor_file_contexts", "META/vendor_file_contexts"):
                     data = update_vendor_file_contexts(data.decode(), channeld_payload is not None,
                                                        has_hwcomposer, has_power, codec2=has_codec2,
-                                                       audio=has_audio, gnss=has_gnss, sensors=has_sensors, camera=has_camera).encode()
-                elif name == VENDOR_SERVICE_CONTEXTS and (channeld_payload is not None or has_codec2
-                                                          or has_camera):
-                    data = update_vendor_service_contexts(
-                        data.decode(), codec2=has_codec2, channeld=channeld_payload is not None,
-                        camera=has_camera).encode()
+                                                       audio=has_audio, gnss=has_gnss, sensors=has_sensors, camera=has_camera, keymint=has_keymint).encode()
+                    if widevine_hal:
+                        data = with_widevine_file_contexts(data.decode()).encode()
+                elif name == VENDOR_SERVICE_CONTEXTS:
+                    if channeld_payload is not None or has_codec2 or has_camera:
+                        data = update_vendor_service_contexts(
+                            data.decode(), codec2=has_codec2, channeld=channeld_payload is not None,
+                            camera=has_camera).encode()
+                    # Whatever the vendor policy declares: a vendor built without Widevine
+                    # labels no such service, and servicemanager would refuse the module's.
+                    data = with_widevine_service_context(data.decode()).encode()
                 elif has_audio and AUDIO_POLICY_CONFIG.match(name):
                     data = without_primary_audio_module(data.decode()).encode()
                 elif name == VENDOR_PROPERTY_CONTEXTS:
                     data = update_vendor_property_contexts(data.decode()).encode()
+            if name == INIT_RC:
+                # The Widevine module's image, laid over /vendor/apex before apexd-bootstrap.
+                data = with_widevine_early(data.decode()).encode()
             info.compress_type = zipfile.ZIP_STORED
             zout.writestr(info, data)
         zout.writestr(PREBUILT_OAT_RECORD, json.dumps(prebuilt, indent=2, sort_keys=True) + "\n")
         for directory in FSTAB_DIRS:
             zout.writestr(directory + "fstab.dsa", fstab)
+            zout.writestr(directory + DIRECT_MAPPED_FSTAB, mapped_fstab)
         zout.writestr(MEMORY_RC, (HERE / "dsa-memory.rc").read_bytes())
         zout.writestr(DISPLAY_RC, (HERE / "dsa-display.rc").read_bytes())
         zout.writestr(TRACE_RC, (HERE / "dsa-trace.rc").read_bytes())
         zout.writestr(CONSOLE_RC, (HERE / "dsa-console.rc").read_bytes())
+        zout.writestr(ZRAM_BACKING_RC, (HERE / "dsa-zram-backing.rc").read_bytes())
         zout.writestr(ARM_TRANSLATION_RC, (HERE / "dsa-arm-translation.rc").read_bytes())
         for target, source_file in ARM_TRANSLATION_PROPS.items():
             zout.writestr(target, source_file.read_bytes())
@@ -4794,6 +6163,7 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                 zout.writestr(link_entry(name), target.encode())
         zout.writestr(GAPPS_RC, (HERE / "dsa-gapps.rc").read_bytes())
         zout.writestr(ADDONS_RC, (HERE / "dsa-addons.rc").read_bytes())
+        zout.writestr(WIDEVINE_RC, (HERE / "dsa-widevine.rc").read_bytes())
         for target, source_file in GAPPS_PROPS.items():
             zout.writestr(target, source_file.read_bytes())
         zout.writestr(GAPPS_COMPILE_SCRIPT, (HERE / "gapps-compile.sh").read_bytes())
@@ -4813,6 +6183,8 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
             zout.writestr(CHANNELD_BINARY, channeld_payload)
             zout.writestr(CHANNELD_RC, (HERE / "dsa-channeld.rc").read_bytes())
             zout.writestr(SU_GUARD_RC, (HERE / "dsa-su-guard.rc").read_bytes())
+            zout.writestr(KEYMINT_KEY_RC, (HERE / "dsa-keymint-key.rc").read_bytes())
+            zout.writestr(CACERTS_RC, (HERE / "dsa-cacerts.rc").read_bytes())
             zout.writestr(CHANNEL_MANIFEST, (HERE / "dsa-channel-manifest.xml").read_bytes())
         if su_payload is not None:
             zout.writestr(SU_CLIENT_BINARY, su_payload)
@@ -4831,9 +6203,19 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
         if has_camera:
             for name, payload in camera_payloads.items():
                 zout.writestr(name, payload)
-        if (channeld_payload is not None or has_codec2 or has_camera) and VENDOR_SERVICE_CONTEXTS not in names:
-            zout.writestr(VENDOR_SERVICE_CONTEXTS, update_vendor_service_contexts(
-                "", codec2=has_codec2, channeld=channeld_payload is not None, camera=has_camera))
+        if has_keymint:
+            # The files the build has under the same name (libssl, should a build carry it) were
+            # replaced above; the rest are added.
+            for name in KEYMINT_FILES:
+                if name not in replaced_framework:
+                    zout.writestr(name, framework[name])
+                    replaced_framework.add(name)
+            zout.writestr(KEYMINT_RC, KEYMINT_RC_SOURCE.read_bytes())
+        if VENDOR_SERVICE_CONTEXTS not in names:
+            contexts = update_vendor_service_contexts(
+                "", codec2=has_codec2, channeld=channeld_payload is not None, camera=has_camera)
+            contexts = with_widevine_service_context(contexts)
+            zout.writestr(VENDOR_SERVICE_CONTEXTS, contexts)
         if overlay_payload is not None:
             zout.writestr(FRAMEWORK_OVERLAY_APK, overlay_payload)
         if settings_overlay_payload is not None:
@@ -4844,19 +6226,20 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
             zout.writestr(AGENT_APK, agent_payload)
             zout.writestr(AGENT_PERMISSIONS, AGENT_PERMISSIONS_SOURCE.read_bytes())
             zout.writestr(AGENT_DEFAULT_PERMISSIONS, AGENT_DEFAULT_PERMISSIONS_SOURCE.read_bytes())
+            zout.writestr(AGENT_SYSCONFIG, AGENT_SYSCONFIG_SOURCE.read_bytes())
         if vulkan_payload is not None and not replaced_vulkan_payload:
             zout.writestr(VULKAN_RANCHU_LIBRARY, vulkan_payload)
             replaced_vulkan_payload = True
         if "VENDOR/etc/selinux/vendor_file_contexts" not in names:
-            zout.writestr(
-                "VENDOR/etc/selinux/vendor_file_contexts",
-                update_vendor_file_contexts("", channeld_payload is not None, has_hwcomposer, has_power,
-                                            codec2=has_codec2, audio=has_audio, gnss=has_gnss, sensors=has_sensors, camera=has_camera).encode(),
-            )
+            contexts = update_vendor_file_contexts("", channeld_payload is not None, has_hwcomposer, has_power,
+                                                   codec2=has_codec2, audio=has_audio, gnss=has_gnss, sensors=has_sensors, camera=has_camera, keymint=has_keymint)
+            if widevine_hal:
+                contexts = with_widevine_file_contexts(contexts)
+            zout.writestr("VENDOR/etc/selinux/vendor_file_contexts", contexts.encode())
     if graphics_payload is not None and not replaced_graphics_payload:
         dest.unlink(missing_ok=True)
         raise ValueError(f"target_files does not contain {GFXSTREAM_LIBRARY}")
-    if framework is not None and replaced_framework != set(framework):
+    if framework is not None and set(framework) - replaced_framework:
         dest.unlink(missing_ok=True)
         raise ValueError("target_files does not contain "
                          + ", ".join(sorted(set(framework) - replaced_framework))
@@ -4944,11 +6327,11 @@ COMPILED_APPS = [
     "PRODUCT/app/webview/webview.apk",
     AGENT_APK,
 ]
-# The apps whose dex make-image.py edits (edit_settings_apk, edit_documentsui_apk), compiled
-# after the edits with the rest. dex2oat verifies every method as it compiles, and refuses an
-# edited app with a method the verifier rejects outright: ART would throw a VerifyError
-# instead of running it, and the app would close the moment that class loads.
-EDITED_APPS = [SETTINGS_APP, "SYSTEM/priv-app/DocumentsUI/DocumentsUI.apk"]
+# The apps whose dex make-image.py edits (edit_settings_apk), compiled after the edits with
+# the rest. dex2oat verifies every method as it compiles, and refuses an edited app with a
+# method the verifier rejects outright: ART would throw a VerifyError instead of running it,
+# and the app would close the moment that class loads.
+EDITED_APPS = [SETTINGS_APP]
 # What differs between the guest architectures DSA makes images for: the kernel's file
 # format and name, ART's instruction set and its variant, and the ELF machine number of a
 # binary built for the guest. arm64 is 64-bit only: the guest runs no 32-bit ARM code.
@@ -5031,6 +6414,17 @@ def revised(spec, revision):
     if revision < spec.get("revision", 1):
         raise ValueError(f"revision {revision} is lower than inputs.json's {spec.get('revision', 1)}")
     return dict(spec, revision=revision, version=version_of(spec, revision))
+
+
+def as_development_build(spec, number):
+    """The inputs.json entry `spec` as development build `number`: its version ends in
+    -dev.<number>, and its build number stays the revision's. The Development build workflow
+    makes such an image for testing on one computer and never publishes it; the host orders it
+    after the release before it and before the release of its own revision, and a newer
+    development build of the same revision after an older one."""
+    if not isinstance(number, int) or isinstance(number, bool) or number < 1:
+        raise ValueError(f"a development build number is a whole number from 1, not {number!r}")
+    return dict(spec, version=f"{spec['version']}-dev.{number}")
 
 
 def next_revision(spec, tags):
@@ -5123,9 +6517,9 @@ def device_path(name):
 
 
 def oat_files(apk):
-    """The odex and vdex target_files members ART looks for beside an APK."""
+    """The odex and vdex target_files members ART looks for beside an APK or a jar."""
     folder, file = apk.rsplit("/", 1)
-    stem = file[:-len(".apk")]
+    stem = file.rsplit(".", 1)[0]
     return (f"{folder}/oat/{COMPILED_ISA}/{stem}.odex", f"{folder}/oat/{COMPILED_ISA}/{stem}.vdex")
 
 
@@ -5280,16 +6674,22 @@ PREBUILT_OAT_PARTITIONS = "|".join(PARTITION_DIRS)
 
 def prebuilt_oat(names, read):
     """{apk: {"files": [odex, vdex, art...], "filter": f, "classpath": c}} for each APK in a
-    target_files whose member names are `names` that has its odex in its own partition, for
-    the guest's instruction set. `read` reads a member."""
+    target_files whose member names are `names` that has its odex in its own partition, and
+    for each jar make-image.py edits (EDITED_JARS) that has its odex beside it, for the guest's
+    instruction set. `read` reads a member."""
     names = set(names)
     found = {}
     for odex in sorted(names):
         m = re.fullmatch(rf"((?:{PREBUILT_OAT_PARTITIONS})/.+)/oat/{COMPILED_ISA}/([^/]+)\.odex", odex)
-        if not m or f"{m.group(1)}/{m.group(2)}.apk" not in names:
+        if not m:
+            continue
+        source = next((f"{m.group(1)}/{m.group(2)}{ext}" for ext in (".apk", ".jar")
+                       if f"{m.group(1)}/{m.group(2)}{ext}" in names
+                       and (ext == ".apk" or f"{m.group(1)}/{m.group(2)}{ext}" in EDITED_JARS)), None)
+        if source is None:
             continue
         keys = oat_key_values(read(odex))
-        found[f"{m.group(1)}/{m.group(2)}.apk"] = {
+        found[source] = {
             "files": [odex] + [odex[:-len(".odex")] + ext for ext in (".vdex", ".art")
                                if odex[:-len(".odex")] + ext in names],
             "filter": keys.get("compiler-filter"),
@@ -5504,7 +6904,7 @@ def apk_edits_left(apk, code=None, controllers=None, dimensions=None, theme_attr
 
 def permission_controller_problems(signed, otatools, work, env):
     """What is wrong with PermissionController in a signed target_files: its lists without
-    the room below their last row, looked for in the permission APEX the image ships."""
+    their cards' corners, looked for in the permission APEX the image ships."""
     with zipfile.ZipFile(signed) as z:
         found = [n for n in PERMISSION_APEXES if n in z.namelist()]
         if not found:
@@ -5518,15 +6918,33 @@ def permission_controller_problems(signed, otatools, work, env):
         left = apk_edits_left(apk.read_bytes(), dimensions=permission_controller_edits())
         if left:
             problems.append(f"{found[0]}:{apk.relative_to(payload).as_posix()} still has {'; '.join(left)}, "
-                            "so the last row of its lists sits on the window's edge, or its cards keep "
-                            "corners of their own")
+                            "so its cards keep corners of their own")
     shutil.rmtree(folder, ignore_errors=True)
     return problems
 
 
-def compile_apps(signed, tools_zip, otatools, work, env):
-    """Compiles COMPILED_APPS in the signed target_files and adds their odex and vdex files
-    and filesystem rules to it. Returns the bytes each app's compiled files take."""
+def services_profiles(spec, inputs):
+    """{SERVICES_JAR: [art-profile, art-profile-extra]}: the text profiles the inputs.json
+    entry `spec` pins for services.jar, in the folder `inputs` fetch.sh put them in, in the
+    order the published build concatenated them (its art-profile-combined)."""
+    paths = []
+    for key in (SERVICES_PROFILE_INPUT, SERVICES_PROFILE_INPUT + "_extra"):
+        if key not in spec["files"]:
+            raise ValueError(f"inputs.json names no {key} for build {spec['build_id']}, so the edited "
+                             "services.jar could not be compiled with the published build's profile")
+        path = inputs / spec["files"][key]["name"]
+        if not path.exists():
+            raise ValueError(f"{path} is missing: run dsa/guest/image/fetch.sh first")
+        paths.append(path)
+    return {SERVICES_JAR: paths}
+
+
+def compile_apps(signed, tools_zip, otatools, work, env, profiles=None):
+    """Compiles COMPILED_APPS in the signed target_files, and again each app or edited jar
+    whose dex no longer matches the odex the published build shipped (compile_jobs), and adds
+    their odex and vdex files and filesystem rules to it. `profiles` maps a jar to the text
+    profiles (frameworks/base's art-profile format) the published build compiled it with.
+    Returns the bytes each app's compiled files take."""
     tools = work / "dexpreopt-tools"
     with zipfile.ZipFile(tools_zip) as z:
         z.extractall(tools)
@@ -5588,6 +7006,17 @@ def compile_apps(signed, tools_zip, otatools, work, env):
                         print(f"{apk}: profman could not read its profile, so it is compiled with speed",
                               flush=True)
                         profile = None
+            if profile is None and filter == "speed-profile" and apk in (profiles or {}):
+                listing = host_apk.with_suffix(".profile.txt")
+                listing.write_bytes(b"".join(Path(p).read_bytes() for p in profiles[apk]))
+                profile = host_apk.with_suffix(".prof")
+                try:
+                    run(profman, f"--create-profile-from={listing}", f"--apk={host_apk}",
+                        f"--dex-location={location}", f"--reference-profile-file={profile}", env=env)
+                except subprocess.CalledProcessError:
+                    print(f"{apk}: profman could not read the published build's profile, so it is "
+                          "compiled with speed", flush=True)
+                    profile = None
             if filter is None:
                 filter = compiler_filter(apk, profile is not None)
             elif filter == "speed-profile" and profile is None:
@@ -5703,7 +7132,9 @@ def system_disk(images, otatools, work, out):
         shutil.copy(super_img, super_raw)
     raw = work / "system.raw"
     needed = sum(size for _, size in SYSTEM_SMALL_PARTITIONS) + super_raw.stat().st_size + (128 << 20)
-    system_disk_size = ((needed + (1 << 20) - 1) // (1 << 20)) * (1 << 20)
+    # A whole number of 2 MiB: the host's direct-mapped mode attaches the disk as persistent
+    # memory, which the guest maps in sections of that size.
+    system_disk_size = ((needed + SYSTEM_DISK_ALIGNMENT - 1) // SYSTEM_DISK_ALIGNMENT) * SYSTEM_DISK_ALIGNMENT
     make_raw_disk(raw, system_disk_size)
     on_disk = {name for name, _ in SYSTEM_SMALL_PARTITIONS}
     found = verified_boot_partitions(images / "vbmeta.img", otatools)
@@ -5767,10 +7198,11 @@ def data_disk(otatools, work, out):
 SERIAL_CONSOLE = {"x86_64": ["console=ttyS0", "8250.nr_uarts=1"], "arm64": ["console=ttyAMA0"]}
 
 
-def kernel_cmdline(partition_cmdline, hwcomposer=False, arch=DEFAULT_ARCH, camera=False):
+def kernel_cmdline(partition_cmdline, hwcomposer=False, arch=DEFAULT_ARCH, camera=False, keymint=False):
     """Returns the kernel command line shared by every DSA guest image of `arch`. With
     `hwcomposer`, the image has DSA's composer in place of Cuttlefish's; with `camera`, DSA's
-    camera HAL in place of Cuttlefish's emulated cameras, whose APEX is then not selected."""
+    camera HAL in place of Cuttlefish's emulated cameras, whose APEX is then not selected; with
+    `keymint`, DSA's KeyMint in place of the KeyMint APEX, of which none is then selected."""
     if hwcomposer:
         composer = [f"androidboot.dsa.{key}={value}" for key, value in DISPLAY_BOOTCONFIG.items()]
         apexes = {module: apex for module, apex in VENDOR_APEX_BOOTCONFIG.items()
@@ -5786,6 +7218,9 @@ def kernel_cmdline(partition_cmdline, hwcomposer=False, arch=DEFAULT_ARCH, camer
         apexes = VENDOR_APEX_BOOTCONFIG
     if camera:
         apexes = {module: apex for module, apex in apexes.items() if module != CAMERA_APEX_MODULE}
+    if keymint:
+        # apexd activates none of a module's APEXes whose selection is "none".
+        apexes = {**apexes, KEYMINT_APEX_MODULE: "none"}
     return " ".join([
         # No audit=1, as on Android devices: SELinux denials reach logd's auditd without it.
         # With it, the kernel also audited every iptables change and BPF program load with
@@ -5830,6 +7265,9 @@ def main():
                         help="print the revision the next image of --major and --arch gets, given "
                              "the release tags already published, one per line on standard input, "
                              "and make nothing")
+    parser.add_argument("--dev-build", type=int, metavar="N",
+                        help="make development build N: the version ends in -dev.N. The Development "
+                             "build workflow passes its run number; such an image is never published")
     parser.add_argument("--inputs", type=Path, default=REPO / ".scratch/aosp-inputs")
     parser.add_argument("--out", type=Path, default=REPO / "dsa/target/image")
     parser.add_argument("--arch", choices=sorted(ARCHES), default=DEFAULT_ARCH,
@@ -5880,8 +7318,14 @@ def main():
                              "an x86_64 image carries as its default translator, and releases beside it")
     parser.add_argument("--framework", type=Path,
                         help="a folder from the Framework build (framework.json and the files it names): "
-                             "SurfaceFlinger, libhwui and libEGL that recover from a GPU device loss, built "
-                             "from the image's own build for its architecture")
+                             "SurfaceFlinger, libhwui and libEGL that recover from a GPU device loss, and "
+                             "DSA's KeyMint, whose root key comes from the host, built from the image's own "
+                             "build for its architecture")
+    parser.add_argument("--uncompressed-erofs", action="store_true",
+                        help="build the read-only partitions uncompressed, in 4 KiB chunks, so that the "
+                             "host's direct-mapped mode maps every file of them from persistent memory "
+                             "instead of the guest caching it; the system disk grows by the compression "
+                             "it loses")
     args = parser.parse_args()
     if args.arm_translation:
         checked_arm_translation(args.arm_translation, args.arch)
@@ -5894,6 +7338,8 @@ def main():
         parser.error("--keys is required to make an image")
     if args.revision is not None:
         spec = revised(spec, args.revision)
+    if args.dev_build is not None:
+        spec = as_development_build(spec, args.dev_build)
     use_arch(args.arch)
     framework_payloads = framework_description = None
     if args.framework:
@@ -5938,10 +7384,9 @@ def main():
         framework_res = work / "framework-res.apk"
         with zipfile.ZipFile(target_files) as z:
             framework_res.write_bytes(z.read(FRAMEWORK_RES))
-            home_padding = SETTINGS_APP in z.namelist() and settings_has_home_padding(z.read(SETTINGS_APP))
             tables = system_overlay_targets(z, otatools, work, env)
         framework_overlay, settings_overlay, design_overlays = build_system_overlays(
-            aapt2, framework_res, work, tables, home_padding)
+            aapt2, framework_res, work, tables)
     else:
         print("no aapt2, so the image has none of the system screen overlays", flush=True)
 
@@ -5952,7 +7397,7 @@ def main():
            codec2=args.codec2, audio=args.audio, gnss_hal=args.gnss_hal,
            sensors=args.sensors, camera=args.camera, arm_translation=args.arm_translation,
            framework=framework_payloads, overlays=design_overlays, su_client=args.su_client,
-           arch=args.arch)
+           arch=args.arch, uncompressed_erofs=args.uncompressed_erofs)
 
     signed = work / "signed.zip"
     # It runs where AOSP's certificates sit at the paths apkcerts.txt names, so every path
@@ -5967,7 +7412,8 @@ def main():
     problems = permission_controller_problems(signed, otatools, work, env)
     if problems:
         raise ValueError("; ".join(problems))
-    compile_apps(signed, inputs / spec["files"]["dexpreopt_tools"]["name"], otatools, work, env)
+    compile_apps(signed, inputs / spec["files"]["dexpreopt_tools"]["name"], otatools, work, env,
+                 profiles=services_profiles(spec, inputs))
     run(otatools / "bin/add_img_to_target_files", "-p", otatools, "-a", signed, env=env)
 
     images = work / "images"
@@ -6010,7 +7456,8 @@ def main():
         files.append(kernel)
 
     cmdline = kernel_cmdline(partition_cmdline, hwcomposer=args.hwcomposer is not None, arch=args.arch,
-                             camera=args.camera is not None)
+                             camera=args.camera is not None,
+                             keymint=framework_payloads is not None and framework_has_keymint(framework_payloads))
     manifest = {
         "version": spec["version"],
         "android_major": spec["android_major"],
@@ -6023,6 +7470,9 @@ def main():
         # What the host needs to compose a fingerprint from a device identity the user chose.
         "identity": image_identity(zipfile.ZipFile(signed).read("SYSTEM/build.prop").decode()),
         "files": {name: {"size": (out / name).stat().st_size, "sha256": sha256(out / name)} for name in files},
+        # What the host's direct-mapped mode boots with: the mount table it names, and whether
+        # the read-only partitions are uncompressed, so that every file of them is mapped.
+        "direct_mapped": direct_mapped_entry(args.uncompressed_erofs),
     }
     (out / ARM_TRANSLATION_ZIP).unlink(missing_ok=True)
     if args.arm_translation:

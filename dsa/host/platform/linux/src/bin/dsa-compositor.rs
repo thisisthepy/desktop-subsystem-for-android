@@ -5,6 +5,8 @@
 //! - `dsa-compositor --launch <package>`: starts the app, as its launcher entry does.
 //! - `dsa-compositor --app-settings <package>` and `--uninstall <package>`: the launcher
 //!   entry's actions.
+//! - `dsa-compositor --launch-shortcut <package> <id>`: starts one of the app's shortcuts, as
+//!   the entry's shortcut actions and a pinned shortcut on the desktop do.
 //! - `dsa-compositor --install-autostart`: starts the compositor with every session.
 
 #[cfg(not(target_os = "linux"))]
@@ -27,6 +29,19 @@ fn main() -> std::process::ExitCode {
                 return ExitCode::FAILURE;
             };
             match session::one_shot(action, package) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(why) => {
+                    session::log(&why);
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some("--launch-shortcut") => {
+            let (Some(package), Some(id)) = (args.get(1), args.get(2)) else {
+                eprintln!("--launch-shortcut needs the app's package name and the shortcut's ID");
+                return ExitCode::FAILURE;
+            };
+            match session::launch_shortcut(package, id) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(why) => {
                     session::log(&why);

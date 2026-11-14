@@ -1,12 +1,23 @@
 //! `dsa-channeld`: the guest's control channel daemon, as init starts it.
 //!
 //!     dsa-channeld [--port <port>] [--log-port <port>] [--bootconfig <path>] [--cid <cid>]
+//!     dsa-channeld --keymint-key
+//!     dsa-channeld --cacerts-setup
+//!     dsa-channeld --dns-redirect
+//!     dsa-channeld --memory-report
 //!
 //! It reads the boot's secret from the kernel's bootconfig, connects to the host over
 //! vsock, and keeps the connection, connecting again whenever it is lost. While the host
 //! asks for Android's log, it reads logd and sends the records on the log port, a vsock port
 //! of its own. It exits only
 //! when it cannot work at all: no secret, or a host that refuses this guest for good.
+//! With `--keymint-key` it only fetches KeyMint's root key from the host and exits. With
+//! `--cacerts-setup` it only copies Android's system certificates into the folders init binds
+//! over them, so the host's roots can be added beside them later, and exits. With
+//! `--dns-redirect` (as root) it only makes the packet filter rules that send the guest's DNS
+//! queries to its DNS stub match `vendor.dsa.dns`, and exits.
+//! With `--memory-report` it only writes what the guest kernel's memory is made of (as root,
+//! when the shell asks) and exits.
 //! Messages go to standard error, which init sends to the kernel log.
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -333,16 +344,43 @@ mod daemon {
     #[cfg(not(target_os = "android"))]
     fn switch_android_files(_files: &dsa_protocol::control::AndroidFiles) {}
 
+    /// Makes Android's system certificates hold the root certificates the host added, and no
+    /// other of the host's: in the tmpfs folders `dsa-cacerts.rc` binds over Android's, so
+    /// every app sees the change at once.
+    #[cfg(target_os = "android")]
+    fn install_host_certificates(certificates: &dsa_protocol::control::HostCertificates) {
+        use dsa_guest_channeld::cacerts::Installer;
+        let wanted = if certificates.enabled {
+            certificates.certificates.clone()
+        } else {
+            Vec::new()
+        };
+        let report = Installer::of_system().install(&wanted);
+        say!(
+            "the host's root certificates: {} added, {} kept, {} taken away, {} already trusted",
+            report.added.len(),
+            report.kept.len(),
+            report.removed.len(),
+            report.already_trusted
+        );
+        for problem in &report.problems {
+            say!("the host's root certificates: {problem}");
+        }
+    }
+
+    /// Off Android there are no system certificate folders to add to.
+    #[cfg(not(target_os = "android"))]
+    fn install_host_certificates(_certificates: &dsa_protocol::control::HostCertificates) {}
+
     /// Hands idle memory back to the host: every so often, decides whether the guest should
     /// reclaim now (see `reclaim`), and has init do it. Only init may write the
     /// kernel's memory controls; the daemon only asks.
     #[cfg(target_os = "android")]
     fn reclaim_idle_memory(router: Arc<Router>) {
         use dsa_guest_channeld::reclaim::{
-            file_refaults_kb, memory_pressure, package_running, reclaim_step_mib, MemInfo,
-            ReadFailures, Reason, ReclaimPolicy, Reclaimer, CHECK_INTERVAL, EXIT_POLL,
-            EXIT_WAIT_LIMIT, RECLAIM_PROPERTY, RECLAIM_STEP_PROPERTY, TRIM_PROPERTY,
-            TRIM_SIZE_PROPERTY,
+            file_refaults_kb, memory_pressure, package_running, MemInfo, ReadFailures, Reason,
+            ReclaimPolicy, Reclaimer, CHECK_INTERVAL, EXIT_POLL, EXIT_WAIT_LIMIT, RECLAIM_PROPERTY,
+            RECLAIM_STEP_PROPERTY, TRIM_PROPERTY, TRIM_SIZE_PROPERTY,
         };
         // The command lines of the guest's processes, for whether a closed app's are gone.
         fn command_lines(failures: &mut ReadFailures) -> Vec<String> {
@@ -428,11 +466,36 @@ mod daemon {
             ) {
                 say!("{line}");
             }
+            // What Android reads back while it boots and settles is not an app's working set.
+            reclaimer.booted(read_property("vendor.dsa.boot_completed") == "1");
+            let learnt_before = reclaimer.learns_working_set();
+            // Nor is what an app reads while it starts; a minimized task keeps less cache.
+            let launching_before = reclaimer.launching();
+            reclaimer.tasks_seen(start.elapsed(), tasks, router.tasks_shown());
+            if reclaimer.launching() != launching_before {
+                say!(
+                    "{}",
+                    if reclaimer.launching() {
+                        "an app is starting: what it reads back for the next minute does not \
+                         raise the working set target"
+                    } else {
+                        "the app has started: evicted page cache read back raises the working \
+                         set target again"
+                    }
+                );
+            }
             if let Some(refaults) = vmstat
                 .ok()
                 .and_then(|text| file_refaults_kb(&text, page_kb))
             {
                 reclaimer.refaults(refaults);
+            }
+            if reclaimer.learns_working_set() != learnt_before {
+                say!(
+                    "Android has settled after its boot: evicted page cache read back now raises \
+                     the working set target (now {} MiB)",
+                    reclaimer.working_set_target_kb() / 1024
+                );
             }
             let reason = if app_closed {
                 reclaimer.app_closed(start.elapsed(), tasks, &memory)
@@ -452,10 +515,17 @@ mod daemon {
                     }
                     TRIM_PROPERTY
                 } else {
-                    let step = reclaim_step_mib(&memory).to_string();
+                    // 0 while tasks are open, unless the host is short and the cache is already
+                    // down to their working set: init drops the cache and moves nothing to zram.
+                    let step = reclaimer
+                        .anonymous_step_mib(reason, tasks, &memory)
+                        .to_string();
                     if let Err(why) = set_property(RECLAIM_STEP_PROPERTY, &step) {
                         say!("could not size the reclaim: {why}");
                         continue;
+                    }
+                    if step == "0" {
+                        say!("the reclaim takes page cache only; no app memory goes to zram");
                     }
                     RECLAIM_PROPERTY
                 };
@@ -556,6 +626,153 @@ mod daemon {
     #[cfg(not(target_os = "android"))]
     fn page_out_after_wakes(_router: Arc<Router>) {}
 
+    /// Writes what stays cold in zram on to its backing file while no app is in use (see
+    /// `writeback`): every so often decides whether a run is due, gives init the run's budget,
+    /// has init run it, and logs and counts what it wrote. Only init may write zram's files;
+    /// the daemon only asks and reads. Stops for good when zram has no backing file.
+    #[cfg(target_os = "android")]
+    fn write_back_cold_zram(router: Arc<Router>) {
+        use dsa_guest_channeld::writeback::{
+            day_of, has_backing_device, BackingStat, Day, Run, Writeback, WritebackPolicy,
+            ZramStat, CHECK_INTERVAL, RUN_WAIT_LIMIT, WRITEBACK_AFTER_PROPERTY,
+            WRITEBACK_AGE_PROPERTY, WRITEBACK_DAY_PROPERTY, WRITEBACK_PAGES_PROPERTY,
+            WRITEBACK_PROPERTY, ZRAM,
+        };
+        fn today() -> u64 {
+            day_of(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_secs()),
+            )
+        }
+        fn zram_stat() -> Option<ZramStat> {
+            ZramStat::parse(&std::fs::read_to_string(format!("{ZRAM}/mm_stat")).ok()?)
+        }
+        fn backing_stat() -> Option<BackingStat> {
+            BackingStat::parse(&std::fs::read_to_string(format!("{ZRAM}/bd_stat")).ok()?)
+        }
+        while read_property("vendor.dsa.boot_completed") != "1" {
+            thread::sleep(CHECK_INTERVAL);
+        }
+        match std::fs::read_to_string(format!("{ZRAM}/backing_dev")) {
+            Ok(name) if has_backing_device(&name) => {}
+            Ok(_) => {
+                say!(
+                    "zram has no backing file, so what stays cold in it stays in memory: fs_mgr \
+                     could not make /data/per_boot/zram_swap (look for \"zram backing device\" \
+                     in the log of init)"
+                );
+                return;
+            }
+            Err(error) => {
+                say!(
+                    "cannot read zram's backing device ({error}), so what stays cold in zram \
+                     stays in memory"
+                );
+                return;
+            }
+        }
+        let policy = WritebackPolicy::with_times(
+            &read_property(WRITEBACK_AFTER_PROPERTY),
+            &read_property(WRITEBACK_AGE_PROPERTY),
+        );
+        let start = std::time::Instant::now();
+        let mut writeback = Writeback::new(
+            policy,
+            today(),
+            Day::parse(&read_property(WRITEBACK_DAY_PROPERTY)),
+        );
+        say!(
+            "zram writes what no one has used for {} s to its backing file once no app has been \
+             in use for {} s, at most {} MiB a run and {} MiB a day ({} MiB left today)",
+            policy.age.as_secs(),
+            policy.idle_after.as_secs(),
+            policy.run_pages * 4 / 1024,
+            policy.daily_pages * 4 / 1024,
+            writeback.left_pages() * 4 / 1024
+        );
+        loop {
+            thread::sleep(CHECK_INTERVAL);
+            let Some(before) = zram_stat() else {
+                continue;
+            };
+            let Some(pages) =
+                writeback.decide(start.elapsed(), today(), router.tasks_in_use(), &before)
+            else {
+                continue;
+            };
+            let backing_before = backing_stat().unwrap_or_default();
+            if let Err(why) = set_property(WRITEBACK_PAGES_PROPERTY, &pages.to_string()) {
+                say!("could not give the zram writeback its budget: {why}");
+                continue;
+            }
+            let began = std::time::Instant::now();
+            if let Err(why) = set_property(WRITEBACK_PROPERTY, "1") {
+                say!("could not ask init for the zram writeback: {why}");
+                continue;
+            }
+            while read_property(WRITEBACK_PROPERTY) == "1" && began.elapsed() < RUN_WAIT_LIMIT {
+                thread::sleep(std::time::Duration::from_millis(100));
+            }
+            let run = Run {
+                before,
+                after: zram_stat().unwrap_or(before),
+                backing_before,
+                backing_after: backing_stat().unwrap_or(backing_before),
+                took: began.elapsed(),
+                left_pages: 0,
+                daily_pages: policy.daily_pages,
+            };
+            let day = writeback.wrote(run.written_pages());
+            if let Err(why) = set_property(WRITEBACK_DAY_PROPERTY, &day.to_property()) {
+                say!("could not keep what the zram writeback wrote today: {why}");
+            }
+            say!(
+                "{}",
+                Run {
+                    left_pages: writeback.left_pages(),
+                    ..run
+                }
+                .line()
+            );
+        }
+    }
+
+    /// Off Android there is no zram backing file.
+    #[cfg(not(target_os = "android"))]
+    fn write_back_cold_zram(_router: Arc<Router>) {}
+
+    /// Names the apps that see the computer's memory as the device's (the Play Store and Google
+    /// Play services) in `vendor.dsa.host_memory.uids`, from the package manager's list, again
+    /// whenever Google Play is installed or removed. init hands the list to the kernel
+    /// (`dsa-memory.rc`), and the framework reads the property itself.
+    #[cfg(target_os = "android")]
+    fn name_host_memory_apps() {
+        use dsa_guest_channeld::host_memory::{HostMemoryApps, POLL, PROPERTY};
+        use dsa_guest_channeld::su_relay::PACKAGES_LIST;
+        let mut apps = HostMemoryApps::new();
+        loop {
+            let text = std::fs::read_to_string(PACKAGES_LIST).ok();
+            if let Some(value) = apps.look(text.as_deref()) {
+                match set_property(PROPERTY, &value) {
+                    Ok(()) => {
+                        say!("apps that see the computer's memory (uids): {value}");
+                        apps.set(value);
+                    }
+                    Err(why) => say!(
+                        "could not name the apps that see the computer's memory, so Google \
+                         Play sees the VM's: {why}"
+                    ),
+                }
+            }
+            thread::sleep(POLL);
+        }
+    }
+
+    /// A Linux system other than Android has no package list.
+    #[cfg(not(target_os = "android"))]
+    fn name_host_memory_apps() {}
+
     /// Tells the host how much memory the guest has, so it can add memory before the guest
     /// runs out and take it back once the guest no longer needs it.
     fn report_memory_pressure(router: Arc<Router>) {
@@ -572,6 +789,116 @@ mod daemon {
                 router.to_host(sample.frame());
             }
         }
+    }
+
+    /// `--keymint-key`: KeyMint's root key from the host, into the tmpfs file only KeyMint
+    /// reads. init runs it once, early in boot, as KeyMint's user (`dsa-channeld.rc`).
+    fn keymint_key() -> i32 {
+        use dsa_guest_channeld::keymint_key::{self, Retry};
+        let secret = std::fs::read_to_string(DEFAULT_BOOTCONFIG)
+            .ok()
+            .and_then(|text| secret_from_bootconfig(&text));
+        let hello = local_hello(
+            Role::Guest,
+            concat!("dsa-channeld ", env!("CARGO_PKG_VERSION"), " (keymint)"),
+        );
+        let mut connector = VsockConnector {
+            cid: VMADDR_CID_HOST,
+            port: keymint_key::PORT,
+        };
+        keymint_key::run(
+            &mut connector,
+            &hello,
+            secret.as_ref(),
+            std::path::Path::new(keymint_key::DIR),
+            &Retry::default(),
+            &|line: &str| say!("{line}"),
+        )
+    }
+
+    /// Switches the packet filter rules that send the guest's DNS queries to the stub: init
+    /// runs `dsa-channeld --dns-redirect` when the property changes (`dsa-channeld.rc`).
+    #[cfg(target_os = "android")]
+    fn switch_dns(on: bool) {
+        use dsa_guest_channeld::dns_stub::PROPERTY;
+        if let Err(why) = set_property(PROPERTY, if on { "on" } else { "off" }) {
+            say!("could not switch the guest's DNS to the host's resolver: {why}");
+        }
+    }
+
+    /// Off Android there is no init to set the packet filter.
+    #[cfg(not(target_os = "android"))]
+    fn switch_dns(_on: bool) {}
+
+    /// The guest's DNS, answered by the host's resolver: the stub on the loopback addresses,
+    /// and the connection to the host's DNS port it hands each query to, past the same
+    /// handshake as the control channel. The redirect to the stub is on only while the host
+    /// answers, so the guest keeps its network's DNS servers otherwise.
+    fn serve_dns(credentials: &Credentials, cid: u32) {
+        use dsa_guest_channeld::dns_stub::{self, Stub, Tunnel};
+        let stub = match Stub::bind(dns_stub::STUB_PORT) {
+            Ok(stub) => stub,
+            Err(why) => {
+                say!(
+                    "the DNS stub cannot listen ({why}); the guest asks its network's DNS \
+                     servers"
+                );
+                switch_dns(false);
+                return;
+            }
+        };
+        let credentials = credentials.clone();
+        let connect: Box<dns_stub::DnsConnector> = Box::new(move || {
+            let mut connection = VsockConnector {
+                cid,
+                port: dns_stub::PORT,
+            }
+            .connect(std::time::Duration::from_secs(5))
+            .map_err(|e| e.to_string())?;
+            guest_connect(
+                connection.as_mut(),
+                &credentials.hello,
+                &credentials.secret,
+                std::time::Duration::from_secs(10),
+            )
+            .map_err(|e| e.to_string())?;
+            Ok(connection)
+        });
+        let tunnel = Arc::new(Tunnel::new(connect, Box::new(switch_dns)));
+        stub.serve(Arc::clone(&tunnel), Arc::new(|line: &str| say!("{line}")));
+        let spawned = thread::Builder::new()
+            .name("dsa-dns-host".into())
+            .spawn(move || {
+                let stop = AtomicBool::new(false);
+                tunnel.run(&stop, &|line| say!("{line}"));
+            });
+        if let Err(why) = spawned {
+            say!(
+                "the guest's DNS cannot reach the host ({why}); it asks its network's DNS servers"
+            );
+            switch_dns(false);
+        }
+    }
+
+    /// `--dns-redirect`: makes the packet filter send the guest's DNS queries to the stub, or
+    /// stop sending them, as `vendor.dsa.dns` says. init runs it as root.
+    fn dns_redirect() -> i32 {
+        let run = |program: &str, args: &[String]| -> Result<(), String> {
+            let output = std::process::Command::new(program)
+                .args(args)
+                .output()
+                .map_err(|e| e.to_string())?;
+            if output.status.success() {
+                return Ok(());
+            }
+            let said = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            Err(if said.is_empty() {
+                format!("it ended with {}", output.status)
+            } else {
+                said
+            })
+        };
+        dsa_guest_channeld::dns_redirect::run(&read_property, &run, &|line| say!("{line}"))
     }
 
     pub fn run() -> i32 {
@@ -592,6 +919,25 @@ mod daemon {
         }
         if std::env::args().nth(1).as_deref() == Some("--android-files") {
             return dsa_guest_channeld::android_files::run(&read_property, &say_line);
+        }
+        if std::env::args().nth(1).as_deref() == Some("--keymint-key") {
+            return keymint_key();
+        }
+        if std::env::args().nth(1).as_deref() == Some("--dns-redirect") {
+            return dns_redirect();
+        }
+        if std::env::args().nth(1).as_deref() == Some("--cacerts-setup") {
+            use dsa_guest_channeld::cacerts::{setup, FOLDERS, ROOT};
+            let problems = setup(std::path::Path::new(ROOT), &FOLDERS);
+            for problem in &problems {
+                say!("Android's system certificates: {problem}");
+            }
+            // A folder that could not be copied is not there, so init's bind of it fails and
+            // Android's own folder stays in use.
+            return 0;
+        }
+        if std::env::args().nth(1).as_deref() == Some("--memory-report") {
+            return dsa_guest_channeld::memory_report::run(&say_line);
         }
         let options = match options() {
             Ok(options) => options,
@@ -650,6 +996,7 @@ mod daemon {
                 .on_developer_mode(switch_adb)
                 .on_file_sharing(switch_shares)
                 .on_android_files(switch_android_files)
+                .on_host_certificates(install_host_certificates)
                 .on_arm_translation(Arc::new(ArmTranslation::new(
                     arm_translation::DIR,
                     BootFacts::of_system(|| read_property("ro.product.cpu.abilist")),
@@ -703,6 +1050,7 @@ mod daemon {
             });
         }
         serve_clients(&router);
+        serve_dns(&credentials, options.cid);
         {
             let router = Arc::clone(&router);
             thread::spawn(move || reclaim_idle_memory(router));
@@ -713,12 +1061,17 @@ mod daemon {
         }
         {
             let router = Arc::clone(&router);
+            thread::spawn(move || write_back_cold_zram(router));
+        }
+        {
+            let router = Arc::clone(&router);
             thread::spawn(move || report_memory_pressure(router));
         }
         {
             let router = Arc::clone(&router);
             thread::spawn(move || watch_boot(router));
         }
+        thread::spawn(name_host_memory_apps);
         let (events, event_rx) = mpsc::channel();
         thread::spawn(move || {
             for event in event_rx {

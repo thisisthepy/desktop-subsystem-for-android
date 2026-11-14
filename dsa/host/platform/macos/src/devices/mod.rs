@@ -5,17 +5,22 @@
 //!
 //! ```text
 //! sound out and in   Audio Queue Services             [`audio`]
+//! sound volume       the Mac's volume                 [`system_volume`]
 //! video decoding     VideoToolbox                     [`video`]
 //! cameras            AVFoundation                     [`camera`]
 //! sensors            none a program may read          [`sensors`]
 //! location           CoreLocation                     [`location`]
 //! printing           PDFKit and NSPrintOperation      [`print`], [`print_jobs`]
+//! passkeys           AuthenticationServices           `passkeys`, [`passkey_ceremonies`]
 //! web links          /usr/bin/open                    [`links`]
 //! controllers        the GameController framework     [`gamepads`], [`front`]
 //! permissions        AVFoundation's prompts           [`permissions`]
 //! settings           time zone, languages, format,    [`settings`]
 //!                    dark mode and accent color
 //! folders            the user's home folders          [`shared_folders`]
+//! speech             AVSpeechSynthesizer and          [`language`]
+//!                    SFSpeechRecognizer
+//! spelling           NSSpellChecker                   [`language`]
 //! address lookups    the boundaries in the bundle     [`geocode`]
 //! sharing            NSSharingServicePicker           [`share`]
 //! ```
@@ -34,18 +39,23 @@ pub mod camera;
 pub mod front;
 pub mod gamepads;
 pub mod geocode;
+pub mod language;
 pub mod links;
 pub mod location;
+pub mod passkey_ceremonies;
 pub mod permissions;
 pub mod print_jobs;
 pub mod sensors;
 pub mod settings;
 pub mod share;
 pub mod shared_folders;
+pub mod system_volume;
 pub mod video;
 
 #[cfg(target_os = "macos")]
 pub mod audio;
+#[cfg(target_os = "macos")]
+pub mod passkeys;
 #[cfg(target_os = "macos")]
 pub mod print;
 
@@ -96,6 +106,9 @@ pub struct Followers {
     pub links: bool,
     pub settings: bool,
     pub gamepads: bool,
+    pub passkeys: bool,
+    /// Speech synthesis, speech recognition and spell checking for Android.
+    pub language: bool,
     /// The address lookups of the apps in Android.
     pub geocoding: bool,
     /// What the apps in Android share with the Mac.
@@ -110,6 +123,8 @@ impl Default for Followers {
             links: true,
             settings: true,
             gamepads: true,
+            passkeys: true,
+            language: true,
             geocoding: true,
             share: true,
         }
@@ -148,8 +163,11 @@ mod lender {
 
     /// Serves the guest's device ports (sound, video, cameras, sensors) on the sockets in
     /// `user`'s folder until `stop`, each on a thread of its own. A port that cannot be
-    /// opened is logged and left out.
+    /// opened is logged and left out. The guest's sound has the Mac's volume and nothing
+    /// else: a thread follows the apps' volumes over the local API through `connect`, and
+    /// another the Mac's volume ([`super::system_volume`]).
     pub fn start_guest_ports(
+        connect: &ConnectorFactory,
         user: &UserFolders,
         stop: &Arc<AtomicBool>,
         log: &Log,
@@ -157,6 +175,39 @@ mod lender {
         let mut threads = Vec::new();
 
         if let Some(mut listener) = listen(user, dsa_host_core::audio::AUDIO_PORT, "sound", log) {
+            let volumes = dsa_host_core::app_audio::AppVolumes::new();
+            let one = Arc::new(std::sync::Mutex::new(
+                super::system_volume::OneVolume::default(),
+            ));
+            {
+                let (mut connector, stop, log) = (connect(), Arc::clone(stop), Arc::clone(log));
+                let (volumes, one) = (Arc::clone(&volumes), Arc::clone(&one));
+                threads.extend(spawn("dsa-app-audio", &Arc::clone(&log), move || {
+                    dsa_host_core::app_audio::follow(
+                        &mut *connector,
+                        &build("app audio"),
+                        &volumes,
+                        &stop,
+                        &*log,
+                        &|changed: &[dsa_host_core::app_audio::AppStream]| {
+                            let set = one
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .guest_changed(changed);
+                            if let Some((volume, muted)) = set {
+                                super::system_volume::set(volume, muted);
+                            }
+                        },
+                    )
+                }));
+            }
+            {
+                let stop = Arc::clone(stop);
+                let (volumes, one) = (Arc::clone(&volumes), Arc::clone(&one));
+                threads.extend(spawn("dsa-mac-volume", &Arc::clone(log), move || {
+                    super::system_volume::follow(&volumes, &one, &stop)
+                }));
+            }
             let (stop, log) = (Arc::clone(stop), Arc::clone(log));
             let device: Arc<dyn dsa_host_core::audio::AudioDevice> =
                 Arc::new(super::audio::CoreAudio);
@@ -204,9 +255,9 @@ mod lender {
         threads
     }
 
-    /// Follows the local API for the devices it carries (the location, print jobs, web
-    /// links, the user's settings and the game controllers) until `stop`, each on a thread
-    /// of its own with its own connection.
+    /// Follows the local API for the devices it carries (the location, print jobs, passkey
+    /// ceremonies, web links, the user's settings and the game controllers) until `stop`,
+    /// each on a thread of its own with its own connection.
     pub fn start_followers(
         connect: ConnectorFactory,
         which: Followers,
@@ -233,6 +284,14 @@ mod lender {
             threads.extend(spawn("dsa-print", &Arc::clone(&log), move || {
                 let print: super::print_jobs::Print = Arc::new(super::print::print);
                 super::print_jobs::serve(connector, print, stop, log)
+            }));
+        }
+        if which.passkeys {
+            let (connector, stop, log) = (connect(), Arc::clone(stop), Arc::clone(log));
+            threads.extend(spawn("dsa-passkeys", &Arc::clone(&log), move || {
+                let perform: super::passkey_ceremonies::Perform =
+                    Arc::new(super::passkeys::perform);
+                super::passkey_ceremonies::serve(connector, perform, stop, log)
             }));
         }
         if which.geocoding {
@@ -265,6 +324,25 @@ mod lender {
                     &stop,
                     &line,
                 )
+            }));
+        }
+        if which.language {
+            let (mut connector, stop, log) = (connect(), Arc::clone(stop), Arc::clone(log));
+            threads.extend(spawn("dsa-language", &Arc::clone(&log), move || {
+                use dsa_host_core::language::server::{serve, Backends};
+                use dsa_host_core::language::{SpeechRecognizer, SpeechSynthesizer, SpellChecker};
+                let backends = Backends {
+                    speech: Box::new(|| {
+                        Box::new(super::language::MacSpeech::new()) as Box<dyn SpeechSynthesizer>
+                    }),
+                    recognition: Box::new(|| {
+                        Box::new(super::language::MacRecognition) as Box<dyn SpeechRecognizer>
+                    }),
+                    spelling: Box::new(|| {
+                        Box::new(super::language::MacSpelling) as Box<dyn SpellChecker>
+                    }),
+                };
+                serve(&mut *connector, &build("language"), backends, &stop, log)
             }));
         }
         if which.gamepads {
@@ -302,6 +380,8 @@ mod tests {
     fn fr26_the_lender_runs_every_device_unless_told_otherwise() {
         let all = Followers::default();
         assert!(all.location && all.print && all.links && all.settings && all.gamepads);
+        assert!(all.passkeys);
+        assert!(all.language);
         assert!(all.geocoding && all.share);
         assert!(build("camera").starts_with("dsa-devices "));
         assert!(build("camera").ends_with(" camera"));
