@@ -72,7 +72,6 @@ type NewFn = unsafe extern "C" fn(
     *const BufferAttr,
     *mut c_int,
 ) -> *mut c_void;
-type IoFn = unsafe extern "C" fn(*mut c_void, *const c_void, usize, *mut c_int) -> c_int;
 type ReadFn = unsafe extern "C" fn(*mut c_void, *mut c_void, usize, *mut c_int) -> c_int;
 type LatencyFn = unsafe extern "C" fn(*mut c_void, *mut c_int) -> u64;
 type FreeFn = unsafe extern "C" fn(*mut c_void);
@@ -81,7 +80,6 @@ type StrErrorFn = unsafe extern "C" fn(c_int) -> *const c_char;
 /// The functions of the simple API this uses.
 struct Pulse {
     new: NewFn,
-    write: IoFn,
     read: ReadFn,
     latency: LatencyFn,
     free: FreeFn,
@@ -127,7 +125,6 @@ fn pulse() -> Result<&'static Pulse, String> {
             unsafe {
                 Ok(Pulse {
                     new: symbol(simple, c"pa_simple_new").ok_or_else(missing)?,
-                    write: symbol(simple, c"pa_simple_write").ok_or_else(missing)?,
                     read: symbol(simple, c"pa_simple_read").ok_or_else(missing)?,
                     latency: symbol(simple, c"pa_simple_get_latency").ok_or_else(missing)?,
                     free: symbol(simple, c"pa_simple_free").ok_or_else(missing)?,

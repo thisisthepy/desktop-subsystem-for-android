@@ -17,6 +17,7 @@
 
 use std::collections::HashMap;
 use std::ffi::c_void;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -67,6 +68,9 @@ pub struct Presenter {
     /// Told of each display no longer shown, so the renderer lets go of what it held for it.
     #[allow(clippy::type_complexity)]
     forget: Mutex<Option<Box<dyn Fn(u32) + Send + Sync>>>,
+    /// How many frames reached a routed display: after a GPU reset, a guest that draws none
+    /// has a compositor that did not recover.
+    frames_shown: AtomicU64,
 }
 
 impl Presenter {
@@ -79,7 +83,13 @@ impl Presenter {
             links,
             ports,
             forget: Mutex::new(None),
+            frames_shown: AtomicU64::new(0),
         }
+    }
+
+    /// How many frames have reached a routed display so far.
+    pub fn frames_shown(&self) -> u64 {
+        self.frames_shown.load(Ordering::Relaxed)
     }
 
     /// Tells `forget` of each display no longer shown: the renderer (in its own process)
@@ -329,6 +339,7 @@ impl FrameSink for Presenter {
         };
         match written {
             Ok(()) => {
+                self.frames_shown.fetch_add(1, Ordering::Relaxed);
                 let now = Instant::now();
                 if let Some(announce) = shown.slots.written(slot, (width, height), now) {
                     announce_frame(shown, announce);
@@ -358,6 +369,7 @@ impl FrameSink for Presenter {
         let Some(slot) = shown.copying.take() else {
             return;
         };
+        self.frames_shown.fetch_add(1, Ordering::Relaxed);
         if let Some(announce) = shown.slots.written(slot, (width, height), Instant::now()) {
             announce_frame(shown, announce);
         }

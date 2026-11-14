@@ -68,8 +68,8 @@ const BITMAP_BGRA: u32 = 2 | (2 << 12);
 /// What the window manager calls itself to the service for the widgets.
 const BUILD: &str = "dsa-wm widgets";
 
-/// How often the desk is looked at while a press may become a long press or the More button
-/// fades.
+/// How often the desk is looked at while a press may become a long press or a resize has a
+/// size to pass on.
 const TICK: f64 = 1.0 / 30.0;
 
 /// How often the window manager looks whether it should stop.
@@ -377,7 +377,7 @@ fn view_class() -> Result<&'static AnyClass, String> {
                 sel!(acceptsFirstResponder),
                 yes as unsafe extern "C-unwind" fn(_, _) -> _,
             );
-            // The desk moves the panel itself, from a long press or the More button.
+            // The desk moves the panel itself, after a long press.
             b.add_method(
                 sel!(mouseDownCanMoveWindow),
                 no as unsafe extern "C-unwind" fn(_, _) -> _,

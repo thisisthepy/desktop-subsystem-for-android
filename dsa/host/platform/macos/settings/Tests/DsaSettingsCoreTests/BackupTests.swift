@@ -88,7 +88,7 @@ final class BackupTests: XCTestCase {
         await vm.backUpNow()
         XCTAssertFalse(cli.called("backup now --json"), "the backup cannot be used")
 
-        cli.answer("backup status --json", #"{"available":false,"problem":""}"#)
+        cli.answer("backup status --json", #"{"enabled":true,"available":false,"problem":""}"#)
         await vm.load()
         XCTAssertEqual(vm.problemText, "Backup_UnavailableUnknown")
     }

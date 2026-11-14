@@ -735,8 +735,9 @@ impl TextInput {
     }
 }
 
-/// Where the cursor of the editor focused in a task is, in the task's own pixels from its top
-/// left corner, which its window shows one to one.
+/// Where the cursor of the editor focused in a task is, in pixels from the top left corner: the
+/// task's own as the guest reports it, which the window manager turns into its window's
+/// (the same, unless the window shows the task at another scale) before a window hears of it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct ImeCursor {
     pub left: i32,

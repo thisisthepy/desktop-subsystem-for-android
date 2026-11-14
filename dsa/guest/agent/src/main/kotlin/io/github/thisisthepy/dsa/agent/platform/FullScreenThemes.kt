@@ -19,6 +19,9 @@ import io.github.thisisthepy.dsa.agent.tasks.launchBounds
  * from the moment it is created, so its window opens filling its monitor and the task is not
  * resized, and relaunched, right after its activity is created.
  *
+ * It reads android:windowNoDisplay the same way, for the title bar's back arrow, which never
+ * counts an activity that shows nothing as a screen to go back to.
+ *
  * The answer is kept for each activity, theme and installed copy of its app (its APK's path
  * changes when the app is updated), because the task source asks on every change to any task.
  */
@@ -26,25 +29,34 @@ class FullScreenThemes(
     private val context: Context,
     private val log: Log,
 ) {
-    private data class Key(val activity: ComponentName, val theme: Int, val sourceDir: String?)
+    private data class Key(val activity: ComponentName, val theme: Int, val sourceDir: String?, val attr: Int)
 
     private val known = LinkedHashMap<Key, Boolean>()
     private var warned = false
 
     /** Whether [activity]'s theme sets android:windowFullscreen. False when it cannot be read. */
-    fun asks(activity: ActivityInfo?): Boolean {
+    fun asks(activity: ActivityInfo?): Boolean = flag(activity, android.R.attr.windowFullscreen)
+
+    /**
+     * Whether [activity]'s theme sets android:windowNoDisplay (Theme.NoDisplay): the activity
+     * shows nothing, as a trampoline that only starts another one. False when it cannot be read.
+     */
+    fun drawsNothing(activity: ActivityInfo?): Boolean = flag(activity, android.R.attr.windowNoDisplay)
+
+    /** The boolean theme attribute [attr] of [activity]'s theme, read once for each. */
+    private fun flag(activity: ActivityInfo?, attr: Int): Boolean {
         if (activity == null) return false
         // The activity's own theme, else its application's.
         val theme = activity.themeResource
         if (theme == 0) return false
-        val key = Key(ComponentName(activity.packageName, activity.name), theme, activity.applicationInfo?.sourceDir)
+        val key = Key(ComponentName(activity.packageName, activity.name), theme, activity.applicationInfo?.sourceDir, attr)
         synchronized(known) { known[key]?.let { return it } }
-        val asks = read(activity.packageName, theme)
+        val set = read(activity.packageName, theme, attr)
         synchronized(known) {
             if (known.size >= MAX_KNOWN) known.remove(known.keys.first())
-            known[key] = asks
+            known[key] = set
         }
-        return asks
+        return set
     }
 
     /**
@@ -65,10 +77,10 @@ class FullScreenThemes(
             ?.let { Rect(it.left, it.top, it.right, it.bottom) }
     }
 
-    private fun read(packageName: String, theme: Int): Boolean = try {
+    private fun read(packageName: String, theme: Int, attr: Int): Boolean = try {
         val app = context.createPackageContext(packageName, Context.CONTEXT_IGNORE_SECURITY)
         val styled = app.resources.newTheme().apply { applyStyle(theme, true) }
-        val values = styled.obtainStyledAttributes(intArrayOf(android.R.attr.windowFullscreen))
+        val values = styled.obtainStyledAttributes(intArrayOf(attr))
         try {
             values.getBoolean(0, false)
         } finally {

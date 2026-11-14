@@ -547,6 +547,13 @@ impl TaskWindow {
         unsafe { band_of(self.ptr()) }.height
     }
 
+    /// The rows of the task's frame the title bar band covers: [`Self::band_height`] in the
+    /// task's pixels, as the window shows the frame at its frame scale. A frame read back is
+    /// in the task's pixels, not the window's.
+    pub fn band_rows_in_frame(&self) -> u32 {
+        super::screenshot::band_rows(self.band_height(), self.frame_scale)
+    }
+
     fn ptr(&self) -> *mut AnyObject {
         Retained::as_ptr(&self.window) as *mut AnyObject
     }

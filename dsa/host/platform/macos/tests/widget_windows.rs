@@ -13,7 +13,9 @@ use dsa_host_core::host_api::HostApiClient;
 use dsa_host_core::host_api_conformance::{FakeAndroid, FakeAndroids, RunningService};
 use dsa_host_core::widget_windows::desk::{Button, Desk, Effect, Key};
 use dsa_host_core::widget_windows::paint::Image;
-use dsa_host_core::widget_windows::{edit_margin, WidgetWindows, WindowCommand, WindowReport};
+use dsa_host_core::widget_windows::{
+    android_density, edit_margin, WidgetWindows, WindowCommand, WindowReport,
+};
 use dsa_host_core::widgets::WidgetProvider;
 use dsa_host_macos::wm::widget_panels::{
     desk_point, dpi_of_backing, look, menu_items, panel_frame, MenuItem,
@@ -146,8 +148,8 @@ fn fr12_long_pressing_a_widget_edits_it_like_a_home_screen() {
         })
     };
 
-    // The widget's panel opens on the desktop at its place, 180 x 110 dp on a Retina screen:
-    // 216 x 132 pixels, 108 x 66 points, the same physical size on any screen.
+    // The widget's panel opens on the desktop at its place, 180 x 110 dp on a Retina screen,
+    // where Android draws at 262 dpi: 295 x 180 pixels, 147.5 x 90 points.
     until("the widget's window opening", || {
         windows.with(|desk| desk.window(widget_id).is_some())
     });
@@ -159,13 +161,13 @@ fn fr12_long_pressing_a_widget_edits_it_like_a_home_screen() {
     else {
         panic!("no window opened: {opened:?}");
     };
-    assert_eq!(size, (216, 132));
+    assert_eq!(size, (295, 180));
     assert_eq!(origin, (64, 64), "where the service placed it");
     let (x, y, width, height) = panel_frame(origin, size, MAIN_HEIGHT, 2.0);
-    assert_eq!((x, width, height), (32.0, 108.0, 66.0));
+    assert_eq!((x, width, height), (32.0, 147.5, 90.0));
     assert_eq!(
         y,
-        MAIN_HEIGHT - 32.0 - 66.0,
+        MAIN_HEIGHT - 32.0 - 90.0,
         "from the top of the main screen"
     );
     // The pointer on the screen, at the panel's top left corner, is there in the desk's pixels.
@@ -233,7 +235,7 @@ fn fr12_long_pressing_a_widget_edits_it_like_a_home_screen() {
     assert!(!windows.with(|desk| desk.window(widget_id).unwrap().editing()));
 
     // Lifted again and dragged, the widget moves; letting go tells the service where, in dp
-    // at the output's density, 96 x its scale.
+    // at Android's density on the screen, 262 on a Retina screen.
     let sizes_before = android.widget_sizes.lock().unwrap().len();
     windows.with(|desk| desk.down(widget_id, (60, 60), Button::Primary, false, now));
     windows.with(|desk| desk.tick(now + Duration::from_millis(600)));
@@ -256,7 +258,7 @@ fn fr12_long_pressing_a_widget_edits_it_like_a_home_screen() {
     assert_eq!(id, widget_id);
     assert_eq!(
         (told.width_dp, told.height_dp, told.density_dpi),
-        (180, 110, 192)
+        (180, 110, android_density(dpi_of_backing(2.0)))
     );
 
     // Esc ends an edit without a choice.
@@ -336,7 +338,7 @@ fn fr12_right_clicking_a_widget_resizes_or_removes_it() {
     let (_, told) = *android.widget_sizes.lock().unwrap().last().unwrap();
     assert_eq!(
         (told.width_dp, told.height_dp, told.density_dpi),
-        (270, 165, 96)
+        (270, 165, android_density(dpi_of_backing(1.0)))
     );
 
     // Remove takes it off the desktop: its window closes once the service says it is gone.

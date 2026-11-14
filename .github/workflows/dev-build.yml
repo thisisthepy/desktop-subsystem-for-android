@@ -1,0 +1,122 @@
+# Builds DSA for testing on one Windows x64 computer, without testing or publishing it: the
+# guest kernel, the x86_64 image of the newest supported Android (with the patched framework
+# and the default ARM translator, as a release has them) and the Windows x64 installer,
+# signed with the release keys from the same secrets as a release. It makes them with the
+# Image release's own jobs (release-image.yml, called with dev_build), so a development build
+# is made exactly as a release is.
+#
+# It publishes nothing: no release, tag, image list, program list or channel, so no installed
+# DSA ever sees it. What it made stays as workflow artifacts for three days:
+#   development-image        the image's files, image.json and the kernel's source
+#   development-image-list   images.json and images.json.sig, the signed list naming them
+#   development-installer    DSA-v<version>-win-x64-setup.exe, SHA256SUMS.txt and the
+#                            kernel's source
+# The installer's version is <next release>-dev.<run number> (0.2.4-dev.12): newer than the
+# release before it, older than the release it leads up to, which then reaches the computer
+# as an ordinary update. The image's version is the next unpublished revision with
+# -dev.<run number> after it (17.0.0-16373615-15-dev.12): newer than the installed image,
+# and older than the release of that revision.
+#
+# By default it makes only what changed since the last Development build that made each
+# part (.github/scripts/release/dev-build-plan.sh): a host change makes the installer alone
+# (about ten minutes), a guest change the image alone (about twenty-five), both about
+# twenty-five, as the installer builds beside the image. A kernel built from the same inputs
+# comes from the cache. "build" chooses by hand.
+#
+# It runs only by hand, on develop, and runs no tests. scripts/install-dev-build.ps1 downloads
+# a run's artifacts, checks them as the service would, and installs them:
+#
+#   gh workflow run dev-build.yml --ref develop
+#   pwsh scripts/install-dev-build.ps1            (the newest successful run)
+#   pwsh scripts/install-dev-build.ps1 -Run <id>
+
+name: Development build
+
+on:
+  # GitHub starts a hand-run workflow only once it is on the default branch or has run at
+  # least once. A push to develop that changes this file runs it with the defaults, which
+  # registers it until the release sync carries it to main.
+  push:
+    branches: [develop]
+    paths: [.github/workflows/dev-build.yml]
+  workflow_dispatch:
+    inputs:
+      build:
+        description: "What to make: auto (what changed since the last Development build), all, image or installer"
+        type: choice
+        options:
+          - auto
+          - all
+          - image
+          - installer
+        required: false
+        default: auto
+      next_release:
+        description: "The release this build leads up to; the installer's version is <next_release>-dev.<run number>"
+        required: false
+        default: "0.2.4"
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: Decide what to build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      image: ${{ steps.plan.outputs.image }}
+      installer: ${{ steps.plan.outputs.installer }}
+      installer_version: ${{ steps.version.outputs.installer_version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check the branch and the version
+        id: version
+        env:
+          REF: ${{ github.ref }}
+          NEXT: ${{ inputs.next_release || '0.2.4' }}
+        run: |
+          if [[ "$REF" != refs/heads/develop ]]; then
+            echo "::error::A Development build is made from develop only, not from $REF." >&2
+            exit 1
+          fi
+          if [[ ! "$NEXT" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::next_release is a release version such as 0.2.4, not $NEXT." >&2
+            exit 1
+          fi
+          echo "installer_version=$NEXT-dev.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
+      - name: Decide what changed since the last Development build
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BUILD: ${{ inputs.build || 'auto' }}
+        run: |
+          bash .github/scripts/release/dev-build-plan.sh plan "$BUILD" "$GITHUB_SHA" | tee -a "$GITHUB_OUTPUT"
+          if grep -qx 'image=false' "$GITHUB_OUTPUT" && grep -qx 'installer=false' "$GITHUB_OUTPUT"; then
+            echo "::notice::Nothing the image or the installer is made from changed since the last Development build; run with build set to all, image or installer to make one anyway."
+          fi
+
+  build:
+    name: Build
+    needs: plan
+    if: needs.plan.outputs.image == 'true' || needs.plan.outputs.installer == 'true'
+    # The release's jobs ask for these; with dev_build they publish nothing.
+    permissions:
+      contents: write
+      actions: write
+      pull-requests: read
+      issues: read
+    uses: ./.github/workflows/release-image.yml
+    secrets: inherit
+    with:
+      dev_build: true
+      rebuild_images: ${{ needs.plan.outputs.image == 'true' }}
+      installer_version: ${{ needs.plan.outputs.installer == 'true' && needs.plan.outputs.installer_version || '' }}

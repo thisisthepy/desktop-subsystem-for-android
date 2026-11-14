@@ -1,8 +1,9 @@
 //! The menu of a widget window, which the user opens by long-pressing the widget, by
-//! right-clicking it or with its "More" button: Widget settings, for a widget whose app lets it
-//! be set up again, Resize, with the sizes the widget allows, and Remove, as Android's home
-//! screen offers them. It is a Windows 11 menu ([`crate::compositor::fluent_menu`]), with an
-//! icon for each item and a check mark on the widget's current size.
+//! right-clicking it, or with the menu key or Shift+F10: Widget settings, for a widget whose
+//! app lets it be set up again, Resize, with the sizes the widget allows, and Remove, as
+//! Android's home screen offers them. It is a Windows 11 menu
+//! ([`crate::compositor::fluent_menu`]), with an icon for each item and a check mark on the
+//! widget's current size.
 //!
 //! Choosing Widget settings asks the service to open the widget's setup again, which shows as
 //! the app's window; once the user finishes it, the widget shows what they chose. Choosing a
@@ -133,6 +134,7 @@ mod tests {
             y: 0,
             width_dp,
             height_dp,
+            resized: false,
         }
     }
 
@@ -200,8 +202,6 @@ mod tests {
         assert_eq!(size_label(&menu_text(true), &large), "크게 (270 × 165)");
         assert_eq!(menu_text(false).remove, "Remove");
         assert_eq!(menu_text(true).resize, "크기 조정");
-        assert_eq!(menu_text(false).more, "More options");
-        assert_eq!(menu_text(true).more, "옵션 더 보기");
         assert_eq!(menu_text(false).settings, "Widget settings");
         assert_eq!(menu_text(true).settings, "위젯 설정");
     }

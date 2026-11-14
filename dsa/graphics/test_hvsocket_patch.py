@@ -81,7 +81,12 @@ class HvSocketPatchTests(unittest.TestCase):
         # Behaviour: fr3_shared_color_buffer_has_the_format_of_its_gralloc_buffer.
         patch = PATCH_0002.read_text()
         self.assertIn("dsa_shared_color_buffer_gl_format(cros_handle->format)", patch)
-        self.assertIn("dsa_shared_color_buffer_gl_format(buffer.format)", HWC_HOST_RENDERER.read_text())
+        # The hwcomposer picks the same format through the YUV-aware helper, which falls back
+        # to dsa_shared_color_buffer_gl_format, as the copy-up patch makes the driver do.
+        self.assertIn(
+            "dsa_shared_color_buffer_create_format(buffer.format, width, height,",
+            HWC_HOST_RENDERER.read_text(),
+        )
 
     def test_pr3_hardware_buffer_import_uses_no_virtio_gpu_ioctl_without_the_device(self):
         # On a Hyper-V VM the first render node is vgem or vkms. Importing a buffer used to

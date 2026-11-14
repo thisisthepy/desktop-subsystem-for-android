@@ -37,8 +37,8 @@ pub struct CFDictionaryValueCallBacks {
 extern "C" {
     pub static kCFBooleanTrue: CFTypeRef;
     pub static kCFBooleanFalse: CFTypeRef;
-    static kCFTypeDictionaryKeyCallBacks: CFDictionaryKeyCallBacks;
-    static kCFTypeDictionaryValueCallBacks: CFDictionaryValueCallBacks;
+    pub static kCFTypeDictionaryKeyCallBacks: CFDictionaryKeyCallBacks;
+    pub static kCFTypeDictionaryValueCallBacks: CFDictionaryValueCallBacks;
     fn CFStringCreateWithBytes(
         alloc: CFTypeRef,
         bytes: *const u8,
@@ -53,7 +53,8 @@ extern "C" {
     fn CFDataCreate(alloc: CFTypeRef, bytes: *const u8, length: isize) -> CFTypeRef;
     fn CFDataGetLength(data: CFTypeRef) -> isize;
     fn CFDataGetBytePtr(data: CFTypeRef) -> *const u8;
-    fn CFDictionaryCreate(
+    /// Declared once for the crate: a second declaration with other pointer types clashes.
+    pub fn CFDictionaryCreate(
         alloc: CFTypeRef,
         keys: *const CFTypeRef,
         values: *const CFTypeRef,

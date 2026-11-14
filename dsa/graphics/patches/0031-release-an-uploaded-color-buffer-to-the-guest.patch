@@ -1,0 +1,139 @@
+Subject: Release an uploaded ColorBuffer to the guest
+
+What a guest CPU writes into a buffer (a video decoder's pictures, a camera's frames, a layer an
+app draws in software) reaches its ColorBuffer through updateColorBufferFromBytesLocked. The
+guest then reads that ColorBuffer through a VkImage of its own, bound to the same memory, and
+takes it from the external queue family (VK_QUEUE_FAMILY_FOREIGN_EXT in the guest, as Android
+does with every AHardwareBuffer). The upload never released the image there: it used the image
+without taking it from the external queue family when the compositor had left it there, and left
+it with the renderer's queue family afterwards. releaseColorBufferForGuestUse(), which keeps that
+convention, is only called for a guest's swapchain images.
+
+A driver that compresses what a copy writes (Intel Arc) then kept the picture compressed, since
+nothing released it, and the guest's acquire read the compressed blocks as the memory holds them.
+A YUV picture is only ever sampled by the guest (SurfaceFlinger composes it into its client
+target), so every picture went that way: on the owner's PC (Intel Arc, 0.2.4-dev.12) a YouTube
+Short showed rows of green, purple and yellow blocks across the flat area at the top of its
+picture, under the window's title bar, while the detailed rest of the picture was right, with the
+host's hardware decoder and the guest's software decoder alike. Patch 0030 ordered the copy with
+its transitions, which did not change it.
+
+Now the upload takes the image from the external queue family when it is there, and its last
+barrier releases it to the external queue family in the layout the guest is given (the one it
+had, or VK_IMAGE_LAYOUT_PRESENT_SRC_KHR for an image never used), and records both. The release
+goes in the command buffer of the last copy, so an upload costs no extra GPU job. The compositor,
+which takes a ColorBuffer from wherever it was left, takes it from the external queue family as it
+does after its own use.
+
+diff --git a/host/vulkan/VkCommonOperations.cpp b/host/vulkan/VkCommonOperations.cpp
+--- a/host/vulkan/VkCommonOperations.cpp
++++ b/host/vulkan/VkCommonOperations.cpp
+@@ -4227,6 +4227,20 @@
+         currentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+     }
+ 
++    // The guest reads a ColorBuffer through an image of its own on the same memory, and takes
++    // it from the external queue family (VK_QUEUE_FAMILY_FOREIGN_EXT in the guest). So the
++    // copy takes the image from there when the guest or the compositor left it there, and
++    // gives it back there once written, in the layout releaseColorBufferForGuestUse() gives
++    // the guest. Left with the renderer's queue family, the image was never released: a
++    // driver that compresses what a copy writes (Intel Arc) kept the picture compressed, and
++    // the guest's acquire read the compressed blocks as they lie in memory. A video's YUV
++    // pictures, which only the guest samples, showed rows of green, purple and yellow blocks
++    // where the picture is flat, and the rest of the picture right.
++    const bool takenFromGuest = colorBufferInfo->currentQueueFamilyIndex != mQueueFamilyIndex;
++    const VkImageLayout guestLayout = colorBufferInfo->currentLayout != VK_IMAGE_LAYOUT_UNDEFINED
++                                          ? colorBufferInfo->currentLayout
++                                          : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
++
+     // In bounded jobs, each submitted and waited for on its own: the first takes the image
+     // to the transfer layout, the last gives it back.
+     const auto groups = boundedCopies(bufferImageCopies, dstBufferSize);
+@@ -4250,8 +4264,10 @@
+                 .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+                 .oldLayout = currentLayout,
+                 .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+-                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+-                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
++                .srcQueueFamilyIndex = takenFromGuest ? colorBufferInfo->currentQueueFamilyIndex
++                                                      : VK_QUEUE_FAMILY_IGNORED,
++                .dstQueueFamilyIndex = takenFromGuest ? mQueueFamilyIndex
++                                                      : VK_QUEUE_FAMILY_IGNORED,
+                 .image = colorBufferInfo->image,
+                 .subresourceRange =
+                     {
+@@ -4275,46 +4291,34 @@
+                                    groups[group].data());
+ 
+         if (last) {
+-            // After the copy has written, and visible to every later use: the transition back
+-            // ran beside the last copy before (its first scope was the host stage), and could
+-            // leave the plane copied last half written.
+-            if (colorBufferInfo->currentLayout != VK_IMAGE_LAYOUT_UNDEFINED) {
+-                const VkImageMemoryBarrier toCurrentLayoutImageBarrier = {
+-                    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+-                    .pNext = nullptr,
+-                    .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+-                    .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
+-                    .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+-                    .newLayout = colorBufferInfo->currentLayout,
+-                    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+-                    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+-                    .image = colorBufferInfo->image,
+-                    .subresourceRange =
+-                        {
+-                            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+-                            .baseMipLevel = 0,
+-                            .levelCount = 1,
+-                            .baseArrayLayer = 0,
+-                            .layerCount = 1,
+-                        },
+-                };
+-                vk->vkCmdPipelineBarrier(mCommandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+-                                         VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0,
+-                                         nullptr, 1, &toCurrentLayoutImageBarrier);
+-            } else {
+-                // The image stays in the transfer layout, as the host now records; what the
+-                // copy wrote is made visible to every later use all the same.
+-                const VkMemoryBarrier written = {
+-                    .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+-                    .pNext = nullptr,
+-                    .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+-                    .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
+-                };
+-                vk->vkCmdPipelineBarrier(mCommandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+-                                         VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 1, &written, 0,
+-                                         nullptr, 0, nullptr);
+-                colorBufferInfo->currentLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+-            }
++            // After the copy has written, and released to the guest: the transition back ran
++            // beside the last copy before (its first scope was the host stage), and could
++            // leave the plane copied last half written. The release is what makes the driver
++            // leave the memory as another image of it can read it.
++            const VkImageMemoryBarrier toGuestImageBarrier = {
++                .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
++                .pNext = nullptr,
++                .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
++                .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
++                .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
++                .newLayout = guestLayout,
++                .srcQueueFamilyIndex = mQueueFamilyIndex,
++                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_EXTERNAL,
++                .image = colorBufferInfo->image,
++                .subresourceRange =
++                    {
++                        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
++                        .baseMipLevel = 0,
++                        .levelCount = 1,
++                        .baseArrayLayer = 0,
++                        .layerCount = 1,
++                    },
++            };
++            vk->vkCmdPipelineBarrier(mCommandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
++                                     VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0,
++                                     nullptr, 1, &toGuestImageBarrier);
++            colorBufferInfo->currentLayout = guestLayout;
++            colorBufferInfo->currentQueueFamilyIndex = VK_QUEUE_FAMILY_EXTERNAL;
+             mDebugUtilsHelper.cmdEndDebugLabel(mCommandBuffer);
+         }
+ 

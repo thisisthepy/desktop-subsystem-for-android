@@ -13,10 +13,12 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use dsa_host_core::app_windows::AppWindowSettings;
+use dsa_host_core::compositor::frame_stall::{restart_in_background, Stall};
 use dsa_host_core::compositor::window_hosts::{to_wire, HostId, ToHost};
 use dsa_host_core::compositor::GraphicsStreamKind;
 use dsa_host_core::guest_display::display_or_smallest;
 use dsa_host_core::host_api::HostApiClient;
+use dsa_host_core::notifications::Notification;
 use dsa_host_core::tasks::{AppInfo, PinShortcutRequest, TaskRequest};
 use dsa_host_unix::socket::UnixLocalConnector;
 
@@ -128,6 +130,10 @@ struct MacPlatform {
     syncing: Arc<Mutex<()>>,
     /// Where the apps' requests to pin a shortcut go to be asked about.
     pins: Sender<PinShortcutRequest>,
+    /// The service's local API, which restarts Android when its graphics did not recover.
+    host_api: PathBuf,
+    /// DSA's own news for the Notification Center.
+    news: Sender<Notification>,
 }
 
 impl MacPlatform {
@@ -207,6 +213,34 @@ impl Platform for MacPlatform {
                 let _ = child.wait();
             });
         Ok(())
+    }
+
+    fn frames_shown(&mut self) -> u64 {
+        self.presenter.frames_shown()
+    }
+
+    fn recover(&mut self, stall: &Stall, packages: Vec<String>) {
+        let notice = stall
+            .notice()
+            .notification(crate::compositor::menu_bar::korean());
+        if self.news.send(notice).is_err() {
+            log("the notifications have ended; the user is not told that Android restarts");
+        }
+        if !stall.restart {
+            return;
+        }
+        let connector = UnixLocalConnector {
+            path: self.host_api.clone(),
+        };
+        let told: Arc<dyn Fn(&str) + Send + Sync> = Arc::new(|line: &str| log(line));
+        if let Err(why) = restart_in_background(
+            Box::new(connector),
+            format!("{BUILD} restart after a GPU reset"),
+            packages,
+            told,
+        ) {
+            log(&format!("could not start restarting Android: {why}"));
+        }
     }
 
     fn log(&mut self, line: &str) {
@@ -420,11 +454,13 @@ fn serve(places: Places, stop: Arc<AtomicBool>) -> Result<(), String> {
             .map(|home| crate::shell::app_stubs::default_desktop(Path::new(&home))),
     });
     let (pins, pin_requests) = channel();
+    let (news, news_posted) = channel();
     super::notifications::show(
         places.host_api.clone(),
         places.user.root.join("notifications"),
         Arc::clone(&stop),
         pin_requests,
+        news_posted,
         Arc::clone(&launcher),
     );
     let platform = MacPlatform {
@@ -434,10 +470,19 @@ fn serve(places: Places, stop: Arc<AtomicBool>) -> Result<(), String> {
         launcher,
         syncing: Arc::default(),
         pins,
+        host_api: places.host_api.clone(),
+        news,
     };
     let mut manager = Manager::new(platform);
     let mut last_tick = Instant::now();
+    // The renderer's word on its device: any change is a GPU reset, followed at once.
+    let mut device_changes = client.device_changes();
     while !stop.load(Ordering::Relaxed) {
+        let changes = client.device_changes();
+        if changes != device_changes {
+            device_changes = changes;
+            manager.handle(ManagerEvent::GpuReset, Instant::now());
+        }
         match received.recv_timeout(PRESENT_TICK) {
             Ok(event) => {
                 // A failure in the rules must not end the window manager; the event is lost.

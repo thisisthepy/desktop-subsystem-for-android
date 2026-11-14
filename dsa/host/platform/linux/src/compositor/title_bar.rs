@@ -11,8 +11,9 @@
 //! An app may draw its own title bar (a transparent caption bar background, as on Android's
 //! desktop windows). The window then draws no name and no fill, only the icon's cell and the
 //! buttons over the app, and the points of the band on the app's controls go to the app. The
-//! window's pixels are the task's pixels, so the controls' rectangles the guest gives (in
-//! task pixels) are used as they come.
+//! guest gives the controls' rectangles in the task's pixels, and the window manager turns
+//! them into the window's (the task's at the window's frame scale) before they come here, so
+//! they are used as they come.
 
 use dsa_host_core::compositor::caption::{
     band_sample, caption_icon, caption_tone, paint_title_bar, title_bar_hit, BackButton,
@@ -645,20 +646,25 @@ mod tests {
     fn fr22_a_frame_tells_how_light_its_band_is() {
         use dsa_host_core::compositor::caption::shown_tone;
         let (width, height, band) = (64u32, 48u32, 16u32);
-        // An app drawing edge to edge with a transparent status bar: its header runs under
-        // the band, light or dark, whatever its status bar reports.
+        // An app drawing edge to edge with a transparent status bar that expressed nothing
+        // about it: its header runs under the band, light or dark, and decides.
         let frame = |header: [u8; 4]| -> Vec<u8> { header.repeat((width * height) as usize) };
         let light = frame_band_sample(&frame([0xFA, 0xF9, 0xF8, 0xff]), width, height, band);
         let dark = frame_band_sample(&frame([0x24, 0x21, 0x20, 0xff]), width, height, band);
         assert!(light.luminance.is_some_and(|l| l > 900), "{light:?}");
         assert!(dark.luminance.is_some_and(|l| l < 50), "{dark:?}");
-        for reported in [CaptionTone::DarkGlyphs, CaptionTone::LightGlyphs] {
+        for shown in [CaptionTone::DarkGlyphs, CaptionTone::LightGlyphs] {
             assert_eq!(
-                shown_tone(reported, light, false, reported),
+                shown_tone(None, light, false, shown),
                 CaptionTone::DarkGlyphs
             );
             assert_eq!(
-                shown_tone(reported, dark, false, reported),
+                shown_tone(None, dark, false, shown),
+                CaptionTone::LightGlyphs
+            );
+            // An app that asked for a tone keeps it over either.
+            assert_eq!(
+                shown_tone(Some(CaptionTone::LightGlyphs), light, false, shown),
                 CaptionTone::LightGlyphs
             );
         }

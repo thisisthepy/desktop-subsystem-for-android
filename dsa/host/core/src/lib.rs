@@ -16,6 +16,8 @@
 //! - [`handshake`]: the control channel's handshake as a session uses it.
 //! - [`host_api`]: the local API service, which acts on each caller's own Android, and its
 //!   client.
+//! - [`host_certificates`]: the root certificates a user or an administrator added to the
+//!   host, which Android trusts beside its own.
 //! - [`host_config`]: the configuration file's defaults and rules that every host shares.
 //! - [`host_paths`]: where the host keeps its files, a port each platform fills in.
 //! - [`tasks`]: the guest's app tasks, which the session keeps and hands on.
@@ -48,6 +50,7 @@
 //! - [`file_share`]: the user's host folders in the guest's shared storage, and the guest's
 //!   shared storage on the host.
 //! - [`erofs`]: erofs images, the read-only file systems the host hands the guest as one file.
+//! - [`vhdx`]: the disks inside the image's dynamic VHDX files.
 //! - [`settings`]: the settings a user changes from the settings app, kept by the service.
 //! - [`system_settings`]: the host's time zone, languages, regional format, theme and accent
 //!   color, which each user's Android follows.
@@ -56,6 +59,7 @@
 //! - [`gapps`]: Google Play for a user who asks for it, downloaded and laid over the guest's
 //!   system as an erofs image.
 //! - [`memory`]: how much memory a user's Android takes, in the guest and on the host.
+//! - [`host_memory`]: the computer's physical memory, which Google Play sees as the device's.
 //! - [`window_manager`]: keeping a user's window manager running while their Android runs.
 //! - [`compositor`]: platform-neutral graphics stream bookkeeping, renderer interfaces, and
 //!   which window each task and each frame goes to.
@@ -90,6 +94,9 @@ pub mod computer_identity;
 pub mod data_reset;
 pub mod device_identity;
 pub mod diagnostics;
+pub mod direct_mapped;
+pub mod direct_mapped_disk;
+pub mod dns;
 pub mod drag;
 pub mod erofs;
 pub mod file_share;
@@ -106,8 +113,10 @@ pub mod handshake;
 pub mod host_api;
 #[cfg(feature = "conformance")]
 pub mod host_api_conformance;
+pub mod host_certificates;
 pub mod host_config;
 pub mod host_keys;
+pub mod host_memory;
 pub mod host_paths;
 pub mod ime;
 pub mod input;
@@ -137,8 +146,10 @@ pub mod system_settings;
 pub mod tasks;
 pub mod touch_gestures;
 pub mod update;
+pub mod vhdx;
 pub mod video;
 pub mod video_layout;
+pub mod widevine;
 pub mod widget_windows;
 pub mod widgets;
 pub mod window_manager;

@@ -37,6 +37,13 @@ class FakeWidgetPlatform : WidgetPlatform {
     var changed: () -> Unit = {}
     var failed: (Int) -> Unit = {}
 
+    /** Says a widget's views reach past its size: its content needs a width and height in dp. */
+    var needs: (Int, Int, Int) -> Unit = { _, _, _ -> }
+
+    override fun fitting(needs: (widgetId: Int, widthDp: Int, heightDp: Int) -> Unit) {
+        this.needs = needs
+    }
+
     /**
      * The widget IDs a view listens to. Like Android's widget host, it starts empty in every
      * process: the views an earlier agent made are gone with it, and [update] drops an update
@@ -192,6 +199,158 @@ class WidgetManagerTest {
         assertEquals(8, sent[1].widgetAdded.requestId)
         assertEquals(listOf(1), sent[2].widgetList.widgetIdsList)
         assertEquals(WidgetSize(180, 110, 160, 180, 110), store.sizes()[1])
+    }
+
+    @Test
+    fun fr12_a_widget_is_placed_in_whole_launcher_cells_that_hold_its_minimum() {
+        // Android's rule: n cells hold 70n - 30 dp.
+        assertEquals(1, WidgetInfo.cellsFor(0))
+        assertEquals(1, WidgetInfo.cellsFor(40))
+        assertEquals(2, WidgetInfo.cellsFor(110))
+        assertEquals(3, WidgetInfo.cellsFor(180))
+        // A 5 by 2 music widget of 369 by 110 dp: two rows of cells, 132 dp, rather than its
+        // bare 110 dp minimum, which cut its playback buttons off.
+        assertEquals(132, WidgetInfo.launcherSide(110, 0))
+        assertEquals("never below the minimum", 369, WidgetInfo.launcherSide(369, 0))
+        assertEquals(58, WidgetInfo.launcherSide(40, 0))
+        assertEquals("the cells its app asks for", 206, WidgetInfo.launcherSide(110, 3))
+        assertEquals("never fewer cells than hold the minimum", 206, WidgetInfo.launcherSide(180, 1))
+        assertEquals("no more than a launcher's grid", 354, WidgetInfo.launcherSide(110, 9))
+        assertEquals("within its maximum", 120, WidgetInfo.launcherSide(110, 0, 120))
+        assertEquals("a maximum below the minimum leaves the minimum", 110, WidgetInfo.launcherSide(110, 0, 90))
+    }
+
+    @Test
+    fun fr12_a_widget_whose_content_needs_more_than_its_minimum_gets_a_window_that_fits() {
+        val music = clock(provider = "com.example.music/.Widget5x2").copy(
+            label = "Music",
+            minWidthDp = 369,
+            minHeightDp = 110,
+            defaultWidthDp = WidgetInfo.launcherSide(369, 0),
+            defaultHeightDp = WidgetInfo.launcherSide(110, 0),
+            resizeMode = 1,
+        )
+        started()
+        platform.offered += music
+        add("com.example.music/.Widget5x2")
+        val placed = sent.last { it.hasWidgetUpdated() }.widgetUpdated.provider
+        assertEquals(369 to 132, placed.defaultWidthDp to placed.defaultHeightDp)
+
+        // Its text is larger than its app planned for: its last row reaches 168 dp down.
+        sent.clear()
+        platform.needs(1, 369, 168)
+        scheduler.runDue()
+        val grown = sent.single { it.hasWidgetUpdated() }.widgetUpdated
+        assertEquals(1, grown.widgetId)
+        assertEquals("the window that holds it", 369 to 168, grown.provider.defaultWidthDp to grown.provider.defaultHeightDp)
+        assertEquals("its minimum is what its app says", 110, grown.provider.minHeightDp)
+
+        // A smaller need later changes nothing: the window never jumps back.
+        sent.clear()
+        platform.needs(1, 369, 150)
+        scheduler.runDue()
+        assertTrue(sent.none { it.hasWidgetUpdated() })
+
+        // Each new connection hears the size that holds it.
+        manager.connected()
+        val again = sent.first { it.hasWidgetUpdated() }.widgetUpdated.provider
+        assertEquals(168, again.defaultHeightDp)
+
+        // An agent that starts again describes it at that size from the start, so its window
+        // does not shrink and grow again each time Android starts.
+        val restarted = mutableListOf<Envelope>()
+        val next = WidgetManager(platform, store, { frame -> restarted += decode(frame); true }, log, { true })
+        next.start { it() }
+        next.connected()
+        assertEquals(168, restarted.first { it.hasWidgetUpdated() }.widgetUpdated.provider.defaultHeightDp)
+
+        // A need within the widget's maximum only.
+        val capped = music.copy(maxHeightDp = 150).holding(369, 400)
+        assertEquals(150, capped.defaultHeightDp)
+    }
+
+    @Test
+    fun fr12_a_widget_whose_views_reach_past_its_window_is_drawn_shrunk_to_fit_never_cut() {
+        // Its views fit: drawn at full size.
+        assertEquals(1f, WidgetFit.scale(443, 158, 443, 158), 0f)
+        // Its last row reaches 200 pixels down a window of 158: shrunk until it shows whole.
+        val scale = WidgetFit.scale(443, 158, 443, 200)
+        assertEquals(158f / 200f, scale, 0.0001f)
+        assertTrue(WidgetFit.layoutSide(158, scale) >= 200)
+        assertEquals(WidgetFit.layoutSide(443, scale).toFloat() * scale, 443f, 1f)
+        // Across too, and the side that needs it more decides.
+        assertEquals(0.8f, WidgetFit.scale(400, 100, 500, 110), 0.0001f)
+        // Shrunk no further than can still be read.
+        assertEquals(WidgetFit.MIN_SCALE, WidgetFit.scale(100, 100, 100, 1000), 0f)
+        // The size it needs, rounded up so it is held whole.
+        assertEquals(168, WidgetFit.dpOf(210, 200))
+        assertEquals(169, WidgetFit.dpOf(200, 190))
+        assertEquals(110, WidgetFit.dpOf(132, 192))
+    }
+
+    /**
+     * A 5 by 2 music widget at 369 by 170 dp, on a monitor at 200% (262 dpi) and at 125%
+     * (164 dpi). Its app was told 16 dp less each way than its window, Android's padding for a
+     * launcher's grid, which the agent's widget view does not have: at 262 dpi it laid out
+     * 154 dp, 252 pixels of a 278 pixel window, and the window showed a 26 pixel empty band
+     * below the widget.
+     */
+    @Test
+    fun fr12_a_widgets_app_is_told_the_size_of_its_window_at_200_and_125_percent() {
+        for ((density, window) in listOf(262 to (604 to 278), 164 to (378 to 174))) {
+            val told = WidgetFit.told(369, 170)
+            assertEquals(WidgetFit.Told(369, 170), told)
+            // The size the app lays out for covers the window to the pixel.
+            val px = { dp: Int -> Math.round(dp * density / 160.0).toInt() }
+            assertEquals("width at $density dpi", window.first.toDouble(), px(told.widthDp).toDouble(), 1.0)
+            assertEquals("height at $density dpi", window.second.toDouble(), px(told.heightDp).toDouble(), 1.0)
+        }
+    }
+
+    /**
+     * Android centres a widget's content, so content taller than its window is cut off at the
+     * top as much as at the bottom. Counting only the bottom, the 369 by 132 dp music widget
+     * whose content was 172 dp grew 132, 140, 156, 163, 167, 169, 170 dp and never held it.
+     */
+    @Test
+    fun fr12_a_widget_whose_content_overflows_at_the_top_too_is_measured_whole_and_shown_whole() {
+        // 200%: 132 dp is 216 pixels, and 172 dp of content 282 pixels, from -33 to 249.
+        val room = 216
+        val content = 282
+        val start = (room - content) / 2
+        assertEquals(-33, start)
+        val span = WidgetFit.span(room, start, start + content)
+        assertEquals(content, span)
+        assertEquals(173, WidgetFit.dpOf(span, 262))
+        // Drawn shrunk until a room that large holds it, where centred content starts at 0.
+        val scale = WidgetFit.scale(604, room, 604, span)
+        val layout = WidgetFit.layoutSide(room, scale)
+        assertTrue(layout >= content)
+        assertTrue((layout - content) / 2 >= 0)
+        // At its 170 dp (278 pixels) the content still reaches 2 pixels past each edge.
+        assertEquals(282, WidgetFit.span(278, -2, 280))
+        assertEquals(173, WidgetFit.dpOf(282, 262))
+        // 125%: 132 dp is 135 pixels, the content 176.
+        assertEquals(176, WidgetFit.span(135, (135 - 176) / 2, (135 - 176) / 2 + 176))
+        assertEquals(172, WidgetFit.dpOf(176, 164))
+        // Content inside its window needs nothing more.
+        assertEquals(278, WidgetFit.span(278, 0, 278))
+        assertEquals(278, WidgetFit.span(278, 20, 258))
+    }
+
+    @Test
+    fun fr12_what_an_apps_own_view_cuts_off_inside_the_window_is_not_counted_as_cut() {
+        // A card from 20 to 584 of a 604 pixel window cuts off its picture: the app's design.
+        assertEquals(20, WidgetFit.clipEdge(Int.MIN_VALUE, 20, 0, low = true))
+        assertEquals(584, WidgetFit.clipEdge(Int.MAX_VALUE, 584, 604, low = false))
+        // A view at the window's edges, or past them, is cut off by the window itself.
+        assertEquals(Int.MIN_VALUE, WidgetFit.clipEdge(Int.MIN_VALUE, 0, 0, low = true))
+        assertEquals(Int.MIN_VALUE, WidgetFit.clipEdge(Int.MIN_VALUE, -13, 0, low = true))
+        assertEquals(Int.MAX_VALUE, WidgetFit.clipEdge(Int.MAX_VALUE, 278, 278, low = false))
+        assertEquals(Int.MAX_VALUE, WidgetFit.clipEdge(Int.MAX_VALUE, 291, 278, low = false))
+        // An inner edge never loosens an outer one.
+        assertEquals(30, WidgetFit.clipEdge(30, 20, 0, low = true))
+        assertEquals(500, WidgetFit.clipEdge(500, 584, 604, low = false))
     }
 
     @Test
@@ -417,6 +576,35 @@ class WidgetManagerTest {
         manager.handle(Envelope.newBuilder().setResizeWidget(ResizeWidget.newBuilder().setWidgetId(1).setWidth(0).setHeight(5).setDensityDpi(240).setWidthDp(1).setHeightDp(1)).build())
         manager.handle(Envelope.newBuilder().setResizeWidget(ResizeWidget.newBuilder().setWidgetId(99).setWidth(10).setHeight(10).setDensityDpi(160).setWidthDp(10).setHeightDp(10)).build())
         assertEquals(before, platform.shown.size)
+    }
+
+    /**
+     * A size the widget is drawn at already changes nothing: the host passes the size of a
+     * window being resized as the drag pauses and again at its end, and a widget drawn anew
+     * makes its views again, which costs memory and time.
+     */
+    @Test
+    fun fr12_a_size_the_widget_is_drawn_at_already_does_not_draw_it_again() {
+        started()
+        platform.offered += clock()
+        add()
+        fun resize(width: Int, widthDp: Int) = manager.handle(
+            Envelope.newBuilder().setResizeWidget(
+                ResizeWidget.newBuilder().setWidgetId(1).setWidth(width).setHeight(220).setDensityDpi(240)
+                    .setWidthDp(widthDp).setHeightDp(147),
+            ).build(),
+        )
+        resize(360, 240)
+        val drawn = platform.shown.size
+        resize(360, 240)
+        resize(360, 240)
+        scheduler.runDue()
+        assertEquals("the same size drew the widget again", drawn, platform.shown.size)
+        assertEquals(WidgetSize(360, 220, 240, 240, 147), store.sizes()[1])
+        // A new size draws it once more.
+        resize(420, 280)
+        assertEquals(drawn + 1, platform.shown.size)
+        assertEquals(1 to WidgetSize(420, 220, 240, 280, 147), platform.shown.last())
     }
 
     @Test

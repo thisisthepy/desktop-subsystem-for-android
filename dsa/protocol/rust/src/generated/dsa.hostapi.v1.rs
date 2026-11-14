@@ -135,7 +135,7 @@ pub struct ResizeTask {
     pub live: bool,
 }
 /// A task's window moved to a monitor of another scale: asks the caller's Android to draw
-/// the task at `density_dpi` (96 at a scale of 100%, where a dp is 0.6 of a host pixel).
+/// the task at `density_dpi` (130 at a scale of 100%, where a dp is 0.819 of a host pixel).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct SetTaskDensity {
     #[prost(int32, tag = "1")]
@@ -175,6 +175,15 @@ pub struct StreamInput {}
 pub struct SetWindowsShown {
     #[prost(bool, tag = "1")]
     pub shown: bool,
+}
+/// Says which tasks of the caller's Android have their window shown: open and not minimized.
+/// The window manager sends it on each change. The caller's Android keeps less memory for an
+/// app whose windows are all minimized. The service keeps the latest value while the Android is
+/// not running, for its next start.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct SetTasksShown {
+    #[prost(int32, repeated, tag = "1")]
+    pub task_ids: ::prost::alloc::vec::Vec<i32>,
 }
 /// Says whether the caller's window manager can turn the host's three- and four-finger touch
 /// gestures off (Settings.touch_gestures_off): `state` is "unsupported", "available" or
@@ -970,8 +979,8 @@ pub struct PlaceWidget {
     pub widget_id: i32,
     #[prost(message, optional, tag = "2")]
     pub placement: ::core::option::Option<WidgetPlacement>,
-    /// The window's size in its monitor's pixels, and Android's density for it (96 at a scale of
-    /// 100%).
+    /// The window's size in its monitor's pixels, and Android's density for it (130 at a scale
+    /// of 100%).
     #[prost(uint32, tag = "3")]
     pub width: u32,
     #[prost(uint32, tag = "4")]
@@ -1271,7 +1280,7 @@ pub struct Task {
     /// Whether the task has input focus in Android.
     #[prost(bool, tag = "5")]
     pub focused: bool,
-    /// The density the task's app draws at, in dots per inch (96 at a scale of 100%). 0 when
+    /// The density the task's app draws at, in dots per inch (130 at a scale of 100%). 0 when
     /// unknown.
     #[prost(uint32, tag = "6")]
     pub density_dpi: u32,
@@ -1395,6 +1404,12 @@ pub struct AppInfo {
     /// in rank order, then the pinned ones. Empty for a task's app.
     #[prost(message, repeated, tag = "17")]
     pub shortcuts: ::prost::alloc::vec::Vec<AppShortcut>,
+    /// The user ID the app shares with other apps (its manifest's `android:sharedUserId`), in
+    /// the list of installed apps. Apps with the same value run under one Android uid and are
+    /// one group for root elevation: their level and grace apply to all of them, and a settings
+    /// app shows them together. Empty for an app with a user ID of its own, and for a task's app.
+    #[prost(string, tag = "18")]
+    pub shared_user_id: ::prost::alloc::string::String,
 }
 /// One of an app's launcher shortcuts in Android: a static one from its manifest, a dynamic
 /// one it published, or one pinned at its request. The host's jump list (Dock menu, desktop
@@ -1658,6 +1673,23 @@ pub struct GuestMemory {
     pub google_play_pss_kb: u64,
     #[prost(uint64, tag = "27")]
     pub google_play_swap_pss_kb: u64,
+    /// Free page reporting, as the control channel's GuestMemory says: the free memory the host
+    /// has taken back now, the memory reported since boot, and the reported free memory the
+    /// host took back in again with a neighbour since boot. All 0 when the guest could not read
+    /// them.
+    #[prost(uint64, tag = "28")]
+    pub free_reported_kb: u64,
+    #[prost(uint64, tag = "29")]
+    pub reported_total_kb: u64,
+    #[prost(uint64, tag = "30")]
+    pub refaulted_total_kb: u64,
+    /// How fast memory went back to the host between the report before this one and this one,
+    /// in KiB a minute, when reported_rate_known is set: the growth of reported_total_kb over
+    /// the time between the two.
+    #[prost(uint64, tag = "31")]
+    pub reported_kb_per_minute: u64,
+    #[prost(bool, tag = "32")]
+    pub reported_rate_known: bool,
 }
 /// One host process that runs the caller's Android: its VM's memory process, the window
 /// manager, an app window.
@@ -1828,14 +1860,14 @@ pub struct GetSettings {}
 /// an update setting, which applies to every user, needs a caller acting as an administrator
 /// (on Windows, an elevated process); otherwise nothing changes and the answer is
 /// ERROR_CODE_NOT_ALLOWED.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct SetSettings {
     #[prost(message, optional, tag = "1")]
     pub settings: ::core::option::Option<Settings>,
 }
 /// The settings of the caller's DSA. `render_gpu`, `freeze`, `clipboard` and `links_in_android` are
 /// the caller's own; the update and trace settings are the machine's, shared by every user of it.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Settings {
     /// The GPU the caller's window manager renders on: "display" (the GPU that drives the
     /// primary monitor, the default), "integrated", "discrete", or part of a GPU's name. The
@@ -1988,6 +2020,42 @@ pub struct Settings {
     /// next time the user starts Android.
     #[prost(bool, tag = "39")]
     pub image_auto_restart: bool,
+    /// Whether the caller's Android trusts, as system certificates, the root certificates a user
+    /// or an administrator added to this computer (imported_certificates). On unless the user
+    /// turned it off; a client sends back the value it read. It applies at once, without
+    /// restarting Android.
+    #[prost(bool, tag = "40")]
+    pub host_certificates: bool,
+    /// The root certificates the service found added to this computer's trust stores for the
+    /// caller, whether or not host_certificates is on. Those the operating system ships are left
+    /// out. A client cannot change it.
+    #[prost(message, repeated, tag = "41")]
+    pub imported_certificates: ::prost::alloc::vec::Vec<ImportedCertificate>,
+}
+/// One root certificate the service found added to the computer's trust stores.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ImportedCertificate {
+    /// Who the certificate is for and who signed it, as distinguished names ("CN=Example Root,
+    /// O=Example").
+    #[prost(string, tag = "1")]
+    pub subject: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub issuer: ::prost::alloc::string::String,
+    /// Where it was found: "machine" (the computer's trusted root store), "machine_group_policy",
+    /// "machine_enterprise", "user" (the caller's own trusted root store), "user_group_policy",
+    /// "admin" (the computer's administrator trust settings) or "system" (a certificate added to
+    /// the system's certificate store).
+    #[prost(string, tag = "3")]
+    pub source: ::prost::alloc::string::String,
+    /// The store or file it was found in, as the operating system names it.
+    #[prost(string, tag = "4")]
+    pub location: ::prost::alloc::string::String,
+    /// The SHA-256 fingerprint of the certificate, in lower-case hexadecimal.
+    #[prost(string, tag = "5")]
+    pub sha256: ::prost::alloc::string::String,
+    /// When it stops being valid, in seconds since the Unix epoch; 0 when unknown.
+    #[prost(int64, tag = "6")]
+    pub not_after: i64,
 }
 /// How the caller's Android reaches the network.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -2010,6 +2078,12 @@ pub struct NetworkStatus {
     /// network. Empty when there is none.
     #[prost(string, tag = "5")]
     pub problem: ::prost::alloc::string::String,
+    /// Who answers the guest's DNS queries: "host" while this host's resolver answers them (so
+    /// the host's hosts file, VPN and DNS filters apply to Android's apps), "network" while the
+    /// host's resolver does not answer and Android asks `dns_servers` itself. Empty while Android
+    /// is not running or still booting, and from a service that cannot say.
+    #[prost(string, tag = "6")]
+    pub dns_resolver: ::prost::alloc::string::String,
 }
 /// Erases the caller's Android data: the apps they installed, their accounts and every app's
 /// data. The service stops the caller's Android, waits for it to stop, and replaces their data
@@ -2384,6 +2458,76 @@ pub struct ArmTranslation {
     /// when guest_known.
     #[prost(bool, tag = "10")]
     pub guest_left_on_data: bool,
+}
+/// The Widevine module a user installed: the com.google.android.widevine APEX of Google's
+/// emulator system image for their Android version and architecture, which the client
+/// downloaded from Google's SDK repository and took out unchanged. DSA does not ship it.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct WidevinePackage {
+    /// The APEX's file name in the image's /vendor/apex, such as
+    /// "com.google.android.widevine.apex". The guest's apexd reads it from there.
+    #[prost(string, tag = "1")]
+    pub apex: ::prost::alloc::string::String,
+    /// The image it came from: its build, API level and revision, such as
+    /// "BE2A.250530.026.F3 (API 36, r7)".
+    #[prost(string, tag = "2")]
+    pub version: ::prost::alloc::string::String,
+    /// The Android major version and the ABI ("x86_64", "arm64-v8a") of that image, which are
+    /// the caller's Android's.
+    #[prost(uint32, tag = "3")]
+    pub android_major: u32,
+    #[prost(string, tag = "4")]
+    pub abi: ::prost::alloc::string::String,
+    /// The system image archive it was taken from, on Google's download server.
+    #[prost(string, tag = "5")]
+    pub source: ::prost::alloc::string::String,
+    /// The APEX's size in bytes and its SHA-256 digest, as the image holds it.
+    #[prost(uint64, tag = "6")]
+    pub size: u64,
+    #[prost(bytes = "vec", tag = "7")]
+    pub sha256: ::prost::alloc::vec::Vec<u8>,
+    /// The licence Google offers the image under, as its list names it.
+    #[prost(string, tag = "8")]
+    pub license: ::prost::alloc::string::String,
+}
+/// Installs Widevine for the caller's Android. The service answers at once: Done when it takes
+/// an APEX with this description, or an error. After Done the client sends the APEX, exactly
+/// as the image holds it, package.size bytes, in ApkChunk frames, and the service answers the
+/// same request id once more: Widevine once the APEX is on the caller's add-on disk, or an
+/// error. The connection then ends. Android need not run: the module is used from its next
+/// start.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct InstallWidevine {
+    #[prost(message, optional, tag = "1")]
+    pub package: ::core::option::Option<WidevinePackage>,
+}
+/// Asks where Widevine stands for the caller. Answered with Widevine.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetWidevine {}
+/// Removes the caller's Widevine module. Answered with Widevine. From Android's next start the
+/// module is gone, and so are the device certificates Widevine kept in /data/vendor/mediadrm.
+/// A running Android keeps the module it booted with until it restarts.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct RemoveWidevine {}
+/// Where Widevine stands for the caller.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct Widevine {
+    /// The module the caller installed; absent when there is none.
+    #[prost(message, optional, tag = "1")]
+    pub package: ::core::option::Option<WidevinePackage>,
+    /// The caller's add-on disk holds the module, for Android's next start.
+    #[prost(bool, tag = "2")]
+    pub on_disk: bool,
+    /// The caller's Android runs now: the two fields below hold only then.
+    #[prost(bool, tag = "3")]
+    pub running: bool,
+    /// The running Android was started with Widevine.
+    #[prost(bool, tag = "4")]
+    pub active: bool,
+    /// What is installed differs from what the running Android was started with, so it applies
+    /// once Android starts again.
+    #[prost(bool, tag = "5")]
+    pub restart_needed: bool,
 }
 /// The Google apps package a user installed: LiteGapps' Core build for their Android, which the
 /// service downloaded from LiteGapps' file host.
@@ -2861,7 +3005,7 @@ pub struct Request {
     pub id: u64,
     #[prost(
         oneof = "request::Body",
-        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 25, 26, 22, 23, 24, 27, 29, 30, 31, 46, 32, 33, 34, 28, 35, 36, 39, 38, 45, 70, 71, 37, 120, 121, 200, 72, 73, 74, 80, 81, 41, 42, 43, 44, 300, 301, 302, 303, 90, 310, 320, 321, 322, 330, 331, 332, 400, 401, 402, 340, 341, 350, 620, 470, 471, 472, 473, 640, 641, 642, 643, 644, 645, 646, 647, 648, 660, 661, 680, 681"
+        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 47, 21, 25, 26, 22, 23, 24, 27, 29, 30, 31, 46, 32, 33, 34, 28, 35, 36, 39, 38, 45, 70, 71, 37, 120, 121, 200, 72, 73, 74, 80, 81, 41, 42, 43, 44, 300, 301, 302, 303, 90, 310, 320, 321, 322, 330, 331, 332, 400, 401, 402, 340, 341, 350, 620, 470, 471, 472, 473, 640, 641, 642, 643, 644, 645, 646, 647, 648, 660, 661, 680, 681, 700, 701, 702"
     )]
     pub body: ::core::option::Option<request::Body>,
 }
@@ -2903,6 +3047,8 @@ pub mod request {
         SetSettings(super::SetSettings),
         #[prost(message, tag = "20")]
         SetWindowsShown(super::SetWindowsShown),
+        #[prost(message, tag = "47")]
+        SetTasksShown(super::SetTasksShown),
         #[prost(message, tag = "21")]
         FreezeSession(super::FreezeSession),
         #[prost(message, tag = "25")]
@@ -3045,6 +3191,12 @@ pub mod request {
         LaunchShortcut(super::LaunchShortcut),
         #[prost(message, tag = "681")]
         AnswerPinShortcut(super::AnswerPinShortcut),
+        #[prost(message, tag = "700")]
+        InstallWidevine(super::InstallWidevine),
+        #[prost(message, tag = "701")]
+        GetWidevine(super::GetWidevine),
+        #[prost(message, tag = "702")]
+        RemoveWidevine(super::RemoveWidevine),
     }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -3053,7 +3205,7 @@ pub struct Response {
     pub id: u64,
     #[prost(
         oneof = "response::Body",
-        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 80, 17, 18, 300, 90, 320, 321, 330, 332, 400, 401, 340, 341, 620, 621, 622, 660"
+        tags = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 80, 17, 18, 300, 90, 320, 321, 330, 332, 400, 401, 340, 341, 620, 621, 622, 660, 700"
     )]
     pub body: ::core::option::Option<response::Body>,
 }
@@ -3125,6 +3277,8 @@ pub mod response {
         KeyProtection(super::KeyProtection),
         #[prost(message, tag = "660")]
         AppAudio(super::AppAudio),
+        #[prost(message, tag = "700")]
+        Widevine(super::Widevine),
     }
 }
 /// The one message type on the wire. Each frame carries exactly one.

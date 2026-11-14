@@ -10,6 +10,7 @@ kernel, and the user's WSL kernel is not touched.
 | `android-arm64.config` | The options the arm64 kernel adds after `android.config` |
 | `virtio.config` | The virtio drivers the macOS host's VM needs, merged last for both architectures |
 | `patches/` | Small patches applied to the pinned source before configuration, the same for both architectures |
+| `apply-patches.sh` | Leaves a checkout of the tag with the whole patch series applied, however often it runs; the patches stack (several change `mm/page_reporting.c`), so it checks the series as a whole, not one patch at a time |
 | `build.sh` | Fetches the source into `.scratch/`, merges the configuration, checks it and builds `bzImage` (x86_64) or `Image` (arm64) |
 
 ## Architectures
@@ -32,14 +33,41 @@ when VMBus is there and otherwise leaves the place to virtio's.
 
 The patches touch only architecture-neutral code (VMBus's ACPI probe, which Hyper-V uses on
 both architectures, the command-line partition parser, cgroup v1, wakeup sources, shmem,
-free page reporting), so the same set applies to both builds.
+free page reporting, ext4, the persistent memory drivers), so the same set applies to both builds.
+
+The host's direct-mapped mode (off by default) attaches the read-only disks as persistent
+memory: Hyper-V's virtual persistent memory, which the kernel finds through ACPI's NFIT, or
+virtio-pmem under KVM. erofs then maps their files with DAX instead of caching them.
+`patches/pmem-dax.patch` gives Hyper-V's raw persistent memory page structs, which DAX needs
+(virtio-pmem has them already), and puts each persistent memory bus below a platform device of
+its own (`nfit`, `virtio-pmem`): Android makes `/dev/block/by-name` links only for disks below
+a boot device, and the host names those two in such a boot. It also makes every persistent
+memory region read only (`ND_REGION_READONLY`), so its disk refuses writes, as the read-only
+SCSI disk does outside the mode: each one is a disk image the host maps read only.
 
 Memory the guest frees goes back to the host at once. Upstream free page reporting waits two
 seconds before each pass, and again after each pass that used up its budget, so a large
 free reached the host slice by slice over many seconds; `patches/page-reporting-no-delay.patch`
 starts every pass at once. The host chooses the smallest piece reported
 (`page_reporting.page_reporting_order` on the command line): 4 KiB where it backs memory in
-4 KiB pages, so a freed page need not wait for compaction to gather a whole block.
+4 KiB pages, so a freed page need not wait for compaction to gather a whole block. A host
+that faults memory in larger pieces (Hyper-V's 64 KiB fault clusters, a Linux host's huge
+pages) takes reported neighbours back in with a page the guest touches again, and the guest
+never offers those a second time. `patches/page-reporting-rereport.patch` adds
+`page_reporting.rereport`: writing 1 empties the per-CPU free lists and reports every free
+page again. The guest's idle reclaim writes it after it has compacted memory.
+
+zram writes pages that stay cold for long to a backing file on the guest's data disk
+(`CONFIG_ZRAM_WRITEBACK`), chosen by the time each page was last used
+(`CONFIG_ZRAM_TRACK_ENTRY_ACTIME`). Upstream clears that time when it compresses a page again,
+so every page zstd had compressed again looked unused since boot;
+`patches/zram-recompress-keeps-access-time.patch` keeps it.
+
+Android mounts each APEX package as a read-only ext4 image, about 75 of them with Google Play.
+Upstream ext4 gives every mount a workqueue for converting unwritten extents, and with it a
+rescuer thread (`ext4-rsv-conversion`) that stays for the life of the mount, though a read-only
+mount of a read-only device never writes. `patches/ext4-rsv-conversion-read-only.patch` makes
+the workqueue only for a mount that can write, or when a mount is remounted read-write.
 
 ## Why the WSL kernel
 
@@ -75,6 +103,15 @@ in probe order, which changes when the host attaches another disk.
   dm-crypt, quotas, and the eBPF and netfilter pieces netd uses.
 - **Everything built in.** The VM boots one image with no modules, so options
   `config-wsl` builds as modules, and their dependencies, are set to `y`.
+- **The computer's memory for Google Play.** Google Play gives a device under 8 GB a Chrome
+  whose browser is 32-bit, which this 64-bit only guest cannot run, and the VM starts small
+  and grows, so its size is not the computer's. `patches/dsa-host-memory.patch` adds
+  `fs/proc/dsa_host_memory.c`: a process whose uid is in
+  `/sys/module/dsa_host_memory/parameters/uids` sees `total_kb`, the computer's physical
+  memory, as `MemTotal` in `/proc/meminfo` and as the total of `sysinfo()`. The host passes
+  `total_kb` in the bootconfig (`kernel.dsa_host_memory.total_kb`); init writes the uids the
+  guest's control daemon names (the Play Store and Play services). Only the total changes, and
+  only for those uids, so lmkd and every other process see the VM's real memory.
 - **Bootconfig**, which carries each boot's control channel secret from the host. The
   guest reads it from `/proc/bootconfig`, which apps cannot read.
 - **Its own release name** (`-dsa`), so it is never mistaken for the WSL kernel.

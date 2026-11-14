@@ -85,6 +85,10 @@ impl HostKeyStore for MemoryKeys {
         self.0.lock().unwrap().insert(purpose, secret.clone());
         Ok(())
     }
+    fn remove(&self, purpose: KeyPurpose) -> Result<(), KeyError> {
+        self.0.lock().unwrap().remove(&purpose);
+        Ok(())
+    }
 }
 
 /// A sealer bound to one user on one computer, as DPAPI and a TPM are: what it seals opens

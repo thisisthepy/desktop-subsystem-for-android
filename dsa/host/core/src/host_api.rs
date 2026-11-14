@@ -112,6 +112,7 @@ use crate::tasks::{
 };
 use crate::touch_gestures::TouchGesturesState;
 use crate::update::alerts::{self as update_alerts, UpdateAlert};
+use crate::widevine::{self, WidevinePackage, WidevineStatus};
 use crate::widgets::{
     self, MemoryWidgetPlacements, Placement, Widget, WidgetError, WidgetEvent, WidgetFrame,
     WidgetPlacements, WidgetProvider, WidgetSize,
@@ -272,6 +273,12 @@ pub trait UserAndroid: Send + Sync {
     fn adb_auto_connect_state(&self) -> AutoConnectState {
         AutoConnectState::Off
     }
+    /// Whether this host's resolver answers this Android's DNS queries now: `Some(false)` when
+    /// Android runs but asks its network's DNS servers itself, `None` when it cannot be said
+    /// (Android is not running, or this host does not answer DNS queries at all).
+    fn dns_answered_by_host(&self) -> Option<bool> {
+        None
+    }
     /// Sends a file to this Android, which asks the user which app opens or takes it.
     fn open_file(&self, file: &FileTransfer) -> Result<(), TaskRequestError> {
         let _ = file;
@@ -283,6 +290,16 @@ pub trait UserAndroid: Send + Sync {
     /// while `on`, as the user's file sharing setting says.
     fn share_folders(&self, on: bool, folders: Vec<String>) {
         let _ = (on, folders);
+    }
+    /// Lets this Android trust the root certificates a user or an administrator added to the
+    /// computer (`on`), or takes them away, as the user's setting says.
+    fn trust_host_certificates(&self, on: bool) {
+        let _ = on;
+    }
+    /// The root certificates added to the computer that this Android is given while the user's
+    /// setting is on. Empty when this Android reads no trust store.
+    fn host_certificates(&self) -> Vec<crate::host_certificates::ImportedCertificate> {
+        Vec::new()
     }
     /// Sets the user's root elevation settings: the computer's switch and the apps with a
     /// level other than off. The running Android is told at once (see
@@ -935,6 +952,9 @@ impl UserAndroid for Session {
     fn adb_auto_connect_state(&self) -> AutoConnectState {
         Session::adb_auto_connect_state(self)
     }
+    fn dns_answered_by_host(&self) -> Option<bool> {
+        Session::dns_answered_by_host(self)
+    }
     fn watch_links(&self) -> Option<Receiver<String>> {
         Some(Session::watch_links(self))
     }
@@ -943,6 +963,12 @@ impl UserAndroid for Session {
     }
     fn share_folders(&self, on: bool, folders: Vec<String>) {
         Session::share_folders(self, on, folders)
+    }
+    fn trust_host_certificates(&self, on: bool) {
+        Session::trust_host_certificates(self, on)
+    }
+    fn host_certificates(&self) -> Vec<crate::host_certificates::ImportedCertificate> {
+        Session::host_certificates(self)
     }
     fn set_root_elevation_config(&self, on: bool, apps: Vec<crate::root_elevation::AppLevel>) {
         Session::set_root_elevation_config(self, on, apps)
@@ -1088,6 +1114,11 @@ impl UserAndroid for Session {
         let image = match addon {
             Addon::Gapps => control::AddonImage::Gapps,
             Addon::ArmTranslation => control::AddonImage::ArmTranslation,
+            Addon::Widevine => {
+                return Err(InstallError::Refused(
+                    "no DSA kept the Widevine module on Android's disk".into(),
+                ))
+            }
         };
         Session::read_addon_image(self, image, offset, length)
             .map(|part| AddonImagePart {
@@ -1586,6 +1617,7 @@ fn app_to_wire(app: AppInfo) -> types::AppInfo {
         multiple_windows: app.multiple_windows,
         root: app.root,
         shortcuts: app.shortcuts.into_iter().map(shortcut_to_wire).collect(),
+        shared_user_id: app.shared_user_id,
     }
 }
 
@@ -1652,6 +1684,7 @@ fn app_from_wire(app: types::AppInfo) -> AppInfo {
         multiple_windows: app.multiple_windows,
         root: app.root,
         shortcuts: app.shortcuts.into_iter().map(shortcut_from_wire).collect(),
+        shared_user_id: app.shared_user_id,
     }
 }
 
@@ -1942,6 +1975,9 @@ pub struct SettingsReport {
     /// mode is on, "unavailable" while root elevation is off, and empty while developer mode is
     /// off (adb is closed) or from a service that does not report it.
     pub adb_shell_root: String,
+    /// The root certificates added to the computer that the caller's Android is given while
+    /// `settings.host_certificates` is on. Empty from a service that does not report them.
+    pub imported_certificates: Vec<crate::host_certificates::ImportedCertificate>,
 }
 
 /// How a user's Android reaches the network.
@@ -1955,6 +1991,9 @@ pub struct NetworkStatus {
     pub gateway: String,
     /// Why the network is not what the settings ask for, if it is not.
     pub problem: Option<String>,
+    /// Who answers the guest's DNS queries: [`NetworkStatus::DNS_HOST`],
+    /// [`NetworkStatus::DNS_NETWORK`], or empty when nobody can say yet.
+    pub dns_resolver: String,
 }
 
 impl NetworkStatus {
@@ -1964,6 +2003,11 @@ impl NetworkStatus {
     pub const ADVANCED: &'static str = "advanced";
     /// No network, because Android is not running.
     pub const OFF: &'static str = "off";
+    /// The host's resolver answers the guest's names, so the host's hosts file, VPN and DNS
+    /// filters apply to Android's apps.
+    pub const DNS_HOST: &'static str = "host";
+    /// The host's resolver does not answer, so Android asks `dns_servers` itself.
+    pub const DNS_NETWORK: &'static str = "network";
 
     pub fn off() -> NetworkStatus {
         NetworkStatus {
@@ -1979,6 +2023,7 @@ impl NetworkStatus {
             dns_servers: self.dns_servers.clone(),
             gateway: self.gateway.clone(),
             problem: self.problem.clone().unwrap_or_default(),
+            dns_resolver: self.dns_resolver.clone(),
         }
     }
 
@@ -1989,6 +2034,7 @@ impl NetworkStatus {
             dns_servers: status.dns_servers,
             gateway: status.gateway,
             problem: Some(status.problem).filter(|p| !p.is_empty()),
+            dns_resolver: status.dns_resolver,
         }
     }
 }
@@ -2207,6 +2253,54 @@ fn gapps_progress_from_wire(progress: &types::GappsProgress) -> Option<gapps::Pr
         done: progress.done,
         total: progress.total,
     })
+}
+
+fn widevine_package_to_wire(package: &WidevinePackage) -> types::WidevinePackage {
+    types::WidevinePackage {
+        apex: package.apex.clone(),
+        version: package.version.clone(),
+        android_major: package.android_major,
+        abi: package.abi.clone(),
+        source: package.source.clone(),
+        size: package.size,
+        sha256: (0..package.sha256.len() / 2)
+            .filter_map(|i| u8::from_str_radix(package.sha256.get(i * 2..i * 2 + 2)?, 16).ok())
+            .collect(),
+        license: package.license.clone(),
+    }
+}
+
+fn widevine_package_from_wire(package: types::WidevinePackage) -> WidevinePackage {
+    WidevinePackage {
+        apex: package.apex,
+        version: package.version,
+        android_major: package.android_major,
+        abi: package.abi,
+        source: package.source,
+        size: package.size,
+        sha256: package.sha256.iter().map(|b| format!("{b:02x}")).collect(),
+        license: package.license,
+    }
+}
+
+fn widevine_to_wire(status: &WidevineStatus) -> types::Widevine {
+    types::Widevine {
+        package: status.package.as_ref().map(widevine_package_to_wire),
+        on_disk: status.on_disk,
+        running: status.running,
+        active: status.active,
+        restart_needed: status.restart_needed,
+    }
+}
+
+fn widevine_from_wire(status: types::Widevine) -> WidevineStatus {
+    WidevineStatus {
+        package: status.package.map(widevine_package_from_wire),
+        on_disk: status.on_disk,
+        running: status.running,
+        active: status.active,
+        restart_needed: status.restart_needed,
+    }
 }
 
 fn package_to_wire(package: &Package) -> types::ArmTranslationPackage {
@@ -2611,6 +2705,9 @@ impl HostApiService {
             }
             if let Some(request::Body::InstallGapps(_)) = &request.body {
                 return self.install_gapps(connection, &peer, request.id);
+            }
+            if let Some(request::Body::InstallWidevine(install)) = &request.body {
+                return self.install_widevine(connection, &peer, request.id, install.clone());
             }
             if let Some(request::Body::WatchLinks(_)) = request.body {
                 return self.watch_links(connection, &peer, request.id);
@@ -3824,7 +3921,9 @@ impl HostApiService {
         })
     }
 
-    /// The widget with its placement: the one kept for it, else a new one, which is kept.
+    /// The widget with its placement: the one kept for it, brought up to date with what the
+    /// widget allows and needs now ([`widgets::refreshed_placement`]), else a new one. Either
+    /// is kept.
     fn placed(
         &self,
         user: &str,
@@ -3833,7 +3932,25 @@ impl HostApiService {
         kept: &mut std::collections::BTreeMap<i32, Placement>,
     ) -> Widget {
         let placement = match kept.get(&widget_id) {
-            Some(placement) => *placement,
+            Some(placement) => {
+                let refreshed = widgets::refreshed_placement(&provider, *placement);
+                if refreshed != *placement {
+                    eprintln!(
+                        "widgets: widget {widget_id} ({}) goes from {}x{} dp to {}x{} dp, as \
+                         it allows and needs now",
+                        provider.provider,
+                        placement.width_dp,
+                        placement.height_dp,
+                        refreshed.width_dp,
+                        refreshed.height_dp
+                    );
+                    if let Err(why) = self.placements.set(user, widget_id, refreshed) {
+                        eprintln!("widgets: the size of widget {widget_id} is not kept: {why}");
+                    }
+                    kept.insert(widget_id, refreshed);
+                }
+                refreshed
+            }
             None => {
                 let others: Vec<Placement> = kept.values().copied().collect();
                 let placement = widgets::default_placement(&provider, &others);
@@ -4048,10 +4165,25 @@ impl HostApiService {
         }
     }
 
+    /// The packages that share `package`'s Android user ID in `user`'s Android, `package`
+    /// first, as the guest last listed its installed apps. Just `package` for an app with a
+    /// user ID of its own, or when the list is not known.
+    fn shared_user_group(&self, user: &str, package: &str) -> Vec<String> {
+        let installed = self
+            .androids
+            .android(user)
+            .ok()
+            .and_then(|android| android.watch_tasks())
+            .and_then(|watch| installed_of(watch.current))
+            .unwrap_or_default();
+        crate::root_elevation::shared_user_group(&installed, package)
+    }
+
     /// Sets how far one app may elevate to root. The feature must be on. Moving an app to
     /// "remember" needs an administrator: a caller who is not one gets the administrator
     /// prompt in their own session. A change clears that app's grace, and the running Android
-    /// is sent the new config at once.
+    /// is sent the new config at once. Apps that share an Android user ID are one group, so
+    /// the level is set for every app of the group.
     fn set_app_root(&self, peer: &Peer, set: types::SetAppRoot) -> response::Body {
         use crate::root_elevation::Level;
         if !apk::valid_package_name(&set.package_name) {
@@ -4082,19 +4214,13 @@ impl HostApiService {
                 "root elevation is off for this computer; turn it on first",
             );
         }
-        let current = store
-            .root_apps(&peer.user)
-            .ok()
-            .and_then(|apps| {
-                apps.into_iter()
-                    .find(|a| a.package == set.package_name)
-                    .map(|a| a.level)
-            })
-            .unwrap_or_else(|| {
-                crate::root_elevation::default_level(&set.package_name)
-                    .code()
-                    .to_string()
-            });
+        let group = self.shared_user_group(&peer.user, &set.package_name);
+        let current = crate::root_elevation::group_level(
+            &store.root_apps(&peer.user).unwrap_or_default(),
+            &group,
+        )
+        .code()
+        .to_string();
         if level.change_needs_admin() && !peer.administrator && current != level.code() {
             // The caller is not an administrator, so one is asked in the caller's own session,
             // through the prompt the app's su calls use. Running the command elevated would
@@ -4118,7 +4244,10 @@ impl HostApiService {
                 );
             }
         }
-        match store.set_root_app(&peer.user, &set.package_name, level.code()) {
+        let stored = group
+            .iter()
+            .try_for_each(|member| store.set_root_app(&peer.user, member, level.code()));
+        match stored {
             Ok(()) => {
                 // The running Android follows the new level at once: the guest's su guard
                 // shows su to the app, or hides it, from this message on.
@@ -4128,7 +4257,7 @@ impl HostApiService {
                 eprintln!(
                     "local API: {} set the root level of {} to {}",
                     peer.user,
-                    set.package_name,
+                    group.join(", "),
                     level.code()
                 );
                 app_root(types::AppRootStatus::Success, level.code(), "")
@@ -4158,7 +4287,8 @@ impl HostApiService {
             .to_string()
     }
     /// Fills each listed app's `root` with its level: "unavailable" when the feature is off
-    /// for the computer, otherwise the per-app level ("off", "ask" or "remember").
+    /// for the computer, otherwise the level ("off", "ask" or "remember") of the app, or of
+    /// its group when it shares an Android user ID with other apps.
     fn fill_app_root(&self, user: &str, installed: &mut types::InstalledApps) {
         let Some((store, _facts)) = &self.settings else {
             return;
@@ -4170,12 +4300,25 @@ impl HostApiService {
             return;
         }
         let levels = store.root_apps(user).unwrap_or_default();
-        for app in &mut installed.apps {
-            app.root = levels
-                .iter()
-                .find(|a| a.package == app.package_name)
-                .map(|a| a.level.clone())
-                .unwrap_or_else(|| "off".to_string());
+        let groups: Vec<Vec<String>> = installed
+            .apps
+            .iter()
+            .map(|app| {
+                if app.shared_user_id.is_empty() {
+                    return vec![app.package_name.clone()];
+                }
+                installed
+                    .apps
+                    .iter()
+                    .filter(|other| other.shared_user_id == app.shared_user_id)
+                    .map(|other| other.package_name.clone())
+                    .collect()
+            })
+            .collect();
+        for (app, group) in installed.apps.iter_mut().zip(groups) {
+            app.root = crate::root_elevation::group_level(&levels, &group)
+                .code()
+                .to_string();
         }
     }
 
@@ -4407,12 +4550,20 @@ impl HostApiService {
         };
         let asked = place.placement.unwrap_or_default();
         let (width_dp, height_dp) = widgets::clamp_size(&provider, asked.width_dp, asked.height_dp);
-        let placement = Placement {
-            x: asked.x,
-            y: asked.y,
-            width_dp,
-            height_dp,
-        };
+        let kept = self
+            .placements_of(&peer.user)
+            .get(&place.widget_id)
+            .copied();
+        let placement = widgets::reported_placement(
+            kept,
+            Placement {
+                x: asked.x,
+                y: asked.y,
+                width_dp,
+                height_dp,
+                resized: false,
+            },
+        );
         if let Err(why) = self.placements.set(&peer.user, place.widget_id, placement) {
             eprintln!(
                 "widgets: the place of widget {} is not kept: {why}",
@@ -4503,8 +4654,11 @@ impl HostApiService {
             }
         };
         // An update alert is the host's alone: its desktop opens the update settings on a
-        // click, and Android has nothing to open or dismiss.
-        if update_alerts::is_update_key(action.key()) {
+        // click, and Android has nothing to open or dismiss. So is a notice that Android was
+        // restarted to recover its graphics.
+        if update_alerts::is_update_key(action.key())
+            || crate::compositor::frame_stall::is_recovery_key(action.key())
+        {
             return response::Body::Done(types::Done {});
         }
         let android = match self.androids.android(&peer.user) {
@@ -4830,12 +4984,28 @@ impl HostApiService {
         }
         // x86_64 first: arm64-v8a only when the APK's x86_64 libraries leave out some of its
         // arm64 ones and the running Android translates ARM code. Android is asked only then.
+        // An APK with arm64-v8a code only is refused while it does not, with that reason.
         let libraries = NativeLibraries::from_wire(&install.native_libraries);
-        let abi = native_abi::choose(&libraries, || {
+        let abi = match native_abi::install_abi(&libraries, || {
             android
                 .arm_translation()
-                .is_some_and(|guest| native_abi::translates_arm64(&guest.abilist))
-        });
+                .filter(|guest| !guest.abilist.is_empty())
+                .map(|guest| native_abi::translates_arm64(&guest.abilist))
+        }) {
+            Ok(abi) => abi,
+            Err(why) => {
+                eprintln!(
+                    "install: refused {} from {}: {why}",
+                    install.name, peer.user
+                );
+                answer(
+                    &mut *connection,
+                    error(ErrorCode::InstallRefused, why.to_string()),
+                );
+                connection.close();
+                return;
+            }
+        };
         answer(&mut *connection, response::Body::Done(types::Done {}));
         eprintln!(
             "install: {} asked to install {} ({} bytes){}",
@@ -5052,6 +5222,12 @@ impl HostApiService {
             Some(request::Body::SetWindowsShown(shown)) => {
                 self.request(peer, TaskRequest::WindowsShown { shown: shown.shown })
             }
+            Some(request::Body::SetTasksShown(shown)) => self.request(
+                peer,
+                TaskRequest::TasksShown {
+                    task_ids: shown.task_ids,
+                },
+            ),
             Some(request::Body::ReportTouchGestures(report)) => {
                 self.report_touch_gestures(peer, report)
             }
@@ -5068,6 +5244,8 @@ impl HostApiService {
             Some(request::Body::RemoveArmTranslation(_)) => self.remove_arm_translation(peer),
             Some(request::Body::GetGapps(_)) => self.get_gapps(peer),
             Some(request::Body::RemoveGapps(_)) => self.remove_gapps(peer),
+            Some(request::Body::GetWidevine(_)) => self.get_widevine(peer),
+            Some(request::Body::RemoveWidevine(_)) => self.remove_widevine(peer),
             Some(request::Body::GetPackage(get)) => self.package_state(peer, &get.package_name),
             Some(request::Body::DragOut(out)) => self.drag_out(peer, out),
             Some(request::Body::ReadDrag(read)) => self.read_drag(peer, read),
@@ -5113,6 +5291,7 @@ impl HostApiService {
                         | request::Body::SetTaskDensity(_)
                         | request::Body::SetTaskCaption(_)
                         | request::Body::SetWindowsShown(_)
+                        | request::Body::SetTasksShown(_)
                         | request::Body::FreezeSession(_)
                         | request::Body::GetSettings(_)
                         | request::Body::SetSettings(_)
@@ -5128,6 +5307,9 @@ impl HostApiService {
                         | request::Body::InstallGapps(_)
                         | request::Body::GetGapps(_)
                         | request::Body::RemoveGapps(_)
+                        | request::Body::InstallWidevine(_)
+                        | request::Body::GetWidevine(_)
+                        | request::Body::RemoveWidevine(_)
                         | request::Body::WatchLinks(_)
                         | request::Body::OpenFile(_)
                         | request::Body::WatchNotifications(_)
@@ -5202,13 +5384,18 @@ impl HostApiService {
     fn trace_resize(&self, resize: &types::ResizeTask, started: Instant) {
         let now = Instant::now();
         let size = (resize.width, resize.height);
-        let detail = format!(
+        let mut detail = format!(
             "live={} took={}",
             resize.live,
             resize_trace::millis(now.saturating_duration_since(started))
         );
         let wall = resize_trace::wall_now();
         let mut trace = self.resize_trace.lock().unwrap_or_else(|e| e.into_inner());
+        if resize.live {
+            trace.live_sent(resize.task_id, size, now);
+        } else if let Some(since) = trace.since_live(resize.task_id, size, now) {
+            detail.push_str(&format!(" since_live={}", resize_trace::millis(since)));
+        }
         let line = if trace.detailed() {
             trace.stage(
                 resize.task_id,
@@ -5407,6 +5594,8 @@ impl HostApiService {
         let removed = match addon {
             Addon::Gapps => android.remove_gapps().map(|_| ()),
             Addon::ArmTranslation => android.remove_arm_translation().map(|_| ()),
+            // No DSA ever kept the Widevine module in /data.
+            Addon::Widevine => return None,
         };
         match removed {
             Ok(()) => Some(()),
@@ -5419,6 +5608,171 @@ impl HostApiService {
                 None
             }
         }
+    }
+
+    /// The Android major version the caller runs, or 0 when this service does not know it.
+    fn guest_android_major(&self) -> u32 {
+        self.versions
+            .as_ref()
+            .and_then(|versions| versions.report().ok())
+            .map(|report| report.android_major)
+            .unwrap_or(0)
+    }
+
+    /// Where Widevine stands for `peer`: the module they installed, whether their add-on disk
+    /// holds it for the next start, and whether their running Android was started with it.
+    fn widevine_status(
+        &self,
+        peer: &Peer,
+        store: &dyn SettingsStore,
+    ) -> Result<WidevineStatus, String> {
+        let package = store.widevine(&peer.user)?;
+        let disk = self.addon_disk(&peer.user).ok();
+        let on_disk = disk
+            .as_ref()
+            .is_some_and(|disk| disk.holds(Addon::Widevine));
+        let running = self
+            .androids
+            .android(&peer.user)
+            .ok()
+            .is_some_and(|android| {
+                matches!(
+                    android.state(),
+                    SessionState::Active | SessionState::Dozing | SessionState::Frozen
+                )
+            });
+        let attached = disk
+            .as_ref()
+            .is_some_and(|disk| disk.attached().contains(&Addon::Widevine));
+        Ok(WidevineStatus::new(package, on_disk, running, attached))
+    }
+
+    fn widevine_answer(&self, peer: &Peer, store: &dyn SettingsStore) -> response::Body {
+        match self.widevine_status(peer, store) {
+            Ok(status) => response::Body::Widevine(widevine_to_wire(&status)),
+            Err(why) => error(ErrorCode::Unavailable, why),
+        }
+    }
+
+    fn get_widevine(&self, peer: &Peer) -> response::Body {
+        let Some((store, _)) = &self.settings else {
+            return Self::no_settings();
+        };
+        self.widevine_answer(peer, &**store)
+    }
+
+    /// Removes the caller's Widevine module: from their add-on disk and their settings, so
+    /// Android's next start goes without it and removes the device certificates it kept.
+    fn remove_widevine(&self, peer: &Peer) -> response::Body {
+        let Some((store, _)) = &self.settings else {
+            return Self::no_settings();
+        };
+        let _change = self.addon_change.lock().unwrap_or_else(|e| e.into_inner());
+        if let Ok(disk) = self.addon_disk(&peer.user) {
+            if let Err(why) = disk.remove(Addon::Widevine) {
+                return error(ErrorCode::Unavailable, why);
+            }
+        }
+        if let Err(why) = store.set_widevine(&peer.user, None) {
+            return error(ErrorCode::Unavailable, why);
+        }
+        eprintln!("widevine: {} removed Widevine", peer.user);
+        self.widevine_answer(peer, &**store)
+    }
+
+    /// Answers an InstallWidevine request: refuses a module whose description does not fit the
+    /// caller's Android, else takes the APEX the client sends after Done, checks it is
+    /// Widevine's as described, and puts it, unchanged, on the caller's add-on disk. Once it is
+    /// there the module is recorded with the caller's settings, and the service answers again
+    /// with where Widevine stands. The connection ends with the install. Android need not run:
+    /// the module is used from its next start.
+    fn install_widevine(
+        &self,
+        mut connection: Box<dyn Connection>,
+        peer: &Peer,
+        id: u64,
+        install: types::InstallWidevine,
+    ) {
+        let answer = |connection: &mut dyn Connection, body: response::Body| {
+            let _ = send(
+                connection,
+                Body::Response(Response {
+                    id,
+                    body: Some(body),
+                }),
+            );
+        };
+        let refuse = |mut connection: Box<dyn Connection>, body: response::Body| {
+            answer(&mut *connection, body);
+            connection.close();
+        };
+        let Some((store, _)) = &self.settings else {
+            return refuse(connection, Self::no_settings());
+        };
+        let major = self.guest_android_major();
+        let package = install
+            .package
+            .map(widevine_package_from_wire)
+            .ok_or_else(|| "the request does not describe the module".to_string())
+            .and_then(|package| {
+                package
+                    .check(major, widevine::guest_abi())
+                    .map(|()| package)
+            });
+        let package = match package {
+            Ok(package) => package,
+            Err(why) => {
+                eprintln!("widevine: refused a module from {}: {why}", peer.user);
+                return refuse(connection, error(ErrorCode::InstallRefused, why));
+            }
+        };
+        let disk = match self.addon_disk(&peer.user) {
+            Ok(disk) => disk,
+            Err(why) => return refuse(connection, error(ErrorCode::Unavailable, why)),
+        };
+        answer(&mut *connection, response::Body::Done(types::Done {}));
+        eprintln!(
+            "widevine: {} is installing Widevine from {} ({} bytes)",
+            peer.user, package.version, package.size
+        );
+        let mut content = ApkChunks {
+            connection: &mut *connection,
+            user: &peer.user,
+            left: package.size,
+            piece: Vec::new(),
+            at: 0,
+        };
+        let mut apex = Vec::with_capacity(package.size as usize);
+        let received = content
+            .read_to_end(&mut apex)
+            .map_err(|e| format!("the module did not arrive whole: {e}"))
+            .and_then(|_| widevine::check_apex(&apex, &package))
+            .and_then(|()| widevine::image(apex, &package));
+        let image = match received {
+            Ok(image) => image,
+            Err(why) => {
+                eprintln!("widevine: refused the module from {}: {why}", peer.user);
+                answer(&mut *connection, error(ErrorCode::InstallRefused, why));
+                return connection.close();
+            }
+        };
+        let _change = self.addon_change.lock().unwrap_or_else(|e| e.into_inner());
+        let digest = <sha2::Sha256 as sha2::Digest>::digest(&image);
+        let installed = disk.install(
+            Addon::Widevine,
+            image.len() as u64,
+            Some(digest.as_slice()),
+            &mut &image[..],
+        );
+        let body = match installed {
+            Ok(()) => match store.set_widevine(&peer.user, Some(&package)) {
+                Ok(()) => self.widevine_answer(peer, &**store),
+                Err(why) => error(ErrorCode::Unavailable, why),
+            },
+            Err(why) => error(ErrorCode::InstallRefused, why),
+        };
+        answer(&mut *connection, body);
+        connection.close();
     }
 
     /// Answers an InstallArmTranslation request: refuses a package whose description is not
@@ -6201,10 +6555,30 @@ impl HostApiService {
                 wire.adb_auto_connect_state = self.adb_auto_connect_now(&peer.user);
                 wire.adb_shell_root = self.adb_shell_root_now(&peer.user, &settings);
                 self.touch_gestures_now(&peer.user, &mut wire);
+                wire.imported_certificates = self.host_certificates_now(&peer.user);
                 response::Body::Settings(wire)
             }
             Err(why) => error(ErrorCode::Unavailable, why),
         }
+    }
+
+    /// The root certificates added to the computer that the caller's Android is given, as its
+    /// session last read them; none when it has no Android.
+    fn host_certificates_now(&self, user: &str) -> Vec<types::ImportedCertificate> {
+        self.androids
+            .android(user)
+            .map(|android| android.host_certificates())
+            .unwrap_or_default()
+            .into_iter()
+            .map(|certificate| types::ImportedCertificate {
+                subject: certificate.subject,
+                issuer: certificate.issuer,
+                source: certificate.source,
+                location: certificate.location,
+                sha256: certificate.sha256,
+                not_after: certificate.not_after,
+            })
+            .collect()
     }
 
     /// What the caller's window manager last said about the host's touch gestures, into
@@ -6265,10 +6639,22 @@ impl HostApiService {
     }
 
     /// The caller's network as the platform reports it, or "off" when it cannot say (no
-    /// Android is running, so there is no network yet).
+    /// Android is running, so there is no network yet), with who answers its DNS queries.
     fn network_now(&self, user: &str, settings: &Settings) -> Option<types::NetworkStatus> {
         let source = self.network.as_ref()?;
-        let status = source(user, settings).unwrap_or_else(NetworkStatus::off);
+        let mut status = source(user, settings).unwrap_or_else(NetworkStatus::off);
+        if status.mode != NetworkStatus::OFF && status.dns_resolver.is_empty() {
+            let answered = self
+                .androids
+                .android(user)
+                .ok()
+                .and_then(|android| android.dns_answered_by_host());
+            status.dns_resolver = match answered {
+                Some(true) => NetworkStatus::DNS_HOST.into(),
+                Some(false) => NetworkStatus::DNS_NETWORK.into(),
+                None => String::new(),
+            };
+        }
         Some(status.to_wire())
     }
 
@@ -6303,6 +6689,7 @@ impl HostApiService {
             advanced_networking: wanted.advanced_networking,
             touch_gestures_off: wanted.touch_gestures_off,
             image_auto_restart: wanted.image_auto_restart,
+            host_certificates: wanted.host_certificates,
             adb_port: match u16::try_from(wanted.adb_port) {
                 Ok(port) => port,
                 Err(_) => {
@@ -6363,6 +6750,7 @@ impl HostApiService {
                     android.share_folders(settings.file_sharing, settings.shared_folders.clone());
                     android.adb_auto_connect(settings.adb_auto_connect);
                     android.image_auto_restart(settings.image_auto_restart);
+                    android.trust_host_certificates(settings.host_certificates);
                     crate::root_elevation::apply(android.as_ref(), store.as_ref(), &peer.user);
                     if let Err(why) =
                         android.developer_mode(settings.developer_mode, settings.adb_port)
@@ -6383,7 +6771,7 @@ impl HostApiService {
                      {}, links in Android {}, program updates {} ({} channel), image updates \
                      {}, input trace {}, resize trace {}, developer mode {} (adb port {}, \
                      auto-connect {}), file sharing {} ({}), advanced networking {}, touch \
-                     gestures off in task windows {}, image auto-restart {}",
+                     gestures off in task windows {}, image auto-restart {}, host certificates {}",
                     peer.user,
                     settings.render_gpu,
                     on_off(settings.freeze),
@@ -6403,7 +6791,8 @@ impl HostApiService {
                     settings.shared_folders.join(", "),
                     on_off(settings.advanced_networking),
                     on_off(settings.touch_gestures_off),
-                    on_off(settings.image_auto_restart)
+                    on_off(settings.image_auto_restart),
+                    on_off(settings.host_certificates)
                 );
                 if settings.root_elevation != machine.root_elevation {
                     // The switch is the computer's, so every user's Android follows it. The
@@ -6435,6 +6824,7 @@ impl HostApiService {
                 wire.adb_auto_connect_state = self.adb_auto_connect_now(&peer.user);
                 wire.adb_shell_root = self.adb_shell_root_now(&peer.user, &settings);
                 self.touch_gestures_now(&peer.user, &mut wire);
+                wire.imported_certificates = self.host_certificates_now(&peer.user);
                 response::Body::Settings(wire)
             }
             Err(why) => error(ErrorCode::InvalidSetting, why),
@@ -6485,6 +6875,8 @@ fn settings_to_wire(settings: &Settings, facts: &ServiceFacts) -> types::Setting
         advanced_networking: settings.advanced_networking,
         touch_gestures_off: settings.touch_gestures_off,
         image_auto_restart: settings.image_auto_restart,
+        host_certificates: settings.host_certificates,
+        imported_certificates: Vec::new(),
         touch_gestures_state: String::new(),
         touch_gestures_problem: String::new(),
         adb_shell_root: String::new(),
@@ -6524,6 +6916,7 @@ fn settings_from_wire(settings: types::Settings) -> SettingsReport {
             advanced_networking: settings.advanced_networking,
             touch_gestures_off: settings.touch_gestures_off,
             image_auto_restart: settings.image_auto_restart,
+            host_certificates: settings.host_certificates,
         },
         facts: ServiceFacts {
             version: settings.version,
@@ -6540,6 +6933,20 @@ fn settings_from_wire(settings: types::Settings) -> SettingsReport {
             &settings.touch_gestures_problem,
         ),
         adb_shell_root: settings.adb_shell_root,
+        imported_certificates: settings
+            .imported_certificates
+            .into_iter()
+            .map(
+                |certificate| crate::host_certificates::ImportedCertificate {
+                    subject: certificate.subject,
+                    issuer: certificate.issuer,
+                    source: certificate.source,
+                    location: certificate.location,
+                    sha256: certificate.sha256,
+                    not_after: certificate.not_after,
+                },
+            )
+            .collect(),
     }
 }
 
@@ -6757,6 +7164,14 @@ impl HostApiClient {
     pub fn set_windows_shown(&mut self, shown: bool) -> Result<(), ClientError> {
         self.done(request::Body::SetWindowsShown(types::SetWindowsShown {
             shown,
+        }))
+    }
+
+    /// Says which tasks of the caller's Android have their window shown: open and not
+    /// minimized.
+    pub fn set_tasks_shown(&mut self, task_ids: &[i32]) -> Result<(), ClientError> {
+        self.done(request::Body::SetTasksShown(types::SetTasksShown {
+            task_ids: task_ids.to_vec(),
         }))
     }
 
@@ -7019,6 +7434,75 @@ impl HostApiClient {
             response::Body::Gapps(status) => Ok(GappsStatus::from_wire(status)),
             _ => Err(ClientError::Malformed(
                 "expected where Google Play stands".into(),
+            )),
+        }
+    }
+
+    /// Where Widevine stands for the caller.
+    pub fn widevine(&mut self) -> Result<WidevineStatus, ClientError> {
+        let body = request::Body::GetWidevine(types::GetWidevine {});
+        match self.exchange(body, self.timeout)? {
+            response::Body::Widevine(status) => Ok(widevine_from_wire(status)),
+            _ => Err(ClientError::Malformed(
+                "expected where Widevine stands".into(),
+            )),
+        }
+    }
+
+    /// Removes the caller's Widevine module; Android goes without it from its next start.
+    pub fn remove_widevine(&mut self) -> Result<WidevineStatus, ClientError> {
+        let body = request::Body::RemoveWidevine(types::RemoveWidevine {});
+        match self.exchange(body, INSTALL_ANSWER_WAIT)? {
+            response::Body::Widevine(status) => Ok(widevine_from_wire(status)),
+            _ => Err(ClientError::Malformed(
+                "expected where Widevine stands".into(),
+            )),
+        }
+    }
+
+    /// Installs the Widevine module `package` for the caller: its APEX, `package.size` bytes
+    /// read from `content`, goes on the caller's add-on disk, from which Android uses it from
+    /// its next start. The connection ends with the install, so the client is used up.
+    pub fn install_widevine(
+        mut self,
+        package: &WidevinePackage,
+        content: &mut dyn Read,
+    ) -> Result<WidevineStatus, ClientError> {
+        let id = self.next_id;
+        let body = request::Body::InstallWidevine(types::InstallWidevine {
+            package: Some(widevine_package_to_wire(package)),
+        });
+        match self.exchange(body, self.timeout)? {
+            response::Body::Done(_) => {}
+            _ => {
+                return Err(ClientError::Malformed(
+                    "expected the answer that the module is taken".into(),
+                ))
+            }
+        }
+        let mut left = package.size;
+        let mut piece = vec![0u8; apk::LOCAL_CHUNK_BYTES];
+        while left > 0 {
+            let length = left.min(piece.len() as u64) as usize;
+            if let Err(error) = content.read_exact(&mut piece[..length]) {
+                self.connection.close();
+                return Err(ClientError::Service {
+                    code: ErrorCode::InstallRefused,
+                    detail: format!("the module could not be read: {error}"),
+                });
+            }
+            let chunk = Body::ApkChunk(types::ApkChunk {
+                data: piece[..length].to_vec(),
+            });
+            if send(&mut *self.connection, chunk).is_err() {
+                break;
+            }
+            left -= length as u64;
+        }
+        match self.answer(id, INSTALL_ANSWER_WAIT)? {
+            response::Body::Widevine(status) => Ok(widevine_from_wire(status)),
+            _ => Err(ClientError::Malformed(
+                "expected where Widevine stands".into(),
             )),
         }
     }
@@ -7341,6 +7825,7 @@ impl HostApiClient {
                 end_width,
             } => self.set_task_caption(*task_id, *height, *start_width, *end_width),
             TaskRequest::WindowsShown { shown } => self.set_windows_shown(*shown),
+            TaskRequest::TasksShown { task_ids } => self.set_tasks_shown(task_ids),
             TaskRequest::StopApp { package_name } => self.stop_app(package_name),
             TaskRequest::LaunchShortcut {
                 package_name,
@@ -8807,6 +9292,7 @@ fn widget_from_wire(widget: types::Widget) -> Widget {
             y: placement.y,
             width_dp: placement.width_dp,
             height_dp: placement.height_dp,
+            resized: false,
         },
     }
 }

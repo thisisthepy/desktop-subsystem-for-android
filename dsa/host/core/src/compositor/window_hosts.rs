@@ -96,10 +96,12 @@ pub enum ToHost {
         task_id: i32,
         editor: crate::ime::ImeEditor,
     },
-    /// The tone of the window's caption buttons, which follows the app's status bar.
+    /// The tone of the window's caption buttons, which follows the app's status bar; `None`
+    /// when the app expressed nothing, so the window reads it from the pixels under its band.
+    /// On the wire, `None` is the tone left unspecified.
     CaptionTone {
         task_id: i32,
-        tone: CaptionTone,
+        tone: Option<CaptionTone>,
     },
     /// How the window is shown, and whether the user may resize it.
     Mode {
@@ -118,6 +120,13 @@ pub enum ToHost {
     CaptionBack {
         task_id: i32,
         back: bool,
+    },
+    /// The window opened for task `task_id` shows task `shown_task_id` from now on, which
+    /// took it over after a GPU reset. Messages still name the window by `task_id`; what the
+    /// window sends Android itself goes to `shown_task_id` (see [`super::window_tasks`]).
+    ShownTask {
+        task_id: i32,
+        shown_task_id: i32,
     },
     /// What every window of the app offers in its system menu: New window only when the app
     /// supports several windows. It is about the app, not one window, so it names no task.
@@ -214,6 +223,7 @@ impl ToHost {
             | ToHost::Mode { task_id, .. }
             | ToHost::CaptionMode { task_id, .. }
             | ToHost::CaptionBack { task_id, .. }
+            | ToHost::ShownTask { task_id, .. }
             | ToHost::Close { task_id } => *task_id,
         })
     }
@@ -673,6 +683,13 @@ impl WindowHosts {
                 task_id: *task_id,
                 back: *back,
             }),
+            WindowChange::ShownTask {
+                task_id,
+                shown_task_id,
+            } => self.forward(ToHost::ShownTask {
+                task_id: *task_id,
+                shown_task_id: *shown_task_id,
+            }),
         }
     }
 
@@ -1068,8 +1085,9 @@ pub fn to_wire(message: &ToHost) -> Body {
         ToHost::CaptionTone { task_id, tone } => {
             use dsa_protocol::window_host::types::{CaptionTone as WireTone, SetCaptionTone};
             let tone = match tone {
-                CaptionTone::DarkGlyphs => WireTone::DarkGlyphs,
-                CaptionTone::LightGlyphs => WireTone::LightGlyphs,
+                Some(CaptionTone::DarkGlyphs) => WireTone::DarkGlyphs,
+                Some(CaptionTone::LightGlyphs) => WireTone::LightGlyphs,
+                None => WireTone::Unspecified,
             };
             Body::SetCaptionTone(SetCaptionTone {
                 task_id,
@@ -1116,6 +1134,13 @@ pub fn to_wire(message: &ToHost) -> Body {
         ToHost::CaptionBack { task_id, back } => {
             Body::SetCaptionBack(dsa_protocol::window_host::types::SetCaptionBack { task_id, back })
         }
+        ToHost::ShownTask {
+            task_id,
+            shown_task_id,
+        } => Body::SetShownTask(dsa_protocol::window_host::types::SetShownTask {
+            task_id,
+            shown_task_id,
+        }),
         ToHost::AppMenu { new_window } => {
             Body::AppMenu(dsa_protocol::window_host::types::AppMenu { new_window })
         }
@@ -1202,10 +1227,12 @@ pub fn to_host_from_wire(body: &Body) -> Option<ToHost> {
             use dsa_protocol::window_host::types::CaptionTone as WireTone;
             ToHost::CaptionTone {
                 task_id: set.task_id,
-                // A tone this build does not know reads as the default, dark glyphs.
+                // An unspecified tone, or one this build does not know, says nothing: the
+                // window reads the tone from its pixels.
                 tone: match set.tone() {
-                    WireTone::LightGlyphs => CaptionTone::LightGlyphs,
-                    WireTone::DarkGlyphs | WireTone::Unspecified => CaptionTone::DarkGlyphs,
+                    WireTone::LightGlyphs => Some(CaptionTone::LightGlyphs),
+                    WireTone::DarkGlyphs => Some(CaptionTone::DarkGlyphs),
+                    WireTone::Unspecified => None,
                 },
             }
         }
@@ -1243,6 +1270,10 @@ pub fn to_host_from_wire(body: &Body) -> Option<ToHost> {
         Body::SetCaptionBack(set) => ToHost::CaptionBack {
             task_id: set.task_id,
             back: set.back,
+        },
+        Body::SetShownTask(set) => ToHost::ShownTask {
+            task_id: set.task_id,
+            shown_task_id: set.shown_task_id,
         },
         Body::AppMenu(menu) => ToHost::AppMenu {
             new_window: menu.new_window,
@@ -1963,11 +1994,15 @@ mod tests {
             },
             ToHost::CaptionTone {
                 task_id: 8,
-                tone: CaptionTone::LightGlyphs,
+                tone: Some(CaptionTone::LightGlyphs),
             },
             ToHost::CaptionTone {
                 task_id: 9,
-                tone: CaptionTone::DarkGlyphs,
+                tone: None,
+            },
+            ToHost::CaptionTone {
+                task_id: 9,
+                tone: Some(CaptionTone::DarkGlyphs),
             },
             ToHost::CaptionMode {
                 task_id: 10,
@@ -1987,6 +2022,10 @@ mod tests {
             ToHost::CaptionBack {
                 task_id: 11,
                 back: true,
+            },
+            ToHost::ShownTask {
+                task_id: 12,
+                shown_task_id: 31,
             },
             ToHost::AppMenu { new_window: true },
             ToHost::AppMenu { new_window: false },

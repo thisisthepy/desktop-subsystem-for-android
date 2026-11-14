@@ -10,13 +10,14 @@ import android.content.pm.PackageManager
 import android.graphics.Rect
 import io.github.thisisthepy.dsa.agent.Log
 import io.github.thisisthepy.dsa.agent.tasks.ScreenDp
-import io.github.thisisthepy.dsa.agent.tasks.StatusBarAppearance
+import io.github.thisisthepy.dsa.agent.tasks.SystemBarAppearances
 import io.github.thisisthepy.dsa.agent.tasks.TaskBounds
 import io.github.thisisthepy.dsa.agent.tasks.TaskKind
 import io.github.thisisthepy.dsa.agent.tasks.TaskOrientation
 import io.github.thisisthepy.dsa.agent.tasks.asksForFullScreen
 import io.github.thisisthepy.dsa.agent.tasks.TaskSnapshot
 import io.github.thisisthepy.dsa.agent.tasks.TaskSource
+import io.github.thisisthepy.dsa.agent.tasks.TaskStack
 import io.github.thisisthepy.dsa.agent.tasks.WidgetSetupTasks
 import io.github.thisisthepy.dsa.agent.tasks.handlesDensityChange
 import io.github.thisisthepy.dsa.agent.tasks.handlesFontScaleChange
@@ -33,6 +34,12 @@ import io.github.thisisthepy.dsa.agent.tasks.handlesFontScaleChange
  *
  * A task's bounds, focus and activity type are framework fields the SDK does not publish;
  * they are read by reflection, which platform apps may use.
+ *
+ * A task's status bar appearance is not read from its task description, which the framework
+ * only updates when an activity's description changes and so goes stale while an app that
+ * draws edge to edge switches screens and tabs. It comes from the window manager's live
+ * reports to the status bar ([AndroidSystemBars], [SystemBarAppearances]), each of which is a
+ * change like any other.
  */
 class AndroidTaskSource(
     private val context: Context,
@@ -47,12 +54,15 @@ class AndroidTaskSource(
 
     private val setups = WidgetSetupTasks(context.packageName, WidgetConfigureActivity::class.java.name)
 
+    private val appearances = SystemBarAppearances()
+    private val systemBars = AndroidSystemBars(log)
+
     // Held while the tasks are read, so two reads at once do not mix up which tasks are setups.
     override fun snapshot(): List<TaskSnapshot> = synchronized(setups) {
         @Suppress("DEPRECATION")
         val tasks = activityManager.getRunningTasks(MAX_TASKS).map(::read)
         setups.retain(tasks.map { it.taskId })
-        tasks
+        appearances.apply(tasks)
     }
 
     override fun listen(onChange: () -> Unit) {
@@ -67,6 +77,12 @@ class AndroidTaskSource(
         }
         ActivityTaskManager.getService().registerTaskStackListener(changes)
         listener = changes
+        // A new appearance changes no task's description, so the task stack listener does
+        // not hear it: the tasks are read again for each report.
+        systemBars.listen { report ->
+            appearances.report(report)
+            onChange()
+        }
     }
 
     private fun read(info: ActivityManager.RunningTaskInfo): TaskSnapshot {
@@ -87,7 +103,6 @@ class AndroidTaskSource(
             screenDp = fields.screenDp(info),
             minWidth = smallest?.first ?: 0,
             minHeight = smallest?.second ?: 0,
-            statusBar = fields.statusBar(info),
             statusBarColor = fields.statusBarColor(info),
             orientation = fields.orientation(info),
             // Full screen whichever way an app asks for it: leaving freeform for the fullscreen
@@ -100,10 +115,19 @@ class AndroidTaskSource(
             ),
             pictureInPicture = fields.windowingMode(info) == WINDOWING_MODE_PINNED,
             transparentCaption = fields.transparentCaption(info),
-            // The task's first activity is at the bottom of its stack; past it, Back has
-            // somewhere to go.
-            // A setup's own first screen is above the agent's: Back there cancels the setup.
-            canGoBack = !setup && info.numActivities > 1,
+            // Whether Back lands on a screen the user saw is the agent's to tell, from the
+            // stack as it changes (BackStacks). A setup's own first screen is above the
+            // agent's: Back there cancels the setup, so a setup never offers it.
+            stack = if (setup) {
+                null
+            } else {
+                TaskStack(
+                    activities = info.numActivities,
+                    top = info.topActivity?.flattenToShortString(),
+                    topShows = !themes.drawsNothing(top),
+                    visible = fields.visible(info),
+                )
+            },
             // Whether its manifest says it handles a change of density itself
             // (ActivityInfo.configChanges includes density): Android relaunches any other
             // activity whose density changes. False when the package manager does not know it.
@@ -182,6 +206,7 @@ private class TaskFields(private val log: Log) {
     // later; not in the SDK).
     private val requestedVisibleTypes = optional { taskInfo.getField("requestedVisibleTypes") }
     private val isFocused = field { taskInfo.getField("isFocused") }
+    private val isVisible = optional { taskInfo.getField("isVisible") }
     private val minWidth = field { taskInfo.getField("minWidth") }
     private val minHeight = field { taskInfo.getField("minHeight") }
     private val defaultMinSize = field { taskInfo.getField("defaultMinSize") }
@@ -233,24 +258,6 @@ private class TaskFields(private val log: Log) {
         }
 
     /**
-     * Whether the task's app asked for dark status bar icons (a light status bar) or light
-     * ones, as its task description says: WindowInsetsController's
-     * APPEARANCE_LIGHT_STATUS_BARS, or APPEARANCE_LIGHT_CAPTION_BARS, which follows it unless
-     * the app sets it apart. Unknown when the framework does not say.
-     */
-    fun statusBar(info: ActivityManager.RunningTaskInfo): StatusBarAppearance {
-        val description = info.taskDescription ?: return StatusBarAppearance.UNKNOWN
-        val appearance = read("status bar appearance") { barsAppearance!!.invoke(description) as Int }
-            ?: return StatusBarAppearance.UNKNOWN
-        val light = appearance and (APPEARANCE_LIGHT_STATUS_BARS or APPEARANCE_LIGHT_CAPTION_BARS)
-        return if (light != 0) {
-            StatusBarAppearance.LIGHT
-        } else {
-            StatusBarAppearance.DARK
-        }
-    }
-
-    /**
      * Whether the task's app asked to draw its own title bar: its task description carries
      * WindowInsetsController's APPEARANCE_TRANSPARENT_CAPTION_BAR_BACKGROUND, which is how
      * Android's own desktop windows tell (TaskInfo.isTransparentCaptionBarAppearance in the
@@ -290,6 +297,12 @@ private class TaskFields(private val log: Log) {
     fun focused(info: ActivityManager.RunningTaskInfo): Boolean =
         read("focus") { isFocused!!.getBoolean(info) } ?: false
 
+    /** Whether the task is visible (TaskInfo.isVisible); true when the framework does not say. */
+    fun visible(info: ActivityManager.RunningTaskInfo): Boolean {
+        val field = isVisible ?: return true
+        return read("visibility") { field.getBoolean(info) } ?: true
+    }
+
     private fun windowConfiguration(info: ActivityManager.RunningTaskInfo): Any =
         windowConfiguration!!.get(configuration!!.get(info))!!
 
@@ -317,10 +330,6 @@ private class TaskFields(private val log: Log) {
     private companion object {
         // DisplayMetrics.DENSITY_DEFAULT: the density at which one dp is one pixel.
         const val DENSITY_BASE = 160
-
-        // WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS and APPEARANCE_LIGHT_CAPTION_BARS.
-        const val APPEARANCE_LIGHT_STATUS_BARS = 8
-        const val APPEARANCE_LIGHT_CAPTION_BARS = 256
 
         // WindowInsetsController.APPEARANCE_TRANSPARENT_CAPTION_BAR_BACKGROUND.
         const val APPEARANCE_TRANSPARENT_CAPTION_BAR_BACKGROUND = 128

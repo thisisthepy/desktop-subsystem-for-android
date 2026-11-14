@@ -53,6 +53,7 @@ public  final class Envelope extends
     CLOCK_PROBE(28),
     CLOCK_ANSWER(29),
     SCREEN_STATE(40),
+    TASKS_SHOWN(46),
     POWER_STATE(41),
     DISPLAY_REFRESH(407),
     POWER_HINT(110),
@@ -212,6 +213,9 @@ public  final class Envelope extends
     LAUNCH_SHORTCUT(681),
     PIN_SHORTCUT_REQUEST(682),
     PIN_SHORTCUT_ANSWER(683),
+    HOST_CERTIFICATES(684),
+    DNS_QUERY(690),
+    DNS_ANSWER(691),
     BODY_NOT_SET(0);
     private final int value;
     private BodyCase(int value) {
@@ -260,6 +264,7 @@ public  final class Envelope extends
         case 28: return CLOCK_PROBE;
         case 29: return CLOCK_ANSWER;
         case 40: return SCREEN_STATE;
+        case 46: return TASKS_SHOWN;
         case 41: return POWER_STATE;
         case 407: return DISPLAY_REFRESH;
         case 110: return POWER_HINT;
@@ -419,6 +424,9 @@ public  final class Envelope extends
         case 681: return LAUNCH_SHORTCUT;
         case 682: return PIN_SHORTCUT_REQUEST;
         case 683: return PIN_SHORTCUT_ANSWER;
+        case 684: return HOST_CERTIFICATES;
+        case 690: return DNS_QUERY;
+        case 691: return DNS_ANSWER;
         case 0: return BODY_NOT_SET;
         default: return null;
       }
@@ -2085,6 +2093,56 @@ public  final class Envelope extends
    */
   private void clearScreenState() {
     if (bodyCase_ == 40) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int TASKS_SHOWN_FIELD_NUMBER = 46;
+  /**
+   * <code>.dsa.control.v1.TasksShown tasks_shown = 46;</code>
+   */
+  @java.lang.Override
+  public boolean hasTasksShown() {
+    return bodyCase_ == 46;
+  }
+  /**
+   * <code>.dsa.control.v1.TasksShown tasks_shown = 46;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.TasksShown getTasksShown() {
+    if (bodyCase_ == 46) {
+       return (io.github.thisisthepy.dsa.control.v1.TasksShown) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.TasksShown.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.TasksShown tasks_shown = 46;</code>
+   */
+  private void setTasksShown(io.github.thisisthepy.dsa.control.v1.TasksShown value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 46;
+  }
+  /**
+   * <code>.dsa.control.v1.TasksShown tasks_shown = 46;</code>
+   */
+  private void mergeTasksShown(io.github.thisisthepy.dsa.control.v1.TasksShown value) {
+    value.getClass();
+  if (bodyCase_ == 46 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.TasksShown.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.TasksShown.newBuilder((io.github.thisisthepy.dsa.control.v1.TasksShown) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 46;
+  }
+  /**
+   * <code>.dsa.control.v1.TasksShown tasks_shown = 46;</code>
+   */
+  private void clearTasksShown() {
+    if (bodyCase_ == 46) {
       bodyCase_ = 0;
       body_ = null;
     }
@@ -10040,6 +10098,156 @@ public  final class Envelope extends
     }
   }
 
+  public static final int HOST_CERTIFICATES_FIELD_NUMBER = 684;
+  /**
+   * <code>.dsa.control.v1.HostCertificates host_certificates = 684;</code>
+   */
+  @java.lang.Override
+  public boolean hasHostCertificates() {
+    return bodyCase_ == 684;
+  }
+  /**
+   * <code>.dsa.control.v1.HostCertificates host_certificates = 684;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.HostCertificates getHostCertificates() {
+    if (bodyCase_ == 684) {
+       return (io.github.thisisthepy.dsa.control.v1.HostCertificates) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.HostCertificates.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.HostCertificates host_certificates = 684;</code>
+   */
+  private void setHostCertificates(io.github.thisisthepy.dsa.control.v1.HostCertificates value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 684;
+  }
+  /**
+   * <code>.dsa.control.v1.HostCertificates host_certificates = 684;</code>
+   */
+  private void mergeHostCertificates(io.github.thisisthepy.dsa.control.v1.HostCertificates value) {
+    value.getClass();
+  if (bodyCase_ == 684 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.HostCertificates.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.HostCertificates.newBuilder((io.github.thisisthepy.dsa.control.v1.HostCertificates) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 684;
+  }
+  /**
+   * <code>.dsa.control.v1.HostCertificates host_certificates = 684;</code>
+   */
+  private void clearHostCertificates() {
+    if (bodyCase_ == 684) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int DNS_QUERY_FIELD_NUMBER = 690;
+  /**
+   * <code>.dsa.control.v1.DnsQuery dns_query = 690;</code>
+   */
+  @java.lang.Override
+  public boolean hasDnsQuery() {
+    return bodyCase_ == 690;
+  }
+  /**
+   * <code>.dsa.control.v1.DnsQuery dns_query = 690;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.DnsQuery getDnsQuery() {
+    if (bodyCase_ == 690) {
+       return (io.github.thisisthepy.dsa.control.v1.DnsQuery) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.DnsQuery.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.DnsQuery dns_query = 690;</code>
+   */
+  private void setDnsQuery(io.github.thisisthepy.dsa.control.v1.DnsQuery value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 690;
+  }
+  /**
+   * <code>.dsa.control.v1.DnsQuery dns_query = 690;</code>
+   */
+  private void mergeDnsQuery(io.github.thisisthepy.dsa.control.v1.DnsQuery value) {
+    value.getClass();
+  if (bodyCase_ == 690 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.DnsQuery.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.DnsQuery.newBuilder((io.github.thisisthepy.dsa.control.v1.DnsQuery) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 690;
+  }
+  /**
+   * <code>.dsa.control.v1.DnsQuery dns_query = 690;</code>
+   */
+  private void clearDnsQuery() {
+    if (bodyCase_ == 690) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
+  public static final int DNS_ANSWER_FIELD_NUMBER = 691;
+  /**
+   * <code>.dsa.control.v1.DnsAnswer dns_answer = 691;</code>
+   */
+  @java.lang.Override
+  public boolean hasDnsAnswer() {
+    return bodyCase_ == 691;
+  }
+  /**
+   * <code>.dsa.control.v1.DnsAnswer dns_answer = 691;</code>
+   */
+  @java.lang.Override
+  public io.github.thisisthepy.dsa.control.v1.DnsAnswer getDnsAnswer() {
+    if (bodyCase_ == 691) {
+       return (io.github.thisisthepy.dsa.control.v1.DnsAnswer) body_;
+    }
+    return io.github.thisisthepy.dsa.control.v1.DnsAnswer.getDefaultInstance();
+  }
+  /**
+   * <code>.dsa.control.v1.DnsAnswer dns_answer = 691;</code>
+   */
+  private void setDnsAnswer(io.github.thisisthepy.dsa.control.v1.DnsAnswer value) {
+    value.getClass();
+  body_ = value;
+    bodyCase_ = 691;
+  }
+  /**
+   * <code>.dsa.control.v1.DnsAnswer dns_answer = 691;</code>
+   */
+  private void mergeDnsAnswer(io.github.thisisthepy.dsa.control.v1.DnsAnswer value) {
+    value.getClass();
+  if (bodyCase_ == 691 &&
+        body_ != io.github.thisisthepy.dsa.control.v1.DnsAnswer.getDefaultInstance()) {
+      body_ = io.github.thisisthepy.dsa.control.v1.DnsAnswer.newBuilder((io.github.thisisthepy.dsa.control.v1.DnsAnswer) body_)
+          .mergeFrom(value).buildPartial();
+    } else {
+      body_ = value;
+    }
+    bodyCase_ = 691;
+  }
+  /**
+   * <code>.dsa.control.v1.DnsAnswer dns_answer = 691;</code>
+   */
+  private void clearDnsAnswer() {
+    if (bodyCase_ == 691) {
+      bodyCase_ = 0;
+      body_ = null;
+    }
+  }
+
   public static io.github.thisisthepy.dsa.control.v1.Envelope parseFrom(
       java.nio.ByteBuffer data)
       throws com.google.protobuf.InvalidProtocolBufferException {
@@ -11732,6 +11940,54 @@ public  final class Envelope extends
     public Builder clearScreenState() {
       copyOnWrite();
       instance.clearScreenState();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.TasksShown tasks_shown = 46;</code>
+     */
+    @java.lang.Override
+    public boolean hasTasksShown() {
+      return instance.hasTasksShown();
+    }
+    /**
+     * <code>.dsa.control.v1.TasksShown tasks_shown = 46;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.TasksShown getTasksShown() {
+      return instance.getTasksShown();
+    }
+    /**
+     * <code>.dsa.control.v1.TasksShown tasks_shown = 46;</code>
+     */
+    public Builder setTasksShown(io.github.thisisthepy.dsa.control.v1.TasksShown value) {
+      copyOnWrite();
+      instance.setTasksShown(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.TasksShown tasks_shown = 46;</code>
+     */
+    public Builder setTasksShown(
+        io.github.thisisthepy.dsa.control.v1.TasksShown.Builder builderForValue) {
+      copyOnWrite();
+      instance.setTasksShown(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.TasksShown tasks_shown = 46;</code>
+     */
+    public Builder mergeTasksShown(io.github.thisisthepy.dsa.control.v1.TasksShown value) {
+      copyOnWrite();
+      instance.mergeTasksShown(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.TasksShown tasks_shown = 46;</code>
+     */
+    public Builder clearTasksShown() {
+      copyOnWrite();
+      instance.clearTasksShown();
       return this;
     }
 
@@ -19367,6 +19623,150 @@ public  final class Envelope extends
       return this;
     }
 
+    /**
+     * <code>.dsa.control.v1.HostCertificates host_certificates = 684;</code>
+     */
+    @java.lang.Override
+    public boolean hasHostCertificates() {
+      return instance.hasHostCertificates();
+    }
+    /**
+     * <code>.dsa.control.v1.HostCertificates host_certificates = 684;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.HostCertificates getHostCertificates() {
+      return instance.getHostCertificates();
+    }
+    /**
+     * <code>.dsa.control.v1.HostCertificates host_certificates = 684;</code>
+     */
+    public Builder setHostCertificates(io.github.thisisthepy.dsa.control.v1.HostCertificates value) {
+      copyOnWrite();
+      instance.setHostCertificates(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.HostCertificates host_certificates = 684;</code>
+     */
+    public Builder setHostCertificates(
+        io.github.thisisthepy.dsa.control.v1.HostCertificates.Builder builderForValue) {
+      copyOnWrite();
+      instance.setHostCertificates(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.HostCertificates host_certificates = 684;</code>
+     */
+    public Builder mergeHostCertificates(io.github.thisisthepy.dsa.control.v1.HostCertificates value) {
+      copyOnWrite();
+      instance.mergeHostCertificates(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.HostCertificates host_certificates = 684;</code>
+     */
+    public Builder clearHostCertificates() {
+      copyOnWrite();
+      instance.clearHostCertificates();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.DnsQuery dns_query = 690;</code>
+     */
+    @java.lang.Override
+    public boolean hasDnsQuery() {
+      return instance.hasDnsQuery();
+    }
+    /**
+     * <code>.dsa.control.v1.DnsQuery dns_query = 690;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.DnsQuery getDnsQuery() {
+      return instance.getDnsQuery();
+    }
+    /**
+     * <code>.dsa.control.v1.DnsQuery dns_query = 690;</code>
+     */
+    public Builder setDnsQuery(io.github.thisisthepy.dsa.control.v1.DnsQuery value) {
+      copyOnWrite();
+      instance.setDnsQuery(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.DnsQuery dns_query = 690;</code>
+     */
+    public Builder setDnsQuery(
+        io.github.thisisthepy.dsa.control.v1.DnsQuery.Builder builderForValue) {
+      copyOnWrite();
+      instance.setDnsQuery(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.DnsQuery dns_query = 690;</code>
+     */
+    public Builder mergeDnsQuery(io.github.thisisthepy.dsa.control.v1.DnsQuery value) {
+      copyOnWrite();
+      instance.mergeDnsQuery(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.DnsQuery dns_query = 690;</code>
+     */
+    public Builder clearDnsQuery() {
+      copyOnWrite();
+      instance.clearDnsQuery();
+      return this;
+    }
+
+    /**
+     * <code>.dsa.control.v1.DnsAnswer dns_answer = 691;</code>
+     */
+    @java.lang.Override
+    public boolean hasDnsAnswer() {
+      return instance.hasDnsAnswer();
+    }
+    /**
+     * <code>.dsa.control.v1.DnsAnswer dns_answer = 691;</code>
+     */
+    @java.lang.Override
+    public io.github.thisisthepy.dsa.control.v1.DnsAnswer getDnsAnswer() {
+      return instance.getDnsAnswer();
+    }
+    /**
+     * <code>.dsa.control.v1.DnsAnswer dns_answer = 691;</code>
+     */
+    public Builder setDnsAnswer(io.github.thisisthepy.dsa.control.v1.DnsAnswer value) {
+      copyOnWrite();
+      instance.setDnsAnswer(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.DnsAnswer dns_answer = 691;</code>
+     */
+    public Builder setDnsAnswer(
+        io.github.thisisthepy.dsa.control.v1.DnsAnswer.Builder builderForValue) {
+      copyOnWrite();
+      instance.setDnsAnswer(builderForValue.build());
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.DnsAnswer dns_answer = 691;</code>
+     */
+    public Builder mergeDnsAnswer(io.github.thisisthepy.dsa.control.v1.DnsAnswer value) {
+      copyOnWrite();
+      instance.mergeDnsAnswer(value);
+      return this;
+    }
+    /**
+     * <code>.dsa.control.v1.DnsAnswer dns_answer = 691;</code>
+     */
+    public Builder clearDnsAnswer() {
+      copyOnWrite();
+      instance.clearDnsAnswer();
+      return this;
+    }
+
     // @@protoc_insertion_point(builder_scope:dsa.control.v1.Envelope)
   }
   @java.lang.Override
@@ -19420,6 +19820,7 @@ public  final class Envelope extends
             io.github.thisisthepy.dsa.control.v1.HostMemory.class,
             io.github.thisisthepy.dsa.control.v1.HostSleep.class,
             io.github.thisisthepy.dsa.control.v1.GuestSleepReady.class,
+            io.github.thisisthepy.dsa.control.v1.TasksShown.class,
             io.github.thisisthepy.dsa.control.v1.OpenLink.class,
             io.github.thisisthepy.dsa.control.v1.LinkHandling.class,
             io.github.thisisthepy.dsa.control.v1.OpenFile.class,
@@ -19577,35 +19978,39 @@ public  final class Envelope extends
             io.github.thisisthepy.dsa.control.v1.LaunchShortcut.class,
             io.github.thisisthepy.dsa.control.v1.PinShortcutRequest.class,
             io.github.thisisthepy.dsa.control.v1.PinShortcutAnswer.class,
+            io.github.thisisthepy.dsa.control.v1.HostCertificates.class,
+            io.github.thisisthepy.dsa.control.v1.DnsQuery.class,
+            io.github.thisisthepy.dsa.control.v1.DnsAnswer.class,
           };
           java.lang.String info =
-              "\u0000\u00c0\u0001\u0000\u0001\u02ab\u00c0\u0000\u0000\u0000\u0001<\u0000\u0002<" +
+              "\u0000\u00c4\u0001\u0000\u0001\u02b3\u00c4\u0000\u0000\u0000\u0001<\u0000\u0002<" +
               "\u0000\u0003<\u0000\u0004<\u0000\u0005<\u0000\u0006<\u0000\u0007<\u0000\b<\u0000" +
               "\t<\u0000\n<\u0000\u000b<\u0000\f<\u0000\r<\u0000\u000f<\u0000\u0010<\u0000\u0011" +
               "<\u0000\u0012<\u0000\u0013<\u0000\u0014<\u0000\u0015<\u0000\u0016<\u0000\u0017<\u0000" +
               "\u0018<\u0000\u0019<\u0000\u001a<\u0000\u001b<\u0000\u001c<\u0000\u001d<\u0000\u001e" +
-              "<\u0000(<\u0000)<\u0000*<\u0000+<\u0000,<\u0000-<\u00002<\u00003<\u00004<\u00005" +
-              "<\u00006<\u0000<<\u0000=<\u0000><\u0000?<\u0000@<\u0000A<\u0000B<\u0000C<\u0000D" +
-              "<\u0000E<\u0000F<\u0000G<\u0000H<\u0000I<\u0000J<\u0000K<\u0000L<\u0000M<\u0000N" +
-              "<\u0000O<\u0000P<\u0000Q<\u0000R<\u0000S<\u0000Z<\u0000[<\u0000\\<\u0000]<\u0000" +
-              "^<\u0000_<\u0000`<\u0000a<\u0000b<\u0000c<\u0000d<\u0000e<\u0000f<\u0000g<\u0000" +
-              "h<\u0000i<\u0000j<\u0000k<\u0000n<\u0000x<\u0000y<\u0000z<\u0000{<\u0000|<\u0000" +
-              "}<\u0000~<\u0000<\u0000\u0082<\u0000\u0083<\u0000\u0084<\u0000\u0085<\u0000\u0086" +
-              "<\u0000\u0087<\u0000\u0088<\u0000\u008c<\u0000\u008d<\u0000\u0098<\u0000\u0099<\u0000" +
-              "\u009a<\u0000\u009b<\u0000\u00c8<\u0000\u00c9<\u0000\u00ca<\u0000\u00dc<\u0000\u00dd" +
-              "<\u0000\u00de<\u0000\u00df<\u0000\u00f0<\u0000\u00f1<\u0000\u00f2<\u0000\u0104<\u0000" +
-              "\u0105<\u0000\u0106<\u0000\u0107<\u0000\u0108<\u0000\u0109<\u0000\u010a<\u0000\u010b" +
-              "<\u0000\u0122<\u0000\u0123<\u0000\u0154<\u0000\u0155<\u0000\u0156<\u0000\u0157<\u0000" +
-              "\u0158<\u0000\u015e<\u0000\u015f<\u0000\u0160<\u0000\u0161<\u0000\u0162<\u0000\u0179" +
-              "<\u0000\u017c<\u0000\u017d<\u0000\u017e<\u0000\u017f<\u0000\u0192<\u0000\u0193<\u0000" +
-              "\u0194<\u0000\u0195<\u0000\u0196<\u0000\u0197<\u0000\u0198<\u0000\u0199<\u0000\u019a" +
-              "<\u0000\u019b<\u0000\u019c<\u0000\u019d<\u0000\u019e<\u0000\u019f<\u0000\u01d6<\u0000" +
-              "\u01d7<\u0000\u01d8<\u0000\u01d9<\u0000\u026c<\u0000\u026d<\u0000\u026e<\u0000\u026f" +
-              "<\u0000\u0270<\u0000\u0271<\u0000\u0272<\u0000\u0273<\u0000\u0274<\u0000\u0275<\u0000" +
-              "\u0276<\u0000\u0277<\u0000\u0280<\u0000\u0281<\u0000\u0282<\u0000\u0283<\u0000\u0284" +
-              "<\u0000\u0285<\u0000\u0286<\u0000\u0287<\u0000\u0288<\u0000\u0289<\u0000\u028a<\u0000" +
-              "\u028b<\u0000\u028c<\u0000\u028d<\u0000\u028e<\u0000\u028f<\u0000\u0290<\u0000\u0291" +
-              "<\u0000\u0292<\u0000\u02a8<\u0000\u02a9<\u0000\u02aa<\u0000\u02ab<\u0000";
+              "<\u0000(<\u0000)<\u0000*<\u0000+<\u0000,<\u0000-<\u0000.<\u00002<\u00003<\u00004" +
+              "<\u00005<\u00006<\u0000<<\u0000=<\u0000><\u0000?<\u0000@<\u0000A<\u0000B<\u0000C" +
+              "<\u0000D<\u0000E<\u0000F<\u0000G<\u0000H<\u0000I<\u0000J<\u0000K<\u0000L<\u0000M" +
+              "<\u0000N<\u0000O<\u0000P<\u0000Q<\u0000R<\u0000S<\u0000Z<\u0000[<\u0000\\<\u0000" +
+              "]<\u0000^<\u0000_<\u0000`<\u0000a<\u0000b<\u0000c<\u0000d<\u0000e<\u0000f<\u0000" +
+              "g<\u0000h<\u0000i<\u0000j<\u0000k<\u0000n<\u0000x<\u0000y<\u0000z<\u0000{<\u0000" +
+              "|<\u0000}<\u0000~<\u0000<\u0000\u0082<\u0000\u0083<\u0000\u0084<\u0000\u0085<\u0000" +
+              "\u0086<\u0000\u0087<\u0000\u0088<\u0000\u008c<\u0000\u008d<\u0000\u0098<\u0000\u0099" +
+              "<\u0000\u009a<\u0000\u009b<\u0000\u00c8<\u0000\u00c9<\u0000\u00ca<\u0000\u00dc<\u0000" +
+              "\u00dd<\u0000\u00de<\u0000\u00df<\u0000\u00f0<\u0000\u00f1<\u0000\u00f2<\u0000\u0104" +
+              "<\u0000\u0105<\u0000\u0106<\u0000\u0107<\u0000\u0108<\u0000\u0109<\u0000\u010a<\u0000" +
+              "\u010b<\u0000\u0122<\u0000\u0123<\u0000\u0154<\u0000\u0155<\u0000\u0156<\u0000\u0157" +
+              "<\u0000\u0158<\u0000\u015e<\u0000\u015f<\u0000\u0160<\u0000\u0161<\u0000\u0162<\u0000" +
+              "\u0179<\u0000\u017c<\u0000\u017d<\u0000\u017e<\u0000\u017f<\u0000\u0192<\u0000\u0193" +
+              "<\u0000\u0194<\u0000\u0195<\u0000\u0196<\u0000\u0197<\u0000\u0198<\u0000\u0199<\u0000" +
+              "\u019a<\u0000\u019b<\u0000\u019c<\u0000\u019d<\u0000\u019e<\u0000\u019f<\u0000\u01d6" +
+              "<\u0000\u01d7<\u0000\u01d8<\u0000\u01d9<\u0000\u026c<\u0000\u026d<\u0000\u026e<\u0000" +
+              "\u026f<\u0000\u0270<\u0000\u0271<\u0000\u0272<\u0000\u0273<\u0000\u0274<\u0000\u0275" +
+              "<\u0000\u0276<\u0000\u0277<\u0000\u0280<\u0000\u0281<\u0000\u0282<\u0000\u0283<\u0000" +
+              "\u0284<\u0000\u0285<\u0000\u0286<\u0000\u0287<\u0000\u0288<\u0000\u0289<\u0000\u028a" +
+              "<\u0000\u028b<\u0000\u028c<\u0000\u028d<\u0000\u028e<\u0000\u028f<\u0000\u0290<\u0000" +
+              "\u0291<\u0000\u0292<\u0000\u02a8<\u0000\u02a9<\u0000\u02aa<\u0000\u02ab<\u0000\u02ac" +
+              "<\u0000\u02b2<\u0000\u02b3<\u0000";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through

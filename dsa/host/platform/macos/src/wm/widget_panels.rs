@@ -202,14 +202,18 @@ mod tests {
                 y: 0,
                 width_dp: 180,
                 height_dp: 110,
+                resized: false,
             },
             dpi_of_backing(2.0),
         );
-        assert_eq!(px, (216, 132));
-        // 108 x 66 points on a Retina screen, at its place from the top of the main screen.
+        // Android draws its desktop at 131 dpi times the scale, rounded to an even density:
+        // 262 on a Retina screen, so 180 x 110 dp is 295 x 180 pixels.
+        assert_eq!(dsa_host_core::widget_windows::android_density(192), 262);
+        assert_eq!(px, (295, 180));
+        // 147.5 x 90 points on a Retina screen, at its place from the top of the main screen.
         let (x, y, width, height) = panel_frame((128, 128), px, 900.0, 2.0);
-        assert_eq!((x, width, height), (64.0, 108.0, 66.0));
-        assert_eq!(y, 900.0 - 64.0 - 66.0);
+        assert_eq!((x, width, height), (64.0, 147.5, 90.0));
+        assert_eq!(y, 900.0 - 64.0 - 90.0);
         // And a point on the screen comes back to the desk's pixels.
         assert_eq!(desk_point((64.0, 900.0 - 64.0), 900.0, 2.0), (128, 128));
         assert_eq!(desk_point((10.25, 890.0), 900.0, 2.0), (20, 20));
@@ -248,6 +252,7 @@ mod tests {
             y: 0,
             width_dp: 180,
             height_dp: 110,
+            resized: false,
         };
         let items = menu_items(&entries(&menu_text(false), &provider, &placement));
         assert_eq!(

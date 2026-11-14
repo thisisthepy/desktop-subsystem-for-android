@@ -125,9 +125,71 @@ void fr5_a_change_to_the_last_bytes_of_an_odd_sized_allocation_is_seen() {
     }
 }
 
+// A read back the host sends whole (an older renderer, or a piece with one changed block):
+// only the blocks the device changed come in, and what the app wrote since its last submit
+// stays and still goes at the next flush.
+void fr4_a_read_back_takes_only_what_the_device_changed_and_keeps_the_apps_writes() {
+    const char* test = __func__;
+    std::vector<uint8_t> memory(4 * kShadowBlockSize, 0);
+    ShadowBlocks blocks(memory.size());
+    std::vector<uint8_t> host(memory.size(), 0);
+    host[2 * kShadowBlockSize + 5] = 9;  // the device wrote block 2
+    memory[0 * kShadowBlockSize + 3] = 4;  // the app wrote block 0, not flushed yet
+    const uint64_t taken = blocks.receive(memory.data(), 0, host.data(), host.size());
+    check(taken == kShadowBlockSize, test, "one block came in");
+    check(memory[2 * kShadowBlockSize + 5] == 9, test, "the device's write is in the copy");
+    check(memory[3] == 4, test, "the app's write stays");
+    const auto ranges = blocks.changed(memory.data());
+    check(ranges.size() == 1 && ranges[0].offset == 0 && ranges[0].size == kShadowBlockSize,
+          test, "and only the app's write goes at the next flush");
+}
+
+void fr4_a_read_back_of_unchanged_memory_takes_nothing() {
+    const char* test = __func__;
+    std::vector<uint8_t> memory(8 * kShadowBlockSize, 0);
+    ShadowBlocks blocks(memory.size());
+    memory[100] = 1;
+    blocks.changed(memory.data());
+    const std::vector<uint8_t> host = memory;
+    check(blocks.receive(memory.data(), 0, host.data(), host.size()) == 0, test,
+          "the host has what the copy last sent");
+    check(blocks.changed(memory.data()).empty(), test, "nothing to send either");
+}
+
+void fr4_a_block_read_back_in_part_goes_whole_at_the_next_flush() {
+    const char* test = __func__;
+    std::vector<uint8_t> memory(2 * kShadowBlockSize, 0);
+    ShadowBlocks blocks(memory.size());
+    const std::vector<uint8_t> part(100, 7);
+    check(blocks.receive(memory.data(), kShadowBlockSize + 10, part.data(), part.size()) == 100,
+          test, "the bytes sent come in");
+    check(memory[kShadowBlockSize + 10] == 7 && memory[kShadowBlockSize + 109] == 7, test,
+          "where they were sent for");
+    const auto ranges = blocks.changed(memory.data());
+    check(ranges.size() == 1 && ranges[0].offset == kShadowBlockSize &&
+              ranges[0].size == kShadowBlockSize,
+          test, "the block is not known to match the host's, so it goes whole");
+}
+
+void fr4_a_read_back_past_the_end_is_cut_at_the_end() {
+    const char* test = __func__;
+    const uint64_t size = kShadowBlockSize + 100;
+    std::vector<uint8_t> memory(size, 0);
+    ShadowBlocks blocks(size);
+    const std::vector<uint8_t> host(2 * kShadowBlockSize, 3);
+    check(blocks.receive(memory.data(), 0, host.data(), host.size()) == size, test,
+          "no further than the copy's end");
+    check(memory[size - 1] == 3, test, "the short last block came in");
+    check(blocks.changed(memory.data()).empty(), test, "and is known to match");
+}
+
 }  // namespace
 
 int main() {
+    fr4_a_read_back_takes_only_what_the_device_changed_and_keeps_the_apps_writes();
+    fr4_a_read_back_of_unchanged_memory_takes_nothing();
+    fr4_a_block_read_back_in_part_goes_whole_at_the_next_flush();
+    fr4_a_read_back_past_the_end_is_cut_at_the_end();
     fr5_a_change_to_the_last_bytes_of_an_odd_sized_allocation_is_seen();
     fr5_memory_nothing_wrote_to_sends_nothing();
     fr5_a_write_sends_only_its_block();

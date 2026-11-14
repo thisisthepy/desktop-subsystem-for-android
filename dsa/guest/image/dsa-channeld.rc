@@ -23,24 +23,76 @@ on property:sys.boot_completed=1
     setprop vendor.dsa.boot_completed 1
 
 # Handing idle memory back to the host. dsa-channeld sets this when no task is in use for a
-# while, or the guest holds mostly cache. A guest with memory to spare is never short, so the
-# kernel would never swap by itself: first it is asked to move cold pages to zram, a quarter at
-# a time because init does nothing else during a command. Writing to the root cgroup covers
-# every process, and "swappiness=200" prefers anonymous pages. vendor.dsa.memory.reclaim_step
-# says how many MiB each quarter takes: together half the anonymous memory, the coldest, so the
-# pages of the processes still running are not swapped out only to come straight back. Then the
-# clean page cache and the reclaimable kernel caches are dropped, and compaction leaves whole
-# blocks free, which free page reporting hands back to Hyper-V. Nothing is lost: what left is read back when needed.
+# while, an app closed, the host is short of memory, or the guest holds mostly cache. Clean page
+# cache goes first: the clean page cache no process maps and the reclaimable kernel caches are
+# dropped before any app memory is compressed, so zram never holds an app's memory beside cache
+# that could simply have gone. A guest with memory to spare is never short, so the kernel would
+# never swap by itself: next it is asked to move cold pages to zram, a quarter at a time because
+# init does nothing else during a command. Writing to the root cgroup covers every process, and
+# "swappiness=200" takes anonymous pages only. vendor.dsa.memory.reclaim_step says how many MiB
+# each quarter takes: with no app open, together half the anonymous memory, the coldest, so the
+# pages of the processes still running are not swapped out only to come straight back; with
+# apps open, 0 (nothing), unless the host is short and the cache is already down to the apps'
+# working set. What zram holds is then compressed again with zstd (dsa-memory.rc names it),
+# which takes about a fifth less than LZ4: every page in zram is marked idle, and up to 64 MiB
+# of them (16384 pages) is compressed again each time, so one reclaim keeps init busy for a
+# fraction of a second and the rest follows in the next ones. A page already compressed again
+# is skipped, and one swapped back in leaves zram, so only what stays cold is ever recompressed.
+# zram's own compaction then frees the memory the old copies left in its pages. Nothing is
+# lost: what left is read back when needed.
+# Then, on a host that takes back only whole blocks (2 MiB or 128 KiB; the host puts
+# androidboot.dsa.memory_compaction=on on the command line for those), compaction gathers the
+# free pages into whole blocks for free page reporting to hand back. A host that takes back
+# every free 4 KiB page gets them without it, and there compaction would only move memory: each
+# page it copies lands in a free page the host had already taken back, which the host backs
+# again before the page left behind is reported, so the VM's memory rose for the length of the
+# pass before it fell.
+# Last, every free page is reported to the host again (page_reporting.rereport, DSA's kernel):
+# Hyper-V backs a VM's memory in 64 KiB clusters, so a page the guest touches again brings its
+# reported free neighbours back with it, and a guest that marked them reported would not offer
+# them again until the kernel saw the page handed out (page_reporting.fault_cluster_order);
+# the per-CPU lists' free pages go to the free lists first.
+# The three actions share the trigger, so init runs them one after the other, in this order.
 # It waits for boot to finish, so a boot still under way does not swap out what it is using;
 # a request made before then stays set, and runs when boot completes.
 on property:vendor.dsa.memory.reclaim=1 && property:sys.boot_completed=1
-    write /sys/fs/cgroup/memory.reclaim "${vendor.dsa.memory.reclaim_step}M swappiness=200"
-    write /sys/fs/cgroup/memory.reclaim "${vendor.dsa.memory.reclaim_step}M swappiness=200"
-    write /sys/fs/cgroup/memory.reclaim "${vendor.dsa.memory.reclaim_step}M swappiness=200"
-    write /sys/fs/cgroup/memory.reclaim "${vendor.dsa.memory.reclaim_step}M swappiness=200"
     write /proc/sys/vm/drop_caches 3
+    write /sys/fs/cgroup/memory.reclaim "${vendor.dsa.memory.reclaim_step}M swappiness=200"
+    write /sys/fs/cgroup/memory.reclaim "${vendor.dsa.memory.reclaim_step}M swappiness=200"
+    write /sys/fs/cgroup/memory.reclaim "${vendor.dsa.memory.reclaim_step}M swappiness=200"
+    write /sys/fs/cgroup/memory.reclaim "${vendor.dsa.memory.reclaim_step}M swappiness=200"
+    write /sys/devices/virtual/block/zram0/idle all
+    write /sys/devices/virtual/block/zram0/recompress "type=idle max_pages=16384"
+    write /sys/devices/virtual/block/zram0/compact 1
+
+on property:vendor.dsa.memory.reclaim=1 && property:sys.boot_completed=1 && property:ro.boot.dsa.memory_compaction=on
     write /proc/sys/vm/compact_memory 1
+
+on property:vendor.dsa.memory.reclaim=1 && property:sys.boot_completed=1
+    write /sys/module/page_reporting/parameters/rereport 1
     setprop vendor.dsa.memory.reclaim 0
+
+# zram writeback: what stays cold in zram goes to its backing file on the data disk
+# (fstab.dsa), so the host keeps disk space for it instead of memory. dsa-channeld sets this
+# only after no app has been open for vendor.dsa.memory.writeback_after seconds, at most every
+# ten minutes, and gives it vendor.dsa.memory.writeback_pages, the 4 KiB pages this run may
+# write: what is left of the day's budget, and at most 32 MiB, so init is busy for a fraction
+# of a second. zram counts the budget down as it writes and stops at zero, and it is set back
+# to zero afterwards, so nothing else writes. Only pages untouched for
+# vendor.dsa.memory.writeback_age seconds are marked idle (zram keeps when each page was last
+# read or written, and compressing one again with zstd is not a use). Incompressible pages go
+# first: each one written frees a whole 4 KiB page, a compressed one only its share of one.
+# A page read back leaves the file. Then zram's pages are compacted, and the memory they
+# freed is reported to the host again as after the idle reclaim.
+on property:vendor.dsa.memory.writeback=1 && property:sys.boot_completed=1
+    write /sys/devices/virtual/block/zram0/writeback_limit ${vendor.dsa.memory.writeback_pages}
+    write /sys/devices/virtual/block/zram0/idle ${vendor.dsa.memory.writeback_age}
+    write /sys/devices/virtual/block/zram0/writeback huge_idle
+    write /sys/devices/virtual/block/zram0/writeback idle
+    write /sys/devices/virtual/block/zram0/writeback_limit 0
+    write /sys/devices/virtual/block/zram0/compact 1
+    write /sys/module/page_reporting/parameters/rereport 1
+    setprop vendor.dsa.memory.writeback 0
 
 # The working set trim: dsa-channeld sets this on the first look that finds page cache grown
 # past the guest's working set (an app closed, or files were read), while the guest is not
@@ -50,12 +102,17 @@ on property:vendor.dsa.memory.reclaim=1 && property:sys.boot_completed=1
 # pages of running apps and system_server stay. "swappiness=0" takes page cache only: app
 # memory moves to zram in the idle reclaim, not while an app is in use. The root's file is
 # root's, unlike those of the groups libprocessgroup makes, so init's vendor scripts can always
-# open it. The pages it frees are scattered among pages in use, and free page reporting hands
-# back only whole free blocks, so compaction then gathers them and they go back to the host at
-# once rather than whenever background compaction gets to them.
+# open it. The pages it frees are scattered among pages in use. On a host that takes back only
+# whole free blocks (androidboot.dsa.memory_compaction=on), compaction then gathers them and they
+# go back to the host at once rather than whenever background compaction gets to them; a host
+# that takes back every free page gets them as they are, without moving any memory.
 on property:vendor.dsa.memory.trim=1
     write /sys/fs/cgroup/memory.reclaim "${vendor.dsa.memory.trim_size}M swappiness=0"
+
+on property:vendor.dsa.memory.trim=1 && property:ro.boot.dsa.memory_compaction=on
     write /proc/sys/vm/compact_memory 1
+
+on property:vendor.dsa.memory.trim=1
     setprop vendor.dsa.memory.trim 0
 
 # Developer mode. dsa-channeld sets vendor.dsa.adb as the host says: 1 while the user's
@@ -126,6 +183,28 @@ on property:vendor.dsa.root_elevation=1
 on property:vendor.dsa.root_elevation=0
     stop dsa_su
 
+# The guest's DNS, answered by the host's resolver. dsa-channeld listens on the loopback
+# addresses (port 5553, UDP and TCP) and hands each query to the host on the DNS port; it sets
+# vendor.dsa.dns to "on" while the host answers and to "off" when the host stays unreachable.
+# dsa-channeld --dns-redirect then makes the packet filter send every DNS query a program sends
+# to port 53 to that port, or stop doing so, in a nat chain of its own (dsa_dns), so the
+# guest's queries reach the host's resolver rather than the network's DNS servers. It runs as
+# root, which changing the packet filter needs, in a domain of its own (channeld.cil). It starts
+# on the property alone: a vendor script may not trigger on init.svc.netd (init drops the whole
+# action as an "unexported property trigger"), and it needs no wait for netd, which never
+# flushes nat OUTPUT, where the jump to the chain goes; -w waits out netd's lock instead.
+service dsa_dns_redirect /vendor/bin/dsa-channeld --dns-redirect
+    user root
+    group root
+    capabilities NET_ADMIN NET_RAW
+    seclabel u:r:dsa_dns_redirect:s0
+    oneshot
+    disabled
+    stdio_to_kmsg
+
+on property:vendor.dsa.dns=*
+    start dsa_dns_redirect
+
 # KeyMint's root key, which the host keeps sealed by the user's credential store and gives
 # once each boot. dsa-channeld --keymint-key asks for it on the host's KeyMint port and writes
 # it to /dev/dsa_keymint/root_key, a tmpfs file only KeyMint's domain may read
@@ -141,3 +220,33 @@ service dsa_keymint_key /vendor/bin/dsa-channeld --keymint-key
     oneshot
     disabled
     stdio_to_kmsg
+
+# Android's system certificates, copied into the tmpfs folders dsa-cacerts.rc binds over
+# Android's own, so the daemon can add the root certificates a user or administrator added to
+# the host beside them. dsa-cacerts.rc runs it once, at post-fs-data, before the zygote starts.
+# It runs as the system user, which the daemon runs as and which owns the folders, in the
+# daemon's domain (sepolicy/cacerts.cil).
+service dsa_cacerts_setup /vendor/bin/dsa-channeld --cacerts-setup
+    user system
+    group system
+    oneshot
+    disabled
+    stdio_to_kmsg
+
+# What the guest kernel's own memory is made of: the largest slab caches, vmalloc users and
+# threads, which only root may read. dsa-channeld --memory-report reads them, writes them to
+# the kernel log ("memory report:" lines, which `logcat -b kernel` shows) and exits. It runs as
+# root, which /proc/slabinfo and /proc/vmallocinfo need, in a domain of its own that may only
+# read (channeld.cil), and in the readproc group, which lets it see every process under /proc.
+# Only while developer mode is on, when the shell asks: `setprop debug.dsa.memory_report 1`
+# (0 and then 1 again for another report). The memory measurement in CI asks for one.
+service dsa_memory_report /vendor/bin/dsa-channeld --memory-report
+    user root
+    group root readproc
+    seclabel u:r:dsa_memory_report:s0
+    oneshot
+    disabled
+    stdio_to_kmsg
+
+on property:debug.dsa.memory_report=1 && property:vendor.dsa.adb=1
+    start dsa_memory_report

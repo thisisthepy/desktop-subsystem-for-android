@@ -18,7 +18,9 @@
 //!
 //! A window that is resized by its edges is resized here, not by the desktop: a layer
 //! surface, an X11 desktop window and a borderless Mac panel have no edges of the desktop's
-//! own to drag.
+//! own to drag. While it is resized its size goes to the service when the drag pauses and when
+//! it ends ([`ResizeReports`]), and the widget's last image shows unscaled meanwhile; the host
+//! keeps calling [`Desk::tick`] while [`Desk::busy`] says so.
 
 use std::collections::BTreeMap;
 use std::time::Instant;
@@ -26,14 +28,14 @@ use std::time::Instant;
 use dsa_protocol::host_api::types::PointerAction;
 
 use super::geometry::{
-    all_clear, android_density, edit_hit_test, edit_layout, edit_margin, frame_overdue, hit_test,
-    max_window_size, min_window_size, more_button, placeholder, placement_of, press_threshold,
-    px_of_dip, reachable_origin, to_frame, window_size, Hit, ScreenRect, HOLD_TO_MOVE,
+    all_clear, edit_layout, edit_margin, frame_overdue, hit_test, keep_clickable, max_window_size,
+    min_window_size, placeholder, placement_of, press_threshold, px_of_dip, reachable_origin,
+    to_frame, unscaled, window_size, Hit, ScreenRect, HOLD_TO_MOVE,
 };
-use super::gesture::{more_button_shown, Fade, Gesture, Step};
+use super::gesture::{Gesture, Press, ResizePoll, ResizeReports, Step};
 use super::menu::{self, choice_of, size_choices, Entry, MenuChoice, MenuText};
-use super::paint::{draw_edit, draw_more_button, ButtonState, Image, Look};
-use super::service::{WindowCommand, WindowReport};
+use super::paint::{draw_lifted, Image, Look};
+use super::service::{placed_report, WindowCommand, WindowReport};
 use crate::widgets::{Placement, Widget, WidgetFrame};
 
 /// How far the pointer moves before a press is a drag, in device-independent pixels: the
@@ -64,8 +66,8 @@ pub enum Key {
 /// Where the widget's menu opens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Anchor {
-    /// Under this rectangle on the screen (left, top, right, bottom): the More button, or the
-    /// widget after a long press.
+    /// Under this rectangle on the screen (left, top, right, bottom): the widget, after a long
+    /// press or from the keyboard.
     Below(ScreenRect),
     /// At this point on the screen, where the widget was right-clicked.
     At(i32, i32),
@@ -105,15 +107,6 @@ pub enum Effect {
     Log(String),
 }
 
-/// A press that resizes the window from one of its edges or handles.
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct Resizing {
-    edge: Hit,
-    down: (i32, i32),
-    origin: (i32, i32),
-    size: (i32, i32),
-}
-
 /// One widget's window, as the desk keeps it.
 #[derive(Debug, Clone)]
 pub struct DeskWindow {
@@ -128,11 +121,12 @@ pub struct DeskWindow {
     frame: Option<Image>,
     kept: Option<Image>,
     gesture: Gesture,
-    resizing: Option<Resizing>,
+    /// When the widget's size is passed on while it is resized, and whether the resize ended
+    /// with its last size perhaps still to pass on.
+    resizes: ResizeReports<ScreenRect>,
+    resize_ended: bool,
     /// The room around the widget while it is edited.
     edit: Option<i32>,
-    hover: bool,
-    over_button: bool,
     focused: bool,
     menu_open: bool,
     /// Whether Android has a press of this window.
@@ -140,7 +134,6 @@ pub struct DeskWindow {
     /// Where the pointer was last, on the screen, and whether a finger or a pen put it there.
     pointer: (i32, i32),
     touch: bool,
-    fade: Fade,
     waiting_since: Option<Instant>,
     noted: bool,
 }
@@ -174,11 +167,41 @@ impl DeskWindow {
     fn hit(&self, local: (i32, i32)) -> Hit {
         let resize_mode = self.widget.provider.resize_mode;
         let (w, h) = self.size;
-        if self.editing() {
-            edit_hit_test(local.0, local.1, w, h, self.dpi, resize_mode)
-        } else {
-            hit_test(local.0, local.1, w, h, self.dpi, resize_mode)
-        }
+        hit_test(
+            self.editing(),
+            local.0,
+            local.1,
+            w,
+            h,
+            self.dpi,
+            resize_mode,
+        )
+    }
+
+    /// The window's rectangle on the screen.
+    fn rect(&self) -> ScreenRect {
+        let (x, y) = self.origin;
+        (x, y, x + self.size.0, y + self.size.1)
+    }
+
+    /// The widget's own rectangle on the screen, without the room of an edit.
+    fn widget_on_screen(&self) -> ScreenRect {
+        let (x, y, w, h) = self.widget_rect();
+        let (left, top) = self.screen((x, y));
+        (left, top, left + w, top + h)
+    }
+
+    /// The smallest and largest the window may be made now, width and height in pixels: what
+    /// the widget allows, with the room around it while it is edited.
+    fn size_limits(&self) -> ((i32, i32), (i32, i32)) {
+        let provider = &self.widget.provider;
+        let room = 2 * self.margin();
+        let (min_w, min_h) = min_window_size(provider, self.dpi);
+        let (max_w, max_h) = max_window_size(provider, self.dpi);
+        (
+            (min_w + room, min_h + room),
+            (max_w.max(min_w) + room, max_h.max(min_h) + room),
+        )
     }
 
     fn threshold(&self) -> (i32, i32) {
@@ -193,14 +216,7 @@ impl DeskWindow {
     }
 
     fn report(&self) -> WindowReport {
-        let (_, _, w, h) = self.widget_rect();
-        WindowReport::Placed {
-            widget_id: self.widget.widget_id,
-            placement: self.placement(),
-            width: w.max(1) as u32,
-            height: h.max(1) as u32,
-            density_dpi: android_density(self.dpi),
-        }
+        placed_report(self.widget.widget_id, self.widget_on_screen(), self.dpi)
     }
 
     /// The lifted widget's rectangle on the screen while it is edited, else the widget's.
@@ -218,12 +234,6 @@ impl DeskWindow {
         };
         let (left, top) = self.screen((x, y));
         (left, top, left + w, top + h)
-    }
-
-    fn button_on_screen(&self) -> ScreenRect {
-        let (left, top, right, bottom) = more_button(self.size.0, self.size.1, self.dpi).bounds();
-        let (x, y) = self.origin;
-        (x + left, y + top, x + right, y + bottom)
     }
 
     /// The image the widget shows: its latest frame, or the last that had something in it
@@ -287,12 +297,15 @@ impl Desk {
         self.windows.keys().copied().collect()
     }
 
-    /// Whether the desk needs [`Desk::tick`] soon: a press may become a long press, or the
-    /// More button is fading.
-    pub fn busy(&self, now: Instant) -> bool {
-        self.windows
-            .values()
-            .any(|w| matches!(w.gesture, Gesture::Widget { slid: false, .. }) || !w.fade.done(now))
+    /// Whether the desk needs [`Desk::tick`] soon: a press may become a long press, or a
+    /// resize has a size to pass on.
+    pub fn busy(&self, _now: Instant) -> bool {
+        self.windows.values().any(|w| {
+            matches!(
+                w.gesture,
+                Gesture::Widget { slid: false, .. } | Gesture::Resizing { .. }
+            ) || w.resize_ended
+        })
     }
 
     /// The monitors' work areas are `areas` now, on the screen in the host's pixels.
@@ -352,16 +365,14 @@ impl Desk {
                         frame: None,
                         kept: None,
                         gesture: Gesture::Idle,
-                        resizing: None,
+                        resizes: ResizeReports::new(),
+                        resize_ended: false,
                         edit: None,
-                        hover: false,
-                        over_button: false,
                         focused: false,
                         menu_open: false,
                         pressed: false,
                         pointer: origin,
                         touch: false,
-                        fade: Fade::hidden(now),
                         waiting_since: Some(now),
                         noted: false,
                     },
@@ -420,26 +431,6 @@ impl Desk {
         }
     }
 
-    /// The More button shows or hides as the window's state says, fading.
-    fn refresh_button(&mut self, widget_id: i32) {
-        let Some(window) = self.windows.get_mut(&widget_id) else {
-            return;
-        };
-        let shown = more_button_shown(
-            window.hover,
-            window.focused,
-            window.menu_open,
-            window.editing(),
-            &window.gesture,
-        );
-        let now = Instant::now();
-        let fade = window.fade.toward(shown, now);
-        if fade != window.fade {
-            window.fade = fade;
-        }
-        self.effects.push(Effect::Redraw { widget_id });
-    }
-
     /// Lifts the widget for editing: its window grows by the room for the shadow and the
     /// handles on each side, keeping the widget where it was, and takes the keyboard. One
     /// widget is edited at a time.
@@ -461,7 +452,6 @@ impl Desk {
         )));
         self.place_effect(widget_id);
         self.effects.push(Effect::Focus { widget_id });
-        self.refresh_button(widget_id);
     }
 
     /// Ends the widget's edit, if it is being edited: its window shrinks back around the
@@ -480,7 +470,6 @@ impl Desk {
             (window.size.1 - 2 * margin).max(1),
         );
         self.place_effect(widget_id);
-        self.refresh_button(widget_id);
     }
 
     fn end_other_edits(&mut self, widget_id: i32) {
@@ -510,20 +499,14 @@ impl Desk {
             entries,
             name,
         });
-        self.refresh_button(widget_id);
     }
 
-    /// Opens the widget's menu as its More button does: under the button, or under a widget
-    /// being edited.
+    /// Opens the widget's menu under it, lifted or not, as the keyboard does.
     fn open_menu_below(&mut self, widget_id: i32) {
         let Some(window) = self.windows.get(&widget_id) else {
             return;
         };
-        let anchor = if window.editing() {
-            Anchor::Below(window.shown_on_screen())
-        } else {
-            Anchor::Below(window.button_on_screen())
-        };
+        let anchor = Anchor::Below(window.shown_on_screen());
         self.open_menu(widget_id, anchor);
     }
 
@@ -543,11 +526,10 @@ impl Desk {
         }
         let (x, y, w, h) = window.widget_rect();
         let frame = window
-            .frame
-            .as_ref()
+            .image()
             .map(|f| (f.width, f.height))
             .unwrap_or((w.max(1) as u32, h.max(1) as u32));
-        let (fx, fy) = to_frame(local.0 - x, local.1 - y, (w, h), frame);
+        let (fx, fy) = to_frame(local.0 - x, local.1 - y, frame);
         self.reports.push(WindowReport::Pointer {
             widget_id,
             action,
@@ -556,13 +538,13 @@ impl Desk {
         });
     }
 
-    /// Does what a step of the window's gesture asks.
-    fn step(&mut self, widget_id: i32, step: Step, local: (i32, i32)) {
+    /// Does what a step of the window's gesture asks, at `now`.
+    fn step(&mut self, widget_id: i32, step: Step, local: (i32, i32), now: Instant) {
         match step {
-            Step::Nothing => {}
+            // A hold checked early is checked again on the next tick; one that slid is the
+            // widget's own drag.
+            Step::Nothing | Step::HoldOn(_) | Step::HoldRefused(_) => {}
             Step::Android(action) => self.pointer(widget_id, action, local),
-            Step::Button => self.refresh_button(widget_id),
-            Step::OpenMenu => self.open_menu_below(widget_id),
             Step::Lift => {
                 // The long press is not the widget's: Android's press is cancelled, so it
                 // never becomes a click, before the widget lifts.
@@ -586,6 +568,55 @@ impl Desk {
                 // A finished move ends the edit, as on a phone's home screen.
                 self.leave_edit(widget_id);
             }
+            Step::StartResize(_) => {
+                if let Some(window) = self.windows.get_mut(&widget_id) {
+                    window.resizes.restart();
+                    window.resize_ended = false;
+                }
+            }
+            Step::ResizeTo((left, top, right, bottom)) => {
+                let Some(window) = self.windows.get_mut(&widget_id) else {
+                    return;
+                };
+                let (origin, size) = ((left, top), ((right - left).max(1), (bottom - top).max(1)));
+                if (origin, size) == (window.origin, window.size) {
+                    return;
+                }
+                window.origin = origin;
+                window.size = size;
+                let widget = window.widget_on_screen();
+                window.resizes.moved(widget, now);
+                self.place_effect(widget_id);
+            }
+            Step::EndResize => {
+                // The last size is passed on now, or as soon as the last one passed on is far
+                // enough behind, and the service keeps it.
+                if let Some(window) = self.windows.get_mut(&widget_id) {
+                    window.resize_ended = true;
+                    let (_, _, w, h) = window.widget_rect();
+                    self.effects.push(Effect::Log(format!(
+                        "widget {widget_id}: resized to {w}x{h} pixels"
+                    )));
+                }
+                self.poll_resize(widget_id, now);
+                // A finished resize ends the edit, as on a phone's home screen.
+                self.leave_edit(widget_id);
+            }
+        }
+    }
+
+    /// Passes the widget's size on if its resize has one due ([`ResizeReports::poll`]).
+    fn poll_resize(&mut self, widget_id: i32, now: Instant) {
+        let Some(window) = self.windows.get_mut(&widget_id) else {
+            return;
+        };
+        let ended = window.resize_ended;
+        let poll = window.resizes.poll(now, ended);
+        if ended && poll != ResizePoll::Wait {
+            window.resize_ended = false;
+        }
+        if let ResizePoll::Send(_) = poll {
+            self.report(widget_id);
         }
     }
 
@@ -616,26 +647,20 @@ impl Desk {
         }
         let editing = window.editing();
         let hit = window.hit(local);
-        match hit {
-            Hit::Outside => {
-                self.leave_edit(widget_id);
-                return;
-            }
-            Hit::Client | Hit::More => {}
-            edge => {
-                window.resizing = Some(Resizing {
-                    edge,
-                    down: at,
-                    origin: window.origin,
-                    size: window.size,
-                });
-                return;
-            }
+        if hit == Hit::Outside {
+            self.leave_edit(widget_id);
+            return;
         }
-        let on_button = hit == Hit::More;
-        let step = window.gesture.down(on_button, editing, at, now);
-        self.step(widget_id, step, local);
-        self.refresh_button(widget_id);
+        let (min, max) = window.size_limits();
+        let press = Press {
+            hit,
+            editing,
+            window: window.rect(),
+            min,
+            max,
+        };
+        let step = window.gesture.press(press, at, now);
+        self.step(widget_id, step, local, now);
     }
 
     /// The pointer moved to `local` in the widget's window.
@@ -645,19 +670,9 @@ impl Desk {
         };
         let at = window.screen(local);
         window.pointer = at;
-        if let Some(resizing) = window.resizing {
-            self.resize(widget_id, resizing, at);
-            return;
-        }
-        let over = window.hit(local) == Hit::More && !window.editing();
-        let first = !std::mem::replace(&mut window.hover, true);
-        let changed = std::mem::replace(&mut window.over_button, over) != over;
         let (origin, threshold) = (window.origin, window.threshold());
         let step = window.gesture.moved(at, origin, threshold);
-        if first || changed {
-            self.refresh_button(widget_id);
-        }
-        self.step(widget_id, step, local);
+        self.step(widget_id, step, local, Instant::now());
     }
 
     /// The button went up at `local` in the widget's window.
@@ -668,16 +683,8 @@ impl Desk {
         let Some(window) = self.windows.get_mut(&widget_id) else {
             return;
         };
-        if window.resizing.take().is_some() {
-            self.report(widget_id);
-            // A finished resize ends the edit, as on a phone's home screen.
-            self.leave_edit(widget_id);
-            return;
-        }
-        let over = window.hit(local) == Hit::More && !window.editing();
-        let step = window.gesture.up(over);
-        self.step(widget_id, step, local);
-        self.refresh_button(widget_id);
+        let step = window.gesture.up();
+        self.step(widget_id, step, local, Instant::now());
     }
 
     /// The window lost the pointer before the button went up, as when the desktop took it.
@@ -685,37 +692,25 @@ impl Desk {
         let Some(window) = self.windows.get_mut(&widget_id) else {
             return;
         };
-        if window.resizing.take().is_some() {
-            self.report(widget_id);
-            return;
-        }
         let local = (
             window.pointer.0 - window.origin.0,
             window.pointer.1 - window.origin.1,
         );
         let step = window.gesture.cancel();
-        self.step(widget_id, step, local);
+        self.step(widget_id, step, local, Instant::now());
     }
 
-    /// The pointer came into the window, at `local`.
+    /// The pointer came into the window, at `local`. Nothing is drawn over the widget for it,
+    /// so its own buttons stay free to click in every corner; the host shows the cursor of
+    /// [`Desk::hit`].
     pub fn entered(&mut self, widget_id: i32, local: (i32, i32)) {
-        let Some(window) = self.windows.get_mut(&widget_id) else {
-            return;
-        };
-        window.hover = true;
-        window.over_button = window.hit(local) == Hit::More && !window.editing();
-        self.refresh_button(widget_id);
+        if let Some(window) = self.windows.get_mut(&widget_id) {
+            window.pointer = window.screen(local);
+        }
     }
 
     /// The pointer left the window.
-    pub fn left(&mut self, widget_id: i32) {
-        let Some(window) = self.windows.get_mut(&widget_id) else {
-            return;
-        };
-        window.hover = false;
-        window.over_button = false;
-        self.refresh_button(widget_id);
-    }
+    pub fn left(&mut self, _widget_id: i32) {}
 
     /// The window took the keyboard, or lost it. Losing it to another window ends an edit;
     /// its own menu taking it ends nothing.
@@ -728,7 +723,6 @@ impl Desk {
         if !focused && !menu_open {
             self.leave_edit(widget_id);
         }
-        self.refresh_button(widget_id);
     }
 
     /// A key went down in the window.
@@ -780,7 +774,6 @@ impl Desk {
             None if editing && pressed_beside => self.leave_edit(widget_id),
             None => {}
         }
-        self.refresh_button(widget_id);
     }
 
     /// The window is on a monitor of `dpi` now: an edit ends, and the widget keeps its size
@@ -805,65 +798,11 @@ impl Desk {
         let Some(window) = self.windows.get_mut(&widget_id) else {
             return;
         };
-        if window.origin == origin || window.resizing.is_some() {
-            return;
-        }
-        if matches!(window.gesture, Gesture::Moving { .. }) {
+        if window.origin == origin || window.gesture.dragging() {
             return;
         }
         window.origin = origin;
         self.report(widget_id);
-    }
-
-    /// Resizes the window from the edge `resizing` holds, the pointer at `at` on the screen,
-    /// within what the widget allows.
-    fn resize(&mut self, widget_id: i32, resizing: Resizing, at: (i32, i32)) {
-        let Some(window) = self.windows.get_mut(&widget_id) else {
-            return;
-        };
-        let provider = &window.widget.provider;
-        let room = 2 * window.margin();
-        let (min_w, min_h) = min_window_size(provider, window.dpi);
-        let (max_w, max_h) = max_window_size(provider, window.dpi);
-        let (min_w, min_h) = (min_w + room, min_h + room);
-        let (max_w, max_h) = ((max_w + room).max(min_w), (max_h + room).max(min_h));
-        let (dx, dy) = (at.0 - resizing.down.0, at.1 - resizing.down.1);
-        let (x, y) = resizing.origin;
-        let (w, h) = resizing.size;
-        let left = matches!(resizing.edge, Hit::Left | Hit::TopLeft | Hit::BottomLeft);
-        let right = matches!(resizing.edge, Hit::Right | Hit::TopRight | Hit::BottomRight);
-        let top = matches!(resizing.edge, Hit::Top | Hit::TopLeft | Hit::TopRight);
-        let bottom = matches!(
-            resizing.edge,
-            Hit::Bottom | Hit::BottomLeft | Hit::BottomRight
-        );
-        let width = if left {
-            w - dx
-        } else if right {
-            w + dx
-        } else {
-            w
-        }
-        .clamp(min_w, max_w);
-        let height = if top {
-            h - dy
-        } else if bottom {
-            h + dy
-        } else {
-            h
-        }
-        .clamp(min_h, max_h);
-        // The edge opposite the one dragged stays where it was.
-        let origin = (
-            if left { x + w - width } else { x },
-            if top { y + h - height } else { y },
-        );
-        if (origin, (width, height)) == (window.origin, window.size) {
-            return;
-        }
-        window.origin = origin;
-        window.size = (width, height);
-        self.place_effect(widget_id);
     }
 
     /// A press on the widget firm enough to be a long press at once, as a trackpad's force
@@ -878,11 +817,12 @@ impl Desk {
         let (at, origin) = (window.pointer, window.origin);
         let step = window.gesture.held(at, origin, since + HOLD_TO_MOVE);
         let local = (at.0 - origin.0, at.1 - origin.1);
-        self.step(widget_id, step, local);
+        self.step(widget_id, step, local, Instant::now());
     }
 
-    /// What is due at `now`: a press held still long enough lifts its widget, a fading More
-    /// button is drawn again, and a window still waiting for its first picture is logged once.
+    /// What is due at `now`: a press held still long enough lifts its widget, a resize that
+    /// paused or ended passes its size on, and a window still waiting for its first picture is
+    /// logged once.
     pub fn tick(&mut self, now: Instant) {
         let ids = self.ids();
         for widget_id in ids {
@@ -892,18 +832,14 @@ impl Desk {
             let (at, origin) = (window.pointer, window.origin);
             let step = window.gesture.held(at, origin, now);
             let local = (at.0 - origin.0, at.1 - origin.1);
-            if !window.fade.done(now) {
-                self.effects.push(Effect::Redraw { widget_id });
+            if frame_overdue(window.waiting_since, window.noted, now) {
+                window.noted = true;
+                self.effects.push(Effect::Log(format!(
+                    "widget {widget_id} has shown no picture from Android yet; its window shows its placeholder"
+                )));
             }
-            if let Some(window) = self.windows.get_mut(&widget_id) {
-                if frame_overdue(window.waiting_since, window.noted, now) {
-                    window.noted = true;
-                    self.effects.push(Effect::Log(format!(
-                        "widget {widget_id} has shown no picture from Android yet; its window shows its placeholder"
-                    )));
-                }
-            }
-            self.step(widget_id, step, local);
+            self.step(widget_id, step, local, now);
+            self.poll_resize(widget_id, now);
         }
     }
 
@@ -911,52 +847,42 @@ impl Desk {
     /// the rest is the widget's.
     pub fn hit(&self, widget_id: i32, local: (i32, i32)) -> Option<Hit> {
         let window = self.windows.get(&widget_id)?;
-        if let Some(resizing) = window.resizing {
-            return Some(resizing.edge);
+        if let Gesture::Resizing { edge, .. } = window.gesture {
+            return Some(edge);
         }
         Some(window.hit(local))
     }
 
-    /// The window's picture at its size now: the widget's image scaled to it, or its
-    /// placeholder until Android has drawn it, with the More button as far as it has faded
-    /// in; lifted over its shadow with its border and handles while it is edited.
-    pub fn picture(&self, widget_id: i32, now: Instant) -> Option<Image> {
+    /// The window's picture at its size now: the widget's image at its own size, never
+    /// scaled, from the window's top left corner (while a resize has not reached Android yet
+    /// it is the last one, and the room it does not fill stays clear), or its placeholder
+    /// until Android has drawn it; raised over its shadow with its border and handles while it
+    /// is edited. Every pixel takes the pointer, so the whole window can be pressed.
+    pub fn picture(&self, widget_id: i32, _now: Instant) -> Option<Image> {
         let window = self.windows.get(&widget_id)?;
         let (width, height) = (window.size.0.max(1) as usize, window.size.1.max(1) as usize);
-        let image = window.image();
-        let at = |w: i32, h: i32| -> Image {
-            let (w, h) = (w.max(1) as u32, h.max(1) as u32);
-            match image {
-                Some(image) => image.scaled(w, h),
-                None => Image {
+        let (_, _, ww, wh) = window.widget_rect();
+        let card;
+        let image = match window.image() {
+            Some(image) => image,
+            None => {
+                let (w, h) = (ww.max(1) as u32, wh.max(1) as u32);
+                card = Image {
                     width: w,
                     height: h,
                     pixels: placeholder(w as usize, h as usize, window.dpi),
-                },
+                };
+                &card
             }
         };
-        let pixels = if window.editing() {
+        let mut pixels = if window.editing() {
             let resize_mode = window.widget.provider.resize_mode;
-            let layout = edit_layout(width as i32, height as i32, window.dpi, resize_mode);
-            let (_, _, lw, lh) = layout.lifted;
-            draw_edit(
-                &at(lw, lh),
-                width,
-                height,
-                window.dpi,
-                resize_mode,
-                &self.look,
-            )
+            draw_lifted(image, width, height, window.dpi, resize_mode, &self.look)
         } else {
-            let mut pixels = at(width as i32, height as i32).pixels;
-            let state = ButtonState {
-                level: window.fade.level(now),
-                hover: window.over_button,
-                pressed: matches!(window.gesture, Gesture::Button { .. }) && window.over_button,
-            };
-            draw_more_button(&mut pixels, width, height, window.dpi, &state, &self.look);
-            pixels
+            let from = (image.width as usize, image.height as usize);
+            unscaled(&image.pixels, from, (width, height))
         };
+        keep_clickable(&mut pixels);
         Some(Image {
             width: width as u32,
             height: height as u32,
@@ -970,6 +896,8 @@ mod tests {
     use super::*;
     use crate::widgets::WidgetProvider;
     use std::time::Duration;
+
+    use super::super::geometry::{android_density, dp_of_px};
 
     fn clock(reconfigurable: bool) -> Widget {
         Widget {
@@ -990,8 +918,14 @@ mod tests {
                 y: 200,
                 width_dp: 180,
                 height_dp: 110,
+                resized: false,
             },
         }
+    }
+
+    /// The size of the clock's window at `dpi`, in pixels.
+    fn clock_size(dpi: u32) -> (i32, i32) {
+        window_size(&clock(false).placement, dpi)
     }
 
     fn desk(dpi: u32) -> Desk {
@@ -1032,18 +966,42 @@ mod tests {
         })
     }
 
+    fn frame_of(width: u32, height: u32, rgba: [u8; 4]) -> WidgetFrame {
+        WidgetFrame {
+            widget_id: 7,
+            width,
+            height,
+            png: crate::png::encode(
+                &crate::png::Rgba {
+                    width,
+                    height,
+                    pixels: rgba.repeat((width * height) as usize),
+                },
+                true,
+            ),
+        }
+    }
+
     #[test]
     fn fr12_a_widget_window_opens_at_its_placement_sized_in_dp_at_its_monitors_scale() {
-        // At a scale of 150% (144 dpi) a dp is 0.9 of the host's pixels: 180 x 110 dp is
-        // 162 x 99 pixels, the same physical size as on any other monitor.
+        // At a scale of 150% (144 dpi) the window is the widget's size in dp at Android's
+        // density there, the same physical size as on any other monitor.
         let (mut desk, _) = placed(144, false);
+        let size = clock_size(144);
+        assert_eq!(
+            size,
+            (
+                crate::widgets::px_of(180, android_density(144)) as i32,
+                crate::widgets::px_of(110, android_density(144)) as i32
+            )
+        );
         let effects = desk.take_effects();
         assert_eq!(
             effects[0],
             Effect::Open {
                 widget_id: 7,
                 origin: (100, 200),
-                size: (162, 99)
+                size,
             }
         );
         let reports = desk.take_reports();
@@ -1055,11 +1013,12 @@ mod tests {
                     x: 100,
                     y: 200,
                     width_dp: 180,
-                    height_dp: 110
+                    height_dp: 110,
+                    resized: false,
                 },
-                width: 162,
-                height: 99,
-                density_dpi: 144,
+                width: size.0 as u32,
+                height: size.1 as u32,
+                density_dpi: android_density(144),
             }]
         );
         // A window off every monitor comes back into view.
@@ -1076,8 +1035,8 @@ mod tests {
             Instant::now(),
         );
         let window = desk.window(7).unwrap();
-        // 180 x 110 dp at 100% is 108 x 66 pixels.
-        assert_eq!(window.origin, (1920 - 108, 1080 - 66));
+        let (w, h) = clock_size(96);
+        assert_eq!(window.origin, (1920 - w, 1080 - h));
     }
 
     fn desk_with_area() -> Desk {
@@ -1108,31 +1067,33 @@ mod tests {
             pointers(&desk.take_reports()),
             vec![PointerAction::Down, PointerAction::Move, PointerAction::Up]
         );
-        // The point is in the widget's frame's pixels: a frame drawn at half the window's size
-        // gets half the coordinates.
-        let half = crate::png::encode(
-            &crate::png::Rgba {
-                width: 60,
-                height: 36,
-                pixels: vec![255; 60 * 36 * 4],
-            },
-            true,
-        );
-        desk.command(
-            WindowCommand::Frame(WidgetFrame {
-                widget_id: 7,
-                width: 60,
-                height: 36,
-                png: half,
-            }),
-            now,
-        );
-        desk.down(7, (60, 40), Button::Primary, false, now);
+    }
+
+    #[test]
+    fn fr12_a_point_in_the_window_is_the_same_pixel_of_the_widgets_unscaled_frame() {
+        // A frame drawn at another size than the window (one from before a resize) is shown
+        // from the window's top left corner at its own size, so a press is the same pixel of
+        // it, kept inside it.
+        let (mut desk, now) = placed(160, false);
+        desk.command(WindowCommand::Frame(frame_of(60, 36, [255; 4])), now);
+        desk.take_reports();
+        desk.down(7, (20, 13), Button::Primary, false, now);
+        desk.up(7, (20, 13), Button::Primary);
+        desk.down(7, (100, 80), Button::Primary, false, now);
         let reports = desk.take_reports();
-        let Some(WindowReport::Pointer { x, y, .. }) = reports.last() else {
-            panic!("no pointer report in {reports:?}");
-        };
-        assert!((x - 20.0).abs() < 0.5 && (y - 13.1).abs() < 0.5, "{x}, {y}");
+        let points: Vec<(f32, f32)> = reports
+            .iter()
+            .filter_map(|r| match r {
+                WindowReport::Pointer {
+                    action: PointerAction::Down,
+                    x,
+                    y,
+                    ..
+                } => Some((*x, *y)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(points, vec![(20.0, 13.0), (60.0, 36.0)]);
     }
 
     #[test]
@@ -1141,6 +1102,7 @@ mod tests {
         desk.take_effects();
         desk.take_reports();
         let margin = edit_margin(160);
+        let (w0, h0) = clock_size(160);
 
         // A press held still for half a second lifts the widget: Android's press is
         // cancelled, so the long press never clicks, and the window grows by the room for the
@@ -1152,7 +1114,7 @@ mod tests {
         let window = desk.window(7).unwrap();
         assert!(window.editing());
         assert_eq!(window.origin, (100 - margin, 200 - margin));
-        assert_eq!(window.size, (180 + 2 * margin, 110 + 2 * margin));
+        assert_eq!(window.size, (w0 + 2 * margin, h0 + 2 * margin));
         assert_eq!(
             pointers(&desk.take_reports()),
             vec![PointerAction::Down, PointerAction::Cancel]
@@ -1167,7 +1129,7 @@ mod tests {
         let Anchor::Below((left, top, right, bottom)) = anchor else {
             panic!("the menu opens under the widget, not at {anchor:?}");
         };
-        assert!(left < 100 && top < 200 && right > 280 && bottom > 310);
+        assert!(left < 100 && top < 200 && right > 100 + w0 && bottom > 200 + h0);
         assert!(
             matches!(&entries[0], Entry::Item { command: menu::SETTINGS, label, .. } if label == "Widget settings")
         );
@@ -1219,16 +1181,22 @@ mod tests {
             .find(|(hit, _)| *hit == Hit::Right)
             .unwrap();
         let handle = (right.cx as i32, right.cy as i32);
+        assert_eq!(desk.hit(7, handle), Some(Hit::Right));
         desk.down(7, handle, Button::Primary, false, now);
         desk.moved(7, (handle.0 + 60, handle.1));
         desk.up(7, (handle.0 + 60, handle.1), Button::Primary);
         let window = desk.window(7).unwrap();
         assert!(!window.editing());
-        assert_eq!(window.size, (240, 110));
+        assert_eq!(window.size, (w0 + 60, h0));
         let reports = desk.take_reports();
+        let wider = dp_of_px(w0 + 60, 160);
         assert!(
-            matches!(reports.last(), Some(WindowReport::Placed { placement, width: 240, .. }) if placement.width_dp == 240),
+            matches!(reports.last(), Some(WindowReport::Placed { placement, width, .. }) if placement.width_dp == wider && *width == (w0 + 60) as u32),
             "{reports:?}"
+        );
+        assert!(
+            pointers(&reports).is_empty(),
+            "a resize is never the widget's: {reports:?}"
         );
 
         // A handle never makes it smaller than the widget allows.
@@ -1247,11 +1215,8 @@ mod tests {
         desk.down(7, handle, Button::Primary, false, now);
         desk.moved(7, (handle.0, handle.1 - 500));
         desk.up(7, (handle.0, handle.1 - 500), Button::Primary);
-        // At 160 dpi a dp is a pixel; no widget window is less than 67 dp on a side.
-        assert_eq!(
-            desk.window(7).unwrap().size.1,
-            crate::widgets::MIN_SIDE_DP as i32
-        );
+        let smallest = min_window_size(&clock(true).provider, 160);
+        assert_eq!(desk.window(7).unwrap().size.1, smallest.1);
 
         // Esc ends an edit; a press beside the lifted widget ends it too.
         desk.down(7, (50, 50), Button::Primary, false, now);
@@ -1274,6 +1239,21 @@ mod tests {
             !desk.window(7).unwrap().editing(),
             "a press in the room around it ends it"
         );
+    }
+
+    #[test]
+    fn fr12_a_long_press_anywhere_on_the_widget_edits_it() {
+        // Every part of the widget but the edges it is resized by is the widget's, the top
+        // right corner too: no button sits there, so a long press there lifts it as anywhere
+        // else does.
+        let (w0, h0) = clock_size(160);
+        for at in [(w0 - 20, 15), (15, 15), (w0 / 2, h0 / 2), (15, h0 - 15)] {
+            let (mut desk, now) = placed(160, false);
+            assert_eq!(desk.hit(7, at), Some(Hit::Client), "{at:?}");
+            desk.down(7, at, Button::Primary, false, now);
+            desk.tick(now + HOLD_TO_MOVE);
+            assert!(desk.window(7).unwrap().editing(), "{at:?}");
+        }
     }
 
     #[test]
@@ -1328,7 +1308,15 @@ mod tests {
             })
             .unwrap();
         desk.menu_closed(7, Some(large), false);
-        assert_eq!(desk.window(7).unwrap().size, (270, 165));
+        let large_size = window_size(
+            &Placement {
+                width_dp: 270,
+                height_dp: 165,
+                ..clock(false).placement
+            },
+            160,
+        );
+        assert_eq!(desk.window(7).unwrap().size, large_size);
         assert!(matches!(
             desk.take_reports().last(),
             Some(WindowReport::Placed { placement, .. }) if (placement.width_dp, placement.height_dp) == (270, 165)
@@ -1350,17 +1338,17 @@ mod tests {
 
     #[test]
     fn fr12_a_widget_window_is_resized_by_its_edges_in_dp_within_what_the_widget_allows() {
-        // At 200% (192 dpi) a dp is 1.2 pixels: 180 x 110 dp is 216 x 132 pixels, and the
-        // window's right edge dragged 120 pixels makes the widget 100 dp wider.
+        // At 200% (192 dpi) the window's right edge dragged 120 pixels makes the widget that
+        // much wider, in dp at Android's density there.
         let (mut desk, now) = placed(192, false);
         desk.take_reports();
         let (w, h) = desk.window(7).unwrap().size;
-        assert_eq!((w, h), (216, 132));
+        assert_eq!((w, h), clock_size(192));
         assert_eq!(desk.hit(7, (w - 1, h / 2)), Some(Hit::Right));
         desk.down(7, (w - 1, h / 2), Button::Primary, false, now);
         desk.moved(7, (w - 1 + 120, h / 2));
         desk.up(7, (w - 1 + 120, h / 2), Button::Primary);
-        assert_eq!(desk.window(7).unwrap().size, (336, 132));
+        assert_eq!(desk.window(7).unwrap().size, (w + 120, h));
         let reports = desk.take_reports();
         assert_eq!(
             reports,
@@ -1369,12 +1357,13 @@ mod tests {
                 placement: Placement {
                     x: 100,
                     y: 200,
-                    width_dp: 280,
-                    height_dp: 110
+                    width_dp: dp_of_px(w + 120, 192),
+                    height_dp: dp_of_px(h, 192),
+                    resized: false,
                 },
-                width: 336,
-                height: 132,
-                density_dpi: 192,
+                width: (w + 120) as u32,
+                height: h as u32,
+                density_dpi: android_density(192),
             }]
         );
         // From the left edge the right edge stays.
@@ -1382,90 +1371,109 @@ mod tests {
         desk.moved(7, (-60, h / 2));
         desk.up(7, (-60, h / 2), Button::Primary);
         let window = desk.window(7).unwrap();
-        assert_eq!((window.origin.0, window.size.0), (40, 396));
-        // On a monitor of another scale it keeps its size in dp: 330 x 110 dp at 100% is
-        // 198 x 66 pixels.
+        assert_eq!((window.origin.0, window.size.0), (40, w + 180));
+        // On a monitor of another scale it keeps its size in dp.
+        let before = placement_of(40, 200, w + 180, h, 192);
         desk.take_reports();
         desk.scale_changed(7, 96);
         let window = desk.window(7).unwrap();
-        assert_eq!(window.size, (198, 66));
+        assert_eq!(window.size, window_size(&before, 96));
         assert!(matches!(
             desk.take_reports().last(),
-            Some(WindowReport::Placed {
-                density_dpi: 96,
-                ..
-            })
+            Some(WindowReport::Placed { density_dpi, .. }) if *density_dpi == android_density(96)
         ));
     }
 
     #[test]
-    fn fr12_the_more_button_opens_the_menu_on_a_click_and_moves_the_widget_on_a_drag() {
+    fn fr12_a_resized_widget_passes_its_size_on_when_the_drag_pauses() {
+        // Each size Android is told makes it draw the widget anew, so a size is passed on
+        // when the drag pauses on it and when it ends, not at every step of the drag.
         let (mut desk, now) = placed(160, false);
-        let circle = more_button(180, 110, 160);
-        let on = (circle.cx as i32, circle.cy as i32);
-        desk.entered(7, on);
-        desk.take_effects();
-        desk.down(7, on, Button::Primary, false, now);
-        desk.up(7, on, Button::Primary);
-        let (anchor, _) = menu_of(&desk.take_effects()).expect("a click opens the menu");
-        assert!(matches!(anchor, Anchor::Below(_)));
-        desk.menu_closed(7, None, false);
         desk.take_reports();
-        desk.down(7, on, Button::Primary, false, now);
-        desk.moved(7, (on.0 + 50, on.1 + 10));
-        desk.up(7, (on.0 + 50, on.1 + 10), Button::Primary);
-        assert_eq!(desk.window(7).unwrap().origin, (150, 210));
-        let reports = desk.take_reports();
-        assert!(pointers(&reports).is_empty());
-        assert!(matches!(reports.last(), Some(WindowReport::Placed { .. })));
+        let (w, h) = desk.window(7).unwrap().size;
+        let placed_widths = |desk: &mut Desk| -> Vec<u32> {
+            desk.take_reports()
+                .iter()
+                .filter_map(|r| match r {
+                    WindowReport::Placed { width, .. } => Some(*width),
+                    _ => None,
+                })
+                .collect()
+        };
+        desk.down(7, (w - 1, h / 2), Button::Primary, false, now);
+        desk.moved(7, (w - 1 + 10, h / 2));
+        assert!(desk.busy(now), "a resize has a size to pass on");
+        desk.tick(now);
+        assert!(placed_widths(&mut desk).is_empty(), "not before a pause");
+        desk.tick(now + Duration::from_millis(200));
+        assert_eq!(placed_widths(&mut desk), vec![(w + 10) as u32]);
+        // The next pause is passed on no sooner than a quarter of a second after the last.
+        desk.moved(7, (w - 1 + 20, h / 2));
+        desk.tick(now + Duration::from_millis(300));
+        assert!(placed_widths(&mut desk).is_empty());
+        desk.tick(now + Duration::from_millis(460));
+        assert_eq!(placed_widths(&mut desk), vec![(w + 20) as u32]);
+        // Letting go passes the last size on once that much time has gone by, and its image
+        // shows unscaled meanwhile: the window is the new size, the picture too.
+        desk.moved(7, (w - 1 + 30, h / 2));
+        desk.up(7, (w - 1 + 30, h / 2), Button::Primary);
+        assert!(desk.busy(now), "the last size is still to pass on");
+        desk.tick(now + Duration::from_millis(800));
+        assert_eq!(placed_widths(&mut desk), vec![(w + 30) as u32]);
+        assert!(!desk.busy(now + Duration::from_millis(800)));
+        let picture = desk.picture(7, now).unwrap();
+        assert_eq!((picture.width, picture.height), ((w + 30) as u32, h as u32));
+    }
+
+    #[test]
+    fn fr12_nothing_is_drawn_over_a_widget_and_the_keyboard_opens_its_menu_under_it() {
+        let (mut desk, now) = placed(160, false);
+        let (w, h) = clock_size(160);
+        desk.command(
+            WindowCommand::Frame(frame_of(w as u32, h as u32, [10, 20, 30, 255])),
+            now,
+        );
+        // The pointer over the widget draws nothing over it: the picture is the widget's own.
+        desk.entered(7, (w - 20, 15));
+        desk.moved(7, (w - 20, 15));
+        let picture = desk.picture(7, now).unwrap();
+        assert!(picture
+            .pixels
+            .chunks_exact(4)
+            .all(|p| p == [30, 20, 10, 255]));
+        // A press in its top right corner is the widget's.
+        desk.take_reports();
+        desk.down(7, (w - 20, 15), Button::Primary, false, now);
+        desk.up(7, (w - 20, 15), Button::Primary);
+        assert_eq!(
+            pointers(&desk.take_reports()),
+            vec![PointerAction::Down, PointerAction::Up]
+        );
+        // The menu key opens the menu under the widget.
+        desk.take_effects();
+        desk.key(7, Key::Menu);
+        let (anchor, _) = menu_of(&desk.take_effects()).expect("the menu key opens the menu");
+        assert_eq!(anchor, Anchor::Below((100, 200, 100 + w, 200 + h)));
     }
 
     #[test]
     fn fr12_a_widget_window_shows_a_placeholder_then_its_picture() {
         let (mut desk, now) = placed(160, false);
         let picture = desk.picture(7, now).unwrap();
-        assert_eq!((picture.width, picture.height), (180, 110));
+        let (w, h) = clock_size(160);
+        assert_eq!((picture.width, picture.height), (w as u32, h as u32));
         assert!(
             !all_clear(&picture.pixels),
             "the placeholder shows where it is"
         );
-        let red = crate::png::encode(
-            &crate::png::Rgba {
-                width: 2,
-                height: 2,
-                pixels: [255, 0, 0, 255].repeat(4),
-            },
-            true,
-        );
-        desk.command(
-            WindowCommand::Frame(WidgetFrame {
-                widget_id: 7,
-                width: 2,
-                height: 2,
-                png: red,
-            }),
-            now,
-        );
+        desk.command(WindowCommand::Frame(frame_of(2, 2, [255, 0, 0, 255])), now);
         let picture = desk.picture(7, now).unwrap();
         assert_eq!(&picture.pixels[0..4], &[0, 0, 255, 255]);
+        // Its own size, never scaled: beside the 2 x 2 image the window is clear, but still
+        // takes the pointer.
+        assert_eq!(&picture.pixels[8..12], &[0, 0, 0, 1]);
         // A picture with nothing in it keeps the last that had something.
-        let clear = crate::png::encode(
-            &crate::png::Rgba {
-                width: 2,
-                height: 2,
-                pixels: vec![0; 16],
-            },
-            true,
-        );
-        desk.command(
-            WindowCommand::Frame(WidgetFrame {
-                widget_id: 7,
-                width: 2,
-                height: 2,
-                png: clear,
-            }),
-            now,
-        );
+        desk.command(WindowCommand::Frame(frame_of(2, 2, [0; 4])), now);
         assert_eq!(
             &desk.picture(7, now).unwrap().pixels[0..4],
             &[0, 0, 255, 255]

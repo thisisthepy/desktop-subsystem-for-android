@@ -191,6 +191,17 @@ extern "C" DSA_GFX_EXPORT uint64_t dsa_gfx_device_generation(void) {
     return fb->getEmulationVk().deviceGeneration();
 }
 
+extern "C" DSA_GFX_EXPORT uint64_t dsa_gfx_device_losses(void) {
+    if (!s_initialized.load(std::memory_order_acquire)) {
+        return 0;
+    }
+    gfxstream::FrameBuffer* fb = gfxstream::FrameBuffer::getFB();
+    if (!fb || !fb->hasEmulationVk()) {
+        return 0;
+    }
+    return fb->getEmulationVk().deviceLosses();
+}
+
 extern "C" DSA_GFX_EXPORT int dsa_gfx_select_gpu(uint32_t rule, const uint8_t* luid, const char* name) {
     if (s_initialized.load(std::memory_order_acquire)) {
         return -1;

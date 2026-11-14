@@ -10,6 +10,7 @@ use std::time::Duration;
 use dsa_protocol::host_api::types::PointerAction;
 use dsa_transport::Connector;
 
+use super::geometry::{android_density, placement_of, ScreenRect};
 use crate::host_api::HostApiClient;
 use crate::session::SessionState;
 use crate::widgets::{Placement, Widget, WidgetEvent, WidgetFrame};
@@ -40,8 +41,8 @@ pub enum WindowCommand {
 /// What the widget windows report to the window manager.
 #[derive(Debug, Clone, PartialEq)]
 pub enum WindowReport {
-    /// The window is at `placement`, `width` by `height` pixels on a monitor of
-    /// `density_dpi` (Android's density: 96 at a scale of 100%).
+    /// The window is at `placement`, `width` by `height` pixels on a monitor where Android
+    /// draws at `density_dpi` ([`android_density`]).
     Placed {
         widget_id: i32,
         placement: Placement,
@@ -60,6 +61,21 @@ pub enum WindowReport {
     Remove { widget_id: i32 },
     /// The user chose Widget settings in the window's menu: the widget's setup opens again.
     Reconfigure { widget_id: i32 },
+}
+
+/// What a widget window reports when its widget `widget_id` sits at `widget` on the screen
+/// (left, top, right and bottom; its own rectangle, without the room of an edit) on a monitor
+/// of `dpi`: where it is and how large, in pixels and in dp at Android's density there. The
+/// service keeps it and tells Android, which draws the widget at that size.
+pub fn placed_report(widget_id: i32, widget: ScreenRect, dpi: u32) -> WindowReport {
+    let (width, height) = ((widget.2 - widget.0).max(1), (widget.3 - widget.1).max(1));
+    WindowReport::Placed {
+        widget_id,
+        placement: placement_of(widget.0, widget.1, width, height, dpi),
+        width: width as u32,
+        height: height as u32,
+        density_dpi: android_density(dpi),
+    }
 }
 
 /// The widget windows, as the watch drives them: a window manager's are windows on a thread

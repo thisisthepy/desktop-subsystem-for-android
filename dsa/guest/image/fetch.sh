@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Downloads the pinned AOSP build inputs of one Android major version and guest architecture
-# (see inputs.json: target_files, otatools, and dexpreopt_tools with the build's own dex2oat)
-# into .scratch/aosp-inputs/<build>-<arch>/ and checks their sizes and SHA-256.
+# (see inputs.json: target_files, otatools, dexpreopt_tools with the build's own dex2oat, and
+# services.jar's ART profile from the build's own frameworks/base commit) into .scratch/aosp-inputs/<build>-<arch>/ and checks their sizes and SHA-256.
 #
 #   dsa/guest/image/fetch.sh 17            the x86_64 image's inputs
 #   dsa/guest/image/fetch.sh 17 arm64      the arm64 (64-bit only) image's inputs
@@ -29,8 +29,22 @@ for kind in $kinds; do
     echo "have $name"
     continue
   fi
+  # A file with a url is a source file at the build's own commit, which the source server
+  # sends base64 encoded; the others are the build's outputs.
+  url="$(jq -r --argjson m "$major" --arg a "$arch" --arg k "$kind" "$select | .files[\$k].url // empty" "$here/inputs.json")"
+  encoding="$(jq -r --argjson m "$major" --arg a "$arch" --arg k "$kind" "$select | .files[\$k].encoding // empty" "$here/inputs.json")"
   echo "downloading $name of build $build ($target)"
-  curl -fsSL --retry 8 --retry-all-errors -o "$file.part" "https://ci.android.com/builds/submitted/$build/$target/latest/raw/$name"
+  if [[ -n "$url" ]]; then
+    curl -fsSL --retry 8 --retry-all-errors -o "$file.download" "$url"
+    if [[ "$encoding" == "base64" ]]; then
+      base64 -d "$file.download" > "$file.part"
+      rm -f "$file.download"
+    else
+      mv "$file.download" "$file.part"
+    fi
+  else
+    curl -fsSL --retry 8 --retry-all-errors -o "$file.part" "https://ci.android.com/builds/submitted/$build/$target/latest/raw/$name"
+  fi
   if ! echo "$sha  $file.part" | sha256sum --check --status; then
     echo "$name does not match the SHA-256 pinned in inputs.json" >&2
     rm -f "$file.part"

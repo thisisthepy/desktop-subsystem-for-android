@@ -289,7 +289,15 @@ public final class SettingsViewModel: ObservableObject {
     }
 
     public var networkAddresses: String { joinOrNone(network?.addresses) }
-    public var networkDns: String { joinOrNone(network?.dnsServers) }
+    /// Who answers Android's DNS queries: this Mac's resolver, or, when that does not answer,
+    /// the network's DNS servers. A service that does not say shows the servers.
+    public var networkDns: String {
+        switch network?.dnsResolver ?? .unknown {
+        case .host: return text.get("Network_DnsHost")
+        case .network: return text.format("Network_DnsFallback", joinOrNone(network?.dnsServers))
+        case .unknown: return joinOrNone(network?.dnsServers)
+        }
+    }
     public var networkGateway: String {
         let gateway = network?.gateway ?? ""
         return gateway.isEmpty ? text.get("Network_None") : gateway
@@ -304,6 +312,43 @@ public final class SettingsViewModel: ObservableObject {
             return false
         }
         return advancedNetworking != (network.mode == .advanced)
+    }
+
+    // MARK: Trusted certificates
+
+    /// Whether Android trusts the root certificates a user or an administrator added to this
+    /// Mac, such as those an internet filter or a company proxy installs. On by default.
+    public var hostCertificates: Bool { settings?.hostCertificates ?? true }
+
+    /// The root certificates the service found added to this Mac, in the order it lists them.
+    public var importedCertificates: [ImportedCertificate] { settings?.importedCertificates ?? [] }
+
+    /// Whether the service found no added root certificate, so the page says so.
+    public var hasNoImportedCertificates: Bool { importedCertificates.isEmpty }
+
+    /// Where a certificate was found, in the user's language; a source this app does not know
+    /// is shown as the service names it.
+    public func certificateSourceText(_ source: String) -> String {
+        switch source {
+        case "machine": return text.get("HostCertificatesSource_machine")
+        case "machine_group_policy": return text.get("HostCertificatesSource_machine_group_policy")
+        case "machine_enterprise": return text.get("HostCertificatesSource_machine_enterprise")
+        case "user": return text.get("HostCertificatesSource_user")
+        case "user_group_policy": return text.get("HostCertificatesSource_user_group_policy")
+        case "admin": return text.get("HostCertificatesSource_admin")
+        case "system": return text.get("HostCertificatesSource_system")
+        default: return source
+        }
+    }
+
+    /// Who signed a certificate, as the list's second line says it.
+    public func certificateIssuerText(_ certificate: ImportedCertificate) -> String {
+        text.format("HostCertificatesIssuer.Text", certificate.issuer)
+    }
+
+    public func setHostCertificates(_ on: Bool) async {
+        if on == hostCertificates && loaded { return }
+        await change { try await service.setHostCertificates(on) }
     }
 
     // MARK: Data reset

@@ -349,7 +349,8 @@ impl Desktop {
         Ok(ready > 0 && fds[1].revents & libc::POLLIN != 0)
     }
 
-    /// Runs what is due: key repeat, and a widget's long press or its More button's fade.
+    /// Runs what is due: key repeat, a widget's long press, and the size of a widget being
+    /// resized.
     pub fn tick(&mut self, now: Instant) {
         self.state.repeat_due(now);
         self.state.widget_tick(now);

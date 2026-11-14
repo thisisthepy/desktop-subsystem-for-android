@@ -113,24 +113,25 @@ class SystemSettingsSyncTest {
     /** The host's settings with a font scale for a Windows text size of [percent]. */
     private fun textSize(percent: Int): ByteArray {
         val envelope = Envelope.parseFrom(seoul())
-        val settings = envelope.systemSettings.toBuilder().setFontScale(160f / 96f * percent / 100f)
+        val settings = envelope.systemSettings.toBuilder().setFontScale(percent / 100f)
         return envelope.toBuilder().setSystemSettings(settings).build().toByteArray()
     }
 
     @Test
     fun fr4_text_follows_the_windows_text_size() {
-        // Android starts: the tasks are read, and none is open yet.
+        // Android starts: the tasks are read, and none is open yet. A text size of 100% is a
+        // font scale of 1, which Android starts at, so nothing is set.
         sync.tasksRunning(emptyList())
         sync.handle(textSize(100))
-        assertTrue(calls.contains("font scale 1.667"))
-        assertEquals(160f / 96f, fontScale, 0.001f)
+        assertFalse(calls.any { it.startsWith("font scale") })
+        assertEquals(1f, fontScale, 0.001f)
 
         // An app that handles a change of font scale itself is open: the new size applies at
         // once, and Android redraws it without a restart.
         calls.clear()
         sync.tasksRunning(emptyList())
         sync.handle(textSize(150))
-        assertEquals(listOf("font scale 2.500"), calls)
+        assertEquals(listOf("font scale 1.500"), calls)
         assertFalse(sync.holdsFontScale)
 
         // An app that would be restarted for it is open: the size waits, and nothing restarts.
@@ -139,7 +140,7 @@ class SystemSettingsSyncTest {
         sync.handle(textSize(125))
         assertTrue(calls.isEmpty())
         assertTrue(sync.holdsFontScale)
-        assertEquals(2.5f, fontScale, 0.001f)
+        assertEquals(1.5f, fontScale, 0.001f)
         assertTrue(log.lines.any { it.contains("while com.example.notes is open") })
         // Other settings still apply meanwhile.
         sync.handle(
@@ -151,7 +152,7 @@ class SystemSettingsSyncTest {
         // The app closes: the size the host asked for last applies.
         calls.clear()
         sync.tasksRunning(emptyList())
-        assertEquals(listOf("font scale 2.083"), calls)
+        assertEquals(listOf("font scale 1.250"), calls)
         assertFalse(sync.holdsFontScale)
 
         // The same size again changes nothing.
@@ -159,15 +160,21 @@ class SystemSettingsSyncTest {
         sync.connected()
         sync.handle(textSize(125))
         assertFalse(calls.any { it.startsWith("font scale") })
+
+        // Back to 100%: the guest's font scale is 1 again. The new connection applied the
+        // other settings in full above, so only what this step sets is looked at.
+        calls.clear()
+        sync.handle(textSize(100))
+        assertEquals(listOf("font scale 1.000"), calls)
     }
 
     @Test
     fun fr4_a_font_scale_waits_until_the_tasks_are_read() {
-        sync.handle(textSize(100))
+        sync.handle(textSize(150))
         assertTrue(sync.holdsFontScale)
         assertFalse(calls.any { it.startsWith("font scale") })
         sync.tasksRunning(emptyList())
-        assertTrue(calls.contains("font scale 1.667"))
+        assertTrue(calls.contains("font scale 1.500"))
         // An older host sends no font scale: the guest's stays as it is.
         calls.clear()
         val older = SystemSettingsSync(port, log)

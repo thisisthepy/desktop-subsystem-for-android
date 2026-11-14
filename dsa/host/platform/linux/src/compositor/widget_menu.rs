@@ -356,6 +356,7 @@ mod tests {
             y: 0,
             width_dp: 180,
             height_dp: 110,
+            resized: false,
         }
     }
 

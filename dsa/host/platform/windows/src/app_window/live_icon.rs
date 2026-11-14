@@ -89,6 +89,20 @@ pub fn premultiplied(png: &[u8], side: u32) -> Option<Vec<u8>> {
     with_com(|| Decoder::new().ok()?.decode(png, side, side).ok())
 }
 
+/// An adaptive icon's foreground layer `png` as the title bar draws it, `side` pixels square:
+/// cropped to its logo and enlarged to the size of a whole icon, as the program's own
+/// foreground is ([`dsa_host_core::compositor::caption::caption_icon`]).
+pub fn caption_logo(png: &[u8], side: u32) -> Option<Vec<u8>> {
+    let (width, height) = size(png)?;
+    if side == 0 || width == 0 || height == 0 || width > MAX_SOURCE || height > MAX_SOURCE {
+        return None;
+    }
+    let pixels = with_com(|| Decoder::new().ok()?.decode(png, width, height).ok())?;
+    Some(dsa_host_core::compositor::caption::caption_icon(
+        &pixels, width, height, side, true,
+    ))
+}
+
 /// The sides of a window's small and big icons at `dpi`, as Windows draws them there.
 pub fn icon_sides(dpi: u32) -> (u32, u32) {
     // SAFETY: plain metric queries.

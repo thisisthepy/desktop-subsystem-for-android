@@ -210,6 +210,18 @@ pub enum NetworkMode {
     Off,
 }
 
+/// Who answers Android's DNS queries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DnsResolver {
+    /// The service did not say: Android is still starting, or the service is older.
+    Unknown,
+    /// This computer's resolver, so its hosts file, VPN and DNS filters apply.
+    Host,
+    /// This computer's resolver does not answer, so Android asks the network's DNS servers
+    /// itself.
+    Network,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Network {
     pub mode: NetworkMode,
@@ -217,6 +229,7 @@ pub struct Network {
     pub dns_servers: Vec<String>,
     pub gateway: String,
     pub problem: Option<String>,
+    pub dns_resolver: DnsResolver,
 }
 
 impl Network {
@@ -232,6 +245,11 @@ impl Network {
             dns_servers: texts(json, "dns_servers"),
             gateway: text(json, "gateway"),
             problem: optional_text(json, "problem"),
+            dns_resolver: match json["dns_resolver"].as_str() {
+                Some("host") => DnsResolver::Host,
+                Some("network") => DnsResolver::Network,
+                _ => DnsResolver::Unknown,
+            },
         }
     }
 }
@@ -288,6 +306,43 @@ pub struct Settings {
     /// Whether apps in Android may ask for root through an administrator's approval. The
     /// machine's, off by default; it applies from the next start of Android.
     pub root_elevation: bool,
+    /// Whether Android trusts the root certificates a user or an administrator added to this
+    /// computer. On by default; it applies at once.
+    pub host_certificates: bool,
+    /// The root certificates the service found added to this computer, whether or not
+    /// [`Settings::host_certificates`] is on. Those the system ships are left out.
+    pub imported_certificates: Vec<ImportedCertificate>,
+}
+
+/// A root certificate the service found added to this computer's trust stores.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportedCertificate {
+    /// Who it is for, as a distinguished name ("CN=Example Root, O=Example").
+    pub subject: String,
+    /// Who signed it, the same way.
+    pub issuer: String,
+    /// Where it was found: "system" on Linux (added to the system's certificate store beside
+    /// the distribution's bundle); the other hosts name their own stores.
+    pub source: String,
+    /// The file or store it was found in.
+    pub location: String,
+    /// Its SHA-256 fingerprint, in lower-case hexadecimal.
+    pub sha256: String,
+    /// When it stops being valid, in seconds since 1970; 0 when unknown.
+    pub not_after: i64,
+}
+
+impl ImportedCertificate {
+    pub fn read(json: &Value) -> ImportedCertificate {
+        ImportedCertificate {
+            subject: text(json, "subject"),
+            issuer: text(json, "issuer"),
+            source: text(json, "source"),
+            location: text(json, "location"),
+            sha256: text(json, "sha256"),
+            not_after: signed(json, "not_after"),
+        }
+    }
 }
 
 /// Where attaching developer mode's port to the user's adb server stands.
@@ -366,6 +421,12 @@ impl Settings {
             prerelease_updates: flag(json, "prerelease_updates", false),
             update_channel_available: flag(json, "update_channel_available", false),
             root_elevation: flag(json, "root_elevation", false),
+            host_certificates: flag(json, "host_certificates", true),
+            imported_certificates: items(json, "imported_certificates")
+                .iter()
+                .filter(|c| c.is_object())
+                .map(ImportedCertificate::read)
+                .collect(),
         }
     }
 
@@ -570,6 +631,9 @@ pub struct App {
     /// How far the app may use root: `off`, `ask` or `remember`, or `unavailable` while root
     /// elevation is off for the computer. Empty from a `dsa` that does not say.
     pub root: String,
+    /// The user ID the app shares with other apps (`android:sharedUserId`); empty for an app
+    /// with a user ID of its own, and from a `dsa` that does not say.
+    pub shared_user_id: String,
 }
 
 /// The "Run as ARM" switch of an app, as `dsa apps list` reports it.
@@ -614,6 +678,7 @@ impl App {
             icon_png: base64_decode(json["icon_png"].as_str().unwrap_or_default()),
             run_as_arm: RunAsArm::read(&json["run_as_arm"]),
             root: text(json, "root"),
+            shared_user_id: text(json, "shared_user_id"),
         }
     }
 }
@@ -1126,6 +1191,90 @@ impl Gapps {
 
     /// Whether the remove button may be pressed: only with a package, and not while a
     /// request is under way.
+    pub fn can_remove(&self, busy: bool) -> bool {
+        !busy && self.package.is_some()
+    }
+}
+
+/// Google's terms for what its SDK repository gives, which Widevine comes from.
+pub const WIDEVINE_TERMS_URL: &str = "https://developer.android.com/studio/terms";
+/// Where the emulator image Widevine is taken from is downloaded.
+pub const WIDEVINE_SOURCE: &str = "https://dl.google.com/android/repository/sys-img/google_apis/";
+
+/// The Widevine module DSA installed for the user, as dsa describes it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WidevinePackage {
+    /// The APEX's file name, `com.google.android.widevine.apex`.
+    pub apex: String,
+    /// Google's image it came from: its build, API level and revision.
+    pub version: String,
+    pub android_major: u64,
+    pub abi: String,
+    pub source: String,
+}
+
+/// What the protected content item shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WidevineState {
+    /// No module is installed, and the running Android has none.
+    NotInstalled,
+    /// A module is installed, and the running Android uses it (or does not run).
+    Installed,
+    /// What is installed differs from what the running Android started with.
+    RestartPending,
+}
+
+/// Where Widevine stands for the user.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Widevine {
+    pub package: Option<WidevinePackage>,
+    /// Whether Android runs now, and whether it was started with Widevine.
+    pub running: bool,
+    pub active: bool,
+    pub restart_needed: bool,
+    /// The security level the module gives: L3.
+    pub security_level: String,
+}
+
+impl Widevine {
+    pub fn read(json: &Value) -> Widevine {
+        let package = json
+            .get("package")
+            .filter(|p| p.is_object())
+            .map(|p| WidevinePackage {
+                apex: text(p, "apex"),
+                version: text(p, "version"),
+                android_major: number(p, "android_major"),
+                abi: text(p, "abi"),
+                source: text(p, "source"),
+            });
+        Widevine {
+            package,
+            running: flag(json, "running", false),
+            active: flag(json, "active", false),
+            restart_needed: flag(json, "restart_needed", false),
+            security_level: optional_text(json, "security_level").unwrap_or_else(|| "L3".into()),
+        }
+    }
+
+    pub fn state(&self) -> WidevineState {
+        if self.restart_needed {
+            WidevineState::RestartPending
+        } else if self.package.is_some() {
+            WidevineState::Installed
+        } else {
+            WidevineState::NotInstalled
+        }
+    }
+
+    /// Whether the install button may be pressed: without a module, and not while a request is
+    /// under way.
+    pub fn can_install(&self, busy: bool) -> bool {
+        !busy && self.package.is_none()
+    }
+
+    /// Whether the remove button may be pressed: only with a module, and not while a request
+    /// is under way.
     pub fn can_remove(&self, busy: bool) -> bool {
         !busy && self.package.is_some()
     }
@@ -1722,6 +1871,12 @@ impl Client {
         ])?))
     }
 
+    /// Whether Android trusts the root certificates a user or an administrator added to this
+    /// computer. The user's own setting; it applies at once.
+    pub fn set_host_certificates(&self, on: bool) -> Result<Settings, Failure> {
+        self.switch("host-certificates", on)
+    }
+
     /// The most memory Android may grow to, in MiB; 0 is automatic.
     pub fn set_memory_limit(&self, mb: u32) -> Result<Settings, Failure> {
         let value = if mb == 0 {
@@ -1812,6 +1967,24 @@ impl Client {
     /// Google's apps keep Android from starting; Android goes without them from its next start.
     pub fn remove_gapps(&self) -> Result<Gapps, Failure> {
         Ok(Gapps::read(&self.json(&["gapps", "remove"])?))
+    }
+
+    /// Where Widevine stands.
+    pub fn widevine(&self) -> Result<Widevine, Failure> {
+        Ok(Widevine::read(&self.json(&["drm", "widevine", "status"])?))
+    }
+
+    /// Downloads Google's emulator image for this Android, takes Widevine out of it unchanged
+    /// and installs it. The user agreed to Google's terms in the app first, so dsa does not ask
+    /// again. It takes minutes; Android uses the module from its next start.
+    pub fn install_widevine(&self) -> Result<Widevine, Failure> {
+        let args = ["drm", "widevine", "install", "--yes"];
+        Ok(Widevine::read(&self.json(&args)?))
+    }
+
+    /// Removes Widevine and the device certificates it kept, from Android's next start.
+    pub fn remove_widevine(&self) -> Result<Widevine, Failure> {
+        Ok(Widevine::read(&self.json(&["drm", "widevine", "remove"])?))
     }
 
     /// Where the app data backup stands. It never starts Android.

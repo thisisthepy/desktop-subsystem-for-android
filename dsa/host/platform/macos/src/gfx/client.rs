@@ -11,8 +11,8 @@ use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use dsa_host_core::renderer::{
-    Given, Pending, RendererHandler, RendererLink, RendererProcessMemory, TextureBook,
-    QUESTION_TIMEOUT,
+    DeviceChanges, Given, Pending, RendererHandler, RendererLink, RendererProcessMemory,
+    TextureBook, QUESTION_TIMEOUT,
 };
 use dsa_protocol::renderer::types::{
     envelope::Body, ForgetDisplay, FramePath, MemoryReport, MemoryRequest, Start, Started, Target,
@@ -36,6 +36,8 @@ pub struct RendererClient {
     link: Mutex<Option<RendererLink>>,
     book: Mutex<TextureBook<usize>>,
     memory: Pending<MemoryReport>,
+    /// Each DeviceState the renderer sent: a change is a GPU reset.
+    device_changes: DeviceChanges,
     starts: Mutex<u64>,
 }
 
@@ -54,6 +56,7 @@ impl RendererClient {
             link: Mutex::new(None),
             book: Mutex::new(TextureBook::new()),
             memory: Pending::new(),
+            device_changes: DeviceChanges::new(),
             starts: Mutex::new(0),
         });
         let weak: Weak<RendererClient> = Arc::downgrade(&client);
@@ -63,6 +66,13 @@ impl RendererClient {
             }
         }));
         client
+    }
+
+    /// A count that changes each time the renderer finds its GPU device lost or makes it
+    /// again: the window manager takes any change as a GPU reset, the moment the renderer
+    /// finds it.
+    pub fn device_changes(&self) -> u64 {
+        self.device_changes.count()
     }
 
     /// How many renderers have started.
@@ -209,6 +219,12 @@ impl RendererHandler for RendererClient {
                 }
             }
             Body::MemoryReport(report) => self.memory.complete(report.request, report),
+            Body::DeviceState(state) => {
+                // The manager looks at this at its next tick and takes the change as a GPU
+                // reset.
+                let line = self.device_changes.told(&state);
+                log(&format!("graphics: {line}"));
+            }
             Body::RendererLog(line) => {
                 let severity = char::from_u32(line.severity).unwrap_or('E');
                 log(&format!("graphics renderer {severity}: {}", line.message));

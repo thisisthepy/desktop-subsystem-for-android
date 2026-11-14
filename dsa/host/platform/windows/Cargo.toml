@@ -26,6 +26,8 @@ windows-sys = { version = "0.61", features = [
     "Win32_Graphics_Gdi",
     # The VM's network: the host's adapters and the guest's addresses as the host sees them.
     "Win32_NetworkManagement_IpHelper",
+    # The guest's DNS queries, answered by Windows' DNS client (DnsQueryRaw, DnsQueryEx).
+    "Win32_NetworkManagement_Dns",
     "Win32_NetworkManagement_Ndis",
     "Win32_Networking_WinHttp",
     "Win32_Networking_WinSock",

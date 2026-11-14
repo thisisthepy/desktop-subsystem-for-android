@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds the patched SurfaceFlinger, libhwui and libEGL, and DSA's KeyMint (dsa-keymint, whose
+# Builds the patched SurfaceFlinger, libhwui, libEGL and libandroid_runtime, and DSA's KeyMint (dsa-keymint, whose
 # root key of key blobs comes from the DSA host, with the libssl it needs), in a tree
 # fetch-source.py made from dsa/guest/framework/framework-lock.json.
 #
@@ -36,7 +36,11 @@ rm -rf "$device"
 mkdir -p "$device"
 cp "$here/device/AndroidProducts.mk" "$here/device/dsa_framework.mk" "$device/"
 cp "$here/device/$arch/BoardConfig.mk" "$device/"
-cp -r "$here/device/hosttools" "$device/"
+# The stand-in libsqlite only while the tree has no real one: libandroid_runtime needs
+# external/sqlite, and two modules of one name stop Soong's analysis.
+if [[ ! -e "$top/external/sqlite/dist/Android.bp" ]]; then
+  cp -r "$here/device/hosttools" "$device/"
+fi
 
 # Build files the tree takes in DSA's cut (stand-ins/common for every version, then
 # stand-ins/<android>): each upstream file declares modules over sources the sparse checkout

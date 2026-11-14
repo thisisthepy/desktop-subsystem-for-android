@@ -57,6 +57,14 @@ DEQP_APK_SIZE = 209769483
 DEQP_APK_CRC = 0x6142F2B5
 MUSTPASS = CTS_DIR + "vk-main-2019-03-01/"
 DEQP_PACKAGE = "com.drawelements.deqp"
+# The CTS runs in a process named after the package with this suffix, so `pidof` of the
+# package alone never finds it.
+DEQP_PROCESSES = f"{DEQP_PACKAGE}:testercore {DEQP_PACKAGE}"
+# How many polls in a row the CTS process must be missing before a run counts as over. Android
+# recreates the CTS activity when its window changes size right after it opens, and the CTS
+# ends its process when its activity goes ("Done, killing process"); the new process starts
+# about a second later and runs the case list again from the start.
+DEQP_GONE_POLLS = 2
 
 # The test apps: Android's NDK samples (Apache-2.0), built by the "Graphics test" workflow.
 TEST_APPS_ARTIFACT = "graphics-test-apps"
@@ -150,6 +158,9 @@ def expand_subset(patterns, cases):
 class CtsResults:
     statuses: dict = field(default_factory=dict)
     session_complete: bool = False
+    # The case the log begins but never ends: the one running when the log was read, or the
+    # one the CTS process ended in. None when every case the log begins is ended.
+    unfinished: str = None
 
     def failed(self):
         return {case: status for case, status in self.statuses.items()
@@ -175,7 +186,27 @@ def parse_qpa(text):
             case = None
         elif line.startswith("#endSession"):
             results.session_complete = True
+    results.unfinished = case
     return results
+
+
+def merge_run(merged, run, given, still_running):
+    """Adds the statuses one CTS process wrote for the cases it was given to `merged`, and
+    returns the case the process ended in, if it ended in one. A case still running when the
+    run was stopped because the time ran out is a timeout, not a crash."""
+    if still_running and run.unfinished:
+        run.statuses[run.unfinished] = "Timeout"
+    given = set(given)
+    for case, status in run.statuses.items():
+        if case in given:
+            merged.statuses[case] = status
+    merged.session_complete = run.session_complete
+    return None if still_running else run.unfinished
+
+
+def cases_left(cases, results):
+    """The cases, in order, that no CTS process has written a status for."""
+    return [case for case in cases if case not in results.statuses]
 
 
 # ---------------------------------------------------------------- measurements
@@ -530,25 +561,56 @@ def run_cts(args):
     # -g granted; newer Android also wants all-files access, which the shell can allow.
     adb.shell(f"appops set {DEQP_PACKAGE} MANAGE_EXTERNAL_STORAGE allow", check=False)
     adb.shell("logcat -c", check=False)
-    remote_cases, remote_log = "/sdcard/dsa-vk-cases.txt", "/sdcard/dsa-vk-results.qpa"
-    adb.run("push", str(cases_file), remote_cases)
-    adb.shell(f"rm -f {remote_log}", check=False)
-    command = (f"deqp --deqp-caselist-file={remote_cases} --deqp-log-filename={remote_log} "
-               "--deqp-log-images=disable --deqp-log-shader-sources=disable --deqp-watchdog=enable")
     print(f"running {len(cases)} Vulkan CTS cases")
-    adb.shell(f"am start -W -n {DEQP_PACKAGE}/android.app.NativeActivity -e cmdLine '{command}'")
     deadline = time.time() + args.timeout
     results = CtsResults()
     local_log = WORK / "vk-cts-results.qpa"
-    while time.time() < deadline:
-        time.sleep(5)
-        running = adb.shell(f"pidof {DEQP_PACKAGE}", check=False).strip()
-        adb.run("pull", remote_log, str(local_log), check=False)
-        if local_log.exists():
-            results = parse_qpa(local_log.read_text(encoding="utf-8", errors="replace"))
-        if results.session_complete or not running:
+    local_log.write_text("", encoding="utf-8")
+    remaining = list(cases)
+    run = 0
+    # A case that ends the CTS process is a crash and fails the subset, but the cases after it
+    # still run: each new process is given the cases no process has written a status for.
+    while remaining and time.time() < deadline:
+        run += 1
+        run_cases = WORK / f"vk-cts-cases-{run}.txt"
+        run_cases.write_text("\n".join(remaining) + "\n", encoding="utf-8")
+        remote_cases = f"/sdcard/dsa-vk-cases-{run}.txt"
+        remote_log = f"/sdcard/dsa-vk-results-{run}.qpa"
+        run_log = WORK / f"vk-cts-results-{run}.qpa"
+        run_log.unlink(missing_ok=True)
+        adb.run("push", str(run_cases), remote_cases)
+        adb.shell(f"rm -f {remote_log}", check=False)
+        command = (f"deqp --deqp-caselist-file={remote_cases} --deqp-log-filename={remote_log} "
+                   "--deqp-log-images=disable --deqp-log-shader-sources=disable --deqp-watchdog=enable")
+        adb.shell(f"am start -W -n {DEQP_PACKAGE}/android.app.NativeActivity -e cmdLine '{command}'")
+        run_results = CtsResults()
+        running = True
+        gone = 0
+        while time.time() < deadline:
+            time.sleep(5)
+            running = bool(adb.shell(f"pidof {DEQP_PROCESSES}", check=False).strip())
+            adb.run("pull", remote_log, str(run_log), check=False)
+            if run_log.exists():
+                run_results = parse_qpa(run_log.read_text(encoding="utf-8", errors="replace"))
+            if run_results.session_complete:
+                running = False
+                break
+            gone = 0 if running else gone + 1
+            if gone >= DEQP_GONE_POLLS:
+                break
+        adb.shell(f"am force-stop {DEQP_PACKAGE}", check=False)
+        if run_log.exists():
+            with local_log.open("a", encoding="utf-8") as combined:
+                combined.write(run_log.read_text(encoding="utf-8", errors="replace"))
+        before = len(results.statuses)
+        crashed = merge_run(results, run_results, remaining, running)
+        remaining = cases_left(cases, results)
+        if running or len(results.statuses) == before:
+            # The time ran out, or the process wrote no result, so another would not either.
             break
-    adb.shell(f"am force-stop {DEQP_PACKAGE}", check=False)
+        if crashed and remaining:
+            print(f"the CTS process ended in {crashed}; running the {len(remaining)} cases "
+                  "after it in a new process")
     logcat = adb.shell("logcat -d -v threadtime", check=False)
     report = cts_report(cases, results, exceptions, args.software_vulkan)
     problems = check_stack(stack)

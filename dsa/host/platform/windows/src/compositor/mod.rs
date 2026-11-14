@@ -73,6 +73,7 @@ use std::time::{Duration, Instant};
 
 use dsa_host_core::app_audio::{self, AppStream, AppVolumes};
 use dsa_host_core::audio::{serve_port as serve_audio_port, AudioDevice, AUDIO_PORT};
+use dsa_host_core::compositor::frame_stall::{restart_in_background, SharedConnector, Stall};
 use dsa_host_core::compositor::{
     GraphicsRenderer, GraphicsStreamKind, StreamTracker, GRAPHICS_COMMAND_PORT,
     GRAPHICS_PROCESS_PIPE_PORT,
@@ -140,6 +141,9 @@ pub struct Compositor {
     /// Binds the video port, where the guest's codec HAL has its streams decoded. None in
     /// tests, which have no GPU decoders.
     bind_video: Option<BindFn>,
+    /// Set when the last video decoder closed and its device was let go, so the idle trim
+    /// gives back the memory that freed.
+    video_let_go: Arc<AtomicBool>,
     /// Binds the sensor port, where the guest's sensors HAL reads this computer's sensors.
     /// None in tests, which read no sensors.
     bind_sensors: Option<BindFn>,
@@ -184,6 +188,8 @@ pub struct Compositor {
     /// What joins the media sessions the tray follows to the media buttons in the taskbar
     /// previews of the task windows.
     media_windows: MediaWindows,
+    /// DSA's own news the window manager raises, which the notifications' thread shows.
+    dsa_news: notifications::DsaNews,
 }
 
 /// The way between the media sessions the tray follows and the media buttons in the task
@@ -312,6 +318,7 @@ impl Compositor {
             renderer,
             tracker: Arc::new(StreamTracker::new()),
             vm_id_slot: VmIdSlot::default(),
+            video_let_go: Arc::new(AtomicBool::new(false)),
             local_api_connector,
             bind_command: Some(bind_command),
             bind_process_pipe: Some(bind_process_pipe),
@@ -337,6 +344,7 @@ impl Compositor {
             show_background: true,
             touch_gestures: touch_gestures::TouchGestureSetup::for_this_user(),
             media_windows: MediaWindows::new(),
+            dsa_news: notifications::DsaNews::default(),
         }
     }
 
@@ -353,6 +361,7 @@ impl Compositor {
             renderer,
             tracker: Arc::new(StreamTracker::new()),
             vm_id_slot: VmIdSlot::default(),
+            video_let_go: Arc::new(AtomicBool::new(false)),
             local_api_connector,
             bind_command: Some(bind_command),
             bind_process_pipe: Some(bind_process_pipe),
@@ -378,6 +387,7 @@ impl Compositor {
             show_background: false,
             touch_gestures: None,
             media_windows: MediaWindows::new(),
+            dsa_news: notifications::DsaNews::default(),
         }
     }
 
@@ -763,6 +773,7 @@ impl Compositor {
         let listener = VmBoundListener::new(Arc::clone(&self.vm_id_slot), bind);
         let stop = Arc::clone(stop);
         let logger = self.logger.clone();
+        let let_go = Arc::clone(&self.video_let_go);
         thread::Builder::new()
             .name("dsa-wm-video".into())
             .spawn(move || {
@@ -772,9 +783,11 @@ impl Compositor {
                     }
                 });
                 let probe_log = Arc::clone(&log);
-                let decoders = crate::video_decoder::MediaFoundationDecoders::lazy(Box::new(
-                    move |line: &str| probe_log(line),
-                ));
+                let decoders = crate::video_decoder::MediaFoundationDecoders::lazy(
+                    Box::new(move |line: &str| probe_log(line)),
+                    // The trim gives back what the decoders freed a few seconds later.
+                    Box::new(move || let_go.store(true, Ordering::SeqCst)),
+                );
                 let build = format!("dsa-wm {}", crate::VERSION);
                 dsa_host_core::video::serve(
                     Box::new(listener),
@@ -1264,6 +1277,7 @@ impl Compositor {
         let stop = Arc::clone(stop);
         let logger = self.logger.clone();
         let failed = self.logger.clone();
+        let news = Arc::clone(&self.dsa_news);
         thread::Builder::new()
             .name("dsa-wm-notifications".into())
             .spawn(move || {
@@ -1274,6 +1288,7 @@ impl Compositor {
                     connector,
                     &mut toasts,
                     notifications::default_icon_dir(),
+                    news,
                     stop,
                     logger,
                 );
@@ -1285,6 +1300,36 @@ impl Compositor {
                 )
             })
             .ok()
+    }
+
+    /// What the manager does when the guest's compositor did not recover from a GPU reset:
+    /// tells the user, as DSA's own news, and restarts Android through the service on a
+    /// thread of its own, opening the apps that had windows again.
+    fn recovery(&self) -> hosts::Recovery {
+        let connector = Arc::new(Mutex::new((self.local_api_connector)()));
+        let news = Arc::clone(&self.dsa_news);
+        let logger = self.logger.clone();
+        Box::new(move |stall: &Stall, packages: Vec<String>| {
+            news.lock().unwrap_or_else(|e| e.into_inner()).push_back(
+                stall
+                    .notice()
+                    .notification(notifications::user_reads_korean()),
+            );
+            if !stall.restart {
+                return;
+            }
+            let said = logger.clone();
+            let log: Arc<dyn Fn(&str) + Send + Sync> =
+                Arc::new(move |line: &str| note(said.as_deref(), line));
+            if let Err(why) = restart_in_background(
+                Box::new(SharedConnector(Arc::clone(&connector))),
+                "dsa-wm restart after a GPU reset".into(),
+                packages,
+                Arc::clone(&log),
+            ) {
+                log(&format!("could not start restarting Android: {why}"));
+            }
+        })
     }
 
     /// Starts the task windows: the manager, the listener for the app window hosts, the watch
@@ -1397,6 +1442,7 @@ impl Compositor {
                 Box::new(move || presenter.device_generation()) as Box<dyn Fn() -> u64 + Send>
             }),
             media_pressed: Some(self.media_windows.pressed_tx.clone()),
+            recover: Some(self.recovery()),
         };
         // The media sessions the tray follows reach the windows through the manager.
         *self
@@ -1452,6 +1498,7 @@ impl Compositor {
             installed_tx = Some(tx);
         }
         let trim_idle = Arc::clone(&idle);
+        let trim_let_go = Arc::clone(&self.video_let_go);
         let trim_stop = Arc::clone(&manager_stop);
         let trim_logger = self.logger.clone();
         let trimmer = thread::Builder::new()
@@ -1463,6 +1510,7 @@ impl Compositor {
                     trim_gpu,
                     trim_renderer,
                     quiet_for,
+                    trim_let_go,
                     trim_stop,
                     trim_logger,
                 )

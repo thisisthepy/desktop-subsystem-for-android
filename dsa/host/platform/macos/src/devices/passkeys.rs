@@ -223,7 +223,7 @@ unsafe fn responds(object: &AnyObject, selector: Sel) -> bool {
 
 /// An `NSArray` of `objects`.
 unsafe fn ns_array(objects: &[Retained<AnyObject>]) -> Result<Retained<AnyObject>, String> {
-    let pointers: Vec<*const AnyObject> = objects.iter().map(|o| Retained::as_ptr(o)).collect();
+    let pointers: Vec<*const AnyObject> = objects.iter().map(Retained::as_ptr).collect();
     let array_class = class(c"NSArray")?;
     let array: Option<Retained<AnyObject>> = msg_send![
         array_class,

@@ -3,7 +3,6 @@
 
 #include "component.h"
 
-#include <poll.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
@@ -11,7 +10,6 @@
 #include <atomic>
 #include <chrono>
 #include <cstring>
-#include <thread>
 
 #include <android/hardware_buffer_aidl.h>
 
@@ -66,8 +64,24 @@ typedef C2GlobalParam<C2Info, C2Hal_Rect, 1> C2Hal_RectInfo;
 constexpr int32_t kAllocatorIgba = 0x14;
 // How long a picture waits for a buffer of the app's surface before it is dropped.
 constexpr auto kAllocateWait = std::chrono::seconds(2);
-// How long one wait on the allocator's waitable lasts before a stop or flush is looked for.
+// How long one wait on the allocator's waitable lasts before it asks the allocator again.
 constexpr auto kAllocatePoll = std::chrono::milliseconds(50);
+// How long a buffer's release fence may take: past it the surface's consumer is still reading
+// the buffer, and a picture written into it would show while it is being written.
+constexpr auto kFenceWait = std::chrono::seconds(1);
+// How long a flush waits for the host's answer.
+constexpr auto kFlushWait = std::chrono::seconds(2);
+// The host's pictures that may wait for the component's own thread: enough that the host
+// decodes on while one picture waits for a buffer of the app's surface, and few, since each
+// is a decoded frame in memory (345 KiB at 640x360; at 4096x2304, the byte bound lets two).
+constexpr size_t kWaitingPictures = 4;
+constexpr size_t kWaitingBytes = 32 * 1024 * 1024;
+
+using Clock = std::chrono::steady_clock;
+
+std::chrono::microseconds since(Clock::time_point from, Clock::time_point to) {
+    return std::chrono::duration_cast<std::chrono::microseconds>(to - from);
+}
 
 ndk::ScopedAStatus status(c2_status_t error) { return ndk::ScopedAStatus::fromServiceSpecificError(error); }
 
@@ -156,12 +170,22 @@ Work workFor(const c2aidl::WorkOrdinal& ordinal, int32_t inputFlags) {
     return work;
 }
 
-bool waitFd(int fd, std::chrono::milliseconds timeout) {
-    if (fd < 0) {
-        return true;
+const char* describe(WriteResult result) {
+    switch (result) {
+        case WriteResult::Written:
+            return "written";
+        case WriteResult::WrongBuffer:
+            return "the buffer is smaller than the picture";
+        case WriteResult::NotLocked:
+            return "the buffer could not be locked";
+        case WriteResult::BadPlanes:
+            return "the buffer's planes do not fit its size";
+        case WriteResult::NotCopied:
+            return "the picture is shorter than its size";
+        case WriteResult::NotUnlocked:
+            return "the buffer could not be unlocked";
     }
-    pollfd p{fd, POLLIN, 0};
-    return poll(&p, 1, static_cast<int>(timeout.count())) > 0;
+    return "unknown";
 }
 
 }  // namespace
@@ -194,9 +218,52 @@ Component::Component(const DecoderInfo& info, const std::shared_ptr<C2ComponentI
       mIntf(intf),
       mParams(params),
       mListener(listener),
-      mInterface(ndk::SharedRefBase::make<ComponentInterface>(intf)) {}
+      mInterface(ndk::SharedRefBase::make<ComponentInterface>(intf)),
+      mArrivals(std::make_shared<ArrivalQueue>(kWaitingPictures, kWaitingBytes)) {}
 
-Component::~Component() { closeHost(); }
+Component::~Component() {
+    {
+        std::lock_guard<std::mutex> lock(mLock);
+        mGate.stop();
+    }
+    mArrivals->close();
+    closeHost();
+    stopWorker();
+}
+
+void Component::startWorker() {
+    if (mWorker.joinable()) {
+        return;
+    }
+    mArrivals->open();
+    std::weak_ptr<Component> self = ref<Component>();
+    std::shared_ptr<ArrivalQueue> arrivals = mArrivals;
+    mWorker = std::thread([self, arrivals] {
+        Arrival arrival;
+        while (arrivals->pop(&arrival)) {
+            std::shared_ptr<Component> component = self.lock();
+            if (!component) {
+                return;
+            }
+            component->handle(arrival);
+        }
+    });
+}
+
+void Component::stopWorker() {
+    // Wakes the thread whether it waits for a message or, through a closed gate, for a buffer.
+    mArrivals->close();
+    if (!mWorker.joinable()) {
+        return;
+    }
+    if (mWorker.get_id() == std::this_thread::get_id()) {
+        // The component's last reference went on its own thread, which ends once it finds
+        // the queue closed.
+        mWorker.detach();
+    } else {
+        mWorker.join();
+    }
+}
 
 void Component::closeHost() {
     std::unique_ptr<HostDecoder> host;
@@ -241,11 +308,13 @@ ndk::ScopedAStatus Component::start() {
     }
     std::string error;
     std::weak_ptr<Component> self = ref<Component>();
+    // The thread that takes the host's pictures runs before the host can send one.
+    startWorker();
     mHost = HostDecoder::open(
         mInfo.codec, mParams->width(), mParams->height(),
-        [self](const HostMessage& message) {
+        [self](HostMessage message) {
             if (auto component = self.lock()) {
-                component->onHostMessage(message);
+                component->onHostMessage(std::move(message));
             }
         },
         &error);
@@ -308,23 +377,74 @@ ndk::ScopedAStatus Component::queue(const WorkBundle& bundle) {
     return ndk::ScopedAStatus::ok();
 }
 
-void Component::onHostMessage(const HostMessage& message) {
+void Component::onHostMessage(HostMessage message) {
+    const Clock::time_point now = Clock::now();
+    const uint64_t ticket = mGate.ticket();
     if (const auto* frame = std::get_if<Frame>(&message)) {
-        if (frame->endOfStream) {
-            endOfStream(*frame);
-        } else {
-            picture(*frame);
+        if (!frame->endOfStream) {
+            mStats.received(now);
+            if (!mGate.open(ticket)) {
+                // A flush is waiting for the host's answer, and this picture is of the stream
+                // before it: its work goes back with the flushed ones.
+                mStats.dropped(now, Drop::Flushed);
+                return;
+            }
         }
     } else if (std::holds_alternative<Flushed>(message)) {
+        // Taken at once: the flush waits for it, and the pictures before it are dropped by
+        // the component's own thread as it comes to them, their tickets being stale.
         std::lock_guard<std::mutex> lock(mLock);
         mFlushDone = true;
         mFlushed.notify_all();
-    } else if (const auto* error = std::get_if<DecodeError>(&message)) {
+        return;
+    } else if (!std::holds_alternative<DecodeError>(message)) {
+        return;
+    }
+    // Waits while the queue is full, which holds the host back; a stop ends the wait.
+    mArrivals->push(Arrival{std::move(message), ticket, now});
+}
+
+void Component::handle(Arrival& arrival) {
+    if (auto* frame = std::get_if<Frame>(&arrival.message)) {
+        if (frame->endOfStream) {
+            endOfStream(*frame);
+        } else {
+            picture(*frame, arrival.ticket, arrival.arrived);
+        }
+    } else if (const auto* error = std::get_if<DecodeError>(&arrival.message)) {
         decodeError(error->error);
     }
 }
 
-AHardwareBuffer* Component::allocate(uint32_t width, uint32_t height) {
+void Component::logStats() {
+    std::string line;
+    if (mStats.report(Clock::now(), mArrivals->size(), &line)) {
+        CODEC_LOGI("%s %ux%u %s", mInfo.name, mLastWidth, mLastHeight, line.c_str());
+    }
+}
+
+void Component::discard(AHardwareBuffer* buffer, const std::shared_ptr<IGraphicBufferAllocator>& from) {
+    if (buffer == nullptr) {
+        return;
+    }
+    if (from) {
+        // The surface's allocator counts the buffer as the component's until it hears back, as
+        // the platform's own pool tells it when a block it never queued goes away. Without
+        // this, every buffer dropped here would be one fewer the surface ever hands out.
+        uint64_t id = 0;
+        if (AHardwareBuffer_getId(buffer, &id) == 0) {
+            bool done = false;
+            const ndk::ScopedAStatus result = from->deallocate(static_cast<int64_t>(id), &done);
+            if (!result.isOk() || !done) {
+                CODEC_LOGW("%s: the surface did not take back a buffer that was not shown", mInfo.name);
+            }
+        }
+    }
+    AHardwareBuffer_release(buffer);
+}
+
+AHardwareBuffer* Component::allocate(uint32_t width, uint32_t height, uint64_t ticket,
+                                     std::shared_ptr<IGraphicBufferAllocator>* from) {
     std::shared_ptr<IGraphicBufferAllocator> igba;
     int waitable = -1;
     {
@@ -335,9 +455,9 @@ AHardwareBuffer* Component::allocate(uint32_t width, uint32_t height) {
             waitable = pool->second.waitableFd.get();
         }
     }
+    from->reset();
     const uint64_t usage = mParams->outputUsage() | AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN |
                            AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE;
-    const uint64_t epoch = mAllocateEpoch.load();
     uint32_t failures = 0;
     if (igba) {
         IGraphicBufferAllocator::Description desc;
@@ -350,9 +470,30 @@ AHardwareBuffer* Component::allocate(uint32_t width, uint32_t height) {
             IGraphicBufferAllocator::Allocation allocation;
             const ndk::ScopedAStatus result = igba->allocate(desc, &allocation);
             if (result.isOk()) {
+                AHardwareBuffer* buffer = allocation.buffer.release();
+                if (buffer == nullptr) {
+                    return nullptr;
+                }
+                // The buffer may still be on screen, or being copied up to the host: it is
+                // written only once its consumer has let it go, as the platform's own pool
+                // does, and given back when that takes too long.
+                const int fence = allocation.fence.get();
+                if (fence >= 0) {
+                    const WaitResult released =
+                        waitReadable(fence, std::chrono::steady_clock::now() + kFenceWait, mGate, ticket);
+                    if (released != WaitResult::Ready) {
+                        if (released != WaitResult::Closed && mAllocateFailures.shouldLog(&failures)) {
+                            CODEC_LOGW("%s: a buffer of the surface was still in use; a picture is dropped (%u "
+                                       "in a row)",
+                                       mInfo.name, failures);
+                        }
+                        discard(buffer, igba);
+                        return nullptr;
+                    }
+                }
                 mAllocateFailures.reset();
-                waitFd(allocation.fence.get(), std::chrono::milliseconds(1000));
-                return allocation.buffer.release();
+                *from = igba;
+                return buffer;
             }
             const int32_t error = result.getServiceSpecificError();
             switch (classifyAllocateError(error)) {
@@ -370,17 +511,19 @@ AHardwareBuffer* Component::allocate(uint32_t width, uint32_t height) {
             // Every buffer of the surface is shown or queued. The waitable becomes readable
             // once one comes back; a stop or a flush ends the wait sooner.
             const auto now = std::chrono::steady_clock::now();
-            if (now >= deadline || mAllocateEpoch.load() != epoch) {
+            if (now >= deadline || !mGate.open(ticket)) {
                 break;
             }
-            const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now);
-            if (waitable >= 0) {
-                waitFd(waitable, std::min(left, kAllocatePoll));
-            } else {
-                std::this_thread::sleep_for(std::min(left, kAllocatePoll));
+            const WaitResult waited = waitReadable(waitable, std::min(deadline, now + kAllocatePoll), mGate, ticket);
+            if (waited == WaitResult::Closed) {
+                break;
+            }
+            if (waited == WaitResult::Failed) {
+                // A waitable in error stays readable: ask again only once a poll has passed.
+                waitReadable(-1, std::min(deadline, now + kAllocatePoll), mGate, ticket);
             }
         }
-        if (mAllocateEpoch.load() == epoch && mAllocateFailures.shouldLog(&failures)) {
+        if (mGate.open(ticket) && mAllocateFailures.shouldLog(&failures)) {
             CODEC_LOGW("%s: no buffer of the surface came back in time; a picture is dropped (%u in a row)",
                        mInfo.name, failures);
         }
@@ -404,49 +547,110 @@ AHardwareBuffer* Component::allocate(uint32_t width, uint32_t height) {
     return buffer;
 }
 
-void Component::picture(const Frame& frame) {
+void Component::picture(const Frame& frame, uint64_t ticket, Clock::time_point arrived) {
+    const Clock::time_point begun = Clock::now();
+    mLastWidth = frame.width;
+    mLastHeight = frame.height;
+    if (!mGate.open(ticket)) {
+        // A flush, a stop or a reset came after it: its work goes back with the flushed ones.
+        // Waiting for a buffer here would hold the flush up by as long.
+        mStats.dropped(begun, Drop::Flushed);
+        logStats();
+        return;
+    }
+    PictureTimes times;
+    times.queued = since(arrived, begun);
+    const PictureSize bufferSize = bufferSizeFor(frame.width, frame.height);
+    std::shared_ptr<IGraphicBufferAllocator> from;
+    AHardwareBuffer* buffer = allocate(bufferSize.width, bufferSize.height, ticket, &from);
+    const Clock::time_point allocated = Clock::now();
+    times.buffer = since(begun, allocated);
+    const bool gotBuffer = buffer != nullptr;
+    if (buffer != nullptr) {
+        // The buffer's own size, which an allocator may make larger than asked: every sample
+        // of it is written, so none is left as zeros (green) or as an older picture.
+        AHardwareBuffer_Desc desc{};
+        AHardwareBuffer_describe(buffer, &desc);
+        const WriteResult written = writePicture(
+            reinterpret_cast<const uint8_t*>(frame.nv12.data()), frame.nv12.size(), frame.width, frame.height,
+            frame.stride, BufferSize{desc.width, desc.height},
+            [buffer](YuvPlanes* yuv, uint32_t* planeCount) {
+                AHardwareBuffer_Planes planes{};
+                if (AHardwareBuffer_lockPlanes(buffer, AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN, -1, nullptr,
+                                               &planes) != 0) {
+                    return false;
+                }
+                *planeCount = planes.planeCount;
+                if (planes.planeCount >= 3) {
+                    yuv->y = Plane{static_cast<uint8_t*>(planes.planes[0].data), planes.planes[0].pixelStride,
+                                   planes.planes[0].rowStride};
+                    yuv->u = Plane{static_cast<uint8_t*>(planes.planes[1].data), planes.planes[1].pixelStride,
+                                   planes.planes[1].rowStride};
+                    yuv->v = Plane{static_cast<uint8_t*>(planes.planes[2].data), planes.planes[2].pixelStride,
+                                   planes.planes[2].rowStride};
+                }
+                return true;
+            },
+            [buffer] { return AHardwareBuffer_unlock(buffer, nullptr) == 0; });
+        if (written != WriteResult::Written) {
+            uint32_t failures = 0;
+            if (mWriteFailures.shouldLog(&failures)) {
+                CODEC_LOGE("%s: a %ux%u picture was not written into its %ux%u buffer (%s); it is dropped (%u in "
+                           "a row)",
+                           mInfo.name, frame.width, frame.height, desc.width, desc.height, describe(written),
+                           failures);
+            }
+            discard(buffer, from);
+            buffer = nullptr;
+        } else {
+            mWriteFailures.reset();
+        }
+    }
+    const Clock::time_point copied = Clock::now();
+    times.write = since(allocated, copied);
     std::optional<Work> work;
     {
         std::lock_guard<std::mutex> lock(mLock);
-        auto pending = mPending.find(frame.frameIndex);
-        if (pending != mPending.end()) {
-            work = std::move(pending->second);
-            mPending.erase(pending);
+        if (!mGate.open(ticket)) {
+            // Flushed or stopped while it waited: a flush hands its work back, a stop drops it.
+            work.reset();
+        } else {
+            auto pending = mPending.find(frame.frameIndex);
+            if (pending != mPending.end()) {
+                work = std::move(pending->second);
+                mPending.erase(pending);
+            } else {
+                // A picture of a work already finished (its decode error came first): it goes
+                // out as a work of its own.
+                c2aidl::WorkOrdinal ordinal;
+                ordinal.frameIndex = static_cast<int64_t>(frame.frameIndex);
+                ordinal.timestampUs = frame.timestampUs;
+                work = workFor(ordinal, 0);
+            }
         }
     }
     if (!work) {
-        // A picture of a work already finished, or flushed: it goes out as a work of its own.
-        c2aidl::WorkOrdinal ordinal;
-        ordinal.frameIndex = static_cast<int64_t>(frame.frameIndex);
-        ordinal.timestampUs = frame.timestampUs;
-        work = workFor(ordinal, 0);
+        discard(buffer, from);
+        mStats.dropped(copied, Drop::Flushed);
+        logStats();
+        return;
     }
-    const PictureSize bufferSize = bufferSizeFor(frame.width, frame.height);
-    AHardwareBuffer* buffer = allocate(bufferSize.width, bufferSize.height);
-    if (buffer != nullptr) {
-        AHardwareBuffer_Planes planes{};
-        if (AHardwareBuffer_lockPlanes(buffer, AHARDWAREBUFFER_USAGE_CPU_WRITE_OFTEN, -1, nullptr, &planes) == 0) {
-            YuvPlanes yuv;
-            yuv.y = Plane{static_cast<uint8_t*>(planes.planes[0].data), planes.planes[0].pixelStride,
-                          planes.planes[0].rowStride};
-            yuv.u = Plane{static_cast<uint8_t*>(planes.planes[1].data), planes.planes[1].pixelStride,
-                          planes.planes[1].rowStride};
-            yuv.v = Plane{static_cast<uint8_t*>(planes.planes[2].data), planes.planes[2].pixelStride,
-                          planes.planes[2].rowStride};
-            if (planes.planeCount < 3 ||
-                !copyNv12(reinterpret_cast<const uint8_t*>(frame.nv12.data()), frame.nv12.size(), frame.width,
-                          frame.height, frame.stride, yuv, bufferSize.width, bufferSize.height)) {
-                CODEC_LOGE("%s: a %ux%u picture did not fit its buffer", mInfo.name, frame.width, frame.height);
-            }
-            AHardwareBuffer_unlock(buffer, nullptr);
-        } else {
-            CODEC_LOGE("%s: cannot write a picture buffer", mInfo.name);
-        }
-    }
+    // Without a buffer that holds the whole picture the work finishes with no output, rather
+    // than with a buffer that would show green or an older picture.
     finish(std::move(*work), buffer, frame.width, frame.height, false);
     if (buffer != nullptr) {
         AHardwareBuffer_release(buffer);
     }
+    const Clock::time_point handed = Clock::now();
+    if (buffer != nullptr) {
+        times.handOff = since(copied, handed);
+        mStats.shown(handed, times);
+    } else if (!mGate.open(ticket)) {
+        mStats.dropped(handed, Drop::Flushed);
+    } else {
+        mStats.dropped(handed, gotBuffer ? Drop::NotWritten : Drop::NoBuffer);
+    }
+    logStats();
 }
 
 void Component::endOfStream(const Frame& frame) {
@@ -547,17 +751,19 @@ void Component::finish(Work work, AHardwareBuffer* output, uint32_t width, uint3
 }
 
 ndk::ScopedAStatus Component::flush(WorkBundle* flushed) {
-    // A picture waiting for a buffer belongs to the stream before the flush.
-    mAllocateEpoch++;
     HostDecoder* host = nullptr;
     {
         std::unique_lock<std::mutex> lock(mLock);
+        // Every picture until the host's answer belongs to the stream before the flush: one
+        // waiting for a buffer gives up, and one still on its way is dropped as it comes, so
+        // the answer behind them is not held up by the app's surface.
+        mGate.beginFlush();
         host = mHost.get();
         mFlushDone = false;
     }
     if (host != nullptr && host->send(encodeFlush())) {
         std::unique_lock<std::mutex> lock(mLock);
-        if (!mFlushed.wait_for(lock, std::chrono::seconds(2), [this] { return mFlushDone; })) {
+        if (!mFlushed.wait_for(lock, kFlushWait, [this] { return mFlushDone; })) {
             CODEC_LOGW("%s: the host did not answer a flush", mInfo.name);
         }
     }
@@ -565,6 +771,7 @@ ndk::ScopedAStatus Component::flush(WorkBundle* flushed) {
     {
         std::lock_guard<std::mutex> lock(mLock);
         left.swap(mPending);
+        mGate.endFlush();
     }
     for (auto& [index, work] : left) {
         work.workletsProcessed = 0;
@@ -594,16 +801,30 @@ ndk::ScopedAStatus Component::getInterface(std::shared_ptr<c2aidl::IComponentInt
 }
 
 ndk::ScopedAStatus Component::stop() {
-    mAllocateEpoch++;
+    {
+        // Ends a picture's waits for its buffer, so closing the host (which waits for the
+        // reader) does not wait for the surface.
+        std::lock_guard<std::mutex> lock(mLock);
+        mGate.stop();
+    }
+    // Ends a reader's wait for room in the queue, then the reader, then the thread that
+    // writes the pictures.
+    mArrivals->close();
     closeHost();
+    stopWorker();
     std::lock_guard<std::mutex> lock(mLock);
     mPending.clear();
     return ndk::ScopedAStatus::ok();
 }
 
 ndk::ScopedAStatus Component::reset() {
-    mAllocateEpoch++;
+    {
+        std::lock_guard<std::mutex> lock(mLock);
+        mGate.stop();
+    }
+    mArrivals->close();
     closeHost();
+    stopWorker();
     std::lock_guard<std::mutex> lock(mLock);
     mPending.clear();
     mPools.clear();

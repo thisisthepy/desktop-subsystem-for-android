@@ -2,6 +2,7 @@ package io.github.thisisthepy.dsa.agent
 
 import io.github.thisisthepy.dsa.agent.channel.ChannelEndpoint
 import io.github.thisisthepy.dsa.agent.channel.ChannelLocator
+import io.github.thisisthepy.dsa.agent.requests.InsetGiven
 import io.github.thisisthepy.dsa.agent.requests.ResizeOutcome
 import io.github.thisisthepy.dsa.agent.input.InjectedKey
 import io.github.thisisthepy.dsa.agent.input.InjectedMotion
@@ -51,6 +52,11 @@ class FakeScheduler : Scheduler {
 
     override fun postDelayed(delayMillis: Long, work: () -> Unit) {
         queue += Item(now + delayMillis, order++, work)
+    }
+
+    /** Ahead of everything waiting, in the order such work was posted. */
+    override fun postFirst(work: () -> Unit) {
+        queue += Item(Long.MIN_VALUE, order++, work)
     }
 
     /** Runs everything that is due, including what that work posts. */
@@ -306,6 +312,22 @@ class FakeActions : TaskActions {
         captionInsets += taskId to frame
         captionBoundingRects += boundingRects
         return insetsTaken
+    }
+
+    /** The framework's status bar height at each density; 0 for any other. */
+    var statusBarHeights = mapOf<Int, Int>()
+
+    override fun statusBarHeight(densityDpi: Int): Int = statusBarHeights[densityDpi] ?: 0
+
+    /** Each navigation bar inset given: the task and its frame, null for a removal. */
+    val navigationBarInsets = mutableListOf<Pair<Int, TaskBounds?>>()
+
+    /** What the framework does with a navigation bar inset it is given. */
+    var navigationBarGiven = InsetGiven.FOLLOWS_TASK
+
+    override fun setNavigationBarInset(taskId: Int, frame: TaskBounds?): InsetGiven {
+        navigationBarInsets += taskId to frame
+        return navigationBarGiven
     }
 }
 

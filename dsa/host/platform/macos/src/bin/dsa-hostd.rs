@@ -167,7 +167,7 @@ mod macos {
                 false,
             ),
             memory_max_mb: 4096,
-            memory_start_mb: 3072,
+            memory_start_mb: 2048,
             processors: config.processors,
             disks,
             console_log: Some(user.logs().join("check-console.log")),

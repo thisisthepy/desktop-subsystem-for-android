@@ -50,7 +50,7 @@ widgets stop too. That is why DSA never freezes Android unless you ask.
 
 ## Memory limit
 
-The limit is **Automatic** by default, which sets no fixed limit. Android starts at 3 GB and grows while it runs, up to your PC's memory less what Windows keeps (10% of the memory or 2 GB, whichever is larger). Android holds only what it uses.
+The limit is **Automatic** by default, which sets no fixed limit. Android starts at 2 GB and grows while it runs, up to your PC's memory less what Windows keeps (10% of the memory or 2 GB, whichever is larger). Android holds only what it uses.
 To set a limit, use **Memory limit** on the **Memory** page, or:
 
 ```

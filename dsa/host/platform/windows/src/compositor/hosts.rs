@@ -29,7 +29,9 @@ use std::time::{Duration, Instant};
 use dsa_host_core::background::MediaCommand;
 use dsa_host_core::compositor::early_frames::EarlyFrames;
 use dsa_host_core::compositor::frame_buffers::texture_fits;
+use dsa_host_core::compositor::frame_stall::{FrameStall, Stall};
 use dsa_host_core::compositor::gpu_reset::{GpuResetWindows, Report};
+use dsa_host_core::compositor::program_exit::{describe_exit, ended_by_crash, CrashRestarts};
 use dsa_host_core::compositor::shown_windows::ShownWindows;
 use dsa_host_core::compositor::task_windows::{TaskWindows, WindowChange};
 use dsa_host_core::compositor::window_hosts::{
@@ -42,7 +44,10 @@ use dsa_protocol::window_host::types::{envelope::Body, Frame, FrameTexture};
 use dsa_protocol::window_host::{decode, encode_body};
 use dsa_transport::{Connection, FrameSender, Listener, TransportError};
 use windows_sys::Win32::Foundation::{CloseHandle, DuplicateHandle, DUPLICATE_SAME_ACCESS, HANDLE};
-use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcess, PROCESS_DUP_HANDLE};
+use windows_sys::Win32::System::Threading::{
+    GetCurrentProcess, GetExitCodeProcess, OpenProcess, WaitForSingleObject, PROCESS_DUP_HANDLE,
+    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+};
 
 use super::frames::{FrameRouter, FrameTarget};
 use super::log::{
@@ -112,8 +117,9 @@ pub enum ManagerEvent {
     },
     /// A window host reported what the user did to a window.
     Report { host: HostId, report: FromHost },
-    /// A window host's connection ended.
-    Gone { host: HostId },
+    /// A window host's connection ended. `exit` is its program's exit code when the program
+    /// ended with it.
+    Gone { host: HostId, exit: Option<u32> },
     /// The user's window settings for each app, as the service has them now.
     AppWindows(Vec<dsa_host_core::app_windows::AppWindowSettings>),
     /// The app's media session changed, or ended (`None`): the media buttons in the taskbar
@@ -627,6 +633,49 @@ pub fn accept_hosts(
     }
 }
 
+/// How long the window manager waits, once a window program's connection broke, for the
+/// program to end, so its exit code says whether it crashed.
+const EXIT_WAIT: Duration = Duration::from_secs(3);
+
+/// `STILL_ACTIVE`: what `GetExitCodeProcess` answers while the process runs.
+const STILL_ACTIVE: u32 = 259;
+
+/// An app window program's process, held from the moment it attached, so its exit code can be
+/// read once its connection ends, though its process ID may name another process by then.
+struct ProgramProcess(HANDLE);
+
+impl ProgramProcess {
+    fn open(process_id: u32) -> Option<ProgramProcess> {
+        // SAFETY: a plain call; the handle it returns is closed once, in drop.
+        let handle = unsafe {
+            OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
+                0,
+                process_id,
+            )
+        };
+        (!handle.is_null()).then_some(ProgramProcess(handle))
+    }
+
+    /// The program's exit code, waiting `wait` at most for it to end; `None` while it runs.
+    fn exit_code(&self, wait: Duration) -> Option<u32> {
+        let mut code = STILL_ACTIVE;
+        // SAFETY: plain calls on the handle this holds; `code` is a local.
+        let read = unsafe {
+            WaitForSingleObject(self.0, wait.as_millis().min(u32::MAX as u128) as u32);
+            GetExitCodeProcess(self.0, &mut code)
+        };
+        (read != 0 && code != STILL_ACTIVE).then_some(code)
+    }
+}
+
+impl Drop for ProgramProcess {
+    fn drop(&mut self) {
+        // SAFETY: the handle OpenProcess gave, closed once.
+        unsafe { CloseHandle(self.0) };
+    }
+}
+
 fn serve_host(
     mut connection: Box<dyn Connection>,
     id: HostId,
@@ -658,6 +707,9 @@ fn serve_host(
     };
     let link = Arc::new(HostLink::new(id, sender, attach.process_id));
     let package = attach.package_name.clone();
+    // Held from now, so the exit code read when the connection ends is this program's.
+    let process = ProgramProcess::open(attach.process_id);
+    let mut exit = None;
     let attached = ManagerEvent::Attached {
         link: Arc::clone(&link),
         package: attach.package_name,
@@ -672,12 +724,19 @@ fn serve_host(
             Ok(frame) => frame,
             Err(TransportError::Timeout) => continue,
             Err(error) => {
-                // Its windows close with it, and Android ends their tasks, so the log says
-                // why.
+                // Its windows close with it and Android ends their tasks, or, when it crashed,
+                // it starts again with its windows; the log says which it was.
+                exit = process
+                    .as_ref()
+                    .and_then(|process| process.exit_code(EXIT_WAIT));
+                let how = exit.map_or_else(
+                    || "it still runs, or its exit code cannot be read".to_string(),
+                    describe_exit,
+                );
                 note(
                     logger.as_deref(),
                     &format!(
-                        "{package}'s window program (process {}) is gone: {error}",
+                        "{package}'s window program (process {}) is gone: {error} ({how})",
                         attach.process_id
                     ),
                 );
@@ -707,8 +766,12 @@ fn serve_host(
     }
     link.close();
     connection.close();
-    let _ = events.send(ManagerEvent::Gone { host: id });
+    let _ = events.send(ManagerEvent::Gone { host: id, exit });
 }
+
+/// What is done when the guest's compositor did not recover from a GPU reset, with the apps
+/// that had windows.
+pub type Recovery = Box<dyn Fn(&Stall, Vec<String>) + Send>;
 
 /// What the manager thread is given.
 pub struct ManagerSetup {
@@ -737,12 +800,20 @@ pub struct ManagerSetup {
     /// controls' connection to the service, which sends it to the app's media session, as a
     /// media key's press goes. None when the media sessions are not followed.
     pub media_pressed: Option<Sender<(String, MediaCommand)>>,
+    /// Told when the guest's compositor did not recover from a GPU reset, with the apps that
+    /// had windows: it tells the user, and restarts Android when the stall says to. None when
+    /// nothing is done about it.
+    pub recover: Option<Recovery>,
 }
 
 struct Manager {
     windows: TaskWindows,
     /// The windows kept through a GPU reset, and which task each shows.
     resets: GpuResetWindows,
+    /// How often each app's window program started again after a crash lately.
+    crashes: CrashRestarts,
+    /// Whether the guest draws again after a GPU reset.
+    stall: FrameStall,
     /// The generations of the window manager's Direct3D device and of the renderer's Vulkan
     /// device last seen: a change is a GPU reset.
     gpu_generation: u64,
@@ -768,6 +839,8 @@ pub fn manage(setup: ManagerSetup) {
     let mut manager = Manager {
         windows: TaskWindows::new(),
         resets: GpuResetWindows::new(),
+        crashes: CrashRestarts::new(),
+        stall: FrameStall::new(),
         gpu_generation,
         renderer_generation,
         hosts: WindowHosts::new(),
@@ -828,6 +901,9 @@ impl Manager {
                     self.carry_out(actions);
                 }
                 let changes = self.windows.apply(&event);
+                for note in self.windows.take_notes() {
+                    self.log(&note);
+                }
                 self.guest_change(changes, now);
                 // A task that took a size its window gave it live outside a drag (a
                 // maximise, a snap) is reconfigured for it now, at a size it has.
@@ -880,9 +956,47 @@ impl Manager {
                 let actions = self.hosts.media(&package, media);
                 self.carry_out(actions);
             }
-            ManagerEvent::Gone { host } => {
+            ManagerEvent::Gone { host, exit } => {
                 self.links.remove(&host);
+                let package = self.hosts.package_of(host).map(str::to_string);
                 let tasks = self.hosts.detached(host);
+                let crashed = exit.is_some_and(ended_by_crash) && !tasks.is_empty();
+                // A program that crashed did not mean its windows to close: it starts again
+                // and opens them for the same tasks, which go on in Android. A GPU reset is
+                // one way a window program can crash, and the app must not end with it.
+                let restart = crashed
+                    && package
+                        .as_deref()
+                        .is_some_and(|package| self.crashes.may_restart(package, now));
+                if restart {
+                    self.log(&format!(
+                        "{}'s window program crashed with task windows {tasks:?} open; it \
+                         starts again with them, and their tasks go on",
+                        package.as_deref().unwrap_or_default()
+                    ));
+                    self.program_ended(host);
+                    for window in tasks {
+                        self.drop_remote(window);
+                        // A window kept through a GPU reset has no task to show yet; the app's
+                        // next task opens a window of its own.
+                        let Some(task_id) = self.resets.window_gone(window) else {
+                            continue;
+                        };
+                        // The new window becomes the active window when the user picks it.
+                        if self.focused.remove(&task_id) {
+                            self.focus_changed();
+                        }
+                        let changes = self.windows.reopen(task_id);
+                        self.change(changes, now);
+                    }
+                    return;
+                }
+                if crashed {
+                    self.log(
+                        "the window program crashed too often of late to start it again; its \
+                         windows close",
+                    );
+                }
                 if !tasks.is_empty() {
                     self.log(&format!(
                         "a window program ended with task windows {tasks:?} open; they close, \
@@ -904,14 +1018,18 @@ impl Manager {
                     // program does: Android ends their tasks.
                     self.user_closed(task_id, now);
                 }
-                // A program that ran under a name or icon the guest has since changed (or
-                // never gave) is made again now that it no longer runs.
-                if let Some(package) = self.host_packages.remove(&host) {
-                    if !self.host_packages.values().any(|p| *p == package) {
-                        let app = self.hosts.app_info(&package).cloned();
-                        self.setup.launcher.ended(&package, app.as_ref());
-                    }
-                }
+                self.program_ended(host);
+            }
+        }
+    }
+
+    /// The window program on `host` no longer runs. One that ran under a name or icon the
+    /// guest has since changed (or never gave) is made again now.
+    fn program_ended(&mut self, host: HostId) {
+        if let Some(package) = self.host_packages.remove(&host) {
+            if !self.host_packages.values().any(|p| *p == package) {
+                let app = self.hosts.app_info(&package).cloned();
+                self.setup.launcher.ended(&package, app.as_ref());
             }
         }
     }
@@ -1121,6 +1239,9 @@ impl Manager {
             }
         }
         if let Some(seen) = &self.setup.renderer_generation {
+            // It changes the moment the renderer finds its device lost, in its own process or
+            // in this one, so the reset is followed long before this process's own Direct3D
+            // device fails, and before Android ends a task that lost its rendering.
             let generation = seen();
             if generation != self.renderer_generation {
                 self.renderer_generation = generation;
@@ -1129,11 +1250,34 @@ impl Manager {
         }
         if reset {
             self.resets.gpu_reset(now);
+            self.stall.gpu_reset(now, self.setup.router.frames_shown());
+        }
+    }
+
+    /// After a GPU reset, looks whether the guest draws again: when no task window has had a
+    /// frame for long, its compositor did not recover, and the user is told and Android
+    /// restarted, with the apps that had windows opened again.
+    fn follow_frame_stall(&mut self, now: Instant) {
+        let shown = self.shown.shown_among(&self.windows.windows());
+        let frames = self.setup.router.frames_shown();
+        let Some(stall) = self.stall.tick(now, &shown, frames) else {
+            return;
+        };
+        self.log(&stall.reason());
+        let mut packages = self.windows.window_packages();
+        for package in self.resets.kept_packages() {
+            if !packages.contains(&package) {
+                packages.push(package);
+            }
+        }
+        if let Some(recover) = &self.setup.recover {
+            recover(&stall, packages);
         }
     }
 
     fn tick(&mut self) {
         self.follow_gpu_resets(Instant::now());
+        self.follow_frame_stall(Instant::now());
         // A window kept through a GPU reset whose app did not come back closes.
         let late = self.resets.tick(Instant::now());
         if !late.is_empty() {
@@ -1220,6 +1364,7 @@ impl Manager {
                         | ToHost::CaptionTone { .. }
                         | ToHost::CaptionMode { .. }
                         | ToHost::CaptionBack { .. }
+                        | ToHost::ShownTask { .. }
                         | ToHost::Mode { .. } => {}
                     }
                     link.send(to_wire(&message));
@@ -1262,6 +1407,9 @@ impl Manager {
     /// tells the guest when whether any window is shown changed, so it can sleep or wake.
     fn publish(&mut self) {
         let windows = self.windows.windows();
+        if let Some(request) = self.shown.update_tasks(&windows) {
+            self.request(vec![request]);
+        }
         if let Some(request) = self.shown.update(&windows) {
             if let TaskRequest::WindowsShown { shown } = request {
                 self.setup

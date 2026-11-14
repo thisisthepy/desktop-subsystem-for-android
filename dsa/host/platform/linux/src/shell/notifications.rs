@@ -77,6 +77,22 @@ pub struct Notify {
     pub resident: bool,
 }
 
+/// The `Notify` call for one of DSA's own notices that the compositor raises itself, such as
+/// the one that Android restarts because its graphics did not recover: under DSA's settings
+/// app, as the news about updates, with nothing to click.
+pub fn dsa_notice(notification: &Notification) -> Notify {
+    Notify {
+        app_name: notification.app_label.clone(),
+        replaces_id: 0,
+        summary: notification.title.clone(),
+        body: body_text(&notification.text),
+        actions: Vec::new(),
+        urgency: urgency(notification),
+        desktop_entry: SETTINGS_ENTRY.to_string(),
+        resident: false,
+    }
+}
+
 /// What the host's notifications and the service's numbers stand for.
 #[derive(Debug, Default)]
 pub struct Shown {
@@ -269,6 +285,18 @@ mod tests {
         shown.shown("0|com.example.chat|1|null|10100", 13);
         assert_eq!(shown.clear(), vec![13]);
         assert_eq!(shown.notify(&applied).replaces_id, 12);
+    }
+
+    #[test]
+    fn nfr5_the_notice_that_android_restarts_for_its_graphics_shows_under_dsa() {
+        use dsa_host_core::compositor::frame_stall::Notice;
+        let notice = Notice::Restarting.notification(true);
+        let notify = dsa_notice(&notice);
+        assert_eq!(notify.app_name, "DSA");
+        assert_eq!(notify.desktop_entry, SETTINGS_ENTRY);
+        assert_eq!(notify.summary, notice.title);
+        assert!(notify.actions.is_empty(), "nothing to click");
+        assert_eq!(notify.urgency, 1);
     }
 
     #[test]

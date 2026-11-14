@@ -699,6 +699,9 @@ impl NetworkStatusFacts {
                 .map(|g| g.to_string())
                 .unwrap_or_default(),
             problem: self.problem.clone(),
+            // The service fills it from the session, which knows whether the guest reaches
+            // the DNS port.
+            dns_resolver: String::new(),
         }
     }
 }

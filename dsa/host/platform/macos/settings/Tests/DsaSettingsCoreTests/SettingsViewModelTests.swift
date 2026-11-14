@@ -197,6 +197,25 @@ final class SettingsViewModelTests: XCTestCase {
         XCTAssertEqual(settings.networkModeText, "Network_ModeAdvanced")
     }
 
+    func test_fr28_network_page_says_this_macs_resolver_answers_androids_names_and_when_it_does_not() async {
+        let (cli, service) = make()
+        cli.answer("settings --json", #"{"advanced_networking":false,"network":{"mode":"nat","addresses":["10.0.2.15"],"dns_servers":["10.0.2.3"],"gateway":"10.0.2.2","dns_resolver":"host"}}"#)
+        let settings = SettingsViewModel(service: service, text: DnsText())
+        await settings.load()
+        XCTAssertEqual(settings.network?.dnsResolver, .host)
+        XCTAssertEqual(settings.networkDns, "Network_DnsHost")
+        // The guest no longer reaches this Mac's resolver: Android asks the network's servers.
+        cli.answer("network --json", #"{"mode":"nat","addresses":["10.0.2.15"],"dns_servers":["10.0.2.3"],"gateway":"10.0.2.2","dns_resolver":"network"}"#)
+        await settings.refreshNetwork()
+        XCTAssertEqual(settings.network?.dnsResolver, .network)
+        XCTAssertEqual(settings.networkDns, "dns fallback: 10.0.2.3")
+        // A service that does not say who answers shows the servers.
+        cli.answer("network --json", #"{"mode":"nat","addresses":["10.0.2.15"],"dns_servers":["10.0.2.3"],"gateway":"10.0.2.2"}"#)
+        await settings.refreshNetwork()
+        XCTAssertEqual(settings.network?.dnsResolver, .unknown)
+        XCTAssertEqual(settings.networkDns, "10.0.2.3")
+    }
+
     func test_fr17_arm_translation_status_names_the_package() async {
         let (cli, service) = make()
         cli.answer("settings --json", "{}")

@@ -3,10 +3,11 @@
 
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use dsa_host_core::video::{
-    serve_connection, Codec, CodecSupport, Packet, Picture, VideoDecoder, VideoDecoders, VideoEnd,
+    serve_connection, Codec, CodecSupport, DecoderReport, Packet, Picture, StreamStats,
+    VideoDecoder, VideoDecoders, VideoEnd, PICTURES_IN_FLIGHT, STATS_INTERVAL,
 };
 use dsa_protocol::control::envelope::Body;
 use dsa_protocol::control::{
@@ -361,4 +362,193 @@ fn pr4_each_packet_reaches_the_decoder_with_its_presentation_time() {
     assert_eq!(host.join().unwrap(), VideoEnd::Closed);
     let times: Vec<i64> = times.lock().unwrap().iter().map(|(_, t)| *t).collect();
     assert_eq!(times, [33_333, 99_999, 66_666]);
+}
+
+/// Decoders that record when each decoder is dropped and when the host says every one is
+/// closed.
+struct ReleasedDecoders {
+    events: Arc<Mutex<Vec<String>>>,
+}
+
+struct ReleasedDecoder {
+    events: Arc<Mutex<Vec<String>>>,
+}
+
+impl VideoDecoder for ReleasedDecoder {
+    fn decode(&mut self, _: Packet) -> Result<Vec<Picture>, String> {
+        Ok(Vec::new())
+    }
+    fn drain(&mut self) -> Result<Vec<Picture>, String> {
+        Ok(Vec::new())
+    }
+    fn flush(&mut self) {}
+}
+
+impl Drop for ReleasedDecoder {
+    fn drop(&mut self) {
+        self.events.lock().unwrap().push("dropped".into());
+    }
+}
+
+impl VideoDecoders for ReleasedDecoders {
+    fn capabilities(&self) -> Vec<CodecSupport> {
+        FakeDecoders {
+            log: Arc::default(),
+        }
+        .capabilities()
+    }
+    fn open(&self, _: Codec, _: u32, _: u32) -> Result<Box<dyn VideoDecoder>, String> {
+        self.events.lock().unwrap().push("opened".into());
+        Ok(Box::new(ReleasedDecoder {
+            events: Arc::clone(&self.events),
+        }))
+    }
+    fn all_closed(&self) {
+        self.events.lock().unwrap().push("all closed".into());
+    }
+}
+
+/// Waits until `events` holds `count` entries, or the wait runs out.
+fn wait_for(events: &Mutex<Vec<String>>, count: usize) -> Vec<String> {
+    let deadline = std::time::Instant::now() + WAIT;
+    loop {
+        let now = events.lock().unwrap().clone();
+        if now.len() >= count || std::time::Instant::now() > deadline {
+            return now;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn nfr2_the_platform_hears_once_the_last_decoder_closed_so_it_lets_its_device_go() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let (listener, connector) = memory::pair();
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let decoders: Arc<dyn VideoDecoders> = Arc::new(ReleasedDecoders {
+        events: Arc::clone(&events),
+    });
+    let stop = Arc::new(AtomicBool::new(false));
+    let host = {
+        let stop = Arc::clone(&stop);
+        thread::spawn(move || {
+            dsa_host_core::video::serve(
+                Box::new(listener),
+                decoders,
+                "dsa-host test".into(),
+                stop,
+                Arc::new(|_: &str| {}),
+            )
+        })
+    };
+    let mut guests = Vec::new();
+    for _ in 0..2 {
+        let mut guest = connector.clone().connect(WAIT).expect("connects");
+        send(
+            guest.as_mut(),
+            Body::Hello(local_hello(Role::GuestVideo, "dsa-codec2 test")),
+        );
+        open(guest.as_mut(), VideoCodec::H264, 1280, 720);
+        assert!(matches!(next(guest.as_mut()), Body::VideoDecoderOpened(o) if o.ok));
+        guests.push(guest);
+    }
+    assert_eq!(wait_for(&events, 2), ["opened", "opened"]);
+
+    // One video closes while the other still plays: the platform keeps what it shares.
+    guests[0].close();
+    assert_eq!(wait_for(&events, 3), ["opened", "opened", "dropped"]);
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(
+        events.lock().unwrap().len(),
+        3,
+        "{:?}",
+        events.lock().unwrap()
+    );
+
+    // The last one closes: its decoder is gone first, then the platform hears it.
+    guests[1].close();
+    assert_eq!(
+        wait_for(&events, 5),
+        ["opened", "opened", "dropped", "dropped", "all closed"]
+    );
+    stop.store(true, Ordering::Relaxed);
+    host.join().unwrap();
+}
+
+#[test]
+fn fr26_a_streams_numbers_go_to_the_log_every_few_seconds() {
+    let start = Instant::now();
+    let mut stats = StreamStats::default();
+    // Nothing has happened: nothing to say.
+    assert_eq!(stats.report(start + STATS_INTERVAL * 2, Codec::Av1), None);
+    for i in 0..150u32 {
+        let at = start + Duration::from_millis(u64::from(i) * 33);
+        stats.decoded(at, Duration::from_millis(4), 1);
+        stats.decoder(DecoderReport {
+            readback: Duration::from_millis(1),
+            readbacks: 1,
+            surface: Some("640x384 NV12, pitch 640, chroma at row 384".into()),
+        });
+        if i < 2 {
+            stats.dropped(at, true);
+            continue;
+        }
+        stats.handed_on(at, (640, 360), Duration::from_millis(10));
+        stats.sent(Duration::from_millis(1));
+    }
+    // Not before the interval.
+    assert_eq!(
+        stats.report(start + Duration::from_secs(4), Codec::Av1),
+        None
+    );
+    let line = stats
+        .report(start + STATS_INTERVAL, Codec::Av1)
+        .expect("a line once the interval has passed");
+    assert!(
+        line.starts_with("video: AV1 640x360 over 5.0 s: 150 packets"),
+        "{line}"
+    );
+    assert!(line.contains("150 pictures decoded (30.0/s)"), "{line}");
+    assert!(line.contains("148 handed on (29.6/s)"), "{line}");
+    assert!(
+        line.contains("2 dropped (2 flushed, 0 malformed)"),
+        "{line}"
+    );
+    assert!(
+        line.contains("decode 4.00 (copy out of the GPU 1.00)"),
+        "{line}"
+    );
+    assert!(
+        line.contains("waiting for the guest to take a picture 10.00"),
+        "{line}"
+    );
+    assert!(line.contains("send 1.00"), "{line}");
+    assert!(line.contains("chroma at row 384"), "{line}");
+    // A new count starts: the next line comes an interval later, not at once.
+    assert_eq!(
+        stats.report(start + STATS_INTERVAL + Duration::from_secs(1), Codec::Av1),
+        None
+    );
+}
+
+#[test]
+fn fr26_messages_keep_their_order_behind_the_pictures_in_flight() {
+    // More pictures than may wait for the guest, then a flush: every picture comes out in
+    // its order and the flush's answer after them, as the guest reads them.
+    let (mut guest, host, _log) = connect(Role::GuestVideo);
+    open(guest.as_mut(), VideoCodec::H264, 0, 0);
+    assert!(matches!(next(guest.as_mut()), Body::VideoDecoderOpened(o) if o.ok));
+    let count = PICTURES_IN_FLIGHT as u64 * 3;
+    for index in 1..=count + 1 {
+        send(guest.as_mut(), packet(index, &[index as u8]));
+    }
+    for index in 1..=count {
+        let picture = frame(next(guest.as_mut()));
+        assert_eq!(picture.frame_index, index);
+        assert_eq!(picture.nv12, vec![index as u8; 6]);
+    }
+    send(guest.as_mut(), Body::VideoFlush(VideoFlush {}));
+    assert!(matches!(next(guest.as_mut()), Body::VideoFlushed(_)));
+    guest.close();
+    assert_eq!(host.join().unwrap(), VideoEnd::Closed);
 }

@@ -22,7 +22,7 @@ pub fn apps(ctx: &Shared) -> gtk::Widget {
 
     let manage = group(
         "",
-        Some(&tr("The Android apps installed on this computer. Open an app, change its permissions, storage and notifications in App info, or uninstall an app you installed. Android starts when you open this page.")),
+        Some(&tr("The Android apps on this computer. Open them, change them in App info, or uninstall the ones you installed.\nAndroid starts when you open this page.")),
     );
     let manage_row = link_row(
         &tr("Manage apps"),
@@ -100,11 +100,20 @@ pub fn apps(ctx: &Shared) -> gtk::Widget {
                 rows.note(&tr("No app matches your search."));
             }
             if view::root_unavailable(all) {
-                rows.note(&tr("Root access is off for this computer, so no app can use su. An administrator turns it on under Advanced, and then you choose each app's level here."));
+                rows.note(&tr("Root access is off for this computer, so no app can use su.\nAn administrator turns it on under Advanced. Then you choose each app's level here."));
             }
             for app in shown {
                 let window = windows.borrow().get(&app.package).cloned();
-                let row = app_row(&ctx, &page, app, window, forced.get(), reload.clone());
+                let group_note = view::root_group_note(app, all);
+                let row = app_row(
+                    &ctx,
+                    &page,
+                    app,
+                    group_note,
+                    window,
+                    forced.get(),
+                    reload.clone(),
+                );
                 // The app App info was opened for: its row opens and comes into view, once.
                 let focused = ctx.focus_app.borrow().as_deref() == Some(app.package.as_str());
                 if focused {
@@ -171,15 +180,12 @@ fn app_row(
     ctx: &Shared,
     page: &Rc<Page>,
     app: &App,
+    group_note: Option<String>,
     window: Option<AppWindow>,
     system_forced_available: bool,
     reload: Hook,
 ) -> adw::ExpanderRow {
-    let row = adw::ExpanderRow::builder()
-        .title(app.label.as_str())
-        .subtitle(view::app_detail(app))
-        .use_markup(false)
-        .build();
+    let row = expander_row(&app.label, &view::app_detail(app));
     row.add_prefix(&png_image(&app.icon_png, "application-x-executable", 32));
 
     let open = button(&tr("Open"));
@@ -381,6 +387,15 @@ fn app_row(
     // How far the app may use root: not at all, asking an administrator each time, or without
     // asking.
     let root = view::root_view(app);
+    // Apps that share a user ID are one group for root: the row says so, and with which apps.
+    let root_subtitle = match &group_note {
+        Some(note) => format!(
+            "{}
+{note}",
+            root.subtitle
+        ),
+        None => root.subtitle.clone(),
+    };
     let root_level = {
         let (ctx, page, package, label) = (
             ctx.clone(),
@@ -390,7 +405,7 @@ fn app_row(
         );
         let reload = reload.clone();
         let current = app.root.clone();
-        Combo::new(&tr("Root access"), &root.subtitle, move |index| {
+        Combo::new(&tr("Root access"), &root_subtitle, move |index| {
             let Some(level) = view::ROOT_LEVELS.get(index as usize) else {
                 return;
             };
@@ -542,7 +557,7 @@ fn switch_abi(
                             &ctx2,
                             &trf("Erase {0}'s data?", &[&label]),
                             &trf(
-                                "Android cannot change how {0} runs and keep its data. Installing it again erases its data: sign-ins, settings and files it keeps for itself.",
+                                "Android cannot change how {0} runs and keep its data.\n\nInstalling it again erases its data: sign-ins, settings and files it keeps for itself.",
                                 &[&label],
                             ),
                             &tr("Erase and install again"),
@@ -570,7 +585,7 @@ pub fn background(ctx: &Shared) -> gtk::Widget {
     let page = Rc::new(Page::new());
     let intro = group(
         &tr("Apps"),
-        Some(&tr("These Android apps keep running after their windows close, because they play music, download files, keep a VPN on or do other work in the background. Each also has an indicator in the top bar. Stopping an app ends what it is doing and frees the memory it used.")),
+        Some(&tr("These Android apps keep running after their windows close, to play music, download files, keep a VPN on or do other work.\nEach also has an indicator in the top bar.\nStopping an app ends what it is doing and frees the memory it used.")),
     );
     let refresh = gtk::Button::from_icon_name("view-refresh-symbolic");
     refresh.set_tooltip_text(Some(&tr("Refresh")));
@@ -730,7 +745,7 @@ pub fn widgets(ctx: &Shared) -> gtk::Widget {
     let page = Rc::new(Page::new());
     let placed = group(
         &tr("On your desktop"),
-        Some(&tr("Place the widgets your Android apps offer on your desktop. Each widget gets a window of its own on the desktop, below your other windows. Press and hold a widget to edit it: drag it to move it, and drag its handles to resize it. Right-click a widget for its settings, its sizes and Remove. Android starts when you open this page.")),
+        Some(&tr("Place the widgets your Android apps offer on your desktop. Each widget gets a window of its own, below your other windows.\nPress and hold a widget to edit it: drag it to move it, and drag its handles to resize it.\nRight-click a widget for its settings, its sizes and Remove. Android starts when you open this page.")),
     );
     let refresh = gtk::Button::from_icon_name("view-refresh-symbolic");
     refresh.set_tooltip_text(Some(&tr("Refresh")));

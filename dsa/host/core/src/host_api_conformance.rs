@@ -83,6 +83,8 @@ pub struct FakeAndroid {
     /// Each word on whether any task window is shown, in order. Taken in every state, as a
     /// session takes it.
     pub shown: Mutex<Vec<bool>>,
+    /// Each word on which tasks have their window shown, in order. Taken in every state too.
+    pub tasks_shown: Mutex<Vec<Vec<i32>>>,
     /// Each word on whether it may be frozen when idle, in order.
     pub freeze_when_idle: Mutex<Vec<bool>>,
     /// Each word on whether web links open in it, in order.
@@ -95,6 +97,8 @@ pub struct FakeAndroid {
     pub adb_auto_connect: Mutex<Vec<bool>>,
     /// Where it says auto-connect stands.
     pub adb_auto_connect_state: Mutex<AutoConnectState>,
+    /// Whether it says the host's resolver answers its DNS queries.
+    pub dns_answered_by_host: Mutex<Option<bool>>,
     /// Each word on file sharing (on, and the folders), in order.
     pub shared_folders: Mutex<Vec<(bool, Vec<String>)>>,
     /// The drags the host ended, and whether each was dropped.
@@ -251,12 +255,14 @@ impl FakeAndroid {
             keys: Mutex::new(Vec::new()),
             text: Mutex::new(Vec::new()),
             shown: Mutex::new(Vec::new()),
+            tasks_shown: Mutex::new(Vec::new()),
             freeze_when_idle: Mutex::new(Vec::new()),
             links_in_android: Mutex::new(Vec::new()),
             developer_mode: Mutex::new(Vec::new()),
             refuse_developer_mode: Mutex::new(None),
             adb_auto_connect: Mutex::new(Vec::new()),
             adb_auto_connect_state: Mutex::new(AutoConnectState::Off),
+            dns_answered_by_host: Mutex::new(None),
             shared_folders: Mutex::new(Vec::new()),
             ended_drags: Mutex::new(Vec::new()),
             link_watchers: Mutex::new(Vec::new()),
@@ -463,6 +469,9 @@ impl UserAndroid for FakeAndroid {
     }
     fn adb_auto_connect_state(&self) -> AutoConnectState {
         *self.adb_auto_connect_state.lock().unwrap()
+    }
+    fn dns_answered_by_host(&self) -> Option<bool> {
+        *self.dns_answered_by_host.lock().unwrap()
     }
     fn watch_links(&self) -> Option<mpsc::Receiver<String>> {
         let (tx, rx) = mpsc::channel();
@@ -719,6 +728,11 @@ impl UserAndroid for FakeAndroid {
         let slot = match addon {
             Addon::Gapps => &self.gapps_image,
             Addon::ArmTranslation => &self.arm_image,
+            Addon::Widevine => {
+                return Err(InstallError::Refused(
+                    "no DSA kept the Widevine module on Android's disk".into(),
+                ))
+            }
         };
         let image = slot.lock().unwrap();
         let Some(image) = image.as_ref() else {
@@ -962,6 +976,10 @@ impl UserAndroid for FakeAndroid {
             self.shown.lock().unwrap().push(shown);
             return Ok(());
         }
+        if let TaskRequest::TasksShown { task_ids } = &request {
+            self.tasks_shown.lock().unwrap().push(task_ids.clone());
+            return Ok(());
+        }
         if self.state() != SessionState::Active {
             return Err(TaskRequestError::NotRunning(format!(
                 "Android is {}, not running",
@@ -1185,6 +1203,10 @@ macro_rules! host_api_conformance {
             $crate::host_api_conformance::windows_shown_reaches_the_caller(&mut || $make);
         }
         #[test]
+        fn nfr2_the_shown_tasks_reach_the_callers_android_in_any_state() {
+            $crate::host_api_conformance::tasks_shown_reaches_the_caller(&mut || $make);
+        }
+        #[test]
         fn fr10_freezing_reaches_the_callers_android_only_while_it_runs() {
             $crate::host_api_conformance::freeze_reaches_the_caller(&mut || $make);
         }
@@ -1301,6 +1323,10 @@ macro_rules! host_api_conformance {
             $crate::host_api_conformance::install_abi_follows_the_libraries(&mut || $make);
         }
         #[test]
+        fn fr25_an_apk_with_arm64_code_only_is_refused_with_its_reason_without_translation() {
+            $crate::host_api_conformance::arm64_only_install_needs_translation(&mut || $make);
+        }
+        #[test]
         fn fr25_run_as_arm_reaches_the_callers_android_and_asks_before_erasing_data() {
             $crate::host_api_conformance::run_as_arm_reaches_the_caller(&mut || $make);
         }
@@ -1343,6 +1369,14 @@ macro_rules! host_api_conformance {
         #[test]
         fn fr25_the_images_default_translator_is_used_until_a_package_replaces_it() {
             $crate::host_api_conformance::default_arm_translation_reaches_the_caller(&mut || $make);
+        }
+        #[test]
+        fn fr37_widevine_is_installed_reported_and_removed() {
+            $crate::host_api_conformance::widevine_reaches_the_caller(&mut || $make);
+        }
+        #[test]
+        fn fr37_a_module_that_is_not_widevines_or_not_for_this_android_is_refused() {
+            $crate::host_api_conformance::unusable_widevine_is_refused(&mut || $make);
         }
         #[test]
         fn fr32_google_play_is_installed_reported_and_removed() {
@@ -1901,6 +1935,27 @@ pub fn windows_shown_reaches_the_caller(make: MakeLocal<'_>) {
     assert!(android.requests.lock().unwrap().is_empty());
 }
 
+pub fn tasks_shown_reaches_the_caller(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    let mut client = connect(&mut *connector);
+    // Taken while the Android is stopped, for its next start.
+    client
+        .request(&TaskRequest::TasksShown { task_ids: vec![3] })
+        .expect("the word while stopped");
+    client.start().unwrap();
+    client
+        .set_tasks_shown(&[3, 5])
+        .expect("the word while running");
+    let android = androids.of(&user).unwrap();
+    assert_eq!(
+        *android.tasks_shown.lock().unwrap(),
+        vec![vec![3], vec![3, 5]]
+    );
+    assert!(android.requests.lock().unwrap().is_empty());
+}
+
 pub fn freeze_reaches_the_caller(make: MakeLocal<'_>) {
     let (listener, mut connector, _) = make();
     let androids = Arc::new(FakeAndroids::default());
@@ -2447,6 +2502,46 @@ pub fn install_abi_follows_the_libraries(make: MakeLocal<'_>) {
             Some("x86_64".to_string()),
             None,
         ]
+    );
+}
+
+pub fn arm64_only_install_needs_translation(make: MakeLocal<'_>) {
+    use crate::native_abi::NativeLibraries;
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    connect(&mut *connector).start().unwrap();
+    let content = sample_apk();
+    let mut arm = NativeLibraries::new();
+    arm.add("arm64-v8a", "libmain.so");
+    // Without a translator it is refused with the reason, before anything is sent: the reader
+    // fails the test if it is read.
+    let mut never = Unread;
+    match connect(&mut *connector).install_apk_with_libraries(
+        "game.apk",
+        content.len() as u64,
+        &arm,
+        &mut never,
+    ) {
+        Err(ClientError::Service { code, detail }) => {
+            assert_eq!(code, ErrorCode::InstallRefused, "{detail}");
+            assert!(detail.contains("ARM translation is not on"), "{detail}");
+            assert!(detail.contains("Turn it on under ARM apps"), "{detail}");
+        }
+        other => panic!("expected an arm64-only APK to be refused, got {other:?}"),
+    }
+    let android = androids.of(&user).unwrap();
+    assert!(android.install_abis.lock().unwrap().is_empty());
+    assert!(android.installs.lock().unwrap().is_empty());
+    // With one it is installed as arm64-v8a.
+    *android.translating.lock().unwrap() = true;
+    let outcome = connect(&mut *connector)
+        .install_apk_with_libraries("game.apk", content.len() as u64, &arm, &mut &content[..])
+        .expect("installing");
+    assert_eq!(outcome.status, InstallStatus::Installed);
+    assert_eq!(
+        *android.install_abis.lock().unwrap(),
+        vec![Some("arm64-v8a".to_string())]
     );
 }
 
@@ -3347,6 +3442,136 @@ pub fn arm_translation_reaches_the_caller(make: MakeLocal<'_>) {
     assert!(!removed.restart_needed);
     assert!(!disk.holds(Addon::ArmTranslation));
     assert_eq!(store.arm_translation(&user).unwrap(), None);
+}
+
+fn widevine_package(apex: &[u8]) -> crate::widevine::WidevinePackage {
+    crate::widevine::WidevinePackage {
+        apex: format!("{}.apex", crate::widevine::MODULE),
+        version: "BE2A.250530.026.F3 (API 36, r7)".into(),
+        android_major: 16,
+        abi: crate::widevine::guest_abi().into(),
+        source: "https://dl.google.com/android/repository/sys-img/google_apis/x86_64-36_r07.zip"
+            .into(),
+        size: apex.len() as u64,
+        sha256: crate::widevine::sha256_hex(apex),
+        license: "android-sdk-license".into(),
+    }
+}
+
+pub fn widevine_reaches_the_caller(make: MakeLocal<'_>) {
+    use crate::widevine::fixture::apex;
+    let (listener, mut connector, user) = make();
+    let store = Arc::new(MemorySettings::default());
+    let androids = Arc::new(FakeAndroids::default());
+    let disks = addon_disks(addon_dir("widevine"));
+    let service = HostApiService::new(androids.clone(), "test service")
+        .with_settings(store.clone(), facts())
+        .with_addon_disks(disks.clone());
+    let _service = RunningService::start_service(listener, service);
+    let mut client = connect(&mut *connector);
+    let none = client.widevine().expect("asking where Widevine stands");
+    assert_eq!(none.package, None);
+    assert!(!none.on_disk && !none.restart_needed);
+
+    // Android need not run.
+    let module = apex(crate::widevine::MODULE, crate::widevine::guest_abi());
+    let package = widevine_package(&module);
+    let installed = connect(&mut *connector)
+        .install_widevine(&package, &mut module.as_slice())
+        .expect("installing Widevine");
+    assert_eq!(installed.package, Some(package.clone()));
+    assert!(installed.on_disk);
+    assert!(!installed.running && !installed.restart_needed);
+    // The APEX is on the caller's add-on disk, unchanged, as the one file of its image.
+    let disk = disks(&user).unwrap();
+    let image = disk
+        .image(Addon::Widevine)
+        .expect("the image is on the disk");
+    let files = crate::erofs::read::files(&image);
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[&package.apex], module);
+    assert_eq!(store.widevine(&user).unwrap(), Some(package.clone()));
+    let next = disk.prepare_for_boot();
+    assert!(next.contains(&Addon::Widevine));
+    assert!(crate::widevine::bootconfig_for(&*store, &user, &next)
+        .starts_with(crate::widevine::BOOTCONFIG_ON));
+
+    client.start().unwrap();
+    let running = client.widevine().expect("asking again");
+    assert!(running.running && running.active && !running.restart_needed);
+
+    let removed = client.remove_widevine().expect("removing Widevine");
+    assert_eq!(removed.package, None);
+    assert!(!removed.on_disk);
+    assert!(
+        removed.active,
+        "the running Android keeps what it started with"
+    );
+    assert!(removed.restart_needed);
+    assert!(!disk.holds(Addon::Widevine));
+    assert_eq!(store.widevine(&user).unwrap(), None);
+    assert_eq!(
+        crate::widevine::bootconfig_for(&*store, &user, &[]),
+        crate::widevine::BOOTCONFIG_OFF
+    );
+}
+
+pub fn unusable_widevine_is_refused(make: MakeLocal<'_>) {
+    use crate::widevine::fixture::apex;
+    let (listener, mut connector, user) = make();
+    let store = Arc::new(MemorySettings::default());
+    let androids = Arc::new(FakeAndroids::default());
+    let disks = addon_disks(addon_dir("widevine-refused"));
+    let service = HostApiService::new(androids, "test service")
+        .with_settings(store.clone(), facts())
+        .with_addon_disks(disks.clone());
+    let _service = RunningService::start_service(listener, service);
+    let abi = crate::widevine::guest_abi();
+    let other_abi = if abi == "x86_64" {
+        "arm64-v8a"
+    } else {
+        "x86_64"
+    };
+    let other_module = apex("com.android.other", abi);
+    let foreign = apex(crate::widevine::MODULE, other_abi);
+    let good = apex(crate::widevine::MODULE, abi);
+    let cases: Vec<(crate::widevine::WidevinePackage, Vec<u8>)> = vec![
+        // Described for another processor: refused before anything is sent.
+        (
+            crate::widevine::WidevinePackage {
+                abi: other_abi.into(),
+                ..widevine_package(&foreign)
+            },
+            foreign.clone(),
+        ),
+        // Described for this one, but built for another.
+        (widevine_package(&foreign), foreign),
+        // Another module.
+        (widevine_package(&other_module), other_module),
+        // Not what was described.
+        (
+            crate::widevine::WidevinePackage {
+                sha256: "1".repeat(64),
+                ..widevine_package(&good)
+            },
+            good,
+        ),
+    ];
+    for (package, data) in cases {
+        let refused = connect(&mut *connector).install_widevine(&package, &mut data.as_slice());
+        assert!(
+            matches!(
+                refused,
+                Err(ClientError::Service {
+                    code: ErrorCode::InstallRefused,
+                    ..
+                })
+            ),
+            "{package:?}: {refused:?}"
+        );
+        assert_eq!(store.widevine(&user).unwrap(), None);
+        assert!(!disks(&user).unwrap().holds(Addon::Widevine));
+    }
 }
 
 fn default_arm_package() -> Package {
@@ -4980,7 +5205,8 @@ pub fn added_widget_is_placed_and_kept(make: MakeLocal<'_>) {
             x: 64,
             y: 64,
             width_dp: 180,
-            height_dp: 110
+            height_dp: 110,
+            resized: false,
         }
     );
     let second = client
@@ -5051,6 +5277,7 @@ pub fn placed_widget_size_reaches_the_caller(make: MakeLocal<'_>) {
         y: 20,
         width_dp: 240,
         height_dp: 147,
+        resized: false,
     };
     client
         .place_widget(widget.widget_id, moved, 360, 220, 240)
@@ -5077,7 +5304,7 @@ pub fn placed_widget_size_reaches_the_caller(make: MakeLocal<'_>) {
     );
     assert_eq!(client.widgets().unwrap().0[0].placement, moved);
     // A size the widget does not allow is kept within its limits, and no side gets smaller
-    // than a widget window can be: 40 of the host's device-independent pixels, 67 dp.
+    // than a widget window can be: 40 of the host's device-independent pixels, 49 dp.
     client
         .place_widget(
             widget.widget_id,
@@ -5092,7 +5319,7 @@ pub fn placed_widget_size_reaches_the_caller(make: MakeLocal<'_>) {
         )
         .unwrap();
     let kept = client.widgets().unwrap().0[0].placement;
-    assert_eq!((kept.width_dp, kept.height_dp), (110, 67));
+    assert_eq!((kept.width_dp, kept.height_dp), (110, 49));
 }
 
 pub fn widget_pointer_reaches_the_caller(make: MakeLocal<'_>) {

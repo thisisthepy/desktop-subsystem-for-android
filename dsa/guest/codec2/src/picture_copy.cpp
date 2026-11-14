@@ -88,4 +88,41 @@ bool copyNv12(const uint8_t* nv12, size_t size, uint32_t width, uint32_t height,
     return true;
 }
 
+namespace {
+
+// Whether `plane` has rows of `samples` samples at least, as the lock describes it.
+bool rowsFit(const Plane& plane, uint32_t samples) {
+    if (plane.data == nullptr || plane.pixelStride == 0) {
+        return false;
+    }
+    return static_cast<uint64_t>(plane.rowStride) >=
+           static_cast<uint64_t>(samples - 1) * plane.pixelStride + 1;
+}
+
+}  // namespace
+
+WriteResult writePicture(const uint8_t* nv12, size_t size, uint32_t width, uint32_t height, uint32_t stride,
+                         const BufferSize& buffer, const LockPlanes& lock, const UnlockPlanes& unlock) {
+    if (width == 0 || height == 0 || buffer.width < width || buffer.height < height) {
+        return WriteResult::WrongBuffer;
+    }
+    YuvPlanes planes;
+    uint32_t planeCount = 0;
+    if (!lock(&planes, &planeCount)) {
+        return WriteResult::NotLocked;
+    }
+    const uint32_t chromaWidth = (buffer.width + 1) / 2;
+    WriteResult result = WriteResult::Written;
+    if (planeCount < 3 || !rowsFit(planes.y, buffer.width) || !rowsFit(planes.u, chromaWidth) ||
+        !rowsFit(planes.v, chromaWidth)) {
+        result = WriteResult::BadPlanes;
+    } else if (!copyNv12(nv12, size, width, height, stride, planes, buffer.width, buffer.height)) {
+        result = WriteResult::NotCopied;
+    }
+    if (!unlock() && result == WriteResult::Written) {
+        result = WriteResult::NotUnlocked;
+    }
+    return result;
+}
+
 }  // namespace dsa::codec2

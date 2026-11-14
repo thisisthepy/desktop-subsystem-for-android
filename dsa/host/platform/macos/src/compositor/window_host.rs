@@ -19,6 +19,7 @@ use dsa_host_core::compositor::window_hosts::{
     connect_window_host, report_to_wire, to_host_from_wire, FromHost, ToHost,
 };
 use dsa_host_core::compositor::window_mode::WindowMode;
+use dsa_host_core::compositor::window_tasks::WindowTasks;
 use dsa_host_core::drag::{DragOffer, DragOut};
 use dsa_host_core::files::{FileAction, FileTransfer};
 use dsa_host_core::host_api::{HostApiClient, InputStream};
@@ -128,11 +129,14 @@ fn report(reports: &Reports, message: FromHost) {
     }
 }
 
-/// Sends the windows' input to the service until every sender is gone.
-fn serve_input(mut connector: UnixLocalConnector, events: Receiver<InputEvent>) {
+/// Sends the windows' input to the service until every sender is gone. Each event names the
+/// window it was made in, and goes to the task that window shows now, as `tasks` says: another
+/// task once one took the window over after a GPU reset.
+fn serve_input(mut connector: impl Connector, events: Receiver<InputEvent>, tasks: WindowTasks) {
     let mut stream: Option<InputStream> = None;
     let mut retry_at: Option<Instant> = None;
     while let Ok(event) = events.recv() {
+        let event = tasks.input(event);
         for _ in 0..2 {
             if stream.is_none() {
                 if retry_at.is_some_and(|at| Instant::now() < at) {
@@ -348,6 +352,33 @@ thread_local! {
     static STATE: RefCell<State> = RefCell::new(State::default());
 }
 
+/// For each press that left a window (`left`, by the window's ID), asks the service through a
+/// connection from `connect` whether the app drags something out, about the task the window
+/// shows now, as `tasks` says. An offer goes to `offered` with the window's ID and the
+/// connection that reads it.
+fn ask_drags(
+    mut connect: impl FnMut() -> Box<dyn Connector>,
+    left: Receiver<DragOut>,
+    tasks: WindowTasks,
+    offered: impl Fn(i32, DragOffer, HostApiClient),
+) {
+    for out in left {
+        let window = out.task_id;
+        let out = tasks.drag_out(out);
+        let mut connector = connect();
+        let asked = HostApiClient::connect(&mut *connector, BUILD, CONNECT_TIMEOUT)
+            .and_then(|mut client| client.drag_out(out).map(|offer| (offer, client)));
+        match asked {
+            Ok((Some(offer), client)) => offered(window, offer, client),
+            Ok((None, _)) => {}
+            Err(why) => eprintln!(
+                "dsa-app-window: a drag out of task {} did not start: {why}",
+                out.task_id
+            ),
+        }
+    }
+}
+
 /// Starts an app's drag out of task `task_id`'s window on the desktop, or ends it in the
 /// guest when it cannot start. On the main thread.
 fn start_drag(task_id: i32, offer: DragOffer, client: HostApiClient) {
@@ -505,6 +536,9 @@ fn handle(message: ToHost) {
                 window.set_back(back);
             }
         }),
+        // The window host's `WindowTasks` took it before it reached this thread, so the
+        // window's input goes to the task it shows; the window itself shows the same.
+        ToHost::ShownTask { .. } => {}
         ToHost::AppMenu { new_window } => menu_bar::set_new_window(new_window),
         ToHost::AppIcon { icon_png, .. } => set_dock_icon(&icon_png),
         // The media buttons are a Windows taskbar preview's; macOS has no such preview.
@@ -600,7 +634,7 @@ fn screenshot(state: &State, task_id: i32) -> Result<(), String> {
         .textures
         .get(&texture_id)
         .ok_or("the window's frame is gone")?;
-    let band = window.band_height();
+    let band = window.band_rows_in_frame();
     let shot = surface
         .read(|pixels, stride| screenshot::app_content(pixels, stride, content, band))?
         .ok_or("the window shows nothing under its title bar")?;
@@ -756,13 +790,16 @@ pub fn run(setup: HostSetup) -> Result<(), String> {
         eprintln!("dsa-app-window: {why}; frames come by their global surface IDs");
     }
 
+    // The task each window shows, which what the windows send Android itself goes to.
+    let tasks = WindowTasks::new();
     let (input, input_events) = channel();
     let host_api = UnixLocalConnector {
         path: setup.host_api.clone(),
     };
+    let input_tasks = tasks.clone();
     std::thread::Builder::new()
         .name("dsa-app-window-input".into())
-        .spawn(move || serve_input(host_api, input_events))
+        .spawn(move || serve_input(host_api, input_events, input_tasks))
         .map_err(|e| format!("the window input could not start: {e}"))?;
 
     // Files dropped on a window are opened in the app through the local API.
@@ -794,26 +831,20 @@ pub fn run(setup: HostSetup) -> Result<(), String> {
     // offer becomes an AppKit drag on the main thread.
     let (drags, left) = channel::<DragOut>();
     let ask_with = setup.host_api.clone();
+    let drag_tasks = tasks.clone();
     std::thread::Builder::new()
         .name("dsa-app-window-drags".into())
         .spawn(move || {
-            for out in left {
-                let mut connector = UnixLocalConnector {
-                    path: ask_with.clone(),
-                };
-                let asked = HostApiClient::connect(&mut connector, BUILD, CONNECT_TIMEOUT)
-                    .and_then(|mut client| client.drag_out(out).map(|offer| (offer, client)));
-                match asked {
-                    Ok((Some(offer), client)) => {
-                        on_main(move || start_drag(out.task_id, offer, client))
-                    }
-                    Ok((None, _)) => {}
-                    Err(why) => eprintln!(
-                        "dsa-app-window: a drag out of task {} did not start: {why}",
-                        out.task_id
-                    ),
-                }
-            }
+            ask_drags(
+                move || {
+                    Box::new(UnixLocalConnector {
+                        path: ask_with.clone(),
+                    }) as Box<dyn Connector>
+                },
+                left,
+                drag_tasks,
+                |window, offer, client| on_main(move || start_drag(window, offer, client)),
+            )
         })
         .map_err(|e| format!("the drags out of the windows could not start: {e}"))?;
 
@@ -849,6 +880,9 @@ pub fn run(setup: HostSetup) -> Result<(), String> {
                 }
                 body => {
                     if let Some(message) = to_host_from_wire(&body) {
+                        // Before the windows act on it, so what they send next goes where it
+                        // now belongs.
+                        tasks.follow(&message);
                         on_main(move || handle(message));
                     }
                 }
@@ -875,4 +909,123 @@ pub fn run(setup: HostSetup) -> Result<(), String> {
         let _: () = msg_send![app, run];
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dsa_host_core::host_api::{UserAndroid, UserAndroids};
+    use dsa_host_core::host_api_conformance::{FakeAndroid, FakeAndroids, RunningService};
+    use dsa_host_core::input::{PointerAction, PointerEvent, PointerTool};
+    use dsa_transport::local::{self, MemoryLocalConnector, Peer};
+    use dsa_transport::{Connection, TransportError};
+
+    const USER: &str = "test-user";
+
+    /// Connects to the in-memory local API as [`USER`].
+    struct AsUser(MemoryLocalConnector);
+
+    impl Connector for AsUser {
+        fn connect(&mut self, _: Duration) -> Result<Box<dyn Connection>, TransportError> {
+            self.0.connect_as(Peer {
+                user: USER.into(),
+                administrator: false,
+            })
+        }
+    }
+
+    /// The in-memory service with the user's fake Android running.
+    fn service() -> (RunningService, MemoryLocalConnector, Arc<FakeAndroid>) {
+        let (listener, connector) = local::pair();
+        let androids = Arc::new(FakeAndroids::default());
+        let _ = androids.android(USER);
+        let android = androids.of(USER).expect("the user's Android");
+        android.start();
+        let service = RunningService::start(Box::new(listener), androids);
+        (service, connector, android)
+    }
+
+    fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !done() {
+            assert!(Instant::now() < deadline, "timed out waiting for {what}");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// After a GPU reset the app's new task 14 took over the window opened for task 9.
+    fn taken_over() -> WindowTasks {
+        let tasks = WindowTasks::new();
+        tasks.follow(&ToHost::ShownTask {
+            task_id: 9,
+            shown_task_id: 14,
+        });
+        tasks
+    }
+
+    #[test]
+    fn nfr5_input_in_a_window_taken_over_after_a_gpu_reset_reaches_the_new_task() {
+        let (_service, connector, android) = service();
+        let (events, received) = channel();
+        let tasks = taken_over();
+        let thread = std::thread::spawn(move || serve_input(AsUser(connector), received, tasks));
+        let tap = PointerEvent::new(9, PointerAction::Down, PointerTool::Touch, (5.0, 6.0));
+        events.send(InputEvent::Pointer(tap)).unwrap();
+        for key in back_keys(9, 1234) {
+            events.send(InputEvent::Key(key)).unwrap();
+        }
+        events
+            .send(InputEvent::Ime(dsa_host_core::ime::ImeEvent::Commit {
+                task_id: 9,
+                text: "a".into(),
+            }))
+            .unwrap();
+        wait_until("the input to reach Android", || {
+            android.pointers.lock().unwrap().len() == 1
+                && android.keys.lock().unwrap().len() == 2
+                && android.text.lock().unwrap().len() == 1
+        });
+        assert_eq!(android.pointers.lock().unwrap()[0].task_id, 14);
+        assert!(android
+            .keys
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|key| key.task_id == 14));
+        assert_eq!(android.text.lock().unwrap()[0].task_id(), 14);
+        drop(events);
+        thread.join().unwrap();
+    }
+
+    #[test]
+    fn nfr5_a_drag_out_of_a_window_taken_over_after_a_gpu_reset_asks_the_new_task() {
+        // The fake Android has something to drag out of task 7 only.
+        let (_service, connector, _android) = service();
+        let tasks = WindowTasks::new();
+        tasks.follow(&ToHost::ShownTask {
+            task_id: 3,
+            shown_task_id: 7,
+        });
+        let (drags, left) = channel();
+        drags
+            .send(DragOut {
+                task_id: 3,
+                x: 1.0,
+                y: 2.0,
+                tool: dsa_protocol::control::PointerTool::Mouse as i32,
+                pointer_id: 0,
+            })
+            .unwrap();
+        drop(drags);
+        let offers: Arc<Mutex<Vec<(i32, usize)>>> = Arc::default();
+        let seen = Arc::clone(&offers);
+        ask_drags(
+            move || Box::new(AsUser(connector.clone())) as Box<dyn Connector>,
+            left,
+            tasks,
+            move |window, offer, _| seen.lock().unwrap().push((window, offer.items.len())),
+        );
+        // Asked of task 7, and offered to the window the press left, by its own ID.
+        assert_eq!(*offers.lock().unwrap(), vec![(3, 2)]);
+    }
 }

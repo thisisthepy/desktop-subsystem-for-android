@@ -115,6 +115,9 @@ class LockTests(unittest.TestCase):
             self.assertIn("external/protobuf", [p["path"] for p in version["projects"]])
         build = (REPO / ".github/scripts/framework/build.sh").read_text()
         self.assertIn('cp -r "$here/device/hosttools" "$device/"', build)
+        # With external/sqlite in the tree (libandroid_runtime needs it) its libsqlite is the
+        # real one, and the stand-in would define the module twice.
+        self.assertIn('if [[ ! -e "$top/external/sqlite/dist/Android.bp" ]]; then', build)
 
     def test_nfr5_modules_soong_analyses_find_their_sources_and_licenses(self):
         # Errors that missing dependencies do not excuse stopped the second and third Framework
@@ -225,6 +228,65 @@ class LockTests(unittest.TestCase):
                            ("frameworks/native", "opengl/libs"),
                            ("frameworks/base", "libs/hwui")]:
                 self.assertIn(wanted, changed, android)
+
+    def test_nfr1_both_versions_free_the_client_target_when_nothing_is_composed_into_it(self):
+        # The client target is the display's size (63 MiB at 2880x2880). FramebufferSurface
+        # gives its buffers back after a while without client composition, and RenderSurface
+        # drops its textures of them, or the memory would stay held.
+        for android in ("android16", "android17"):
+            added = {}
+            for project, patch in framework_lock.patch_files(android):
+                if project != "frameworks/native":
+                    continue
+                path = None
+                for line in patch.read_text().splitlines():
+                    if line.startswith("+++ b/"):
+                        path = line[len("+++ b/"):]
+                    elif line.startswith("+") and path:
+                        added.setdefault(path, []).append(line[1:])
+            def adds(path, text):
+                return any(text in line for line in added.get(path, []))
+            fbs = "services/surfaceflinger/DisplayHardware/FramebufferSurface.cpp"
+            self.assertTrue(adds("services/surfaceflinger/CompositionEngine/include/compositionengine/"
+                                 "DisplaySurface.h", "virtual bool takeBuffersReleased()"), android)
+            self.assertTrue(adds("services/surfaceflinger/CompositionEngine/src/RenderSurface.cpp",
+                                 "mTextureCache.clear();"), android)
+            self.assertTrue(adds(fbs, "discardFreeBuffers("), android)
+            self.assertTrue(adds(fbs, "kReleaseIdleBuffersAfter"), android)
+            self.assertTrue(adds("services/surfaceflinger/DisplayHardware/FramebufferSurface.h",
+                                 "kReleaseIdleBuffersAfter = 1'000'000'000"), android)
+
+    def test_nfr1_android17_frees_the_client_target_whichever_framebuffer_surface_it_picks(self):
+        # Android 17 picks FramebufferSurface or LegacyFramebufferSurface by the
+        # wb_framebuffersurface2 flag, and the build DSA ships takes the legacy one. A release
+        # only in FramebufferSurface never ran there: the client target stayed held, and its
+        # "buffers are freed" line never appeared.
+        added = {}
+        for project, patch in framework_lock.patch_files("android17"):
+            if project != "frameworks/native":
+                continue
+            path = None
+            for line in patch.read_text().splitlines():
+                if line.startswith("+++ b/"):
+                    path = line[len("+++ b/"):]
+                elif line.startswith("+") and path:
+                    added.setdefault(path, []).append(line[1:])
+
+        def adds(path, text):
+            return any(text in line for line in added.get(path, []))
+
+        for name in ("FramebufferSurface", "LegacyFramebufferSurface"):
+            source = f"services/surfaceflinger/DisplayHardware/{name}.cpp"
+            header = f"services/surfaceflinger/DisplayHardware/{name}.h"
+            self.assertTrue(adds(header, "bool takeBuffersReleased() override;"), name)
+            self.assertTrue(adds(header, "kReleaseIdleBuffersAfter = 1'000'000'000"), name)
+            self.assertTrue(adds(source, f"bool {name}::takeBuffersReleased()"), name)
+            self.assertTrue(adds(source, "discardFreeBuffers("), name)
+            self.assertTrue(adds(source, "its buffers are freed"), name)
+        # The legacy class tells HWC about each slot's buffer only once; after the discard the
+        # slots hold new buffers, which must go to HWC whole.
+        self.assertTrue(adds("services/surfaceflinger/DisplayHardware/LegacyFramebufferSurface.cpp",
+                             "id = UINT64_MAX;"))
 
     def test_nfr5_each_patch_adds_the_tested_recovery_policy_unchanged(self):
         # The policy the renderers follow is the one test_device_loss_recovery.cpp tests.
@@ -433,6 +495,48 @@ class NinjaInputsTests(unittest.TestCase):
             self.assertNotIn("cone", legacy)
             self.assertNotIn("patterns", legacy)
 
+    def test_fr32_what_libandroid_runtime_links_is_fetched(self):
+        # Framework build 43377022889 passed the analysis and the input check, then stopped in
+        # ninja on libraries libandroid_runtime links: headers beside sources the cones left out
+        # (libnetd_client's and libandroid_net's NetdClient.h, libmeminfo's include, perfetto's
+        # JNIHelp.h, libbpf's libelf.h, contexthub_data_flow's chre/platform/atomic_ref.h), a
+        # HIDL interface's dependency (camera.device@3.2 on camera.common@1.0), a project
+        # libtflite_static includes by path (external/gemmlowp), and aconfig declarations
+        # whose flag files were not fetched ("production library contains no production
+        # flags", or the file named as missing). libtflite_static's own sources, which that
+        # run never reached, include TensorFlow's core, TSL and third_party headers.
+        both = {
+            "external/elfutils": ["bionic-fixup", "include", "lib", "libelf"],
+            "external/perfetto": ["src/android_sdk/nativehelper"],
+            "external/tensorflow": ["tensorflow/core/kernels", "tensorflow/core/lib/bfloat16",
+                                    "tensorflow/core/lib/random", "tensorflow/core/platform",
+                                    "tensorflow/core/public", "tensorflow/lite",
+                                    "tensorflow/tsl/platform", "third_party/eigen3",
+                                    "third_party/fft2d"],
+            "frameworks/base": ["core/java/android/database/sqlite", "core/java/android/permission",
+                                "core/java/android/window/flags"],
+            "hardware/interfaces": ["camera/common/1.0", "camera/device/3.2"],
+            "system/memory/libmeminfo": ["include"],
+            "system/netd": ["client", "include"],
+        }
+        only = {
+            "android16": {},
+            "android17": {
+                "frameworks/base": ["core/java/android/tracing"],
+                "system/chre": ["platform/include", "platform/shared/public_std_atomic_ref",
+                                "variant/googletest/include", "variant/include"],
+            },
+        }
+        for version in framework_lock.load()["versions"]:
+            projects = {p["path"]: p for p in version["projects"]}
+            for wanted in (both, only[version["android"]]):
+                for path, folders in wanted.items():
+                    for folder in folders:
+                        self.assertIn(folder, projects[path]["cone"], f"{version['android']} {path}")
+            gemmlowp = projects["external/gemmlowp"]
+            self.assertNotIn("cone", gemmlowp)
+            self.assertNotIn("patterns", gemmlowp)
+
     def test_nfr5_boringssls_go_build_tools_are_fetched(self):
         # bssl_inject_hash and the Go packages it uses, which the fifth run stopped on.
         lock = framework_lock.load()
@@ -606,7 +710,11 @@ class KeyMintLockTests(unittest.TestCase):
         crates = ["ciborium", "ciborium-io", "ciborium-ll", "coset", "der", "der_derive", "const-oid", "spki",
                   "pkcs1", "pkcs8", "sec1", "x509-cert", "flagset", "zeroize", "zeroize_derive", "enumn", "hex",
                   "half", "foreign-types", "foreign-types-shared", "openssl-macros", "android_logger", "log",
-                  "libc", "nix", "regex", "zerocopy", "downcast-rs", "thiserror"]
+                  "libc", "nix", "regex", "zerocopy", "downcast-rs", "thiserror",
+                  # The AIDL Rust backend gives every generated interface crate libasync_trait,
+                  # for its async traits. Without it the first KeyMint Framework build stopped on
+                  # the KeyMint, RKP, secure clock and shared secret interface crates.
+                  "async-trait"]
         for version in framework_lock.load()["versions"]:
             projects = {p["path"]: p for p in version["projects"]}
             for whole in ("system/keymint", "external/rust/crates/openssl"):

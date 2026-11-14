@@ -26,7 +26,7 @@ class AndroidBackupManager(private val context: Context, private val log: Log) :
     private val userId: Int get() = android.os.Process.myUid() / PER_USER_RANGE
 
     private fun manager(): IBackupManager? =
-        ServiceManager.getService(Context.BACKUP_SERVICE)?.let { IBackupManager.Stub.asInterface(it) }
+        ServiceManager.getService(BACKUP_SERVICE)?.let { IBackupManager.Stub.asInterface(it) }
 
     override fun useHostTransport(): Boolean {
         val manager = manager() ?: return false
@@ -150,6 +150,9 @@ class AndroidBackupManager(private val context: Context, private val log: Log) :
     companion object {
         /** UserHandle.PER_USER_RANGE: each user's apps have uids in a range of this size. */
         private const val PER_USER_RANGE = 100_000
+
+        /** Context.BACKUP_SERVICE, the backup manager's service name; the SDK hides it. */
+        private const val BACKUP_SERVICE = "backup"
 
         /** The transport AOSP's backup manager starts with, which keeps backups on the guest. */
         const val LOCAL_TRANSPORT = "com.android.localtransport/.LocalTransport"

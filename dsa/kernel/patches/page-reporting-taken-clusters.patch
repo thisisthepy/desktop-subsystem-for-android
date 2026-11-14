@@ -1,0 +1,169 @@
+diff --git a/mm/page_alloc.c b/mm/page_alloc.c
+--- a/mm/page_alloc.c
++++ b/mm/page_alloc.c
+@@ -1770,10 +1770,13 @@
+ 						int high, int migratetype)
+ {
+ 	int nr_pages = 1 << high;
++	bool reported = page_reported(page);
+ 
+ 	__del_page_from_free_list(page, zone, high, migratetype);
+ 	nr_pages -= expand(zone, page, low, high, migratetype);
+ 	account_freepages(zone, -nr_pages, migratetype);
++	if (reported)
++		page_reporting_taken(zone, page, high);
+ }
+ 
+ static void check_new_page_bad(struct page *page)
+diff --git a/mm/page_reporting.c b/mm/page_reporting.c
+--- a/mm/page_reporting.c
++++ b/mm/page_reporting.c
+@@ -59,6 +59,12 @@
+ 
+ /* The pages reported to the host since boot (page_reporting.reported_total_kb). */
+ static atomic_long_t page_reporting_reported_pages = ATOMIC_LONG_INIT(0);
++
++/*
++ * The free pages that lost their reported mark since boot because the host took them in
++ * again with a neighbour in its fault cluster (page_reporting.refaulted_total_kb).
++ */
++static atomic_long_t page_reporting_refaulted_pages = ATOMIC_LONG_INIT(0);
+ 
+ enum {
+ 	PAGE_REPORTING_IDLE = 0,
+@@ -497,6 +503,88 @@
+ module_param_cb(reported_total_kb, &page_reporting_reported_total_ops, NULL, 0444);
+ MODULE_PARM_DESC(reported_total_kb, "Memory reported to the host since boot, in KiB");
+ 
++/*
++ * The host's fault cluster, as a page order: 0, the default, for a host that backs each
++ * reported page by itself, and 4 for Hyper-V with small backing pages, which faults guest
++ * memory in 64 KiB at a time. When the guest touches a page the host has taken back, the host
++ * backs the whole cluster again, the free pages beside it included. Those stay marked
++ * reported, so they were never offered a second time and stayed with the VM until they were
++ * allocated and freed, or until a rereport. With the cluster known, handing out a reported
++ * block smaller than the cluster takes the mark off the free blocks in the rest of it, and the
++ * next pass reports them again.
++ */
++unsigned int page_reporting_fault_cluster_order __read_mostly;
++
++static int page_reporting_fault_cluster_set(const char *val,
++					    const struct kernel_param *kp)
++{
++	return param_set_uint_minmax(val, kp, 0, MAX_PAGE_ORDER);
++}
++
++static const struct kernel_param_ops page_reporting_fault_cluster_ops = {
++	.set = page_reporting_fault_cluster_set,
++	.get = param_get_uint,
++};
++
++module_param_cb(fault_cluster_order, &page_reporting_fault_cluster_ops,
++		&page_reporting_fault_cluster_order, 0644);
++MODULE_PARM_DESC(fault_cluster_order, "The host's fault cluster, as a page order");
++
++static int page_reporting_refaulted_total_get(char *buffer,
++					      const struct kernel_param *kp)
++{
++	unsigned long pages = atomic_long_read(&page_reporting_refaulted_pages);
++
++	return sysfs_emit(buffer, "%lu\n", pages << (PAGE_SHIFT - 10));
++}
++
++static const struct kernel_param_ops page_reporting_refaulted_total_ops = {
++	.set = page_reporting_read_only_set,
++	.get = page_reporting_refaulted_total_get,
++};
++
++module_param_cb(refaulted_total_kb, &page_reporting_refaulted_total_ops, NULL, 0444);
++MODULE_PARM_DESC(refaulted_total_kb,
++		 "Reported free memory the host took in again with a neighbour since boot, in KiB");
++
++/*
++ * Free blocks of a fault cluster are aligned to their order and smaller than the cluster,
++ * since a page of it is in use, so a walk of its pages meets each one's first page first.
++ */
++void __page_reporting_taken(struct zone *zone, struct page *page,
++			    unsigned int order)
++{
++	unsigned long nr = 1UL << page_reporting_fault_cluster_order;
++	unsigned long start = ALIGN_DOWN(page_to_pfn(page), nr);
++	unsigned long pfn = start, forgotten = 0;
++
++	while (pfn < start + nr) {
++		struct page *p;
++		unsigned int o;
++
++		if (!pfn_valid(pfn) || !zone_spans_pfn(zone, pfn)) {
++			pfn++;
++			continue;
++		}
++		p = pfn_to_page(pfn);
++		if (!PageBuddy(p) || page_zone(p) != zone) {
++			pfn++;
++			continue;
++		}
++		o = buddy_order(p);
++		if (PageReported(p)) {
++			__ClearPageReported(p);
++			forgotten += 1UL << o;
++		}
++		pfn += 1UL << o;
++	}
++
++	if (forgotten)
++		atomic_long_add(forgotten, &page_reporting_refaulted_pages);
++	/* What was forgotten, and what is left of a split block, is reported again. */
++	__page_reporting_notify();
++}
++
+ int page_reporting_register(struct page_reporting_dev_info *prdev)
+ {
+ 	int err = 0;
+diff --git a/mm/page_reporting.h b/mm/page_reporting.h
+--- a/mm/page_reporting.h
++++ b/mm/page_reporting.h
+@@ -14,6 +14,9 @@
+ DECLARE_STATIC_KEY_FALSE(page_reporting_enabled);
+ extern unsigned int page_reporting_order;
+ void __page_reporting_notify(void);
++extern unsigned int page_reporting_fault_cluster_order;
++void __page_reporting_taken(struct zone *zone, struct page *page,
++			    unsigned int order);
+ 
+ static inline bool page_reported(struct page *page)
+ {
+@@ -43,11 +46,33 @@
+ 	/* This will add a few cycles, but should be called infrequently */
+ 	__page_reporting_notify();
+ }
++
++/**
++ * page_reporting_taken - A reported block was handed out by the allocator
++ * @zone: its zone, whose lock the caller holds
++ * @page: the first page handed out
++ * @order: the order of what was handed out
++ *
++ * Called only for a block that was marked reported, so the host had taken it back. A host
++ * that faults guest memory in clusters backs the whole cluster again when the guest touches
++ * the block, so the free blocks beside it in that cluster lose their reported mark.
++ */
++static inline void page_reporting_taken(struct zone *zone, struct page *page,
++					unsigned int order)
++{
++	if (order < page_reporting_fault_cluster_order)
++		__page_reporting_taken(zone, page, order);
++}
+ #else /* CONFIG_PAGE_REPORTING */
+ #define page_reported(_page)	false
+ 
+ static inline void page_reporting_notify_free(unsigned int order)
+ {
+ }
++
++static inline void page_reporting_taken(struct zone *zone, struct page *page,
++					unsigned int order)
++{
++}
+ #endif /* CONFIG_PAGE_REPORTING */
+ #endif /*_MM_PAGE_REPORTING_H */

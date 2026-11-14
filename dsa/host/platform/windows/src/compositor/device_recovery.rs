@@ -197,6 +197,41 @@ mod tests {
     }
 
     #[test]
+    fn nfr5_a_device_removed_during_a_swapchain_resize_is_replaced_and_later_frames_show() {
+        let (gpu, removed, made) = devices();
+        // A frame's texture is opened on the devices current then.
+        let (opened_on, first) = (gpu.generation(), gpu.current().0.number);
+        assert_eq!((opened_on, first), (1, 1));
+        // The GPU is reset while the window resizes its swapchain for a new size: the resize
+        // fails as the removed device's calls do, the devices are made again, and the resize
+        // runs once more on the new ones, so the window stays and takes its size.
+        removed.lock().unwrap().store(true, Ordering::SeqCst);
+        let resize =
+            |device: &FakeDevice| shared_texture(device).map(|number| (number, (1048, 1278)));
+        assert_eq!(gpu.with(resize), Ok(((2, (1048, 1278)), 2)));
+        // The texture opened before the reset is of the old devices: its frame is not shown,
+        // and the next one, in a texture opened on the new devices, is.
+        assert_ne!(opened_on, gpu.generation());
+        for _ in 0..3 {
+            assert_eq!(gpu.with(shared_texture), Ok((2, 2)));
+        }
+        // Frames after the reset make nothing again.
+        assert_eq!(made.load(Ordering::SeqCst), 2);
+        assert_eq!(gpu.recover(), Ok(None));
+    }
+
+    #[test]
+    fn nfr5_a_second_reset_after_frames_on_the_new_devices_is_survived_too() {
+        let (gpu, removed, made) = devices();
+        for expected in 2..=3u32 {
+            removed.lock().unwrap().store(true, Ordering::SeqCst);
+            assert_eq!(gpu.recover(), Ok(Some((DEVICE_REMOVED, expected as u64))));
+            assert_eq!(gpu.with(shared_texture), Ok((expected, expected as u64)));
+        }
+        assert_eq!(made.load(Ordering::SeqCst), 3);
+    }
+
+    #[test]
     fn nfr5_asking_a_removed_device_replaces_it_before_anything_fails() {
         let (gpu, removed, _) = devices();
         assert_eq!(gpu.recover(), Ok(None));

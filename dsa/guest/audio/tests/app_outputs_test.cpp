@@ -41,3 +41,5 @@ TEST(fr26_the_volume_is_a_gain_from_minus_96_db_to_full_scale) {
     EXPECT_TRUE(!gainInRange(kGainMinMb - 1));
     EXPECT_EQ((kGainMaxMb - kGainMinMb) % kGainStepMb, 0);
 }
+
+int main() { return dsa::test::runAll(); }

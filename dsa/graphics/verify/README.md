@@ -55,7 +55,11 @@ uv run dsa/graphics/verify/verify.py measure --seconds 30
 - `fetch-cts` downloads only the Vulkan CTS APK and writes the expanded case list, for a
   machine that has the test apps already.
 - `cts` checks that the guest reports ANGLE and the remoting Vulkan driver, runs the subset,
-  and prints each case that did not pass. It exits non-zero on any failure. `--results DIR`
+  and prints each case that did not pass. It exits non-zero on any failure. A case that ends
+  the CTS process is a crash and fails the subset, and the cases after it run in a new
+  process, so one crash does not hide the rest. A run is over only when the CTS process has
+  been gone for two polls in a row: Android recreates the CTS activity when its window changes
+  size just after it opens, and the CTS then starts again in a new process. `--results DIR`
   keeps each case's result, the dEQP log and the guest log in `DIR`; `--software-vulkan`
   excuses the `lavapipe:` cases, for a renderer on Lavapipe. `DSA_ADB` names the adb to use.
 - `apps` starts hello-gl2 and hello-vulkan, checks that each presents frames, and asks

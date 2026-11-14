@@ -1,0 +1,29 @@
+# The root certificates a user or administrator added to the host, among Android's system
+# certificates (dsa-channeld.rc defines the setup service). Android reads its system
+# certificates from /apex/com.android.conscrypt/cacerts, and from /system/etc/security/cacerts
+# on a build that asks for it; both are read only. So at post-fs-data, once apexd has mounted
+# the APEXes (init.rc waits for that earlier in the same trigger) and before the zygote starts,
+# init makes a tmpfs folder, dsa-channeld --cacerts-setup copies each of Android's two folders
+# into it, and init binds each copy over the original. Every app's mount namespace is made
+# from the zygote's after this, so every app sees the copies; and since they are folders of one
+# tmpfs, a certificate dsa-channeld adds there later, or takes away, shows in every app at once
+# without a restart. Android's own certificates stay as they are: the daemon only adds files
+# beside them and takes away only those it added.
+#
+# A system script, because it runs as init: a vendor script's mkdir runs as vendor_init, which
+# may not make a folder in /dev, and only init may mount over a system folder. The folder's
+# label (dsa_cacerts_file, vendor_file_contexts) lets the daemon write in it and every domain
+# read it (sepolicy/cacerts.cil). Setup gives a folder its name only once the whole copy is in
+# it, so a copy that failed is not there and its bind fails, leaving Android's folder in use.
+#
+# On Android 17 init logs "enter_default_mount_ns ... Failed to switch to default mount
+# namespace" at post-fs-data, and binds from the namespace it stays in. The binds still reach
+# the apps: /apex is private to each mount namespace, yet adb's shell, which init starts later
+# by the same rule as the zygote, has the bind under /apex in its mount table, so the zygote's
+# namespace is the one init binds in. Apps therefore read the copy under /apex as Android
+# chooses, and the VM needs no option to read the folder under /system instead.
+on post-fs-data
+    mkdir /dev/dsa_cacerts 0755 system system
+    exec_start dsa_cacerts_setup
+    mount none /dev/dsa_cacerts/conscrypt /apex/com.android.conscrypt/cacerts bind
+    mount none /dev/dsa_cacerts/system /system/etc/security/cacerts bind

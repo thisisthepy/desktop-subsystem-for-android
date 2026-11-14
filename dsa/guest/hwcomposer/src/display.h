@@ -33,7 +33,7 @@ namespace composer3 = aidl::android::hardware::graphics::composer3;
 struct DisplayConfig {
     int32_t width = 1920;
     int32_t height = 1080;
-    int32_t dpi = 96;
+    int32_t dpi = 130;
     int32_t refreshRateHz = 60;
 
     static DisplayConfig fromProperties();

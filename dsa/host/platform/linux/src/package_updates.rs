@@ -279,6 +279,19 @@ impl SettingsStore for ChannelFollowingSettings {
     fn set_gapps(&self, user: &str, package: Option<&GappsPackage>) -> Result<(), String> {
         self.inner.set_gapps(user, package)
     }
+    fn widevine(
+        &self,
+        user: &str,
+    ) -> Result<Option<dsa_host_core::widevine::WidevinePackage>, String> {
+        self.inner.widevine(user)
+    }
+    fn set_widevine(
+        &self,
+        user: &str,
+        package: Option<&dsa_host_core::widevine::WidevinePackage>,
+    ) -> Result<(), String> {
+        self.inner.set_widevine(user, package)
+    }
     fn root_apps(&self, user: &str) -> Result<Vec<RootApp>, String> {
         self.inner.root_apps(user)
     }

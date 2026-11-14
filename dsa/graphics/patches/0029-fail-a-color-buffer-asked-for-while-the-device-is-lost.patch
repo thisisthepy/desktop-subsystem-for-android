@@ -1,0 +1,40 @@
+Subject: Fail a ColorBuffer asked for while the device is lost, instead of ending the stream
+
+A GPU reset loses the renderer's Vulkan device, and 0021 makes it again on a thread of its own
+while the guest's calls that need it fail at once. A ColorBuffer asked for in that time cannot
+be made, and FrameBuffer took that for a fatal error: it aborted, which (with aemu's 0002)
+ended the guest's stream. The guest process lost its renderer connection over a call that
+works again a few milliseconds later. When the ColorBuffer could not be made because the
+device was lost (it is not usable now, or a loss was counted during the call), the call
+fails instead: rcCreateColorBuffer answers handle 0, and a ColorBuffer asked for under the
+guest's own handle is not made, which the guest's next open finds. The stream stays, and the
+same call makes the ColorBuffer on the new device. Any other failure stays fatal.
+
+Applies after 0028 on gfxstream d047a57228332d995d36600792fa9ccc26cf8ae6.
+---
+diff --git a/host/FrameBuffer.cpp b/host/FrameBuffer.cpp
+--- a/host/FrameBuffer.cpp
++++ b/host/FrameBuffer.cpp
+@@ -1201,9 +1201,22 @@ HandleType FrameBuffer::createColorBufferWithResourceHandleLocked(int p_width, int p_height,
+                                                                   GLenum p_internalFormat,
+                                                                   FrameworkFormat p_frameworkFormat,
+                                                                   HandleType handle) {
++    // A GPU reset loses the Vulkan device, and a ColorBuffer asked for until the device is
++    // made again cannot be made. That is not the guest's fault and not fatal: the call fails
++    // (handle 0, or no ColorBuffer under the guest's handle, which the guest's next open
++    // finds), the guest's stream stays, and the same call works on the new device.
++    const uint64_t lossesBefore = m_emulationVk ? m_emulationVk->deviceLosses() : 0;
+     ColorBufferPtr cb =
+         ColorBuffer::create(m_emulationGl.get(), m_emulationVk.get(), p_width, p_height,
+                             p_internalFormat, p_frameworkFormat, handle, nullptr /*stream*/);
++    if (cb.get() == nullptr && m_emulationVk &&
++        (!m_emulationVk->deviceUsable() || m_emulationVk->deviceLosses() != lossesBefore)) {
++        ERR("Could not make ColorBuffer %u (%dx%d, format 0x%x): the renderer's Vulkan device "
++            "was lost and is being made again. The guest's call fails; it works again once "
++            "the new device is made.",
++            handle, p_width, p_height, p_internalFormat);
++        return 0;
++    }
+     if (cb.get() == nullptr) {
+         GFXSTREAM_ABORT(FatalError(ABORT_REASON_OTHER))
+             << "Failed to create ColorBuffer:" << handle << " format:" << p_internalFormat

@@ -1,5 +1,6 @@
 package io.github.thisisthepy.dsa.agent.platform
 
+import android.content.Intent
 import java.io.File
 import javax.xml.parsers.DocumentBuilderFactory
 import org.junit.Assert.assertEquals
@@ -56,7 +57,7 @@ class WidgetManifestTest {
         assertTrue(activity.attribute("resizeableActivity") != "false")
         // Each setup a new task, even beside another setup.
         val flags = WidgetConfigureActivity.LAUNCH_FLAGS
-        assertTrue(flags and android.content.Intent.FLAG_ACTIVITY_NEW_TASK != 0)
-        assertTrue(flags and android.content.Intent.FLAG_ACTIVITY_MULTIPLE_TASK != 0)
+        assertTrue(flags and Intent.FLAG_ACTIVITY_NEW_TASK != 0)
+        assertTrue(flags and Intent.FLAG_ACTIVITY_MULTIPLE_TASK != 0)
     }
 }

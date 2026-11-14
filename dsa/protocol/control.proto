@@ -245,7 +245,7 @@ message ResizeTask {
 }
 
 // Host to guest: the task's window is on a monitor of another scale; the task's app draws
-// at `density_dpi` (96 at a scale of 100%). The host sends the matching ResizeTask right
+// at `density_dpi` (130 at a scale of 100%). The host sends the matching ResizeTask right
 // after it, and the agent applies both together, so the app relays out once.
 message SetTaskDensity {
   int32 task_id = 1;
@@ -325,6 +325,11 @@ message InstalledApp {
   // The native libraries the app's APKs on the device hold, base and splits together, by
   // ABI, in ABI order. Empty for an app without native code.
   repeated NativeLibraries native_libraries = 13;
+  // The user ID the app shares with other apps (its manifest's `android:sharedUserId`), such
+  // as "com.example.shared". Apps with the same value run under one Android uid, so the host
+  // treats them as one group wherever only the uid tells them apart, as root elevation does.
+  // Empty for an app with a user ID of its own.
+  string shared_user_id = 14;
 }
 
 // The native libraries of one ABI: the file names under `lib/<abi>/` of an APK, or of an APK
@@ -730,6 +735,15 @@ message ImeSetComposingRegion {
 // sends this on each change after that.
 message ScreenState {
   bool on = 1;
+}
+
+// Host to guest, to the control daemon: the tasks whose window the host shows now, open and
+// not minimized; every other task's window is minimized. Sent after the connection opens and
+// on each change. The daemon keeps less page cache for a minimized task's app than for a shown
+// one, since it draws nothing and reads few files; until it is told, every task counts as
+// shown.
+message TasksShown {
+  repeated int32 task_ids = 1;
 }
 
 // Host to guest: the host computer's power, which the agent makes the guest's battery state
@@ -1389,6 +1403,16 @@ message GuestMemory {
   uint32 google_play_processes = 24;
   uint64 google_play_pss_kb = 25;
   uint64 google_play_swap_pss_kb = 26;
+  // Free page reporting, as the guest's kernel counts it: the free memory marked reported
+  // now, which the host has taken back (mem_free_kb less it is free memory the VM still
+  // holds); the memory reported to the host since boot, whose growth between two reports is
+  // how fast freed memory goes back; and the reported free memory the host took back in again
+  // since boot because a page beside it in the host's fault cluster was used, which the guest
+  // then reported again. All 0 when the guest cannot read them (reported_total_kb is never 0
+  // once reporting runs, since the first pass after boot reports every free page).
+  uint64 free_reported_kb = 27;
+  uint64 reported_total_kb = 28;
+  uint64 refaulted_total_kb = 29;
 }
 
 // From the agent to the guest's control daemon, on each connection to it: the agent has
@@ -1951,7 +1975,7 @@ message WidgetReconfigured {
 }
 
 // Host to guest: the size of the widget's host window. The agent draws the widget at `width`
-// by `height` pixels at `density_dpi` (96 at a scale of 100%), and tells the widget's app
+// by `height` pixels at `density_dpi` (130 at a scale of 100%), and tells the widget's app
 // its size in dp, so a widget with layouts for several sizes picks the one that fits.
 message ResizeWidget {
   int32 widget_id = 1;
@@ -2510,11 +2534,10 @@ message SystemSettings {
   // The host's accent color as 0xAARRGGBB, which becomes the seed of the guest's dynamic
   // colors. 0 when the host has none.
   fixed32 accent_color = 7;
-  // The guest's font scale (Settings.System.FONT_SCALE), so text in Android apps is the size
-  // of the host's text. Android draws at 96 dpi at a host scale of 100%, where a dp is 0.6 of
-  // a host pixel, and scales text separately from everything else, so this is 160/96 times
-  // the host's text size setting: about 1.667 at a text size of 100%, 2.5 at 150%. 0 leaves
-  // the guest's as it is.
+  // The guest's font scale (Settings.System.FONT_SCALE): the host's text size setting, 1 at
+  // a text size of 100% and 1.5 at 150%. Android draws at 130 dpi at a host scale of 100%,
+  // where a dp is 0.819 of a host pixel, and text follows the same ratio as everything else.
+  // 0 leaves the guest's as it is.
   float font_scale = 8;
 }
 
@@ -2764,6 +2787,23 @@ message BackupSetting {
   bool enabled = 1;
 }
 
+// Host to guest, to the control daemon: the root certificates a user or an administrator added
+// to the host's trust store (the host leaves out those its operating system ships), which
+// Android trusts as system certificates beside its own. Internet filters and company proxies
+// that inspect HTTPS install such a root on the computer, and apps reach the internet there only
+// if Android trusts it too. The daemon adds them to Android's system certificate folders without
+// a restart and takes away those it added before that are no longer named; Android's own
+// certificates are never touched. With `enabled` false it takes away every one it added. The
+// agent hears it too, once the folders are in step, and has every running app forget the trust
+// anchors it has looked up, so a root taken away stops being trusted at once. The host sends
+// it each time the daemon connects, again when the agent connects, and whenever the host's
+// store or the user's setting changes. A guest boots trusting none of them.
+message HostCertificates {
+  bool enabled = 1;
+  // Each certificate, DER-encoded X.509. Empty while `enabled` is false.
+  repeated bytes certificates = 2;
+}
+
 // Which passkey ceremony an app asks for.
 enum PasskeyOperation {
   PASSKEY_OPERATION_UNSPECIFIED = 0;
@@ -2837,6 +2877,32 @@ message KeyMintRootKey {
   bytes key = 1;
   // Why it is empty.
   string message = 2;
+}
+
+// Guest to host, on the DNS port, from the control daemon after the handshake: one DNS query
+// that a program in the guest made, as a whole DNS message (RFC 1035) with one question. The
+// host answers it with its operating system's resolver, so the host's hosts file, its name
+// resolution policy, a VPN's split DNS and a DNS filter apply to Android's apps as they do to
+// the host's own programs. Answered with the DnsAnswer that carries the same id; the queries
+// on one connection are answered in any order.
+message DnsQuery {
+  // The daemon's number for this query, unique among its unanswered queries.
+  uint32 id = 1;
+  // The DNS message as the program sent it.
+  bytes message = 2;
+  // Whether the program asked over TCP, so the answer may be as large as a DNS message can
+  // be. Over UDP, an answer larger than the program's buffer comes truncated (TC set), and the
+  // program asks again over TCP.
+  bool tcp = 3;
+}
+
+// Host to guest, on the DNS port: the answer to the DnsQuery with the same id, a whole DNS
+// message with the query's ID and question. When the host's resolver fails or takes too long
+// the answer says SERVFAIL, so a program in the guest never waits for an answer that does not
+// come.
+message DnsAnswer {
+  uint32 id = 1;
+  bytes message = 2;
 }
 
 // Speech and spelling from the host. The agent's text-to-speech engine, speech recognition
@@ -3081,6 +3147,7 @@ message Envelope {
     ClockProbe clock_probe = 28;
     ClockAnswer clock_answer = 29;
     ScreenState screen_state = 40;
+    TasksShown tasks_shown = 46;
     PowerState power_state = 41;
     DisplayRefresh display_refresh = 407;
     PowerHint power_hint = 110;
@@ -3240,5 +3307,8 @@ message Envelope {
     LaunchShortcut launch_shortcut = 681;
     PinShortcutRequest pin_shortcut_request = 682;
     PinShortcutAnswer pin_shortcut_answer = 683;
+    HostCertificates host_certificates = 684;
+    DnsQuery dns_query = 690;
+    DnsAnswer dns_answer = 691;
   }
 }

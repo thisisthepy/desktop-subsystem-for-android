@@ -28,6 +28,10 @@ nothing else.
    compose has finished, the hwcomposer makes the ColorBuffer the task display's current
    one (`rcSetDisplayColorBuffer`), which is when the host copies it into the window. Two
    ColorBuffers per task alternate, so the host can show one while the next is composed.
+   A task that has had no layer for 2 s (its window minimized, its app in the background)
+   lets go of both, since its window shows its own copy of the last frame; the next frame
+   makes them again. The hwcomposer asks SurfaceFlinger for a frame when they are due, as
+   nothing else changes on the display then.
 
 `presentDisplay` does not wait for the host. It hands the frame to a thread of its own,
 which composes and posts it, and waits only until the frame before has gone out. That is
@@ -120,7 +124,12 @@ So the hwcomposer copies them up (`src/cpu_upload.*`, with the rules in
 - A buffer whose usage says a CPU writes it and the GPU does not draw it keeps its
   descriptors when SurfaceFlinger first sends it.
 - At each validate, before SurfaceFlinger draws its client layers, each such layer's planes
-  are read through a gralloc CPU lock and sent with `rcUpdateColorBuffer`. A layer whose
+  are read through a gralloc CPU lock and sent with `rcUpdateColorBuffer`. The lock needs the
+  buffer imported from its handle (`AHardwareBuffer_createFromHandle`, cloning it, with the
+  method number in `dsa/graphics/include/dsa_hardware_buffer_import.h`): a wrong method is
+  refused before the mapper sees the buffer, and nothing is copied up. SurfaceFlinger's own
+  graphics driver leaves these copies to the hwcomposer, so a failed copy shows a video as
+  green. A failure is logged at its first, then once in 600 with its count. A layer whose
   buffer changed holds a new picture and is copied; a buffer seen again is copied only when
   a fingerprint of every eighth row of its planes changed. A buffer the GPU draws is never
   copied. The bytes copied each second are logged at debug level.
@@ -137,27 +146,31 @@ The guest Vulkan driver does the same in the other processes that sample such a 
 The display's size and density come from the kernel command line. `make-image.py` writes
 these defaults into `image.json`, and the host replaces the width and height with a square as
 long as the user's longest monitor when it starts the VM, and the density with the density of
-a window on the user's main monitor (144 at a scale of 150%). SurfaceFlinger, and so every
+a window on the user's main monitor (196 at a scale of 150%). SurfaceFlinger, and so every
 app, starts at that same density (`androidboot.lcd_density`, which the host sets beside it):
 
 | Property | Default |
 |---|---|
 | `androidboot.dsa.display_width` | 1920 |
 | `androidboot.dsa.display_height` | 1080 |
-| `androidboot.dsa.display_dpi` | 96 |
+| `androidboot.dsa.display_dpi` | 130 |
 | `androidboot.dsa.display_refresh_rate` | 60 |
 
 The display offers one configuration per refresh rate (60, 75, 90, 100, 120, 144, 165 and
 240 Hz, `src/refresh_rates.h`), all the same size and in one group, so SurfaceFlinger moves
 between them seamlessly. `display_refresh_rate` is only the rate it starts at. The host
 chooses the rate while Android runs: the user's fastest monitor, at most 60 Hz while the
-host's battery saver is on. It sends that rate to the agent (`DisplayRefresh`), which holds
+host's battery saver is on or while the user drags a window to a new size. It sends that rate to the agent (`DisplayRefresh`), which holds
 the framework's refresh rate range at it, and SurfaceFlinger then sets the matching
 configuration, whose period the vsync clock takes from its next tick.
 
 A window cannot be larger than this display. A task's ColorBuffers follow the task's own
 size in steps (`taskBufferSize`), so a large display costs nothing per window. Only the client
-target has the display's size, and only once SurfaceFlinger composes something itself.
+target has the display's size, and only while SurfaceFlinger composes something itself (a
+video's YUV pictures). Two seconds after the last such frame the hwcomposer lets go of the
+client target's ColorBuffers and asks for a frame, on which SurfaceFlinger (with DSA's
+framework patch, `dsa/guest/framework/patches/frameworks/native`) gives its own buffers back
+too. The next frame that needs them allocates them again.
 
 ## Build and test
 

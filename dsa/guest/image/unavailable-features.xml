@@ -7,7 +7,16 @@
      their ANRs takes the CPU from the apps on screen. Device lock is a phone carrier's
      financing lock, which a desktop has no use for; without the feature, system_server does
      not start its service. Without its HAL, the UWB service waits
-     for it forever and servicemanager tries to start it about twice a second. -->
+     for it forever and servicemanager tries to start it about twice a second. A PC has no
+     face or fingerprint sensor, no infrared blaster and no sensor hub, and their HALs are
+     removed: without the features, system_server starts neither the biometric services nor
+     the context hub's, and the consumer IR service, which refuses to start with the feature
+     but no HAL, starts without one. The guest's Wi-Fi is virt_wifi over the host's network,
+     a station that joins one network and has no radio of its own: no Wi-Fi Direct, Wi-Fi
+     Aware or round-trip timing, and no Thread radio (its HAL APEX is removed). Declared,
+     system_server starts a service for each, with its own threads, state machine and Java
+     heap, that waits on a radio that is never there. -->
+
 <permissions>
     <unavailable-feature name="android.hardware.uwb" />
     <unavailable-feature name="android.hardware.bluetooth" />
@@ -29,4 +38,12 @@
     <unavailable-feature name="android.hardware.telephony.ims" />
     <unavailable-feature name="android.hardware.telephony.euicc" />
     <unavailable-feature name="android.software.device_lock" />
+    <unavailable-feature name="android.hardware.biometrics.face" />
+    <unavailable-feature name="android.hardware.fingerprint" />
+    <unavailable-feature name="android.hardware.consumerir" />
+    <unavailable-feature name="android.hardware.context_hub" />
+    <unavailable-feature name="android.hardware.wifi.direct" />
+    <unavailable-feature name="android.hardware.wifi.aware" />
+    <unavailable-feature name="android.hardware.wifi.rtt" />
+    <unavailable-feature name="android.hardware.thread_network" />
 </permissions>

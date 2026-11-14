@@ -21,9 +21,12 @@
           "commit": "1690c6912a7972c9e62c39b48c706de9b8b18b4a",
           "cone": [
             "build",
+            "libartbase",
+            "libartpalette",
             "libdexfile",
             "libnativebridge",
-            "libnativeloader"
+            "libnativeloader",
+            "runtime"
           ],
           "exclude": [
             "build/apex/Android.bp",
@@ -96,6 +99,11 @@
           ]
         },
         {
+          "path": "external/FP16",
+          "url": "https://android.googlesource.com/platform/external/FP16",
+          "commit": "e6ad60074cdb730af563c2d1553f472dc6115bf5"
+        },
+        {
           "path": "external/XMP-Toolkit-SDK",
           "url": "https://android.googlesource.com/platform/external/XMP-Toolkit-SDK",
           "commit": "83f7b87cad246ed89c6c7cc66bfcfeeccec6cc99",
@@ -141,6 +149,11 @@
           "path": "external/arm-optimized-routines",
           "url": "https://android.googlesource.com/platform/external/arm-optimized-routines",
           "commit": "1a2b3aeae89d8d89155305e22cec96fc1028081c"
+        },
+        {
+          "path": "external/bcc",
+          "url": "https://android.googlesource.com/platform/external/bcc",
+          "commit": "01210563170460a86cea38b6f3ad3a68c36f1d66"
         },
         {
           "path": "external/boringssl",
@@ -189,6 +202,22 @@
           ]
         },
         {
+          "path": "external/eigen",
+          "url": "https://android.googlesource.com/platform/external/eigen",
+          "commit": "8e0a65994b692428dfc363f7b30f643374c4d144"
+        },
+        {
+          "path": "external/elfutils",
+          "url": "https://android.googlesource.com/platform/external/elfutils",
+          "commit": "93591ccb588e3a9819dee6431d94ea5fa2e03875",
+          "cone": [
+            "bionic-fixup",
+            "include",
+            "lib",
+            "libelf"
+          ]
+        },
+        {
           "path": "external/expat",
           "url": "https://android.googlesource.com/platform/external/expat",
           "commit": "79dde19a8fe1dfb580d39de37854221a6de5f09b",
@@ -196,6 +225,16 @@
             "expat/lib",
             "lib"
           ]
+        },
+        {
+          "path": "external/fft2d",
+          "url": "https://android.googlesource.com/platform/external/fft2d",
+          "commit": "fa0ad63f8b666836f56a823de546390a6e4ff4b6"
+        },
+        {
+          "path": "external/flatbuffers",
+          "url": "https://android.googlesource.com/platform/external/flatbuffers",
+          "commit": "58a81bef33e5c0a02a06d74dea4418d085a26432"
         },
         {
           "path": "external/fmtlib",
@@ -228,6 +267,11 @@
             "src/truetype",
             "src/type1"
           ]
+        },
+        {
+          "path": "external/gemmlowp",
+          "url": "https://android.googlesource.com/platform/external/gemmlowp",
+          "commit": "9304d9b673e827202f9526913d161e3cb49a1560"
         },
         {
           "path": "external/giflib",
@@ -320,6 +364,16 @@
           ]
         },
         {
+          "path": "external/libbpf",
+          "url": "https://android.googlesource.com/platform/external/libbpf",
+          "commit": "ff800a483e65c6f736a1646d1164c6dd4995af92"
+        },
+        {
+          "path": "external/libcap",
+          "url": "https://android.googlesource.com/platform/external/libcap",
+          "commit": "ca128b78c0b6629ffe88edc04d2a9415adbafcd0"
+        },
+        {
           "path": "external/libcxx",
           "url": "https://android.googlesource.com/platform/external/libcxx",
           "commit": "88894a62bb97313ed9bf79a546f1486de4b2e723"
@@ -366,6 +420,14 @@
           "cone": [
             "arm",
             "intel"
+          ]
+        },
+        {
+          "path": "external/libtextclassifier",
+          "url": "https://android.googlesource.com/platform/external/libtextclassifier",
+          "commit": "ab9d14623e9a6b1b4934614dab870532e0b726ca",
+          "cone": [
+            "native"
           ]
         },
         {
@@ -446,6 +508,9 @@
             "include",
             "protos",
             "src/android_internal",
+            "src/android_sdk/jni",
+            "src/android_sdk/nativehelper",
+            "src/android_sdk/perfetto_sdk_for_jni",
             "src/android_stats",
             "src/base",
             "src/ipc",
@@ -479,6 +544,11 @@
           ]
         },
         {
+          "path": "external/regex-re2",
+          "url": "https://android.googlesource.com/platform/external/regex-re2",
+          "commit": "e01f06cf85ee76b8c8c0ca2e3fc196f8b3f6d1b0"
+        },
+        {
           "path": "external/rust/android-crates-io",
           "url": "https://android.googlesource.com/platform/external/rust/android-crates-io",
           "commit": "0bb9c7a4cb26e195379037742a853fa381ecc102",
@@ -490,6 +560,7 @@
             "crates/annotate-snippets",
             "crates/anstyle",
             "crates/anyhow",
+            "crates/async-trait",
             "crates/bindgen",
             "crates/bindgen-cli",
             "crates/bitflags",
@@ -510,6 +581,8 @@
             "crates/codespan-reporting",
             "crates/const-oid",
             "crates/coset",
+            "crates/crossbeam-queue",
+            "crates/crossbeam-utils",
             "crates/der",
             "crates/der_derive",
             "crates/displaydoc",
@@ -545,6 +618,7 @@
             "crates/libc",
             "crates/libloading",
             "crates/litemap",
+            "crates/lock_api",
             "crates/log",
             "crates/memchr",
             "crates/memmap2",
@@ -554,6 +628,8 @@
             "crates/nom",
             "crates/once_cell",
             "crates/openssl-macros",
+            "crates/parking_lot",
+            "crates/parking_lot_core",
             "crates/paste",
             "crates/pkcs1",
             "crates/pkcs8",
@@ -574,12 +650,14 @@
             "crates/rustix",
             "crates/rustversion",
             "crates/ryu",
+            "crates/scopeguard",
             "crates/sec1",
             "crates/serde",
             "crates/serde_derive",
             "crates/serde_json",
             "crates/shlex",
             "crates/skrifa",
+            "crates/smallvec",
             "crates/spki",
             "crates/stable_deref_trait",
             "crates/static_assertions",
@@ -626,6 +704,16 @@
           "path": "external/rust/cxx",
           "url": "https://android.googlesource.com/platform/external/rust/cxx",
           "commit": "aa5556da131ac8f41aef2a57c2c887a21cf47ac1"
+        },
+        {
+          "path": "external/ruy",
+          "url": "https://android.googlesource.com/platform/external/ruy",
+          "commit": "c165d6b0f1a1be9ddd2f904e8f87a4c1d9b38c43"
+        },
+        {
+          "path": "external/scrypt",
+          "url": "https://android.googlesource.com/platform/external/scrypt",
+          "commit": "958140511cebc42a79e9eec852a4f7dfa2bd2755"
         },
         {
           "path": "external/scudo",
@@ -716,9 +804,39 @@
           ]
         },
         {
+          "path": "external/sqlite",
+          "url": "https://android.googlesource.com/platform/external/sqlite",
+          "commit": "c7a62b3b161f45bb530376227576685549e72852",
+          "cone": [
+            "android",
+            "dist"
+          ]
+        },
+        {
           "path": "external/starlark-go",
           "url": "https://android.googlesource.com/platform/external/starlark-go",
           "commit": "4947cdc739c985f6d86941e22894f5cefe7c9e9a"
+        },
+        {
+          "path": "external/tensorflow",
+          "url": "https://android.googlesource.com/platform/external/tensorflow",
+          "commit": "559b803b1a79a96c84abbfacb5eea9c622a06543",
+          "cone": [
+            "tensorflow/core/kernels",
+            "tensorflow/core/lib/bfloat16",
+            "tensorflow/core/lib/random",
+            "tensorflow/core/platform",
+            "tensorflow/core/public",
+            "tensorflow/lite",
+            "tensorflow/tsl/platform",
+            "third_party/eigen3",
+            "third_party/fft2d"
+          ]
+        },
+        {
+          "path": "external/tinyxml2",
+          "url": "https://android.googlesource.com/platform/external/tinyxml2",
+          "commit": "5f2c372c6213bfcb312adcfc9cafbce9f99eee78"
         },
         {
           "path": "external/vulkan-headers",
@@ -779,6 +897,7 @@
             "media/codec2/hal/hidl/1.2/utils",
             "media/codec2/sfplugin",
             "media/codec2/vndk",
+            "media/img_utils",
             "media/libaudioclient",
             "media/libaudiofoundation",
             "media/libaudioprocessing/include",
@@ -814,12 +933,17 @@
           "commit": "45034f0663f960d9ee5fb0a101a4732b71f6e2f4",
           "cone": [
             "api",
+            "cmds/idmap2",
             "core/java/android/companion/virtual/flags",
+            "core/java/android/companion/virtualnative",
             "core/java/android/content/res",
+            "core/java/android/database/sqlite",
             "core/java/android/hardware/flags",
             "core/java/android/os",
+            "core/java/android/permission",
             "core/java/android/text/flags",
             "core/java/android/view/accessibility/flags",
+            "core/java/android/window/flags",
             "core/jni",
             "libs/androidfw",
             "libs/content",
@@ -858,6 +982,14 @@
           ]
         },
         {
+          "path": "frameworks/libs/modules-utils",
+          "url": "https://android.googlesource.com/platform/frameworks/libs/modules-utils",
+          "commit": "e945bbce0ccb83e1111b6031a3bba89e6b5cac6f",
+          "cone": [
+            "build"
+          ]
+        },
+        {
           "path": "frameworks/minikin",
           "url": "https://android.googlesource.com/platform/frameworks/minikin",
           "commit": "1d91454dddc3d88b787440aa9a6f8072f4850a17",
@@ -872,14 +1004,19 @@
           "url": "https://android.googlesource.com/platform/frameworks/native",
           "commit": "fcbde2bcff56ca1d7bec9cabf8bdca5e288bf103",
           "cone": [
+            "aidl/android/hardware/display",
             "aidl/binder",
             "aidl/gui",
             "headers",
             "include",
             "libs/android_runtime_lazy",
             "libs/arect",
+            "libs/battery",
             "libs/binder",
+            "libs/binderdebug",
             "libs/binderthreadstate",
+            "libs/cputimeinstate",
+            "libs/debugstore/rust",
             "libs/gralloc/types",
             "libs/graphicsenv",
             "libs/gui",
@@ -890,6 +1027,7 @@
             "libs/nativewindow",
             "libs/permission",
             "libs/renderengine",
+            "libs/sensor",
             "libs/shaders",
             "libs/tonemap",
             "libs/tracing_perfetto",
@@ -913,6 +1051,8 @@
           "url": "https://android.googlesource.com/platform/hardware/interfaces",
           "commit": "aa229558cbf04bc997ed27465c5e7ad497123d1b",
           "cone": [
+            "camera/common/1.0",
+            "camera/device/3.2",
             "cas/1.0",
             "cas/native/1.0",
             "common/aidl",
@@ -941,6 +1081,9 @@
             "media/c2/aidl/aidl_api/android.hardware.media.c2",
             "media/c2/aidl/android/hardware/media/c2",
             "media/omx/1.0",
+            "memtrack/1.0",
+            "memtrack/aidl/aidl_api/android.hardware.memtrack",
+            "memtrack/aidl/android/hardware/memtrack",
             "power/1.0",
             "power/1.1",
             "power/1.2",
@@ -974,6 +1117,28 @@
           "path": "libnativehelper",
           "url": "https://android.googlesource.com/platform/libnativehelper",
           "commit": "2d584ec2da2c5271ed1576593c6590d652806f0d"
+        },
+        {
+          "path": "packages/modules/Connectivity",
+          "url": "https://android.googlesource.com/platform/packages/modules/Connectivity",
+          "commit": "f930245ec39a510f37a9a7dfaded96d287491a61",
+          "cone": [
+            "bpf/headers",
+            "bpf/syscall_wrappers",
+            "staticlibs/netd/libnetdutils"
+          ],
+          "exclude": [
+            "staticlibs/Android.bp",
+            "staticlibs/netd/Android.bp"
+          ]
+        },
+        {
+          "path": "packages/modules/DnsResolver",
+          "url": "https://android.googlesource.com/platform/packages/modules/DnsResolver",
+          "commit": "278cc346b4a2afd88e9b1155b716ebcb50dff8ca",
+          "exclude": [
+            "apex/Android.bp"
+          ]
         },
         {
           "path": "packages/modules/StatsD",
@@ -1073,12 +1238,22 @@
           ]
         },
         {
+          "path": "system/bpf",
+          "url": "https://android.googlesource.com/platform/system/bpf",
+          "commit": "0021d8d13eb1f603db6b1fa61b6d8ae4b65023db",
+          "cone": [
+            "progs"
+          ]
+        },
+        {
           "path": "system/core",
           "url": "https://android.googlesource.com/platform/system/core",
           "commit": "e9d1fa3705d7fbd0ac1c942bc4c276161bfbfed1",
           "cone": [
+            "debuggerd",
             "debuggerd/include",
             "include",
+            "libappfuse",
             "libcutils",
             "libgrallocusage",
             "libpackagelistparser",
@@ -1088,10 +1263,12 @@
             "libstats/socket_lazy",
             "libsync",
             "libsystem",
+            "libusbhost",
             "libutils",
             "libvndksupport",
             "property_service/libpropertyinfoparser",
-            "property_service/libpropertyinfoserializer"
+            "property_service/libpropertyinfoserializer",
+            "toolbox"
           ]
         },
         {
@@ -1099,7 +1276,9 @@
           "url": "https://android.googlesource.com/platform/system/hardware/interfaces",
           "commit": "8266ce79ba801eb1cb71f123651ab083ad1c1044",
           "cone": [
-            "media"
+            "media",
+            "suspend/1.0/default",
+            "suspend/aidl"
           ]
         },
         {
@@ -1108,6 +1287,7 @@
           "commit": "6d8b9b339e7cc9abfeba475fc4c89984c2824cd9",
           "cone": [
             "incfs",
+            "libdataloader",
             "sysprop"
           ]
         },
@@ -1115,6 +1295,11 @@
           "path": "system/keymint",
           "url": "https://android.googlesource.com/platform/system/keymint",
           "commit": "748182e106e68bb3661f733be3383a1b548fa51b"
+        },
+        {
+          "path": "system/libartpalette",
+          "url": "https://android.googlesource.com/platform/system/libartpalette",
+          "commit": "04477914833f33d061ed37561eacaeb525dc2887"
         },
         {
           "path": "system/libbase",
@@ -1171,6 +1356,11 @@
           ]
         },
         {
+          "path": "system/libvintf",
+          "url": "https://android.googlesource.com/platform/system/libvintf",
+          "commit": "69c456ea4aa2f503a2904cfbc11f279a3b2efb09"
+        },
+        {
           "path": "system/libziparchive",
           "url": "https://android.googlesource.com/platform/system/libziparchive",
           "commit": "94db64a81930e4cc8bacca4010bf935f664c97e1"
@@ -1206,6 +1396,46 @@
           "cone": [
             "include",
             "kernel-headers"
+          ]
+        },
+        {
+          "path": "system/memory/libmeminfo",
+          "url": "https://android.googlesource.com/platform/system/memory/libmeminfo",
+          "commit": "49326ec942a00db8994f2dc69796ea28c99643e1",
+          "cone": [
+            "include",
+            "libdmabufinfo"
+          ]
+        },
+        {
+          "path": "system/memory/libmemtrack",
+          "url": "https://android.googlesource.com/platform/system/memory/libmemtrack",
+          "commit": "79bee1fc6be158cd66298c02c5237d8bdfba5415"
+        },
+        {
+          "path": "system/memory/libmemunreachable",
+          "url": "https://android.googlesource.com/platform/system/memory/libmemunreachable",
+          "commit": "6417a0b4de782746ec1d68ca4b32b515255e6bb2"
+        },
+        {
+          "path": "system/netd",
+          "url": "https://android.googlesource.com/platform/system/netd",
+          "commit": "8d4a0b7420e67cec340dc37a88815d99a16abfa7",
+          "cone": [
+            "client",
+            "include"
+          ]
+        },
+        {
+          "path": "system/sepolicy",
+          "url": "https://android.googlesource.com/platform/system/sepolicy",
+          "commit": "43e4494a5a78317819dcc2766a11927c12ef3dfd",
+          "cone": [
+            "compat/libgenfslabelsversion"
+          ],
+          "exclude": [
+            "Android.bp",
+            "compat/Android.bp"
           ]
         },
         {
@@ -1281,9 +1511,12 @@
           "commit": "b753cf97923c3695338d21466fa14c57b480a59a",
           "cone": [
             "build",
+            "libartbase",
+            "libartpalette",
             "libdexfile",
             "libnativebridge",
-            "libnativeloader"
+            "libnativeloader",
+            "runtime"
           ],
           "exclude": [
             "build/apex/Android.bp",
@@ -1356,6 +1589,11 @@
           ]
         },
         {
+          "path": "external/FP16",
+          "url": "https://android.googlesource.com/platform/external/FP16",
+          "commit": "e6ad60074cdb730af563c2d1553f472dc6115bf5"
+        },
+        {
           "path": "external/XMP-Toolkit-SDK",
           "url": "https://android.googlesource.com/platform/external/XMP-Toolkit-SDK",
           "commit": "45acb237cd13c19708f963247c732250cd43a4a5",
@@ -1401,6 +1639,11 @@
           "path": "external/arm-optimized-routines",
           "url": "https://android.googlesource.com/platform/external/arm-optimized-routines",
           "commit": "498b3de1a06e8cd87b2f9d49d1d8a23ebba5cc5a"
+        },
+        {
+          "path": "external/bcc",
+          "url": "https://android.googlesource.com/platform/external/bcc",
+          "commit": "79791945c2f1db4a6b2a1443524f3f5d19338609"
         },
         {
           "path": "external/boringssl",
@@ -1450,6 +1693,22 @@
           ]
         },
         {
+          "path": "external/eigen",
+          "url": "https://android.googlesource.com/platform/external/eigen",
+          "commit": "711c7cdce03a5e52d73f6f85bbe198324bfccc0b"
+        },
+        {
+          "path": "external/elfutils",
+          "url": "https://android.googlesource.com/platform/external/elfutils",
+          "commit": "219c3a368b121307f2e05593cee89b8591cc40b9",
+          "cone": [
+            "bionic-fixup",
+            "include",
+            "lib",
+            "libelf"
+          ]
+        },
+        {
           "path": "external/expat",
           "url": "https://android.googlesource.com/platform/external/expat",
           "commit": "9cc7a1ca765061a58e196f101fc601d23845c89a",
@@ -1457,6 +1716,16 @@
             "expat/lib",
             "lib"
           ]
+        },
+        {
+          "path": "external/fft2d",
+          "url": "https://android.googlesource.com/platform/external/fft2d",
+          "commit": "fa0ad63f8b666836f56a823de546390a6e4ff4b6"
+        },
+        {
+          "path": "external/flatbuffers",
+          "url": "https://android.googlesource.com/platform/external/flatbuffers",
+          "commit": "a321165845235e5fa63a5455ee866f4a5008b7c6"
         },
         {
           "path": "external/fmtlib",
@@ -1489,6 +1758,11 @@
             "src/truetype",
             "src/type1"
           ]
+        },
+        {
+          "path": "external/gemmlowp",
+          "url": "https://android.googlesource.com/platform/external/gemmlowp",
+          "commit": "9304d9b673e827202f9526913d161e3cb49a1560"
         },
         {
           "path": "external/giflib",
@@ -1581,6 +1855,16 @@
           ]
         },
         {
+          "path": "external/libbpf",
+          "url": "https://android.googlesource.com/platform/external/libbpf",
+          "commit": "9723b4de6459ab48b361aed3bae5df3c1bd20cb8"
+        },
+        {
+          "path": "external/libcap",
+          "url": "https://android.googlesource.com/platform/external/libcap",
+          "commit": "9a2ead0b5a377a75849cb0656aa553b5452a7080"
+        },
+        {
           "path": "external/libcxx",
           "url": "https://android.googlesource.com/platform/external/libcxx",
           "commit": "88894a62bb97313ed9bf79a546f1486de4b2e723"
@@ -1627,6 +1911,14 @@
           "cone": [
             "arm",
             "intel"
+          ]
+        },
+        {
+          "path": "external/libtextclassifier",
+          "url": "https://android.googlesource.com/platform/external/libtextclassifier",
+          "commit": "2973bcf11b21bcd40064f1751638d06cf6023e47",
+          "cone": [
+            "native"
           ]
         },
         {
@@ -1707,6 +1999,9 @@
             "include",
             "protos",
             "src/android_internal",
+            "src/android_sdk/jni",
+            "src/android_sdk/nativehelper",
+            "src/android_sdk/perfetto_sdk_for_jni",
             "src/android_stats",
             "src/base",
             "src/ipc",
@@ -1724,6 +2019,44 @@
           "commit": "c7c1d44ab9b98e9e51baf1e5d02f65ba03fbed28",
           "cone": [
             "src"
+          ]
+        },
+        {
+          "path": "external/pigweed",
+          "url": "https://android.googlesource.com/platform/external/pigweed",
+          "commit": "db5cb0db8513b2598ae7c1fa8a6441ff7f8808b5",
+          "cone": [
+            "pw_allocator",
+            "pw_assert",
+            "pw_assert_log",
+            "pw_base64",
+            "pw_build_android",
+            "pw_bytes",
+            "pw_chrono",
+            "pw_chrono_stl",
+            "pw_containers",
+            "pw_function",
+            "pw_log",
+            "pw_log_android",
+            "pw_log_tokenized",
+            "pw_memory",
+            "pw_metric",
+            "pw_numeric",
+            "pw_polyfill",
+            "pw_preprocessor",
+            "pw_result",
+            "pw_span",
+            "pw_status",
+            "pw_stream",
+            "pw_string",
+            "pw_sync",
+            "pw_sync_stl",
+            "pw_thread",
+            "pw_thread_stl",
+            "pw_tokenizer",
+            "pw_toolchain",
+            "pw_varint",
+            "third_party"
           ]
         },
         {
@@ -1753,6 +2086,11 @@
           ]
         },
         {
+          "path": "external/regex-re2",
+          "url": "https://android.googlesource.com/platform/external/regex-re2",
+          "commit": "1b18ee77492041f7f0a7063ad8e02b5694aa6683"
+        },
+        {
           "path": "external/rust/android-crates-io",
           "url": "https://android.googlesource.com/platform/external/rust/android-crates-io",
           "commit": "1f5e95cd6e996995023c9c0f7df0f15a8a43269e",
@@ -1763,6 +2101,7 @@
             "crates/annotate-snippets",
             "crates/anstyle",
             "crates/anyhow",
+            "crates/async-trait",
             "crates/bindgen",
             "crates/bindgen-cli",
             "crates/bitflags",
@@ -1783,6 +2122,8 @@
             "crates/codespan-reporting",
             "crates/const-oid",
             "crates/coset",
+            "crates/crossbeam-queue",
+            "crates/crossbeam-utils",
             "crates/der",
             "crates/der_derive",
             "crates/displaydoc",
@@ -1816,9 +2157,12 @@
             "crates/itertools",
             "crates/itoa",
             "crates/lazy_static",
+            "crates/libbpf-rs",
+            "crates/libbpf-sys",
             "crates/libc",
             "crates/libloading",
             "crates/litemap",
+            "crates/lock_api",
             "crates/log",
             "crates/memchr",
             "crates/memmap2",
@@ -1828,6 +2172,8 @@
             "crates/nom",
             "crates/once_cell",
             "crates/openssl-macros",
+            "crates/parking_lot",
+            "crates/parking_lot_core",
             "crates/paste",
             "crates/pkcs1",
             "crates/pkcs8",
@@ -1849,6 +2195,7 @@
             "crates/rustversion",
             "crates/ryu",
             "crates/same-file",
+            "crates/scopeguard",
             "crates/sec1",
             "crates/serde",
             "crates/serde_core",
@@ -1856,6 +2203,7 @@
             "crates/serde_json",
             "crates/shlex",
             "crates/skrifa",
+            "crates/smallvec",
             "crates/spin",
             "crates/spki",
             "crates/stable_deref_trait",
@@ -1872,6 +2220,7 @@
             "crates/unicode-bidi",
             "crates/unicode-ident",
             "crates/unicode-width",
+            "crates/vsprintf",
             "crates/walkdir",
             "crates/which",
             "crates/writeable",
@@ -1903,6 +2252,16 @@
           "path": "external/rust/cxx",
           "url": "https://android.googlesource.com/platform/external/rust/cxx",
           "commit": "41972f6ebbe9c21eeed3fdf5c1b0805f2c8b824c"
+        },
+        {
+          "path": "external/ruy",
+          "url": "https://android.googlesource.com/platform/external/ruy",
+          "commit": "c165d6b0f1a1be9ddd2f904e8f87a4c1d9b38c43"
+        },
+        {
+          "path": "external/scrypt",
+          "url": "https://android.googlesource.com/platform/external/scrypt",
+          "commit": "958140511cebc42a79e9eec852a4f7dfa2bd2755"
         },
         {
           "path": "external/scudo",
@@ -1993,9 +2352,39 @@
           ]
         },
         {
+          "path": "external/sqlite",
+          "url": "https://android.googlesource.com/platform/external/sqlite",
+          "commit": "7961228217942c86f2b0bd2ae4115d00e157fc0b",
+          "cone": [
+            "android",
+            "dist"
+          ]
+        },
+        {
           "path": "external/starlark-go",
           "url": "https://android.googlesource.com/platform/external/starlark-go",
           "commit": "4947cdc739c985f6d86941e22894f5cefe7c9e9a"
+        },
+        {
+          "path": "external/tensorflow",
+          "url": "https://android.googlesource.com/platform/external/tensorflow",
+          "commit": "d6bfb0bfab3e7565df0be176c3ebaa45ff9000ec",
+          "cone": [
+            "tensorflow/core/kernels",
+            "tensorflow/core/lib/bfloat16",
+            "tensorflow/core/lib/random",
+            "tensorflow/core/platform",
+            "tensorflow/core/public",
+            "tensorflow/lite",
+            "tensorflow/tsl/platform",
+            "third_party/eigen3",
+            "third_party/fft2d"
+          ]
+        },
+        {
+          "path": "external/tinyxml2",
+          "url": "https://android.googlesource.com/platform/external/tinyxml2",
+          "commit": "33ba115074c80a720826efffab1937d5b355c3b8"
         },
         {
           "path": "external/vulkan-headers",
@@ -2057,6 +2446,7 @@
             "media/codec2/libion_legacy",
             "media/codec2/sfplugin",
             "media/codec2/vndk",
+            "media/img_utils",
             "media/libaaudio",
             "media/libaudioclient",
             "media/libaudiofoundation",
@@ -2092,12 +2482,17 @@
           "commit": "94b4c163b7dfe5ce3607f7bb8456f9573f7de57d",
           "cone": [
             "api",
+            "cmds/idmap2",
             "core/java/android/app/privatecompute",
             "core/java/android/companion/virtual/flags",
+            "core/java/android/companion/virtualnative",
             "core/java/android/content/res",
+            "core/java/android/database/sqlite",
             "core/java/android/hardware/flags",
             "core/java/android/os",
+            "core/java/android/permission",
             "core/java/android/text/flags",
+            "core/java/android/tracing",
             "core/java/android/view/accessibility/flags",
             "core/java/android/window/flags",
             "core/jni",
@@ -2130,6 +2525,14 @@
           ]
         },
         {
+          "path": "frameworks/libs/modules-utils",
+          "url": "https://android.googlesource.com/platform/frameworks/libs/modules-utils",
+          "commit": "a11fa5c814cc3239217ce4d093bfc5c808f73785",
+          "cone": [
+            "build"
+          ]
+        },
+        {
           "path": "frameworks/minikin",
           "url": "https://android.googlesource.com/platform/frameworks/minikin",
           "commit": "915f1232cff2f38be1ed2273769c5ffd00928dff",
@@ -2144,14 +2547,20 @@
           "url": "https://android.googlesource.com/platform/frameworks/native",
           "commit": "ae266dcb706d083868578cfedce381ef44488a07",
           "cone": [
+            "aidl/android/hardware/display",
             "aidl/binder",
             "aidl/gui",
             "headers",
             "include",
             "libs/android_runtime_lazy",
             "libs/arect",
+            "libs/battery",
             "libs/binder",
+            "libs/binderdebug",
             "libs/binderthreadstate",
+            "libs/cpucycleperuid",
+            "libs/cputimeinstate",
+            "libs/debugstore/rust",
             "libs/gralloc/types",
             "libs/graphicsenv",
             "libs/gui",
@@ -2162,7 +2571,9 @@
             "libs/nativedisplay",
             "libs/nativewindow",
             "libs/permission",
+            "libs/protolog",
             "libs/renderengine",
+            "libs/sensor",
             "libs/shaders",
             "libs/tonemap",
             "libs/tracing_perfetto",
@@ -2185,11 +2596,15 @@
           "url": "https://android.googlesource.com/platform/hardware/interfaces",
           "commit": "0162af698935100a590b7359581ac8b1b80693e5",
           "cone": [
+            "camera/common/1.0",
+            "camera/device/3.2",
             "cas/1.0",
             "cas/native/1.0",
             "common/aidl",
             "common/fmq/aidl",
             "common/support",
+            "contexthub/aidl/aidl_api/android.hardware.contexthub",
+            "contexthub/aidl/android/hardware/contexthub",
             "drm/1.0",
             "drm/1.1",
             "drm/1.2",
@@ -2210,6 +2625,8 @@
             "media/c2/aidl/aidl_api/android.hardware.media.c2",
             "media/c2/aidl/android/hardware/media/c2",
             "media/omx/1.0",
+            "memtrack/aidl/aidl_api/android.hardware.memtrack",
+            "memtrack/aidl/android/hardware/memtrack",
             "power/1.0",
             "power/1.1",
             "power/1.2",
@@ -2243,6 +2660,28 @@
           "path": "libnativehelper",
           "url": "https://android.googlesource.com/platform/libnativehelper",
           "commit": "5b63a7e308ca88c5c4a2a74dfda9c73ed17cfebb"
+        },
+        {
+          "path": "packages/modules/Connectivity",
+          "url": "https://android.googlesource.com/platform/packages/modules/Connectivity",
+          "commit": "347fbd34b368d19f0d87e908ea101eed3601a731",
+          "cone": [
+            "bpf/headers",
+            "bpf/syscall_wrappers",
+            "staticlibs/netd/libnetdutils"
+          ],
+          "exclude": [
+            "staticlibs/Android.bp",
+            "staticlibs/netd/Android.bp"
+          ]
+        },
+        {
+          "path": "packages/modules/DnsResolver",
+          "url": "https://android.googlesource.com/platform/packages/modules/DnsResolver",
+          "commit": "0aeaf9d222ec761b9e0443a01c7a06590b9d1b4f",
+          "exclude": [
+            "apex/Android.bp"
+          ]
         },
         {
           "path": "packages/modules/StatsD",
@@ -2341,12 +2780,34 @@
           ]
         },
         {
+          "path": "system/bpf",
+          "url": "https://android.googlesource.com/platform/system/bpf",
+          "commit": "d68a263039127dc709114802395e57537a02babf",
+          "cone": [
+            "progs"
+          ]
+        },
+        {
+          "path": "system/chre",
+          "url": "https://android.googlesource.com/platform/system/chre",
+          "commit": "17b4a35a8c2b9f27e7f1b382b7d714aced928ce4",
+          "cone": [
+            "data_flow",
+            "platform/include",
+            "platform/shared/public_std_atomic_ref",
+            "variant/googletest/include",
+            "variant/include"
+          ]
+        },
+        {
           "path": "system/core",
           "url": "https://android.googlesource.com/platform/system/core",
           "commit": "545d2487e38192a2ce25040897ced877cf6b4f53",
           "cone": [
+            "debuggerd",
             "debuggerd/include",
             "include",
+            "libappfuse",
             "libcutils",
             "libgrallocusage",
             "libpackagelistparser",
@@ -2356,10 +2817,12 @@
             "libstats/socket_lazy",
             "libsync",
             "libsystem",
+            "libusbhost",
             "libutils",
             "libvndksupport",
             "property_service/libpropertyinfoparser",
-            "property_service/libpropertyinfoserializer"
+            "property_service/libpropertyinfoserializer",
+            "toolbox"
           ]
         },
         {
@@ -2367,7 +2830,8 @@
           "url": "https://android.googlesource.com/platform/system/hardware/interfaces",
           "commit": "9c3469aa3d4aeec5b2bc8e8ae8fdb4437dab4edb",
           "cone": [
-            "media"
+            "media",
+            "suspend/aidl"
           ]
         },
         {
@@ -2376,6 +2840,7 @@
           "commit": "6b853f9e5703a8c90648f82850a3a01d9763e619",
           "cone": [
             "incfs",
+            "libdataloader",
             "sysprop"
           ]
         },
@@ -2383,6 +2848,11 @@
           "path": "system/keymint",
           "url": "https://android.googlesource.com/platform/system/keymint",
           "commit": "cfeefc94bf8c4f19d19dca193d376a1fc05e8e3e"
+        },
+        {
+          "path": "system/libartpalette",
+          "url": "https://android.googlesource.com/platform/system/libartpalette",
+          "commit": "9d680186fa4f024111b271feedb5cd7156768902"
         },
         {
           "path": "system/libbase",
@@ -2439,6 +2909,11 @@
           ]
         },
         {
+          "path": "system/libvintf",
+          "url": "https://android.googlesource.com/platform/system/libvintf",
+          "commit": "df89ad736e14ac375f61d50fa543ae7cd746a140"
+        },
+        {
           "path": "system/libziparchive",
           "url": "https://android.googlesource.com/platform/system/libziparchive",
           "commit": "bdd41f9c99400f241363b035eb64ad3d5f063c82"
@@ -2474,6 +2949,46 @@
           "cone": [
             "include",
             "kernel-headers"
+          ]
+        },
+        {
+          "path": "system/memory/libmeminfo",
+          "url": "https://android.googlesource.com/platform/system/memory/libmeminfo",
+          "commit": "d59c960b1fb93377bf68664918031ea5fe709f89",
+          "cone": [
+            "include",
+            "libdmabufinfo"
+          ]
+        },
+        {
+          "path": "system/memory/libmemtrack",
+          "url": "https://android.googlesource.com/platform/system/memory/libmemtrack",
+          "commit": "25ee95c80f9be933f4d0a2f399db1b98195f384d"
+        },
+        {
+          "path": "system/memory/libmemunreachable",
+          "url": "https://android.googlesource.com/platform/system/memory/libmemunreachable",
+          "commit": "c3dc0b2f3ce01b53388635a14b01ca7e7a7000cc"
+        },
+        {
+          "path": "system/netd",
+          "url": "https://android.googlesource.com/platform/system/netd",
+          "commit": "43c893c7f33de178d6edaf5be49aed0794b3a917",
+          "cone": [
+            "client",
+            "include"
+          ]
+        },
+        {
+          "path": "system/sepolicy",
+          "url": "https://android.googlesource.com/platform/system/sepolicy",
+          "commit": "e066568e98d86db31a9346d30977f3632fa7073c",
+          "cone": [
+            "compat/libgenfslabelsversion"
+          ],
+          "exclude": [
+            "Android.bp",
+            "compat/Android.bp"
           ]
         },
         {
@@ -2518,6 +3033,14 @@
           "commit": "31327c70da147fdc069598c4a5fd075aea8d3312",
           "cone": [
             "libunwindstack"
+          ]
+        },
+        {
+          "path": "system/zygote",
+          "url": "https://android.googlesource.com/platform/system/zygote",
+          "commit": "c24023080df0bdb5988c1e0c641d494574a97c40",
+          "cone": [
+            "zygote-messages"
           ]
         },
         {

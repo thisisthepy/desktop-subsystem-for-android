@@ -174,7 +174,7 @@ pub fn look(dark: bool, accent: u32) -> Look {
 }
 
 /// What the cursor shows over a part of a widget window, by its `cursor-shape-v1` name: the
-/// arrows of an edge it is resized by, the move cross on its More button, the arrow elsewhere.
+/// arrows of an edge or a handle it is resized by, the arrow elsewhere.
 pub fn cursor_name(hit: Hit) -> &'static str {
     match hit {
         Hit::Left => "w-resize",
@@ -185,7 +185,7 @@ pub fn cursor_name(hit: Hit) -> &'static str {
         Hit::TopRight => "ne-resize",
         Hit::BottomLeft => "sw-resize",
         Hit::BottomRight => "se-resize",
-        Hit::Client | Hit::More | Hit::Outside => "default",
+        Hit::Client | Hit::Outside => "default",
     }
 }
 
@@ -211,18 +211,22 @@ mod tests {
         assert_eq!(dpi_of_scale(1), 96);
         assert_eq!(dpi_of_scale(2), 192);
         assert_eq!(dpi_of_scale(0), 96);
-        // 180 x 110 dp is 108 x 66 logical pixels at every scale: 216 x 132 pixels at 2.
+        // Android draws its desktop at 131 dpi times the scale, rounded to an even density: at
+        // a scale of 2 that is 262, so 180 x 110 dp is 295 x 180 pixels, 148 x 90 logical
+        // pixels.
         let px = dsa_host_core::widget_windows::window_size(
             &dsa_host_core::widgets::Placement {
                 x: 0,
                 y: 0,
                 width_dp: 180,
                 height_dp: 110,
+                resized: false,
             },
             dpi_of_scale(2),
         );
-        assert_eq!(px, (216, 132));
-        assert_eq!((logical_size(px.0, 2), logical_size(px.1, 2)), (108, 66));
+        assert_eq!(dsa_host_core::widget_windows::android_density(192), 262);
+        assert_eq!(px, (295, 180));
+        assert_eq!((logical_size(px.0, 2), logical_size(px.1, 2)), (148, 90));
         assert_eq!(logical_size(215, 2), 108);
         assert_eq!(logical_place(-3, 2), -2);
         assert_eq!(logical_place(64, 2), 32);

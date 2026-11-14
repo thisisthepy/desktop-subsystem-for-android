@@ -46,14 +46,19 @@ import java.util.concurrent.atomic.AtomicLong;
  * </ul>
  *
  * Pictures reaching the screen are counted with the codec's rendered-frame callback, and what
- * the surface shows is copied back (PixelCopy) and its colours checked as well.
+ * the surface shows is copied back (PixelCopy) and its colours checked as well. The display is
+ * then captured as SurfaceFlinger composes it, and the bars checked where the surface sits on
+ * it: PixelCopy reads the surface in the probe's own process, whose graphics driver copies the
+ * decoder's picture up to the host by itself, so a picture the composer never copied up
+ * (green on screen, as YouTube showed it) passes PixelCopy and fails only here.
  *
  * <p>Results, per clip ({@code avc_426x240} and so on) and decoder:
  * {@code video.<clip>.<decoder>.buffer.out}, {@code .buffer.colour} ("ok" or what is wrong),
  * {@code .surface.rendered}, {@code .surface.presented}, {@code .surface.after_swap},
- * {@code .surface.colour}, {@code .surface.audio}, {@code .shorts.first},
- * {@code .shorts.second}, {@code .shorts.first_frame_ms}, {@code .shorts.colour}, and
- * {@code .<way>.error} for a way that threw.
+ * {@code .surface.colour}, {@code .surface.screen}, {@code .surface.audio},
+ * {@code .shorts.first}, {@code .shorts.second}, {@code .shorts.first_frame_ms},
+ * {@code .shorts.colour}, {@code .shorts.screen}, and {@code .<way>.error} for a way that
+ * threw.
  */
 final class VideoCheck {
     private static final String TAG = MediaProbe.TAG;
@@ -296,6 +301,52 @@ final class VideoCheck {
         return "ok";
     }
 
+    /**
+     * "ok", or what is wrong with the bars where a surface sits on the display, in a capture
+     * of the whole display as SurfaceFlinger composes it. The surface scales the picture to
+     * its own size, and the bars are upright stripes, so each is looked for at the same
+     * fraction of the surface's width.
+     */
+    private String screenColours(SurfaceView view) {
+        int[] origin = new int[2];
+        view.getLocationOnScreen(origin);
+        int width = view.getWidth();
+        int height = view.getHeight();
+        if (width < 8 || height < 8) {
+            return "the surface is " + width + "x" + height + " on screen";
+        }
+        Bitmap shot = instrumentation.getUiAutomation().takeScreenshot();
+        if (shot == null) {
+            return "the display could not be captured";
+        }
+        Bitmap screen = shot.getConfig() == Bitmap.Config.HARDWARE
+                ? shot.copy(Bitmap.Config.ARGB_8888, false)
+                : shot;
+        if (screen == null) {
+            return "the display's capture could not be read";
+        }
+        int[] rows = {height / 4, height / 2, height * 3 / 4};
+        for (int b = 0; b < 4; b++) {
+            int want = BAR_COLOURS[b];
+            for (int row : rows) {
+                int x = origin[0] + (2 * b + 1) * width / 8;
+                int y = origin[1] + row;
+                if (x < 0 || y < 0 || x >= screen.getWidth() || y >= screen.getHeight()) {
+                    return String.format("the surface at %d,%d (%dx%d) is off the %dx%d display",
+                            origin[0], origin[1], width, height, screen.getWidth(), screen.getHeight());
+                }
+                int got = screen.getPixel(x, y);
+                if (Math.abs(Color.red(got) - Color.red(want)) > RGB_TOLERANCE
+                        || Math.abs(Color.green(got) - Color.green(want)) > RGB_TOLERANCE
+                        || Math.abs(Color.blue(got) - Color.blue(want)) > RGB_TOLERANCE) {
+                    return String.format("wrong colour on screen at %d,%d: #%06x, not #%06x", x, y,
+                            got & 0xffffff, want & 0xffffff);
+                }
+            }
+        }
+        return "ok";
+    }
+
     /** Queues the clip's next unit, or its end; returns how many are queued. */
     private static int queueNext(MediaCodec codec, MediaProbe.Stream stream, int queued, long offsetUs,
             boolean configFirst) {
@@ -439,6 +490,7 @@ final class VideoCheck {
             // The last pictures reach the screen, and their callbacks come.
             SystemClock.sleep(1000);
             results.putString(key + ".colour", surfaceColours(activity.view(1), width, height, handler));
+            results.putString(key + ".screen", screenColours(activity.view(1)));
             codec.stop();
         } finally {
             codec.release();
@@ -500,6 +552,7 @@ final class VideoCheck {
                 SystemClock.sleep(50);
             }
             results.putString(key + ".colour", surfaceColours(activity.view(1), width, height, handler));
+            results.putString(key + ".screen", screenColours(activity.view(1)));
             codec.stop();
         } finally {
             codec.release();

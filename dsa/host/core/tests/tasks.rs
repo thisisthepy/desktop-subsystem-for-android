@@ -2,6 +2,8 @@
 //! session in the service, and a client of the local API, all over the in-memory
 //! transports.
 
+mod common;
+
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -100,6 +102,7 @@ fn connect_agent(control: &mut MemoryConnector, guest: &Guest) -> Box<dyn Connec
         WAIT,
     )
     .expect("the host accepts the agent");
+    let mut agent: Box<dyn Connection> = Box::new(common::PastConnectSettings(agent));
     // The guest has finished booting and its agent has connected, as its daemon reports.
     agent
         .send(&dsa_protocol::encode(&dsa_protocol::control::Envelope {

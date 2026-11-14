@@ -256,13 +256,13 @@ jobs:
           name: caption-pictures
           path: .scratch/caption-pictures
 
-      # Pictures of a widget's menu (the menu and its Resize submenu) and of its More button
-      # at rest, hovered and pressed, in both themes at 100% and 150%, kept with the run.
+      # Pictures of a widget's menu (the menu and its Resize submenu) and of a widget being
+      # edited with its menu under it, in both themes at 100% and 150%, kept with the run.
       - name: Draw the widget menu pictures
         if: runner.os == 'Windows'
         env:
           DSA_WIDGET_MENU_PICTURES: ${{ github.workspace }}/.scratch/widget-menu-pictures
-        run: cargo test -p dsa-host-windows --lib fr12_pictures_of_the_widget_menu_and_its_more_button
+        run: cargo test -p dsa-host-windows --lib fr12_pictures_of_the_widget_menu
 
       - name: Keep the widget menu pictures
         if: runner.os == 'Windows'

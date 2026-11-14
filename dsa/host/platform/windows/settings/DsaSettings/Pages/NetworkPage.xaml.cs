@@ -5,8 +5,9 @@ using Dsa.Settings.Core;
 
 namespace Dsa.Settings.Pages;
 
-/// <summary>How Android reaches the network, and developer mode: how adb reaches Android
-/// through this PC's loopback address.</summary>
+/// <summary>How Android reaches the network, the root certificates added to this PC that
+/// Android trusts, and developer mode: how adb reaches Android through this PC's loopback
+/// address.</summary>
 public partial class NetworkPage : Page
 {
     /// <summary>Reads where adb auto-connect stands while the page is shown.</summary>
@@ -32,6 +33,9 @@ public partial class NetworkPage : Page
 
     private async void OnAdvancedNetworkingToggled(object sender, RoutedEventArgs e) =>
         await ViewModel.SetAdvancedNetworkingAsync(AdvancedNetworkingSwitch.IsChecked == true);
+
+    private async void OnHostCertificatesToggled(object sender, RoutedEventArgs e) =>
+        await ViewModel.SetHostCertificatesAsync(HostCertificatesSwitch.IsChecked == true);
 
     private async void OnDeveloperModeToggled(object sender, RoutedEventArgs e) =>
         await ViewModel.SetDeveloperModeAsync(DeveloperModeSwitch.IsChecked == true);

@@ -18,14 +18,14 @@
         </Grid>
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
             <StackPanel Style="{StaticResource PageContent}">
-                <TextBlock Text="{l:Text WidgetsIntro.Text}" Style="{StaticResource Note}" />
+                <TextBlock Text="{l:Text WidgetsIntro.Text}" Style="{StaticResource PageIntro}" />
 
                 <ProgressBar IsIndeterminate="True" Margin="0,8,0,0"
                              Visibility="{Binding IsBusy, Converter={StaticResource Visible}}" />
                 <ui:InfoBar Title="{l:Text WidgetsErrorBar.Title}" Severity="Error" IsClosable="False"
-                            IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" Margin="0,0,0,4" />
+                            IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" />
                 <ui:InfoBar Title="{l:Text WidgetsDoneBar.Title}" Severity="Success" IsClosable="False"
-                            IsOpen="{Binding HasMessage, Mode=OneWay}" Message="{Binding Message, Mode=OneWay}" Margin="0,0,0,4" />
+                            IsOpen="{Binding HasMessage, Mode=OneWay}" Message="{Binding Message, Mode=OneWay}" />
 
                 <TextBlock Text="{l:Text WidgetsPlacedHeader.Text}" Style="{StaticResource SectionHeader}" />
                 <TextBlock Text="{l:Text WidgetsPlacedNone.Text}" Style="{StaticResource Note}"
@@ -33,7 +33,7 @@
                 <l:RowList ItemsSource="{Binding Placed, Mode=OneWay}">
                     <l:RowList.ItemTemplate>
                         <DataTemplate>
-                            <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Apps24}">
+                            <ui:CardControl Icon="{ui:SymbolIcon Apps24}">
                                 <ui:CardControl.Header>
                                     <StackPanel>
                                         <TextBlock Text="{Binding Label}" Style="{StaticResource CardTitle}" />
@@ -54,7 +54,7 @@
                 <l:RowList ItemsSource="{Binding Offers, Mode=OneWay}">
                     <l:RowList.ItemTemplate>
                         <DataTemplate>
-                            <ui:CardControl Margin="0,0,0,4">
+                            <ui:CardControl>
                                 <ui:CardControl.Header>
                                     <StackPanel Orientation="Horizontal">
                                         <Border Width="64" Height="64" Margin="0,0,12,0" CornerRadius="4">

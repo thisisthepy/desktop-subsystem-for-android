@@ -32,6 +32,8 @@
 //! - [`keychain`], [`secure_enclave`] and `host_services`: the app data backup in `~/DSA Backup`,
 //!   the passkey check and KeyMint's root key: the backup key in the user's login keychain, the
 //!   KeyMint root key sealed by the Secure Enclave first.
+//! - `host_certificates`: the root certificates the administrator's and the user's trust
+//!   settings added, which the user's Android trusts beside its own.
 //!
 //! What can be checked anywhere (the kernel command line, the disk formats, the
 //! configuration, the launchd agent, key tables, sizes, bundle layouts, value conversions) is
@@ -76,6 +78,8 @@ pub mod android_vm;
 pub mod fetch;
 #[cfg(target_os = "macos")]
 pub mod gfx;
+#[cfg(target_os = "macos")]
+pub mod host_certificates;
 #[cfg(target_os = "macos")]
 pub mod host_memory;
 #[cfg(target_os = "macos")]

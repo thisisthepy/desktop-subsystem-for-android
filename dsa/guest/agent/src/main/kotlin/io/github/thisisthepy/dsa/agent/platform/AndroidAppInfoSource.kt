@@ -20,8 +20,8 @@ import java.io.ByteArrayOutputStream
  * window program on the host.
  *
  * The icon is drawn at [WINDOW_ICON_SIZE] pixels. The host draws the window's splash from it
- * before the app's first frame, 160 dp large like the app's own splash, which is 192 pixels on
- * a 200% monitor; at 512 the host scales it down on every monitor up to 500%, and never up.
+ * before the app's first frame, 160 dp large like the app's own splash, which is 262 pixels on
+ * a 200% monitor; at 512 the host scales it down on every monitor up to 390%, and never up.
  * The host makes the program's 256 pixel icon from it too. Adaptive icons are drawn with the
  * launcher's mask, as a launcher shows them.
  *
@@ -148,10 +148,9 @@ internal fun iconPng(drawable: Drawable, size: Int = ICON_SIZE): ByteArray {
  * The icon [iconRes] of [app] drawn as a square PNG of [size] pixels, loaded at the density at
  * which its bitmaps are at least that large.
  *
- * The package manager loads an icon at the agent's own density, the guest display's (96 dpi
- * on a 100% main monitor), where a launcher icon is 29 pixels and an adaptive icon's layers
- * 65: drawn into 256 pixels
- * that is scaled up eight times and blurred. [fallback] is the icon as the package manager
+ * The package manager loads an icon at the agent's own density, the guest display's (130 dpi
+ * on a 100% main monitor), where a launcher icon is 39 pixels and an adaptive icon's layers
+ * 88: drawn into 256 pixels that is scaled up more than six times and blurred. [fallback] is the icon as the package manager
  * gives it, for an app whose icon cannot be read by resource.
  */
 internal fun sharpIconPng(pm: PackageManager, app: ApplicationInfo, iconRes: Int, size: Int = ICON_SIZE, fallback: () -> Drawable): ByteArray =

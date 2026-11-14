@@ -31,7 +31,8 @@
 //! - [`tpm2`]: each user's KeyMint root key, sealed by the computer's TPM 2.0 through the
 //!   kernel's resource manager;
 //! - `host_services`: the app data backup in `~/DSA Backup`, the passkey check and the
-//!   KeyMint root key each user's session serves.
+//!   KeyMint root key each user's session serves, and [`host_certificates`], the root
+//!   certificates an administrator added to the system's store, which Android trusts too.
 //!
 //! The rules are plain functions and types, tested on every host. The parts that talk to
 //! the window system, the buses, the devices and the VM build on Linux only, so the workspace
@@ -50,6 +51,7 @@ pub mod crosvm_control;
 #[cfg(target_os = "linux")]
 pub mod devices;
 pub mod fetch;
+pub mod host_certificates;
 #[cfg(target_os = "linux")]
 pub mod host_services;
 pub mod image;

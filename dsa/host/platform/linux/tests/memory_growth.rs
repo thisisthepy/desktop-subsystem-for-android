@@ -102,7 +102,7 @@ fn nfr2_memory_growth_sets_the_virtio_mem_request() {
             Ok(BootPlan {
                 files: files.clone(),
                 image_version: Some("test".into()),
-                memory_mb: 3072,
+                memory_mb: 2048,
                 memory_max_mb: Some(4096),
             })
         }),
@@ -115,29 +115,30 @@ fn nfr2_memory_growth_sets_the_virtio_mem_request() {
     // The VM boots at its base, with the rest as virtio-mem, and no balloon holding memory.
     let calls = std::fs::read_to_string(dir.join("calls")).unwrap();
     let run = calls.lines().next().unwrap();
-    assert!(run.contains("--mem size=3072 --virtio-mem 1024"), "{run}");
+    assert!(run.contains("--mem size=2048 --virtio-mem 2048"), "{run}");
     assert!(!run.contains("--init-mem"), "{run}");
     assert!(run.contains("memory_hotplug.memmap_on_memory=1"), "{run}");
-    assert_eq!(launcher.memory_range_mb(), Some((3072, 4096)));
+    assert_eq!(launcher.memory_range_mb(), Some((2048, 4096)));
 
     // The session's policy, as the session drives it.
     let (base, max) = launcher.memory_range_mb().unwrap();
     let mut growth = MemoryGrowth::new(base, max);
     let start = Instant::now();
-    // Short of memory: grow to the maximum, all of the virtio-mem region.
-    let Some(GrowthAction::Resize(mb)) = growth.on_pressure(&pressure(2900, 200), start) else {
+    // Short of memory: grow to what the guest uses plus 768 MiB of headroom, and at least
+    // 512 MiB, here 512 MiB of the virtio-mem region.
+    let Some(GrowthAction::Resize(mb)) = growth.on_pressure(&pressure(1900, 200), start) else {
         panic!("a guest short of memory did not grow");
     };
-    assert_eq!(mb, 4096);
+    assert_eq!(mb, 2560);
     launcher.set_memory_mb(mb).unwrap();
     growth.applied();
     // The first calm report after the growth settles gives it back at once, to the base:
     // nothing of the region is requested any more.
     let calm = start + Duration::from_secs(5);
-    let Some(GrowthAction::Resize(mb)) = growth.on_pressure(&pressure(4000, 3600), calm) else {
+    let Some(GrowthAction::Resize(mb)) = growth.on_pressure(&pressure(3000, 2600), calm) else {
         panic!("a calm guest kept the memory it no longer needs");
     };
-    assert_eq!(mb, 3072);
+    assert_eq!(mb, 2048);
     launcher.set_memory_mb(mb).unwrap();
 
     let sock = dir.join("run").join("crosvm.sock");
@@ -149,7 +150,7 @@ fn nfr2_memory_growth_sets_the_virtio_mem_request() {
     assert_eq!(
         resizes,
         [
-            format!("virtio-mem {} {}", 1024 * MIB, sock.display()),
+            format!("virtio-mem {} {}", 512 * MIB, sock.display()),
             format!("virtio-mem 0 {}", sock.display()),
         ]
     );

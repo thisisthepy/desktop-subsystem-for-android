@@ -109,7 +109,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::io::Read;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
@@ -168,6 +168,7 @@ use crate::widgets::{
     self, Placement, Widget, WidgetEvent, WidgetFrame, WidgetProvider, WidgetSize,
 };
 
+mod dns_port;
 mod host_services;
 pub use host_services::{KeyMintKeyState, RestoreOutcome};
 
@@ -575,6 +576,8 @@ enum RefreshInput {
     MonitorHz(u32),
     /// Whether the host's battery saver is on.
     BatterySaver(bool),
+    /// Whether any task window is being resized live changed.
+    LiveResize,
 }
 
 enum Command {
@@ -590,6 +593,8 @@ enum Command {
     Refresh(RefreshInput),
     /// Whether the host is short of memory changed.
     HostMemoryLow(bool),
+    /// Which tasks have their window shown changed.
+    TasksShown(Vec<i32>),
     /// The host's system settings or one of its game controllers changed.
     System(SystemInput),
     /// Freeze the guest after this long in Doze, or never.
@@ -653,6 +658,9 @@ struct Shared {
     sender: Mutex<Option<Box<dyn FrameSender>>>,
     /// The guest's last memory report, and when it arrived. Cleared when the guest stops.
     guest_memory: Mutex<Option<(GuestMemory, Instant)>>,
+    /// The VM's memory as the host last set it, in MiB, while the platform resizes it (see
+    /// [`MemoryGrowth`]); `None` when it does not, and while the guest is stopped.
+    vm_memory_mb: Mutex<Option<u64>>,
     /// What keeps the guest from being ready, while something does.
     problem: Mutex<Option<BootProblem>>,
     /// Who opens the web links the guest sends.
@@ -663,6 +671,9 @@ struct Shared {
     last_transfer: AtomicU32,
     /// How to pair the host's clock with the guest's, when the platform traces input.
     clock_trace: Mutex<Option<ClockTrace>>,
+    /// The task windows being resized live, which hold the guest's refresh rate down until
+    /// they end. The caller that sends a resize marks it, and the worker reads it for the rate.
+    live_resizes: Mutex<crate::guest_refresh::LiveResizes>,
     /// Who hears of the text the guest copies.
     clipboard_watchers: Mutex<Vec<Sender<String>>>,
     /// Who plays the rumble effects the guest's apps play on the host's controllers.
@@ -749,6 +760,11 @@ struct Shared {
     boot_secret: Mutex<Option<BootSecret>>,
     /// Set when the session ends, so the log port's threads end with it.
     log_port_stop: Arc<AtomicBool>,
+    /// The guest's connections on the DNS port that passed the handshake and are still open:
+    /// while there is one, the host's resolver answers the guest's names.
+    dns_connections: AtomicUsize,
+    /// Whether the platform serves the DNS port, so the guest's names can be answered here.
+    dns_port_served: AtomicBool,
     /// Which of the user's host folders their Android shows, which each agent that connects
     /// is told.
     file_sharing: SharingNow,
@@ -775,7 +791,9 @@ struct Shared {
 struct RootElevationNow {
     /// The computer's switch, as it stands now.
     on: bool,
-    /// The apps with a level other than off.
+    /// The apps with a level the user set, off included: apps that share an Android user ID
+    /// are one group, and one of them set to off hides su from the whole group, which only
+    /// the guest can tell apart by uid.
     apps: Vec<AppLevel>,
     /// The switch as it stood when the running boot started; `None` while no boot runs. The
     /// kernel's su guard and the relay are set up at boot, so a boot that started with the
@@ -900,6 +918,9 @@ enum InstallEvent {
 struct AccessibilityHub {
     next_watch: u64,
     watchers: HashMap<i32, Vec<(u64, Sender<GuestAccessibility>)>>,
+    /// The tasks whose first tree since their newest watch began the service's log has
+    /// named, so a watch that never gets one shows by the missing line.
+    announced: HashSet<i32>,
 }
 
 /// The guest's tasks and who is watching them, under one lock, so a new watcher's starting
@@ -995,6 +1016,14 @@ impl Shared {
         *self.vm_id.lock().unwrap_or_else(|e| e.into_inner()) = vm_id;
     }
 
+    /// Forgets why an earlier boot stopped, once a newer one is up and well. Shown beside a
+    /// healthy Android, the old cause reads as a current fault: a refusal from the boot before
+    /// an update went on reading "was built from a different protocol definition" after the
+    /// updated guest had connected.
+    fn forget_last_reason(&self) {
+        self.status.lock().unwrap_or_else(|e| e.into_inner()).1 = None;
+    }
+
     fn set_problem(&self, problem: Option<BootProblem>) {
         *self.problem.lock().unwrap_or_else(|e| e.into_inner()) = problem;
     }
@@ -1006,8 +1035,21 @@ impl Shared {
             .clone()
     }
 
+    /// Keeps the guest's latest memory report. A report that follows one from the same boot
+    /// says how fast memory went back to the host in between ([`GuestMemory::following`]).
     fn set_guest_memory(&self, memory: Option<(GuestMemory, Instant)>) {
-        *self.guest_memory.lock().unwrap_or_else(|e| e.into_inner()) = memory;
+        let mut kept = self.guest_memory.lock().unwrap_or_else(|e| e.into_inner());
+        *kept = match (memory, kept.take()) {
+            (Some((memory, at)), Some((before, then))) => Some((
+                memory.following(&before, at.saturating_duration_since(then)),
+                at,
+            )),
+            (memory, _) => memory,
+        };
+    }
+
+    fn set_vm_memory_mb(&self, mb: Option<u64>) {
+        *self.vm_memory_mb.lock().unwrap_or_else(|e| e.into_inner()) = mb;
     }
 
     /// Records a task message and hands it to the watchers, unless it changes nothing.
@@ -1181,6 +1223,14 @@ impl Shared {
     /// Hands what the guest sent about a task's accessibility to the task's watchers.
     fn publish_accessibility(&self, task_id: i32, message: GuestAccessibility) {
         let mut hub = self.accessibility.lock().unwrap_or_else(|e| e.into_inner());
+        if let GuestAccessibility::Tree(tree) = &message {
+            if hub.watchers.contains_key(&task_id) && hub.announced.insert(task_id) {
+                eprintln!(
+                    "accessibility: Android sent task {task_id}'s tree ({} nodes)",
+                    tree.nodes.len()
+                );
+            }
+        }
         match hub.watchers.get_mut(&task_id) {
             Some(watchers) => watchers.retain(|(_, w)| w.send(message.clone()).is_ok()),
             None => eprintln!(
@@ -1358,11 +1408,13 @@ impl Session {
             tasks: Mutex::new(TaskHub::default()),
             sender: Mutex::new(None),
             guest_memory: Mutex::new(None),
+            vm_memory_mb: Mutex::new(None),
             problem: Mutex::new(None),
             link_watchers: Mutex::new(Vec::new()),
             transfers: Mutex::new(HashMap::new()),
             last_transfer: AtomicU32::new(0),
             clock_trace: Mutex::new(None),
+            live_resizes: Mutex::new(Default::default()),
             clipboard_watchers: Mutex::new(Vec::new()),
             rumble_watchers: Mutex::new(Vec::new()),
             notification_watchers: Mutex::new(Vec::new()),
@@ -1404,6 +1456,8 @@ impl Session {
             logs: Mutex::new(LogHub::default()),
             boot_secret: Mutex::new(None),
             log_port_stop: Arc::new(AtomicBool::new(false)),
+            dns_connections: AtomicUsize::new(0),
+            dns_port_served: AtomicBool::new(false),
             file_sharing: Arc::new(Mutex::new(Sharing::default())),
             share_server: Mutex::new(None),
             android_files_token: Mutex::new(None),
@@ -1440,6 +1494,8 @@ impl Session {
             refresh_pending: false,
             host_memory_low: false,
             host_memory_pending: false,
+            tasks_shown: None,
+            tasks_shown_pending: false,
             system_settings: None,
             gamepads: GamepadTable::new(),
             system_pending: false,
@@ -1670,7 +1726,7 @@ impl Session {
     }
 
     /// Sets the user's root elevation settings: the computer's switch and the apps with a
-    /// level other than off. The running Android is told at once, so a changed level applies
+    /// level the user set, off included. The running Android is told at once, so a changed level applies
     /// without a restart; so does turning the switch off. Turning it on applies from the next
     /// start of Android, as the kernel's su guard and the relay are set up at boot. Each boot
     /// is told again once its agent connects.
@@ -1685,11 +1741,9 @@ impl Session {
             if !on && now.boot_on.is_some() {
                 now.off_since_boot = true;
             }
-            now.apps = apps
-                .into_iter()
-                .filter(|app| app.level != Level::Off)
-                .collect();
+            now.apps = apps;
             now.apps.sort_by(|a, b| a.package.cmp(&b.package));
+            now.apps.dedup_by(|a, b| a.package == b.package);
         }
         if let Some(body) = self.shared.root_elevation_body(false) {
             send_quietly(&self.shared, &self.commands, body);
@@ -1954,14 +2008,26 @@ impl Session {
 
     /// The guest's last memory report and how old it is. `None` until the agent has sent one
     /// since the guest started.
+    ///
+    /// The memory the guest was given is the VM's size as the host last set it, when the
+    /// platform resizes the VM. The guest counts its online memory blocks, and memory that was
+    /// hot-added and then ballooned back to the host stays online in the guest, so its count
+    /// alone takes that memory for the kernel's own: on the owner's PC, a VM grown to 3840 MiB
+    /// and shrunk back to 2560 MiB showed 1357 MiB "reserved by the kernel at boot", where the
+    /// kernel had kept 77 MiB and the host had the other 1280 MiB back.
     pub fn guest_memory(&self) -> Option<GuestMemoryReport> {
+        let vm_mb = *self
+            .shared
+            .vm_memory_mb
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         self.shared
             .guest_memory
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .as_ref()
             .map(|(memory, at)| GuestMemoryReport {
-                memory: memory.clone(),
+                memory: memory.given(vm_mb),
                 age: at.elapsed(),
             })
     }
@@ -2404,6 +2470,15 @@ impl Session {
             .map_err(|_| SessionError::Gone)
     }
 
+    /// Says which tasks have their window shown: open and not minimized. The session keeps the
+    /// latest word in every state; the guest is told now if it is up, and each time it connects,
+    /// so it keeps less memory for a minimized task's app.
+    pub fn tasks_shown(&self, task_ids: Vec<i32>) -> Result<(), SessionError> {
+        self.commands
+            .send(Command::TasksShown(task_ids))
+            .map_err(|_| SessionError::Gone)
+    }
+
     /// Records the host's power, which the guest is told now if it is up, and each time its
     /// agent connects.
     pub fn set_power(&self, state: PowerState) {
@@ -2838,6 +2913,7 @@ impl Session {
             hub.next_watch += 1;
             let id = hub.next_watch;
             hub.watchers.entry(task_id).or_default().push((id, tx));
+            hub.announced.remove(&task_id);
             id
         };
         eprintln!(
@@ -2996,10 +3072,11 @@ impl Session {
     }
 
     /// Asks the guest to close, resize or rescale a task, or to launch an app. Needs an
-    /// active session, except for the word on shown windows, which is always taken.
+    /// active session, except for the words on shown windows and tasks, which are always taken.
     pub fn request(&self, request: TaskRequest) -> Result<(), SessionError> {
         let body = match request {
             TaskRequest::WindowsShown { shown } => return self.windows_shown(shown),
+            TaskRequest::TasksShown { task_ids } => return self.tasks_shown(task_ids),
             TaskRequest::Close { task_id } => Body::CloseTask(control::CloseTask { task_id }),
             TaskRequest::Launch { package_name } => Body::LaunchApp(control::LaunchApp {
                 package_name,
@@ -3034,12 +3111,14 @@ impl Session {
                 width,
                 height,
                 live,
-            } => Body::ResizeTask(control::ResizeTask {
-                task_id,
-                width,
-                height,
-                live,
-            }),
+            } => {
+                return self.resize(control::ResizeTask {
+                    task_id,
+                    width,
+                    height,
+                    live,
+                })
+            }
             TaskRequest::SetDensity {
                 task_id,
                 density_dpi,
@@ -3062,6 +3141,36 @@ impl Session {
         self.send(dsa_protocol::encode(&control::Envelope {
             body: Some(body),
         }))
+    }
+
+    /// Sends a step of a task window's resize, and holds the guest's refresh rate down while
+    /// any window is resized live ([`crate::guest_refresh::LiveResizes`]).
+    ///
+    /// A step that starts or ends the live resizes goes through the worker, right behind the
+    /// word that changes the rate, so the first live step reaches a guest already at the lower
+    /// rate. The caller waits for the worker to send it, so the steps after it, which go out
+    /// at once as every other step does, never overtake it.
+    fn resize(&self, resize: control::ResizeTask) -> Result<(), SessionError> {
+        let changed = self
+            .shared
+            .live_resizes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .step(resize.task_id, resize.live, Instant::now());
+        let frame = dsa_protocol::encode(&control::Envelope {
+            body: Some(Body::ResizeTask(resize)),
+        });
+        if !changed {
+            return self.send(frame);
+        }
+        let _ = self
+            .commands
+            .send(Command::Refresh(RefreshInput::LiveResize));
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.commands
+            .send(Command::Send(frame, reply_tx))
+            .map_err(|_| SessionError::Gone)?;
+        reply_rx.recv().map_err(|_| SessionError::Gone)?
     }
 
     /// The widgets the agent hosts now, and every change to them from now on. The watch lasts
@@ -4077,6 +4186,10 @@ struct Worker {
     host_memory_low: bool,
     /// Set when that changed while the guest was frozen, so it is told after the thaw.
     host_memory_pending: bool,
+    /// The tasks whose window is shown, as last recorded, once the window manager has said.
+    tasks_shown: Option<Vec<i32>>,
+    /// Set when they changed while the guest was frozen, so it is told after the thaw.
+    tasks_shown_pending: bool,
     /// The host's system settings, as last recorded.
     system_settings: Option<SystemSettings>,
     /// The host's game controllers that are connected, and the latest state of each.
@@ -4166,6 +4279,7 @@ impl Worker {
                         Ok(Command::Power(state)) => self.set_power(state),
                         Ok(Command::Refresh(input)) => self.refresh_input(input),
                         Ok(Command::HostMemoryLow(low)) => self.set_host_memory_low(low),
+                        Ok(Command::TasksShown(task_ids)) => self.set_tasks_shown(task_ids),
                         Ok(Command::System(input)) => self.system_input(input),
                         Ok(Command::FreezeAfter(after)) => self.config.freeze_after = after,
                         Ok(Command::LinksInAndroid(on)) => self.set_links_in_android(on),
@@ -4199,6 +4313,7 @@ impl Worker {
                         Ok(Command::Power(state)) => self.set_power(state),
                         Ok(Command::Refresh(input)) => self.refresh_input(input),
                         Ok(Command::HostMemoryLow(low)) => self.set_host_memory_low(low),
+                        Ok(Command::TasksShown(task_ids)) => self.set_tasks_shown(task_ids),
                         Ok(Command::System(input)) => self.system_input(input),
                         Ok(Command::FreezeAfter(after)) => self.config.freeze_after = after,
                         Ok(Command::LinksInAndroid(on)) => self.set_links_in_android(on),
@@ -4274,6 +4389,10 @@ impl Worker {
             }
             Command::HostMemoryLow(low) => {
                 self.set_host_memory_low(low);
+                true
+            }
+            Command::TasksShown(task_ids) => {
+                self.set_tasks_shown(task_ids);
                 true
             }
             Command::System(input) => {
@@ -4553,18 +4672,24 @@ impl Worker {
             &app.native_libraries,
             crash.arm64_supported,
         );
-        if switch.on {
-            eprintln!("apps: {package} runs as ARM already; nothing is offered");
+        if switch.available() && !switch.on {
+            self.post_notice(native_abi::Notice::Offer.notification(&app));
             return;
         }
-        if let Some(why) = switch.unavailable {
+        if switch.on {
+            eprintln!("apps: {package} runs as ARM already; nothing is offered");
+        } else if let Some(why) = switch.unavailable {
             eprintln!(
                 "apps: {package} cannot run as ARM ({}); nothing is offered",
                 why.code()
             );
-            return;
         }
-        self.post_notice(native_abi::Notice::Offer.notification(&app));
+        // A build made to run as 32-bit code, which the 64-bit-only guest does not run: the
+        // user is told to install its 64-bit build.
+        if native_abi::needs_64_bit_build(&app.native_libraries, switch, &detail) {
+            eprintln!("apps: {package} holds 32-bit code, which Android here does not run");
+            self.post_notice(native_abi::Notice::Needs64Bit.notification(&app));
+        }
     }
 
     /// What the user did with one of the host's notifications about running an app as ARM.
@@ -4608,7 +4733,9 @@ impl Worker {
                     new_window: false,
                 }));
             }
-            native_abi::Notice::NeedsErase | native_abi::Notice::Failed => {}
+            native_abi::Notice::NeedsErase
+            | native_abi::Notice::Failed
+            | native_abi::Notice::Needs64Bit => {}
         }
         Ok(())
     }
@@ -4669,13 +4796,34 @@ impl Worker {
             }));
             return;
         };
-        let app = self.shared.installed_app(&request.package);
+        // The guest names every app of a shared user ID group, since the uid alone is all the
+        // kernel knows of the caller; the prompt shows each of them with its name and icon.
+        let packages = crate::root_approval::package_group(&request.package);
+        let app = packages
+            .first()
+            .and_then(|package| self.shared.installed_app(package));
+        let mut approval_request =
+            crate::root_approval::ApprovalRequest::from_su(&request, app.as_ref());
+        if packages.len() > 1 {
+            let shared_apps = packages
+                .iter()
+                .map(|package| {
+                    self.shared
+                        .installed_app(package)
+                        .unwrap_or_else(|| AppInfo {
+                            package_name: package.to_string(),
+                            ..Default::default()
+                        })
+                })
+                .collect();
+            approval_request = approval_request.with_shared_apps(shared_apps);
+        }
         let shared = Arc::clone(&self.shared);
         let request_id = request.request_id;
         let spawned = thread::Builder::new()
             .name("dsa-su-approval".into())
             .spawn(move || {
-                let decision = approval.decide(&request, app.as_ref());
+                let decision = approval.answer(&approval_request);
                 send_quietly(&shared, &commands, Body::SuDecision(decision));
             });
         if let Err(error) = spawned {
@@ -5222,10 +5370,18 @@ impl Worker {
             let low = self.host_memory_low;
             self.send_body(Body::HostMemory(control::HostMemory { low }));
         }
+        if std::mem::take(&mut self.tasks_shown_pending) {
+            if let Some(task_ids) = self.tasks_shown.clone() {
+                self.send_body(Body::TasksShown(control::TasksShown { task_ids }));
+            }
+        }
         if std::mem::take(&mut self.system_pending) {
             self.replay_system_settings();
             self.replay_gamepads();
         }
+        // A change to the host's root certificates while the guest was frozen was not heard.
+        let body = self.shared.host_certificates_body();
+        self.send_body(body);
         true
     }
 
@@ -5269,8 +5425,32 @@ impl Worker {
         match input {
             RefreshInput::MonitorHz(hz) => self.monitor_hz = Some(hz),
             RefreshInput::BatterySaver(on) => self.battery_saver = on,
+            RefreshInput::LiveResize => {}
         }
         self.update_refresh();
+    }
+
+    fn resizing_live(&self) -> bool {
+        self.shared
+            .live_resizes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .any()
+    }
+
+    /// Ends the live resizes that have heard nothing for a while, and tells the guest the rate
+    /// that follows.
+    fn tick_refresh(&mut self) {
+        let expired = self
+            .shared
+            .live_resizes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .expire(Instant::now());
+        if expired {
+            eprintln!("lifecycle: a live resize ended without its last step");
+            self.update_refresh();
+        }
     }
 
     /// Tells the guest its display refresh rate, if it changed since it was last told and the
@@ -5279,7 +5459,8 @@ impl Worker {
         let Some(monitor_hz) = self.monitor_hz else {
             return;
         };
-        let hz = crate::guest_refresh::refresh_rate(monitor_hz, self.battery_saver);
+        let resizing = self.resizing_live();
+        let hz = crate::guest_refresh::refresh_rate_while(monitor_hz, self.battery_saver, resizing);
         if self.refresh_sent == Some(hz) {
             return;
         }
@@ -5290,8 +5471,9 @@ impl Worker {
             | SessionState::Dozing => {
                 eprintln!(
                     "lifecycle: the guest's display refreshes at {hz} Hz (fastest monitor \
-                     {monitor_hz} Hz, battery saver {})",
-                    if self.battery_saver { "on" } else { "off" }
+                     {monitor_hz} Hz, battery saver {}, live resize {})",
+                    if self.battery_saver { "on" } else { "off" },
+                    if resizing { "on" } else { "off" }
                 );
                 self.refresh_sent = Some(hz);
                 self.send_body(Body::DisplayRefresh(control::DisplayRefresh { hz }));
@@ -5362,6 +5544,24 @@ impl Worker {
                 self.send_body(Body::HostMemory(control::HostMemory { low }));
             }
             SessionState::Frozen => self.host_memory_pending = true,
+            _ => {}
+        }
+    }
+
+    /// Records which tasks have their window shown, and tells a guest that is up.
+    fn set_tasks_shown(&mut self, task_ids: Vec<i32>) {
+        if self.tasks_shown.as_ref() == Some(&task_ids) {
+            return;
+        }
+        self.tasks_shown = Some(task_ids.clone());
+        match self.state() {
+            SessionState::Starting
+            | SessionState::Stalled
+            | SessionState::Active
+            | SessionState::Dozing => {
+                self.send_body(Body::TasksShown(control::TasksShown { task_ids }));
+            }
+            SessionState::Frozen => self.tasks_shown_pending = true,
             _ => {}
         }
     }
@@ -5494,6 +5694,7 @@ impl Worker {
         match result {
             Ok(()) => {
                 growth.applied();
+                self.shared.set_vm_memory_mb(Some(mb));
                 eprintln!(
                     "memory: Android's memory {} from {before} to {mb} MiB ({} MiB available, \
                      {:.1}% stalled)",
@@ -5555,8 +5756,14 @@ impl Worker {
             if let Some(power) = self.power {
                 self.send_body(Body::PowerState(power.to_control()));
             }
-            // A new agent holds the display at the rate it is told, from the start.
+            // A new agent holds the display at the rate it is told, from the start. A resize
+            // under way went to the agent before it, and the next live step starts it again.
             self.refresh_sent = None;
+            self.shared
+                .live_resizes
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clear();
             self.update_refresh();
             if self.host_memory_low {
                 self.send_body(Body::HostMemory(control::HostMemory { low: true }));
@@ -5618,6 +5825,11 @@ impl Worker {
             // A new agent keeps Android's backup manager from backing up to the host until it
             // hears that the user turned backup on.
             let body = self.shared.backup_setting_body();
+            self.send_body(body);
+            // The root certificates added on the host again: a change the daemon could not
+            // hear while Android was starting reaches it now, and the new agent has the apps
+            // that started before it forget the anchors they looked up.
+            let body = self.shared.host_certificates_body();
             self.send_body(body);
         } else {
             self.agent_lost_at = Some(now);
@@ -5749,6 +5961,7 @@ impl Worker {
         match self.state() {
             SessionState::Starting | SessionState::Stalled if ready => {
                 self.shared.set_problem(None);
+                self.shared.forget_last_reason();
                 // The doze delay counts from here when no window is shown.
                 self.hidden_since = now;
                 let doze = self.stall_doze.take();
@@ -5855,6 +6068,8 @@ impl Worker {
             eprintln!("memory: Android starts with {base} MiB and may grow to {max} MiB");
             MemoryGrowth::new(base, max)
         });
+        self.shared
+            .set_vm_memory_mb(self.memory_growth.as_ref().map(MemoryGrowth::current_mb));
         let started = Instant::now();
         self.started_at = started;
         // A new boot of Android: the root policy is read again and no app keeps a grace.
@@ -5926,9 +6141,18 @@ impl Worker {
                             self.dozing_since = None;
                             self.power_pending = false;
                             self.host_memory_pending = false;
+                            // The control daemon takes every task to be shown until it is told.
+                            self.tasks_shown_pending = false;
+                            if let Some(task_ids) = self.tasks_shown.clone() {
+                                self.send_body(Body::TasksShown(control::TasksShown { task_ids }));
+                            }
                             // A new boot's control daemon has no controller yet.
                             self.system_pending = false;
                             self.replay_gamepads();
+                            // A boot trusts none of the root certificates added on the host
+                            // until its daemon is told them, before any app reaches the network.
+                            let body = self.shared.host_certificates_body();
+                            self.send_body(body);
                             return;
                         }
                         Err(Refusal::NotTheGuest(why)) => {
@@ -5980,6 +6204,10 @@ impl Worker {
             }
             Command::HostMemoryLow(low) => {
                 self.set_host_memory_low(low);
+                true
+            }
+            Command::TasksShown(task_ids) => {
+                self.set_tasks_shown(task_ids);
                 true
             }
             Command::System(input) => {
@@ -6046,6 +6274,7 @@ impl Worker {
                 return;
             }
             self.tick_lifecycle();
+            self.tick_refresh();
             self.tick_clock();
             self.offer_host_clipboard();
             self.tick_notifications();
@@ -6211,6 +6440,7 @@ impl Worker {
                     cache_bytes: app.cache_bytes,
                     native_libraries: NativeLibraries::from_control(&app.native_libraries),
                     primary_abi: native_abi::checked_abi(&app.primary_abi),
+                    shared_user_id: app.shared_user_id,
                     ..Default::default()
                 });
             }
@@ -6486,6 +6716,9 @@ impl Worker {
                      on the KeyMint port"
                 );
             }
+            Some(Body::DnsQuery(_) | Body::DnsAnswer(_)) => {
+                eprintln!("control channel: dropping a DNS message, which belongs on the DNS port");
+            }
             Some(
                 body @ (Body::ListSpeechVoices(_)
                 | Body::SpeakText(_)
@@ -6510,6 +6743,7 @@ impl Worker {
                 );
             }
             Some(Body::ScreenState(_))
+            | Some(Body::TasksShown(_))
             | Some(Body::PowerState(_))
             | Some(Body::DisplayRefresh(_))
             | Some(Body::HostMemory(_))
@@ -6604,6 +6838,7 @@ impl Worker {
             | Some(Body::PasskeyResponse(_))
             | Some(Body::KeymintRootKey(_))
             | Some(Body::BackupSetting(_))
+            | Some(Body::HostCertificates(_))
             | Some(Body::SetAppVolume(_)) => {
                 eprintln!("control channel: dropping a request only the host sends");
             }
@@ -6695,6 +6930,7 @@ impl Worker {
         // And what it asked of the host's speech and spelling.
         self.shared.language().guest_gone();
         self.shared.set_guest_memory(None);
+        self.shared.set_vm_memory_mb(None);
         // A dump or diagnostics under way gets no more from this guest.
         self.shared
             .logs

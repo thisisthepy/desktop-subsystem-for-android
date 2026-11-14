@@ -28,6 +28,7 @@
 //! cleared (or a disk moved to another computer) says the key is gone with it. The key is never
 //! replaced, since Android's keys are wrapped under it; a data reset lets it go.
 
+#[cfg(any(windows, test))]
 use std::path::Path;
 use std::sync::Arc;
 
@@ -246,7 +247,6 @@ mod sealers {
         NCRYPT_PAD_OAEP_FLAG, NCRYPT_PCP_PLATFORM_TYPE_PROPERTY, NCRYPT_RSA_ALGORITHM,
         NCRYPT_SILENT_FLAG,
     };
-    use windows_sys::Win32::Security::{ImpersonateLoggedOnUser, RevertToSelf};
 
     use super::{
         dpapi_entropy, sealer_named, tpm_key_name, tpm_version, unseal_error, unusable_reason,
@@ -264,32 +264,12 @@ mod sealers {
     /// Runs `work` as the user with SID `sid`: on this thread, impersonating them with the
     /// token of a session they are signed in to, or as this process when it is the user's own.
     fn as_user<T>(sid: &str, work: impl FnOnce() -> T) -> Result<T, KeyError> {
-        if current_user_sid().is_ok_and(|me| me == sid) {
-            return Ok(work());
-        }
-        let token = crate::window_manager::user_token(sid).map_err(|e| {
+        crate::safe_fs::as_user(sid, work).map_err(|why| {
             KeyError::Unavailable(format!(
                 "Windows opens this user's credentials only while they are signed in, and they \
-                 are not ({e})"
+                 are not ({why})"
             ))
-        })?;
-        // SAFETY: the user's token; this thread acts as the user until it reverts below.
-        if unsafe { ImpersonateLoggedOnUser(token.0) } == 0 {
-            return Err(KeyError::Failed(format!(
-                "cannot act as the user to open their credentials: {}",
-                io::Error::last_os_error()
-            )));
-        }
-        // Reverting must happen even if the work panics, or the thread would stay the user's.
-        struct Revert;
-        impl Drop for Revert {
-            fn drop(&mut self) {
-                // SAFETY: ends this thread's impersonation.
-                unsafe { RevertToSelf() };
-            }
-        }
-        let _revert = Revert;
-        Ok(work())
+        })
     }
 
     /// Takes the bytes of a blob DPAPI allocated, and frees it.
@@ -731,10 +711,106 @@ mod sealers {
     }
 }
 
+/// A user's [`SealedKeys`] in their own folder `dir`: every folder down to `dir` is held and
+/// the sealed files are checked as plain files while the service reads or writes them (see
+/// `crate::safe_fs`).
+#[cfg(windows)]
+pub struct UserKeys {
+    inner: SealedKeys,
+}
+
+#[cfg(windows)]
+impl UserKeys {
+    pub fn dir(&self) -> &Path {
+        self.inner.dir()
+    }
+
+    /// The file the secret for `purpose` is sealed in.
+    pub fn path(&self, purpose: KeyPurpose) -> std::path::PathBuf {
+        self.inner.path(purpose)
+    }
+
+    fn guard(
+        &self,
+        purpose: KeyPurpose,
+        create_dir: bool,
+    ) -> Result<Vec<crate::safe_fs::GuardedDir>, KeyError> {
+        let dir = self.inner.dir();
+        if !create_dir && std::fs::symlink_metadata(dir).is_err() {
+            if let Some(root) = dir
+                .parent()
+                .filter(|root| std::fs::symlink_metadata(root).is_ok())
+            {
+                crate::safe_fs::guard_below(root, root).map_err(KeyError::Failed)?;
+            }
+            return Ok(Vec::new());
+        }
+        if create_dir {
+            if let Some(root) = dir
+                .parent()
+                .filter(|root| std::fs::symlink_metadata(root).is_ok())
+            {
+                crate::safe_fs::guard_below(root, root).map_err(KeyError::Failed)?;
+            }
+            std::fs::create_dir_all(dir).map_err(|e| {
+                KeyError::Failed(format!(
+                    "the {} cannot be kept in {}: {e}",
+                    purpose.description(),
+                    dir.display()
+                ))
+            })?;
+        }
+        let root = dir
+            .parent()
+            .filter(|root| std::fs::symlink_metadata(root).is_ok())
+            .unwrap_or(dir);
+        let path = self.inner.path(purpose);
+        let mut temp_name = path.file_name().unwrap_or_default().to_os_string();
+        temp_name.push(".new");
+        let temporary = path.with_file_name(temp_name);
+        crate::safe_fs::guard_files(root, &[&path, &temporary]).map_err(KeyError::Failed)
+    }
+}
+
+#[cfg(windows)]
+impl dsa_host_core::host_keys::HostKeyStore for UserKeys {
+    fn load(
+        &self,
+        purpose: KeyPurpose,
+    ) -> Result<Option<dsa_host_core::host_keys::Secret>, KeyError> {
+        let _guard = self.guard(purpose, false)?;
+        self.inner.load(purpose)
+    }
+
+    fn store(
+        &self,
+        purpose: KeyPurpose,
+        secret: &dsa_host_core::host_keys::Secret,
+    ) -> Result<(), KeyError> {
+        let _guard = self.guard(purpose, true)?;
+        self.inner.store(purpose, secret)
+    }
+
+    fn remove(&self, purpose: KeyPurpose) -> Result<(), KeyError> {
+        let _guard = self.guard(purpose, false)?;
+        self.inner.remove(purpose)
+    }
+
+    fn protection(
+        &self,
+        purpose: KeyPurpose,
+    ) -> Result<Option<dsa_host_core::host_keys::KeyProtection>, KeyError> {
+        let _guard = self.guard(purpose, false)?;
+        self.inner.protection(purpose)
+    }
+}
+
 /// The store of the user with SID `sid`, whose sealed files live in `dir`.
 #[cfg(windows)]
-pub fn for_user(sid: &str, dir: &Path) -> SealedKeys {
-    SealedKeys::new(dir, Arc::new(WindowsSealers::new(sid)))
+pub fn for_user(sid: &str, dir: &Path) -> UserKeys {
+    UserKeys {
+        inner: SealedKeys::new(dir, Arc::new(WindowsSealers::new(sid))),
+    }
 }
 
 /// A [`SealerSource`] of fixed sealers, for a computer whose TPM a test decides.

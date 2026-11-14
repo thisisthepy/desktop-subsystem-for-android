@@ -26,9 +26,9 @@ fn fr2_a_minimal_configuration_gets_working_defaults() {
     assert_eq!(session.stop_timeout, Duration::from_secs(30));
     let vm = config.vm_config(Some("S-1-5-21-1-2-3-1001")).unwrap();
     assert_eq!(vm.kernel, PathBuf::from(r"C:\Program Files\DSA\vm\bzImage"));
-    // Without memory_mb and without a user limit, the VM keeps its 3 GiB default.
+    // Without memory_mb and without a user limit, the VM starts at its 2 GiB default.
     assert_eq!(vm.memory_mb, host_sized_memory_mb(0));
-    assert_eq!(vm.memory_mb, 3072);
+    assert_eq!(vm.memory_mb, 2048);
     assert!([0, 9].contains(&vm.page_reporting_order));
     assert_eq!(vm.socket_sids, ["S-1-5-21-1-2-3-1001"]);
     vm.to_hcs_document_for(GuestArch::X86_64)
@@ -40,6 +40,18 @@ fn fr10_android_dozes_after_half_a_minute_without_a_window_and_never_freezes_by_
     let session = HostConfig::parse(MINIMAL).unwrap().session_config();
     assert_eq!(session.doze_delay, Duration::from_secs(30));
     assert_eq!(session.freeze_after, None);
+}
+
+#[test]
+fn nfr1_the_direct_mapped_mode_is_a_host_setting_that_is_off_by_default() {
+    let config = HostConfig::parse(MINIMAL).unwrap();
+    assert!(!config.direct_mapped_images);
+    // A VM configured from the file attaches its disks as SCSI disks; the launcher maps them
+    // at each boot only with the setting on.
+    let vm = config.vm_config(Some("S-1-5-21-1-2-3-1001")).unwrap();
+    assert_eq!(vm.direct_mapped, None);
+    let json = MINIMAL.replace("\n}", ",\n  \"direct_mapped_images\": true\n}");
+    assert!(HostConfig::parse(&json).unwrap().direct_mapped_images);
 }
 
 #[test]
@@ -216,6 +228,36 @@ fn pr5_each_users_disk_is_in_their_own_profile_without_a_data_folder() {
 }
 
 #[test]
+fn fr32_the_disks_the_service_writes_are_in_the_machines_folder_not_the_users_profile() {
+    let mut config = HostConfig::parse(PROFILES).unwrap();
+    config.machine_root = Some(PathBuf::from(r"C:\ProgramData\DSA"));
+    let alice = config
+        .user_vm_with("S-1-5-21-1-2-3-1001", &profiles)
+        .unwrap();
+    assert_eq!(
+        alice.config.addon_disk,
+        Some(PathBuf::from(
+            r"C:\ProgramData\DSA\users\S-1-5-21-1-2-3-1001\addons.vhd"
+        ))
+    );
+    assert_eq!(
+        alice.config.pstore_disk,
+        Some(PathBuf::from(
+            r"C:\ProgramData\DSA\users\S-1-5-21-1-2-3-1001\pstore.vhd"
+        ))
+    );
+    // A data folder is the service's own, so they stay beside the disk there.
+    let shared = HostConfig::parse(SERVICE).unwrap();
+    let bob = shared.user_vm("S-1-5-21-1-2-3-1002").unwrap();
+    assert_eq!(
+        bob.config.addon_disk,
+        Some(PathBuf::from(
+            r"C:\ProgramData\DSA\users\S-1-5-21-1-2-3-1002\addons.vhd"
+        ))
+    );
+}
+
+#[test]
 fn fr2_one_vm_by_hand_keeps_its_disk_in_the_users_profile_without_a_data_disk() {
     let config = HostConfig::parse(PROFILES).unwrap();
     let vm = config
@@ -346,12 +388,14 @@ fn fr14_an_image_made_from_aosp_boots_from_one_disk_made_from_its_template() {
     vm.kernel_cmdline = files.kernel_cmdline;
     let document = vm.to_hcs_document_for(GuestArch::X86_64).unwrap();
     let attachments = &document["VirtualMachine"]["Devices"]["Scsi"]["0"]["Attachments"];
-    // The user's disk, then the pstore disk every user VM keeps beside it.
+    // The user's disk, then the pstore disk and the read-only add-on disk every user VM
+    // keeps beside it.
     assert_eq!(
         attachments.as_object().unwrap().len(),
-        2,
-        "only the user's disk and its pstore disk"
+        3,
+        "only the user's disk, its pstore disk and its add-on disk"
     );
+    assert_eq!(attachments["2"]["ReadOnly"], true);
     assert_eq!(attachments["0"]["ReadOnly"], false);
     assert_eq!(
         attachments["1"]["Path"].as_str().map(PathBuf::from),
@@ -564,12 +608,14 @@ fn fr14_an_image_with_two_disks_attaches_system_image_and_data_disk() {
     vm.kernel_cmdline = files.kernel_cmdline;
     let document = vm.to_hcs_document_for(GuestArch::X86_64).unwrap();
     let attachments = &document["VirtualMachine"]["Devices"]["Scsi"]["0"]["Attachments"];
-    // The system and data disks, then the pstore disk every user VM keeps.
+    // The system and data disks, then the pstore disk and the read-only add-on disk every
+    // user VM keeps.
     assert_eq!(
         attachments.as_object().unwrap().len(),
-        3,
-        "both system and data disks, and the pstore disk"
+        4,
+        "both system and data disks, the pstore disk and the add-on disk"
     );
+    assert_eq!(attachments["3"]["ReadOnly"], true);
     assert_eq!(attachments["0"]["ReadOnly"], true);
     assert_eq!(attachments["1"]["ReadOnly"], false);
     assert_eq!(

@@ -95,6 +95,42 @@ class ShadowBlocks {
         return ranges;
     }
 
+    // The host sent `size` bytes (`data`) of a read back for `offset` of `memory`. Each block
+    // the device changed since the host last had it (its bytes differ from what this copy
+    // last exchanged) takes the host's bytes. Each other block keeps this copy's, so what the
+    // app wrote there since the last flush is not lost and still goes at the next one. A block
+    // the range covers only in part takes the host's bytes and goes at the next flush whole.
+    // Returns how many bytes were taken.
+    uint64_t receive(uint8_t* memory, uint64_t offset, const uint8_t* data, uint64_t size) {
+        if (offset >= size_ || size == 0) {
+            return 0;
+        }
+        const uint64_t end = size > size_ - offset ? size_ : offset + size;
+        uint64_t taken = 0;
+        for (uint64_t at = offset; at < end;) {
+            const size_t block = static_cast<size_t>(at / kShadowBlockSize);
+            const uint64_t start = block * kShadowBlockSize;
+            const uint64_t length = blockSize(start);
+            const uint64_t stop = start + length < end ? start + length : end;
+            if (start == at && stop == start + length) {
+                const uint64_t hash = shadowBlockHash(data + (at - offset), length);
+                if (hash != hashes_[block]) {
+                    std::memcpy(memory + at, data + (at - offset), length);
+                    hashes_[block] = hash;
+                    taken += length;
+                }
+            } else {
+                std::memcpy(memory + at, data + (at - offset), stop - at);
+                taken += stop - at;
+                // Not the hash of any contents: the block differs from the host's at the
+                // next flush and is sent whole.
+                hashes_[block] = ~shadowBlockHash(memory + start, length);
+            }
+            at = stop;
+        }
+        return taken;
+    }
+
     // The host wrote `memory` (a read back), so it and the host agree on all of it now.
     void refresh(const uint8_t* memory) {
         for (size_t block = 0; block < hashes_.size(); block++) {

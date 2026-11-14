@@ -222,7 +222,9 @@ mod windows_impl {
         (running && created(found.process) == Some(wanted)).then_some(found)
     }
 
-    /// The version in the fixed version information of the file at `path`, as `a.b.c.d`.
+    /// The version of the file at `path`: its version information's `ProductVersion` text
+    /// when that is a version (such as `0.2.3`, or `0.2.4-dev.7` for a development build),
+    /// otherwise its fixed version numbers, as `a.b.c.d`.
     pub fn file_version(path: &Path) -> Option<String> {
         let name: Vec<u16> = path
             .as_os_str()
@@ -239,6 +241,30 @@ mod windows_impl {
         // SAFETY: a buffer of the size Windows asked for.
         if unsafe { GetFileVersionInfoW(name.as_ptr(), 0, size, data.as_mut_ptr().cast()) } == 0 {
             return None;
+        }
+        // The release's own version as text, which a development build's fixed numbers
+        // cannot hold (0.2.4-dev.7 would read as 0.2.4.0, newer than itself). DSA's programs
+        // carry it in English (United States), Unicode.
+        let text_key = wide("\\StringFileInfo\\040904B0\\ProductVersion");
+        let mut text: *mut std::ffi::c_void = std::ptr::null_mut();
+        let mut chars = 0u32;
+        // SAFETY: the block read above, and out pointers into it.
+        let has_text = unsafe {
+            VerQueryValueW(
+                data.as_ptr().cast(),
+                text_key.as_ptr(),
+                &mut text,
+                &mut chars,
+            )
+        };
+        if has_text != 0 && !text.is_null() && chars > 0 {
+            // SAFETY: VerQueryValueW points at `chars` UTF-16 units inside `data`, which lives on.
+            let units = unsafe { std::slice::from_raw_parts(text as *const u16, chars as usize) };
+            let end = units.iter().position(|c| *c == 0).unwrap_or(units.len());
+            let version = String::from_utf16_lossy(&units[..end]).trim().to_string();
+            if dsa_host_core::update::program::Version::parse(&version).is_ok() {
+                return Some(version);
+            }
         }
         let root = wide("\\");
         let mut value: *mut std::ffi::c_void = std::ptr::null_mut();

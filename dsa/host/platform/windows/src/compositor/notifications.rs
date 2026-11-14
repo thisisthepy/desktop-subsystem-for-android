@@ -28,14 +28,15 @@
 //! restarts into a downloaded image has two buttons: [Restart now] launches this program with
 //! [`restart_uri`], which asks the service to restart, and [Later] only closes the toast.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+use dsa_host_core::compositor::frame_stall::is_recovery_key;
 use dsa_host_core::host_api::HostApiClient;
 use dsa_host_core::native_abi::in_user_language;
 use dsa_host_core::notifications::{Notification, NotificationAction, NotificationEvent};
@@ -177,7 +178,7 @@ pub fn is_restart(uri: &str) -> bool {
 }
 
 /// Whether the user reads Windows in Korean.
-fn user_reads_korean() -> bool {
+pub fn user_reads_korean() -> bool {
     #[cfg(windows)]
     {
         // SAFETY: reads the user's display language.
@@ -269,6 +270,17 @@ pub fn default_icon_dir() -> Option<PathBuf> {
     crate::paths::UserRoot::current().map(|root| root.notifications())
 }
 
+/// DSA's own news that the window manager raises itself, such as the notice that Android is
+/// restarted because its graphics did not recover from a GPU reset. The notifications' thread
+/// shows each as it shows the news about updates: under DSA's own name and logo.
+pub type DsaNews = Arc<Mutex<VecDeque<Notification>>>;
+
+/// The place DSA's own news with `key` is shown in, or `None` for an app's notification: one
+/// per kind of update, so the newer replaces the older, and one per notice about a recovery.
+pub fn dsa_thread(key: &str) -> Option<String> {
+    thread_of(key).or_else(|| is_recovery_key(key).then(|| key.to_string()))
+}
+
 /// One toast to show.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Toast {
@@ -308,6 +320,7 @@ pub fn sync(
     mut connector: Box<dyn Connector>,
     toasts: &mut dyn Toasts,
     icon_dir: Option<PathBuf>,
+    news: DsaNews,
     stop: Arc<AtomicBool>,
     logger: Option<Arc<CompositorLogger>>,
 ) {
@@ -318,7 +331,26 @@ pub fn sync(
         // Icons of an earlier run's toasts; those toasts no longer act on anything.
         let _ = std::fs::remove_dir_all(dir);
     }
+    // DSA's own news needs no connection to the service, so it shows while there is none.
+    let show_news = |toasts: &mut dyn Toasts, shown: &mut HashMap<String, Shown>| {
+        let waiting: Vec<Notification> = news
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .drain(..)
+            .collect();
+        for notification in waiting {
+            apply(
+                NotificationEvent::Posted(notification),
+                toasts,
+                shown,
+                icon_dir.as_deref(),
+                &dismissed_tx,
+                logger.as_deref(),
+            );
+        }
+    };
     while !stop.load(Ordering::Relaxed) {
+        show_news(toasts, &mut shown);
         let stream = HostApiClient::connect(&mut *connector, BUILD, ANSWER)
             .and_then(|client| client.watch_notifications());
         let mut stream = match stream {
@@ -338,6 +370,7 @@ pub fn sync(
         };
         last_error.clear();
         while !stop.load(Ordering::Relaxed) {
+            show_news(toasts, &mut shown);
             dismissals(&mut *connector, &dismissed, logger.as_deref());
             match stream.next(POLL) {
                 Ok(Some(event)) => apply(
@@ -369,7 +402,7 @@ fn dismissals(
 ) {
     while let Ok(key) = dismissed.try_recv() {
         // DSA's own news is not Android's to dismiss.
-        if is_update_key(&key) {
+        if is_update_key(&key) || is_recovery_key(&key) {
             continue;
         }
         let result = HostApiClient::connect(connector, BUILD, ANSWER).and_then(|mut client| {
@@ -396,7 +429,7 @@ fn apply(
     match event {
         NotificationEvent::Posted(notification) => {
             let notification = in_user_language(notification, user_reads_korean());
-            let ours = thread_of(&notification.key);
+            let ours = dsa_thread(&notification.key);
             let (app_id, tag, icon_png) = match &ours {
                 Some(thread) => (DSA_APP_ID.to_string(), tag_of(thread), DSA_LOGO_PNG),
                 None => (
@@ -495,6 +528,10 @@ pub fn activate(uri: &str, connector: &mut dyn Connector) -> Result<(), String> 
             NotificationAction::Open { .. } => open_update_settings(),
             NotificationAction::Dismiss { .. } => Ok(()),
         };
+    }
+    // A notice about a recovery says what DSA did; a click only closes it.
+    if is_recovery_key(action.key()) {
+        return Ok(());
     }
     let mut client = HostApiClient::connect(connector, "dsa-wm notification click", ANSWER)
         .map_err(|e| e.to_string())?;
@@ -918,6 +955,34 @@ mod tests {
         let action = parse_activation(&uri).unwrap();
         assert!(dsa_host_core::update::alerts::is_update_key(action.key()));
         assert_eq!(UPDATE_PAGE_ARGUMENTS, ["--page", "updates"]);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn nfr5_the_notice_that_android_restarts_for_its_graphics_is_dsas_own_toast() {
+        use dsa_host_core::compositor::frame_stall::Notice;
+        let dir = std::env::temp_dir().join(format!("dsa-recovery-toasts-{}", std::process::id()));
+        let mut toasts = Recorded::default();
+        let mut shown = HashMap::new();
+        let (tx, _rx) = mpsc::channel();
+        let notice = Notice::Restarting.notification(false);
+        apply(
+            NotificationEvent::Posted(notice.clone()),
+            &mut toasts,
+            &mut shown,
+            Some(&dir),
+            &tx,
+            None,
+        );
+        assert_eq!(
+            toasts.shown,
+            vec![(DSA_APP_ID.to_string(), tag_of(&notice.key), false)],
+            "under DSA's own ID, never an app's"
+        );
+        assert!(dir.join(format!("{}.png", tag_of(&notice.key))).exists());
+        // A click goes nowhere: Android has nothing to open.
+        let action = parse_activation(&activation_uri(&notice.key)).unwrap();
+        assert!(is_recovery_key(action.key()));
         let _ = std::fs::remove_dir_all(dir);
     }
 

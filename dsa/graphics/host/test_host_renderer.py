@@ -218,6 +218,18 @@ class MemoryStats(ctypes.Structure):
     ]
 
 
+class MemoryOwners(ctypes.Structure):
+    _fields_ = [
+        ("renderer_bytes", ctypes.c_uint64 * 3),
+        ("guest_bytes", ctypes.c_uint64 * 3),
+        ("largest_guest_device_bytes", ctypes.c_uint64 * 4),
+        ("renderer_count", ctypes.c_uint32 * 3),
+        ("guest_count", ctypes.c_uint32 * 3),
+        ("guest_devices", ctypes.c_uint32),
+        ("reserved", ctypes.c_uint32),
+    ]
+
+
 def probe_memory_stats(dll_path):
     """Starts the renderer, reads its memory accounting, and prints it as JSON. Runs in a
     process of its own, because the renderer starts once per process."""
@@ -228,20 +240,31 @@ def probe_memory_stats(dll_path):
     lib.dsa_gfx_init.restype = ctypes.c_int
     lib.dsa_gfx_get_memory_stats.argtypes = [ctypes.POINTER(MemoryStats)]
     lib.dsa_gfx_get_memory_stats.restype = ctypes.c_int
+    lib.dsa_gfx_get_memory_owners.argtypes = [ctypes.POINTER(MemoryOwners)]
+    lib.dsa_gfx_get_memory_owners.restype = ctypes.c_int
     lib.dsa_gfx_teardown.argtypes = []
     lib.dsa_gfx_teardown.restype = None
     before = lib.dsa_gfx_get_memory_stats(ctypes.byref(MemoryStats()))
+    owners_before = lib.dsa_gfx_get_memory_owners(ctypes.byref(MemoryOwners()))
     init = lib.dsa_gfx_init(256, 256)
     stats = MemoryStats()
     running = lib.dsa_gfx_get_memory_stats(ctypes.byref(stats))
+    owners = MemoryOwners()
+    owners_running = lib.dsa_gfx_get_memory_owners(ctypes.byref(owners))
     lib.dsa_gfx_teardown()
     after = lib.dsa_gfx_get_memory_stats(ctypes.byref(MemoryStats()))
+    owners_after = lib.dsa_gfx_get_memory_owners(ctypes.byref(MemoryOwners()))
+    counted = [stats.device_local_bytes, stats.host_visible_bytes, stats.imported_bytes]
+    by_owner = [owners.renderer_bytes[k] + owners.guest_bytes[k] for k in range(3)]
     print(json.dumps({
         "init": init,
         "before": before,
         "running": running,
         "after": after,
         "processes": stats.guest_processes,
+        "owners": [owners_before, owners_running, owners_after],
+        "owners_add_up": counted == by_owner,
+        "guest_devices": owners.guest_devices,
     }))
 
 
@@ -263,6 +286,11 @@ class RendererMemoryTests(unittest.TestCase):
         self.assertEqual(result["running"], 0, result)
         self.assertEqual(result["after"], -1, result)
         self.assertEqual(result["processes"], 0, result)
+        # nfr1: the same memory by owner. With no guest connected, all of it is the renderer's
+        # own device's, and the owners add up to the kinds.
+        self.assertEqual(result["owners"], [-1, 0, -1], result)
+        self.assertTrue(result["owners_add_up"], result)
+        self.assertEqual(result["guest_devices"], 0, result)
 
 
 class RendererWithoutVulkanTests(unittest.TestCase):

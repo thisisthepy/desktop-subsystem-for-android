@@ -42,4 +42,25 @@ grep -Fq 'if: always() && matrix.summary' "$workflow"
 grep -Fq 'cat "$report" >> "$GITHUB_STEP_SUMMARY"' "$workflow"
 grep -Fq '/tmp/overlays-test-*/idle-reclaim*' "$workflow"
 grep -Fq '"dsa/host/platform/linux/tests/idle_reclaim/**"' "$workflow"
+# The memory with Google Play and one app window is measured on a runner of its own too, so
+# every release shows it; the overlay check leaves it out.
+grep -Fq -- '--skip nfr1_the_memory_with_google_play_and_one_app_window_is_measured' "$workflow"
+grep -Fq 'filter: nfr1_the_memory_with_google_play_and_one_app_window_is_measured' "$workflow"
+grep -Fq 'summary: /tmp/overlays-test-*/memory.md' "$workflow"
+grep -Fq '/tmp/overlays-test-*/memory*' "$workflow"
+grep -Fq '"dsa/host/platform/linux/tests/memory_check/**"' "$workflow"
+# The host's direct-mapped mode is measured against the cached disks on a runner of its own,
+# on the published image, whose uncompressed system disk the host makes itself; the overlay
+# check leaves it out. The image job records the hash of that disk in image.json and checks the
+# host's copies of the file systems against erofs-utils, without holding up the other checks.
+grep -Fq -- '--skip nfr1_nfr2_the_direct_mapped_disks_are_measured_against_the_cached_ones' "$workflow"
+grep -Fq 'filter: nfr1_nfr2_the_direct_mapped_disks_are_measured_against_the_cached_ones' "$workflow"
+grep -Fq 'summary: /tmp/overlays-test-*/direct-mapped.md' "$workflow"
+grep -Fq 'dsa-release direct-mapped "$dir"' "$workflow"
+grep -Fq 'dsa-release direct-mapped-partitions' "$workflow"
+if grep -Fq 'direct-mapped-image:' "$workflow"; then
+  echo "the direct-mapped measurement boots the published image, not one of its own" >&2
+  exit 1
+fi
+grep -Fq 'dsa-release direct-mapped "$dir"' "$(dirname "$workflow")/release-image.yml"
 echo "image boot overlays workflow: ok"

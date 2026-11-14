@@ -10,6 +10,14 @@
 //! dsa-release image-entry <base-url> <image-dir>
 //!                                              the same, for a folder made by make-image.py:
 //!                                              its image.json and the files it names
+//! dsa-release direct-mapped <image-dir>        records in its image.json the hash of the
+//!                                              direct-mapped system disk the host makes from
+//!                                              its system.vhdx, and of that disk as it is
+//! dsa-release direct-mapped-partitions <image-dir> <out-dir>
+//!                                              writes each erofs partition of its system.vhdx
+//!                                              as <name>.original.img and the host's
+//!                                              uncompressed copy as <name>.copy.img, for a
+//!                                              check against erofs-utils
 //! dsa-release program <version> <setup-url> <setup-file>
 //!                                              prints the program list for a setup file
 //! dsa-release sign <secret.key> <list.json>    writes <list.json>.sig
@@ -32,7 +40,7 @@ use sha2::{Digest, Sha256};
 
 const USAGE: &str = "usage: dsa-release keygen <secret.key> | public-key <secret.key> | \
                      entry <version> <major> <build> <base-url> <file>... | \
-                     image-entry <base-url> <image-dir> | \
+                     image-entry <base-url> <image-dir> | direct-mapped <image-dir> | \
                      program <version> <setup-url> <setup-file> | \
                      sign <secret.key> <list.json> | verify <public-key> <list.json> | \
                      verify-program <public-key> <program.json>";
@@ -132,6 +140,116 @@ fn image_entry(base: &str, dir: &str) -> Result<String, String> {
     Ok(serde_json::to_string_pretty(&image).expect("an entry serialises"))
 }
 
+/// Records in the image folder `dir`'s `image.json` what the host checks the disks it makes
+/// from `system.vhdx` against: under `direct_mapped.system_disk` the uncompressed copy the
+/// direct-mapped mode maps (made here exactly as the host makes it, with the partitions
+/// `direct_mapped.verified_partitions` names left as they are), and under `system_disk_raw`
+/// the disk as it is, which hosts that attach raw disks copy out of the VHDX. The release list
+/// signs `image.json` by its hash, so both are signed with it, and the download is unchanged.
+fn direct_mapped(dir: &str) -> Result<String, String> {
+    use dsa_host_core::direct_mapped_disk;
+    use dsa_host_core::vhdx::open_disk;
+    let dir = Path::new(dir);
+    let manifest_path = dir.join("image.json");
+    let text = std::fs::read_to_string(&manifest_path)
+        .map_err(|e| format!("reading {}: {e}", manifest_path.display()))?;
+    let mut manifest: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| format!("{} is not JSON: {e}", manifest_path.display()))?;
+    let entry = manifest
+        .get_mut("direct_mapped")
+        .and_then(|e| e.as_object_mut())
+        .ok_or("image.json has no direct_mapped entry, so the image has no table for the mode")?;
+    let keep: Vec<String> = entry
+        .get("verified_partitions")
+        .and_then(|v| v.as_array())
+        .map(|list| {
+            list.iter()
+                .filter_map(|n| n.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    let system = dir.join("system.vhdx");
+    let started = std::time::Instant::now();
+    let mut disk = open_disk(&system).map_err(|e| format!("opening {}: {e}", system.display()))?;
+    let described = direct_mapped_disk::describe(disk.as_mut(), &keep)?;
+    let copy_seconds = started.elapsed().as_secs_f64();
+    entry.insert(
+        "system_disk".into(),
+        serde_json::to_value(&described).expect("serialises"),
+    );
+    // The disk as it is: every byte of the virtual disk, holes as zeroes.
+    let started = std::time::Instant::now();
+    let len = disk.len();
+    let mut hash = Sha256::new();
+    let mut buffer = vec![0u8; 4 << 20];
+    let mut at = 0u64;
+    while at < len {
+        let take = (len - at).min(buffer.len() as u64) as usize;
+        disk.read_exact_at(at, &mut buffer[..take])
+            .map_err(|e| format!("reading {}: {e}", system.display()))?;
+        hash.update(&buffer[..take]);
+        at += take as u64;
+    }
+    let raw_seconds = started.elapsed().as_secs_f64();
+    manifest["system_disk_raw"] = serde_json::json!({
+        "bytes": len,
+        "sha256": hex(&hash.finalize()),
+    });
+    let text = serde_json::to_string_pretty(&manifest).expect("serialises");
+    std::fs::write(&manifest_path, format!("{text}\n"))
+        .map_err(|e| format!("writing {}: {e}", manifest_path.display()))?;
+    Ok(format!(
+        "direct-mapped system disk: {} MiB (super {} MiB), SHA-256 {}, made in {copy_seconds:.1} s; \
+         the disk as it is: {} MiB, hashed in {raw_seconds:.1} s",
+        described.bytes >> 20,
+        described.super_bytes >> 20,
+        described.sha256,
+        len >> 20
+    ))
+}
+
+/// Writes each erofs partition of the image folder `dir`'s system disk, and the copy the host
+/// makes of it, into `out`, so a check can compare the two with erofs-utils.
+fn direct_mapped_partitions(dir: &str, out: &str) -> Result<String, String> {
+    use dsa_host_core::direct_mapped_disk::disk;
+    use dsa_host_core::vhdx::open_disk;
+    let dir = Path::new(dir);
+    let out = Path::new(out);
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(dir.join("image.json")).map_err(|e| format!("reading image.json: {e}"))?,
+    )
+    .map_err(|e| format!("image.json is not JSON: {e}"))?;
+    let keep: Vec<String> = manifest["direct_mapped"]["verified_partitions"]
+        .as_array()
+        .map(|list| {
+            list.iter()
+                .filter_map(|n| n.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    let system = dir.join("system.vhdx");
+    let mut dev = open_disk(&system).map_err(|e| format!("opening {}: {e}", system.display()))?;
+    let plan = disk::plan(dev.as_mut(), &keep)?;
+    std::fs::create_dir_all(out).map_err(|e| format!("creating {}: {e}", out.display()))?;
+    let mut names = Vec::new();
+    for index in plan.copied() {
+        let name = plan.partitions[index].name.clone();
+        let write = |path: std::path::PathBuf| {
+            std::fs::File::create(&path)
+                .map(|f| std::io::BufWriter::with_capacity(4 << 20, f))
+                .map_err(|e| format!("creating {}: {e}", path.display()))
+        };
+        let mut original = write(out.join(format!("{name}.original.img")))?;
+        plan.write_original(dev.as_mut(), index, &mut original)?;
+        std::io::Write::flush(&mut original).map_err(|e| e.to_string())?;
+        let mut copy = write(out.join(format!("{name}.copy.img")))?;
+        plan.write_copied(dev.as_mut(), index, &mut copy)?;
+        std::io::Write::flush(&mut copy).map_err(|e| e.to_string())?;
+        names.push(name);
+    }
+    Ok(format!("wrote {} into {}", names.join(", "), out.display()))
+}
+
 /// The list's description of each file: its name, where it will be served, size and hash.
 fn describe<'a>(
     base: &str,
@@ -209,6 +327,10 @@ fn run(args: &[String]) -> Result<String, String> {
         }
         [command, rest @ ..] if command == "entry" => entry(rest),
         [command, base, dir] if command == "image-entry" => image_entry(base, dir),
+        [command, dir] if command == "direct-mapped" => direct_mapped(dir),
+        [command, dir, out] if command == "direct-mapped-partitions" => {
+            direct_mapped_partitions(dir, out)
+        }
         [command, key, list] if command == "sign" => {
             let bytes = std::fs::read(list).map_err(|e| format!("reading {list}: {e}"))?;
             let signature = hex(&read_key(key)?.sign(&bytes).to_bytes());

@@ -17,6 +17,8 @@
 //!   ceremonies. A request is still checked (the app's signature against the site's Digital
 //!   Asset Links) and then answered as unavailable, with that reason.
 //! - The KeyMint root key is given once per boot on its own vsock port.
+//! - The guest's DNS queries come on a vsock port of their own and are answered by the
+//!   system's resolver ([`dsa_host_unix::dns_resolver`]).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -24,12 +26,14 @@ use std::sync::Arc;
 use dsa_host_core::backup::{
     folder_in, BackupService, BackupSwitch, FileAccess, FileSwitch, MemorySwitch,
 };
+use dsa_host_core::dns::DNS_PORT;
 use dsa_host_core::file_share::ShareHost;
 use dsa_host_core::host_keys::{HardwareOrStore, HostKeyStore, SealedKeys, StoredSealer};
 use dsa_host_core::keymint_root::KEYMINT_PORT;
 use dsa_host_core::passkeys::PasskeyService;
 use dsa_host_core::session::Session;
 use dsa_host_unix::backup_folder::keep_private;
+use dsa_host_unix::dns_resolver::SystemResolver;
 use dsa_host_unix::https_get::CurlHttpsGet;
 
 use crate::devices::file_share::UserFolders;
@@ -126,11 +130,21 @@ pub fn serve(
         .with_switch(switch);
     session.serve_backup(Arc::new(backup));
 
+    // The root certificates an administrator added to the system's store.
+    session.serve_host_certificates(Arc::new(crate::host_certificates::LinuxRootStore::system()));
+
     session.set_keymint_keys(Arc::new(keymint_keys(settings_dir, account.uid, keyring)));
     let listener = VsockHub::shared(KEYMINT_PORT)
         .map_err(|e| format!("vsock port {KEYMINT_PORT}: {e}"))?
         .listener(cid, false);
     session.serve_keymint_port(Box::new(listener), build);
+
+    // The guest's DNS queries, answered by the system's resolver, so the hosts file,
+    // systemd-resolved's per-link DNS (a VPN's split DNS) and DNS filters apply to Android's apps.
+    let dns = VsockHub::shared(DNS_PORT)
+        .map_err(|e| format!("vsock port {DNS_PORT}: {e}"))?
+        .listener(cid, false);
+    session.serve_dns_port(Box::new(dns), Arc::new(SystemResolver), build);
 
     // The asset links are read with the user's rights, not root's.
     let curl = crate::network::find_program("curl")

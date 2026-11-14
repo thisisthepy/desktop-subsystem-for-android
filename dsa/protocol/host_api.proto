@@ -204,7 +204,7 @@ message ResizeTask {
 }
 
 // A task's window moved to a monitor of another scale: asks the caller's Android to draw
-// the task at `density_dpi` (96 at a scale of 100%, where a dp is 0.6 of a host pixel).
+// the task at `density_dpi` (130 at a scale of 100%, where a dp is 0.819 of a host pixel).
 message SetTaskDensity {
   int32 task_id = 1;
   uint32 density_dpi = 2;
@@ -236,6 +236,14 @@ message StreamInput {}
 // next start.
 message SetWindowsShown {
   bool shown = 1;
+}
+
+// Says which tasks of the caller's Android have their window shown: open and not minimized.
+// The window manager sends it on each change. The caller's Android keeps less memory for an
+// app whose windows are all minimized. The service keeps the latest value while the Android is
+// not running, for its next start.
+message SetTasksShown {
+  repeated int32 task_ids = 1;
 }
 
 // Says whether the caller's window manager can turn the host's three- and four-finger touch
@@ -917,8 +925,8 @@ message WidgetEvent {
 message PlaceWidget {
   int32 widget_id = 1;
   WidgetPlacement placement = 2;
-  // The window's size in its monitor's pixels, and Android's density for it (96 at a scale of
-  // 100%).
+  // The window's size in its monitor's pixels, and Android's density for it (130 at a scale
+  // of 100%).
   uint32 width = 3;
   uint32 height = 4;
   uint32 density_dpi = 5;
@@ -1217,7 +1225,7 @@ message Task {
   string label = 4;
   // Whether the task has input focus in Android.
   bool focused = 5;
-  // The density the task's app draws at, in dots per inch (96 at a scale of 100%). 0 when
+  // The density the task's app draws at, in dots per inch (130 at a scale of 100%). 0 when
   // unknown.
   uint32 density_dpi = 6;
   // The largest size Android can give the task, in its display pixels. 0 when unknown.
@@ -1321,6 +1329,11 @@ message AppInfo {
   // The app's launcher shortcuts, in the list of installed apps: the static and dynamic ones
   // in rank order, then the pinned ones. Empty for a task's app.
   repeated AppShortcut shortcuts = 17;
+  // The user ID the app shares with other apps (its manifest's `android:sharedUserId`), in
+  // the list of installed apps. Apps with the same value run under one Android uid and are
+  // one group for root elevation: their level and grace apply to all of them, and a settings
+  // app shows them together. Empty for an app with a user ID of its own, and for a task's app.
+  string shared_user_id = 18;
 }
 
 // One of an app's launcher shortcuts in Android: a static one from its manifest, a dynamic
@@ -1538,6 +1551,18 @@ message GuestMemory {
   uint32 google_play_processes = 25;
   uint64 google_play_pss_kb = 26;
   uint64 google_play_swap_pss_kb = 27;
+  // Free page reporting, as the control channel's GuestMemory says: the free memory the host
+  // has taken back now, the memory reported since boot, and the reported free memory the
+  // host took back in again with a neighbour since boot. All 0 when the guest could not read
+  // them.
+  uint64 free_reported_kb = 28;
+  uint64 reported_total_kb = 29;
+  uint64 refaulted_total_kb = 30;
+  // How fast memory went back to the host between the report before this one and this one,
+  // in KiB a minute, when reported_rate_known is set: the growth of reported_total_kb over
+  // the time between the two.
+  uint64 reported_kb_per_minute = 31;
+  bool reported_rate_known = 32;
 }
 
 // One host process that runs the caller's Android: its VM's memory process, the window
@@ -1818,12 +1843,40 @@ message Settings {
   // it off; a client sends back the value it read. Off, a downloaded image is used from the
   // next time the user starts Android.
   bool image_auto_restart = 39;
+  // Whether the caller's Android trusts, as system certificates, the root certificates a user
+  // or an administrator added to this computer (imported_certificates). On unless the user
+  // turned it off; a client sends back the value it read. It applies at once, without
+  // restarting Android.
+  bool host_certificates = 40;
+  // The root certificates the service found added to this computer's trust stores for the
+  // caller, whether or not host_certificates is on. Those the operating system ships are left
+  // out. A client cannot change it.
+  repeated ImportedCertificate imported_certificates = 41;
   // A run mode setting (run_mode, a RunMode enum, stop_after_secs and keep_for_notifications)
   // was here and is gone: an idle Android stays in Doze. Its numbers and names are never
   // used again, so an older peer that still sends them is read without them. The enum name
   // RunMode is not used again either.
   reserved 310, 311, 312;
   reserved "run_mode", "stop_after_secs", "keep_for_notifications";
+}
+
+// One root certificate the service found added to the computer's trust stores.
+message ImportedCertificate {
+  // Who the certificate is for and who signed it, as distinguished names ("CN=Example Root,
+  // O=Example").
+  string subject = 1;
+  string issuer = 2;
+  // Where it was found: "machine" (the computer's trusted root store), "machine_group_policy",
+  // "machine_enterprise", "user" (the caller's own trusted root store), "user_group_policy",
+  // "admin" (the computer's administrator trust settings) or "system" (a certificate added to
+  // the system's certificate store).
+  string source = 3;
+  // The store or file it was found in, as the operating system names it.
+  string location = 4;
+  // The SHA-256 fingerprint of the certificate, in lower-case hexadecimal.
+  string sha256 = 5;
+  // When it stops being valid, in seconds since the Unix epoch; 0 when unknown.
+  int64 not_after = 6;
 }
 
 // How the caller's Android reaches the network.
@@ -1841,6 +1894,11 @@ message NetworkStatus {
   // Why advanced networking is not in use although it is on, or another problem with the
   // network. Empty when there is none.
   string problem = 5;
+  // Who answers the guest's DNS queries: "host" while this host's resolver answers them (so
+  // the host's hosts file, VPN and DNS filters apply to Android's apps), "network" while the
+  // host's resolver does not answer and Android asks `dns_servers` itself. Empty while Android
+  // is not running or still booting, and from a service that cannot say.
+  string dns_resolver = 6;
 }
 
 // Erases the caller's Android data: the apps they installed, their accounts and every app's
@@ -2155,6 +2213,62 @@ message ArmTranslation {
   // its own disk, which the service moves onto the add-on disk and then removes. Holds only
   // when guest_known.
   bool guest_left_on_data = 10;
+}
+
+// The Widevine module a user installed: the com.google.android.widevine APEX of Google's
+// emulator system image for their Android version and architecture, which the client
+// downloaded from Google's SDK repository and took out unchanged. DSA does not ship it.
+message WidevinePackage {
+  // The APEX's file name in the image's /vendor/apex, such as
+  // "com.google.android.widevine.apex". The guest's apexd reads it from there.
+  string apex = 1;
+  // The image it came from: its build, API level and revision, such as
+  // "BE2A.250530.026.F3 (API 36, r7)".
+  string version = 2;
+  // The Android major version and the ABI ("x86_64", "arm64-v8a") of that image, which are
+  // the caller's Android's.
+  uint32 android_major = 3;
+  string abi = 4;
+  // The system image archive it was taken from, on Google's download server.
+  string source = 5;
+  // The APEX's size in bytes and its SHA-256 digest, as the image holds it.
+  uint64 size = 6;
+  bytes sha256 = 7;
+  // The licence Google offers the image under, as its list names it.
+  string license = 8;
+}
+
+// Installs Widevine for the caller's Android. The service answers at once: Done when it takes
+// an APEX with this description, or an error. After Done the client sends the APEX, exactly
+// as the image holds it, package.size bytes, in ApkChunk frames, and the service answers the
+// same request id once more: Widevine once the APEX is on the caller's add-on disk, or an
+// error. The connection then ends. Android need not run: the module is used from its next
+// start.
+message InstallWidevine {
+  WidevinePackage package = 1;
+}
+
+// Asks where Widevine stands for the caller. Answered with Widevine.
+message GetWidevine {}
+
+// Removes the caller's Widevine module. Answered with Widevine. From Android's next start the
+// module is gone, and so are the device certificates Widevine kept in /data/vendor/mediadrm.
+// A running Android keeps the module it booted with until it restarts.
+message RemoveWidevine {}
+
+// Where Widevine stands for the caller.
+message Widevine {
+  // The module the caller installed; absent when there is none.
+  WidevinePackage package = 1;
+  // The caller's add-on disk holds the module, for Android's next start.
+  bool on_disk = 2;
+  // The caller's Android runs now: the two fields below hold only then.
+  bool running = 3;
+  // The running Android was started with Widevine.
+  bool active = 4;
+  // What is installed differs from what the running Android was started with, so it applies
+  // once Android starts again.
+  bool restart_needed = 5;
 }
 
 // The Google apps package a user installed: LiteGapps' Core build for their Android, which the
@@ -2590,6 +2704,7 @@ message Request {
     GetSettings get_settings = 16;
     SetSettings set_settings = 17;
     SetWindowsShown set_windows_shown = 20;
+    SetTasksShown set_tasks_shown = 47;
     FreezeSession freeze_session = 21;
     WatchLinks watch_links = 25;
     OpenFile open_file = 26;
@@ -2661,6 +2776,9 @@ message Request {
     SetAppVolume set_app_volume = 661;
     LaunchShortcut launch_shortcut = 680;
     AnswerPinShortcut answer_pin_shortcut = 681;
+    InstallWidevine install_widevine = 700;
+    GetWidevine get_widevine = 701;
+    RemoveWidevine remove_widevine = 702;
   }
 }
 
@@ -2699,6 +2817,7 @@ message Response {
     BackupRecoveryKey backup_recovery_key = 621;
     KeyProtection key_protection = 622;
     AppAudio app_audio = 660;
+    Widevine widevine = 700;
   }
 }
 

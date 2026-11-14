@@ -59,7 +59,7 @@ class AndroidAppAudio(private val context: Context, private val log: Log) : AppA
         val registered = AudioManager::class.java
             .getMethod("registerAudioPolicy", AudioPolicy::class.java)
             .invoke(audio, made) as Int
-        if (registered != AudioManager.SUCCESS) {
+        if (registered != AUDIO_POLICY_SUCCESS) {
             log.warn("audio policy refused the agent's routing ($registered); every app plays on the shared output")
             return 0
         }
@@ -73,7 +73,7 @@ class AndroidAppAudio(private val context: Context, private val log: Log) : AppA
         val uid = uids[packageName] ?: uidOf(packageName)?.also { uids[packageName] = it } ?: return false
         // An output plays one app: what was routed there before goes first.
         mixes.remove(uid)?.let { old ->
-            if (policy.detachMixes(listOf(old)) != AudioManager.SUCCESS) {
+            if (policy.detachMixes(listOf(old)) != AUDIO_POLICY_SUCCESS) {
                 log.warn("audio policy did not take $packageName off its output")
             }
         }
@@ -94,7 +94,7 @@ class AndroidAppAudio(private val context: Context, private val log: Log) : AppA
             .setRouteFlags(constant(AudioMix::class.java, "ROUTE_FLAG_RENDER"))
             .setDevice(device)
             .build()
-        if (policy.attachMixes(listOf(mix)) != AudioManager.SUCCESS) return false
+        if (policy.attachMixes(listOf(mix)) != AUDIO_POLICY_SUCCESS) return false
         mixes[uid] = mix
         return true
     }
@@ -163,6 +163,8 @@ class AndroidAppAudio(private val context: Context, private val log: Log) : AppA
         /** The address of an app output's bus device, before its number. */
         const val ADDRESS_PREFIX = "dsa_app_"
         const val SAMPLE_RATE = 48_000
+        /** AudioManager.SUCCESS, what the audio policy calls return when they work; the SDK hides it. */
+        const val AUDIO_POLICY_SUCCESS = 0
         /** The framework's broadcasts of a change of a stream's volume and of its mute. */
         const val VOLUME_CHANGED = "android.media.VOLUME_CHANGED_ACTION"
         const val MUTE_CHANGED = "android.media.STREAM_MUTE_CHANGED_ACTION"

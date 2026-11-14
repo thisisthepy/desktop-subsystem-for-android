@@ -97,6 +97,7 @@ fn unbootable(dir: &std::path::Path) -> AndroidVmConfig {
         hosting_process_name_suffix: None,
         fine_grained_memory: false,
         network_adapter: None,
+        direct_mapped: None,
     }
 }
 

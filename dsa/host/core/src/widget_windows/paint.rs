@@ -1,14 +1,13 @@
 //! The pictures of a widget window, drawn on the CPU as premultiplied BGRA rows (the layout of
 //! a Wayland `ARGB8888` buffer, an X11 32-bit image and a little-endian `CGImage` with its
-//! alpha first): the widget's image scaled to its window, its More button, and a widget being
-//! edited, lifted over a soft shadow with a border and its handles.
+//! alpha first): the widget's image at its own size, never scaled, and a widget being edited,
+//! its image raised a little over a soft shadow with a border and its handles around it.
 //!
 //! The Windows host draws the same parts with its Fluent canvas; the Linux and macOS hosts draw
 //! them here, in their desktop's colors ([`Look`]).
 
 use super::geometry::{
-    edit_layout, edit_margin, more_button, more_glyph_size, px_of_dip, EDIT_BORDER_DIP,
-    EDIT_RADIUS_DIP, LIFT_DIP,
+    edit_layout, edit_margin, px_of_dip, unscaled_at, EDIT_BORDER_DIP, EDIT_RADIUS_DIP, LIFT_DIP,
 };
 
 /// A color as `0xAARRGGBB`, its alpha not premultiplied.
@@ -42,67 +41,11 @@ impl Image {
             pixels,
         }
     }
-
-    /// The image scaled to `width` by `height`, each pixel the average of the pixels it
-    /// covers, or the nearest one when it grows.
-    pub fn scaled(&self, width: u32, height: u32) -> Image {
-        let (width, height) = (width.max(1), height.max(1));
-        if (width, height) == (self.width, self.height) {
-            return self.clone();
-        }
-        let mut pixels = vec![0u8; (width * height * 4) as usize];
-        if self.width == 0
-            || self.height == 0
-            || self.pixels.len() < (self.width * self.height * 4) as usize
-        {
-            return Image {
-                width,
-                height,
-                pixels,
-            };
-        }
-        let (sw, sh) = (self.width as usize, self.height as usize);
-        for y in 0..height as usize {
-            let top = y * sh / height as usize;
-            let bottom = ((y + 1) * sh).div_ceil(height as usize).clamp(top + 1, sh);
-            for x in 0..width as usize {
-                let left = x * sw / width as usize;
-                let right = ((x + 1) * sw).div_ceil(width as usize).clamp(left + 1, sw);
-                let mut sum = [0u32; 4];
-                for sy in top..bottom {
-                    for sx in left..right {
-                        let at = (sy * sw + sx) * 4;
-                        for (total, value) in sum.iter_mut().zip(&self.pixels[at..at + 4]) {
-                            *total += u32::from(*value);
-                        }
-                    }
-                }
-                let count = ((bottom - top) * (right - left)) as u32;
-                let at = (y * width as usize + x) * 4;
-                for (out, total) in pixels[at..at + 4].iter_mut().zip(sum) {
-                    *out = ((total + count / 2) / count) as u8;
-                }
-            }
-        }
-        Image {
-            width,
-            height,
-            pixels,
-        }
-    }
 }
 
-/// The colors of a widget's More button and of a widget being edited, in the desktop's own
-/// style.
+/// The colors of a widget being edited, in the desktop's own style.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Look {
-    /// The button's fill, and the overlays while the pointer is on it and presses it.
-    pub button_fill: Argb,
-    pub button_hover: Argb,
-    pub button_pressed: Argb,
-    /// The button's hairline edge and its glyph.
-    pub button_border: Argb,
-    pub glyph: Argb,
     /// The border and the handles' rims of a widget being edited: the desktop's accent.
     pub accent: Argb,
     /// The inside of the handles.
@@ -116,34 +59,18 @@ impl Look {
     pub fn new(dark: bool, accent: Argb) -> Look {
         if dark {
             Look {
-                button_fill: 0xB32D_2D2D,
-                button_hover: 0x14FF_FFFF,
-                button_pressed: 0x0AFF_FFFF,
-                button_border: 0x24FF_FFFF,
-                glyph: 0xFFFF_FFFF,
                 accent,
                 handle: 0xFF2D_2D2D,
                 shadow: 0x5C00_0000,
             }
         } else {
             Look {
-                button_fill: 0xB3FF_FFFF,
-                button_hover: 0x0A00_0000,
-                button_pressed: 0x0600_0000,
-                button_border: 0x24000000,
-                glyph: 0xE400_0000,
                 accent,
                 handle: 0xFFFF_FFFF,
                 shadow: 0x3800_0000,
             }
         }
     }
-}
-
-/// `color` with its alpha scaled by `level` (0 to 1).
-pub fn faded(color: Argb, level: f32) -> Argb {
-    let alpha = (((color >> 24) as f32) * level.clamp(0.0, 1.0)).round() as u32;
-    (alpha.min(255) << 24) | (color & 0x00FF_FFFF)
 }
 
 /// A canvas over premultiplied BGRA rows.
@@ -276,70 +203,9 @@ impl Canvas<'_> {
     }
 }
 
-/// The state the More button is drawn in.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ButtonState {
-    /// How much of it shows, from 0 to 1, as it fades.
-    pub level: f32,
-    pub hover: bool,
-    pub pressed: bool,
-}
-
-/// Draws the More button of a window of `width` by `height` pixels on a monitor of `dpi`
-/// over its `pixels`: a subtle fill with a hairline edge, lighter or darker while the pointer
-/// is on it or presses it, and three dots, the "More" glyph.
-pub fn draw_more_button(
-    pixels: &mut [u8],
-    width: usize,
-    height: usize,
-    dpi: u32,
-    state: &ButtonState,
-    look: &Look,
-) {
-    if state.level <= 0.0 {
-        return;
-    }
-    let circle = more_button(width as i32, height as i32, dpi);
-    let mut canvas = Canvas {
-        width,
-        height,
-        pixels,
-    };
-    let (r, d) = (circle.radius, circle.radius * 2.0);
-    let (x, y) = (circle.cx - r, circle.cy - r);
-    canvas.fill_rounded(x, y, d, d, r, faded(look.button_fill, state.level));
-    let overlay = if state.pressed {
-        Some(look.button_pressed)
-    } else if state.hover {
-        Some(look.button_hover)
-    } else {
-        None
-    };
-    if let Some(overlay) = overlay {
-        canvas.fill_rounded(x, y, d, d, r, faded(overlay, state.level));
-    }
-    let hairline = px_of_dip(1, dpi).max(1) as f32;
-    let border = faded(look.button_border, state.level);
-    canvas.stroke_rounded((x, y, d, d), r, hairline, border);
-    let glyph = more_glyph_size(width as i32, height as i32, dpi) as f32;
-    let dot = (glyph / 8.0).max(1.0);
-    let step = glyph * 0.35;
-    for at in [-1.0, 0.0, 1.0] {
-        let cx = circle.cx + at * step;
-        canvas.fill_rounded(
-            cx - dot,
-            circle.cy - dot,
-            2.0 * dot,
-            2.0 * dot,
-            dot,
-            faded(look.glyph, state.level),
-        );
-    }
-}
-
 /// The picture of a widget being edited, `width` by `height` premultiplied BGRA pixels on a
-/// monitor of `dpi`: a soft shadow under the lifted widget, `lifted` (its image at the lifted
-/// size) over it, a border in the accent color and a handle on each edge `resize_mode` lets
+/// monitor of `dpi`: a soft shadow under the lifted widget, `lifted` (the picture of its
+/// lifted rectangle) over it, a border in the accent color and a handle on each edge `resize_mode` lets
 /// it be resized along. Every pixel of the widget stays just visible enough to be clicked;
 /// the room around it is clear but for the shadow.
 pub fn draw_edit(
@@ -405,6 +271,32 @@ pub fn draw_edit(
     pixels
 }
 
+/// The picture of a widget lifted for editing in a window of `width` by `height` pixels on a
+/// monitor of `dpi`: its `image` (as Android drew it) at its own size, raised a little over a
+/// soft shadow, with the accent border and the handles around it ([`draw_edit`]). The image is
+/// never scaled to the lifted size.
+pub fn draw_lifted(
+    image: &Image,
+    width: usize,
+    height: usize,
+    dpi: u32,
+    resize_mode: u32,
+    look: &Look,
+) -> Vec<u8> {
+    let layout = edit_layout(width as i32, height as i32, dpi, resize_mode);
+    let (lx, ly, lw, lh) = layout.lifted;
+    let (ix, iy, _, _) = layout.image;
+    let room = (lw.max(1) as usize, lh.max(1) as usize);
+    let at = ((ix - lx).max(0) as usize, (iy - ly).max(0) as usize);
+    let from = (image.width as usize, image.height as usize);
+    let lifted = Image {
+        width: room.0 as u32,
+        height: room.1 as u32,
+        pixels: unscaled_at(&image.pixels, from, room, at),
+    };
+    draw_edit(&lifted, width, height, dpi, resize_mode, look)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -415,16 +307,10 @@ mod tests {
     }
 
     #[test]
-    fn fr12_a_picture_from_android_is_premultiplied_and_scaled_to_its_window() {
+    fn fr12_a_picture_from_android_is_premultiplied() {
         // Half see-through red, straight RGBA, becomes premultiplied BGRA.
         let image = Image::from_rgba(1, 1, &[255, 0, 0, 128]);
         assert_eq!(image.pixels, vec![0, 0, 128, 128]);
-        let wide = Image::from_rgba(2, 1, &[255, 255, 255, 255, 0, 0, 0, 0]);
-        let half = wide.scaled(1, 1);
-        assert_eq!(half.pixels, vec![128, 128, 128, 128]);
-        let grown = image.scaled(3, 2);
-        assert_eq!((grown.width, grown.height), (3, 2));
-        assert!(grown.pixels.chunks_exact(4).all(|p| p == [0, 0, 128, 128]));
     }
 
     #[test]
@@ -462,27 +348,34 @@ mod tests {
     }
 
     #[test]
-    fn fr12_the_more_button_is_drawn_with_a_fill_a_hairline_and_three_dots() {
-        let (width, height) = (180usize, 110usize);
-        let mut pixels = vec![0u8; width * height * 4];
+    fn fr12_a_lifted_widget_keeps_its_image_at_its_own_size() {
+        // An opaque widget of 180 x 110 pixels, lifted: its image is raised by the lift, not
+        // stretched to the lifted rectangle, so the lifted rectangle's bottom rows show only
+        // the shadow's room and the border, never the widget's pixels.
+        let dpi = 96;
         let look = Look::new(true, 0xFF35_84E4);
-        let hidden = ButtonState {
-            level: 0.0,
-            hover: false,
-            pressed: false,
+        let margin = edit_margin(dpi) as usize;
+        let (width, height) = (180 + 2 * margin, 110 + 2 * margin);
+        let image = Image {
+            width: 180,
+            height: 110,
+            pixels: [10, 20, 30, 255].repeat(180 * 110),
         };
-        draw_more_button(&mut pixels, width, height, 96, &hidden, &look);
-        assert!(pixels.iter().all(|&byte| byte == 0));
-        let shown = ButtonState {
-            level: 1.0,
-            ..hidden
-        };
-        draw_more_button(&mut pixels, width, height, 96, &shown, &look);
-        let circle = more_button(width as i32, height as i32, 96);
-        // The middle dot is the glyph's color, white on a dark desktop.
-        let at = (circle.cy as usize * width + circle.cx as usize) * 4;
-        assert!(pixels[at] > 200 && pixels[at + 3] > 200);
-        // Outside the circle nothing is drawn.
-        assert_eq!(alpha(&pixels, width, 0, 0), 0);
+        let pixels = draw_lifted(&image, width, height, dpi, 0, &look);
+        let layout = edit_layout(width as i32, height as i32, dpi, 0);
+        let (ix, iy, iw, ih) = layout.image;
+        assert_eq!((iw, ih), (180, 110), "the image keeps its own size");
+        let at = |x: i32, y: i32| (y as usize * width + x as usize) * 4;
+        // The middle of the image is the widget's own color.
+        let middle = at(ix + iw / 2, iy + ih / 2);
+        assert_eq!(&pixels[middle..middle + 4], &[10, 20, 30, 255]);
+        // Below the raised image, inside the lifted rectangle and the border, is not the
+        // widget's color: the image was not stretched to fill it.
+        let border = px_of_dip(EDIT_BORDER_DIP, dpi);
+        let (_, ly, _, lh) = layout.lifted;
+        let below = iy + ih;
+        assert!(below < ly + lh - border, "room under the raised image");
+        let under = at(ix + iw / 2, below);
+        assert_ne!(&pixels[under..under + 4], &[10, 20, 30, 255]);
     }
 }

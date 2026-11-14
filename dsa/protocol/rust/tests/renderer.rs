@@ -6,7 +6,7 @@ use std::thread;
 use std::time::Duration;
 
 use dsa_protocol::renderer::types::{
-    envelope::Body, Envelope, FrameDone, RejectReason, Role, Target, TargetRequest,
+    envelope::Body, DeviceState, Envelope, FrameDone, RejectReason, Role, Target, TargetRequest,
 };
 use dsa_protocol::renderer::{
     decode, decode_body, encode_body, local_hello, renderer_connect, window_manager_accept,
@@ -168,4 +168,13 @@ fn nfr5_a_frames_request_its_target_and_its_completion_survive_the_wire() {
     assert_eq!(decode_body(&encode_body(done.clone())).unwrap(), done);
     // An envelope with no body is an error, not a panic.
     assert!(decode_body(&[]).is_err());
+}
+
+#[test]
+fn nfr5_the_renderers_device_state_survives_the_wire() {
+    let state = Body::DeviceState(DeviceState {
+        losses: 2,
+        generation: 1,
+    });
+    assert_eq!(decode_body(&encode_body(state.clone())).unwrap(), state);
 }

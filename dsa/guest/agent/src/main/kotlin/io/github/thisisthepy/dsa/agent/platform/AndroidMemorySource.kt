@@ -4,8 +4,10 @@ import android.app.ActivityManager
 import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import android.os.Debug
 import io.github.thisisthepy.dsa.agent.memory.GooglePlayPackages
 import io.github.thisisthepy.dsa.agent.memory.MemorySource
+import io.github.thisisthepy.dsa.agent.memory.PageReporting
 import io.github.thisisthepy.dsa.agent.memory.ProcessPss
 import java.io.File
 
@@ -61,6 +63,22 @@ class AndroidMemorySource(context: Context) : MemorySource {
         return if (online == 0) null else online * blockBytes / 1024
     }
 
+    /**
+     * DSA's kernel's free page reporting counts, in KiB; null on a kernel without them or when
+     * the policy hides them. Reading reported_kb walks the kernel's free lists, which the
+     * report's few-minute interval keeps rare.
+     */
+    override fun pageReporting(): PageReporting? {
+        val parameters = File("/sys/module/page_reporting/parameters")
+        fun read(name: String): Long? = runCatching { File(parameters, name).readText().trim().toLong() }.getOrNull()
+        val total = read("reported_total_kb") ?: return null
+        return PageReporting(
+            freeReportedKb = read("reported_kb") ?: 0,
+            reportedTotalKb = total,
+            refaultedTotalKb = read("refaulted_total_kb") ?: 0,
+        )
+    }
+
     override fun processes(): List<ProcessPss> {
         val running = activities.runningAppProcesses ?: return emptyList()
         if (running.isEmpty()) return emptyList()
@@ -71,8 +89,7 @@ class AndroidMemorySource(context: Context) : MemorySource {
                 pid = running[i].pid,
                 name = running[i].processName,
                 pssKb = memory.totalPss.toLong(),
-                // "summary.total-swap" is the swapped-out PSS in KiB, as dumpsys meminfo shows it.
-                swapPssKb = memory.getMemoryStat("summary.total-swap")?.toLongOrNull() ?: 0,
+                swapPssKb = SwapPss.of(memory),
                 // A process runs the code of each package in its list; the Google apps share
                 // their processes (gms, gsf), so any one of them makes it Google Play's.
                 googlePlay = running[i].pkgList.orEmpty().any(::isGooglePlay),
@@ -83,5 +100,29 @@ class AndroidMemorySource(context: Context) : MemorySource {
     private companion object {
         /** Where init mounts the Google apps image before laying it over the system. */
         const val GAPPS_IMAGE = "/mnt/dsa-gapps"
+    }
+}
+
+/** The swapped-out part of a process's PSS, as the memory report and the cached process log count it. */
+internal object SwapPss {
+    /**
+     * The framework's own getter of the swapped-out PSS, the "TOTAL SWAP PSS" dumpsys
+     * meminfo shows. It is hidden; the agent is a platform app, so it may call it.
+     */
+    private val getter = runCatching {
+        Debug.MemoryInfo::class.java.getMethod("getSummaryTotalSwapPss")
+    }.getOrNull()
+
+    /**
+     * The part of a process's PSS swapped out to zram, in KiB. The public
+     * "summary.total-swap" is not it: it counts every page the process has swapped out,
+     * shared ones whole, and was larger than the PSS itself for most processes. It is only
+     * the fallback, and the report never counts more than the PSS.
+     */
+    fun of(memory: Debug.MemoryInfo): Long {
+        getter?.let { method ->
+            runCatching { (method.invoke(memory) as Int).toLong() }.getOrNull()?.let { return it }
+        }
+        return memory.getMemoryStat("summary.total-swap")?.toLongOrNull() ?: 0
     }
 }

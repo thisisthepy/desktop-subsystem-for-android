@@ -27,6 +27,8 @@ const LP_TARGET_LINEAR: u32 = 0;
 const LP_TARGET_ZERO: u32 = 1;
 /// The signature of an ext4 superblock, at byte 1080.
 const EXT4_MAGIC: u16 = 0xEF53;
+/// The signature of an erofs superblock, at byte 1024, as a bare vendor image may have.
+const EROFS_MAGIC: u32 = 0xE0F5_E1E2;
 /// The signature of an Android sparse image, which is not read here.
 const SPARSE_MAGIC: u32 = 0xED26_FF3A;
 
@@ -69,9 +71,9 @@ fn field_name(field: &[u8]) -> String {
     String::from_utf8_lossy(&field[..end]).into_owned()
 }
 
-/// Whether `name` is the system partition's: `system`, or the first slot's `system_a`.
-fn is_system(name: &str) -> bool {
-    name == "system" || name == "system_a"
+/// Whether `name` is the `target` partition's: `target`, or the first slot's `{target}_a`.
+fn is_partition(name: &str, target: &str) -> bool {
+    name == target || (name.starts_with(target) && &name[target.len()..] == "_a")
 }
 
 /// What the start of a disk says about where its system partition is.
@@ -83,17 +85,23 @@ pub enum Found {
     System(Vec<Span>, u64),
 }
 
-/// Where the system partition is in a disk of `disk_size` bytes that starts with `head`.
-pub fn locate(head: &[u8], disk_size: u64) -> Result<Found, String> {
+/// Where the `target` partition is in a disk of `disk_size` bytes that starts with `head`.
+pub fn locate_partition(head: &[u8], disk_size: u64, target: &str) -> Result<Found, String> {
     if u32_at(head, 0) == Some(SPARSE_MAGIC) {
-        return Err("the image's system.img is a sparse image, which DSA does not read".into());
+        return Err(format!(
+            "the image's disk with the {target} partition is a sparse image, which DSA does not \
+             read"
+        ));
     }
     if head.len() < 1082 {
         return Ok(Found::NeedMore);
     }
     if bytes_at(head, SECTOR, 8) != Some(b"EFI PART".as_slice()) {
-        if u16_at(head, 1080) != Some(EXT4_MAGIC) {
-            return Err("the image's system.img is neither a disk nor an ext4 image".into());
+        if u16_at(head, 1080) != Some(EXT4_MAGIC) && u32_at(head, 1024) != Some(EROFS_MAGIC) {
+            return Err(format!(
+                "the image's disk with the {target} partition is neither a disk nor an ext4 or \
+                 erofs image"
+            ));
         }
         let whole = Span {
             source: 0,
@@ -102,14 +110,14 @@ pub fn locate(head: &[u8], disk_size: u64) -> Result<Found, String> {
         };
         return Ok(Found::System(vec![whole], disk_size));
     }
-    let found = gpt(head)?;
+    let found = gpt(head, target)?;
     let Some((name, first, length)) = found else {
         return Ok(Found::NeedMore);
     };
     if first.saturating_add(length) > disk_size {
         return Err(format!("the disk's {name} partition ends after the disk"));
     }
-    if is_system(&name) {
+    if is_partition(&name, target) {
         let span = Span {
             source: first,
             length,
@@ -117,15 +125,15 @@ pub fn locate(head: &[u8], disk_size: u64) -> Result<Found, String> {
         };
         return Ok(Found::System(vec![span], length));
     }
-    match lp(head, first, length)? {
+    match lp(head, first, length, target)? {
         Some((spans, size)) => Ok(Found::System(spans, size)),
         None => Ok(Found::NeedMore),
     }
 }
 
-/// The GPT partition to read: `super` (preferred) or the system partition, as its name,
+/// The GPT partition to read: `super` (preferred) or the `target` partition, as its name,
 /// start and length in bytes. `None` while the table is not all in `head`.
-fn gpt(head: &[u8]) -> Result<Option<(String, u64, u64)>, String> {
+fn gpt(head: &[u8], target: &str) -> Result<Option<(String, u64, u64)>, String> {
     let damaged = || "the disk's partition table is damaged".to_string();
     let table = u64_at(head, SECTOR + 72).ok_or_else(damaged)?;
     let count = u32_at(head, SECTOR + 80).ok_or_else(damaged)?;
@@ -138,7 +146,7 @@ fn gpt(head: &[u8]) -> Result<Option<(String, u64, u64)>, String> {
     let Some(entries) = bytes_at(head, start, length) else {
         return Ok(None);
     };
-    let mut system = None;
+    let mut matched = None;
     for entry in entries.chunks_exact(size as usize) {
         if entry[..16].iter().all(|&b| b == 0) {
             continue;
@@ -158,20 +166,27 @@ fn gpt(head: &[u8]) -> Result<Option<(String, u64, u64)>, String> {
         if name == "super" {
             return Ok(Some(found));
         }
-        if is_system(&name) {
-            system = Some(found);
+        if is_partition(&name, target) {
+            matched = Some(found);
         }
     }
-    match system {
+    match matched {
         Some(found) => Ok(Some(found)),
-        None => Err("the disk has neither a super nor a system partition".into()),
+        None => Err(format!(
+            "the disk has neither a super nor a {target} partition"
+        )),
     }
 }
 
-/// The system partition's runs in the `super` partition at `start`, `length` bytes long, and
+/// The `target` partition's runs in the `super` partition at `start`, `length` bytes long, and
 /// the partition's size, from its liblp metadata. `None` while the metadata is not all in
 /// `head`.
-fn lp(head: &[u8], start: u64, length: u64) -> Result<Option<(Vec<Span>, u64)>, String> {
+fn lp(
+    head: &[u8],
+    start: u64,
+    length: u64,
+    target: &str,
+) -> Result<Option<(Vec<Span>, u64)>, String> {
     let damaged = |what: &str| format!("the super partition's {what} is damaged");
     let geometry = start + LP_GEOMETRY_OFFSET;
     let Some(magic) = u32_at(head, geometry) else {
@@ -218,7 +233,7 @@ fn lp(head: &[u8], start: u64, length: u64) -> Result<Option<(Vec<Span>, u64)>, 
     for index in 0..partitions.1 {
         let at = u64::from(partitions.0) + u64::from(index) * u64::from(partitions.2);
         let entry = bytes_at(tables, at, 52).ok_or_else(|| damaged("partition table"))?;
-        if !is_system(&field_name(&entry[..36])) {
+        if !is_partition(&field_name(&entry[..36]), target) {
             continue;
         }
         let first = u32::from_le_bytes(entry[40..44].try_into().unwrap());
@@ -251,13 +266,14 @@ fn lp(head: &[u8], start: u64, length: u64) -> Result<Option<(Vec<Span>, u64)>, 
         }
         return Ok(Some((spans, size)));
     }
-    Err("the super partition holds no system partition".into())
+    Err(format!("the super partition holds no {target} partition"))
 }
 
-/// Takes a disk's bytes in order and writes the system partition's bytes to `out`.
+/// Takes a disk's bytes in order and writes the partition's bytes to `out`.
 pub struct Extract<W> {
     out: W,
     disk_size: u64,
+    partition: &'static str,
     head: Vec<u8>,
     spans: Option<Vec<Span>>,
     /// The partition's size.
@@ -270,10 +286,17 @@ pub struct Extract<W> {
 
 impl<W: Write + Seek> Extract<W> {
     /// Writes the system partition of a disk of `disk_size` bytes to `out`.
+    #[cfg(test)]
     pub fn new(out: W, disk_size: u64) -> Extract<W> {
+        Self::for_partition(out, disk_size, "system")
+    }
+
+    /// Writes the `partition` of a disk of `disk_size` bytes to `out`.
+    pub fn for_partition(out: W, disk_size: u64, partition: &'static str) -> Extract<W> {
         Extract {
             out,
             disk_size,
+            partition,
             head: Vec::new(),
             spans: None,
             size: 0,
@@ -288,7 +311,7 @@ impl<W: Write + Seek> Extract<W> {
             return self.route(bytes);
         }
         self.head.extend_from_slice(bytes);
-        match locate(&self.head, self.disk_size)? {
+        match locate_partition(&self.head, self.disk_size, self.partition)? {
             Found::NeedMore if self.head.len() as u64 >= self.disk_size => {
                 Err("the disk ends before its partition tables".into())
             }
@@ -310,7 +333,8 @@ impl<W: Write + Seek> Extract<W> {
     fn route(&mut self, bytes: &[u8]) -> Result<bool, String> {
         let start = self.position;
         let end = start + bytes.len() as u64;
-        let io = |e: std::io::Error| format!("the system partition cannot be written: {e}");
+        let partition = self.partition;
+        let io = |e: std::io::Error| format!("the {partition} partition cannot be written: {e}");
         for span in self.spans.iter().flatten() {
             let from = start.max(span.source);
             let to = end.min(span.source + span.length);
@@ -332,9 +356,13 @@ impl<W: Write + Seek> Extract<W> {
             return Err("the disk ends before its partition tables".into());
         }
         if self.position < self.end {
-            return Err("the disk ends inside its system partition".into());
+            return Err(format!(
+                "the disk ends inside its {} partition",
+                self.partition
+            ));
         }
-        let io = |e: std::io::Error| format!("the system partition cannot be written: {e}");
+        let partition = self.partition;
+        let io = |e: std::io::Error| format!("the {partition} partition cannot be written: {e}");
         self.out.flush().map_err(io)?;
         Ok((self.out, self.size))
     }
@@ -365,21 +393,31 @@ pub(crate) mod fixture {
     /// The liblp metadata of a `super` holding `system` at `system_at` (bytes into `super`),
     /// `system_size` bytes long, after a `vendor` partition.
     fn lp_metadata(system_at: u64, system_size: u64) -> Vec<u8> {
+        lp_metadata_of(&[
+            ("vendor", 1u64 << 20, 8 * SECTOR),
+            ("system", system_at, system_size),
+        ])
+    }
+
+    /// The liblp metadata of a `super` holding each of `parts` (its name, where it starts in
+    /// `super` and its size in bytes), each in one run.
+    fn lp_metadata_of(parts: &[(&str, u64, u64)]) -> Vec<u8> {
         let mut partitions = Vec::new();
-        for (name, extent) in [("vendor", 0u32), ("system", 1)] {
+        for (extent, (name, _, _)) in parts.iter().enumerate() {
             let mut entry = vec![0u8; 52];
             entry[..name.len()].copy_from_slice(name.as_bytes());
-            entry[40..44].copy_from_slice(&extent.to_le_bytes());
+            entry[40..44].copy_from_slice(&(extent as u32).to_le_bytes());
             entry[44..48].copy_from_slice(&1u32.to_le_bytes());
             partitions.extend_from_slice(&entry);
         }
         let mut extents = Vec::new();
-        for (sectors, at) in [(8u64, 1u64 << 20), (system_size / SECTOR, system_at)] {
-            extents.extend_from_slice(&sectors.to_le_bytes());
+        for (_, at, size) in parts {
+            extents.extend_from_slice(&(size / SECTOR).to_le_bytes());
             extents.extend_from_slice(&LP_TARGET_LINEAR.to_le_bytes());
             extents.extend_from_slice(&(at / SECTOR).to_le_bytes());
             extents.extend_from_slice(&0u32.to_le_bytes());
         }
+        let count = parts.len() as u32;
         let tables = [partitions, extents].concat();
         let mut header = vec![0u8; 128];
         header[0..4].copy_from_slice(&LP_HEADER_MAGIC.to_le_bytes());
@@ -387,7 +425,7 @@ pub(crate) mod fixture {
         header[8..12].copy_from_slice(&128u32.to_le_bytes());
         header[44..48].copy_from_slice(&(tables.len() as u32).to_le_bytes());
         header[48..80].copy_from_slice(&Sha256::digest(&tables));
-        let descriptors = [(0u32, 2u32, 52u32), (104, 2, 24)];
+        let descriptors = [(0u32, count, 52u32), (52 * count, count, 24)];
         for (i, (offset, count, size)) in descriptors.iter().enumerate() {
             let at = 80 + 12 * i;
             header[at..at + 4].copy_from_slice(&offset.to_le_bytes());
@@ -397,14 +435,10 @@ pub(crate) mod fixture {
         [header, tables].concat()
     }
 
-    /// A disk as the emulator's `system.img` is: a GPT whose `super` partition starts at
-    /// 2 MiB and holds `system` (the bytes given, a whole number of sectors) 1 MiB in.
-    pub fn disk(system: &[u8]) -> Vec<u8> {
-        assert_eq!(system.len() as u64 % SECTOR, 0);
+    /// A GPT disk of `size` bytes whose `super` partition starts at 2 MiB and runs to the end.
+    fn gpt_disk(size: u64) -> Vec<u8> {
         let super_at = 2u64 << 20;
-        let system_at = 1u64 << 20;
-        let super_size = system_at + system.len() as u64 + (1 << 20);
-        let mut disk = vec![0u8; (super_at + super_size) as usize];
+        let mut disk = vec![0u8; size as usize];
         let mut header = vec![0u8; 92];
         header[..8].copy_from_slice(b"EFI PART");
         header[72..80].copy_from_slice(&2u64.to_le_bytes());
@@ -412,14 +446,51 @@ pub(crate) mod fixture {
         header[84..88].copy_from_slice(&128u32.to_le_bytes());
         put(&mut disk, SECTOR, &header);
         let vbmeta = gpt_entry("vbmeta", 2048, 4095);
-        let last = (super_at + super_size) / SECTOR - 1;
+        let last = size / SECTOR - 1;
         let entries = [vbmeta, gpt_entry("super", super_at / SECTOR, last)].concat();
         put(&mut disk, 2 * SECTOR, &entries);
+        disk
+    }
+
+    /// A disk as the emulator's `system.img` is: a GPT whose `super` partition starts at
+    /// 2 MiB and holds `system` (the bytes given, a whole number of sectors) 1 MiB in.
+    pub fn disk(system: &[u8]) -> Vec<u8> {
+        assert_eq!(system.len() as u64 % SECTOR, 0);
+        let super_at = 2u64 << 20;
+        let system_at = 1u64 << 20;
+        let super_size = system_at + system.len() as u64 + (1 << 20);
+        let mut disk = gpt_disk(super_at + super_size);
         let geometry = super_at + LP_GEOMETRY_OFFSET;
         put(&mut disk, geometry, &LP_GEOMETRY_MAGIC.to_le_bytes());
         let metadata = lp_metadata(system_at, system.len() as u64);
         put(&mut disk, geometry + 2 * LP_GEOMETRY_SIZE, &metadata);
         put(&mut disk, super_at + system_at, system);
+        disk
+    }
+
+    /// A disk as the emulator's `system.img` is, whose `super` holds each of `parts` (its name
+    /// and bytes, a whole number of sectors), one after another from 1 MiB in.
+    pub fn disk_of(parts: &[(&str, &[u8])]) -> Vec<u8> {
+        let super_at = 2u64 << 20;
+        let mut placed = Vec::new();
+        let mut at = 1u64 << 20;
+        for (name, bytes) in parts {
+            assert_eq!(bytes.len() as u64 % SECTOR, 0);
+            placed.push((*name, at, bytes.len() as u64));
+            at += (bytes.len() as u64).div_ceil(4096) * 4096;
+        }
+        let super_size = at + (1 << 20);
+        let mut disk = gpt_disk(super_at + super_size);
+        let geometry = super_at + LP_GEOMETRY_OFFSET;
+        put(&mut disk, geometry, &LP_GEOMETRY_MAGIC.to_le_bytes());
+        put(
+            &mut disk,
+            geometry + 2 * LP_GEOMETRY_SIZE,
+            &lp_metadata_of(&placed),
+        );
+        for ((_, at, _), (_, bytes)) in placed.iter().zip(parts) {
+            put(&mut disk, super_at + at, bytes);
+        }
         disk
     }
 }

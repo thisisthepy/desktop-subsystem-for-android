@@ -494,6 +494,7 @@ name = "dsa-guest-channeld"
 version = "0.1.0"
 dependencies = [
  "dsa-guest-transport",
+ "dsa-host-core",
  "dsa-protocol",
  "dsa-protocol-schema",
  "dsa-transport",

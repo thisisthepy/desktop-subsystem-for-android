@@ -6,7 +6,7 @@ package io.github.thisisthepy.dsa.control.v1;
 /**
  * <pre>
  * Host to guest: the task's window is on a monitor of another scale; the task's app draws
- * at `density_dpi` (96 at a scale of 100%). The host sends the matching ResizeTask right
+ * at `density_dpi` (130 at a scale of 100%). The host sends the matching ResizeTask right
  * after it, and the agent applies both together, so the app relays out once.
  * </pre>
  *
@@ -155,7 +155,7 @@ public  final class SetTaskDensity extends
   /**
    * <pre>
    * Host to guest: the task's window is on a monitor of another scale; the task's app draws
-   * at `density_dpi` (96 at a scale of 100%). The host sends the matching ResizeTask right
+   * at `density_dpi` (130 at a scale of 100%). The host sends the matching ResizeTask right
    * after it, and the agent applies both together, so the app relays out once.
    * </pre>
    *

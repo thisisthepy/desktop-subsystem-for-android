@@ -2,8 +2,8 @@
 //! widget whose app lets it be set up again, Resize, with the sizes the widget allows, and
 //! Remove, as Android's home screen offers them.
 //!
-//! The user opens it by long-pressing the widget, by right-clicking it or with its More
-//! button. Choosing Widget settings asks the service to open the widget's setup again, which
+//! The user opens it by long-pressing the widget, by right-clicking it, or with the menu key.
+//! Choosing Widget settings asks the service to open the widget's setup again, which
 //! shows as the app's window; once the user finishes it, the widget shows what they chose.
 //! Choosing a size resizes the window, which tells the service and Android the new size as a
 //! drag of its edges does. Choosing Remove asks the service to remove the widget; its window
@@ -115,8 +115,6 @@ pub struct MenuText {
     pub default: &'static str,
     pub large: &'static str,
     pub extra_large: &'static str,
-    /// What assistive technology calls the button that opens the menu.
-    pub more: &'static str,
     /// What assistive technology calls a widget with no name of its own.
     pub widget: &'static str,
 }
@@ -132,7 +130,6 @@ pub fn menu_text(korean: bool) -> MenuText {
             default: "기본 크기",
             large: "크게",
             extra_large: "아주 크게",
-            more: "옵션 더 보기",
             widget: "위젯",
         }
     } else {
@@ -144,7 +141,6 @@ pub fn menu_text(korean: bool) -> MenuText {
             default: "Default size",
             large: "Large",
             extra_large: "Extra large",
-            more: "More options",
             widget: "Widget",
         }
     }
@@ -246,6 +242,7 @@ mod tests {
             y: 0,
             width_dp,
             height_dp,
+            resized: false,
         }
     }
 

@@ -46,6 +46,11 @@
     <uses-permission android:name="android.permission.INJECT_EVENTS" />
     <!-- Hearing the Escapes no app takes (key gesture events), which become Back. -->
     <uses-permission android:name="android.permission.MANAGE_KEY_GESTURES" />
+    <!--
+      Being the status bar the window manager reports the system bars' live appearance to,
+      which the host's caption buttons follow: the guest has no SystemUI to be it.
+    -->
+    <uses-permission android:name="android.permission.STATUS_BAR_SERVICE" />
     <!-- Reading the label and launcher activity of any app. -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
     <!--
@@ -59,8 +64,12 @@
       and setting the battery and battery saver to the host's.
     -->
     <uses-permission android:name="android.permission.DEVICE_POWER" />
-    <!-- Ending cached apps when the guest goes to sleep with no task open. -->
+    <!--
+      Ending cached apps when the guest goes to sleep with no task open, and ending another
+      app's processes that stay cached with no window: killBackgroundProcesses takes both.
+    -->
     <uses-permission android:name="android.permission.KILL_ALL_BACKGROUND_PROCESSES" />
+    <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
     <!-- Ending an app's processes when its last window closes, or when the host says Stop. -->
     <uses-permission android:name="android.permission.FORCE_STOP_PACKAGES" />
     <!-- Turning off the phone-only apps a desktop does not use, if the build has them. -->

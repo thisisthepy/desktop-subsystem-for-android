@@ -10,6 +10,7 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <utility>
 
 #include "log.h"
 
@@ -138,32 +139,55 @@ std::unique_ptr<HostDecoder> HostDecoder::open(Codec codec, uint32_t width, uint
         ::close(fd);
         return nullptr;
     }
-    // Pictures come when the decoder has them; the reader waits as long as it takes.
+    // Pictures come when the decoder has them; the reader waits as long as it takes. The writer
+    // too: the host reads no packet while the guest has not taken its last picture, which
+    // waits for a buffer of the app's surface. A send that timed out here would end the
+    // stream on a pause, and close() ends both waits.
     timeval none{0, 0};
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &none, sizeof(none));
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &none, sizeof(none));
     std::unique_ptr<HostDecoder> decoder(new HostDecoder(fd, std::move(onMessage)));
     decoder->mReader = std::thread([raw = decoder.get()] { raw->read(); });
+    decoder->mWriter = std::thread([raw = decoder.get()] { raw->write(); });
     return decoder;
 }
 
-HostDecoder::HostDecoder(int fd, MessageHandler onMessage) : mFd(fd), mOnMessage(std::move(onMessage)) {}
+// What may wait unsent: packets are compressed, and the framework keeps only a pipeline's worth
+// of works in flight, so this is reached only when the host has stopped reading.
+constexpr size_t kMaxQueuedBytes = 16 * 1024 * 1024;
+
+HostDecoder::HostDecoder(int fd, MessageHandler onMessage)
+    : mFd(fd), mOnMessage(std::move(onMessage)), mOutgoing(kMaxQueuedBytes) {}
 
 HostDecoder::~HostDecoder() { close(); }
 
 bool HostDecoder::send(const std::vector<uint8_t>& frame) {
-    std::lock_guard<std::mutex> lock(mSendLock);
-    if (mClosed.load()) {
+    if (mClosed.load() || mWriteFailed.load()) {
         return false;
     }
-    return writeAll(mFd, withLength(frame));
+    return mOutgoing.push(withLength(frame));
+}
+
+void HostDecoder::write() {
+    std::vector<uint8_t> frame;
+    while (mOutgoing.pop(&frame)) {
+        if (!writeAll(mFd, frame)) {
+            if (!mClosed.load()) {
+                CODEC_LOGW("a packet did not reach the host's decoder");
+            }
+            mWriteFailed.store(true);
+            mOutgoing.close();
+            return;
+        }
+    }
 }
 
 void HostDecoder::read() {
     std::vector<uint8_t> frame;
     while (!mClosed.load() && readFrame(mFd, &frame)) {
-        const HostMessage message = decodeHostFrame(frame.data(), frame.size());
+        HostMessage message = decodeHostFrame(frame.data(), frame.size());
         if (!mClosed.load()) {
-            mOnMessage(message);
+            mOnMessage(std::move(message));
         }
     }
     if (!mClosed.load()) {
@@ -176,15 +200,19 @@ void HostDecoder::close() {
     if (mClosed.exchange(true)) {
         return;
     }
+    // Wakes the writer whether it waits for a packet or for the socket, and the reader.
+    mOutgoing.close();
     shutdown(mFd, SHUT_RDWR);
-    if (mReader.joinable()) {
-        if (mReader.get_id() == std::this_thread::get_id()) {
-            mReader.detach();
+    for (std::thread* thread : {&mWriter, &mReader}) {
+        if (!thread->joinable()) {
+            continue;
+        }
+        if (thread->get_id() == std::this_thread::get_id()) {
+            thread->detach();
         } else {
-            mReader.join();
+            thread->join();
         }
     }
-    std::lock_guard<std::mutex> lock(mSendLock);
     ::close(mFd);
     mFd = -1;
 }

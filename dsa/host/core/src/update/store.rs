@@ -278,7 +278,7 @@ impl ImageStore {
         let mut state = self.state()?;
         if state.on_trial {
             return Err(UpdateError::Refused(format!(
-                "{} has not finished its first boot yet",
+                "{} is still on trial: it is kept once Android has finished starting from it",
                 state.current.version
             )));
         }
@@ -446,6 +446,21 @@ impl ImageStore {
         Ok(())
     }
 
+    /// Records that Android finished booting from `version`, however that boot was started:
+    /// when `version` is the current image and on trial, it is kept as [`confirm`] keeps it.
+    /// Returns whether this kept it. A boot of any other image says nothing about the current
+    /// one, so it changes nothing.
+    ///
+    /// [`confirm`]: Self::confirm
+    pub fn confirm_booted(&self, version: &str) -> Result<bool, UpdateError> {
+        let state = self.state()?;
+        if !state.on_trial || state.current.version != version {
+            return Ok(false);
+        }
+        self.confirm()?;
+        Ok(true)
+    }
+
     /// Goes back to the previous image after the current one failed to boot. The failed
     /// version is remembered and its files removed. Returns the image now current.
     pub fn roll_back(&self) -> Result<InstalledImage, UpdateError> {
@@ -473,8 +488,7 @@ impl ImageStore {
     /// again by the same build. Returns whether it was adopted.
     pub fn adopt_bundled(&self, bundled: &InstalledImage) -> Result<bool, UpdateError> {
         let mut state = self.state()?;
-        let newer = (bundled.android_major, bundled.build)
-            > (state.current.android_major, state.current.build);
+        let newer = bundled.order() > state.current.order();
         if !newer
             || bundled.version == state.current.version
             || !is_plain_name(&bundled.version)
@@ -511,7 +525,7 @@ impl ImageStore {
         let broken = state.current.clone();
         let mut candidates: Vec<InstalledImage> = state.previous.iter().cloned().collect();
         let mut others = self.complete_images();
-        others.sort_by_key(|image| std::cmp::Reverse((image.android_major, image.build)));
+        others.sort_by_key(|image| std::cmp::Reverse(image.order()));
         candidates.extend(others);
         candidates.push(installed.clone());
         let usable = candidates.into_iter().find(|image| {

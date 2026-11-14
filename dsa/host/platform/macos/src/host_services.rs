@@ -18,11 +18,15 @@
 //!   (`crate::devices::passkeys`). With no device lender running, it is unavailable.
 //! - The KeyMint root key is given once per boot on its own vsock port, which the VM listens
 //!   on with the others ([`listen_ports`]).
+//! - The guest's DNS queries come on a vsock port of their own, which the VM listens on too, and
+//!   are answered by the system's resolver ([`dsa_host_unix::dns_resolver`]): mDNSResponder,
+//!   with the hosts file, a VPN's scoped resolvers and encrypted DNS.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use dsa_host_core::backup::{folder_in, BackupService, BackupSwitch, FileSwitch, MemorySwitch};
+use dsa_host_core::dns::DNS_PORT;
 use dsa_host_core::host_keys::{HardwareOrStore, HostKeyStore, SealedKeys, StoredSealer};
 use dsa_host_core::keymint_root::KEYMINT_PORT;
 use dsa_host_core::passkeys::PasskeyService;
@@ -35,8 +39,8 @@ use crate::keychain::KeychainKeys;
 use crate::secure_enclave::SecureEnclaveSealer;
 
 /// The vsock ports of these services the VM listens on.
-pub fn listen_ports() -> [u32; 1] {
-    [KEYMINT_PORT]
+pub fn listen_ports() -> [u32; 2] {
+    [KEYMINT_PORT, DNS_PORT]
 }
 
 /// What a checked passkey request is told when no device lender performs it.
@@ -78,6 +82,9 @@ pub fn serve(
         .with_file_access(own_rights(folder))
         .with_switch(switch);
     session.serve_backup(Arc::new(backup));
+
+    // The root certificates the administrator's and the user's trust settings added.
+    session.serve_host_certificates(Arc::new(crate::host_certificates::MacRootStore));
 
     let enclave = Arc::new(SecureEnclaveSealer);
     let sealers = HardwareOrStore::new(

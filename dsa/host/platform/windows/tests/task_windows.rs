@@ -9,7 +9,7 @@
 #![cfg(windows)]
 
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -46,7 +46,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     IsWindowVisible, IsZoomed, PostMessageW, SendMessageW, SetWindowPos, ShowWindow, SWP_NOMOVE,
     SWP_NOZORDER, SW_MAXIMIZE, SW_MINIMIZE, SW_RESTORE, WM_CHAR, WM_CLOSE, WM_ENTERSIZEMOVE,
     WM_EXITSIZEMOVE, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_LBUTTONDOWN, WM_LBUTTONUP,
-    WM_MOUSEWHEEL, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    WM_MOUSEWHEEL, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN,
+    WM_SYSKEYUP,
 };
 
 const WAIT: Duration = Duration::from_secs(10);
@@ -163,13 +164,16 @@ impl Running {
 }
 
 fn start(presenter: Option<Arc<CapturingPresenter>>) -> Running {
-    start_with(presenter, None)
+    start_with(
+        presenter.map(|presenter| presenter as Arc<dyn DisplayPresenter>),
+        None,
+    )
 }
 
 /// [`start`], with Windows' touch gestures turned off through `touch_gestures` while a task
 /// window is in front.
 fn start_with(
-    presenter: Option<Arc<CapturingPresenter>>,
+    presenter: Option<Arc<dyn DisplayPresenter>>,
     touch_gestures: Option<TouchGestureSetup>,
 ) -> Running {
     let (api_listener, api_connector) = local::pair();
@@ -1002,6 +1006,31 @@ fn window_and_work_area(hwnd: isize) -> (RECT, RECT) {
     (window, info.rcWork)
 }
 
+/// Checks that `hwnd` is maximised with its client area exactly on its monitor's work area:
+/// not the whole monitor, under the taskbar, and not its restored size. `when` says which step
+/// of the test it is.
+fn assert_fills_its_work_area(hwnd: isize, when: &str) {
+    assert_ne!(
+        unsafe { IsZoomed(hwnd as HWND) },
+        0,
+        "the window is no longer maximised {when}"
+    );
+    let (window, work) = window_and_work_area(hwnd);
+    let mut origin = POINT { x: 0, y: 0 };
+    unsafe { ClientToScreen(hwnd as HWND, &mut origin) };
+    let (width, height) = client_size(hwnd);
+    let client = (origin.x, origin.y, origin.x + width, origin.y + height);
+    assert_eq!(
+        client,
+        (work.left, work.top, work.right, work.bottom),
+        "{when}, the maximised window at {}x{}..{}x{} has its client area at {client:?}, not on the work area",
+        window.left,
+        window.top,
+        window.right,
+        window.bottom,
+    );
+}
+
 #[test]
 fn fr4_a_maximised_task_window_shows_its_task_1_to_1_without_a_new_texture_or_a_stray_size() {
     let presenter = Arc::new(CapturingPresenter::default());
@@ -1043,44 +1072,16 @@ fn fr4_a_maximised_task_window_shows_its_task_1_to_1_without_a_new_texture_or_a_
     wait_for("the maximised size to reach the guest", || {
         (resizes_since(&running, before, 1) == vec![(max, true)]).then_some(())
     });
-    // The window changes size only together with a frame of that size, which comes in the
-    // same texture.
+    // A maximised window holds the size the desktop gives it, its own monitor's work area,
+    // at once: the guest's frame, smaller than that, is shown in its middle 1:1, in the same
+    // texture, and the window does not shrink to it.
+    assert_fills_its_work_area(hwnd, "maximised");
     if let (Some(sink), Some(texture)) = (&sink, texture) {
-        assert_eq!(
-            client_size(hwnd),
-            normal,
-            "the window took a size it had no frame of"
-        );
         assert_eq!(sink.target(3, 1280, 720), Some(texture), "a new texture");
         sink.frame(3, max);
-        wait_for("the window to take the size of its frame", || {
-            (client_size(hwnd) == (max.0 as i32, max.1 as i32)).then_some(())
-        });
+        thread::sleep(Duration::from_millis(300));
+        assert_fills_its_work_area(hwnd, "after a frame of the guest's largest size");
     }
-    let (width, height) = client_size(hwnd);
-    assert_eq!(
-        (width as u32, height as u32),
-        max,
-        "a maximised window takes the most the guest can draw, and no more"
-    );
-    // Centred on the work area, not left in its corner.
-    let (window, work) = window_and_work_area(hwnd);
-    let off_centre = |start: i32, end: i32, work_start: i32, work_end: i32| {
-        ((start - work_start) - (work_end - end)).abs()
-    };
-    assert!(
-        off_centre(window.left, window.right, work.left, work.right) <= 1
-            && off_centre(window.top, window.bottom, work.top, work.bottom) <= 1,
-        "the maximised window at {}x{}..{}x{} is not centred on the work area {}x{}..{}x{}",
-        window.left,
-        window.top,
-        window.right,
-        window.bottom,
-        work.left,
-        work.top,
-        work.right,
-        work.bottom
-    );
 
     // Once the task has the size, it is reconfigured once, at that size.
     let mut maximised = clock.clone();
@@ -1095,9 +1096,10 @@ fn fr4_a_maximised_task_window_shows_its_task_1_to_1_without_a_new_texture_or_a_
         assert_eq!(sink.target(3, 1280, 720), Some(texture), "a new texture");
         sink.frame(3, max);
     }
-    // The window keeps its size: nothing larger than the guest draws, nothing of size zero.
+    // The window stays maximised on its work area, and the guest is asked for nothing larger
+    // than it draws, nor of size zero.
     thread::sleep(Duration::from_millis(300));
-    assert_eq!(client_size(hwnd), (max.0 as i32, max.1 as i32));
+    assert_fills_its_work_area(hwnd, "after the task was reconfigured");
     let asked = resizes_since(&running, 0, 1);
     let within = |((width, height), _): &((u32, u32), bool)| {
         (1..=max.0).contains(width) && (1..=max.1).contains(height)
@@ -1130,6 +1132,92 @@ fn fr4_a_maximised_task_window_shows_its_task_1_to_1_without_a_new_texture_or_a_
 }
 
 #[test]
+fn fr4_a_window_maximised_with_a_guest_larger_than_its_monitor_fills_the_work_area_and_restores() {
+    let presenter = Arc::new(CapturingPresenter::default());
+    let running = start(Some(Arc::clone(&presenter)));
+    running.android.start();
+    // The guest draws more than any monitor shows, as a 2880x2880 guest display does on a
+    // 2048x1152 monitor.
+    let mut notes = task_at_monitor_density(1, 400, 300);
+    notes.max_width = 8000;
+    notes.max_height = 8000;
+    running.android.publish(TaskEvent::Updated(notes.clone()));
+    running.android.publish(TaskEvent::Frames {
+        task_id: 1,
+        display_id: 3,
+    });
+    let open = windows_of(&running, 1);
+    let hwnd = open[0].hwnd;
+    let (_, work) = window_and_work_area(hwnd);
+    let filled = (
+        (work.right - work.left) as u32,
+        (work.bottom - work.top) as u32,
+    );
+    let sink = presenter.sink.lock().unwrap().clone();
+    if let Some(sink) = &sink {
+        wait_for("display 3 to reach task 1's window", || {
+            sink.target(3, filled.0.max(1280), filled.1.max(720))
+        });
+        let (width, height) = client_size(hwnd);
+        sink.frame(3, (width as u32, height as u32));
+    }
+
+    thread::sleep(Duration::from_millis(200));
+    let before = running.android.requests.lock().unwrap().len();
+    let normal = client_size(hwnd);
+    unsafe { ShowWindow(hwnd as HWND, SW_MAXIMIZE) };
+    assert_ne!(unsafe { IsZoomed(hwnd as HWND) }, 0);
+    // The guest is asked for the work area of the window's own monitor, never more.
+    wait_for("the maximised size to reach the guest", || {
+        (resizes_since(&running, before, 1) == vec![(filled, true)]).then_some(())
+    });
+    if let Some(sink) = &sink {
+        sink.frame(3, filled);
+        wait_for("the window to take the size of its frame", || {
+            (client_size(hwnd) == (filled.0 as i32, filled.1 as i32)).then_some(())
+        });
+    }
+    // Its client area is the work area, on the screen, and stays there once the frame of that
+    // size is shown and the guest has had time to answer.
+    assert_fills_its_work_area(hwnd, "maximised");
+    thread::sleep(Duration::from_millis(1500));
+    assert_fills_its_work_area(hwnd, "1.5 s after the frame of its size");
+    let asked = resizes_since(&running, before, 1);
+    assert!(
+        asked
+            .iter()
+            .all(|((width, height), _)| *width <= filled.0 && *height <= filled.1),
+        "a size larger than the work area {}x{} was asked for: {asked:?}",
+        filled.0,
+        filled.1
+    );
+
+    // Restoring it gives the window and the task their old size back.
+    let mut maximised = notes.clone();
+    maximised.bounds.right = maximised.bounds.left + filled.0 as i32;
+    maximised.bounds.bottom = maximised.bounds.top + filled.1 as i32;
+    running.android.publish(TaskEvent::Updated(maximised));
+    let restored_from = running.android.requests.lock().unwrap().len();
+    unsafe { ShowWindow(hwnd as HWND, SW_RESTORE) };
+    assert_eq!(unsafe { IsZoomed(hwnd as HWND) }, 0);
+    let restored = (normal.0 as u32, normal.1 as u32);
+    wait_for("the restored size to reach the guest", || {
+        resizes_since(&running, restored_from, 1)
+            .contains(&(restored, true))
+            .then_some(())
+    });
+    if let Some(sink) = &sink {
+        sink.frame(3, restored);
+        wait_for("the window to take its restored size", || {
+            (client_size(hwnd) == normal).then_some(())
+        });
+    }
+
+    running.android.publish(TaskEvent::Removed { task_id: 1 });
+    windows_of(&running, 0);
+}
+
+#[test]
 fn fr4_a_task_window_cannot_grow_past_what_the_guest_can_draw() {
     let running = start(None);
     running.android.start();
@@ -1152,7 +1240,7 @@ fn fr4_a_task_window_opens_at_its_monitors_scale() {
     let running = start(None);
     running.android.start();
     let mut notes = task(1, "Notes", 400, 300);
-    notes.density_dpi = 96;
+    notes.density_dpi = 130;
     notes.max_width = 1920;
     notes.max_height = 1080;
     running.android.publish(TaskEvent::Updated(notes));
@@ -1160,9 +1248,9 @@ fn fr4_a_task_window_opens_at_its_monitors_scale() {
     let dpi = unsafe { GetDpiForWindow(open[0].hwnd as HWND) }.max(96);
     let wanted = density_for_dpi(dpi);
 
-    let (width, height) = rescale((400, 300), 96, wanted);
+    let (width, height) = rescale((400, 300), 130, wanted);
     assert_eq!(client_size(open[0].hwnd), (width as i32, height as i32));
-    if wanted != 96 {
+    if wanted != 130 {
         wait_for("the density to reach the guest", || {
             let requests = running.android.requests.lock().unwrap().clone();
             (requests.first()
@@ -1190,6 +1278,213 @@ fn nfr5_a_service_that_goes_away_closes_every_task_window() {
     drop(running.service.take());
     running.android.end_watches();
     windows_of(&running, 0);
+}
+
+/// A renderer whose Vulkan device the test loses and makes again, as a GPU reset does.
+#[derive(Default)]
+struct ResettingPresenter {
+    generation: AtomicU64,
+}
+
+impl DisplayPresenter for ResettingPresenter {
+    fn present_displays(&self, _: Option<Arc<dyn DisplaySink>>) -> Result<(), String> {
+        Ok(())
+    }
+    fn adapter_luid(&self) -> Option<[u8; 8]> {
+        None
+    }
+    fn device_generation(&self) -> u64 {
+        self.generation.load(Ordering::SeqCst)
+    }
+}
+
+/// The requests the fake Android was given from the `skip`th on.
+fn requests_since(running: &Running, skip: usize) -> Vec<TaskRequest> {
+    running.android.requests.lock().unwrap()[skip..].to_vec()
+}
+
+#[test]
+fn nfr5_every_input_of_a_window_taken_over_after_a_gpu_reset_reaches_the_new_task() {
+    let presenter = Arc::new(ResettingPresenter::default());
+    let running = start_with(
+        Some(Arc::clone(&presenter) as Arc<dyn DisplayPresenter>),
+        None,
+    );
+    running.android.start();
+    let app = "com.example.app9";
+    running
+        .android
+        .publish(TaskEvent::Updated(task_at_monitor_density(9, 400, 300)));
+    let open = windows_of(&running, 1);
+    let hwnd = open[0].hwnd;
+
+    // A GPU reset, which the window manager sees at its next look; then the app's task ends
+    // because of it, and the window stays for the app's next task.
+    presenter.generation.fetch_add(1, Ordering::SeqCst);
+    thread::sleep(Duration::from_secs(2));
+    running.android.publish(TaskEvent::Removed { task_id: 9 });
+    wait_for("the app to be started again", || {
+        running
+            .android
+            .requests
+            .lock()
+            .unwrap()
+            .contains(&TaskRequest::Launch {
+                package_name: app.into(),
+            })
+            .then_some(())
+    });
+    assert_eq!(windows_of(&running, 1)[0].hwnd, hwnd);
+
+    // The app's new task takes the window over. Its title follows the window host's word on
+    // which task the window shows, on the same connection, so once the title is there every
+    // input after it goes to the new task.
+    let mut again = task_at_monitor_density(14, 400, 300);
+    again.package_name = app.into();
+    again.label = "Notes again".into();
+    again.can_go_back = true;
+    running.android.publish(TaskEvent::Updated(again));
+    wait_for("the window to show the new task's title", || {
+        (title(hwnd) == "Notes again").then_some(())
+    });
+    let open = running.windows();
+    assert_eq!(open.len(), 1);
+    assert_eq!(open[0].hwnd, hwnd);
+    let window = hwnd as HWND;
+
+    // The mouse and the wheel.
+    let (width, height) = client_size(hwnd);
+    let (x, y) = (width / 2, height / 2);
+    let mut point = POINT { x, y };
+    unsafe { ClientToScreen(window, &mut point) };
+    unsafe {
+        PostMessageW(window, WM_LBUTTONDOWN, MK_LBUTTON as usize, lparam(x, y));
+        PostMessageW(window, WM_LBUTTONUP, 0, lparam(x, y));
+        PostMessageW(
+            window,
+            WM_MOUSEWHEEL,
+            ((-120i16) as u16 as usize) << 16,
+            lparam(point.x, point.y),
+        );
+    }
+    let given: Vec<(i32, PointerAction)> = pointers(&running, 3)
+        .iter()
+        .map(|event| (event.task_id, event.action))
+        .collect();
+    assert_eq!(
+        given,
+        vec![
+            (14, PointerAction::Down),
+            (14, PointerAction::Up),
+            (14, PointerAction::Scroll)
+        ]
+    );
+
+    // A key, and a letter typed as text.
+    send_key(window, WM_KEYDOWN, VK_RETURN, 0x1c, false);
+    send_key(window, WM_KEYUP, VK_RETURN, 0x1c, false);
+    unsafe {
+        PostMessageW(
+            window,
+            WM_KEYDOWN,
+            VK_A as usize,
+            key_lparam(0x1e, false, true),
+        );
+        PostMessageW(
+            window,
+            WM_KEYUP,
+            VK_A as usize,
+            key_lparam(0x1e, false, false),
+        );
+    }
+    assert_eq!(
+        text(&running, 1),
+        vec![ImeEvent::Commit {
+            task_id: 14,
+            text: "a".into()
+        }]
+    );
+
+    // The title bar's back arrow, which the new task shows since it can go back.
+    use dsa_host_windows::app_window::caption::HT_BACK;
+    unsafe {
+        PostMessageW(window, WM_NCLBUTTONDOWN, HT_BACK as usize, 0);
+        PostMessageW(window, WM_NCLBUTTONUP, HT_BACK as usize, 0);
+    }
+    let sent: Vec<(i32, KeyAction, u32)> = keys(&running, 4)
+        .iter()
+        .map(|event| (event.task_id, event.action, event.key_code))
+        .collect();
+    assert_eq!(
+        sent,
+        vec![
+            (14, KeyAction::Down, keycode::ENTER),
+            (14, KeyAction::Up, keycode::ENTER),
+            (14, KeyAction::Down, keycode::BACK),
+            (14, KeyAction::Up, keycode::BACK),
+        ]
+    );
+
+    // A resize, a maximise and a close are asked of the new task.
+    resize_to(hwnd, 640, 520);
+    let (width, height) = client_size(hwnd);
+    wait_for("the new size to reach the new task", || {
+        (last_resize(&running, 14) == Some((width as u32, height as u32))).then_some(())
+    });
+    let before = running.android.requests.lock().unwrap().len();
+    unsafe { ShowWindow(window, SW_MAXIMIZE) };
+    wait_for("the maximised size to reach Android", || {
+        requests_since(&running, before)
+            .iter()
+            .any(|request| matches!(request, TaskRequest::Resize { .. }))
+            .then_some(())
+    });
+    unsafe { PostMessageW(window, WM_CLOSE, 0, 0) };
+    wait_for("the close to reach Android", || {
+        requests_since(&running, before)
+            .contains(&TaskRequest::Close { task_id: 14 })
+            .then_some(())
+    });
+    // Nothing went to the task that ended.
+    let all = running.android.requests.lock().unwrap().clone();
+    let launch = all
+        .iter()
+        .position(|request| {
+            *request
+                == TaskRequest::Launch {
+                    package_name: app.into(),
+                }
+        })
+        .unwrap();
+    for request in &all[launch..] {
+        let named = match request {
+            TaskRequest::Resize { task_id, .. } | TaskRequest::Close { task_id } => Some(*task_id),
+            _ => None,
+        };
+        assert_ne!(named, Some(9), "{request:?} went to the task that ended");
+    }
+    // A hover can come from the machine's own cursor resting over the window before the
+    // reset; everything the test did went to the new task.
+    let pointed: Vec<PointerEvent> = running
+        .android
+        .pointers
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|event| {
+            !matches!(
+                event.action,
+                PointerAction::HoverMove | PointerAction::HoverExit
+            )
+        })
+        .copied()
+        .collect();
+    assert!(
+        pointed.iter().all(|event| event.task_id == 14),
+        "{pointed:?}"
+    );
+    let typed = running.android.text.lock().unwrap().clone();
+    assert!(typed.iter().all(|event| event.task_id() == 14), "{typed:?}");
 }
 
 #[test]

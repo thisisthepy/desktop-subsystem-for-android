@@ -579,6 +579,53 @@ fn fr29_file_sharing_reaches_the_switch_and_the_agent() {
     );
 }
 
+/// The agent, which notes whether the installer had already run each time it heard of the
+/// host's certificates.
+struct CertificateAgent {
+    installed: Arc<Mutex<Vec<Vec<Vec<u8>>>>>,
+    heard_after_install: Mutex<Vec<bool>>,
+}
+
+impl Listener for CertificateAgent {
+    fn deliver(&self, frame: &[u8]) -> Delivery {
+        if let Ok(Envelope {
+            body: Some(Body::HostCertificates(_)),
+        }) = dsa_protocol::decode(frame)
+        {
+            let done = !self.installed.lock().unwrap().is_empty();
+            self.heard_after_install.lock().unwrap().push(done);
+        }
+        Delivery::Delivered
+    }
+}
+
+#[test]
+fn fr28_host_certificates_are_installed_before_the_agent_hears_of_them() {
+    let (router, _host) = router();
+    let installed = Arc::new(Mutex::new(Vec::new()));
+    let seen = Arc::clone(&installed);
+    let router = router.on_host_certificates(move |certificates| {
+        seen.lock().unwrap().push(certificates.certificates.clone())
+    });
+    let agent = Arc::new(CertificateAgent {
+        installed: Arc::clone(&installed),
+        heard_after_install: Mutex::new(Vec::new()),
+    });
+    router.subscribe(AGENT, agent.clone());
+    router.from_host(&frame(Body::HostCertificates(
+        dsa_protocol::control::HostCertificates {
+            enabled: true,
+            certificates: vec![vec![0x30, 0x00]],
+        },
+    )));
+    assert_eq!(*installed.lock().unwrap(), vec![vec![vec![0x30, 0x00]]]);
+    assert_eq!(
+        *agent.heard_after_install.lock().unwrap(),
+        vec![true],
+        "the agent hears once the certificates are in place"
+    );
+}
+
 #[test]
 fn fr29_the_request_for_androids_files_reaches_the_switch_and_no_client() {
     let (router, _host) = router();

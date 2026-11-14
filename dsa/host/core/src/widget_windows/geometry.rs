@@ -1,11 +1,11 @@
 //! Where the parts of a widget window are, in its pixels: its size at a monitor's scale, the
-//! edges that resize it, its More button, and the room, border and handles of a widget being
-//! edited.
+//! edges that resize it, the room, border and handles of a widget being edited, and how the
+//! widget's image sits in its window, never scaled.
 //!
 //! Every host measures its windows in device-independent pixels of 1/96 inch: Windows' DIPs,
 //! a Wayland output's logical pixels, a Mac's points. A monitor at a scale of `s` has
-//! `96 x s` of the host's pixels per inch, its `dpi` here, which is also Android's density
-//! there, as a dp is 1/160 inch and 0.6 of a device-independent pixel.
+//! `96 x s` of the host's pixels per inch, its `dpi` here. Android draws its desktop at its own
+//! density there ([`android_density`]).
 
 use std::time::{Duration, Instant};
 
@@ -13,20 +13,6 @@ use crate::widgets::{self, Placement};
 
 /// The width of the edges a widget window is resized by, in device-independent pixels.
 pub const BORDER_DIP: i32 = 6;
-
-/// The diameter of a widget window's More button, in device-independent pixels.
-pub const MORE_BUTTON_DIP: u32 = 28;
-
-/// How far the More button sits from the window's top and right edges, which keeps it
-/// inside every corner radius an Android widget is drawn with (up to 41 dp) and off the edges
-/// that resize the window.
-pub const MORE_BUTTON_MARGIN_DIP: u32 = 8;
-
-/// The size of the More button's glyph.
-pub const MORE_GLYPH_DIP: u32 = 16;
-
-/// How long the More button takes to fade in or out: WinUI's `ControlFastAnimationDuration`.
-pub const FADE: Duration = Duration::from_millis(167);
 
 /// How long a press on the widget is held still before it is a long press, which edits the
 /// widget as a long press does on a phone's home screen.
@@ -37,6 +23,12 @@ pub const HOLD_TO_MOVE: Duration = Duration::from_millis(500);
 /// as still as a mouse.
 pub const TOUCH_SLOP_DIP: u32 = 8;
 
+/// How far the mouse may wander, at least, before its press is a drag rather than a long
+/// press, in device-independent pixels: Windows' default drag threshold at 100%. A threshold
+/// the system reports in unscaled pixels would be half as far at 200%, where a hand resting
+/// on the mouse moves it further in pixels.
+pub const MOUSE_SLOP_DIP: u32 = 4;
+
 /// The room around a widget being edited, for its shadow and its handles, in
 /// device-independent pixels.
 pub const EDIT_MARGIN_DIP: u32 = 16;
@@ -44,6 +36,11 @@ pub const EDIT_MARGIN_DIP: u32 = 16;
 /// How much a widget being edited grows on each side as it lifts, in device-independent
 /// pixels.
 pub const LIFT_DIP: u32 = 4;
+
+/// How far a widget being edited rises as it lifts, in device-independent pixels: its image,
+/// at its own size, moves up by this much over its shadow, as a launcher shows a widget it
+/// picked up. The image itself is never scaled.
+pub const RAISE_DIP: u32 = 2;
 
 /// The width of the accent border of a widget being edited.
 pub const EDIT_BORDER_DIP: u32 = 2;
@@ -75,13 +72,13 @@ pub fn dip_of_px(px: i32, dpi: u32) -> u32 {
     ((px * u64::from(HOST_BASE_DPI) + u64::from(dpi) / 2) / u64::from(dpi)) as u32
 }
 
-/// Android's density for a monitor of `dpi`: 96 at a scale of 100%, as a dp is 1/160 inch and
-/// a device-independent pixel 1/96 inch.
+/// Android's density for a monitor of `dpi`: 130 at a scale of 100%, as Android's desktop dp
+/// is 1/117.23 inch and a device-independent pixel 1/96 inch.
 pub fn android_density(dpi: u32) -> u32 {
     crate::compositor::window_sizing::density_for_dpi(dpi)
 }
 
-/// `dp` of Android's at a monitor of `dpi`, in pixels, rounded to the nearest: 0.6 of a
+/// `dp` of Android's at a monitor of `dpi`, in pixels, rounded to the nearest: 0.819 of a
 /// device-independent pixel each.
 pub fn px_of_dp(dp: u32, dpi: u32) -> i32 {
     widgets::px_of(dp, android_density(dpi)).min(i32::MAX as u32) as i32
@@ -107,6 +104,7 @@ pub fn placement_of(x: i32, y: i32, width: i32, height: i32, dpi: u32) -> Placem
         y,
         width_dp: dp_of_px(width, dpi).max(1),
         height_dp: dp_of_px(height, dpi).max(1),
+        resized: false,
     }
 }
 
@@ -205,8 +203,6 @@ pub fn all_clear(pixels: &[u8]) -> bool {
 pub enum Hit {
     /// Inside the widget: input goes to Android.
     Client,
-    /// The More button: a click opens the menu and a drag moves the window.
-    More,
     Left,
     Right,
     Top,
@@ -219,10 +215,25 @@ pub enum Hit {
     Outside,
 }
 
-/// What `x`, `y` (from the window's top left corner) hits in a window of `width` by `height`
-/// pixels on a monitor of `dpi`. Only the edges the widget may be resized along resize it;
-/// there is no band along the top, so all of the widget but its More button is the widget's.
-pub fn hit_test(x: i32, y: i32, width: i32, height: i32, dpi: u32, resize_mode: u32) -> Hit {
+/// What `x`, `y` (from the window's top left corner) hits in a widget's window of `width` by
+/// `height` pixels on a monitor of `dpi`, while the widget is `editing` or not. A widget
+/// being edited is resized by its handles and the edges of its lifted image
+/// ([`edit_hit_test`]); one that is not, by a band of [`BORDER_DIP`] along its edges. Either
+/// way only the edges the widget may be resized along (`resize_mode`) resize it, so no other
+/// edge shows a resize cursor, and there is no band along the top of a widget that is not
+/// resized along it: all of the rest is the widget's.
+pub fn hit_test(
+    editing: bool,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    dpi: u32,
+    resize_mode: u32,
+) -> Hit {
+    if editing {
+        return edit_hit_test(x, y, width, height, dpi, resize_mode);
+    }
     let border = px_of_dip(BORDER_DIP as u32, dpi).max(1);
     let horizontal = resize_mode & widgets::RESIZE_HORIZONTAL != 0;
     let vertical = resize_mode & widgets::RESIZE_VERTICAL != 0;
@@ -230,7 +241,12 @@ pub fn hit_test(x: i32, y: i32, width: i32, height: i32, dpi: u32, resize_mode: 
     let right = horizontal && x >= width - border;
     let top = vertical && y < border;
     let bottom = vertical && y >= height - border;
-    match (left, right, top, bottom) {
+    edge_of(left, right, top, bottom).unwrap_or(Hit::Client)
+}
+
+/// The edge or corner that these sides make, if any.
+fn edge_of(left: bool, right: bool, top: bool, bottom: bool) -> Option<Hit> {
+    Some(match (left, right, top, bottom) {
         (true, _, true, _) => Hit::TopLeft,
         (_, true, true, _) => Hit::TopRight,
         (true, _, _, true) => Hit::BottomLeft,
@@ -239,9 +255,82 @@ pub fn hit_test(x: i32, y: i32, width: i32, height: i32, dpi: u32, resize_mode: 
         (_, true, ..) => Hit::Right,
         (_, _, true, _) => Hit::Top,
         (.., true) => Hit::Bottom,
-        _ if on_more_button(x, y, width, height, dpi) => Hit::More,
-        _ => Hit::Client,
+        _ => return None,
+    })
+}
+
+impl Hit {
+    /// Whether a press here resizes the window, and along which sides: left, right, top and
+    /// bottom.
+    pub fn sides(self) -> Option<(bool, bool, bool, bool)> {
+        Some(match self {
+            Hit::Left => (true, false, false, false),
+            Hit::Right => (false, true, false, false),
+            Hit::Top => (false, false, true, false),
+            Hit::Bottom => (false, false, false, true),
+            Hit::TopLeft => (true, false, true, false),
+            Hit::TopRight => (false, true, true, false),
+            Hit::BottomLeft => (true, false, false, true),
+            Hit::BottomRight => (false, true, false, true),
+            Hit::Client | Hit::Outside => return None,
+        })
     }
+
+    /// The cursor shown over it.
+    pub fn cursor(self) -> Cursor {
+        match self {
+            Hit::Left | Hit::Right => Cursor::SizeWestEast,
+            Hit::Top | Hit::Bottom => Cursor::SizeNorthSouth,
+            Hit::TopLeft | Hit::BottomRight => Cursor::SizeNorthWestSouthEast,
+            Hit::TopRight | Hit::BottomLeft => Cursor::SizeNorthEastSouthWest,
+            Hit::Client | Hit::Outside => Cursor::Arrow,
+        }
+    }
+}
+
+/// The cursors a widget window shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cursor {
+    Arrow,
+    SizeWestEast,
+    SizeNorthSouth,
+    SizeNorthWestSouthEast,
+    SizeNorthEastSouthWest,
+}
+
+/// The window's rectangle on the screen while it is resized by the `edge` it was pressed on:
+/// it was `start` when the press went `down`, and the pointer is `at` now. The sides the edge
+/// does not name stay where they were, and the size stays within `min` and `max` (width and
+/// height in pixels), the sides being moved stopping where a limit is reached. The same for
+/// the edges of a widget and the handles of one being edited.
+pub fn resize_rect(
+    edge: Hit,
+    start: ScreenRect,
+    down: (i32, i32),
+    at: (i32, i32),
+    min: (i32, i32),
+    max: (i32, i32),
+) -> ScreenRect {
+    let Some((left, right, top, bottom)) = edge.sides() else {
+        return start;
+    };
+    let (dx, dy) = (at.0 - down.0, at.1 - down.1);
+    let (min_w, min_h) = (min.0.max(1), min.1.max(1));
+    let (max_w, max_h) = (max.0.max(min_w), max.1.max(min_h));
+    let (mut l, mut t, mut r, mut b) = start;
+    if left {
+        l = (start.0 + dx).clamp(start.2 - max_w, start.2 - min_w);
+    }
+    if right {
+        r = (start.2 + dx).clamp(start.0 + min_w, start.0 + max_w);
+    }
+    if top {
+        t = (start.1 + dy).clamp(start.3 - max_h, start.3 - min_h);
+    }
+    if bottom {
+        b = (start.3 + dy).clamp(start.1 + min_h, start.1 + max_h);
+    }
+    (l, t, r, b)
 }
 
 /// Where the parts of a widget being edited are in its window, which has
@@ -251,8 +340,12 @@ pub fn hit_test(x: i32, y: i32, width: i32, height: i32, dpi: u32, resize_mode: 
 pub struct EditLayout {
     /// The widget's own place, where it sits when it is not edited.
     pub widget: (i32, i32, i32, i32),
-    /// The widget lifted: [`LIFT_DIP`] larger on each side, which its image is drawn into.
+    /// The widget lifted: [`LIFT_DIP`] larger on each side, which its border and shadow are
+    /// drawn around.
     pub lifted: (i32, i32, i32, i32),
+    /// Where its image goes while it is lifted: at its own size, never scaled, raised by
+    /// [`RAISE_DIP`] from its own place.
+    pub image: (i32, i32, i32, i32),
     /// A handle in the middle of each edge the widget may be resized along, with that edge.
     pub handles: Vec<(Hit, Circle)>,
 }
@@ -282,9 +375,11 @@ pub fn edit_layout(width: i32, height: i32, dpi: u32, resize_mode: u32) -> EditL
         handles.push((Hit::Top, at(cx, ly as f32)));
         handles.push((Hit::Bottom, at(cx, (ly + lh) as f32)));
     }
+    let raise = px_of_dip(RAISE_DIP, dpi).min(lift);
     EditLayout {
         widget: (margin, margin, w, h),
         lifted,
+        image: (margin, margin - raise, w, h),
         handles,
     }
 }
@@ -314,16 +409,8 @@ pub fn edit_hit_test(x: i32, y: i32, width: i32, height: i32, dpi: u32, resize_m
         let right = horizontal && x >= lx + lw - band;
         let top = vertical && y < ly + band;
         let bottom = vertical && y >= ly + lh - band;
-        match (left, right, top, bottom) {
-            (true, _, true, _) => return Hit::TopLeft,
-            (_, true, true, _) => return Hit::TopRight,
-            (true, _, _, true) => return Hit::BottomLeft,
-            (_, true, _, true) => return Hit::BottomRight,
-            (true, ..) => return Hit::Left,
-            (_, true, ..) => return Hit::Right,
-            (_, _, true, _) => return Hit::Top,
-            (.., true) => return Hit::Bottom,
-            _ => {}
+        if let Some(edge) = edge_of(left, right, top, bottom) {
+            return edge;
         }
     }
     if x >= lx && x < lx + lw && y >= ly && y < ly + lh {
@@ -334,12 +421,17 @@ pub fn edit_hit_test(x: i32, y: i32, width: i32, height: i32, dpi: u32, resize_m
 }
 
 /// How far a press may move and still be a long press, at `drag` (the system's drag
-/// threshold): that, or [`TOUCH_SLOP_DIP`] for a finger or a pen when that is more.
+/// threshold): that, or [`MOUSE_SLOP_DIP`] for the mouse and [`TOUCH_SLOP_DIP`] for a finger
+/// or a pen at the monitor's scale when that is more.
 pub fn press_threshold(drag: (i32, i32), touch: bool, dpi: u32) -> (i32, i32) {
-    if !touch {
-        return drag;
-    }
-    let slop = px_of_dip(TOUCH_SLOP_DIP, dpi);
+    let slop = px_of_dip(
+        if touch {
+            TOUCH_SLOP_DIP
+        } else {
+            MOUSE_SLOP_DIP
+        },
+        dpi,
+    );
     (drag.0.max(slop), drag.1.max(slop))
 }
 
@@ -368,50 +460,53 @@ impl Circle {
     }
 }
 
-/// The More button of a window of `width` by `height` pixels on a monitor of `dpi`: a circle
-/// of [`MORE_BUTTON_DIP`] in its top right corner, [`MORE_BUTTON_MARGIN_DIP`] from the edges.
-/// A widget too small for it gets a smaller one that still fits.
-pub fn more_button(width: i32, height: i32, dpi: u32) -> Circle {
-    let side = width.min(height).max(1) as f32;
-    let diameter = (px_of_dip(MORE_BUTTON_DIP, dpi) as f32).min((side - 2.0).max(1.0));
-    let room = ((side - diameter) / 2.0).max(0.0);
-    let margin = (px_of_dip(MORE_BUTTON_MARGIN_DIP, dpi) as f32).min(room);
-    let radius = diameter / 2.0;
-    Circle {
-        cx: width as f32 - margin - radius,
-        cy: margin + radius,
-        radius,
+/// A widget's image of `from` (width and height) shown in `to` pixels, premultiplied BGRA:
+/// never scaled, as Android draws it at the size it was told, and an image of another size
+/// is one drawn before a resize. Stretched to the new size it looked distorted until the
+/// next image came; instead it keeps its own pixels from the top left corner, and the room
+/// it does not fill stays clear. The next image, of the new size, fills it.
+pub fn unscaled(image: &[u8], from: (usize, usize), to: (usize, usize)) -> Vec<u8> {
+    if from == to && image.len() == from.0 * from.1 * 4 {
+        return image.to_vec();
     }
+    unscaled_at(image, from, to, (0, 0))
 }
 
-/// Whether the pixel at `x`, `y` is on the More button of a window of `width` by `height`:
-/// inside its circle, not merely its square.
-pub fn on_more_button(x: i32, y: i32, width: i32, height: i32, dpi: u32) -> bool {
-    more_button(width, height, dpi).contains(x as f32 + 0.5, y as f32 + 0.5)
-}
-
-/// Whether `circle` lies wholly inside a window of `width` by `height` whose corners are
-/// rounded to `radius`, as the widget's own image is.
-pub fn inside_rounded_window(circle: &Circle, width: i32, height: i32, radius: f32) -> bool {
-    let (w, h, rho) = (width as f32, height as f32, circle.radius);
-    let edges = circle.cx - rho >= 0.0
-        && circle.cy - rho >= 0.0
-        && circle.cx + rho <= w
-        && circle.cy + rho <= h;
-    if rho >= radius {
-        return edges;
+/// The same with the image's top left corner `at` pixels into the room: a widget being
+/// edited sits in the middle of its lifted rectangle, at its own size.
+pub fn unscaled_at(
+    image: &[u8],
+    from: (usize, usize),
+    to: (usize, usize),
+    at: (usize, usize),
+) -> Vec<u8> {
+    let (fw, fh) = from;
+    let (tw, th) = to;
+    let mut pixels = vec![0u8; tw * th * 4];
+    let w = fw.min(tw.saturating_sub(at.0));
+    let h = fh.min(th.saturating_sub(at.1));
+    for row in 0..h {
+        let src = row * fw * 4;
+        let dst = ((row + at.1) * tw + at.0) * 4;
+        if let (Some(src), Some(dst)) = (
+            image.get(src..src + w * 4),
+            pixels.get_mut(dst..dst + w * 4),
+        ) {
+            dst.copy_from_slice(src);
+        }
     }
-    // A rounded rectangle is the rectangle `radius` inside it, grown by `radius`.
-    let dx = (radius - circle.cx).max(circle.cx - (w - radius)).max(0.0);
-    let dy = (radius - circle.cy).max(circle.cy - (h - radius)).max(0.0);
-    edges && (dx * dx + dy * dy).sqrt() + rho <= radius + 0.01
+    pixels
 }
 
-/// The size of the More button's glyph box for a window of `width` by `height` on `dpi`.
-pub fn more_glyph_size(width: i32, height: i32, dpi: u32) -> usize {
-    let circle = more_button(width, height, dpi);
-    let wanted = px_of_dip(MORE_GLYPH_DIP, dpi) as f32;
-    (wanted.min(circle.radius * 2.0 * 0.6).round() as usize).max(1)
+/// Keeps every pixel of a widget's premultiplied BGRA `pixels` clickable: one the widget
+/// leaves clear gets an alpha of 1, which shows nothing but still takes the pointer. Nothing
+/// else is drawn over the widget.
+pub fn keep_clickable(pixels: &mut [u8]) {
+    for pixel in pixels.chunks_exact_mut(4) {
+        if pixel[3] == 0 {
+            pixel[3] = 1;
+        }
+    }
 }
 
 /// A rectangle in screen pixels: left, top, right and bottom.
@@ -443,18 +538,13 @@ pub fn reachable_origin(
     )
 }
 
-/// A point in a window of `window` pixels, in the pixels of a frame of `frame` pixels, which
-/// differ while a resize has not reached Android yet.
-pub fn to_frame(x: i32, y: i32, window: (i32, i32), frame: (u32, u32)) -> (f32, f32) {
-    let scale = |v: i32, from: i32, to: u32| {
-        if from <= 0 {
-            v as f32
-        } else {
-            v as f32 * to as f32 / from as f32
-        }
-    };
+/// A point in a widget's window, in the pixels of its frame of `frame` pixels, which may be
+/// of another size than the window while a resize has not reached Android yet. The frame is
+/// shown unscaled from the window's top left corner ([`unscaled`]), so a point is the same
+/// pixel of it, kept inside it.
+pub fn to_frame(x: i32, y: i32, frame: (u32, u32)) -> (f32, f32) {
     (
-        scale(x, window.0, frame.0).clamp(0.0, frame.0 as f32),
-        scale(y, window.1, frame.1).clamp(0.0, frame.1 as f32),
+        (x as f32).clamp(0.0, frame.0 as f32),
+        (y as f32).clamp(0.0, frame.1 as f32),
     )
 }

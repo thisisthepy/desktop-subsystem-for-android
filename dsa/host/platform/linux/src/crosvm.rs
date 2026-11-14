@@ -10,7 +10,9 @@
 //!   only, while they have add-ons) on virtio-blk, at fixed PCI addresses. Android's first stage init makes
 //!   `/dev/block/by-name` links only for disks below the devices `androidboot.boot_devices`
 //!   names, so the command line names those addresses in place of the image's `vmbus`. The
-//!   partitions themselves are found by the disk's GPT GUID, whatever the bus;
+//!   partitions themselves are found by the disk's GPT GUID, whatever the bus. In the host's
+//!   direct-mapped mode (off by default) the system disk and the add-on disk are virtio-pmem
+//!   instead, which the guest maps its files from without caching them (see [`DirectMapped`]);
 //! - vsock through the kernel's vhost-vsock, so the guest reaches the host at CID 2 on the same
 //!   ports as on Hyper-V (5000 control, 5001 log, 5590 and 5591 file sharing, 5555 adb), and
 //!   the host's `AF_VSOCK` sockets serve it (see `vsock`);
@@ -130,7 +132,30 @@ pub struct VmConfig {
     pub network: NetworkBackend,
     /// The adapter's MAC address, for a tap. passt's adapter takes the address passt gives.
     pub mac_address: String,
+    /// The host's direct-mapped mode: the system disk, and the add-on disk when
+    /// [`DirectMapped::addons`] says so, on virtio-pmem instead of virtio-blk, so the guest maps
+    /// their files from the host's mapping rather than caching them. `None` attaches them as
+    /// disks.
+    pub direct_mapped: Option<DirectMapped>,
 }
+
+/// How a direct-mapped boot attaches the read-only disks (`dsa_host_core::direct_mapped`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DirectMapped {
+    /// The image's support for the mode: the mount table it boots with.
+    pub support: dsa_host_core::direct_mapped::ImageSupport,
+    /// Whether the add-on disk is persistent memory too: only one in the layout the mode maps,
+    /// with a partition over each image.
+    pub addons: bool,
+    /// The system disk the mode maps: the uncompressed copy of the image's that the service
+    /// made and checked, in place of [`VmConfig::system_image`].
+    pub system_disk: PathBuf,
+}
+
+/// The platform device the guest kernel puts each virtio-pmem bus below, which a
+/// direct-mapped boot names as a boot device: crosvm picks a pmem device's PCI slot itself, so
+/// no slot can be named for it.
+pub const PERSISTENT_MEMORY_BOOT_DEVICE: &str = "virtio-pmem";
 
 /// Why a configuration cannot describe a VM.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -202,17 +227,44 @@ impl VmConfig {
     /// The slots of the disks the VM has, in order.
     pub fn disk_slots(&self) -> Vec<u8> {
         let mut slots = Vec::new();
-        if self.system_image.is_some() {
+        if self.system_on_block().is_some() {
             slots.push(slot::SYSTEM_DISK);
         }
         slots.push(slot::DATA_DISK);
         if self.pstore_disk.is_some() {
             slots.push(slot::PSTORE_DISK);
         }
-        if self.addon_disk.is_some() {
+        if self.addons_on_block().is_some() {
             slots.push(slot::ADDON_DISK);
         }
         slots
+    }
+
+    /// The system disk when it is a virtio-blk disk, as it is outside the direct-mapped mode.
+    fn system_on_block(&self) -> Option<&PathBuf> {
+        self.system_image
+            .as_ref()
+            .filter(|_| self.direct_mapped.is_none())
+    }
+
+    /// The system disk when it is virtio-pmem, in the direct-mapped mode: the copy made for it.
+    fn system_on_pmem(&self) -> Option<&PathBuf> {
+        self.system_image
+            .as_ref()
+            .and(self.direct_mapped.as_ref())
+            .map(|mapped| &mapped.system_disk)
+    }
+
+    /// Whether the add-on disk is virtio-pmem this boot.
+    fn addons_mapped(&self) -> bool {
+        self.direct_mapped
+            .as_ref()
+            .is_some_and(|mapped| mapped.addons)
+    }
+
+    /// The add-on disk when it is a virtio-blk disk.
+    fn addons_on_block(&self) -> Option<&PathBuf> {
+        self.addon_disk.as_ref().filter(|_| !self.addons_mapped())
     }
 
     /// The kernel command line DSA passes: the memory settings, pstore, then the image's own
@@ -220,18 +272,31 @@ impl VmConfig {
     pub fn full_kernel_cmdline(&self) -> String {
         // SysRq on the console is how the host asks the guest to sync its disks and power
         // off when it stops the VM (see `SHUTDOWN_SEQUENCE`).
+        // The boot-time memory settings are the Windows host's, so the guest kernel sets aside
+        // as little here as there, and the CI's memory measurement on this host reads the same
+        // kernel costs a Windows user's guest has.
+        // crosvm takes back each reported range by itself, so there is no fault cluster.
         let mut cmdline = format!(
-            "panic=-1 sysrq_always_enabled=1 page_reporting.page_reporting_order={} {}",
-            self.page_reporting_order, MEMORY_HOTPLUG_CMDLINE
+            "panic=-1 sysrq_always_enabled=1 {} {} {}",
+            dsa_host_core::memory::page_reporting_cmdline(self.page_reporting_order, 0),
+            MEMORY_HOTPLUG_CMDLINE,
+            dsa_host_core::memory::GUEST_BOOT_MEMORY_CMDLINE
         );
         if self.pstore_disk.is_some() {
             cmdline.push(' ');
             cmdline.push_str(PSTORE_CMDLINE);
         }
-        let image = with_boot_devices(
+        let mut image = with_boot_devices(
             self.kernel_cmdline.trim(),
             &self.arch.boot_devices(&self.disk_slots()),
         );
+        if let Some(mapped) = &self.direct_mapped {
+            image = dsa_host_core::direct_mapped::kernel_cmdline(
+                &image,
+                PERSISTENT_MEMORY_BOOT_DEVICE,
+                &mapped.support,
+            );
+        }
         cmdline.push(' ');
         cmdline.push_str(&image);
         // The boot's secret is bootconfig appended to the initrd, and the kernel reads that
@@ -331,7 +396,16 @@ impl VmConfig {
             "type=stdout,hardware=virtio-console,num=1,console,stdin".to_string(),
         );
         push("--vsock", format!("cid={}", self.guest_cid));
-        if let Some(system) = &self.system_image {
+        // In the direct-mapped mode crosvm maps the read-only disks' files into the guest as
+        // virtio-pmem, read only and shared with the host's page cache, and pads each to the
+        // 2 MiB the guest maps persistent memory in.
+        if let Some(system) = self.system_on_pmem() {
+            push("--pmem", format!("path={},ro=true", path_value(system)));
+        }
+        if let Some(addons) = self.addon_disk.as_ref().filter(|_| self.addons_mapped()) {
+            push("--pmem", format!("path={},ro=true", path_value(addons)));
+        }
+        if let Some(system) = self.system_on_block() {
             push(
                 "--block",
                 format!(
@@ -359,7 +433,7 @@ impl VmConfig {
                 ),
             );
         }
-        if let Some(addons) = &self.addon_disk {
+        if let Some(addons) = self.addons_on_block() {
             push(
                 "--block",
                 format!(
@@ -434,7 +508,7 @@ mod tests {
             initrd: "/home/u/.local/share/dsa/tmp/boot.initrd".into(),
             kernel_cmdline:
                 "console=ttyS0 androidboot.boot_devices=vmbus androidboot.hardware=cutf_cvm".into(),
-            memory_mb: 3072,
+            memory_mb: 2048,
             memory_max_mb: None,
             processors: 4,
             system_image: Some("/var/lib/dsa/images/1/system.img".into()),
@@ -449,7 +523,80 @@ mod tests {
                 socket: "/home/u/.local/share/dsa/tmp/passt.sock".into(),
             },
             mac_address: mac_address(1000),
+            direct_mapped: None,
         }
+    }
+
+    fn direct_mapped(addons: bool) -> DirectMapped {
+        DirectMapped {
+            support: dsa_host_core::direct_mapped::ImageSupport {
+                fstab_suffix: "dsa_dax".into(),
+                system_disk: dsa_host_core::direct_mapped_disk::SystemDisk {
+                    format: dsa_host_core::direct_mapped_disk::FORMAT,
+                    bytes: 2304 << 20,
+                    sha256: "ab".repeat(32),
+                    super_bytes: 2048 << 20,
+                },
+                verified_partitions: vec!["odm".into()],
+            },
+            addons,
+            system_disk: "/var/lib/dsa/direct-mapped/1.img".into(),
+        }
+    }
+
+    #[test]
+    fn nfr1_a_direct_mapped_vm_maps_its_read_only_disks_with_virtio_pmem() {
+        let mut config = config();
+        config.addon_disk = Some("/home/u/.local/share/dsa/addons.img".into());
+        config.kernel_cmdline =
+            "console=ttyS0 androidboot.boot_devices=vmbus androidboot.fstab_suffix=dsa".into();
+        config.direct_mapped = Some(direct_mapped(true));
+        let args = config.crosvm_args().unwrap();
+        assert_eq!(
+            value_of(&args, "--pmem"),
+            [
+                "path=/var/lib/dsa/direct-mapped/1.img,ro=true",
+                "path=/home/u/.local/share/dsa/addons.img,ro=true"
+            ]
+        );
+        // Only the user's disk and the pstore disk stay on virtio-blk.
+        let blocks = value_of(&args, "--block");
+        assert_eq!(blocks.len(), 2, "{blocks:?}");
+        assert!(blocks[0].starts_with("path=/home/u/.local/share/dsa/data.img,"));
+        assert_eq!(config.disk_slots(), [slot::DATA_DISK, slot::PSTORE_DISK]);
+        // The guest boots the image's table for the mode, with the persistent memory's
+        // platform device among the boot devices.
+        let params = &value_of(&args, "--params")[0];
+        assert!(
+            params.contains(
+                "androidboot.boot_devices=pci0000:00/0000:00:11.0,pci0000:00/0000:00:12.0,virtio-pmem"
+            ),
+            "{params}"
+        );
+        assert!(
+            params.contains("androidboot.fstab_suffix=dsa_dax"),
+            "{params}"
+        );
+        assert_eq!(params.matches("androidboot.fstab_suffix=").count(), 1);
+        // An add-on disk not in the mode's layout stays a disk.
+        config.direct_mapped = Some(direct_mapped(false));
+        let args = config.crosvm_args().unwrap();
+        assert_eq!(
+            value_of(&args, "--pmem"),
+            ["path=/var/lib/dsa/direct-mapped/1.img,ro=true"]
+        );
+        assert!(value_of(&args, "--block")
+            .iter()
+            .any(|b| b.starts_with("path=/home/u/.local/share/dsa/addons.img,ro=true")));
+    }
+
+    #[test]
+    fn nfr1_without_the_direct_mapped_mode_no_disk_is_persistent_memory() {
+        let mut config = config();
+        config.addon_disk = Some("/home/u/.local/share/dsa/addons.img".into());
+        let args = config.crosvm_args().unwrap();
+        assert!(value_of(&args, "--pmem").is_empty());
+        assert!(!value_of(&args, "--params")[0].contains("virtio-pmem"));
     }
 
     fn value_of<'a>(args: &'a [String], option: &str) -> Vec<&'a str> {
@@ -574,8 +721,30 @@ mod tests {
         for pinned in ["--hugepages", "--lock-guest-memory", "--no-balloon"] {
             assert!(!joined.contains(pinned), "{pinned} pins guest memory");
         }
-        assert_eq!(value_of(&args, "--mem"), ["size=3072"]);
+        assert_eq!(value_of(&args, "--mem"), ["size=2048"]);
         assert!(value_of(&args, "--init-mem").is_empty());
+    }
+
+    #[test]
+    fn nfr2_the_guest_compacts_only_when_it_reports_whole_blocks() {
+        // At order 9 compaction gathers free pages into the 2 MiB blocks reporting hands back;
+        // at order 0 every free page goes back as it is, and compaction would only move memory
+        // into pages the host had already taken back.
+        let blocks = config().full_kernel_cmdline();
+        assert!(
+            blocks.contains("androidboot.dsa.memory_compaction=on"),
+            "{blocks}"
+        );
+        let mut every_page = config();
+        every_page.page_reporting_order = 0;
+        let cmdline = every_page.full_kernel_cmdline();
+        assert!(
+            cmdline.contains("page_reporting.page_reporting_order=0"),
+            "{cmdline}"
+        );
+        assert!(!cmdline.contains("memory_compaction"), "{cmdline}");
+        // crosvm returns each reported range by itself: no fault cluster to tell the guest.
+        assert!(!cmdline.contains("fault_cluster_order"), "{cmdline}");
     }
 
     #[test]
@@ -583,10 +752,10 @@ mod tests {
         let mut config = config();
         config.memory_max_mb = Some(16384);
         let args = config.crosvm_args().unwrap();
-        // The guest kernel sees only the base at boot, so it keeps page structs for 3 GiB, not
+        // The guest kernel sees only the base at boot, so it keeps page structs for 2 GiB, not
         // for 16 GiB; the rest is plugged in as it is needed.
-        assert_eq!(value_of(&args, "--mem"), ["size=3072"]);
-        assert_eq!(value_of(&args, "--virtio-mem"), ["13312"]);
+        assert_eq!(value_of(&args, "--mem"), ["size=2048"]);
+        assert_eq!(value_of(&args, "--virtio-mem"), ["14336"]);
         assert!(value_of(&args, "--init-mem").is_empty());
         assert!(config
             .full_kernel_cmdline()
@@ -595,15 +764,31 @@ mod tests {
             .full_kernel_cmdline()
             .contains("memory_hotplug.online_policy=auto-movable"));
         // Whole memory blocks only.
-        config.memory_max_mb = Some(3072 + 1000);
-        assert_eq!(config.memory_layout(), (3072, Some(896)));
-        config.memory_max_mb = Some(3072 + 100);
-        assert_eq!(config.memory_layout(), (3072, None));
-        config.memory_max_mb = Some(2048);
-        assert_eq!(config.memory_layout(), (3072, None));
-        assert_eq!(virtio_mem_bytes(3072, 3072), 0);
-        assert_eq!(virtio_mem_bytes(3072, 16384), 13312 * 1024 * 1024);
-        assert_eq!(virtio_mem_bytes(3072, 2048), 0);
+        config.memory_max_mb = Some(2048 + 1000);
+        assert_eq!(config.memory_layout(), (2048, Some(896)));
+        config.memory_max_mb = Some(2048 + 100);
+        assert_eq!(config.memory_layout(), (2048, None));
+        config.memory_max_mb = Some(1024);
+        assert_eq!(config.memory_layout(), (2048, None));
+        assert_eq!(virtio_mem_bytes(2048, 2048), 0);
+        assert_eq!(virtio_mem_bytes(2048, 16384), 14336 * 1024 * 1024);
+        assert_eq!(virtio_mem_bytes(2048, 1024), 0);
+    }
+
+    #[test]
+    fn nfr1_the_guest_kernel_sets_aside_as_little_at_boot_as_on_windows() {
+        let cmdline = config().full_kernel_cmdline();
+        let words: Vec<&str> = cmdline.split_whitespace().collect();
+        for word in [
+            "swiotlb=2048",
+            "kfence.sample_interval=0",
+            "dhash_entries=65536",
+            "ihash_entries=32768",
+            "thash_entries=16384",
+            "uhash_entries=1024",
+        ] {
+            assert!(words.contains(&word), "{word} in {cmdline}");
+        }
     }
 
     #[test]

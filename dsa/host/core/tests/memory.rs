@@ -10,8 +10,9 @@ use dsa_host_core::handshake::ControlHandshake;
 use dsa_host_core::host_api::{HostApiClient, HostApiService, PerUser, UserAndroid, UserAndroids};
 use dsa_host_core::host_api_conformance::RunningService;
 use dsa_host_core::memory::{
-    held_line, snapshot_from_wire, snapshot_to_wire, summary_lines, GuestMemory, GuestMemoryReport,
-    HeldMemory, HostMemory, HostProcessMemory, HostRole, IdleTrim, MemorySnapshot,
+    held_line, snapshot_from_wire, snapshot_to_wire, summary_lines, GooglePlayMemory, GuestMemory,
+    GuestMemoryReport, HeldMemory, HostMemory, HostProcessMemory, HostRole, IdleTrim,
+    MemorySnapshot, ProcessMemory,
 };
 
 fn pressure(total_mb: u64, available_mb: u64, stall: f64) -> memory_pressure::GuestPressure {
@@ -33,22 +34,52 @@ fn nfr2_the_vm_grows_when_the_guest_runs_short_up_to_its_maximum() {
     let mut growth = MemoryGrowth::new(3072, 6144);
     // Plenty free: nothing to do.
     assert_eq!(growth.on_pressure(&pressure(2900, 1500, 0.0), start), None);
-    // Short: grows by half, at least 1 GiB.
+    // Short: grows to what it uses (2600 MiB) plus a third again, in whole 128 MiB blocks.
     assert_eq!(
         growth.on_pressure(&pressure(2900, 300, 0.0), start),
-        Some(GrowthAction::Resize(4608))
+        Some(GrowthAction::Resize(3584))
     );
     growth.applied();
-    // The guest sees it; still short a while later: grows to the maximum and no further.
-    let later = start + Duration::from_secs(6);
-    assert_eq!(
-        growth.on_pressure(&pressure(4400, 400, 20.0), later),
-        Some(GrowthAction::Resize(6144))
-    );
-    growth.applied();
+    // The guest sees it; still short a while later: grows on, to the maximum and no further.
+    let mut later = start;
+    for (total, grown) in [(3400, 4224), (4100, 5120), (4900, 6144)] {
+        later += Duration::from_secs(6);
+        assert_eq!(
+            growth.on_pressure(&pressure(total, 300, 20.0), later),
+            Some(GrowthAction::Resize(grown))
+        );
+        growth.applied();
+    }
     let later = later + Duration::from_secs(6);
     assert_eq!(growth.on_pressure(&pressure(5900, 300, 20.0), later), None);
     assert_eq!(growth.current_mb(), 6144);
+}
+
+#[test]
+fn nfr2_the_vm_grows_only_as_far_as_the_guest_needs_since_added_memory_keeps_its_page_records() {
+    use dsa_host_core::memory::{GrowthAction, MemoryGrowth};
+    let start = Instant::now();
+    let mut growth = MemoryGrowth::new(2048, 29042);
+    // As on the owner's PC: Android had grown to 2560 MiB (2483 MiB after the kernel's own)
+    // and ran short with 509 MiB available. Half the size again took it to 3840 MiB; what it
+    // uses plus 768 MiB of headroom, and at least 512 MiB more, is 3072 MiB.
+    assert_eq!(
+        growth.on_pressure(&pressure(1950, 450, 12.0), start),
+        Some(GrowthAction::Resize(2560))
+    );
+    growth.applied();
+    let t = start + Duration::from_secs(6);
+    assert_eq!(
+        growth.on_pressure(&pressure(2483, 509, 2.7), t),
+        Some(GrowthAction::Resize(3072))
+    );
+    growth.applied();
+    // A guest that uses almost all of it grows by about a third again.
+    let t = t + Duration::from_secs(6);
+    assert_eq!(
+        growth.on_pressure(&pressure(2995, 100, 30.0), t),
+        Some(GrowthAction::Resize(3968))
+    );
 }
 
 #[test]
@@ -58,7 +89,7 @@ fn nfr2_the_vm_gives_memory_back_on_the_next_calm_report_but_not_below_its_base(
     let mut growth = MemoryGrowth::new(3072, 16384);
     assert_eq!(
         growth.on_pressure(&pressure(2900, 100, 0.0), start),
-        Some(GrowthAction::Resize(4608))
+        Some(GrowthAction::Resize(3840))
     );
     growth.applied();
     // Still settling right after the growth.
@@ -101,10 +132,10 @@ fn nfr2_a_timed_out_shrink_is_retried_in_smaller_steps_until_the_vm_is_back_at_i
     let mut growth = MemoryGrowth::new(3072, 16384);
     assert_eq!(
         growth.on_pressure(&pressure(2900, 100, 0.0), start),
-        Some(GrowthAction::Resize(4608))
+        Some(GrowthAction::Resize(3840))
     );
     growth.applied();
-    // The apps closed: all 1.5 GiB is asked back at once, and Hyper-V times out.
+    // The apps closed: all 768 MiB is asked back at once, and Hyper-V times out.
     let t = start + Duration::from_secs(5);
     assert_eq!(
         growth.on_pressure(&pressure(4400, 3600, 0.0), t),
@@ -113,7 +144,7 @@ fn nfr2_a_timed_out_shrink_is_retried_in_smaller_steps_until_the_vm_is_back_at_i
     growth.refused(t);
     assert_eq!(
         growth.current_mb(),
-        4608,
+        3840,
         "the VM counts as still at its size"
     );
     assert!(!growth.stopped(), "a failure does not stop later resizes");
@@ -121,31 +152,25 @@ fn nfr2_a_timed_out_shrink_is_retried_in_smaller_steps_until_the_vm_is_back_at_i
     // Nothing during the wait.
     let t = t + Duration::from_secs(2);
     assert_eq!(growth.on_pressure(&pressure(4400, 3600, 0.0), t), None);
-    // Then half the step that failed.
+    // Then half the step that failed (384 MiB, in whole 128 MiB blocks).
     let t = t + Duration::from_secs(3);
     assert_eq!(
-        growth.on_pressure(&pressure(4400, 3600, 0.0), t),
-        Some(GrowthAction::Resize(3840))
+        growth.on_pressure(&pressure(4100, 3300, 0.0), t),
+        Some(GrowthAction::Resize(3456))
     );
     // It times out again: half again, after twice the wait.
     growth.refused(t);
     assert_eq!(growth.retry_in(t), Some(Duration::from_secs(10)));
     let t = t + Duration::from_secs(10);
     assert_eq!(
-        growth.on_pressure(&pressure(4400, 3600, 0.0), t),
-        Some(GrowthAction::Resize(4224))
+        growth.on_pressure(&pressure(4100, 3300, 0.0), t),
+        Some(GrowthAction::Resize(3584))
     );
     growth.applied();
     // Each step that goes through lets the next double, down to the base.
     let t = t + Duration::from_secs(5);
     assert_eq!(
-        growth.on_pressure(&pressure(4200, 3400, 0.0), t),
-        Some(GrowthAction::Resize(3456))
-    );
-    growth.applied();
-    let t = t + Duration::from_secs(5);
-    assert_eq!(
-        growth.on_pressure(&pressure(3400, 2600, 0.0), t),
+        growth.on_pressure(&pressure(3800, 3000, 0.0), t),
         Some(GrowthAction::Resize(3072))
     );
     growth.applied();
@@ -154,7 +179,7 @@ fn nfr2_a_timed_out_shrink_is_retried_in_smaller_steps_until_the_vm_is_back_at_i
     let t = t + Duration::from_secs(5);
     assert_eq!(
         growth.on_pressure(&pressure(2900, 100, 0.0), t),
-        Some(GrowthAction::Resize(4608))
+        Some(GrowthAction::Resize(3840))
     );
 }
 
@@ -179,7 +204,7 @@ fn nfr2_a_refused_growth_is_retried_smaller_and_the_wait_never_passes_five_minut
         }
     }
     // Each try half the one before, down to the guest's 128 MiB blocks.
-    assert_eq!(&asked[..5], &[4608, 3840, 3456, 3328, 3200]);
+    assert_eq!(&asked[..5], &[3840, 3456, 3328, 3200, 3200]);
     assert!(asked[5..].iter().all(|&mb| mb == 3200), "{asked:?}");
     assert!(!growth.stopped());
 }
@@ -325,6 +350,9 @@ fn report() -> control::GuestMemory {
         cma_total_kb: 0,
         hugetlb_kb: 0,
         mem_online_kb: 4200 * MIB,
+        free_reported_kb: 2000 * MIB,
+        reported_total_kb: 9000 * MIB,
+        refaulted_total_kb: 300 * MIB,
     }
 }
 
@@ -429,6 +457,33 @@ fn nfr1_the_session_keeps_the_guests_last_memory_report_until_it_stops() {
 }
 
 #[test]
+fn nfr2_the_session_works_out_how_fast_memory_goes_back_from_two_reports() {
+    let mut setup = setup();
+    send(&mut setup.agent, Body::GuestMemory(report()));
+    let first = wait_for_report(&setup.session);
+    assert_eq!(
+        first.memory.page_reporting.unwrap().reported_kb_per_minute,
+        None
+    );
+    // A rate needs at least a second between the two reports.
+    thread::sleep(Duration::from_millis(1100));
+    let mut next = report();
+    next.reported_total_kb += 60 * MIB;
+    send(&mut setup.agent, Body::GuestMemory(next));
+    let deadline = Instant::now() + WAIT;
+    let rate = loop {
+        let report = wait_for_report(&setup.session);
+        if let Some(rate) = report.memory.page_reporting.unwrap().reported_kb_per_minute {
+            break rate;
+        }
+        assert!(Instant::now() < deadline, "the second report never arrived");
+        thread::sleep(Duration::from_millis(5));
+    };
+    // 60 MiB in a bit over a second: at most 60 MiB a second, well above 0.
+    assert!(rate > 0 && rate <= 3600 * MIB, "{rate}");
+}
+
+#[test]
 fn nfr1_dsa_memory_asks_the_guest_and_shows_it_beside_the_host_processes() {
     let mut setup = setup();
     let api = &mut setup.api;
@@ -438,12 +493,19 @@ fn nfr1_dsa_memory_asks_the_guest_and_shows_it_beside_the_host_processes() {
                 .expect("connecting")
                 .memory()
         });
-        // The service asks the agent for a fresh report, which it answers.
-        let asked = dsa_protocol::decode(&setup.agent.recv(Some(WAIT)).unwrap()).unwrap();
-        assert_eq!(
-            asked.body,
-            Some(Body::RequestGuestMemory(control::RequestGuestMemory {}))
-        );
+        // The service asks the agent for a fresh report, which it answers. What else the
+        // host tells a newly connected agent (whether app backups are on) comes on the same
+        // channel, and is not what this test is about.
+        let deadline = Instant::now() + WAIT;
+        loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            assert!(!left.is_zero(), "the service never asked for a report");
+            let frame = setup.agent.recv(Some(left)).unwrap();
+            let asked = dsa_protocol::decode(&frame).unwrap();
+            if asked.body == Some(Body::RequestGuestMemory(control::RequestGuestMemory {})) {
+                break;
+            }
+        }
         send(&mut setup.agent, Body::GuestMemory(report()));
         reader.join().unwrap()
     });
@@ -485,7 +547,8 @@ fn nfr1_the_log_line_sums_the_host_and_says_where_the_guests_memory_goes() {
         "memory: host 900 MiB (vm 600, window manager 120, graphics renderer 80, 2 app windows \
          100); guest 2048/4096 MiB used, cache 910, apps 700, swap 100 (zram 30), processes 440 \
          MiB (350 resident, 90 compressed in zram), Google Play services 51 MiB (15 resident, 36 \
-         compressed in zram), 42 s ago"
+         compressed in zram), 42 s ago; free 2048 MiB, 2000 back on the host, 9000 reported since \
+         boot"
     );
     let no_guest = MemorySnapshot {
         guest: None,
@@ -527,6 +590,80 @@ fn nfr1_the_report_dsa_memory_prints_names_every_part() {
     ] {
         assert!(text.contains(part), "{part:?} missing from:\n{text}");
     }
+}
+
+#[test]
+fn nfr2_dsa_memory_says_how_much_free_memory_is_back_on_the_host_and_how_fast_it_went() {
+    let first = GuestMemory::from_control(report());
+    let reporting = first.page_reporting.expect("the guest sent its counts");
+    assert_eq!(reporting.free_reported_kb, 2000 * MIB);
+    assert_eq!(
+        reporting.reported_kb_per_minute, None,
+        "no report before it"
+    );
+    // MemFree is 2048 MiB, 2000 of it back on the host.
+    assert_eq!(first.free_not_reported_kb(), Some(48 * MIB));
+
+    // Two minutes later 600 MiB more went back: 300 MiB a minute.
+    let mut later = report();
+    later.reported_total_kb += 600 * MIB;
+    let later = GuestMemory::from_control(later).following(&first, Duration::from_secs(120));
+    assert_eq!(
+        later.page_reporting.unwrap().reported_kb_per_minute,
+        Some(300 * MIB)
+    );
+    let text = MemorySnapshot {
+        guest: Some(GuestMemoryReport {
+            memory: later.clone(),
+            age: Duration::from_secs(1),
+        }),
+        host: Vec::new(),
+    }
+    .to_string();
+    let line = "free page reporting: 2000 of 2048 MiB free is back on the host, 48 MiB not yet; \
+                9600 MiB reported since boot (300 MiB a minute since the report before); 300 MiB \
+                taken back in with a neighbour and reported again";
+    assert!(text.contains(line), "{line:?} missing from:\n{text}");
+
+    // A count lower than before's is a guest that restarted: no rate across the restart.
+    let restarted = GuestMemory::from_control(report()).following(&later, Duration::from_secs(60));
+    assert_eq!(
+        restarted.page_reporting.unwrap().reported_kb_per_minute,
+        None
+    );
+
+    // The rate crosses the local API.
+    let snapshot = MemorySnapshot {
+        guest: Some(GuestMemoryReport {
+            memory: later,
+            age: Duration::from_secs(3),
+        }),
+        host: Vec::new(),
+    };
+    assert_eq!(snapshot_from_wire(snapshot_to_wire(&snapshot)), snapshot);
+}
+
+#[test]
+fn nfr2_an_older_guest_without_reporting_counts_is_said_to_be_so() {
+    let mut older = report();
+    older.free_reported_kb = 0;
+    older.reported_total_kb = 0;
+    older.refaulted_total_kb = 0;
+    let memory = GuestMemory::from_control(older);
+    assert_eq!(memory.page_reporting, None);
+    assert_eq!(memory.free_not_reported_kb(), None);
+    let text = MemorySnapshot {
+        guest: Some(GuestMemoryReport {
+            memory,
+            age: Duration::from_secs(1),
+        }),
+        host: Vec::new(),
+    }
+    .to_string();
+    assert!(
+        text.contains("free page reporting: Android does not say what it reported"),
+        "{text}"
+    );
 }
 
 #[test]
@@ -591,6 +728,70 @@ fn nfr2_a_guest_that_cannot_measure_zram_says_so_instead_of_counting_full_size()
         "{text}"
     );
     assert!(text.contains("Google Play services: not running"), "{text}");
+}
+
+#[test]
+fn nfr2_a_swap_total_larger_than_the_pss_does_not_make_every_total_zero_resident() {
+    // The owner's PC on v0.2.2: the agent summed each process's count of every page it had
+    // swapped out, 781 MiB against 577 MiB of PSS, and `dsa memory` printed "0 resident" for
+    // every total while the Play Store alone had 38 MiB resident.
+    let process = |pid, name: &str, pss_kb, swap_pss_kb, google_play| ProcessMemory {
+        pid,
+        name: name.into(),
+        pss_kb,
+        swap_pss_kb,
+        google_play,
+    };
+    let guest = GuestMemory {
+        zram_original_kb: 432 * MIB,
+        zram_used_kb: 146 * MIB,
+        total_pss_kb: 577_420,
+        swap_pss_kb: 781_252,
+        top_processes: vec![
+            process(5225, "com.android.vending", 169_087, 129_844, true),
+            process(806, "system", 123_747, 96_488, false),
+            process(3712, "com.google.android.gms", 109_468, 93_932, true),
+            process(1347, "android.ext.services", 35_395, 61_008, false),
+        ],
+        google_play: Some(GooglePlayMemory {
+            processes: 2,
+            pss_kb: 278_555,
+            swap_pss_kb: 322_556,
+        }),
+        ..GuestMemory::default()
+    };
+    let apps = guest.apps();
+    assert_eq!(apps.swapped_out_kb, 129_844 + 96_488 + 93_932 + 35_395);
+    assert_eq!(apps.resident_kb, 577_420 - apps.swapped_out_kb);
+    assert!(apps.resident_kb > 0);
+    let play = guest.google_play_share().unwrap();
+    assert_eq!(play.swapped_out_kb, 129_844 + 93_932);
+    assert_eq!(play.resident_kb, 278_555 - 129_844 - 93_932);
+    // A consistent total is taken as the agent sends it.
+    let consistent = GuestMemory {
+        swap_pss_kb: 300_000,
+        ..guest.clone()
+    };
+    assert_eq!(consistent.apps().swapped_out_kb, 300_000);
+    let snapshot = MemorySnapshot {
+        guest: Some(GuestMemoryReport {
+            memory: guest,
+            age: Duration::from_secs(1),
+        }),
+        host: Vec::new(),
+    };
+    let text = snapshot.to_string();
+    // The totals read as resident memory. One process can still be wholly swapped out: the
+    // agent counted 61 MiB swapped of android.ext.services' 35 MiB, so its own row says
+    // "0 resident", and rightly.
+    for total in ["processes: ", "Google Play services: "] {
+        let line = text
+            .lines()
+            .find(|line| line.trim_start().starts_with(total))
+            .unwrap_or_else(|| panic!("no {total:?} line in {text}"));
+        assert!(!line.contains("(0 resident"), "{text}");
+    }
+    assert!(text.contains("(38 resident, 43 compressed)"), "{text}");
 }
 
 #[test]
@@ -752,6 +953,46 @@ fn nfr2_memory_the_kernel_reserved_at_boot_is_not_counted_as_free_memory_held() 
 }
 
 #[test]
+fn nfr2_memory_given_is_the_vms_size_when_the_host_set_it_below_the_online_blocks() {
+    // Hot-added and since ballooned back: the blocks stay online, the VM is smaller.
+    // As on the owner's PC: grown to 3840 MiB, shrunk back to 2560 MiB, 2483 MiB in MemTotal.
+    let mut grown = report();
+    grown.mem_online_kb = 3840 * MIB;
+    grown.mem_total_kb = 2483 * MIB;
+    let memory = GuestMemory::from_control(grown);
+    assert_eq!(memory.reserved_at_boot_kb(), Some(1357 * MIB));
+    let given = memory.given(Some(2560));
+    assert_eq!(given.kernel.mem_online_kb, 2560 * MIB);
+    assert_eq!(given.reserved_at_boot_kb(), Some(77 * MIB));
+    // Without a size from the host, or with more online than the VM was set to (memory
+    // hot-added but not yet onlined), the guest's own count stands.
+    assert_eq!(memory.given(None), memory);
+    assert_eq!(memory.given(Some(8192)), memory);
+}
+
+#[test]
+fn nfr2_the_window_manager_gives_memory_back_again_while_no_window_is_shown() {
+    use dsa_host_core::memory::{IDLE_TRIM_DELAY, IDLE_TRIM_REPEAT};
+    let start = Instant::now();
+    let mut trim = IdleTrim::new(IDLE_TRIM_DELAY, start);
+    assert!(trim.due(start));
+    // What the idle window manager touches meanwhile goes back on the next round, not hours
+    // later.
+    assert!(!trim.due(start + IDLE_TRIM_REPEAT - Duration::from_secs(1)));
+    assert!(trim.due(start + IDLE_TRIM_REPEAT));
+    assert!(!trim.due(start + IDLE_TRIM_REPEAT + Duration::from_secs(1)));
+    assert!(trim.due(start + IDLE_TRIM_REPEAT * 2));
+    // A shown window ends the rounds; closing it starts a new stretch at once.
+    let shown = start + IDLE_TRIM_REPEAT * 2 + Duration::from_secs(10);
+    trim.sync(&[opened(1)], shown);
+    assert!(!trim.due(shown + IDLE_TRIM_REPEAT * 3));
+    let closed = shown + IDLE_TRIM_REPEAT * 3;
+    trim.task_event(Some(&TaskEvent::Removed { task_id: 1 }), closed);
+    assert!(trim.due(closed));
+    assert!(IDLE_TRIM_REPEAT <= Duration::from_secs(5 * 60));
+}
+
+#[test]
 fn nfr2_the_window_manager_gives_memory_back_as_soon_as_no_window_is_open() {
     use dsa_host_core::memory::IDLE_TRIM_DELAY;
     let start = Instant::now();
@@ -761,6 +1002,52 @@ fn nfr2_the_window_manager_gives_memory_back_as_soon_as_no_window_is_open() {
     trim.task_event(Some(&TaskEvent::Removed { task_id: 1 }), start);
     // The trim's next check, a second later at most, gives it back.
     assert!(trim.due(start));
+}
+
+#[test]
+fn nfr2_the_window_manager_gives_back_what_the_last_video_left_while_windows_stay_shown() {
+    use dsa_host_core::memory::{IDLE_TRIM_DELAY, LET_GO_TRIM_DELAY};
+    let start = Instant::now();
+    let mut trim = IdleTrim::new(IDLE_TRIM_DELAY, start);
+    trim.sync(&[opened(1), opened(2), opened(3)], start);
+    // The windows animate (no quiet trim) while a video plays and then closes.
+    assert!(!trim.spare_due(start));
+    let closed = start + Duration::from_secs(60);
+    trim.let_go(closed);
+    assert!(!trim.spare_due(closed + LET_GO_TRIM_DELAY - Duration::from_secs(1)));
+    assert!(trim.spare_due(closed + LET_GO_TRIM_DELAY));
+    // Once only for each let-go.
+    assert!(!trim.spare_due(closed + LET_GO_TRIM_DELAY + Duration::from_secs(1)));
+    assert!(LET_GO_TRIM_DELAY <= Duration::from_secs(10));
+}
+
+#[test]
+fn nfr2_shown_windows_that_keep_drawing_still_get_a_give_back_every_round() {
+    use dsa_host_core::memory::{IDLE_TRIM_DELAY, IDLE_TRIM_REPEAT};
+    let start = Instant::now();
+    let mut trim = IdleTrim::new(IDLE_TRIM_DELAY, start);
+    trim.sync(&[opened(1)], start);
+    assert!(!trim.spare_due(start));
+    assert!(!trim.spare_due(start + IDLE_TRIM_REPEAT - Duration::from_secs(1)));
+    assert!(trim.spare_due(start + IDLE_TRIM_REPEAT));
+    assert!(!trim.spare_due(start + IDLE_TRIM_REPEAT + Duration::from_secs(1)));
+    assert!(trim.spare_due(start + IDLE_TRIM_REPEAT * 2));
+}
+
+#[test]
+fn nfr2_with_no_window_shown_the_idle_give_back_takes_what_a_video_let_go() {
+    use dsa_host_core::memory::{IDLE_TRIM_DELAY, LET_GO_TRIM_DELAY};
+    let start = Instant::now();
+    let mut trim = IdleTrim::new(IDLE_TRIM_DELAY, start);
+    // Before the idle give-back has run, it takes it: no second give-back.
+    trim.let_go(start);
+    assert!(!trim.spare_due(start + LET_GO_TRIM_DELAY));
+    assert!(trim.due(start + LET_GO_TRIM_DELAY));
+    // After it ran, the next one is minutes away: the let-go gets its own.
+    let later = start + Duration::from_secs(30);
+    trim.let_go(later);
+    assert!(trim.spare_due(later + LET_GO_TRIM_DELAY));
+    assert!(!trim.spare_due(later + LET_GO_TRIM_DELAY * 2));
 }
 
 #[test]
@@ -793,6 +1080,29 @@ fn nfr2_the_window_managers_committed_memory_is_broken_down_by_owner() {
     );
     let unknown = CommittedMemory::default();
     assert!(committed_line(&unknown).contains("(largest allocations none MiB)"));
+}
+
+#[test]
+fn nfr1_the_renderers_gpu_memory_is_logged_by_whose_device_it_is_on() {
+    use dsa_host_core::renderer::{renderer_owners_line, Allocations, RendererOwners};
+    let at = |mib: u64, count: u32| Allocations {
+        kb: mib * MIB,
+        count,
+    };
+    let owners = RendererOwners {
+        renderer: [at(300, 120), at(0, 0), at(159, 126)],
+        guests: [at(104, 49), at(116, 56), at(0, 0)],
+        guest_devices: 10,
+        largest_guest_devices_kb: vec![60 * MIB, 40 * MIB, 20 * MIB, 0],
+    };
+    assert_eq!(
+        renderer_owners_line(&owners),
+        "graphics renderer by owner: color buffers and window textures: GPU-only 300 MiB in \
+         120, CPU-mapped 0 MiB in 0, imported 159 MiB in 126; 10 guest devices: GPU-only 104 \
+         MiB in 49, CPU-mapped 116 MiB in 56, imported 0 MiB in 0 (the largest hold 60, 40, 20 \
+         MiB)"
+    );
+    assert!(renderer_owners_line(&RendererOwners::default()).ends_with("(none holds any)"));
 }
 
 #[test]

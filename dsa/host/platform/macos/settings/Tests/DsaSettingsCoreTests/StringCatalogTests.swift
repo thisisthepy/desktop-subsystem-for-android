@@ -80,6 +80,68 @@ final class StringCatalogTests: XCTestCase {
         }
     }
 
+    /// The width a paragraph takes, in columns: a Hangul syllable or another East Asian wide
+    /// character counts 2, every other character 1. Placeholders count as written.
+    private static func columns(_ paragraph: String) -> Int {
+        paragraph.unicodeScalars.reduce(0) { total, scalar in
+            let v = scalar.value
+            let wide = (0x1100...0x115F).contains(v) || (0x2E80...0xA4CF).contains(v) || (0xAC00...0xD7A3).contains(v)
+                || (0xF900...0xFAFF).contains(v) || (0xFF00...0xFF60).contains(v)
+            return total + (wide ? 2 : 1)
+        }
+    }
+
+    /// The longest text a reader takes in without a break. Longer text goes into short paragraphs
+    /// (a line break, or a blank line in a dialog) or a list.
+    private static let paragraphColumns = 140
+
+    func test_fr17_no_paragraph_is_longer_than_140_columns() throws {
+        for (key, values) in try catalog() {
+            for language in ["en", "ko"] {
+                for paragraph in (values[language] ?? "").components(separatedBy: "\n") {
+                    let width = StringCatalogTests.columns(paragraph)
+                    XCTAssertLessThanOrEqual(
+                        width, StringCatalogTests.paragraphColumns,
+                        "\(key) (\(language)) has a paragraph of \(width) columns; break it up: \(paragraph)")
+                }
+            }
+        }
+    }
+
+    func test_fr17_korean_breaks_its_lines_where_english_does() throws {
+        for (key, values) in try catalog() {
+            let english = (values["en"] ?? "").filter { $0 == "\n" }.count
+            let korean = (values["ko"] ?? "").filter { $0 == "\n" }.count
+            XCTAssertEqual(korean, english, "\(key) has \(english) line breaks in English but \(korean) in Korean, so they do not say the same things in the same order")
+        }
+    }
+
+    func test_fr17_pages_use_the_shared_note_and_leave_row_spacing_to_the_form() throws {
+        let folder = package.appendingPathComponent("Sources/DsaSettings")
+        // The shared views themselves, and the window around the pages, are not pages.
+        let notPages: Set<String> = ["Components", "SettingsWindow", "DsaSettingsApp", "MenuBarIcon", "Shell"]
+        // Sheets and the log page are not rows of a grouped form, so they set their own margins.
+        let ownMargins: Set<String> = ["RecoveryKeySheet", "ImportKeySheet", "LogsPage", "LogRow"]
+        let handStyledNote = try NSRegularExpression(pattern: #"\.font\(\.callout\)\s*\.foregroundStyle\(\.secondary\)"#)
+        let files = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "swift" && !notPages.contains($0.deletingPathExtension().lastPathComponent) }
+        XCTAssertGreaterThanOrEqual(files.count, 5)
+        for file in files {
+            let source = try String(contentsOf: file, encoding: .utf8)
+            let matches = handStyledNote.numberOfMatches(in: source, range: NSRange(source.startIndex..., in: source))
+            XCTAssertEqual(matches, 0, "\(file.lastPathComponent) styles a note itself instead of using Note")
+            // Each view in the file, from its struct line to the next one.
+            for view in source.components(separatedBy: "\nstruct ").dropFirst() {
+                let name = String(view.prefix { $0.isLetter || $0.isNumber })
+                if ownMargins.contains(name) {
+                    continue
+                }
+                XCTAssertFalse(view.contains(".padding("),
+                               "\(name) in \(file.lastPathComponent) pads its rows itself; the grouped form spaces them")
+            }
+        }
+    }
+
     func test_fr21_the_log_page_uses_the_app_font() throws {
         let source = try String(contentsOf: package.appendingPathComponent("Sources/DsaSettings/AndroidPages.swift"), encoding: .utf8)
         let page = try XCTUnwrap(source.range(of: "struct LogsPage"))

@@ -143,6 +143,47 @@ static void pr4_planes_are_packed_without_row_padding_in_the_buffers_plane_order
     EXPECT(at == packed.size());
 }
 
+// A 360x640 Shorts picture as the codec HAL's surface buffers hold it: minigbm gives YV12 luma
+// rows of ALIGN(360, 32) = 384 bytes and chroma rows of 192, so the rows the host takes are
+// shorter than the buffer's. Every row from the first goes up from its own place.
+static void fr26_a_portrait_short_goes_up_from_its_top_row() {
+    const uint32_t width = 360, height = 640, yStride = 384, cStride = 192;
+    Yv12 b;
+    b.width = width;
+    b.height = height;
+    b.planes[0] = {0, yStride};
+    b.planes[1] = {uint64_t(yStride) * height, cStride};
+    b.planes[2] = {b.planes[1].offset + uint64_t(cStride) * (height / 2), cStride};
+    b.bytes.assign(b.planes[2].offset + uint64_t(cStride) * (height / 2), 0);
+    for (uint32_t p = 0; p < 3; ++p) {
+        const uint32_t w = p == 0 ? width : width / 2;
+        const uint32_t h = p == 0 ? height : height / 2;
+        for (uint32_t y = 0; y < h; ++y) {
+            for (uint32_t x = 0; x < w; ++x) {
+                b.bytes[b.planes[p].offset + uint64_t(b.planes[p].stride) * y + x] =
+                    static_cast<uint8_t>(1 + p * 80 + y % 79);
+            }
+        }
+    }
+    const dsa::UploadLayout layout = dsa::uploadLayout(kYv12, width, height, true);
+    EXPECT(layout.planes[0].rowBytes == 360 && layout.planes[0].rows == 640);
+    EXPECT(layout.planes[1].rowBytes == 180 && layout.planes[1].rows == 320);
+    std::vector<uint8_t> packed(layout.packedSize(), 0);
+    EXPECT(dsa::packPlanes(b.bytes.data(), b.bytes.size(), b.planes, 3, layout, packed.data()));
+    // Each packed row is its own row of its plane: none is shifted, none is padding (0).
+    bool exact = true;
+    size_t at = 0;
+    for (uint32_t p = 0; p < 3; ++p) {
+        for (uint32_t y = 0; y < layout.planes[p].rows; ++y) {
+            for (uint32_t x = 0; x < layout.planes[p].rowBytes; ++x) {
+                exact = exact && packed[at++] == static_cast<uint8_t>(1 + p * 80 + y % 79);
+            }
+        }
+    }
+    EXPECT(exact);
+    EXPECT(at == packed.size());
+}
+
 static void nfr5_planes_outside_the_mapping_are_not_read() {
     const Yv12 b = makeYv12(64, 32);
     const dsa::UploadLayout layout = dsa::uploadLayout(kYv12, 64, 32, true);
@@ -207,6 +248,7 @@ int main() {
     pr4_yuv_planes_go_up_as_the_hosts_image_lays_them_out();
     pr4_rgb_buffers_go_up_at_their_colorbuffers_pixel_size();
     pr4_planes_are_packed_without_row_padding_in_the_buffers_plane_order();
+    fr26_a_portrait_short_goes_up_from_its_top_row();
     nfr5_planes_outside_the_mapping_are_not_read();
     pr4_a_picture_is_copied_once_and_again_only_when_it_changes();
     pr4_the_bytes_copied_are_reported_once_a_second();

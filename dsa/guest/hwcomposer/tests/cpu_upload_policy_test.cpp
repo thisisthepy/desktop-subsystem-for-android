@@ -7,6 +7,7 @@
 #include <cstdint>
 
 #include "cpu_upload_policy.h"
+#include "dsa_hardware_buffer_import.h"
 #include "dsa_shared_color_buffer.h"
 #include "test_main.h"
 
@@ -21,6 +22,7 @@ constexpr uint32_t fourcc(char a, char b, char c, char d) {
 
 using dsa::hwc::hostComposes;
 using dsa::hwc::LayerPictures;
+using dsa::hwc::UploadFailureLog;
 
 TEST(pr4_a_video_layer_is_drawn_by_surfaceflinger_not_the_host) {
     // The host's compositor samples RGB images only.
@@ -59,6 +61,49 @@ TEST(pr4_a_yuv_buffer_gets_a_yuv_color_buffer_only_from_a_host_that_makes_them) 
               0x1908u);
     EXPECT_EQ(dsa_shared_color_buffer_create_format(fourcc('R', 'G', '1', '6'), 64, 64, 1),
               0x8D62u);
+}
+
+TEST(fr26_a_decoders_picture_buffer_is_imported_with_the_platforms_clone_method) {
+    // AHardwareBuffer_createFromHandle refuses any method but REGISTER (2) and CLONE (3) with
+    // BAD_VALUE before the mapper sees the buffer. A 1 here failed every import, so no picture
+    // a decoder wrote reached the host and every video was green.
+    EXPECT_EQ(dsa::kAhbCreateFromHandleRegister, 2);
+    EXPECT_EQ(dsa::kAhbCreateFromHandleClone, 3);
+
+    // A 640x360 YV12 picture from the codec HAL, as minigbm describes it: the mapper compares
+    // width, height, requested format, layers and stride with these, and refuses a mismatch.
+    dsa::GrallocBufferFacts facts;
+    facts.width = 640;
+    facts.height = 360;
+    facts.androidFormat = 0x32315659;  // YV12
+    facts.usage = 0x930;               // CPU_WRITE_OFTEN | GPU_SAMPLED_IMAGE | COMPOSER_OVERLAY
+    facts.pixelStride = 640;
+    const dsa::HardwareBufferImport import = dsa::cloneImportFor(facts);
+    EXPECT_EQ(import.method, dsa::kAhbCreateFromHandleClone);
+    EXPECT_EQ(import.width, 640u);
+    EXPECT_EQ(import.height, 360u);
+    EXPECT_EQ(import.layers, 1u);
+    EXPECT_EQ(import.format, 0x32315659u);
+    EXPECT_EQ(import.usage, 0x930ull);
+    EXPECT_EQ(import.stride, 640u);
+
+    // A row padded past the picture keeps the allocation's stride, not the width.
+    facts.width = 426;
+    facts.pixelStride = 432;
+    EXPECT_EQ(dsa::cloneImportFor(facts).stride, 432u);
+}
+
+TEST(fr26_a_copy_up_that_fails_on_every_picture_keeps_being_logged) {
+    UploadFailureLog log(3);
+    uint32_t count = 0;
+    EXPECT_TRUE(log.shouldLog(&count));  // the first of a run
+    EXPECT_EQ(count, 1u);
+    EXPECT_TRUE(!log.shouldLog(&count));
+    EXPECT_TRUE(log.shouldLog(&count));  // again with the count, not silent for the boot
+    EXPECT_EQ(count, 3u);
+    log.reset();
+    EXPECT_TRUE(log.shouldLog(&count));  // a new run after a success
+    EXPECT_EQ(count, 1u);
 }
 
 int main() { return ::dsa::test::runAll(); }
