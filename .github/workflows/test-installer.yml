@@ -14,12 +14,15 @@ name: Installer test
 
 on:
   # Only develop is built and tested: features are integrated there and fixed there.
-  push:
-    branches: [develop]
-    paths:
-      - "dsa/**"
-      - ".github/workflows/test-installer.yml"
-      - ".github/scripts/installer/**"
+  # Paused by the owner's decision (2026-11-14): while memory and resizing are fixed on
+  # the owner's PC, tests run only by hand (workflow_dispatch), so a push to develop does
+  # not take the runners the Development and Framework builds wait for. Uncomment to resume.
+  # push:
+  #   branches: [develop]
+  #   paths:
+  #     - "dsa/**"
+  #     - ".github/workflows/test-installer.yml"
+  #     - ".github/scripts/installer/**"
   workflow_dispatch:
 
 concurrency:
