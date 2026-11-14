@@ -1,9 +1,9 @@
 // Stands in for frameworks/base/core/java/Android.bp, which the lock leaves out and build.sh
-// puts in its place. The tree takes only the folders of core/java that SurfaceFlinger, libhwui
-// and libEGL need, and the real file declares the framework's Java, AIDL and test modules
-// over all of core/java: Soong's analysis stops on those whose sources are not in the tree
-// (an aidl_interface whose srcs match nothing, a gensrcs with no input). This file keeps the
-// package, the modules those three libraries reach, the modules other build files in the
+// puts in its place. The tree takes only the folders of core/java that SurfaceFlinger, libhwui,
+// libEGL and libandroid_runtime need, and the real file declares the framework's Java, AIDL and
+// test modules over all of core/java: Soong's analysis stops on those whose sources are not in
+// the tree (an aidl_interface whose srcs match nothing, a gensrcs with no input). This file
+// keeps the package, the modules those four libraries reach, the modules other build files in the
 // tree name (other than Java ones), and the modules those name in turn, each exactly as
 // upstream writes it.
 
@@ -146,6 +146,16 @@ cc_library {
         ":incremental_aidl",
     ],
     defaults: ["incremental_default"],
+}
+
+aidl_interface {
+    name: "android.companion.virtual.virtualdevice_aidl",
+    unstable: true,
+    host_supported: true,
+    srcs: [
+        "android/companion/virtualnative/IVirtualDeviceManagerNative.aidl",
+    ],
+    local_include_dir: ".",
 }
 
 aidl_interface {

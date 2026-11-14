@@ -315,6 +315,12 @@ pub struct InstalledApp {
     /// ABI, in ABI order. Empty for an app without native code.
     #[prost(message, repeated, tag = "13")]
     pub native_libraries: ::prost::alloc::vec::Vec<NativeLibraries>,
+    /// The user ID the app shares with other apps (its manifest's `android:sharedUserId`), such
+    /// as "com.example.shared". Apps with the same value run under one Android uid, so the host
+    /// treats them as one group wherever only the uid tells them apart, as root elevation does.
+    /// Empty for an app with a user ID of its own.
+    #[prost(string, tag = "14")]
+    pub shared_user_id: ::prost::alloc::string::String,
 }
 /// The native libraries of one ABI: the file names under `lib/<abi>/` of an APK, or of an APK
 /// and its splits together.
@@ -693,6 +699,16 @@ pub struct ImeSetComposingRegion {
 pub struct ScreenState {
     #[prost(bool, tag = "1")]
     pub on: bool,
+}
+/// Host to guest, to the control daemon: the tasks whose window the host shows now, open and
+/// not minimized; every other task's window is minimized. Sent after the connection opens and
+/// on each change. The daemon keeps less page cache for a minimized task's app than for a shown
+/// one, since it draws nothing and reads few files; until it is told, every task counts as
+/// shown.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct TasksShown {
+    #[prost(int32, repeated, tag = "1")]
+    pub task_ids: ::prost::alloc::vec::Vec<i32>,
 }
 /// Host to guest: the host computer's power, which the agent makes the guest's battery state
 /// match. Sent once after the connection opens, when the host knows it, and on each change.
@@ -1430,6 +1446,19 @@ pub struct GuestMemory {
     pub google_play_pss_kb: u64,
     #[prost(uint64, tag = "26")]
     pub google_play_swap_pss_kb: u64,
+    /// Free page reporting, as the guest's kernel counts it: the free memory marked reported
+    /// now, which the host has taken back (mem_free_kb less it is free memory the VM still
+    /// holds); the memory reported to the host since boot, whose growth between two reports is
+    /// how fast freed memory goes back; and the reported free memory the host took back in again
+    /// since boot because a page beside it in the host's fault cluster was used, which the guest
+    /// then reported again. All 0 when the guest cannot read them (reported_total_kb is never 0
+    /// once reporting runs, since the first pass after boot reports every free page).
+    #[prost(uint64, tag = "27")]
+    pub free_reported_kb: u64,
+    #[prost(uint64, tag = "28")]
+    pub reported_total_kb: u64,
+    #[prost(uint64, tag = "29")]
+    pub refaulted_total_kb: u64,
 }
 /// From the agent to the guest's control daemon, on each connection to it: the agent has
 /// subscribed and takes the host's frames. It stops at the daemon, which tells the host with
@@ -3286,7 +3315,7 @@ pub struct SpellingResult {
 pub struct Envelope {
     #[prost(
         oneof = "envelope::Body",
-        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 377, 19, 408, 409, 410, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 40, 41, 407, 110, 140, 152, 153, 154, 402, 403, 404, 405, 406, 411, 412, 413, 414, 415, 42, 43, 44, 45, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 30, 50, 51, 52, 53, 54, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 80, 81, 82, 83, 100, 101, 102, 103, 104, 105, 106, 107, 120, 121, 122, 123, 124, 125, 126, 127, 130, 131, 132, 133, 134, 135, 136, 220, 221, 222, 223, 141, 200, 201, 202, 240, 241, 242, 260, 261, 262, 263, 264, 265, 266, 267, 155, 340, 383, 341, 342, 343, 344, 290, 291, 350, 351, 352, 353, 354, 380, 381, 382, 620, 621, 622, 623, 624, 625, 626, 627, 628, 629, 630, 631, 470, 471, 472, 473, 640, 641, 642, 643, 644, 645, 646, 647, 648, 649, 650, 651, 652, 653, 654, 655, 656, 657, 658, 680, 681, 682, 683, 684, 690, 691"
+        tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 377, 19, 408, 409, 410, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 40, 46, 41, 407, 110, 140, 152, 153, 154, 402, 403, 404, 405, 406, 411, 412, 413, 414, 415, 42, 43, 44, 45, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 30, 50, 51, 52, 53, 54, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 80, 81, 82, 83, 100, 101, 102, 103, 104, 105, 106, 107, 120, 121, 122, 123, 124, 125, 126, 127, 130, 131, 132, 133, 134, 135, 136, 220, 221, 222, 223, 141, 200, 201, 202, 240, 241, 242, 260, 261, 262, 263, 264, 265, 266, 267, 155, 340, 383, 341, 342, 343, 344, 290, 291, 350, 351, 352, 353, 354, 380, 381, 382, 620, 621, 622, 623, 624, 625, 626, 627, 628, 629, 630, 631, 470, 471, 472, 473, 640, 641, 642, 643, 644, 645, 646, 647, 648, 649, 650, 651, 652, 653, 654, 655, 656, 657, 658, 680, 681, 682, 683, 684, 690, 691"
     )]
     pub body: ::core::option::Option<envelope::Body>,
 }
@@ -3360,6 +3389,8 @@ pub mod envelope {
         ClockAnswer(super::ClockAnswer),
         #[prost(message, tag = "40")]
         ScreenState(super::ScreenState),
+        #[prost(message, tag = "46")]
+        TasksShown(super::TasksShown),
         #[prost(message, tag = "41")]
         PowerState(super::PowerState),
         #[prost(message, tag = "407")]

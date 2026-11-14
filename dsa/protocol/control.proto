@@ -325,6 +325,11 @@ message InstalledApp {
   // The native libraries the app's APKs on the device hold, base and splits together, by
   // ABI, in ABI order. Empty for an app without native code.
   repeated NativeLibraries native_libraries = 13;
+  // The user ID the app shares with other apps (its manifest's `android:sharedUserId`), such
+  // as "com.example.shared". Apps with the same value run under one Android uid, so the host
+  // treats them as one group wherever only the uid tells them apart, as root elevation does.
+  // Empty for an app with a user ID of its own.
+  string shared_user_id = 14;
 }
 
 // The native libraries of one ABI: the file names under `lib/<abi>/` of an APK, or of an APK
@@ -730,6 +735,15 @@ message ImeSetComposingRegion {
 // sends this on each change after that.
 message ScreenState {
   bool on = 1;
+}
+
+// Host to guest, to the control daemon: the tasks whose window the host shows now, open and
+// not minimized; every other task's window is minimized. Sent after the connection opens and
+// on each change. The daemon keeps less page cache for a minimized task's app than for a shown
+// one, since it draws nothing and reads few files; until it is told, every task counts as
+// shown.
+message TasksShown {
+  repeated int32 task_ids = 1;
 }
 
 // Host to guest: the host computer's power, which the agent makes the guest's battery state
@@ -1389,6 +1403,16 @@ message GuestMemory {
   uint32 google_play_processes = 24;
   uint64 google_play_pss_kb = 25;
   uint64 google_play_swap_pss_kb = 26;
+  // Free page reporting, as the guest's kernel counts it: the free memory marked reported
+  // now, which the host has taken back (mem_free_kb less it is free memory the VM still
+  // holds); the memory reported to the host since boot, whose growth between two reports is
+  // how fast freed memory goes back; and the reported free memory the host took back in again
+  // since boot because a page beside it in the host's fault cluster was used, which the guest
+  // then reported again. All 0 when the guest cannot read them (reported_total_kb is never 0
+  // once reporting runs, since the first pass after boot reports every free page).
+  uint64 free_reported_kb = 27;
+  uint64 reported_total_kb = 28;
+  uint64 refaulted_total_kb = 29;
 }
 
 // From the agent to the guest's control daemon, on each connection to it: the agent has
@@ -3123,6 +3147,7 @@ message Envelope {
     ClockProbe clock_probe = 28;
     ClockAnswer clock_answer = 29;
     ScreenState screen_state = 40;
+    TasksShown tasks_shown = 46;
     PowerState power_state = 41;
     DisplayRefresh display_refresh = 407;
     PowerHint power_hint = 110;

@@ -378,10 +378,9 @@ mod daemon {
     #[cfg(target_os = "android")]
     fn reclaim_idle_memory(router: Arc<Router>) {
         use dsa_guest_channeld::reclaim::{
-            file_refaults_kb, memory_pressure, package_running, reclaim_step_mib, MemInfo,
-            ReadFailures, Reason, ReclaimPolicy, Reclaimer, CHECK_INTERVAL, EXIT_POLL,
-            EXIT_WAIT_LIMIT, RECLAIM_PROPERTY, RECLAIM_STEP_PROPERTY, TRIM_PROPERTY,
-            TRIM_SIZE_PROPERTY,
+            file_refaults_kb, memory_pressure, package_running, MemInfo, ReadFailures, Reason,
+            ReclaimPolicy, Reclaimer, CHECK_INTERVAL, EXIT_POLL, EXIT_WAIT_LIMIT, RECLAIM_PROPERTY,
+            RECLAIM_STEP_PROPERTY, TRIM_PROPERTY, TRIM_SIZE_PROPERTY,
         };
         // The command lines of the guest's processes, for whether a closed app's are gone.
         fn command_lines(failures: &mut ReadFailures) -> Vec<String> {
@@ -467,11 +466,36 @@ mod daemon {
             ) {
                 say!("{line}");
             }
+            // What Android reads back while it boots and settles is not an app's working set.
+            reclaimer.booted(read_property("vendor.dsa.boot_completed") == "1");
+            let learnt_before = reclaimer.learns_working_set();
+            // Nor is what an app reads while it starts; a minimized task keeps less cache.
+            let launching_before = reclaimer.launching();
+            reclaimer.tasks_seen(start.elapsed(), tasks, router.tasks_shown());
+            if reclaimer.launching() != launching_before {
+                say!(
+                    "{}",
+                    if reclaimer.launching() {
+                        "an app is starting: what it reads back for the next minute does not \
+                         raise the working set target"
+                    } else {
+                        "the app has started: evicted page cache read back raises the working \
+                         set target again"
+                    }
+                );
+            }
             if let Some(refaults) = vmstat
                 .ok()
                 .and_then(|text| file_refaults_kb(&text, page_kb))
             {
                 reclaimer.refaults(refaults);
+            }
+            if reclaimer.learns_working_set() != learnt_before {
+                say!(
+                    "Android has settled after its boot: evicted page cache read back now raises \
+                     the working set target (now {} MiB)",
+                    reclaimer.working_set_target_kb() / 1024
+                );
             }
             let reason = if app_closed {
                 reclaimer.app_closed(start.elapsed(), tasks, &memory)
@@ -491,10 +515,17 @@ mod daemon {
                     }
                     TRIM_PROPERTY
                 } else {
-                    let step = reclaim_step_mib(&memory).to_string();
+                    // 0 while tasks are open, unless the host is short and the cache is already
+                    // down to their working set: init drops the cache and moves nothing to zram.
+                    let step = reclaimer
+                        .anonymous_step_mib(reason, tasks, &memory)
+                        .to_string();
                     if let Err(why) = set_property(RECLAIM_STEP_PROPERTY, &step) {
                         say!("could not size the reclaim: {why}");
                         continue;
+                    }
+                    if step == "0" {
+                        say!("the reclaim takes page cache only; no app memory goes to zram");
                     }
                     RECLAIM_PROPERTY
                 };
@@ -710,6 +741,37 @@ mod daemon {
     /// Off Android there is no zram backing file.
     #[cfg(not(target_os = "android"))]
     fn write_back_cold_zram(_router: Arc<Router>) {}
+
+    /// Names the apps that see the computer's memory as the device's (the Play Store and Google
+    /// Play services) in `vendor.dsa.host_memory.uids`, from the package manager's list, again
+    /// whenever Google Play is installed or removed. init hands the list to the kernel
+    /// (`dsa-memory.rc`), and the framework reads the property itself.
+    #[cfg(target_os = "android")]
+    fn name_host_memory_apps() {
+        use dsa_guest_channeld::host_memory::{HostMemoryApps, POLL, PROPERTY};
+        use dsa_guest_channeld::su_relay::PACKAGES_LIST;
+        let mut apps = HostMemoryApps::new();
+        loop {
+            let text = std::fs::read_to_string(PACKAGES_LIST).ok();
+            if let Some(value) = apps.look(text.as_deref()) {
+                match set_property(PROPERTY, &value) {
+                    Ok(()) => {
+                        say!("apps that see the computer's memory (uids): {value}");
+                        apps.set(value);
+                    }
+                    Err(why) => say!(
+                        "could not name the apps that see the computer's memory, so Google \
+                         Play sees the VM's: {why}"
+                    ),
+                }
+            }
+            thread::sleep(POLL);
+        }
+    }
+
+    /// A Linux system other than Android has no package list.
+    #[cfg(not(target_os = "android"))]
+    fn name_host_memory_apps() {}
 
     /// Tells the host how much memory the guest has, so it can add memory before the guest
     /// runs out and take it back once the guest no longer needs it.
@@ -1009,6 +1071,7 @@ mod daemon {
             let router = Arc::clone(&router);
             thread::spawn(move || watch_boot(router));
         }
+        thread::spawn(name_host_memory_apps);
         let (events, event_rx) = mpsc::channel();
         thread::spawn(move || {
             for event in event_rx {

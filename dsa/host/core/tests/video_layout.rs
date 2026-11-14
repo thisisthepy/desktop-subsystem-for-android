@@ -3,8 +3,9 @@
 
 use dsa_host_core::video::Codec;
 use dsa_host_core::video_layout::{
-    av1_frame_size, chroma_start_row, picture_from_surface, rows_from_length, stream_frame_size,
-    visible_size, vp9_frame_size, SurfaceFormat,
+    av1_frame_size, chroma_start_row, mapped_chroma_row, picture_from_surface,
+    picture_from_surface_area, rows_from_length, staging_rows, stream_frame_size, visible_area,
+    visible_size, vp9_frame_size, Area, StreamSizes, SurfaceFormat,
 };
 
 const Y: u8 = 81;
@@ -41,6 +42,79 @@ fn fr26_the_chroma_plane_starts_after_the_surfaces_own_rows() {
     assert_eq!(chroma_start_row(None, 0, 240), 240);
     // A surface height smaller than the picture is not one.
     assert_eq!(chroma_start_row(Some(120), 256, 240), 256);
+}
+
+#[test]
+fn fr26_a_staging_surface_is_a_whole_number_of_aligned_rows() {
+    assert_eq!(staging_rows(360), 384);
+    assert_eq!(staging_rows(368), 384);
+    assert_eq!(staging_rows(640), 640);
+    assert_eq!(staging_rows(1088), 1088);
+    assert_eq!(staging_rows(1), 64);
+    assert_eq!(staging_rows(0), 64);
+}
+
+#[test]
+fn fr26_a_mapping_that_says_it_is_taller_moves_the_chroma() {
+    let pitch = 640;
+    // A 4:2:0 mapping of exactly the staging rows.
+    assert_eq!(mapped_chroma_row(384, pitch, pitch * 576), 384);
+    // A driver that padded the luma plane further says so in the mapping's size.
+    assert_eq!(mapped_chroma_row(384, pitch, pitch * (448 + 224)), 448);
+    // Sizes that say nothing about the chroma: only the luma plane, none, a page-rounded one,
+    // and one that would put the chroma before the staging rows.
+    assert_eq!(mapped_chroma_row(384, pitch, pitch * 384), 384);
+    assert_eq!(mapped_chroma_row(384, pitch, 0), 384);
+    assert_eq!(mapped_chroma_row(384, pitch, pitch * 576 + 4096), 384);
+    assert_eq!(mapped_chroma_row(384, pitch, pitch * 540), 384);
+    assert_eq!(mapped_chroma_row(384, 0, pitch * 576), 384);
+}
+
+#[test]
+fn fr26_the_top_rows_keep_their_colour_when_the_driver_pads_the_surface() {
+    // A 640x360 picture in a 360-row surface whose driver maps it with its chroma at row 384,
+    // the padding rows below the picture holding what the decoder left there.
+    let (width, height, pitch, padded) = (640usize, 360usize, 640usize, 384usize);
+    let mut data = surface(width, height, pitch, padded);
+    for row in height..padded {
+        for x in 0..width {
+            data[row * pitch + x] = if (x / 16 + row) % 2 == 0 { 16 } else { 235 };
+        }
+    }
+    // Read as the surface's own height says, the first chroma rows are that padding: the
+    // picture's top 48 rows showed as blocks of green and purple.
+    let wrong = picture_from_surface(1, &data, SurfaceFormat::Nv12, pitch, height, 640, 360)
+        .expect("a picture");
+    let wrong_chroma = chroma_of(&wrong.nv12, 640, 360);
+    assert!(wrong_chroma[..640].iter().any(|&c| c != U && c != V));
+    // Read through a staging surface of whole aligned rows, every chroma row is the picture's.
+    let rows = mapped_chroma_row(staging_rows(height), pitch, data.len());
+    assert_eq!(rows, padded);
+    let picture = picture_from_surface(1, &data, SurfaceFormat::Nv12, pitch, rows, 640, 360)
+        .expect("a picture");
+    let chroma = chroma_of(&picture.nv12, 640, 360);
+    assert_eq!(chroma.len(), 640 * 180);
+    for (i, pair) in chroma.chunks(2).enumerate() {
+        assert_eq!(
+            pair,
+            [U, V],
+            "chroma pair {i} (row {}) is not the picture's",
+            i / 320
+        );
+    }
+    assert!(picture.nv12[..640 * 360].iter().all(|&y| y == Y));
+}
+
+#[test]
+fn fr26_a_copy_reaches_the_far_edges_of_the_area_in_whole_pairs() {
+    assert_eq!(Area::at_corner((640, 360)).reach(), (640, 360));
+    let cropped = Area {
+        left: 2,
+        top: 4,
+        width: 425,
+        height: 239,
+    };
+    assert_eq!(cropped.reach(), (428, 244));
 }
 
 #[test]
@@ -125,6 +199,91 @@ fn fr26_the_visible_size_is_the_aperture_then_the_streams_own() {
         (426, 240)
     );
     assert_eq!(visible_size((640, 368), None, None), (640, 368));
+}
+
+#[test]
+fn fr26_a_picture_cropped_at_its_top_left_is_copied_from_its_offset() {
+    // A 4x2 picture at column 2, row 2 of an 8x6 surface whose other samples are padding (0).
+    let (pitch, rows) = (8, 6);
+    let mut data = vec![0u8; pitch * (rows + rows / 2)];
+    for row in 2..4 {
+        data[row * pitch + 2..row * pitch + 6].fill(Y);
+    }
+    // Chroma row 1 covers luma rows 2 and 3; columns 2..6 are pairs 1 and 2.
+    let chroma = (rows + 1) * pitch;
+    data[chroma + 2..chroma + 6].copy_from_slice(&[U, V, U, V]);
+    let area = visible_area(
+        (8, 6),
+        Some(Area {
+            left: 2,
+            top: 2,
+            width: 4,
+            height: 2,
+        }),
+        None,
+    );
+    assert_eq!((area.left, area.top, area.width, area.height), (2, 2, 4, 2));
+    let picture =
+        picture_from_surface_area(1, &data, SurfaceFormat::Nv12, pitch, rows, area).unwrap();
+    // Before, the size was taken at the corner: padding (green) along the top and left.
+    assert_eq!(picture.nv12, vec![Y, Y, Y, Y, Y, Y, Y, Y, U, V, U, V]);
+    // An area that starts off a chroma pair is moved onto one, keeping its other edges.
+    let odd = visible_area(
+        (8, 6),
+        Some(Area {
+            left: 3,
+            top: 1,
+            width: 3,
+            height: 3,
+        }),
+        None,
+    );
+    assert_eq!((odd.left, odd.top, odd.width, odd.height), (2, 0, 4, 4));
+    assert!(picture_from_surface_area(
+        1,
+        &data,
+        SurfaceFormat::Nv12,
+        pitch,
+        rows,
+        Area {
+            left: 3,
+            top: 2,
+            width: 4,
+            height: 2
+        }
+    )
+    .is_none());
+    // An area past the coded size is not believed.
+    let past = visible_area(
+        (8, 6),
+        Some(Area {
+            left: 6,
+            top: 0,
+            width: 4,
+            height: 2,
+        }),
+        Some((8, 4)),
+    );
+    assert_eq!((past.left, past.top, past.width, past.height), (0, 0, 8, 4));
+}
+
+#[test]
+fn fr26_a_pictures_size_follows_the_header_of_the_packet_it_came_from() {
+    // A stream changes size at packet 10 while the decoder still holds pictures of 4..9.
+    let mut sizes = StreamSizes::default();
+    assert_eq!(sizes.for_picture(3), None);
+    sizes.record(0, (1920, 1080));
+    sizes.record(10, (1280, 720));
+    // Before, every picture took the newest header: the old ones cut to 1280x720.
+    assert_eq!(sizes.for_picture(9), Some((1920, 1080)));
+    assert_eq!(sizes.for_picture(10), Some((1280, 720)));
+    assert_eq!(sizes.for_picture(42), Some((1280, 720)));
+    // Only the latest headers are kept.
+    for id in 100..200 {
+        sizes.record(id, (640, 360));
+    }
+    assert_eq!(sizes.for_picture(250), Some((640, 360)));
+    assert_eq!(sizes.for_picture(5), None);
 }
 
 /// Writes bits most significant first.

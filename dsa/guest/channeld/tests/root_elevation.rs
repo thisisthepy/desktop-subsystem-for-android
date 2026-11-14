@@ -33,7 +33,9 @@ impl GuardControl for Guard {
 }
 
 const PACKAGES: &str = "com.ask 10100 0 /data/user/0/com.ask default 3003\n\
-                        com.remember 10102 0 /data/user/0/com.remember default 3003\n";
+                        com.remember 10102 0 /data/user/0/com.remember default 3003\n\
+                        com.shared.one 10300 0 /data/user/0/com.shared.one default 3003\n\
+                        com.shared.two 10300 0 /data/user/0/com.shared.two default 3003\n";
 
 fn daemon() -> (Router, Arc<SuRelay>, Guard, Arc<Mutex<Vec<String>>>) {
     let (to_host, _host) = mpsc::channel();
@@ -393,4 +395,125 @@ fn fr35_the_helper_is_handed_the_config_with_the_apps_uids() {
     assert_eq!(*calls.lock().unwrap(), vec![true]);
     assert!(relay.allows(10100));
     let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn fr35_apps_sharing_a_user_id_are_approved_as_one_group() {
+    use dsa_guest_channeld::su_relay::package_for_uid;
+
+    let (router, relay, guard, _said) = daemon();
+    router.from_host(&config(true, &[("com.shared.one", RootLevel::Ask)]));
+    let lines = guard.take();
+    assert!(lines.contains(&"allow 10300".to_string()), "{lines:?}");
+    assert!(relay.allows(10300));
+    assert_eq!(
+        package_for_uid(&relay.config(), 10300),
+        Some("com.shared.one, com.shared.two".to_string())
+    );
+
+    // Setting one app in the shared group to Off hides su from the entire group.
+    router.from_host(&config(
+        true,
+        &[
+            ("com.shared.one", RootLevel::Ask),
+            ("com.shared.two", RootLevel::Off),
+        ],
+    ));
+    let lines = guard.take();
+    assert!(!lines.contains(&"allow 10300".to_string()), "{lines:?}");
+    assert!(!relay.allows(10300));
+    assert_eq!(package_for_uid(&relay.config(), 10300), None);
+
+    // Both apps allowed again: the group sees su and asks as one.
+    router.from_host(&config(
+        true,
+        &[
+            ("com.shared.one", RootLevel::Ask),
+            ("com.shared.two", RootLevel::Ask),
+        ],
+    ));
+    assert!(guard.take().contains(&"allow 10300".to_string()));
+    assert!(relay.allows(10300));
+    assert_eq!(
+        package_for_uid(&relay.config(), 10300),
+        Some("com.shared.one, com.shared.two".to_string())
+    );
+
+    // The host names an app it set to off, even when the other app of the group is allowed,
+    // so the whole group is hidden again.
+    router.from_host(&config(
+        true,
+        &[
+            ("com.shared.one", RootLevel::Off),
+            ("com.shared.two", RootLevel::Remember),
+        ],
+    ));
+    let lines = guard.take();
+    assert!(!lines.contains(&"allow 10300".to_string()), "{lines:?}");
+    assert!(!relay.allows(10300));
+}
+
+#[test]
+fn fr35_su_takes_the_forms_root_apps_use() {
+    use dsa_guest_channeld::su_args::{parse, SuCommand};
+
+    let args = |list: &[&str]| list.iter().map(|a| a.to_string()).collect::<Vec<_>>();
+    // A shell, with the options and the target root apps pass and su needs nothing from.
+    for shell in [
+        &[][..],
+        &["-"],
+        &["-l"],
+        &["--login"],
+        &["root"],
+        &["0"],
+        &["-mm"],
+        &["-M", "root"],
+        &["--mount-master"],
+        &["-p"],
+        &["--preserve-environment"],
+        &["-s", "/system/bin/sh"],
+        &["--shell=/system/bin/sh"],
+    ] {
+        assert_eq!(parse(&args(shell)), Ok(SuCommand::Shell), "{shell:?}");
+    }
+    // A command, by every spelling, with its own words kept.
+    for (form, command) in [
+        (&["-c", "id"][..], "id"),
+        (&["-c", "id", "-u"], "id -u"),
+        (&["root", "-c", "id"], "id"),
+        // Every word after -c is the command's, as root apps written for common su expect.
+        (&["-c", "echo", "root"], "echo root"),
+        // Android's own form: the command after the target user.
+        (&["0", "sh", "-c", "id"], "sh -c id"),
+        (&["--command", "id"], "id"),
+        (&["--command=id -u"], "id -u"),
+        (
+            &["-mm", "-c", "mount -o remount,rw /"],
+            "mount -o remount,rw /",
+        ),
+        (&["-", "0", "-c", "id"], "id"),
+    ] {
+        assert_eq!(
+            parse(&args(form)),
+            Ok(SuCommand::Command(command.to_string())),
+            "{form:?}"
+        );
+    }
+    // Another user, an unknown option, or a missing command is refused.
+    for refused in [
+        &["shell"][..],
+        &["2000", "-c", "id"],
+        &["--unknown"],
+        &["-c"],
+        &["--command="],
+        &["-s"],
+    ] {
+        assert!(parse(&args(refused)).is_err(), "{refused:?}");
+    }
+    // su -v and -V say su is there without asking for root.
+    assert_eq!(
+        parse(&args(&["-v"])),
+        Ok(SuCommand::Version { code: false })
+    );
+    assert_eq!(parse(&args(&["-V"])), Ok(SuCommand::Version { code: true }));
 }

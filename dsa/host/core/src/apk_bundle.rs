@@ -41,7 +41,7 @@ use crate::apk_info::zip::{Archive, Entry};
 use crate::apk_info::{attr, axml, signing, ApkInfo};
 use crate::arm_translation::google::inflate;
 use crate::host_api::ArmTranslationStatus;
-use crate::native_abi::{self, NativeCode, NativeLibraries, WontRun};
+use crate::native_abi::{self, NativeCode, NativeLibraries, TranslationOff, WontRun};
 pub use crate::native_abi::{ARM64, X86_64};
 
 /// The largest manifest read from a split.
@@ -111,6 +111,9 @@ pub enum Refusal {
     NotAnApp(String),
     /// The app's native code is none the guest runs.
     UnsupportedAbi(WontRun),
+    /// The app's 64-bit native code is for arm64-v8a only, and the running Android does not
+    /// translate ARM code.
+    TranslationOff(TranslationOff),
 }
 
 impl Refusal {
@@ -124,6 +127,7 @@ impl Refusal {
             Refusal::Invalid(_) => "invalid-bundle",
             Refusal::NotAnApp(_) => "not-an-apk",
             Refusal::UnsupportedAbi(why) => why.code(),
+            Refusal::TranslationOff(why) => why.code(),
         }
     }
 }
@@ -149,6 +153,7 @@ impl fmt::Display for Refusal {
             ),
             Refusal::Invalid(why) | Refusal::NotAnApp(why) => f.write_str(why),
             Refusal::UnsupportedAbi(why) => write!(f, "{why}"),
+            Refusal::TranslationOff(why) => write!(f, "{why}"),
         }
     }
 }
@@ -933,9 +938,15 @@ impl Bundle {
             .sum()
     }
 
+    /// The native libraries of every APK of the bundle together, whichever splits a device
+    /// takes.
+    pub fn all_libraries(&self) -> NativeLibraries {
+        NativeLibraries::merged(self.apks.iter().map(|apk| &apk.libraries))
+    }
+
     /// What `device` takes from the bundle.
     pub fn select(&self, device: &Device) -> Selection {
-        let libraries = NativeLibraries::merged(self.apks.iter().map(|apk| &apk.libraries));
+        let libraries = self.all_libraries();
         let abi = if device.abis.first().is_some_and(|abi| abi == X86_64) {
             let translation = device.abis.iter().any(|abi| abi == ARM64);
             native_abi::choose(&libraries, || translation).map(str::to_string)
@@ -1064,6 +1075,33 @@ impl InstallFile {
             FileKind::AppBundle => Err(Refusal::AppBundle),
             FileKind::EncryptedBundle => Err(Refusal::Encrypted),
         }
+    }
+
+    /// The native libraries of every APK the file holds, whichever splits a device takes.
+    pub fn libraries(&self) -> NativeLibraries {
+        match self {
+            InstallFile::Apk(apk) => apk.native_libraries.clone(),
+            InstallFile::Bundle(bundle) => bundle.all_libraries(),
+        }
+    }
+
+    /// Refuses an app whose 64-bit native code is for arm64-v8a only while the running Android
+    /// does not translate ARM code, as `translation` (what the service says of ARM translation,
+    /// `None` when it cannot be asked) says, with [`Refusal::TranslationOff`]. A bundle is
+    /// judged by all its APKs: a device that takes no arm64-v8a split would otherwise get the
+    /// app without its native code. When the running Android's ABI list is not known, the app
+    /// is left to Android.
+    pub fn check_translation(
+        &self,
+        translation: Option<&ArmTranslationStatus>,
+    ) -> Result<(), Refusal> {
+        let translates = translation
+            .and_then(|status| status.guest.as_ref())
+            .filter(|guest| !guest.abilist.is_empty())
+            .map(|guest| native_abi::translates_arm64(&guest.abilist));
+        native_abi::install_abi(&self.libraries(), || translates)
+            .map(|_| ())
+            .map_err(Refusal::TranslationOff)
     }
 }
 
@@ -1813,6 +1851,52 @@ mod tests {
             classify(Some("config.astc")),
             SplitKind::Config { of: base_config() }
         );
+    }
+
+    #[test]
+    fn fr25_a_bundle_with_arm64_code_only_is_refused_with_its_reason_while_translation_is_off() {
+        use crate::arm_translation::GuestArmTranslation;
+        let base = base();
+        let arm64 = split("config.arm64_v8a", &["lib/arm64-v8a/libnotes.so"]);
+        let path = file(
+            "arm64-only",
+            "notes.xapk",
+            &bundle_of(&[
+                stored("manifest.json", b"{\"package_name\":\"com.example.notes\"}"),
+                stored("com.example.notes.apk", &base),
+                stored("config.arm64_v8a.apk", &arm64),
+            ]),
+        );
+        let bundle = InstallFile::open(&path, &std::env::temp_dir()).unwrap();
+        let status = |abilist: &str| ArmTranslationStatus {
+            package: None,
+            default: None,
+            translator: None,
+            enabled: true,
+            guest: Some(GuestArmTranslation {
+                abilist: abilist.into(),
+                ..Default::default()
+            }),
+            restart_needed: false,
+        };
+        // An x86_64 device takes no split of it: without the check it would get the app
+        // without its native code.
+        let refusal = bundle
+            .check_translation(Some(&status("x86_64")))
+            .unwrap_err();
+        assert_eq!(refusal.code(), "translation-off");
+        assert!(
+            refusal.to_string().contains("ARM translation is not on"),
+            "{refusal}"
+        );
+        assert_eq!(
+            bundle.check_translation(Some(&status("x86_64,arm64-v8a"))),
+            Ok(())
+        );
+        // An arm64 device runs it as it is; an Android that cannot be asked judges it.
+        assert_eq!(bundle.check_translation(Some(&status("arm64-v8a"))), Ok(()));
+        assert_eq!(bundle.check_translation(Some(&status(""))), Ok(()));
+        assert_eq!(bundle.check_translation(None), Ok(()));
     }
 
     #[test]

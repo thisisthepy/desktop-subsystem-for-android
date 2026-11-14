@@ -68,6 +68,79 @@ pub fn rows_from_length(len: usize, pitch: usize) -> Option<usize> {
     (rows + rows.div_ceil(2) == total).then_some(rows)
 }
 
+/// The rows a picture read out of a decoder's surface is copied into first, a multiple of
+/// [`STAGING_ROW_ALIGNMENT`].
+///
+/// A surface the CPU reads is mapped as the GPU's driver lays it out, and some drivers start a
+/// mapped 4:2:0 surface's chroma plane after its height rounded up to their own alignment, not
+/// after its height: a 640x360 surface had its chroma at row 368 or 384. Read from row 360, the
+/// first chroma rows were the luma padding below the picture, and the picture's top rows
+/// showed as blocks of green and purple. A staging surface whose height is already a multiple
+/// of every such alignment has its chroma where its height says.
+pub fn staging_rows(rows: usize) -> usize {
+    rows.max(1).div_ceil(STAGING_ROW_ALIGNMENT) * STAGING_ROW_ALIGNMENT
+}
+
+/// The alignment of a staging surface's height (see [`staging_rows`]): larger than any GPU
+/// rounds a surface's rows to.
+pub const STAGING_ROW_ALIGNMENT: usize = 64;
+
+/// The row a mapped staging surface of `rows` rows has its chroma plane at, given the mapping's
+/// row pitch and the size the mapping says the surface has (its depth pitch, 0 when the driver
+/// gives none).
+///
+/// The size wins when it is that of a 4:2:0 surface of at least `rows` luma rows: a driver
+/// that padded the surface further says so there. Any other size (only the luma plane, a size
+/// rounded up to a page, none) says nothing about the chroma, and `rows` stands.
+pub fn mapped_chroma_row(rows: usize, row_pitch: usize, mapped_size: usize) -> usize {
+    match rows_from_length(mapped_size, row_pitch) {
+        Some(luma) if luma >= rows && luma <= rows.saturating_mul(2) => luma,
+        _ => rows,
+    }
+}
+
+/// A rectangle of a decoder's surface: where it starts and its size, in luma samples.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Area {
+    pub left: u32,
+    pub top: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl Area {
+    /// The rectangle from the surface's corner to this area's far edges, rounded up to whole
+    /// chroma pairs: what a copy out of the surface has to take for this area to be in it.
+    pub fn reach(&self) -> Size {
+        let right = self.left + self.width;
+        let bottom = self.top + self.height;
+        (right + (right & 1), bottom + (bottom & 1))
+    }
+
+    /// The `size` at the surface's corner.
+    pub fn at_corner(size: Size) -> Area {
+        Area {
+            left: 0,
+            top: 0,
+            width: size.0,
+            height: size.1,
+        }
+    }
+
+    /// The same area starting on an even row and column, grown by what that takes, so it
+    /// keeps its right and bottom edges: a 4:2:0 surface shares each chroma sample between
+    /// two columns and two rows, and an area starting between them would take its chroma
+    /// from the wrong pair.
+    fn on_chroma_pairs(self) -> Area {
+        Area {
+            left: self.left & !1,
+            top: self.top & !1,
+            width: self.width + (self.left & 1),
+            height: self.height + (self.top & 1),
+        }
+    }
+}
+
 /// The visible size of a picture whose decoder output type says `coded`.
 ///
 /// `aperture` is the display area the decoder reports (H.264's and HEVC's cropping, as
@@ -76,14 +149,59 @@ pub fn rows_from_length(len: usize, pitch: usize) -> Option<usize> {
 /// aperture. A size larger than the coded size is not believed: the picture cannot be larger
 /// than the surface it is in. Without either, the coded size.
 pub fn visible_size(coded: Size, aperture: Option<Size>, stream: Option<Size>) -> Size {
-    let fits = |size: Size| size.0 > 0 && size.1 > 0 && size.0 <= coded.0 && size.1 <= coded.1;
-    if let Some(size) = aperture.filter(|s| fits(*s)) {
-        return size;
+    let area = visible_area(coded, aperture.map(Area::at_corner), stream);
+    (area.width, area.height)
+}
+
+/// As [`visible_size`], with the aperture's offset: a stream cropped at its top or left (an
+/// H.264 frame cropping offset) shows from that row and column, not from the surface's
+/// corner. Taking its size at the corner showed rows and columns of padding along the top
+/// and left, and cut as many off the bottom and right. An area that does not lie inside the
+/// coded size is not believed. The area starts on an even row and column.
+pub fn visible_area(coded: Size, aperture: Option<Area>, stream: Option<Size>) -> Area {
+    let fits = |area: &Area| {
+        area.width > 0
+            && area.height > 0
+            && u64::from(area.left) + u64::from(area.width) <= u64::from(coded.0)
+            && u64::from(area.top) + u64::from(area.height) <= u64::from(coded.1)
+    };
+    if let Some(area) = aperture.map(Area::on_chroma_pairs).filter(fits) {
+        return area;
     }
-    if let Some(size) = stream.filter(|s| fits(*s)) {
-        return size;
+    if let Some(area) = stream.map(Area::at_corner).filter(fits) {
+        return area;
     }
-    coded
+    Area::at_corner(coded)
+}
+
+/// The sizes a stream's own headers gave (VP9's frame size, AV1's sequence header), by the
+/// packet that carried each.
+///
+/// A picture takes the size of the last header at or before its own packet, not the newest:
+/// a decoder still holds pictures of the old size when the packet with a new size goes in
+/// (an adaptive stream that changes quality, a feed whose codec is reused for the next video),
+/// and those pictures were cropped to the new size.
+#[derive(Debug, Default, Clone)]
+pub struct StreamSizes {
+    sizes: std::collections::BTreeMap<u64, Size>,
+}
+
+/// How many headers are kept: more than any decoder holds pictures across.
+const STREAM_SIZES_KEPT: usize = 16;
+
+impl StreamSizes {
+    /// Packet `id` carried a header that gives `size`.
+    pub fn record(&mut self, id: u64, size: Size) {
+        self.sizes.insert(id, size);
+        while self.sizes.len() > STREAM_SIZES_KEPT {
+            self.sizes.pop_first();
+        }
+    }
+
+    /// The size the picture of packet `id` has, by the headers so far.
+    pub fn for_picture(&self, id: u64) -> Option<Size> {
+        self.sizes.range(..=id).next_back().map(|(_, &size)| size)
+    }
 }
 
 /// Copies the visible `width` by `height` of a picture out of a decoder's surface: rows
@@ -100,17 +218,45 @@ pub fn picture_from_surface(
     width: u32,
     height: u32,
 ) -> Option<Picture> {
+    picture_from_surface_area(
+        id,
+        data,
+        format,
+        pitch,
+        chroma_row,
+        Area::at_corner((width, height)),
+    )
+}
+
+/// As [`picture_from_surface`], for the picture in `area` of the surface, which starts on an
+/// even row and column (see [`visible_area`]). `None` for one that does not.
+pub fn picture_from_surface_area(
+    id: u64,
+    data: &[u8],
+    format: SurfaceFormat,
+    pitch: usize,
+    chroma_row: usize,
+    area: Area,
+) -> Option<Picture> {
+    let (width, height) = (area.width, area.height);
     let (w, h) = (width as usize, height as usize);
+    let (left, top) = (area.left as usize, area.top as usize);
     let sample = format.bytes_per_sample();
     let stride = w + (w & 1);
-    if w == 0 || h == 0 || chroma_row < h || pitch < stride.checked_mul(sample)? {
+    if w == 0 || h == 0 || left % 2 != 0 || top % 2 != 0 {
+        return None;
+    }
+    if chroma_row < top.checked_add(h)? || pitch < left.checked_add(stride)?.checked_mul(sample)? {
         return None;
     }
     let chroma_rows = h.div_ceil(2);
-    let needed = pitch.checked_mul(chroma_row.checked_add(chroma_rows)?)?;
+    // The chroma of the area's first row: each chroma row covers two luma rows.
+    let chroma_first = chroma_row.checked_add(top / 2)?;
+    let needed = pitch.checked_mul(chroma_first.checked_add(chroma_rows)?)?;
     if data.len() < needed {
         return None;
     }
+    let column = left * sample;
     let mut nv12 = Vec::with_capacity(stride * (h + chroma_rows));
     let mut copy_row = |start: usize| match format {
         SurfaceFormat::Nv12 => nv12.extend_from_slice(&data[start..start + stride]),
@@ -120,11 +266,12 @@ pub fn picture_from_surface(
         }
     };
     for row in 0..h {
-        copy_row(row * pitch);
+        copy_row((top + row) * pitch + column);
     }
-    let chroma = chroma_row * pitch;
+    // A chroma row holds Cb, Cr pairs, one pair for two luma columns: an even column's
+    // pair starts at the same byte as its luma sample.
     for row in 0..chroma_rows {
-        copy_row(chroma + row * pitch);
+        copy_row((chroma_first + row) * pitch + column);
     }
     Some(Picture {
         id,

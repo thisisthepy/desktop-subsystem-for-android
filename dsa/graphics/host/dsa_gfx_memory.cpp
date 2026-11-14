@@ -28,13 +28,16 @@
 #include "dsa_gfx_backend.h"
 #include "dsa_gfx_memory.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <functional>
 #include <map>
 #include <mutex>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include "FrameBuffer.h"
 #include "vulkan/VkCommonOperations.h"
@@ -321,6 +324,45 @@ extern "C" DSA_GFX_EXPORT int dsa_gfx_get_memory_stats(dsa_gfx_memory_stats* out
         if (allocation.bytes > out->largest_bytes) {
             out->largest_bytes = allocation.bytes;
         }
+    }
+    return 0;
+}
+
+extern "C" DSA_GFX_EXPORT int dsa_gfx_get_memory_owners(dsa_gfx_memory_owners* out) {
+    if (!out) {
+        return -1;
+    }
+    *out = dsa_gfx_memory_owners{};
+    /* The renderer's own device now: after a GPU reset, the one made again. */
+    VkEmulation* emu = emulation();
+    const VkDevice own = emu ? emu->getDevice() : VK_NULL_HANDLE;
+    std::lock_guard<std::mutex> lock(s_mutex);
+    if (!s_counting) {
+        return -1;
+    }
+    std::map<VkDevice, uint64_t> guest_devices;
+    for (const auto& [key, allocation] : s_live) {
+        const int kind = allocation.kind == Kind::DeviceLocal   ? DSA_GFX_MEMORY_DEVICE_LOCAL
+                         : allocation.kind == Kind::HostVisible ? DSA_GFX_MEMORY_HOST_VISIBLE
+                                                                : DSA_GFX_MEMORY_IMPORTED;
+        if (key.first == own) {
+            out->renderer_bytes[kind] += allocation.bytes;
+            out->renderer_count[kind]++;
+        } else {
+            out->guest_bytes[kind] += allocation.bytes;
+            out->guest_count[kind]++;
+            guest_devices[key.first] += allocation.bytes;
+        }
+    }
+    out->guest_devices = static_cast<uint32_t>(guest_devices.size());
+    std::vector<uint64_t> held;
+    held.reserve(guest_devices.size());
+    for (const auto& [device, bytes] : guest_devices) {
+        held.push_back(bytes);
+    }
+    std::sort(held.begin(), held.end(), std::greater<uint64_t>());
+    for (size_t i = 0; i < held.size() && i < DSA_GFX_MEMORY_LARGEST_DEVICES; i++) {
+        out->largest_guest_device_bytes[i] = held[i];
     }
     return 0;
 }

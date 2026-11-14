@@ -25,11 +25,12 @@
 //! buttons themselves are pressed here, on the non-client mouse messages, so Windows never
 //! draws its classic buttons over them.
 //!
-//! The glyphs are dark over a light band and light over a dark one. The presenter reads how
-//! light the app's pixels under the band are ([`WindowPresenter::on_band_colour`]), and they
-//! decide, since an app drawing edge to edge often leaves its status bar transparent or reports
-//! icons for a status bar it does not show; what the app's status bar reports
-//! (`ToHost::CaptionTone`) counts only until a frame has been read. Under a high contrast theme
+//! The glyphs are dark over a light band and light over a dark one. What the app asked its
+//! status bar's icons to be (`ToHost::CaptionTone`, from the appearance the guest's window
+//! manager reports as the app changes it) decides, as it does on Android's own status bar.
+//! Only when the app expressed nothing does the presenter's reading of how light the app's
+//! pixels under the band are ([`WindowPresenter::on_band_colour`]) decide. A band the window
+//! fills takes the tone of its fill. Under a high contrast theme
 //! the buttons take the theme's colors.
 //!
 //! At the left of the band the window draws the app's icon (the program's icon, which the
@@ -85,12 +86,12 @@ use windows_sys::Win32::Graphics::Dwm::{
     DwmExtendFrameIntoClientArea, DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE,
 };
 use windows_sys::Win32::Graphics::Gdi::{
-    CreateCompatibleDC, CreateDIBSection, CreateFontIndirectW, DeleteDC, DeleteObject, DrawTextW,
-    GdiFlush, GetSysColor, GetTextFaceW, ScreenToClient, SelectObject, SetBkMode, SetTextColor,
-    ANTIALIASED_QUALITY, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, COLOR_BTNFACE, COLOR_BTNTEXT,
-    COLOR_GRAYTEXT, COLOR_HIGHLIGHT, COLOR_HIGHLIGHTTEXT, DEFAULT_CHARSET, DIB_RGB_COLORS,
-    DT_END_ELLIPSIS, DT_LEFT, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, HDC, HFONT, LOGFONTW,
-    SYS_COLOR_INDEX, TRANSPARENT,
+    ClientToScreen, CreateCompatibleDC, CreateDIBSection, CreateFontIndirectW, DeleteDC,
+    DeleteObject, DrawTextW, GdiFlush, GetSysColor, GetTextFaceW, ScreenToClient, SelectObject,
+    SetBkMode, SetTextColor, ANTIALIASED_QUALITY, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
+    COLOR_BTNFACE, COLOR_BTNTEXT, COLOR_GRAYTEXT, COLOR_HIGHLIGHT, COLOR_HIGHLIGHTTEXT,
+    DEFAULT_CHARSET, DIB_RGB_COLORS, DT_END_ELLIPSIS, DT_LEFT, DT_NOPREFIX, DT_SINGLELINE,
+    DT_VCENTER, HDC, HFONT, LOGFONTW, SYS_COLOR_INDEX, TRANSPARENT,
 };
 use windows_sys::Win32::UI::Accessibility::{HCF_HIGHCONTRASTON, HIGHCONTRASTW};
 use windows_sys::Win32::UI::Controls::MARGINS;
@@ -102,9 +103,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     DefWindowProcW, GetClientRect, GetMessageTime, IsZoomed, PostMessageW, SystemParametersInfoW,
     HTCAPTION, HTCLIENT, HTCLOSE, HTHELP, HTMAXBUTTON, HTMINBUTTON, HTSYSMENU, HTTOP, HTTOPLEFT,
     HTTOPRIGHT, NCCALCSIZE_PARAMS, SC_CLOSE, SC_MAXIMIZE, SC_MINIMIZE, SC_RESTORE,
-    SPI_GETHIGHCONTRAST, WINDOW_EX_STYLE, WINDOW_STYLE, WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCHITTEST,
-    WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMOUSELEAVE, WM_NCMOUSEMOVE,
-    WM_SYSCOMMAND,
+    SPI_GETHIGHCONTRAST, TITLEBARINFOEX, WINDOW_EX_STYLE, WINDOW_STYLE, WM_GETTITLEBARINFOEX,
+    WM_NCACTIVATE, WM_NCCALCSIZE, WM_NCHITTEST, WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN,
+    WM_NCLBUTTONUP, WM_NCMOUSELEAVE, WM_NCMOUSEMOVE, WM_SYSCOMMAND,
 };
 
 use crate::compositor::present::WindowPresenter;
@@ -225,6 +226,23 @@ fn hit_code(layout: &CaptionLayout, x: i32, y: i32, mode: &TitleBarMode) -> u32 
         TitleBarHit::Back => HT_BACK,
         TitleBarHit::Window(hit) => code_of(hit),
     }
+}
+
+/// The title bar and its minimize, maximize and close buttons, in screen pixels, of a window
+/// laid out as `layout` whose client area's top left corner is at (`x`, `y`) on the screen:
+/// what `WM_GETTITLEBARINFOEX` answers. Windows works them out from a standard caption, which
+/// this window's client area has taken over, and so reported buttons one pixel high at the
+/// window's top edge to UI Automation and a title bar below the real one.
+fn title_bar_rects(layout: &CaptionLayout, x: i32, y: i32) -> (RECT, [RECT; 3]) {
+    let rect = |(left, top, width, height): (i32, i32, u32, u32)| RECT {
+        left: x + left,
+        top: y + top,
+        right: x + left + width as i32,
+        bottom: y + top + height as i32,
+    };
+    let title = rect((0, 0, layout.width, layout.height));
+    let buttons = CaptionButton::ALL.map(|button| rect(layout.button_rect(button)));
+    (title, buttons)
 }
 
 /// The key events a click on the back arrow sends the task: Back pressed and released, at
@@ -419,7 +437,8 @@ pub struct CaptionWindow {
     icon_look: Cell<Option<IconLook>>,
     /// The name as last laid out, and what it was laid out for: text, box and DPI.
     text: RefCell<Option<(TitleKey, Option<Vec<u8>>)>>,
-    tone: Cell<CaptionTone>,
+    /// The tone the app asked for; `None` while it expressed nothing, so the pixels decide.
+    tone: Cell<Option<CaptionTone>>,
     hovered: Cell<Option<CaptionButton>>,
     pressed: Cell<Option<CaptionButton>>,
     active: Cell<bool>,
@@ -466,7 +485,7 @@ impl CaptionWindow {
             icon: RefCell::new(None),
             icon_look: Cell::new(None),
             text: RefCell::new(None),
-            tone: Cell::new(CaptionTone::default()),
+            tone: Cell::new(None),
             hovered: Cell::new(None),
             pressed: Cell::new(None),
             active: Cell::new(true),
@@ -616,8 +635,9 @@ impl CaptionWindow {
         self.apply_tone(hwnd);
     }
 
-    /// The app's status bar calls for `tone`. The buttons take it, and the window's frame the
-    /// matching dark or light mode, unless the pixels under the band say otherwise.
+    /// The app's status bar calls for `tone`, or for nothing (`None`). The buttons take the
+    /// tone it calls for, and the window's frame the matching dark or light mode, unless the
+    /// window fills the band; while it calls for nothing, the pixels under the band decide.
     ///
     /// # Safety
     ///
@@ -625,7 +645,7 @@ impl CaptionWindow {
     pub unsafe fn set_tone(
         &self,
         hwnd: HWND,
-        tone: CaptionTone,
+        tone: Option<CaptionTone>,
         presenter: Option<&WindowPresenter>,
     ) {
         self.tone.set(tone);
@@ -635,8 +655,8 @@ impl CaptionWindow {
 
     /// What the presenter last read from the app's frame under the band: the band takes the
     /// fill (0xAARRGGBB), the app's top color, while the app leaves the band empty, or stays
-    /// transparent without one; the glyphs take the tone the fill, else the band's lightness,
-    /// calls for.
+    /// transparent without one; the glyphs take the tone the fill calls for, else the app's,
+    /// else the one the band's lightness calls for.
     ///
     /// # Safety
     ///
@@ -993,6 +1013,28 @@ impl CaptionWindow {
                     None
                 }
             },
+            WM_GETTITLEBARINFOEX => {
+                // Windows fills in which buttons the window has; where they are is this
+                // window's to say, as its client area holds the title bar.
+                let result = DefWindowProcW(hwnd, message, wparam, lparam);
+                let info = lparam as *mut TITLEBARINFOEX;
+                if info.is_null()
+                    || (*info).cbSize as usize != std::mem::size_of::<TITLEBARINFOEX>()
+                {
+                    return Some(result);
+                }
+                let mut origin = POINT { x: 0, y: 0 };
+                ClientToScreen(hwnd, &mut origin);
+                let (title, [minimize, maximize, close]) =
+                    title_bar_rects(&self.layout(hwnd), origin.x, origin.y);
+                (*info).rcTitleBar = title;
+                // The order Windows gives them: the title bar, a reserved one, minimize,
+                // maximize, help and close.
+                (*info).rgrect[2] = minimize;
+                (*info).rgrect[3] = maximize;
+                (*info).rgrect[5] = close;
+                Some(result)
+            }
             WM_NCACTIVATE => {
                 // Windows would paint its caption; there is none. -1 keeps it from painting
                 // the frame, which DWM draws. The window menu taking the foreground leaves the
@@ -1019,6 +1061,28 @@ mod tests {
         assert_eq!(code_of(CaptionHit::Caption), HTCAPTION);
         assert_eq!(code_of(CaptionHit::Client), HTCLIENT);
         assert_eq!(button_of(HTCAPTION), None);
+    }
+
+    #[test]
+    fn fr22_the_caption_buttons_report_where_they_are_drawn() {
+        // A 200% window whose client area starts at (100, 59) on the screen.
+        let layout = CaptionLayout::new(800, 58, 192, 16);
+        let (title, buttons) = title_bar_rects(&layout, 100, 59);
+        assert_eq!(
+            (title.left, title.top, title.right, title.bottom),
+            (100, 59, 900, 117)
+        );
+        // Each button is as high as the band, not a pixel, and they end at the right edge,
+        // close rightmost.
+        let width = layout.button_width as i32;
+        for (index, button) in buttons.iter().enumerate() {
+            let left = 900 - (3 - index as i32) * width;
+            assert_eq!(
+                (button.left, button.top, button.right, button.bottom),
+                (left, 59, left + width, 117),
+                "button {index}"
+            );
+        }
     }
 
     #[test]

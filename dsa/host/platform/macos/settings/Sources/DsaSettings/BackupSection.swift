@@ -25,8 +25,7 @@ struct BackupSection: View {
             if let progress = vm.progressText {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
-                    Text(progress).font(.callout).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    Note(text: progress)
                 }
             }
             if let result = vm.result {
@@ -41,8 +40,7 @@ struct BackupSection: View {
                 }
                 ValueRow(title: T("KeyProtectionCard.Header"), value: vm.keyProtectionText)
                 if let reason = vm.keyProtectionReason {
-                    Text(reason).font(.callout).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    Note(text: reason)
                 }
             }
         }

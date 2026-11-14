@@ -165,6 +165,11 @@ pub struct AppInfo {
     /// The app's launcher shortcuts, in the list of installed apps: the static and dynamic
     /// ones in rank order, then the pinned ones. Empty for an app that only has a task.
     pub shortcuts: Vec<AppShortcut>,
+    /// The user ID the app shares with other apps (its manifest's `android:sharedUserId`), in
+    /// the list of installed apps. Apps with the same value run under one Android uid, so root
+    /// elevation treats them as one group and the settings apps show them together. Empty for
+    /// an app with a user ID of its own, and for an app that only has a task.
+    pub shared_user_id: String,
 }
 
 /// One of an app's launcher shortcuts in Android (`ShortcutManager`): a static one from its
@@ -355,6 +360,9 @@ pub enum TaskRequest {
     /// a while the guest's screen goes off and the guest goes into Doze; it wakes as soon as
     /// a window is shown again.
     WindowsShown { shown: bool },
+    /// The tasks whose window is shown: open and not minimized. The guest keeps less memory
+    /// for a minimized task's app.
+    TasksShown { task_ids: Vec<i32> },
     /// End every process of the app and give its memory back to the host, even one kept
     /// running by a widget or a foreground service: the user's Stop.
     StopApp { package_name: String },
@@ -408,6 +416,9 @@ impl TaskRequest {
             TaskRequest::WindowsShown { shown: false } => {
                 "let the screen go off with no window shown".into()
             }
+            TaskRequest::TasksShown { task_ids } => {
+                format!("keep memory for the shown tasks {task_ids:?}")
+            }
             TaskRequest::StopApp { package_name } => {
                 format!("stop {package_name} and give its memory back")
             }
@@ -454,6 +465,7 @@ pub fn coalesce(requests: Vec<TaskRequest>) -> Vec<TaskRequest> {
                     TaskRequest::SetCaption { task_id: b, .. },
                 ) => a == b,
                 (TaskRequest::WindowsShown { .. }, TaskRequest::WindowsShown { .. }) => true,
+                (TaskRequest::TasksShown { .. }, TaskRequest::TasksShown { .. }) => true,
                 _ => false,
             })
     };

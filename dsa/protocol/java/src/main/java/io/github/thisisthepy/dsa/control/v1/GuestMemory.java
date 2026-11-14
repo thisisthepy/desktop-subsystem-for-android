@@ -955,6 +955,114 @@ public  final class GuestMemory extends
     googlePlaySwapPssKb_ = 0L;
   }
 
+  public static final int FREE_REPORTED_KB_FIELD_NUMBER = 27;
+  private long freeReportedKb_;
+  /**
+   * <pre>
+   * Free page reporting, as the guest's kernel counts it: the free memory marked reported
+   * now, which the host has taken back (mem_free_kb less it is free memory the VM still
+   * holds); the memory reported to the host since boot, whose growth between two reports is
+   * how fast freed memory goes back; and the reported free memory the host took back in again
+   * since boot because a page beside it in the host's fault cluster was used, which the guest
+   * then reported again. All 0 when the guest cannot read them (reported_total_kb is never 0
+   * once reporting runs, since the first pass after boot reports every free page).
+   * </pre>
+   *
+   * <code>uint64 free_reported_kb = 27;</code>
+   * @return The freeReportedKb.
+   */
+  @java.lang.Override
+  public long getFreeReportedKb() {
+    return freeReportedKb_;
+  }
+  /**
+   * <pre>
+   * Free page reporting, as the guest's kernel counts it: the free memory marked reported
+   * now, which the host has taken back (mem_free_kb less it is free memory the VM still
+   * holds); the memory reported to the host since boot, whose growth between two reports is
+   * how fast freed memory goes back; and the reported free memory the host took back in again
+   * since boot because a page beside it in the host's fault cluster was used, which the guest
+   * then reported again. All 0 when the guest cannot read them (reported_total_kb is never 0
+   * once reporting runs, since the first pass after boot reports every free page).
+   * </pre>
+   *
+   * <code>uint64 free_reported_kb = 27;</code>
+   * @param value The freeReportedKb to set.
+   */
+  private void setFreeReportedKb(long value) {
+    
+    freeReportedKb_ = value;
+  }
+  /**
+   * <pre>
+   * Free page reporting, as the guest's kernel counts it: the free memory marked reported
+   * now, which the host has taken back (mem_free_kb less it is free memory the VM still
+   * holds); the memory reported to the host since boot, whose growth between two reports is
+   * how fast freed memory goes back; and the reported free memory the host took back in again
+   * since boot because a page beside it in the host's fault cluster was used, which the guest
+   * then reported again. All 0 when the guest cannot read them (reported_total_kb is never 0
+   * once reporting runs, since the first pass after boot reports every free page).
+   * </pre>
+   *
+   * <code>uint64 free_reported_kb = 27;</code>
+   */
+  private void clearFreeReportedKb() {
+    
+    freeReportedKb_ = 0L;
+  }
+
+  public static final int REPORTED_TOTAL_KB_FIELD_NUMBER = 28;
+  private long reportedTotalKb_;
+  /**
+   * <code>uint64 reported_total_kb = 28;</code>
+   * @return The reportedTotalKb.
+   */
+  @java.lang.Override
+  public long getReportedTotalKb() {
+    return reportedTotalKb_;
+  }
+  /**
+   * <code>uint64 reported_total_kb = 28;</code>
+   * @param value The reportedTotalKb to set.
+   */
+  private void setReportedTotalKb(long value) {
+    
+    reportedTotalKb_ = value;
+  }
+  /**
+   * <code>uint64 reported_total_kb = 28;</code>
+   */
+  private void clearReportedTotalKb() {
+    
+    reportedTotalKb_ = 0L;
+  }
+
+  public static final int REFAULTED_TOTAL_KB_FIELD_NUMBER = 29;
+  private long refaultedTotalKb_;
+  /**
+   * <code>uint64 refaulted_total_kb = 29;</code>
+   * @return The refaultedTotalKb.
+   */
+  @java.lang.Override
+  public long getRefaultedTotalKb() {
+    return refaultedTotalKb_;
+  }
+  /**
+   * <code>uint64 refaulted_total_kb = 29;</code>
+   * @param value The refaultedTotalKb to set.
+   */
+  private void setRefaultedTotalKb(long value) {
+    
+    refaultedTotalKb_ = value;
+  }
+  /**
+   * <code>uint64 refaulted_total_kb = 29;</code>
+   */
+  private void clearRefaultedTotalKb() {
+    
+    refaultedTotalKb_ = 0L;
+  }
+
   public static io.github.thisisthepy.dsa.control.v1.GuestMemory parseFrom(
       java.nio.ByteBuffer data)
       throws com.google.protobuf.InvalidProtocolBufferException {
@@ -2053,6 +2161,120 @@ public  final class GuestMemory extends
       return this;
     }
 
+    /**
+     * <pre>
+     * Free page reporting, as the guest's kernel counts it: the free memory marked reported
+     * now, which the host has taken back (mem_free_kb less it is free memory the VM still
+     * holds); the memory reported to the host since boot, whose growth between two reports is
+     * how fast freed memory goes back; and the reported free memory the host took back in again
+     * since boot because a page beside it in the host's fault cluster was used, which the guest
+     * then reported again. All 0 when the guest cannot read them (reported_total_kb is never 0
+     * once reporting runs, since the first pass after boot reports every free page).
+     * </pre>
+     *
+     * <code>uint64 free_reported_kb = 27;</code>
+     * @return The freeReportedKb.
+     */
+    @java.lang.Override
+    public long getFreeReportedKb() {
+      return instance.getFreeReportedKb();
+    }
+    /**
+     * <pre>
+     * Free page reporting, as the guest's kernel counts it: the free memory marked reported
+     * now, which the host has taken back (mem_free_kb less it is free memory the VM still
+     * holds); the memory reported to the host since boot, whose growth between two reports is
+     * how fast freed memory goes back; and the reported free memory the host took back in again
+     * since boot because a page beside it in the host's fault cluster was used, which the guest
+     * then reported again. All 0 when the guest cannot read them (reported_total_kb is never 0
+     * once reporting runs, since the first pass after boot reports every free page).
+     * </pre>
+     *
+     * <code>uint64 free_reported_kb = 27;</code>
+     * @param value The freeReportedKb to set.
+     * @return This builder for chaining.
+     */
+    public Builder setFreeReportedKb(long value) {
+      copyOnWrite();
+      instance.setFreeReportedKb(value);
+      return this;
+    }
+    /**
+     * <pre>
+     * Free page reporting, as the guest's kernel counts it: the free memory marked reported
+     * now, which the host has taken back (mem_free_kb less it is free memory the VM still
+     * holds); the memory reported to the host since boot, whose growth between two reports is
+     * how fast freed memory goes back; and the reported free memory the host took back in again
+     * since boot because a page beside it in the host's fault cluster was used, which the guest
+     * then reported again. All 0 when the guest cannot read them (reported_total_kb is never 0
+     * once reporting runs, since the first pass after boot reports every free page).
+     * </pre>
+     *
+     * <code>uint64 free_reported_kb = 27;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearFreeReportedKb() {
+      copyOnWrite();
+      instance.clearFreeReportedKb();
+      return this;
+    }
+
+    /**
+     * <code>uint64 reported_total_kb = 28;</code>
+     * @return The reportedTotalKb.
+     */
+    @java.lang.Override
+    public long getReportedTotalKb() {
+      return instance.getReportedTotalKb();
+    }
+    /**
+     * <code>uint64 reported_total_kb = 28;</code>
+     * @param value The reportedTotalKb to set.
+     * @return This builder for chaining.
+     */
+    public Builder setReportedTotalKb(long value) {
+      copyOnWrite();
+      instance.setReportedTotalKb(value);
+      return this;
+    }
+    /**
+     * <code>uint64 reported_total_kb = 28;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearReportedTotalKb() {
+      copyOnWrite();
+      instance.clearReportedTotalKb();
+      return this;
+    }
+
+    /**
+     * <code>uint64 refaulted_total_kb = 29;</code>
+     * @return The refaultedTotalKb.
+     */
+    @java.lang.Override
+    public long getRefaultedTotalKb() {
+      return instance.getRefaultedTotalKb();
+    }
+    /**
+     * <code>uint64 refaulted_total_kb = 29;</code>
+     * @param value The refaultedTotalKb to set.
+     * @return This builder for chaining.
+     */
+    public Builder setRefaultedTotalKb(long value) {
+      copyOnWrite();
+      instance.setRefaultedTotalKb(value);
+      return this;
+    }
+    /**
+     * <code>uint64 refaulted_total_kb = 29;</code>
+     * @return This builder for chaining.
+     */
+    public Builder clearRefaultedTotalKb() {
+      copyOnWrite();
+      instance.clearRefaultedTotalKb();
+      return this;
+    }
+
     // @@protoc_insertion_point(builder_scope:dsa.control.v1.GuestMemory)
   }
   @java.lang.Override
@@ -2096,13 +2318,16 @@ public  final class GuestMemory extends
             "googlePlayProcesses_",
             "googlePlayPssKb_",
             "googlePlaySwapPssKb_",
+            "freeReportedKb_",
+            "reportedTotalKb_",
+            "refaultedTotalKb_",
           };
           java.lang.String info =
-              "\u0000\u001a\u0000\u0000\u0001\u001a\u001a\u0000\u0001\u0000\u0001\u0003\u0002\u0003" +
+              "\u0000\u001d\u0000\u0000\u0001\u001d\u001d\u0000\u0001\u0000\u0001\u0003\u0002\u0003" +
               "\u0003\u0003\u0004\u0003\u0005\u0003\u0006\u0003\u0007\u0003\b\u0003\t\u0003\n\u0003" +
               "\u000b\u0003\f\u0003\r\u0003\u000e\u001b\u000f\u0003\u0010\u0003\u0011\u0003\u0012" +
               "\u0003\u0013\u0003\u0014\u0003\u0015\u0003\u0016\u0003\u0017\u0003\u0018\u000b\u0019" +
-              "\u0003\u001a\u0003";
+              "\u0003\u001a\u0003\u001b\u0003\u001c\u0003\u001d\u0003";
           return newMessageInfo(DEFAULT_INSTANCE, info, objects);
       }
       // fall through

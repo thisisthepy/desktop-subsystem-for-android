@@ -255,8 +255,9 @@ pub struct HostConfig {
     #[serde(default)]
     pub user_sid: Option<String>,
     /// Free page reporting granularity as a page order: 9 (2 MiB) works on every Windows
-    /// build; 5 (128 KiB) returns memory more finely on recent builds. By default, 5 on
-    /// Windows 11 and later and 9 before.
+    /// build; 0 (4 KiB) returns every free page on builds that back the VM in small pages.
+    /// By default, 0 on those builds and 9 on the others ([`page_reporting_order_for_build`]).
+    /// Above 0 the guest also compacts its memory, so free pages form whole blocks.
     #[serde(default = "default_page_reporting_order")]
     pub page_reporting_order: u8,
     /// The vsock port the guest's channel daemon connects to.
@@ -290,6 +291,17 @@ pub struct HostConfig {
     /// (`dsa-hostd <config.json>`), the setting alone turns freezing on.
     #[serde(default)]
     pub freeze_after_minutes: Option<u64>,
+    /// The direct-mapped mode: each boot attaches the image's system disk and the user's
+    /// add-on disk as virtual persistent memory, mapped from their files, instead of SCSI
+    /// disks, so the guest maps the read-only partitions' files rather than keeping a page
+    /// cache of them on top of Windows' (`dsa_host_core::direct_mapped`). Off until its saving
+    /// is measured; on x86_64 hosts only, and only for images that describe the mode's system
+    /// disk. The service makes that disk (an uncompressed copy of the image's) in the background
+    /// after each image is installed or downloaded, checks it against the image's hash, and keeps
+    /// it in the machine's `direct-mapped` folder; until it is ready, Android boots as without
+    /// the mode.
+    #[serde(default)]
+    pub direct_mapped_images: bool,
     /// The machine's DSA folder: the folder the configuration file is in, which `dsa-hostd`
     /// fills in when it reads the file. Not a key of the file.
     #[serde(skip)]
@@ -582,7 +594,16 @@ impl HostConfig {
         };
         let vm_name = format!("{}-{sid}", self.vm_name);
         let console_log = self.console_log_path(sid, &disk);
-        let config = self.base_vm_config(&vm_name, disk, vec![sid.into()]);
+        let mut config = self.base_vm_config(&vm_name, disk, vec![sid.into()]);
+        // The service writes the add-on and pstore disks as SYSTEM, so a user whose Android
+        // disk is in their own profile, which they can change, has those two in the machine's
+        // folder for them, which only SYSTEM and Administrators write. A `data_dir` folder is
+        // the service's own, so they stay beside the disk there.
+        if disk_in_profile {
+            let machine = self.machine_root();
+            config.addon_disk = Some(machine.user_addon_disk(sid));
+            config.pstore_disk = Some(machine.user_pstore_disk(sid));
+        }
         Ok(UserVm {
             vm_name,
             config,
@@ -686,6 +707,7 @@ impl HostConfig {
             hosting_process_name_suffix: None,
             fine_grained_memory: false,
             network_adapter: None,
+            direct_mapped: None,
         }
     }
 

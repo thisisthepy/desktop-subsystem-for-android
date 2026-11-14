@@ -118,7 +118,7 @@ struct MemoryPage: View {
                             Text("\(vm.guestAvailable) \(T("MemoryAvailableOf.Text")) \(vm.guestTotal)").monospacedDigit()
                         }
                         ProgressView(value: vm.guestUsedFraction)
-                        Text(vm.guestAge).font(.callout).foregroundStyle(.secondary)
+                        Note(text: vm.guestAge)
                     }
                     ForEach(Array(vm.guestRows.enumerated()), id: \.offset) { MemoryRowView(row: $0.element) }
                 } else {
@@ -294,7 +294,7 @@ struct UpdatesPage: View {
                     }
                     Button(T("AndroidApplyButton.Content")) { apply() }.disabled(!android.canApply)
                 }
-                Text(T("AndroidChooseNote.Text")).font(.callout).foregroundStyle(.secondary)
+                Note(text: T("AndroidChooseNote.Text"))
             }
             Section(T("UpdatesProgramHeader.Text")) {
                 if general.hasUpdateNotice {
@@ -346,7 +346,7 @@ struct UpdatesPage: View {
                         }
                     }
                 }
-                Text(T("UpdatesMachineNote.Text")).font(.callout).foregroundStyle(.secondary)
+                Note(text: T("UpdatesMachineNote.Text"))
             }
         }
         .settingsPage()
@@ -473,8 +473,8 @@ struct AboutPage: View {
                 }
             }
             Section {
-                Text(T("AboutIndependent.Text")).font(.callout).foregroundStyle(.secondary)
-                Text(T("AboutTrademark.Text")).font(.callout).foregroundStyle(.secondary)
+                Note(text: T("AboutIndependent.Text"))
+                Note(text: T("AboutTrademark.Text"))
             }
         }
         .settingsPage()

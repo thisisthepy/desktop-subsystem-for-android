@@ -54,6 +54,9 @@ import java.util.List;
  * The "https" check ({@link HttpsCheck}) opens the address the "url" argument names (at the
  * "address" argument, when given) and says whether the platform's certificate check let it
  * through, and what the app sees of the certificate file the "certificate" argument names.
+ *
+ * The "drm" check ({@link DrmCheck}) says whether the app sees Widevine, and at which security
+ * level.
  */
 public final class MediaProbe extends Instrumentation {
     static final String TAG = "DsaMediaProbe";
@@ -127,8 +130,12 @@ public final class MediaProbe extends Instrumentation {
                 rootVisible(results);
             } else if (check.equals("root_request")) {
                 rootRequest(results);
+            } else if (check.equals("root_stdin")) {
+                rootStdin(results);
             } else if (check.equals("https")) {
                 HttpsCheck.run(url, address, certificate, results);
+            } else if (check.equals("drm")) {
+                DrmCheck.run(results);
             } else {
                 results.putString("error", "no check named " + check);
             }
@@ -151,6 +158,16 @@ public final class MediaProbe extends Instrumentation {
     private void rootRequest(Bundle results) throws Exception {
         Process process = new ProcessBuilder("/system/bin/su", "-c", "id")
                 .redirectErrorStream(true).start();
+        String output = new String(process.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        results.putString("root.output", output.trim());
+        results.putInt("root.exit", process.waitFor());
+    }
+
+    private void rootStdin(Bundle results) throws Exception {
+        Process process = new ProcessBuilder("/system/bin/su")
+                .redirectErrorStream(true).start();
+        process.getOutputStream().write("id\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        process.getOutputStream().close();
         String output = new String(process.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
         results.putString("root.output", output.trim());
         results.putInt("root.exit", process.waitFor());

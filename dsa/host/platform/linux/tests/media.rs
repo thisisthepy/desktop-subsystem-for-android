@@ -43,6 +43,12 @@
 //! certificates stay as they were throughout. It needs passwordless sudo, which CI's runners
 //! have.
 //!
+//! The Widevine check asks the probe whether an app sees Widevine (`MediaDrm`): not before the
+//! user installs it; at L3 once the module is taken from Google's emulator image for this
+//! Android, installed as `dsa drm widevine install` installs it, and Android started again; and
+//! not after it is removed and Android started again, with the device certificates it kept
+//! gone. `DSA_GOOGLE_REPOSITORY` names a mirror of Google's repository instead of Google's own.
+//!
 //! Runs when CI gives it what it needs: `DSA_CROSVM` names the crosvm to run,
 //! `DSA_WIDGET_TEST_IMAGE` the image folder built from the commit under test,
 //! `DSA_WIDGET_TEST_KERNEL` the kernel to boot it with when the folder carries none,
@@ -390,23 +396,7 @@ fn root_absent_problems(results: &BTreeMap<String, String>) -> Vec<String> {
     problems
 }
 
-fn restart_for_root(
-    api: &mut HostApiClient,
-    adb: &Adb,
-    dir: &Path,
-    enabled: bool,
-) -> Result<(), String> {
-    api.stop().map_err(|e| e.to_string())?;
-    let deadline = Instant::now() + Duration::from_secs(90);
-    loop {
-        if api.status().map_err(|e| e.to_string())?.state == SessionState::Stopped {
-            break;
-        }
-        if Instant::now() >= deadline {
-            return Err("Android did not stop".into());
-        }
-        std::thread::sleep(Duration::from_millis(250));
-    }
+fn set_machine_switch(dir: &Path, enabled: bool) -> Result<(), String> {
     let executable = std::env::current_exe().map_err(|e| e.to_string())?;
     let output = Command::new("sudo")
         .arg("env")
@@ -425,6 +415,27 @@ fn restart_for_root(
             String::from_utf8_lossy(&output.stderr)
         ));
     }
+    Ok(())
+}
+
+fn restart_for_root(
+    api: &mut HostApiClient,
+    adb: &Adb,
+    dir: &Path,
+    enabled: bool,
+) -> Result<(), String> {
+    api.stop().map_err(|e| e.to_string())?;
+    let deadline = Instant::now() + Duration::from_secs(90);
+    loop {
+        if api.status().map_err(|e| e.to_string())?.state == SessionState::Stopped {
+            break;
+        }
+        if Instant::now() >= deadline {
+            return Err("Android did not stop".into());
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    set_machine_switch(dir, enabled)?;
     if enabled {
         let result = api
             .set_app_root(PROBE_PACKAGE, "ask")
@@ -522,17 +533,75 @@ fn root_approval_check(api: &mut HostApiClient, adb: &Adb, dir: &Path) -> Result
             "the app's second root call did not use its grace: {grace:?}"
         ));
     }
-    restart_for_root(api, adb, dir, false)?;
+    let stdin_run = adb.probe(dir, "root_stdin")?;
+    if number(&stdin_run, "root.exit")? != 0
+        || !stdin_run
+            .get("root.output")
+            .is_some_and(|out| out.contains("uid=0"))
+    {
+        return Err(format!(
+            "su with a command on standard input did not run as root: {stdin_run:?}"
+        ));
+    }
+    let adb_root = adb.shell("su -c id")?;
+    if !adb_root.contains("uid=0") || count()? != 4 {
+        return Err(format!(
+            "adb shell su -c id did not ask the host and run as root: {adb_root:?}"
+        ));
+    }
+    let records = std::fs::read_to_string(&requests).map_err(|e| e.to_string())?;
+    let adb_record: serde_json::Value =
+        serde_json::from_str(records.lines().nth(3).unwrap_or("")).map_err(|e| e.to_string())?;
+    if adb_record["package"] != "com.android.shell" || adb_record["app_name"] != "adb shell" {
+        return Err(format!(
+            "the approval prompt did not identify adb shell: {adb_record}"
+        ));
+    }
+    let disallowed = api
+        .set_app_root(PROBE_PACKAGE, "off")
+        .map_err(|e| e.to_string())?;
+    if disallowed.level != "off" {
+        return Err(format!(
+            "setting the probe's root level to off: {}",
+            disallowed.message
+        ));
+    }
+    let per_app_off = adb.probe(dir, "root_absent")?;
+    let problems = root_absent_problems(&per_app_off);
+    if !problems.is_empty() {
+        return Err(problems.join("\n"));
+    }
+    let restored = api
+        .set_app_root(PROBE_PACKAGE, "ask")
+        .map_err(|e| e.to_string())?;
+    if restored.level != "ask" {
+        return Err(format!(
+            "restoring the probe's root level to ask: {}",
+            restored.message
+        ));
+    }
+    let visible = adb.probe(dir, "root_visible")?;
+    if visible.get("root.visible").map(String::as_str) != Some("yes") {
+        return Err(format!("the re-enabled app cannot see su: {visible:?}"));
+    }
+    set_machine_switch(dir, false)?;
     let off = adb.probe(dir, "root_absent")?;
     let problems = root_absent_problems(&off);
     if !problems.is_empty() {
         return Err(problems.join("\n"));
     }
-    let helper = adb.shell("getprop init.svc.dsa_su")?;
-    if !matches!(helper.trim(), "" | "stopped") {
-        return Err(format!(
-            "the helper still runs after root elevation is off: {helper}"
-        ));
+    let stop_until = Instant::now() + Duration::from_secs(5);
+    loop {
+        let helper = adb.shell("getprop init.svc.dsa_su")?;
+        if matches!(helper.trim(), "" | "stopped") {
+            break;
+        }
+        if Instant::now() >= stop_until {
+            return Err(format!(
+                "the helper still runs after root elevation is off: {helper}"
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(200));
     }
     Ok(())
 }
@@ -1387,6 +1456,214 @@ fn fr28_android_trusts_the_root_certificates_the_host_added() {
     boot_check(false, false, true);
 }
 
+#[test]
+fn fr37_widevine_is_offered_only_when_installed() {
+    BOOT_CHECK_DRM.store(true, Ordering::Relaxed);
+    boot_check(false, false, false);
+}
+
+/// Whether the boot check runs the Widevine check, which boots three times: without the module,
+/// with it, and after it is removed.
+static BOOT_CHECK_DRM: AtomicBool = AtomicBool::new(false);
+
+/// The Widevine check boots three times and downloads Google's emulator image, so it stays
+/// under twenty-five minutes.
+const DRM_BUDGET: Duration = Duration::from_secs(1500);
+
+/// What the probe's "drm" check says that the acceptance does not allow: with the module, an
+/// app sees Widevine at L3; without it, not at all.
+fn drm_problems(results: &BTreeMap<String, String>, installed: bool) -> Vec<String> {
+    let mut problems = Vec::new();
+    let supported = results.get("drm.widevine.supported").map(String::as_str);
+    let level = results
+        .get("drm.widevine.securityLevel")
+        .map(String::as_str);
+    match (installed, supported) {
+        (true, Some("true")) => {
+            if level != Some("L3") {
+                problems.push(format!(
+                    "Widevine is offered at {level:?}, where the module gives L3"
+                ));
+            }
+        }
+        (true, other) => problems.push(format!(
+            "with Widevine installed, an app is told it is not supported ({other:?})"
+        )),
+        (false, Some("false")) => {}
+        (false, other) => problems.push(format!(
+            "without Widevine installed, an app is told it is supported ({other:?})"
+        )),
+    }
+    if let Some(error) = results.get("error") {
+        problems.push(format!("the probe's drm check failed: {error}"));
+    }
+    problems
+}
+
+#[test]
+fn fr37_the_drm_check_reads_what_the_probe_says() {
+    let results = |pairs: &[(&str, &str)]| -> BTreeMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    };
+    let none = results(&[("drm.widevine.supported", "false")]);
+    let l3 = results(&[
+        ("drm.widevine.supported", "true"),
+        ("drm.widevine.securityLevel", "L3"),
+    ]);
+    let l1 = results(&[
+        ("drm.widevine.supported", "true"),
+        ("drm.widevine.securityLevel", "L1"),
+    ]);
+    assert!(drm_problems(&none, false).is_empty());
+    assert!(drm_problems(&l3, true).is_empty());
+    assert_eq!(drm_problems(&none, true).len(), 1);
+    assert_eq!(drm_problems(&l3, false).len(), 1);
+    assert_eq!(drm_problems(&l1, true).len(), 1);
+    assert_eq!(drm_problems(&results(&[]), false).len(), 1);
+}
+
+/// Restarts Android and connects adb to it again.
+fn restart_android(api: &mut HostApiClient, adb: &Adb) -> Result<(), String> {
+    api.stop().map_err(|e| e.to_string())?;
+    let deadline = Instant::now() + Duration::from_secs(90);
+    while api.status().map_err(|e| e.to_string())?.state != SessionState::Stopped {
+        if Instant::now() >= deadline {
+            return Err("Android did not stop".into());
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    api.ensure_running(Duration::from_secs(360), Duration::from_secs(2), |_| {})
+        .map_err(|e| e.to_string())?;
+    adb.connect(Duration::from_secs(120))
+}
+
+/// The Widevine check: an app sees no Widevine before it is installed; the module is taken from
+/// Google's emulator image (`DSA_GOOGLE_REPOSITORY` names a mirror instead) and installed as
+/// `dsa drm widevine install` installs it; after a restart an app sees Widevine at L3 and the
+/// module's service runs; once it is removed and Android restarts, an app sees none again.
+fn widevine_check(
+    api: &mut HostApiClient,
+    socket: &Path,
+    adb: &Adb,
+    dir: &Path,
+) -> Result<Vec<String>, String> {
+    use dsa_host_core::widevine;
+    let mut problems = Vec::new();
+    let before = adb.probe(dir, "drm")?;
+    eprintln!("drm before the install: {before:?}");
+    problems.extend(drm_problems(&before, false));
+
+    let release = adb.shell("getprop ro.build.version.release")?;
+    let major: u32 = release
+        .trim()
+        .split('.')
+        .next()
+        .and_then(|major| major.parse().ok())
+        .ok_or_else(|| format!("Android's version is {release:?}"))?;
+    let abi = adb.shell("getprop ro.product.cpu.abi")?.trim().to_string();
+    let repository = std::env::var(widevine::REPOSITORY_ENV)
+        .unwrap_or_else(|_| widevine::REPOSITORY.to_string());
+    let fetch = dsa_host_core::update::store::FileFetch;
+    let curl = CurlFetch;
+    let fetch: &dyn dsa_host_core::update::store::Fetch = if repository.starts_with("https://") {
+        &curl
+    } else {
+        &fetch
+    };
+    let image = widevine::find_image(fetch, &repository, major, &abi)?;
+    eprintln!("taking Widevine from {}", image.url);
+    let apex = dir.join("widevine.apex");
+    let package = widevine::take_apex(
+        fetch,
+        &image,
+        major,
+        &abi,
+        &dir.join("download"),
+        &apex,
+        &mut |_| {},
+    )?;
+    let mut file = std::fs::File::open(&apex).map_err(|e| e.to_string())?;
+    let installed = client(socket, Duration::from_secs(10))
+        .install_widevine(&package, &mut file)
+        .map_err(|e| format!("installing Widevine: {e}"))?;
+    if !installed.on_disk || !installed.restart_needed {
+        problems.push(format!(
+            "the install did not put the module on the disk for the next start: {installed:?}"
+        ));
+    }
+    restart_android(api, adb)?;
+    let status = api.widevine().map_err(|e| e.to_string())?;
+    if !status.active || status.restart_needed {
+        problems.push(format!("Android did not start with Widevine: {status:?}"));
+    }
+    let mounts = adb.shell("cat /proc/mounts")?;
+    if !mounts
+        .lines()
+        .any(|line| line.contains(" /vendor/apex overlay "))
+    {
+        problems.push("nothing is laid over /vendor/apex".into());
+    }
+    let active = adb.shell(&format!("ls /apex/{}", widevine::MODULE))?;
+    let _ = std::fs::write(dir.join("widevine-apex.txt"), &active);
+    let with = adb.probe(dir, "drm")?;
+    eprintln!("drm with Widevine: {with:?}");
+    problems.extend(drm_problems(&with, true));
+    let log = adb.shell("logcat -d -b all").unwrap_or_default();
+    let _ = std::fs::write(dir.join("logcat-widevine.txt"), &log);
+    for line in denials(
+        &log,
+        &[
+            "dsa_widevine_fs",
+            "hal_drm_widevine",
+            "hal_drm_widevine_exec",
+            "mediadrm_vendor_data_file",
+            "vendor_apex_file",
+        ],
+    ) {
+        problems.push(format!("SELinux refused Widevine: {line}"));
+    }
+
+    let removed = api.remove_widevine().map_err(|e| e.to_string())?;
+    if removed.package.is_some() || removed.on_disk {
+        problems.push(format!("the module was not removed: {removed:?}"));
+    }
+    restart_android(api, adb)?;
+    let after = adb.probe(dir, "drm")?;
+    eprintln!("drm after the removal: {after:?}");
+    problems.extend(drm_problems(&after, false));
+    let left = adb.shell("ls -A /data/vendor/mediadrm 2>&1 || true")?;
+    if !left.trim().is_empty() && !left.contains("Permission denied") {
+        problems.push(format!(
+            "the device certificates are still there after the removal: {left}"
+        ));
+    }
+    Ok(problems)
+}
+
+/// Downloads through curl, as the command line does on Linux.
+struct CurlFetch;
+
+impl dsa_host_core::update::store::Fetch for CurlFetch {
+    fn fetch(&self, url: &str, out: &mut dyn std::io::Write) -> Result<u64, String> {
+        let mut child = Command::new("curl")
+            .args(["--fail", "--silent", "--show-error", "--location"])
+            .args(["--retry", "3", "--connect-timeout", "30", "--", url])
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("curl cannot run: {e}"))?;
+        let mut body = child.stdout.take().ok_or("curl gave no output")?;
+        let copied = std::io::copy(&mut body, out).map_err(|e| e.to_string())?;
+        let status = child.wait().map_err(|e| e.to_string())?;
+        if !status.success() {
+            return Err(format!("curl failed for {url}: {status}"));
+        }
+        Ok(copied)
+    }
+}
+
 /// Where the certificate check adds its test root, as an administrator adds one: the folder
 /// of the certificates added to the system's store beside the distribution's bundle.
 const ADDED_ROOT: &str = "/usr/local/share/ca-certificates/dsa-fr28-test-root.crt";
@@ -1806,7 +2083,10 @@ fn boot_check(check_media: bool, check_root: bool, check_certificates: bool) {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("adb"));
     let started = Instant::now();
-    let (budget, what) = if check_root {
+    let check_drm = BOOT_CHECK_DRM.load(Ordering::Relaxed);
+    let (budget, what) = if check_drm {
+        (DRM_BUDGET, "the Widevine check")
+    } else if check_root {
         (ROOT_BUDGET, "the root check")
     } else if check_certificates {
         (CERTIFICATES_BUDGET, "the root certificate check")
@@ -1815,7 +2095,9 @@ fn boot_check(check_media: bool, check_root: bool, check_certificates: bool) {
     };
     let deadline = started + budget;
     let _watchdog = Watchdog::start(what, budget + OVERRUN);
-    let dir = scratch(if check_root {
+    let dir = scratch(if check_drm {
+        "drm"
+    } else if check_root {
         "root"
     } else if check_certificates {
         "certs"
@@ -2068,6 +2350,12 @@ fn boot_check(check_media: bool, check_root: bool, check_certificates: bool) {
             problems.push(format!(
                 "a DSA decoder's configure was refused as corrupted: {line}"
             ));
+        }
+    }
+    if check_drm {
+        match widevine_check(&mut api, &socket, &adb, &dir) {
+            Ok(found) => problems.extend(found),
+            Err(why) => problems.push(format!("Widevine: {why}")),
         }
     }
     if check_root {

@@ -112,12 +112,16 @@ impl ApprovalRequest {
         } else {
             Vec::new()
         };
+        let mut main_app = app.cloned().unwrap_or_else(|| AppInfo {
+            package_name: request.package.clone(),
+            ..Default::default()
+        });
+        if packages.len() > 1 {
+            main_app.package_name = request.package.clone();
+        }
         ApprovalRequest {
             request_id: request.request_id,
-            app: app.cloned().unwrap_or_else(|| AppInfo {
-                package_name: request.package.clone(),
-                ..Default::default()
-            }),
+            app: main_app,
             uid: request.uid,
             command: request.command.clone(),
             interactive: request.interactive,
@@ -129,6 +133,23 @@ impl ApprovalRequest {
     /// Sets the apps in a shared user ID group, with their names and icons as the guest listed
     /// them.
     pub fn with_shared_apps(mut self, shared_apps: Vec<AppInfo>) -> ApprovalRequest {
+        if shared_apps.len() > 1 {
+            self.app.package_name = shared_apps
+                .iter()
+                .map(|app| app.package_name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            if self.app.label.is_empty() {
+                if let Some(first) = shared_apps.first() {
+                    self.app.label = first.label.clone();
+                }
+            }
+            if self.app.icon_png.is_empty() {
+                if let Some(first) = shared_apps.iter().find(|app| !app.icon_png.is_empty()) {
+                    self.app.icon_png = first.icon_png.clone();
+                }
+            }
+        }
         self.shared_apps = shared_apps;
         self
     }
@@ -243,8 +264,9 @@ impl ApprovalRequest {
     }
 }
 
-/// Splits a package field into the individual packages of a shared user ID group.
-fn package_group(package: &str) -> Vec<&str> {
+/// Splits a su request's package field into the packages of a shared user ID group: the guest
+/// names every app that runs under the caller's uid, separated by commas.
+pub fn package_group(package: &str) -> Vec<&str> {
     package
         .split(',')
         .map(str::trim)

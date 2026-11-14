@@ -2805,7 +2805,199 @@ FLO의 BLAST 버퍼 5개: `VRI[MainActivity]#1`의 4개는 HWUI가 창마다 잡
 - 남은 것: 게스트 프로세스마다 호스트에 VkDevice가 하나씩 있고(ANGLE), 드라이버의 기기별 몫과 ANGLE의 버퍼 풀은 이번 고침에 들지 않는다. 0023 뒤의 CPU-mapped 줄이 그 크기를 처음 보여 준다. 위 절감은 모두 실기에서 재지 않았다. 다음 측정에서 같은 조건(FLO 창 하나, 1분)으로 렌더러 줄을 비교한다.
 - 결정: 위 고침을 develop에 넣었다. 기기별 몫을 줄일지(기기 공유 등)는 측정 뒤에 따로 정한다.
 
-## R38. 호스트 가시 메모리를 복사하지 않고 게스트와 렌더러가 같은 페이지를 쓰는 길 (FR-4, PR-3, NFR-1, NFR-2)
+## R38. 비일관 캐시 메모리 형식과 일관 쌍둥이: ANGLE이 어느 형식을 고르는가 (PR-3, FR-4)
+
+**기준.** R33의 제안 1(소유자 승인): v0.1.9의 싼 경로(비일관 캐시 형식, 앱의 `vkInvalidateMappedMemoryRanges`에서만 되읽기)를 되살리면서 Vulkan이 요구하는 HOST_VISIBLE|HOST_COHERENT 형식을 지킨다. ANGLE은 이미지 입력 빌드 16373615(Android 17)에 든 것을 `external/angle`의 `android-17.0.0_r1`(`1f4500d3`) 소스로 읽었다. 빌드하거나 실행하지 않았다.
+
+**한 일.** guest/mesa 0012는 호스트가 캐시하는 호스트 가시 형식 T마다 둘을 보인다. T는 호스트가 보인 그대로(비일관) 제 인덱스에 두고, T|COHERENT 쌍둥이를 호스트의 형식들 뒤에 붙인다(`dsa_memory_types.h`). 호스트의 인덱스와 마스크는 그대로 게스트의 것이므로 색 버퍼 인덱스처럼 호스트가 준 값은 바뀌지 않는다. 쌍둥이 인덱스는 호스트로 갈 때 T가 되고, 호스트의 마스크에 T가 있으면 쌍둥이도 들어간다. 완료 시점(펜스, 세마포어, 큐와 장치 대기)의 되읽기는 일관 형식만 한다. Vulkan의 순서 규칙(플래그가 엄격한 부분 집합인 형식이 앞)은 호스트의 어떤 형식도 COHERENT가 없으므로 지켜진다.
+
+**ANGLE이 고르는 형식.** ANGLE은 VMA로 고르고, VMA는 필수 플래그를 가진 형식 가운데 선호 플래그를 덜 놓친 것을, 같으면 앞의 것을 고른다.
+
+| 경로 | ANGLE이 묻는 것 | 고르는 형식 |
+|---|---|---|
+| 텍스처 올리기 스테이징 (`CachedNonCoherent`) | 필수 HV+HC, 선호 없음 | T (비일관). 쓰고 `flush`한다 |
+| 내부 `DynamicBuffer` (정점, 인덱스 변환, 기본 유니폼) | 필수 HV, 선호 HC 또는 없음 | 앞의 HV 형식 (T 또는 캐시 없는 형식) |
+| `glReadPixels`와 장치 버퍼 매핑의 스테이징 (`CachedPreferCoherent`) | 필수 HV+HC, 선호 COH | 쌍둥이. 드물고, 읽기 전에 `invalidate`를 부른다 |
+| GL 버퍼 `DYNAMIC_DRAW`, `STREAM_DRAW` | 필수 HV, 선호 COH(+HC) | 쌍둥이. 바꿀 ANGLE 스위치가 없다 |
+| GL 버퍼 `DYNAMIC_READ`, `STREAM_COPY` 등 | 스위치에 따라 HV+HC 또는 HV+COH+HC | 이미지가 `preferCachedNoncoherentForDynamicStreamBufferUsage`를 켜서 T |
+| GL 버퍼 `STATIC_*` | 내장 GPU면 DL+HV+COH 선호(`preferDeviceLocalMemoryHostVisible`), 아니면 DL | 이미지가 그 스위치를 꺼서 DL 전용 형식 |
+
+HWUI는 `SkiaOpenGLPipeline`으로 ANGLE 위에서 그리므로(R19) 위 표를 그대로 따른다. 글리프 아틀라스와 비트맵 올리기는 T로, Skia의 정점, 인덱스, 유니폼 스트리밍(`DYNAMIC_DRAW`, `STREAM_DRAW`)은 쌍둥이로 간다. 장치는 그 버퍼에 쓰지 않으므로 완료 때의 되읽기는 호스트가 크기 0으로 답하는 왕복 하나와 렌더러의 조각 해시만 남는다(R33의 남은 비용). ANGLE은 비일관 형식에서 `flush`와 `invalidate`를 명시적 범위로 부르며, 그 범위는 `nonCoherentAtomSize`로 올림한다.
+
+**함께 고친 것.** 비일관 형식의 사용자는 범위를 `flush`하고 `invalidate`한다. 인코더의 `vkFlushMappedMemoryRanges`는 `VK_WHOLE_SIZE`를 오프셋과 상관없이 매핑 크기만큼 보내 게스트 사본의 끝을 넘어 읽었고, 호스트 렌더러는 `VK_WHOLE_SIZE` 범위를 오프셋에서 할당 크기만큼 읽고 보내 매핑 끝을 넘는다. 0012는 보낼 바이트를 사본 안으로 자르고, 그림자 메모리의 `VK_WHOLE_SIZE` 범위를 호스트 할당 끝까지의 바이트 수로 바꾸어 보낸다.
+
+**확인하지 못한 것.** 모두 CI와 실기의 몫이다. `dEQP-VK.info.device_memory_properties`, `dEQP-VK.memory.allocation.basic.*`, `dEQP-VK.memory.mapping.suballocation.full.*`(비일관 형식의 `flush`와 `invalidate`, 쌍둥이 할당)가 CTS 부분 집합에 있다. 크기 변경 지연과 `driver.readback` 줄의 변화는 재지 않았다. 호스트가 HV만 있는(캐시 없는) 형식을 보이는 GPU(NVIDIA 등)에서는 그 형식이 Vulkan이 허용하는 플래그 조합이 아니며(HV는 COH나 HC와 함께여야 한다), 이 변경 전부터 그렇다. ANGLE 속성(`debug.angle.feature_overrides_*`)이 앱 프로세스에서 읽히는지는 이미지에서 확인하지 않았다.
+
+## R39. 읽기 전용 시스템 이미지를 게스트가 캐시하지 않고 호스트에서 매핑하기: 가상 영구 메모리와 DAX (NFR-1, NFR-2)
+
+**질문.** 게스트는 읽기 전용 파티션(system, system_ext, product, vendor, 추가 기능 erofs 이미지)을 자기 페이지 캐시에 읽어 두고, Windows는 같은 이미지 파일을 자기 파일 캐시에 둔다. 같은 바이트가 두 벌이고, 게스트 쪽 벌은 VM이 잡는 메모리다(소유자 PC에서 약 200 MiB, R26의 페이지 캐시 214-741 MiB 가운데 일부). 읽기 전용 디스크를 Hyper-V 가상 영구 메모리(vPMEM)로 붙이고 게스트가 DAX로 마운트하면 게스트 캐시 없이 호스트의 매핑에서 바로 읽는가. 무엇이 필요하고, 무엇을 잃고, 얼마나 주는가.
+
+**기준.** 이 조사에서 빌드하거나 실행하지 않았다. 설치된 DSA와 바탕 화면은 건드리지 않았다. 읽은 것은 아래 원본과 소유자 PC의 파일 크기다.
+
+| 자료 | 버전 |
+|---|---|
+| HCS 스키마 참조(`VirtualPMemController`, `VirtualPMemDevice`, `VirtualPMemMapping`, `VirtualPMemBackingType`, `VirtualPMemImageFormat`) | learn.microsoft.com, 2026-11-11에 읽음 |
+| hcsshim `internal/hcs/schema2/virtual_p_mem_*.go`, `internal/uvm/create_lcow.go`, `internal/vm/vmutils/constants.go`, `internal/guest/storage/pmem/pmem.go` | `main`, 2026-11-11 |
+| WSL 커널 `Microsoft/config-wsl`(= `arch/x86/configs/config-wsl`), `arch/arm64/configs/config-wsl-arm64`, `drivers/acpi/nfit/core.c`, `drivers/nvdimm/{pmem.c,namespace_devs.c,pfn_devs.c,virtio_pmem.c,nd_virtio.c}`, `drivers/dax/super.c`, `drivers/md/dm-verity-target.c`, `fs/erofs/{inode.c,super.c}` | `linux-msft-wsl-6.18.54.1`(erofs, dax, dm는 같은 6.18 원본) |
+| crosvm `src/crosvm/cmdline.rs`, `devices/device_virtio_pmem/src/lib.rs`, `Cargo.toml` | `b1aa4d87`(`versions.env`의 고정 리비전) |
+| AOSP `build/make/tools/releasetools/build_image.py` | `main`, 2026-11-11 |
+| Cuttlefish `aosp_cf_x86_64_only_phone-target_files-15581820.zip`의 `META/misc_info.txt`, `IMAGES/`, 파일 목록 | Android 16, 소유자 PC의 `.scratch/aosp-inputs` |
+| 소유자 PC의 이미지 `C:\ProgramData\DSA\images\images\17.0.0-16373615-13\system.vhdx` | 크기만 읽음 |
+
+### Windows: HCS의 가상 영구 메모리
+
+1. 스키마. `VirtualMachine.Devices.VirtualPMem`은 `VirtualPMemController`다: `Devices`(번호에서 `VirtualPMemDevice`로, 2.0), `MaximumCount`(uint8, 2.0. 0이 아니면 `HostPath` 없는 빈 장치를 그 수까지 더한다), `MaximumSizeBytes`(2.0. 빈 장치의 크기, 없으면 512 MB), `Backing`(`Virtual` 또는 `Physical`, 2.1). 장치는 `HostPath`, `ReadOnly`, `ImageFormat`(`Vhdx` 또는 `Vhd1`, 2.0), `SizeBytes`와 `Mappings`(2.2, 한 장치에 여러 파일을 겹쳐 놓는 기능)를 가진다. 스키마 2.0과 2.1은 Windows 10 1809 SDK부터이므로 DSA가 쓰는 2.3 문서와 Windows 11 클라이언트에서 쓸 수 있는 필드다.
+2. Microsoft 자신의 쓰임새(hcsshim, 리눅스 컨테이너용 유틸리티 VM). 루트 파일 시스템을 `root=/dev/pmem0`으로 부팅하고, 장치 0을 `HostPath` = rootfs.vhd, `ReadOnly: true`, `ImageFormat: "Vhd1"`(확장자가 vhdx일 때만 `Vhdx`)로 둔다. 기본 장치 수는 64(최대 128), 기본 크기는 4 GiB이고 `Backing`은 정하지 않는다. arm64에서는 장치 수를 0으로 해서 vPMEM을 쓰지 않는다. 게스트 쪽(`pmem.go`)은 ext4를 `MS_RDONLY`, `noload`로 마운트하고 DAX를 쓰지 않으며, dm-linear와 dm-verity를 pmem 위에 둔다. 곧 Microsoft는 vPMEM을 계층 공유에 쓰고, DAX는 쓰지 않는다. DSA가 DAX로 쓰는 것은 Microsoft가 보여 준 적 없는 조합이다.
+3. 형식. vPMEM은 파일을 VM 주소 공간에 그대로 매핑하므로 평면 이미지가 필요하다. `Vhd1`(고정 VHD: 디스크 바이트 뒤 512바이트 꼬리말)은 hcsshim이 쓰는 형식이다. 이미지의 `system.vhdx`는 동적 VHDX라 그대로 쓸 수 없다. 사용자의 `addons.vhd`는 이미 고정 VHD다.
+4. 크기 정렬. 스키마에는 정렬 규칙이 적혀 있지 않다. 게스트 쪽에서는 리눅스가 영구 메모리를 2 MiB 단위(subsection)로 매핑하고, 영역의 시작이나 크기가 그 단위가 아니면 페이지 구조를 만들지 못해 DAX가 꺼진다(`devm_memremap_pages`의 범위 검사, `nd_pfn_validate`의 `memremap_compat_align`). 그래서 디스크를 2 MiB 배수로 만든다.
+5. Windows가 매핑한 페이지를 세는 방법. `Backing: "Virtual"`은 파일을 매핑한 것이고 `Physical`은 VM 메모리로 채운 것이라는 이름이지만, 문서에 설명이 없다. 매핑한 페이지는 깨끗한 파일 페이지이므로 vmmem 작업 집합에 들어와도 Windows가 대기 목록으로 내려 다시 읽을 수 있을 것으로 본다. 여러 사용자의 VM이 같은 이미지를 열면 한 벌을 나눠 쓸 것이다. 둘 다 확인하지 못했다(아래).
+
+### 게스트 커널
+
+1. WSL 설정에 이미 있는 것: `LIBNVDIMM=y`, `BLK_DEV_PMEM=y`(arm64는 `m`), `VIRTIO_PMEM=y`, `DAX=y`, `FS_DAX=y`, `FS_DAX_PMD=y`, `ZONE_DEVICE=y`, `MEMORY_HOTREMOVE=y`, `SPARSEMEM_VMEMMAP=y`, `ND_PFN=y`. 없는 것: `ACPI_NFIT`(Hyper-V vPMEM을 알리는 ACPI 표의 드라이버)이 두 아키텍처 모두 `m`이다. 이미지는 모듈을 싣지 않으므로 `android.config`에 `ACPI_NFIT=y`, `BLK_DEV_PMEM=y` 등을 적었다.
+2. 원시 이름 공간의 DAX. `pmem.c`는 pfn 장치이거나 `pmem_should_map_pages()`가 참일 때만 블록 장치에 DAX를 준다. 그 함수는 영역에 `ND_REGION_PAGEMAP`이 있어야 참인데, `virtio_pmem.c`는 이 표시를 붙이고 `acpi/nfit/core.c`는 붙이지 않는다. 그래서 Hyper-V의 원시 이름 공간은 그대로는 DAX가 없다. 다른 길인 pfn 정보 블록(`NVDIMM_PFN_INFO`, 이름 공간 4 KiB 지점)은 장치에 써야 만들어진다(`nd_pfn_init`은 읽기 전용 영역이면 `-ENXIO`). 여러 VM이 나눠 쓰는 읽기 전용 이미지에는 쓸 수 없다. 그래서 패치(`pmem-dax.patch`)가 NFIT의 PM 영역에 `ND_REGION_PAGEMAP`을 붙인다. 이때 페이지 구조(4 KiB마다 64바이트, 1.56%)는 게스트 메모리에 놓인다.
+3. by-name 링크. Android의 첫 단계 init과 ueventd는 부팅 장치 아래의 디스크에만 `/dev/block/by-name` 링크를 만들고, 디스크의 부팅 장치는 경로를 거슬러 처음 만나는 플랫폼 장치(또는 PCI 슬롯)로 정한다. NFIT의 NVDIMM 버스는 ACPI 장치 아래라 링크가 없다(VMBus가 그랬다, `vmbus-platform-device.patch`). virtio-pmem은 PCI 아래지만 crosvm이 pmem 장치의 슬롯을 스스로 고르고(`--pmem`에 `pci-address`가 없다), 정할 수 없는 슬롯을 부팅 장치로 적을 수 없다. 그래서 같은 패치가 두 버스를 각각 플랫폼 장치 `nfit`, `virtio-pmem` 아래에 둔다. NFIT의 DSM 호출과 알림은 계속 `acpi_desc->dev`(ACPI 장치)로 가고, virtio-pmem의 플러시는 영역의 `provider_data`(virtio 장치)로 가므로 부모를 바꿔도 깨지지 않는다.
+4. erofs의 DAX(6.18). `dax`, `dax=always`, `dax=never` 마운트 옵션이 있고, 블록 크기가 페이지 크기여야 하며("unsupported blocksize for DAX"), 장치가 DAX를 못 하면 "DAX unsupported by block device. Turning off DAX."를 남기고 옵션을 지운 채 마운트한다. 파일마다는 `S_ISREG`이고 배치가 `EROFS_INODE_FLAT_PLAIN` 또는 `EROFS_INODE_CHUNK_BASED`일 때만 DAX다. 압축한 파일과 마지막 블록을 inode에 넣은 파일(FLAT_INLINE)은 이전처럼 캐시된다. 파일 기반 마운트(R26의 add-on 이미지)는 DAX 장치를 얻지 않는다.
+5. device-mapper. dm-linear는 DAX를 통과시키고(`linear_dax_direct_access`, 파티션 시작을 더한다), dm-verity는 `direct_access`가 없다. 논리 파티션(super 안의 system 등)은 dm-linear만 두면 DAX가 되고, dm-verity를 두면 안 된다. `fs_dax_get_by_bdev`는 파티션의 시작과 크기가 페이지 배수가 아니면 "unaligned partition for dax"로 거절한다. sgdisk는 1 MiB, liblp는 1 MiB로 정렬하므로 맞는다.
+
+### Android의 마운트 표와 검증
+
+1. 마운트 표는 `androidboot.fstab_suffix`로 고른다. 첫 단계는 bootconfig, 그다음 커널 명령줄에서 읽지만, 두 번째 단계와 ueventd는 `ro.boot.*` 속성을 읽고 그 속성은 명령줄이 먼저 정한다(읽기 전용 속성이라 처음 값이 남는다). 그래서 호스트는 bootconfig에 더하지 않고 명령줄의 `androidboot.fstab_suffix`와 `androidboot.boot_devices`를 그 자리에서 바꾼다.
+2. 이미지는 `fstab.dsa`에서 `fstab.dsa_dax`를 만든다. 논리 파티션 항목만 바뀐다: 마운트 옵션에 `dax=always`, fs_mgr 플래그에서 `avb`, `avb=...`, `avb_keys=...`를 뺀다. `/data`, `/metadata`, misc, zram, boot 계열의 항목은 그대로다.
+   - 처음 쓴 설명("부팅이 vbmeta와 boot 이미지의 해시를 이전처럼 확인한다")은 틀렸다(보안 검토 M1). boot 계열 항목은 `recoveryonly`라 첫 단계 마운트가 건너뛰고, 첫 단계 init은 dm-verity로 마운트하는 항목이 있을 때만 검증 부팅(`AvbHandle::Open`)을 연다. 논리 파티션이 모두 `avb`를 잃으면 vbmeta를 확인하지 않고 `ro.boot.avb_version`도 정하지 않는다.
+   - 그래서 `odm`(수백 KiB, 해시 트리는 최상위 vbmeta에 있다)은 항목을 그대로 두어 dm-verity로 마운트한다(`DIRECT_MAPPED_VERIFIED`, `image.json`의 `direct_mapped.verified_partitions`). 호스트가 만드는 디스크도 `odm`의 바이트를 해시 트리째 그대로 둔다. 이제 첫 단계가 vbmeta와 연결된 vbmeta, boot 계열의 해시를 보통 부팅처럼 확인한다. Image test의 측정은 두 모드의 `ro.boot.avb_version`과 커널 로그의 AVB, dm-verity 줄을 견주고, 매핑된 부팅에 값이 없거나 다르면 실패한다(실행 전, 확인하지 못함).
+3. 검증. DAX와 dm-verity는 함께 쓸 수 없다. erofs에는 fs-verity가 없다. 그래서 이 방식에서는 매핑하는 파티션의 블록 검증을 게스트가 하지 않고 호스트가 맡는다: 디스크는 서비스가 서명된 목록으로 확인한 `system.vhdx`에서 서비스(SYSTEM)가 만든 사본이고, 만든 뒤와 서비스가 시작할 때마다 서명된 `image.json`의 SHA-256과 바이트 단위로 견준다(아래 "호스트가 만드는 디스크"). SYSTEM만 쓸 수 있는 폴더에 있고, VM에 읽기 전용으로 붙으며, 게스트 커널도 영구 메모리 디스크를 읽기 전용으로 둔다(`ND_REGION_READONLY`). 부팅은 이미 `verifiedbootstate=orange`, `device_state=unlocked`이므로 부팅 상태가 바뀌지 않는다. 잃는 것은 호스트 파일이 부팅 뒤 바뀌었을 때 게스트가 그것을 알아차리는 것이다. 이 설정을 기본으로 켜기 전에 소유자가 이 맞바꿈을 정해야 한다.
+
+### 이미지의 압축
+
+1. 공개 빌드(Android 16 `15581820`)의 `misc_info.txt`: `erofs_default_compressor=lz4hc,9`, `erofs_default_compress_hints`는 `0 .*\.apex$`(APEX만 압축하지 않음). 이미지 크기는 system 729 MB, system_ext 257 MB, product 250 MB, vendor 304 MB(합 약 1.55 GB)이고, 같은 파티션의 파일은 압축 전 959, 347, 364, 297 MiB(합 약 1.98 GiB)다. 곧 지금의 이미지에서는 APEX 말고는 DAX가 되지 않는다.
+2. `make-image.py --uncompressed-erofs`는 `misc_info.txt`에서 압축기를 `none`으로, 압축 힌트와 파티션별 압축기, pcluster 크기를 빼고, `erofs_share_dup_blocks`(`build_image.py`에서 `--chunksize 4096`)를 켠다. 4 KiB 청크 배치는 FLAT_INLINE을 피하고(erofs가 DAX로 매핑하는 배치) 같은 블록을 한 번만 저장한다.
+3. 막는 것: 소유자 PC의 `system.vhdx`(Android 17, 압축)는 1,803,550,720바이트다. 압축을 풀면 약 0.4 GiB가 늘어(위 비율, DSA가 앱을 빼고 odex를 더하는 몫은 재지 않았다) 2.2 GB 안팎이 되고, GitHub 릴리스 자산 하나의 한도(2 GiB)를 넘을 것으로 본다.
+4. 결정(소유자, 2026-11-13): 릴리스 이미지는 지금처럼 압축해 내려받고, 압축하지 않은 DAX용 디스크는 PC가 스스로 만든다. 내려받는 크기는 그대로다.
+
+### 호스트가 만드는 디스크
+
+1. 무엇을 만드는가(`dsa_host_core::direct_mapped_disk`, 형식 1). 원본 `system.vhdx`의 가상 디스크(동적 VHDX를 그대로 읽는다, `dsa_host_core::vhdx`)에서 GPT와 super 앞의 작은 파티션(vbmeta, boot 계열)은 같은 자리에 그대로 두고, super의 liblp 메타데이터를 다시 쓴다. erofs 논리 파티션은 압축을 푼 사본으로 바꾼다: 같은 트리, 모드, 소유자, 시간, 링크 수, 확장 속성(SELinux 레이블, 파일 능력), 모든 inode를 확장 inode와 FLAT_PLAIN으로. `verified_partitions`(`odm`)와 erofs가 아닌 파티션은 그대로 복사한다. 파티션은 블록 장치 정렬(1 MiB)로 붙여 놓고, super는 마지막 파티션 뒤에서 끝난다. 원본 super는 8 GiB(`super_partition_size`, 대부분 빈 공간)라 그대로 두면 영구 메모리의 페이지 구조가 약 128 MiB가 되므로 줄인다. 그래서 커널 명령줄의 `blkdevparts`에서 super의 크기를 호스트가 바꿔 준다. 디스크는 2 MiB 배수, 뒤에 GPT 백업, Windows는 고정 VHD 꼬리말(식별자는 해시에서 만든다)을 붙인다.
+2. 읽는 erofs 형식(커널 6.18 `fs/erofs`를 따랐다): FLAT_PLAIN, FLAT_INLINE, CHUNK_BASED, 압축 FULL과 COMPACT(4B, 2B 팩) 색인, LZ4(0 패딩, 부분 해제), PLAIN과 interlaced 클러스터, big pcluster, tail packing. 압축 프래그먼트, LZ4 외의 알고리즘, 긴 xattr 접두사, 4 KiB가 아닌 블록, 추가 장치는 거절한다. 거절된 이미지는 이 모드 없이 부팅한다.
+3. 같은 바이트. 만드는 방법이 결정적이므로 이미지 빌드(`dsa-release direct-mapped`, release-image와 Image test의 이미지 작업)가 같은 사본을 만들어 그 SHA-256과 크기, super 크기를 `image.json`의 `direct_mapped.system_disk`에 적는다. `image.json`은 서명된 목록에 자기 해시로 실려 있으므로 이 해시도 서명된다. 목록 자체에 칸을 더하지 않은 까닭: 지금까지 나간 서비스는 목록의 모르는 키를 거절한다(`deny_unknown_fields`). 같은 방식으로 `system_disk_raw`(디스크 그대로의 해시)도 적어, Linux의 원시 사본(`system.img`)을 그것과 견준다(보안 검토 L5).
+4. 서비스(`DirectMappedImages`, 서비스에 하나). 서비스가 시작할 때와 이미지를 내려받아 확인한 뒤 현재 이미지의 사본을 본다. 이전 실행이 만든 사본은 먼저 바이트 단위로 해시를 다시 견준다. 없거나 덜 됐거나 틀리면 만든다: 구간(디스크 앞, super 메타데이터, 파티션 하나씩, 끝)마다 `sync`하고 기록해, 멈춘 실행은 다음에 이어 간다. 다 만들면 `sync_all`하고 다시 읽어 해시를 견준 뒤에야 이름을 붙인다(보안 검토 H2). 틀리면 지우고 처음부터 한 번 더, 그래도 틀리면 이 모드 없이 부팅한다. 다른 이미지의 사본은 지운다. Windows는 `THREAD_MODE_BACKGROUND_BEGIN`(유휴 CPU, 아주 낮은 I/O와 메모리 우선순위), Linux는 nice 19와 유휴 I/O 등급으로 돈다. 사본은 Windows `%ProgramData%\DSA\direct-mapped\<version>.vhd`(SYSTEM만 쓰고, 관리자는 읽고 지우며, VM 그룹 `S-1-5-83-0`은 읽기만), Linux `/var/lib/dsa/direct-mapped/<version>.img`(root 0755, 파일 0644)에 둔다. 한 번에 하나만 돈다(보안 검토 L2).
+5. 부팅. 이번 서비스 실행이 확인한 사본만 쓴다. 확인 중이면 최대 20초 기다리고, 아직 없으면 그 부팅은 이미지 자신의 디스크(SCSI 또는 virtio-blk, dm-verity)로 하고 만들기를 재촉한다. 압축된 이미지 그대로는 DAX로 붙이지 않는다(보안 검토 L4).
+6. 시간과 자리(추정, 재지 않았다). 소유자 PC(Intel 노트북, SSD)의 Android 17 이미지: 압축된 데이터 약 1.6 GB를 읽고 약 2.0 GiB를 LZ4로 풀어 약 2.3 GB를 쓰고, 다시 2.3 GB를 읽어 SHA-256을 낸다. LZ4 풀기는 한 코어에서 초당 0.5-1 GB, 쓰기와 읽기는 SSD에서 초당 0.5-2 GB, SHA-256은 SHA 확장이 있는 CPU(Ice Lake 이후)에서 초당 1.5 GB 안팎, 없으면 0.4-0.5 GB로 보아, 한가한 PC에서 30초에서 1분 반, 다른 일이 디스크를 쓰면 낮은 우선순위 때문에 몇 분이다. 서비스가 시작할 때마다 하는 다시 확인은 2.3 GB 읽기와 해시로 2-6초다. 디스크는 사본만큼(약 2.3 GB) 더 쓰고, 만드는 동안 따로 더 쓰지 않는다(부분 파일이 곧 사본이다). 서비스 로그가 예상 크기, 15초마다 진행률과 남은 시간, 끝난 시간을 남기고, CI의 `dsa-release direct-mapped`가 러너에서 만든 시간을 로그에 적는다.
+
+### 다른 호스트
+
+- Linux(crosvm). `--pmem path=...,ro=true`. crosvm은 파일을 읽기 전용으로 매핑하고, 크기를 2 MiB 배수로 맞춘 매핑 영역을 만들어 끝을 익명 메모리로 채운다. 서비스가 만든 원시 디스크(꼬리말 없음)와 `addons.img`를 붙인다.
+- macOS(Virtualization.framework). virtio-pmem이나 DAX 창(virtiofs의 공유 메모리 영역)에 해당하는 장치가 없다. 블록 장치로 남는다.
+
+### 바꾼 것
+
+- 커널: `android.config`에 영구 메모리와 DAX 설정, `patches/pmem-dax.patch`(NFIT 영역의 `ND_REGION_PAGEMAP`, NFIT와 virtio-pmem 버스의 플랫폼 부모, 새 영역 표시 `ND_REGION_READONLY`로 모든 영구 메모리 영역과 그 디스크를 읽기 전용으로). 시험 `test_nfr1_the_system_images_can_be_mapped_from_persistent_memory_with_dax`, `test_nfr1_the_pmem_patch_hunks_count_their_lines`, `test_nfr1_persistent_memory_disks_are_read_only_in_the_guest`.
+- 이미지: 모든 이미지에 `fstab.dsa_dax`(파티션과 첫 단계 램디스크, `odm`은 dm-verity 그대로), `image.json`의 `"direct_mapped": {"fstab_suffix", "uncompressed_erofs", "verified_partitions", "system_disk"}`와 `system_disk_raw`, 시스템 디스크를 2 MiB 배수로, `--uncompressed-erofs`(연구용으로 남김), `check-image.py`의 확인. Google 앱과 번역기 스크립트에 `gapps_image=dax`, `arm_translation_image=dax`일 때 각 이미지의 파티션에서 `dax=always`로 마운트하는 동작. 시험 `test_nfr1_*`(make-image).
+- 추가 기능 디스크(호스트 공통): 각 이미지의 바이트를 덮는 GPT 파티션 `dsa_gapps`, `dsa_arm_translation`을 erofs 파티션 안에 겹쳐 둔다(리눅스 GPT 파서는 겹침을 막지 않는다). 디스크 크기를 2 MiB 배수로. 보통 부팅은 이전처럼 파일에서 마운트하고 새 파티션을 쓰지 않는다. 이전 DSA의 디스크는 이 모드로 처음 부팅할 때 다시 쓴다.
+- 호스트: 설정 `direct_mapped_images`(기본 꺼짐, Windows `dsa-hostd.json`, Linux 설정 파일). 위의 "호스트가 만드는 디스크"가 사본을 만들고 확인한다(처음 안의 `CreateVirtualDisk`로 부팅 때 고정 VHD를 만들던 방식은 해시를 확인하지 않고 8 GiB를 다 써서 버렸다). Windows는 x86_64에서만 HCS 문서에 `VirtualPMem`(장치 0 시스템, 장치 1 추가 기능, `ReadOnly`, `Vhd1`, `Backing: Virtual`)을 두고 그 디스크들을 SCSI에서 뺀다. Linux는 `--pmem`. 둘 다 명령줄의 부팅 장치에 `nfit` 또는 `virtio-pmem`을 더하고, 표를 `dsa_dax`로, `blkdevparts`의 super 크기를 사본의 것으로 바꾼다. 사본이 없으면 그 부팅은 이전처럼 붙인다.
+- 측정: Image test의 "Measure the direct-mapped read-only disks against the cached ones on the booted image". 공개하는 그대로의 이미지로, 서비스가 사본을 만들고 확인할 때까지(최대 15분) 기다린 뒤 Android를 다시 시작해 DAX로 붙이고, Google Play와 창 하나를 연 채 재고, 서비스를 설정을 끈 채 다시 띄워 같은 것을 잰다. 매핑된 부팅에서 `/sys/block/pmem*/ro`가 모두 1인지, `dd` 쓰기 시도 뒤에도 호스트 사본의 해시가 같은지, `ro.boot.avb_version`이 이미지 자신의 디스크로 한 부팅과 같은지도 본다. 이미지 작업은 사본의 erofs를 `fsck.erofs`로 검사하고, 원본과 함께 풀어 파일, 모드, 소유자, 링크가 같은지 견준다(실패해도 다른 확인을 막지 않는다). 따로 만들던 압축하지 않은 이미지(`direct-mapped-image`)는 없앴다. 게스트 페이지 캐시, 사용량, VM 상주와 private, crosvm의 익명/파일/공유 페이지를 작업 요약에 남긴다. 매핑된 부팅이 `/system`, `/vendor`, `/product`, `/system_ext`, `/mnt/dsa-gapps`를 `dax=always`로 마운트하지 못했으면 실패한다.
+
+### 기대하는 절감
+
+- 게스트 페이지 캐시에서 읽기 전용 파티션과 Google 앱 이미지의 몫이 빠진다. 소유자 PC의 약 200 MiB 가운데 압축하지 않은 이미지에서는 대부분, 지금의 압축 이미지에서는 APEX 몫만이다(APEX 페이로드는 loop와 dm-verity 위 ext4라 그 안쪽은 여전히 캐시된다).
+- 대신 게스트가 매핑한 디스크의 페이지 구조를 잡는다: 압축하지 않은 시스템 디스크 약 2.2 GB에 약 34 MiB, Google 앱 디스크 약 0.6 GB에 약 9 MiB. 이것은 되돌릴 수 없는 커널 메모리다.
+- 그래서 VM이 잡는 몫은 약 100-170 MiB 주고(추정), 같은 페이지는 Windows 파일 캐시에 한 벌만 남을 것으로 본다. 앱이 열려 있을 때 이미지의 실행 코드를 다시 읽는 일(R26의 되읽기)은 게스트 회수의 대상이 아니게 된다.
+
+### 확인하지 못한 것
+
+- 실제 Hyper-V에서 되는지 전부. Windows 11 클라이언트의 WSL이 아닌 HCS VM이 `VirtualPMem`과 `Vhd1`을 받는지, `MaximumSizeBytes`가 파일이 있는 장치의 크기를 제한하는지, NFIT가 어떤 모양(라벨 없는 원시 이름 공간인지, 읽기 전용 표시)으로 오는지, 영역의 물리 주소가 2 MiB에 맞는지. 소유자 PC에서 설정을 켜고 부팅해 콘솔 로그의 `nd_pmem`, `pmem0`, erofs의 DAX 줄과 `/proc/self/mountinfo`의 `dax=always`를 보고, `dsa memory`로 게스트 캐시와 vmmem 상주, private를 끈 때와 견줘야 한다. 작업 관리자가 매핑된 파일 페이지를 vmmem의 메모리로 보이는지, 메모리가 모자랄 때 Windows가 그것을 대기 목록으로 내리는지도 그때 본다.
+- ARM64 Windows. hcsshim이 vPMEM을 끄므로 DSA도 쓰지 않는다. 되는지 시험한 적은 없다.
+- CI의 첫 측정값. 이 변경의 develop 실행이 처음 남긴다. 측정이 끝나기 전에는 설정을 기본으로 켜지 않는다.
+- 호스트가 만드는 디스크 전부. 이 컴퓨터에서는 빌드도 시험도 하지 않았다(컴파일 확인만). 실제 Android 이미지의 erofs를 읽는 코드가 맞는지는 CI의 `fsck.erofs` 비교와 매핑된 부팅이 처음 보여 준다. 만드는 시간과 자리는 위의 추정이고, CI 러너의 값과 소유자 PC에서의 값은 아직 없다.
+- 결정이 남은 것: 매핑하는 파티션의 dm-verity를 포기하는 맞바꿈(위 3). 그때까지 설정은 기본으로 꺼져 있다.
+
+## R40. 쓰지 않는 메모리를 더 작은 조각으로, 더 빨리 돌려주기: 빈 페이지 보고의 남은 틈 (NFR-1, NFR-2)
+
+**목표.** 소유자 PC(0.2.4-dev.5)에서 `dsa memory`의 "the VM holds N MiB beyond what Android uses"는 유휴 때 0-8 MiB, 부하 뒤에는 더 컸다. vm 상주는 760-1490 MiB, 게스트 사용은 687-1595 MiB였고, 앱을 닫은 뒤 메모리가 천천히 돌아왔다. 0.2.5 메모리 단계(소유자 승인)로 수십 MiB를 더 작은 조각으로, 더 빨리 돌려준다.
+
+**방법.** 빌드하거나 실행하지 않았고 바탕 화면과 설치된 DSA는 건드리지 않았다. 고정 커널(`linux-msft-wsl-6.18.54.1`)의 `mm/page_reporting.c`, `mm/page_reporting.h`, `mm/page_alloc.c`, `mm/compaction.c`, `drivers/hv/hv_balloon.c`를 받아 읽었다(`.scratch/kernel-src/`). DSA의 패치를 차례로 적용하고 새 패치 둘을 `patch --fuzz=0`으로 원본에 적용해 결과가 같은지 확인했다. 컴파일과 시험은 CI가 한다.
+
+**찾은 것.**
+
+1. 보고 순서는 이미 가장 작다. Windows는 작은 백킹 페이지를 쓸 수 있는 빌드에서 0(4 KiB), 그 밖에는 9(2 MiB)이고(`page_reporting_order_for_build`), Linux(crosvm)와 macOS는 0이다. hv_balloon은 Hyper-V가 작은 범위를 거절하면 스스로 9로 돌아간다("Underlying Hyper-V does not support order less than 9"). 그래서 순서를 더 낮출 곳은 없다. 보고 한 번은 범위 최대 32개(`PAGE_REPORTING_CAPACITY`)를 hypercall 하나로 보낸다. 순서 0에서는 흩어진 4 KiB 조각마다 범위 하나이므로 범위 수가 늘지만, 묶음이 32개라 hypercall은 그 1/32이다.
+2. 지연도 이미 없다. `page-reporting-no-delay.patch`가 2초 지연을 0으로 했고, 한 번에 목록의 1/16만 처리하는 예산이 끝나면 곧바로 다음 패스가 돈다. dsa-channeld는 5초마다 보고, 앱이 닫히면 기다리지 않고 회수한다(PR #724의 순서: 깨끗한 페이지 캐시, 그다음 zram). 이 순서는 그대로 두었다.
+3. Hyper-V의 64 KiB 폴트 클러스터 때문에 생기는 틈이 남아 있었다. 할당자가 보고된 블록을 내주고 게스트가 그것을 쓰면 Hyper-V는 클러스터 전체(16 페이지)를 다시 들인다. 그 안의 다른 빈 블록도 다시 VM의 메모리가 되지만 게스트는 그것을 여전히 보고된 것으로 표시해 두고 다시 내놓지 않는다. 지금까지는 유휴 회수와 writeback 끝의 `rereport`만 이것을 돌려받았으므로, 앱을 쓰는 동안 이 몫이 쌓였다(R26의 "가설"). 할당 경로(`page_del_and_expand`)에서 보고된 블록이 나가는 순간을 알 수 있고, 그 블록이 클러스터보다 작으면 클러스터의 나머지 빈 블록은 버디 머리가 자기 순서에 맞춰 정렬되어 있으므로 페이지 16개를 한 번 훑으면 모두 찾는다. 나눠진 블록의 나머지(`expand`)는 원래 보고 표시가 없으므로 다음 패스가 보고한다.
+4. 순서 0에서 압축 정리(compaction)는 보고에 쓸모가 없고 해롭다. 모든 빈 페이지가 그대로 보고되므로 블록을 모을 필요가 없다. 반면 압축 정리는 페이지를 빈 페이지로 복사하는데, 그 빈 페이지는 대개 호스트가 이미 돌려받은 것이라 호스트가 다시 백킹하고(클러스터째), 떠난 페이지는 그다음에야 보고된다. 유휴 회수의 `compact_memory`와 작업 집합 다듬기의 `compact_memory`, 배경 압축 정리(`compaction_proactiveness` 40)가 모두 그렇다. 앱을 닫은 뒤 VM 메모리가 한 번 오른 뒤에야 내려간 까닭의 하나로 본다(재지 않았다).
+5. 게스트는 무엇을 보고했는지 내보이지 않았다. 호스트는 vm 상주와 게스트 사용의 차이만 보므로, 게스트가 아는 틈(아직 보고하지 않은 빈 메모리)과 게스트가 모르는 틈(보고했는데 호스트가 다시 들인 것)을 나눌 수 없었다.
+6. macOS의 Virtualization framework 풍선(`VZVirtioTraditionalMemoryBalloonDevice`)이 빈 페이지 보고를 받는지는 확인하지 못했다. 돌려주는 길은 공통 `MemoryGrowth`의 풍선 목표다. 압박이 없는 첫 보고에서, 마지막 변경 5초 뒤 사용량 더하기 여유(사용량의 1/3, 최소 768 MiB)로 줄인다. 바꾸지 않았다. 여유를 줄이는 것은 늘리고 줄이기가 흔들리는 비용과 맞바꿈이므로 따로 정한다.
+
+**바꾼 것.**
+
+1. 커널 `patches/page-reporting-stats.patch`: 읽기 전용 `page_reporting.reported_kb`(지금 보고된 것으로 표시된 빈 메모리, 읽을 때 빈 목록을 센다)와 `reported_total_kb`(부팅 뒤 보고한 양). 쓰기는 `-EPERM`으로 거절한다.
+2. 커널 `patches/page-reporting-taken-clusters.patch`: `page_reporting.fault_cluster_order`(기본 0, 꺼짐). 할당자가 보고된 블록을 내주고 그 블록이 클러스터보다 작으면 같은 클러스터의 빈 블록에서 보고 표시를 지우고 보고를 청한다. 그 양을 `refaulted_total_kb`가 센다. 할당 한 번에 `page_reported` 검사 하나가 더해지고(정적 키 뒤), 보고된 작은 블록이 나갈 때만 페이지 16개를 훑는다.
+3. 호스트: `dsa_host_core::memory::page_reporting_cmdline`이 순서, 클러스터(있을 때), `androidboot.dsa.memory_compaction=on`(순서가 0보다 클 때만)을 명령줄에 넣는다. Windows는 작은 백킹 페이지를 쓸 때 클러스터 4를 알린다. 콘솔 머리말이 명령줄을 적기 전에 `fine_grained_memory`를 정하도록 순서를 바꿨다. Linux는 crosvm이 범위마다 돌려받으므로 클러스터가 없고, 설정한 순서가 0보다 클 때만 압축 정리를 청한다. macOS는 순서 0이라 그대로다.
+4. 이미지: `dsa-channeld.rc`의 유휴 회수와 작업 집합 다듬기에서 `compact_memory`를 `ro.boot.dsa.memory_compaction=on` 조건이 붙은 따로의 동작으로 뺐다. 같은 트리거의 동작은 정의 순서대로 돌므로 순서는 "메모리를 푸는 것, (조건부) 압축 정리, `rereport`와 속성 되돌리기"다. `dsa-memory.rc`는 부팅 때 `compaction_proactiveness`를 0으로 하고, 같은 조건에서만 40으로 한다. 할당에 연속 메모리가 필요할 때의 압축 정리(kcompactd, 직접 압축)는 그대로 돈다.
+5. 측정: 에이전트가 세 값을 `GuestMemory`(제어 프로토콜의 27-29번)로 보내고, `memory.cil`이 그 세 파일을 에이전트만 읽게 한다. 세션이 같은 부팅의 두 보고에서 분당 보고량을 낸다. `dsa memory`는 "free page reporting: N of M MiB free is back on the host, K MiB not yet; T MiB reported since boot (R MiB a minute since the report before); F MiB taken back in with a neighbour and reported again"을 적고, `--json`은 `guest.page_reporting`에, 서비스 로그의 메모리 줄은 끝에 같은 것을 적는다. CI 메모리 측정의 두 표에도 "guest free"와 "guest free handed back to the host"를 더했다.
+
+**기대하는 절감(재지 않았다).** 앱을 쓰는 동안 클러스터로 다시 들어온 빈 페이지: R26이 vm private와 게스트 사용의 차이로 본 130-310 MiB 가운데 이 몫이 수십 MiB라면 그것이 앱을 쓰는 동안에도 돌아간다. 앱을 닫은 뒤의 압축 정리 한 번이 옮기던 페이지(게스트 사용의 수백 MiB)를 호스트가 잠깐 다시 백킹하던 봉우리와 그 시간이 없어진다. 배경 압축 정리가 쓰던 CPU도 없어진다. 비용은 클러스터를 다시 보고하는 hypercall(보고된 작은 블록이 나갈 때마다 최대 범위 15개)과, 할당에 큰 연속 블록이 필요할 때 압축 정리를 그때 하는 지연이다.
+
+**확인하지 못한 것(PC에서 잴 것).**
+
+- 위 수치 모두. 같은 이미지, 같은 앱으로 바꾸기 전(0.2.4-dev.5)과 뒤를 견준다. `dsa memory`를 앱을 연 채, 닫은 직후, 1분 뒤, 5분 뒤에 읽어 vm 상주와 private, "beyond what Android uses", 새 "free page reporting" 줄의 "not yet"과 "taken back in with a neighbour", 분당 보고량을 적는다. 앱을 닫은 뒤 vm 상주가 오르지 않고 바로 내려가는지, "beyond"가 부하 뒤에도 작게 남는지 본다.
+- `refaulted_total_kb`가 실제로 자라는지. 자라지 않으면 Hyper-V가 클러스터 안의 이웃을 들이지 않는다는 뜻이므로, 그때는 패치 2의 효과가 없고 R26의 가설도 틀린 것이다.
+- `reported_kb`를 읽는 비용. 빈 블록이 많을 때 빈 목록 전체를 영역 잠금 아래에서 센다. 에이전트는 5분마다와 `dsa memory` 때만 읽는다.
+- 압축 정리를 끈 뒤 GPU, 네트워크처럼 연속 메모리를 쓰는 할당이 느려지지 않는지(커널 로그의 할당 실패, `/proc/vmstat`의 `compact_stall`).
+- Kernel test가 두 패치를 컴파일하는지, Image test가 SELinux enforcing에서 에이전트가 세 파일을 읽게 하는지(부팅 로그의 `avc`, `dsa memory`가 "does not say what it reported"를 적지 않는지).
+
+## R41. system_server와 부팅이 잡는 메모리 줄이기: 고정된 페이지, WebView zygote, 힙 여유, 부팅마다 뜨는 앱 (NFR-1, NFR-2)
+
+**기준.** 소유자 PC의 0.2.4-dev.5(Android 17 x86_64)에서 `system`(system_server)이 PSS 93-137 MiB(상주 78-132), 쉬는 안드로이드가 687 MiB를 쓴다는 측정에서 출발했다. 이 조사는 2026-11-13에 했고, 이 컴퓨터에서 이미지와 프레임워크를 빌드하거나 부팅하지 않았다. 읽은 것: 이미지 빌드가 고정한 frameworks/base 커밋(`94b4c163`, Android 17; `45034f06`, Android 16)의 `SystemServer.java`, `PinnerService.java`, `webkit/SystemImpl.java`, `WebViewUpdateServiceImpl2.java`, `WebViewZygote.java`, `Process.java`, `ProcessList.java`, `ZygoteInit.java`, `ZygoteConfig.java`, `core/jni/AndroidRuntime.cpp`, `core/res/res/values/config.xml`, ART main의 `runtime.cc`, `gc/heap.cc`, `parsed_options.cc`, Cuttlefish의 프레임워크 오버레이(고정 설정 없음), DynamicSystemInstallationService와 DeviceDiagnostics의 매니페스트, Android 16 published build(15581820)의 build.prop과 권한 파일, 11월 12일 develop의 Image test 메모리 측정(`memory-measurement`, Google Play와 설정 창 하나), 11월 5일에 만든 Android 16 서명 이미지(`.scratch/test-f5c7dbb`)의 APK와 `services.jar`. 이전 작업(R26의 기능 거두기, TeleService, 예제 HAL)은 다시 하지 않았다.
+
+**찾은 것.**
+
+1. PinnerService가 홈 앱과 WebView를 mlock으로 고정한다. AOSP 기본값은 홈 앱 APK 60 MiB(`config_pinnerHomePinBytes`), WebView APK 20 MiB(`config_pinnerWebviewPinBytes`)이고, 각 APK의 odex, vdex, 앱 이미지는 따로 고정되며 전체 한도(메모리의 10%, 4 GiB 게스트에서 약 400 MiB)만 받는다. Cuttlefish 오버레이는 이 값을 바꾸지 않는다. DSA의 홈 앱은 에이전트다(매니페스트의 `CATEGORY_HOME`). Android 16 서명 이미지에서 에이전트 APK는 4.2 MiB, WebView APK는 263 MiB(그중 20 MiB가 고정), WebView odex는 6.7 MiB다. 고정된 페이지는 system_server의 주소 공간에 매핑되어 그 PSS에 들고(측정의 `.apk mmap` 합 72.9 MiB), 회수도 zram 압축도 되지 않아 유휴 회수(`drop_caches` 포함)가 돌려주지 못한다. 쉬는 동안 메모리를 호스트가 돌려받아야 한다는 제약에 어긋난다.
+2. WebView zygote는 부팅 때 뜬다. `WebViewUpdateServiceImpl2.startZygoteWhenReady`가 RELRO를 기다린 뒤 `SystemImpl.ensureZygoteStarted`(본문은 `WebViewZygote.getProcess()` 하나)를 부른다. 렌더러를 시작할 때 활동 관리자가 부르는 `Process.startWebView`도 같은 `getProcess()`를 부르고, 이것은 zygote가 없으면 띄운다. 그래서 부팅 때의 호출만 빼면 첫 렌더러에서 뜬다(R26의 4는 services.jar를 고칠 길이 없어 남겨 둔 것이다. 지금은 `SERVICES_CODE`가 그 길이다). Android 16 `services.jar`에서 `getProcess`를 부르는 메서드는 `SystemImpl.ensureZygoteStarted` 하나였다(R8이 인라인하지 않았다). 측정의 `webview_zygote` PSS 5.0 MiB, 소유자 PC 6.9 MiB(R26).
+3. ART는 전경 프로세스의 힙 여유에 `ForegroundHeapGrowthMultiplier + 1`을 곱한다(`runtime.cc`, 기본 2.0이라 3). `heapmaxfree` 4m에서 system_server, 화면의 앱, 영구 프로세스는 GC 뒤 최대 12 MiB를 비워 둔다. 저메모리 기기는 1.0이다. 속성은 `dalvik.vm.foreground-heap-growth-multiplier`(허용 범위 0.1-5.0)다.
+4. 부팅 때 뜨고 할 일이 없는 앱. 측정의 `com.android.dynsystem`과 `com.android.dynsystem:dynsystem`(PSS 4.5 MiB씩), `com.android.devicediagnostics`(4.7 MiB). 모두 `BOOT_COMPLETED` 수신기 하나만으로 뜬다. dynsystem의 수신기는 DSU 이미지가 돌 때 알림을 띄우려 서비스를 시작하고, 서비스는 아니면 스스로 멈춘다. DeviceDiagnostics는 휴대전화 중고 매입의 진단(화면, 터치, 배터리, 인증)이고 수신기는 재부팅 뒤 매입 평가를 이어 간다.
+5. `ro.config.isolated_compilation_enabled=true`(Android 16 build.prop)로 system_server가 IsolatedCompilationService를 띄우고 매일 composd와 VM 관리자를 시작하는 작업을 건다. 보호 VM에는 게스트 안의 KVM이 있어야 하는데 Hyper-V 게스트에는 없다.
+
+**바꾼 것.**
+
+| 변경 | 무엇이 주나 | 기대(재지 않음) |
+|---|---|---|
+| 프레임워크 오버레이: `config_pinnerHomePinBytes` 0, `config_pinnerWebviewPinBytes` 0, `config_pinnerMaxPinnedMemoryPercentage` 0 | 고정된 에이전트 APK와 그 odex·vdex·앱 이미지, WebView APK 20 MiB와 odex 6.7 MiB. 잠긴 페이지가 보통의 페이지 캐시가 되어 쉬는 동안 돌아간다. 비용: 유휴 회수 뒤 에이전트나 WebView가 다시 쓰는 코드는 디스크에서 다시 읽는다(페이지마다 수 ms 안쪽). 앱 시작에서 에이전트가 하는 몫이 그만큼 늦을 수 있어 NFR-4로 확인한다 | 고정 약 31-37 MiB(에이전트 APK 4.2와 그 컴파일 결과물, WebView 20과 6.7)가 회수 가능해진다. system_server PSS는 그만큼 줄고(다른 프로세스와 나누는 몫 빼고) 유휴 회수 뒤 게스트 사용이 같은 만큼 준다 |
+| `services.jar`: `SystemImpl.ensureZygoteStarted`와(R8이 인라인했을 때를 위해) `startZygoteWhenReady`의 `WebViewZygote.getProcess` 호출을 nop으로. check-image는 services.jar 어디서든 그 호출이 남으면 거절한다 | WebView를 쓰는 앱이 없는 동안의 webview_zygote | 5-7 MiB PSS. 비용: 부팅 뒤 첫 WebView가 zygote 시작과 WebView 프리로드(수백 ms)를 한 번 기다린다. 렌더러는 비동기로 뜨므로 창의 첫 프레임(NFR-4)은 기다리지 않고 웹 내용이 그만큼 늦게 그려진다 |
+| `dalvik.vm.foreground-heap-growth-multiplier=1.0`(곱은 3에서 2) | 전경 힙의 GC 뒤 여유가 최대 12 MiB에서 8 MiB로 | system_server 0-4 MiB, 그 밖의 전경 힙마다 0-4 MiB. 비용: 전경 프로세스의 GC가 약 1.5배 잦다(동시 GC, 멈춤 1 ms 안). 성장 한도는 그대로 |
+| `ro.config.isolated_compilation_enabled=false`(vendor build.prop에는 쓰지 않는다) | IsolatedCompilationService와 매일의 composd 시도 | 1 MiB 안쪽과 깨어남. 기기 안의 odrefresh 컴파일은 VM이 필요 없어 그대로다 |
+| DynamicSystemInstallationService와 DeviceDiagnostics의 매니페스트에서 부팅 동작만 받는 수신기를 뺀다(`remove_boot_receivers`, 다른 동작도 받는 수신기는 남긴다). 앱은 남는다 | 부팅마다 뜨던 세 프로세스 | 약 13.7 MiB PSS(캐시 프로세스라 대부분 결국 zram이나 lmkd 몫이지만 그전까지 잡는다). 개발자 옵션의 DSU 로더와 설정의 진단 항목은 그대로 앱을 띄운다 |
+
+Android 16 서명 이미지의 두 APK에 수신기 빼기를 적용해 보니 각각 `.BootCompletedReceiver`(이름이 짧은 채로 컴파일됨)와 `com.android.devicediagnostics.BootCompleteReceiver`가 빠지고, `aapt2 dump xmltree`와 `dump badging`이 고친 매니페스트를 읽었다. 같은 이미지의 services.jar에 `SERVICES_CODE`를 적용하면 `getProcess`를 부르는 메서드가 남지 않았다.
+
+합: 고정 해제 31-37 MiB(회수 가능해짐), WebView zygote 5-7, 부팅 앱 약 14, 힙 여유 2-10, 합쳐 약 50-65 MiB를 기대한다. system_server 자체의 PSS 감소는 고정 해제와 힙 여유에서 오는 약 25-40 MiB로 본다.
+
+**살펴보고 바꾸지 않은 것과 그 까닭.**
+
+- 기능으로 서비스 끄기. 남은 기능 가운데 서비스를 가르는 것은 USB(`usb.host`, `usb.accessory`: 끄면 `UsbManager`가 null이라 그것을 부르는 앱이 죽고, 호스트가 USB 기기를 빌려주는 길도 막힌다), 인쇄, 백업, 동반 기기, 자동 완성, 자격 증명, PIP, 위젯(앱과 WSA가 쓰는 기능)뿐이다. 텔레포니, NFC, UWB, Thread, 블루투스, 생체 인증, 적외선, 컨텍스트 허브, Wi-Fi Direct·Aware·RTT, 기기 잠금은 이미 거뒀다. VR, 자동차, TV 입력, HDMI-CEC, 튜너, 방송 라디오는 기능이 없어 이미 뜨지 않는다. smartspace, 앱 예측, 검색 UI, 음악 인식, 앰비언트 컨텍스트, 배경 화면 효과, 콘텐츠 캡처, 번역은 패키지 이름 설정이 비어 있어 이미 뜨지 않는다.
+- 꿈(DreamManager), 색 표시(ColorDisplay), 트와일라잇은 조건 없이 시작한다. 끄려면 services.jar에서 시작 호출을 빼야 하는데, 그 서비스를 찾는 다른 서비스(전원, 디스플레이)가 null을 견디는지 확인하지 못했다.
+- `config_enableVirtualDeviceManager` 끄기. 아끼는 것이 작고, 동반 기기와 앱 스트리밍, 그리고 `VirtualDeviceManager`를 찾는 앱에 null이 간다.
+- `FEATURE_SLICES_DISABLED`로 SliceManagerService 끄기. 설정의 패널과 슬라이스를 쓰는 앱이 깨질 수 있고 아끼는 것은 작다.
+- `config.disable_networktime`. 호스트는 깨어날 때만 시각을 보내므로, 그 사이 게스트 시계는 NTP가 맞춘다.
+- `config.disable_systemtextclassifier`. 앱의 텍스트 선택(링크, 주소, 전화번호 인식)이 쓴다.
+- preloaded-classes 줄이기. 프리로드되는 클래스 대부분이 이미 부팅 이미지(`boot.art`)에 있고, zygote가 미리 올린 것은 모든 앱이 나눠 쓴다. 줄이면 앱마다 같은 것을 다시 올려 합은 는다(R26). 부팅 이미지는 프레임워크 빌드가 있어야 다시 만든다.
+- `ro.zygote.disable_gl_preload`. zygote가 미리 연 ANGLE과 그 재배치된 페이지를 앱이 COW로 나눠 쓰므로, 끄면 앱마다 자기 사본을 만든다.
+- USAP 풀. 이미 꺼져 있다(`dalvik.vm.usap_pool_enabled=false`, 측정에 `usap` 프로세스 없음). 장치 구성(`runtime_native.usap_pool_enabled`)이 속성보다 앞서므로 이미지로 막을 수도 없다. Play 서비스가 이 값을 켜는지는 PC에서 본다.
+- `dalvik.vm.madvise.vdexfile.size`와 `odexfile.size`(100 MiB). ART는 전경 프로세스에서만 미리 읽고 배경 프로세스는 건너뛴다(T 이후). 쉬는 동안의 메모리가 아니라 앱을 여는 시간과 맞바꾸는 값이라 두었다.
+- `dalvik.vm.minidebuginfo`. JIT 코드의 작은 디버그 정보로 크기는 작고, 네이티브 스택(툼스톤, ANR)의 Java 프레임을 읽는 데 쓴다.
+- `heapgrowthlimit`, `heapsize`(한도일 뿐 잡는 메모리가 아니다), `heapstartsize`(첫 GC 전까지만 의미가 있고, 배경으로 간 앱은 ART가 줄인다), JIT 코드 캐시 크기(system_server의 `dalvik-jit-code-cache` 크기를 smaps로 재기 전에는 정할 근거가 없다).
+- 셀 브로드캐스트 모듈(`com.android.cellbroadcastreceiver.module`, PSS 5.7 MiB). 모뎀과 TeleService가 없으니 받을 것이 없지만 APEX 안의 앱이라 APEX를 풀고 다시 묶고 서명해야 하고, 설정의 긴급 알림 항목이 그 패키지를 본다. 다음 후보다.
+- Health Connect 컨트롤러(5.7 MiB). 앱이 쓰는 Health Connect API의 화면이라 둔다.
+
+**PC에서 재야 할 것(같은 조건: Google Play 설치, 창 없음, 부팅 10분 뒤, 이 변경 앞뒤).**
+
+- `adb shell dumpsys pinner`(앞: 에이전트와 WebView 항목, 뒤: 비어 있음)와 `grep -E 'Mlocked|Unevictable' /proc/meminfo`.
+- `dumpsys meminfo -s system`의 TOTAL PSS와 `.apk mmap`, `.odex mmap`, Dalvik Heap.
+- `pidof webview_zygote`가 WebView를 쓰기 전에는 비어 있고, WebView를 쓰는 앱(로그인 화면 등)을 연 뒤 생기는지. 그 첫 화면이 열리는 시간.
+- `ps -A | grep -E 'dynsystem|devicediagnostics'`가 비어 있는지.
+- `dsa memory`의 게스트 사용과 유휴 회수 뒤 값, vmmem 상주.
+- 설정 앱과 앱 하나를 쓸 때 끊김이 늘지 않는지(GC가 잦아진 몫).
+- CI: Image test의 boot check가 `pinner-first boot.txt`, `pinner-second boot.txt`를 남기고 고정된 파일이 있으면 실패한다. 메모리 측정은 `memory-pinner.txt`와 힙 설정 줄에 곱을 더한다.
+
+## R42. 호스트 가시 메모리를 복사하지 않고 게스트와 렌더러가 같은 페이지를 쓰는 길 (FR-4, PR-3, NFR-1, NFR-2)
 
 **질문.** Hyper-V에는 virtio-gpu의 blob도 goldfish의 직접 매핑도 없어서, gfxstream은 호스트 가시 메모리를 게스트 사본으로 흉내 내고 스트림으로 복사한다(patches/0003, guest/mesa 0005, 0007, 0010, 호스트 0020, R29, R31, R33). Microsoft의 닫힌 라이브러리(dxg 경로의 `libd3d12`, `libdxcore`) 없이, 호스트 렌더러와 게스트가 같은 물리 페이지를 보게 해서 이 복사를 없앨 수 있는가.
 

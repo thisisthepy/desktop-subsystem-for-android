@@ -27,6 +27,8 @@
 
 use dsa_host_core::memory::{HostRole, MemorySnapshot};
 
+pub mod direct_mapped;
+
 /// The recorded baseline the measurement is compared with, checked in beside this module.
 pub const BASELINE: &str = include_str!("baseline.json");
 
@@ -70,6 +72,10 @@ pub struct Reading {
     pub processes_kb: u64,
     /// The same for Google Play services' processes; 0 when none runs.
     pub google_play_kb: u64,
+    /// The guest's free memory, and the part of it free page reporting has handed back to the
+    /// host (0 when the guest's kernel does not say).
+    pub guest_free_kb: u64,
+    pub free_reported_kb: u64,
 }
 
 /// The numbers of one snapshot, with the service's own process. `None` when the guest has not
@@ -120,6 +126,8 @@ pub fn reading(snapshot: &MemorySnapshot, service: ServiceMemory) -> Option<Read
         zram_stored_kb: guest.zram_original_kb,
         processes_kb: guest.apps().total_kb(),
         google_play_kb: guest.google_play_share().map_or(0, |play| play.total_kb()),
+        guest_free_kb: guest.mem_free_kb,
+        free_reported_kb: guest.page_reporting.map_or(0, |r| r.free_reported_kb),
     })
 }
 
@@ -157,6 +165,8 @@ pub fn median(readings: &[Reading]) -> Option<Reading> {
         zram_stored_kb: pick(|r| r.zram_stored_kb),
         processes_kb: pick(|r| r.processes_kb),
         google_play_kb: pick(|r| r.google_play_kb),
+        guest_free_kb: pick(|r| r.guest_free_kb),
+        free_reported_kb: pick(|r| r.free_reported_kb),
     })
 }
 
@@ -270,6 +280,12 @@ pub fn idle_report(
         ("VM resident", before.vm_kb, after.vm_kb),
         ("VM private", before.vm_private_kb, after.vm_private_kb),
         ("guest in use", before.guest_used_kb, after.guest_used_kb),
+        ("guest free", before.guest_free_kb, after.guest_free_kb),
+        (
+            "guest free handed back to the host",
+            before.free_reported_kb,
+            after.free_reported_kb,
+        ),
         ("zram store", before.zram_used_kb, after.zram_used_kb),
         (
             "zram holds (before compression)",
@@ -482,6 +498,15 @@ pub fn report(
         signed_mib(gap),
         signed_mib(private_gap)
     ));
+    if m.free_reported_kb > 0 {
+        md.push_str(&format!(
+            "Of the guest's {} MiB free, free page reporting has handed {} MiB back to the host \
+             ({} MiB not yet).\n\n",
+            mib(m.guest_free_kb),
+            mib(m.free_reported_kb),
+            mib(m.guest_free_kb.saturating_sub(m.free_reported_kb))
+        ));
+    }
     md.push_str("| Guest | MiB |\n|---|---|\n");
     for (name, kb) in [
         ("given", m.guest_total_kb),
@@ -577,6 +602,8 @@ fn reading_json(r: &Reading) -> serde_json::Value {
         "zram_stored": r.zram_stored_kb,
         "processes": r.processes_kb,
         "google_play": r.google_play_kb,
+        "guest_free": r.guest_free_kb,
+        "free_reported": r.free_reported_kb,
     })
 }
 
@@ -923,7 +950,8 @@ pub fn system_server_report(s: &SystemServer<'_>) -> (String, serde_json::Value)
     (md, json)
 }
 
-/// The ART heap settings in a `getprop`'s output, as `<name>=<value>` lines.
+/// The ART heap settings in a `getprop`'s output, as `<name>=<value>` lines: the heap's sizes
+/// and free space, and the factor a foreground process's free space is multiplied by.
 pub fn heap_settings(getprop: &str) -> String {
     getprop
         .lines()
@@ -931,7 +959,8 @@ pub fn heap_settings(getprop: &str) -> String {
             let (name, value) = line.trim().split_once("]: [")?;
             let name = name.strip_prefix('[')?;
             let value = value.strip_suffix(']')?;
-            name.starts_with("dalvik.vm.heap")
+            (name.starts_with("dalvik.vm.heap")
+                || name == "dalvik.vm.foreground-heap-growth-multiplier")
                 .then(|| format!("{name}={value}"))
         })
         .collect::<Vec<_>>()

@@ -227,6 +227,61 @@ fn nfr2_the_report_shows_how_much_more_the_vm_holds_than_the_guest_uses() {
 }
 
 #[test]
+fn nfr2_the_report_shows_how_much_free_memory_the_host_has_back() {
+    use dsa_host_core::memory::PageReporting;
+    use memory_check::idle_report;
+    let with_reporting = |vm_mib: u64, used_mib: u64, reported_mib: u64| {
+        let mut snapshot = snapshot(vm_mib, used_mib);
+        snapshot.guest.as_mut().unwrap().memory.page_reporting = Some(PageReporting {
+            free_reported_kb: reported_mib * 1024,
+            reported_total_kb: 9000 * 1024,
+            ..PageReporting::default()
+        });
+        reading(&snapshot, SERVICE).unwrap()
+    };
+    // 4096 MiB given: 800 in use leaves 3296 free, 480 in use leaves 3616.
+    let open = vec![with_reporting(600, 800, 3200)];
+    let idle = vec![with_reporting(500, 480, 3600)];
+    let setting = Setting {
+        google_play: "LiteGapps' core",
+        app: "Settings",
+        memory_mb: 4096,
+        processors: 2,
+        environment: "test",
+    };
+    let first = report(&open, &[], &serde_json::json!({}), &setting).unwrap();
+    assert!(
+        first.markdown.contains(
+            "Of the guest's 3296 MiB free, free page reporting has handed 3200 MiB back to the \
+             host (96 MiB not yet)."
+        ),
+        "{}",
+        first.markdown
+    );
+    let closed = idle_report(&open, &idle, &[], 150).unwrap();
+    for line in [
+        "| guest free | 3296 | 3616 |",
+        "| guest free handed back to the host | 3200 | 3600 |",
+    ] {
+        assert!(
+            closed.markdown.contains(line),
+            "{line}\n{}",
+            closed.markdown
+        );
+    }
+    assert_eq!(closed.json["median_kb"]["free_reported"], 3600 * 1024);
+    // A guest whose kernel does not say gives no such line.
+    let without = report(
+        &[reading(&snapshot(600, 800), SERVICE).unwrap()],
+        &[],
+        &serde_json::json!({}),
+        &setting,
+    )
+    .unwrap();
+    assert!(!without.markdown.contains("free page reporting"));
+}
+
+#[test]
 fn nfr1_the_zram_writebacks_are_read_from_the_guests_log() {
     use memory_check::{no_backing_file, writeback_runs, WritebackRun};
     let log = "[  812.1] dsa-channeld: reclaiming the guest's memory (Idle, 0 tasks in use)\n\
@@ -425,11 +480,11 @@ fn nfr1_system_servers_threads_services_and_heap_settings_are_reported() {
         listed_services(services),
         ["accessibility", "account", "activity"]
     );
-    let getprop =
-        "[dalvik.vm.heapmaxfree]: [8m]\n[dalvik.vm.heapsize]: [512m]\n[dalvik.vm.usejit]: [true]\n";
+    let getprop = "[dalvik.vm.foreground-heap-growth-multiplier]: [1.0]\n\
+                   [dalvik.vm.heapmaxfree]: [8m]\n[dalvik.vm.heapsize]: [512m]\n[dalvik.vm.usejit]: [true]\n";
     assert_eq!(
         heap_settings(getprop),
-        "dalvik.vm.heapmaxfree=8m\ndalvik.vm.heapsize=512m"
+        "dalvik.vm.foreground-heap-growth-multiplier=1.0\ndalvik.vm.heapmaxfree=8m\ndalvik.vm.heapsize=512m"
     );
     let (md, json) = system_server_report(&SystemServer {
         meminfo: SYSTEM_SERVER_MEMINFO,

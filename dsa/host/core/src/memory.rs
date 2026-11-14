@@ -98,6 +98,40 @@ pub struct GuestMemory {
     /// Google Play services' processes; `None` when none runs (or the Google apps are not
     /// installed).
     pub google_play: Option<GooglePlayMemory>,
+    /// How free page reporting is doing; `None` when the guest could not read it.
+    pub page_reporting: Option<PageReporting>,
+}
+
+/// Free page reporting, in KiB, as the guest's kernel counts it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PageReporting {
+    /// The free memory marked reported now: the host has taken it back.
+    pub free_reported_kb: u64,
+    /// The memory reported to the host since boot.
+    pub reported_total_kb: u64,
+    /// Reported free memory the host took back in since boot with a neighbour in its fault
+    /// cluster, which the guest then reported again.
+    pub refaulted_total_kb: u64,
+    /// How fast memory went back between the report before and this one, in KiB a minute:
+    /// the growth of `reported_total_kb` over the time between them. `None` for the first
+    /// report, or when the guest restarted between the two.
+    pub reported_kb_per_minute: Option<u64>,
+}
+
+impl PageReporting {
+    /// The report's counters, `None` when the guest sent none (all 0).
+    fn from_counts(
+        free_reported_kb: u64,
+        reported_total_kb: u64,
+        refaulted_total_kb: u64,
+    ) -> Option<PageReporting> {
+        (reported_total_kb > 0).then_some(PageReporting {
+            free_reported_kb,
+            reported_total_kb,
+            refaulted_total_kb,
+            reported_kb_per_minute: None,
+        })
+    }
 }
 
 /// What the guest's kernel itself holds, in KiB, from /proc/meminfo, and the memory it was
@@ -298,6 +332,11 @@ impl GuestMemory {
         });
         GuestMemory {
             google_play,
+            page_reporting: PageReporting::from_counts(
+                memory.free_reported_kb,
+                memory.reported_total_kb,
+                memory.refaulted_total_kb,
+            ),
             swap_pss_kb: memory.swap_pss_kb,
             mem_total_kb: memory.mem_total_kb,
             mem_free_kb: memory.mem_free_kb,
@@ -364,6 +403,33 @@ impl GuestMemory {
             }
         }
         memory
+    }
+
+    /// This report with how fast memory went back to the host since `before`, a report the
+    /// guest sent `elapsed` earlier ([`PageReporting::reported_kb_per_minute`]). A count lower
+    /// than before's means the guest restarted in between, and gives no rate. A report less
+    /// than a second after the one before says nothing about a rate, so it keeps that one's.
+    pub fn following(mut self, before: &GuestMemory, elapsed: Duration) -> GuestMemory {
+        if let (Some(now), Some(then)) = (self.page_reporting.as_mut(), before.page_reporting) {
+            let secs = elapsed.as_secs();
+            now.reported_kb_per_minute =
+                match now.reported_total_kb.checked_sub(then.reported_total_kb) {
+                    None => None,
+                    Some(_) if secs == 0 => then.reported_kb_per_minute,
+                    Some(reported) => Some(reported * 60 / secs),
+                };
+        }
+        self
+    }
+
+    /// Free memory the VM still holds as the guest sees it, in KiB: what is free less what the
+    /// host has taken back: free blocks below the reporting order and pages freed since the
+    /// last reporting pass (the per-CPU lists' free pages are outside MemFree, so not here).
+    /// Reported pages the host took back in without the guest knowing do not show here;
+    /// [`MemorySnapshot::vm_beyond_guest_kb`] shows them. `None` without the guest's counts.
+    pub fn free_not_reported_kb(&self) -> Option<u64> {
+        self.page_reporting
+            .map(|r| self.mem_free_kb.saturating_sub(r.free_reported_kb))
     }
 
     /// What the kernel reserved at boot, before MemTotal: its code and data, the page
@@ -438,10 +504,43 @@ impl MemorySnapshot {
                     play,
                     report.age.as_secs()
                 ));
+                if let Some(r) = g.page_reporting {
+                    line.push_str(&format!(
+                        "; free {} MiB, {} back on the host, {} reported since boot",
+                        mib(g.mem_free_kb),
+                        mib(r.free_reported_kb),
+                        mib(r.reported_total_kb)
+                    ));
+                }
             }
         }
         line
     }
+}
+
+/// What `dsa memory` says of free page reporting: how much of the guest's free memory the host
+/// has back, how much it has not, how much went back since boot and how fast lately, and how
+/// much the host took back in with a neighbour and was reported again.
+pub fn page_reporting_line(g: &GuestMemory) -> String {
+    let (Some(r), Some(not_reported)) = (g.page_reporting, g.free_not_reported_kb()) else {
+        return "free page reporting: Android does not say what it reported (an older kernel \
+                or image)"
+            .to_string();
+    };
+    let rate = r
+        .reported_kb_per_minute
+        .map_or("no rate until the next report".to_string(), |kb| {
+            format!("{} MiB a minute since the report before", mib(kb))
+        });
+    format!(
+        "free page reporting: {} of {} MiB free is back on the host, {} MiB not yet; {} MiB \
+         reported since boot ({rate}); {} MiB taken back in with a neighbour and reported again",
+        mib(r.free_reported_kb),
+        mib(g.mem_free_kb),
+        mib(not_reported),
+        mib(r.reported_total_kb),
+        mib(r.refaulted_total_kb),
+    )
 }
 
 /// KiB to whole MiB, rounded to nearest.
@@ -536,6 +635,7 @@ impl fmt::Display for MemorySnapshot {
                 mib(beyond)
             )?;
         }
+        writeln!(f, "  {}", page_reporting_line(g))?;
         writeln!(
             f,
             "  swap {} of {} MiB used; zram holds {} MiB in {} MiB",
@@ -628,6 +728,16 @@ pub fn snapshot_to_wire(snapshot: &MemorySnapshot) -> types::Memory {
                 cma_total_kb: g.kernel.cma_total_kb,
                 hugetlb_kb: g.kernel.hugetlb_kb,
                 mem_online_kb: g.kernel.mem_online_kb,
+                free_reported_kb: g.page_reporting.map_or(0, |r| r.free_reported_kb),
+                reported_total_kb: g.page_reporting.map_or(0, |r| r.reported_total_kb),
+                refaulted_total_kb: g.page_reporting.map_or(0, |r| r.refaulted_total_kb),
+                reported_kb_per_minute: g
+                    .page_reporting
+                    .and_then(|r| r.reported_kb_per_minute)
+                    .unwrap_or(0),
+                reported_rate_known: g
+                    .page_reporting
+                    .is_some_and(|r| r.reported_kb_per_minute.is_some()),
             }
         }),
         host: snapshot
@@ -679,6 +789,17 @@ pub fn snapshot_from_wire(memory: types::Memory) -> MemorySnapshot {
                     processes: g.google_play_processes,
                     pss_kb: g.google_play_pss_kb,
                     swap_pss_kb: g.google_play_swap_pss_kb,
+                }),
+                page_reporting: PageReporting::from_counts(
+                    g.free_reported_kb,
+                    g.reported_total_kb,
+                    g.refaulted_total_kb,
+                )
+                .map(|r| PageReporting {
+                    reported_kb_per_minute: g
+                        .reported_rate_known
+                        .then_some(g.reported_kb_per_minute),
+                    ..r
                 }),
                 kernel: KernelMemory {
                     slab_unreclaimable_kb: g.slab_unreclaimable_kb,
@@ -740,6 +861,42 @@ pub fn summary_lines(androids: &dyn UserAndroids, host: &dyn HostMemory) -> Vec<
 ///   scaled to its memory (about 8 MiB for 3 GiB, down to under 1 MiB).
 pub const GUEST_BOOT_MEMORY_CMDLINE: &str = "swiotlb=2048 kfence.sample_interval=0 \
      dhash_entries=65536 ihash_entries=32768 thash_entries=16384 uhash_entries=1024";
+
+/// The kernel command line word that has the guest compact its memory after each reclaim
+/// and in the background (the image's `dsa-memory.rc` and `dsa-channeld.rc` read it as
+/// `ro.boot.dsa.memory_compaction`).
+pub const GUEST_COMPACTION_CMDLINE: &str = "androidboot.dsa.memory_compaction=on";
+
+/// The command line words for free page reporting at `order` (a page order: 0 is every
+/// 4 KiB page) on a host that faults guest memory in clusters of `fault_cluster_order`
+/// (0 for a host that backs each page by itself).
+///
+/// Compaction is asked for only when the order is above 0. Free page reporting hands back
+/// only whole free blocks of its order, so at 2 MiB (9) or 128 KiB (5) compaction is what
+/// gathers scattered free pages into blocks the host can take. At order 0 every free page is
+/// reported as it is, and compaction only moves memory: each page it copies lands in a free
+/// page the host had taken back, which the host backs again before the page it left is
+/// reported, so after each app closed the VM's memory rose for the length of a pass of the
+/// whole guest before it fell.
+///
+/// With a fault cluster above 0 (Hyper-V's 64 KiB with small backing pages), the guest's
+/// kernel takes the reported mark off the free pages that share a cluster with a reported
+/// page it hands out, so they are reported again (`page_reporting.fault_cluster_order`, a
+/// parameter of DSA's kernel). Without it the host backs them again with their neighbour and
+/// the guest never offers them a second time.
+pub fn page_reporting_cmdline(order: u8, fault_cluster_order: u8) -> String {
+    let mut words = format!("page_reporting.page_reporting_order={order}");
+    if fault_cluster_order > 0 {
+        words.push_str(&format!(
+            " page_reporting.fault_cluster_order={fault_cluster_order}"
+        ));
+    }
+    if order > 0 {
+        words.push(' ');
+        words.push_str(GUEST_COMPACTION_CMDLINE);
+    }
+    words
+}
 
 /// The least memory the host's own system keeps when the VM is sized to the host, in MiB.
 pub const HOST_RESERVE_MIN_MB: u64 = 2048;
@@ -1190,12 +1347,23 @@ pub struct IdleTrim {
     repeat: Duration,
     /// The current quiet stretch (windows shown, no new frame) has had its trim.
     quiet_trimmed: bool,
+    /// When the process last let go of something large (its video decoders), not yet
+    /// followed by a give-back.
+    let_go_at: Option<Instant>,
+    /// When the windows shown last had their periodic give-back, while some are shown.
+    shown_trim_at: Option<Instant>,
 }
 
 /// How long shown windows must go without a new frame before the window manager gives back the
 /// GPU driver's spare memory. An app that shows a still screen draws nothing; one that is
 /// animating never reaches it, so nothing it renders waits for memory the driver let go.
 pub const QUIET_TRIM_DELAY: Duration = Duration::from_secs(5);
+
+/// How long after the process let go of something large (the last video decoder closed) it
+/// gives back the free memory that left behind. A few seconds, so a video that ends and the
+/// next one that opens at once (autoplay, a change of quality) do not trim between them;
+/// short enough that the memory is back before anyone looks.
+pub const LET_GO_TRIM_DELAY: Duration = Duration::from_secs(5);
 
 impl IdleTrim {
     /// Starts idle, as at start-up, when no window is open yet.
@@ -1209,7 +1377,56 @@ impl IdleTrim {
             last_trim: None,
             repeat: IDLE_TRIM_REPEAT,
             quiet_trimmed: false,
+            let_go_at: None,
+            shown_trim_at: None,
         }
+    }
+
+    /// Takes in that the process let go of something large, such as its video decoders once
+    /// the last video closed. Their memory goes back to the heaps and the GPU driver, which
+    /// keep it committed for the next allocation, so it stays the process's until a
+    /// give-back ([`spare_due`](Self::spare_due)) returns it.
+    pub fn let_go(&mut self, now: Instant) {
+        self.let_go_at = Some(now);
+    }
+
+    /// Whether to give back the heaps' free memory and the GPU driver's spare memory now
+    /// while windows may be shown (the working set stays, so shown windows lose nothing):
+    /// [`LET_GO_TRIM_DELAY`] after the process let go of something large, and every
+    /// [`IDLE_TRIM_REPEAT`] while windows are shown, whether or not their frames keep
+    /// coming. Windows that animate never get the quiet trim ([`quiet_due`](Self::quiet_due)),
+    /// so without the round the memory any freed allocation left behind would stay for as
+    /// long as an animating window is open. With no window shown the idle give-back
+    /// ([`due`](Self::due)) covers both.
+    pub fn spare_due(&mut self, now: Instant) -> bool {
+        let shown = !self.open.is_empty() && !self.all_hidden;
+        let let_go = self
+            .let_go_at
+            .is_some_and(|at| now.saturating_duration_since(at) >= LET_GO_TRIM_DELAY);
+        if !shown {
+            // The idle give-back takes everything; the round starts again with a shown window.
+            self.shown_trim_at = None;
+            if !let_go {
+                return false;
+            }
+            self.let_go_at = None;
+            // Once the idle give-back has run it runs again only every repeat, so the memory
+            // let go since goes back now rather than then; before it has run, it takes it.
+            return self.trimmed;
+        }
+        let round = match self.shown_trim_at {
+            Some(at) => now.saturating_duration_since(at) >= self.repeat,
+            None => {
+                self.shown_trim_at = Some(now);
+                false
+            }
+        };
+        if let_go || round {
+            self.let_go_at = None;
+            self.shown_trim_at = Some(now);
+            return true;
+        }
+        false
     }
 
     /// Takes in a change to the guest's tasks. `None` says the tasks are unknown (the service

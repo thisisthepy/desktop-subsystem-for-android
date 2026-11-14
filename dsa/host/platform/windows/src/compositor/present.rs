@@ -6,7 +6,11 @@
 //! ([`Gpu::open_shared`]) on the same GPU. Each task window there has a DirectComposition
 //! visual holding a flip-model swapchain, and [`WindowPresenter::present`] copies the frame
 //! into the swapchain and presents it. A frame is never scaled to its window: the window
-//! takes the size of the frame it shows (`FrameFollow`). No frame passes through the CPU.
+//! takes the size of the frame it shows (`FrameFollow`). The one exception is a window that
+//! holds the size the desktop gave it (maximised, snapped, full screen) while the guest keeps
+//! its task smaller, because its display holds no more: the frame is shown in the window's
+//! middle, scaled to fit for a task that keeps its density ([`WindowPresenter::set_held`]).
+//! No frame passes through the CPU.
 //!
 //! The texture has the size of the guest's buffers, the largest a frame of the task can be,
 //! and each frame fills its top-left region. The swapchain's buffers take the texture's
@@ -58,7 +62,9 @@ use dsa_host_core::compositor::present_watch::{FrameStatistics, PresentWatch};
 use dsa_host_core::compositor::resize_latency::ResizeLatency;
 use dsa_host_core::compositor::splash;
 use dsa_host_core::compositor::visible_change::{self, area_around, Area, PressWatch, Verdict};
-use dsa_host_core::compositor::window_sizing::{to_task_length, window_size_of, Scale};
+use dsa_host_core::compositor::window_sizing::{
+    frame_placement, to_task_length, window_size_of, FramePlacement, Scale,
+};
 use windows::core::{Interface, BOOL, PCWSTR};
 use windows::Win32::Foundation::{CloseHandle, E_FAIL, HANDLE, HMODULE, HWND, LUID, POINT};
 use windows::Win32::Graphics::Direct3D::{
@@ -457,8 +463,9 @@ impl Drop for SharedTexture {
 /// A texture a frame came in, the texture's size, and the region the frame fills.
 type Newest = (ID3D11Texture2D, (u32, u32), (u32, u32));
 
-/// What a visual is committed for: the buffers' size, the frame's and the scale.
-type Committed = ((u32, u32), (u32, u32), Scale);
+/// What a visual is committed for: the buffers' size, the frame's and where the window shows
+/// the frame.
+type Committed = ((u32, u32), (u32, u32), FramePlacement);
 
 struct State {
     /// The devices everything below was made on, and their generation. A GPU reset removes
@@ -492,7 +499,8 @@ struct State {
     frame: (u32, u32),
     /// The client size last proposed for the window, which the guest is asked for.
     asked: (u32, u32),
-    /// What the visual was last committed for: the buffers' size, the frame's and the scale.
+    /// What the visual was last committed for: the buffers' size, the frame's and where the
+    /// window shows it.
     committed: Option<Committed>,
     /// How large the window shows each of the task's pixels (window pixels per task pixels):
     /// 1:1 unless the task keeps its density on a monitor of another scale. `follow` measures
@@ -1096,6 +1104,38 @@ impl WindowPresenter {
                 let _ = windows_sys::Win32::Graphics::Dwm::DwmFlush();
             }
         }
+    }
+
+    /// The window holds the size the desktop gives it (`true`: it is maximised, snapped or
+    /// full screen), or takes the size of its frames again. While it holds its size, it takes
+    /// every size proposed at once and shows each frame in its middle, scaled to fit for a task
+    /// that keeps its density, rather than shrink to a frame the guest keeps smaller.
+    pub fn set_held(&self, held: bool) {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.closed || state.follow.held() == held {
+            return;
+        }
+        state.follow.set_held(held);
+        // A frame kept for the window to take is shown now, in the window as it is.
+        if let Some(region) = state.kept_region.take().filter(|_| held) {
+            let started = Instant::now();
+            // SAFETY: plain COM calls on objects this presenter owns, and the immediate context
+            // under its lock.
+            match unsafe { self.present_back_buffer(&mut state, region) } {
+                Ok(new_size) => {
+                    let in_window = frame_in_window(&state, region);
+                    self.frame_shown(&mut state, in_window, new_size, None, started);
+                }
+                Err(why) => {
+                    note(self.logger.as_deref(), &why);
+                    self.recover(&mut state);
+                }
+            }
+        }
+        self.commit_visual(&mut state);
+        drop(state);
+        // A frame that waited for a claim the hold let go goes on.
+        self.claim_released.notify_all();
     }
 
     /// The window's position is settled. A size it chose and did not take (Windows did not
@@ -2039,14 +2079,22 @@ impl WindowPresenter {
             // Nothing to show yet: the first frame commits it.
             return false;
         };
-        let wanted = (buffers, state.frame, state.scale);
+        // A window that holds the size the desktop gave it (maximised, snapped, full screen)
+        // shows a frame of another size in its middle; any other window has its frame's size.
+        let placement = frame_placement(
+            state.frame,
+            state.follow.view(),
+            state.scale,
+            state.follow.held(),
+        );
+        let wanted = (buffers, state.frame, placement);
         if state.committed == Some(wanted) {
             return false;
         }
         let (x, y) = frame_scale(buffers, state.frame);
         // A task that keeps its density on a monitor of another scale is shown at the window's
         // scale, the same size to the eye.
-        let (numerator, denominator) = state.scale;
+        let (numerator, denominator) = placement.scale;
         let ratio = numerator as f32 / denominator.max(1) as f32;
         let (x, y) = (x * ratio, y * ratio);
         let matrix = Matrix3x2 {
@@ -2054,8 +2102,8 @@ impl WindowPresenter {
             M12: 0.0,
             M21: 0.0,
             M22: y,
-            M31: 0.0,
-            M32: 0.0,
+            M31: placement.origin.0 as f32,
+            M32: placement.origin.1 as f32,
         };
         let Ok(dcomp) = devices.dcomp() else {
             return false;

@@ -20,6 +20,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <aidl/android/hardware/media/c2/BnComponent.h>
@@ -31,9 +32,12 @@
 #include <C2Component.h>
 #include <codec2/aidl/Configurable.h>
 
+#include "arrival_queue.h"
 #include "decoder_interface.h"
 #include "host_link.h"
 #include "output_buffer.h"
+#include "output_gate.h"
+#include "picture_stats.h"
 
 namespace dsa::codec2 {
 
@@ -86,13 +90,29 @@ class Component : public c2aidl::BnComponent {
         ndk::ScopedFileDescriptor waitableFd;
     };
 
-    void onHostMessage(const HostMessage& message);
-    void picture(const Frame& frame);
+    // On the host link's reading thread: a picture, an end or an error goes to the queue for
+    // the component's own thread, in order; a flush's answer is taken at once.
+    void onHostMessage(HostMessage message);
+    // On the component's own thread: one message from the queue.
+    void handle(Arrival& arrival);
+    void picture(const Frame& frame, uint64_t ticket, std::chrono::steady_clock::time_point arrived);
+    // Starts the thread that writes the host's pictures into the app's buffers, and stops it;
+    // what still waits is dropped.
+    void startWorker();
+    void stopWorker();
+    // Logs the decoder's numbers when they are due (picture_stats.h).
+    void logStats();
     void endOfStream(const Frame& frame);
     void decodeError(const std::string& error);
     // Finishes `work` with `output` (an empty output when null), then tells the framework.
     void finish(c2aidl::Work work, AHardwareBuffer* output, uint32_t width, uint32_t height, bool eos);
-    AHardwareBuffer* allocate(uint32_t width, uint32_t height);
+    // A buffer for a picture that arrived with `ticket`, once its consumer has stopped reading
+    // it; null when none came in time or the gate closed. `from` is the surface's allocator
+    // it came from, when it did.
+    AHardwareBuffer* allocate(uint32_t width, uint32_t height, uint64_t ticket,
+                              std::shared_ptr<c2aidl::IGraphicBufferAllocator>* from);
+    // Gives back a buffer that will not go out, so its surface can hand it out again.
+    void discard(AHardwareBuffer* buffer, const std::shared_ptr<c2aidl::IGraphicBufferAllocator>& from);
     void closeHost();
 
     const DecoderInfo mInfo;
@@ -112,11 +132,22 @@ class Component : public c2aidl::BnComponent {
     uint32_t mHeight = 0;
     std::map<int64_t, Pool> mPools;
     int64_t mNextPoolId = 0x100;
-    // Moves on at every flush, stop and reset, which ends a picture's wait for a buffer.
-    std::atomic<uint64_t> mAllocateEpoch{0};
-    // Allocation failures in a row, so one on every picture does not flood the log. Used on
-    // the host link's thread only.
+    // Closes at every flush, stop and reset, which ends a picture's waits for its buffer. A
+    // flush and a stop close it under mLock, so a picture that takes its work from mPending
+    // under mLock with the gate open is never one the flush hands back as well.
+    OutputGate mGate;
+    // Allocation and write failures in a row, so one on every picture does not flood the log.
+    // Used on the component's own thread only.
     FailureThrottle mAllocateFailures;
+    FailureThrottle mWriteFailures;
+    // The host's messages waiting for the component's own thread (arrival_queue.h), shared
+    // with that thread, which may outlive the component by the message it is on.
+    std::shared_ptr<ArrivalQueue> mArrivals;
+    std::thread mWorker;
+    PictureStats mStats;
+    // The size of the last picture, for the log line. The component's own thread only.
+    uint32_t mLastWidth = 0;
+    uint32_t mLastHeight = 0;
 };
 
 }  // namespace dsa::codec2

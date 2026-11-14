@@ -1,5 +1,5 @@
 //! The user's add-on disk: the images of the add-ons a user installed (the Google apps, an ARM
-//! translation package), on a disk the host attaches to their VM read only.
+//! translation package, Widevine), on a disk the host attaches to their VM read only.
 //!
 //! Each add-on is an erofs image the guest mounts at boot. The images used to live on the
 //! user's Android disk, in `/data`, which is encrypted: ext4 gives an encrypted file no direct
@@ -16,23 +16,37 @@
 //! ```text
 //! sector 0          protective MBR
 //! sectors 1-33      GPT header and partition entries
-//! 1 MiB             the partition: erofs, with gapps.img and arm-translation.img at its root
+//! 1 MiB             the partition: erofs, with gapps.img, arm-translation.img and
+//!                   widevine.img at its root
 //! the last 1 MiB    the backup partition entries and GPT header
 //! [Vhd only]        a fixed VHD footer, so Hyper-V attaches the file as a disk
 //! ```
 //!
 //! erofs keeps each file whole and block aligned, so the guest mounts each image from it
-//! file-backed with `directio` and reads it once. Installing or removing an add-on writes a
+//! file-backed with `directio` and reads it once. The partition table also names each image's
+//! own bytes as a partition of their own ([`Addon::partition_name`]), inside the erofs
+//! partition: the host's direct-mapped mode attaches the disk as persistent memory, and the
+//! guest mounts each image from its partition with DAX, which a file-backed mount cannot have,
+//! so its files are mapped from the host and not cached. Every other boot ignores them. The disk
+//! is a whole number of 2 MiB, the sections Linux maps persistent memory in. Installing or removing an add-on writes a
 //! whole new disk beside the attached one (the pending disk), with the images of the other
 //! add-ons copied over, because the running VM keeps the attached disk open. The next start of
 //! Android puts the pending disk in its place before the VM opens it
 //! ([`AddonDisk::prepare_for_boot`]), which is when every change takes effect. A disk with no
 //! add-on on it is removed, and the VM gets none.
+//!
+//! Each disk file has its images' SHA-256 digests beside it (`<disk>.sha256`), recorded when
+//! each image was installed: the digest the package's signed list gave, or for a package
+//! without one the digest of what the host checked and wrote. Before a boot the images on the
+//! disk are checked against them ([`AddonDisk::prepare_for_boot`]); an image that differs is
+//! taken off the disk, said so in the log, and Android starts without it.
 
+use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::SystemTime;
 
 use sha2::Digest;
 
@@ -45,6 +59,10 @@ use crate::erofs::Stream;
 pub const PARTITION_NAME: &str = "dsa_addons";
 /// The partition's UUID.
 pub const PARTITION_UUID: &str = "8d1c4e7a-3b52-4f19-a6e0-5c2b9d7f4e13";
+/// The UUIDs of the partitions that name each add-on's image ([`Addon::partition_name`]).
+const GAPPS_PARTITION_UUID: &str = "4a7e2c19-8b3d-4f60-9c15-6e0d3b8a2f71";
+const ARM_TRANSLATION_PARTITION_UUID: &str = "c25f8e03-7a14-4b9d-8e62-1f4a9c3d5b08";
+const WIDEVINE_PARTITION_UUID: &str = "7e1b9a42-5c63-4d80-a1f4-8b2e3c7d6a59";
 /// The disk's GUID, in its partition table and its VHD footer.
 const DISK_GUID: &str = "b3f0a9d4-6e21-4c8b-9f57-2a4d1e8c6b90";
 /// GPT's type for Linux file system data, the generic Linux type.
@@ -55,6 +73,9 @@ pub const BOOTCONFIG_ON: &str = "androidboot.dsa.addon_disk = \"on\"\n";
 
 const SECTOR: u64 = 512;
 const MIB: u64 = 1 << 20;
+/// The disk is a whole number of these: Linux maps persistent memory in 2 MiB sections, and a
+/// device of another size gets no page structs, so no DAX.
+const SECTION: u64 = 2 * MIB;
 /// The partition starts at 1 MiB and its size is a whole number of MiB, as partitioning tools
 /// align them.
 const PARTITION_FIRST_SECTOR: u64 = MIB / SECTOR;
@@ -72,6 +93,106 @@ const PIECE: usize = 1 << 20;
 
 /// Every change to any add-on disk goes one at a time, in this process.
 static CHANGES: Mutex<()> = Mutex::new(());
+/// The disk files whose images this process has checked against their digests, with the
+/// length and time of change each had then, so a disk is read whole once and not at every
+/// boot. Every write to a disk file takes it off.
+static CHECKED: Mutex<BTreeMap<PathBuf, (u64, SystemTime)>> = Mutex::new(BTreeMap::new());
+
+/// An image's SHA-256 digest.
+type Sha256 = [u8; 32];
+
+fn stamp_of(path: &Path) -> Option<(u64, SystemTime)> {
+    let meta = fs::metadata(path).ok()?;
+    Some((meta.len(), meta.modified().ok()?))
+}
+
+fn forget_checked(path: &Path) {
+    CHECKED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(path);
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn unhex(text: &str) -> Option<Sha256> {
+    if text.len() != 64 {
+        return None;
+    }
+    let mut out = [0u8; 32];
+    for (i, byte) in out.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(text.get(i * 2..i * 2 + 2)?, 16).ok()?;
+    }
+    Some(out)
+}
+
+/// Where the digests of the disk file `disk` are kept: `<disk>.sha256`.
+fn records_path(disk: &Path) -> PathBuf {
+    let mut name = disk
+        .file_name()
+        .map(|name| name.to_os_string())
+        .unwrap_or_default();
+    name.push(".sha256");
+    disk.with_file_name(name)
+}
+
+/// The digests recorded for the disk file `disk`: `None` when it has no record, as a disk an
+/// earlier DSA wrote has not. One line per image, `<file name> <hex digest>`.
+fn read_records(disk: &Path) -> io::Result<Option<BTreeMap<Addon, Sha256>>> {
+    let text = match fs::read_to_string(records_path(disk)) {
+        Ok(text) => text,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    let mut records = BTreeMap::new();
+    for line in text.lines().filter(|line| !line.trim().is_empty()) {
+        let (name, digest) = line
+            .split_once(' ')
+            .ok_or_else(|| invalid("its digest record is damaged"))?;
+        let addon = Addon::of_file_name(name.as_bytes())
+            .ok_or_else(|| invalid("its digest record is damaged"))?;
+        let digest = unhex(digest.trim()).ok_or_else(|| invalid("its digest record is damaged"))?;
+        records.insert(addon, digest);
+    }
+    Ok(Some(records))
+}
+
+/// Records `records` as the digests of the disk file `disk`, whole or not at all.
+fn write_records(disk: &Path, records: &BTreeMap<Addon, Sha256>) -> io::Result<()> {
+    let text: String = records
+        .iter()
+        .map(|(addon, digest)| format!("{} {}\n", addon.file_name(), hex(digest)))
+        .collect();
+    let path = records_path(disk);
+    let mut partial = path.clone().into_os_string();
+    partial.push(".part");
+    let partial = PathBuf::from(partial);
+    {
+        let mut file = File::create(&partial)?;
+        file.write_all(text.as_bytes())?;
+        file.sync_all()?;
+    }
+    fs::rename(&partial, &path).inspect_err(|_| {
+        let _ = fs::remove_file(&partial);
+    })
+}
+
+/// The SHA-256 digest of `entry`'s image in `file`.
+fn digest_of(file: &mut File, entry: &Entry) -> io::Result<Sha256> {
+    file.seek(SeekFrom::Start(entry.offset))?;
+    let mut hasher = sha2::Sha256::new();
+    let mut buffer = vec![0u8; PIECE];
+    let mut left = entry.size;
+    while left > 0 {
+        let length = left.min(PIECE as u64) as usize;
+        file.read_exact(&mut buffer[..length])?;
+        hasher.update(&buffer[..length]);
+        left -= length as u64;
+    }
+    Ok(hasher.finalize().into())
+}
 
 /// An add-on whose image goes on the disk.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -81,11 +202,13 @@ pub enum Addon {
     /// A translation package the user installed (their own or Google's translator), which the
     /// guest binds into `/system`.
     ArmTranslation,
+    /// Google's Widevine DRM module, which the guest lays over `/vendor/apex` for `apexd`.
+    Widevine,
 }
 
 impl Addon {
     /// Every add-on, in the order the disk holds them.
-    pub const ALL: [Addon; 2] = [Addon::Gapps, Addon::ArmTranslation];
+    pub const ALL: [Addon; 3] = [Addon::Gapps, Addon::ArmTranslation, Addon::Widevine];
 
     /// The image's name on the disk, where the guest's init scripts mount it from
     /// (`/mnt/dsa-addons/<name>`).
@@ -93,6 +216,25 @@ impl Addon {
         match self {
             Addon::Gapps => "gapps.img",
             Addon::ArmTranslation => "arm-translation.img",
+            Addon::Widevine => "widevine.img",
+        }
+    }
+
+    /// The partition that names the image's bytes on the disk, which the guest mounts the
+    /// image from in the host's direct-mapped mode (`/dev/block/by-name/<name>`).
+    pub fn partition_name(self) -> &'static str {
+        match self {
+            Addon::Gapps => "dsa_gapps",
+            Addon::ArmTranslation => "dsa_arm_translation",
+            Addon::Widevine => "dsa_widevine",
+        }
+    }
+
+    fn partition_uuid(self) -> &'static str {
+        match self {
+            Addon::Gapps => GAPPS_PARTITION_UUID,
+            Addon::ArmTranslation => ARM_TRANSLATION_PARTITION_UUID,
+            Addon::Widevine => WIDEVINE_PARTITION_UUID,
         }
     }
 
@@ -101,6 +243,7 @@ impl Addon {
         match self {
             Addon::Gapps => "the Google apps image",
             Addon::ArmTranslation => "the ARM translation image",
+            Addon::Widevine => "the Widevine DRM image",
         }
     }
 
@@ -136,6 +279,33 @@ pub fn bootconfig(attached: &[Addon]) -> &'static str {
     } else {
         BOOTCONFIG_ON
     }
+}
+
+/// The bootconfig line that tells the guest its read-only disks are persistent memory this
+/// boot (the host's direct-mapped mode).
+pub const DIRECT_MAPPED_BOOTCONFIG: &str = "androidboot.dsa.direct_mapped = \"on\"\n";
+
+/// A boot's bootconfig, `text`, for the host's direct-mapped mode: each add-on image the boot
+/// takes from the disk (`"disk"`) is mounted from its own partition on the persistent memory
+/// instead (`"dax"`), and the guest is told the mode is on. An image still in `/data` stays
+/// where it is.
+pub fn direct_mapped_bootconfig(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + DIRECT_MAPPED_BOOTCONFIG.len());
+    for line in text.split_inclusive('\n') {
+        let mapped = line
+            .strip_prefix("androidboot.dsa.")
+            .and_then(|rest| rest.split_once(" = "))
+            .filter(|(key, value)| key.ends_with("_image") && value.trim_end() == "\"disk\"");
+        match mapped {
+            Some((key, _)) => out.push_str(&format!("androidboot.dsa.{key} = \"dax\"\n")),
+            None => out.push_str(line),
+        }
+    }
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(DIRECT_MAPPED_BOOTCONFIG);
+    out
 }
 
 /// One add-on's image on a disk: where its bytes start in the disk file, and how many.
@@ -270,6 +440,7 @@ impl AddonDisk {
     ) -> Result<(), String> {
         let _change = lock();
         let base = self.next_disk();
+        let records = read_records(&base).unwrap_or(Some(BTreeMap::new()));
         let kept: Vec<Entry> = Self::entries_of(&base)
             .into_iter()
             .filter(|entry| entry.addon != addon)
@@ -280,7 +451,7 @@ impl AddonDisk {
             .iter()
             .find(|entry| entry.addon == which)
         {
-            Some(entry) => copy_kept(stream, entry, &base),
+            Some(entry) => copy_kept(stream, entry, &base, records.as_ref()),
             None => copy_image(stream, addon, size, sha256, content),
         })?;
         eprintln!(
@@ -296,6 +467,7 @@ impl AddonDisk {
     pub fn remove(&self, addon: Addon) -> Result<bool, String> {
         let _change = lock();
         let base = self.next_disk();
+        let records = read_records(&base).unwrap_or(Some(BTreeMap::new()));
         let entries = Self::entries_of(&base);
         if !entries.iter().any(|entry| entry.addon == addon) {
             return Ok(false);
@@ -310,7 +482,7 @@ impl AddonDisk {
                 .iter()
                 .find(|entry| entry.addon == which)
                 .expect("every add-on written is kept");
-            copy_kept(stream, entry, &base)
+            copy_kept(stream, entry, &base, records.as_ref())
         })?;
         eprintln!(
             "add-ons: {} is off the add-on disk {} from the next start of Android",
@@ -323,24 +495,203 @@ impl AddonDisk {
     /// Writes a disk holding the images of `addons`, which `fill` writes, and makes it the
     /// pending one.
     fn write_pending(&self, addons: &[Addon], fill: &mut Fill<'_>) -> Result<(), String> {
+        self.write_disk_at(&self.pending_path(), addons, fill)
+    }
+
+    /// Writes a disk holding the images of `addons`, which `fill` writes, with their digests,
+    /// and puts it at `target`.
+    fn write_disk_at(
+        &self,
+        target: &Path,
+        addons: &[Addon],
+        fill: &mut Fill<'_>,
+    ) -> Result<(), String> {
         let partial = self.partial_path();
         if let Some(dir) = partial.parent().filter(|dir| !dir.as_os_str().is_empty()) {
             fs::create_dir_all(dir)
                 .map_err(|e| format!("{} cannot be made: {e}", dir.display()))?;
         }
-        let written = write_disk(&partial, self.format, addons, fill);
-        let placed = written.and_then(|()| {
-            fs::rename(&partial, self.pending_path()).map_err(|e| {
-                format!(
-                    "the new add-on disk cannot be put at {}: {e}",
-                    self.pending_path().display()
-                )
-            })
+        let mut records = BTreeMap::new();
+        let written = write_disk(&partial, self.format, addons, &mut |stream, addon| {
+            let digest = fill(stream, addon)?;
+            records.insert(addon, digest);
+            Ok(digest)
         });
+        let placed = written.and_then(|()| self.place(&partial, target, &records));
         if placed.is_err() {
             let _ = fs::remove_file(&partial);
         }
         placed
+    }
+
+    /// Puts the whole disk `partial` at `target`, with `records` as its digests: the digests
+    /// first, so a disk is never in place with the digests of another.
+    fn place(
+        &self,
+        partial: &Path,
+        target: &Path,
+        records: &BTreeMap<Addon, Sha256>,
+    ) -> Result<(), String> {
+        forget_checked(target);
+        write_records(target, records).map_err(|e| {
+            format!(
+                "the digests of the new add-on disk cannot be kept beside {}: {e}",
+                target.display()
+            )
+        })?;
+        fs::rename(partial, target).map_err(|e| {
+            format!(
+                "the new add-on disk cannot be put at {}: {e}",
+                target.display()
+            )
+        })
+    }
+
+    /// Takes over a disk an earlier DSA kept elsewhere, read from `source`, as this disk
+    /// (`pending` false) or as the pending one. The copy is checked as every disk is read, so
+    /// one that is not an add-on disk this host would write is refused, and nothing is put in
+    /// place. An earlier DSA kept no digests, so the digests of the images as they are now are
+    /// recorded. A disk already at the place is never replaced. Returns the add-ons it holds.
+    pub fn take_over(&self, source: &mut dyn Read, pending: bool) -> Result<Vec<Addon>, String> {
+        let _change = lock();
+        let target = if pending {
+            self.pending_path()
+        } else {
+            self.path.clone()
+        };
+        if target.exists() {
+            return Err(format!("{} is there already", target.display()));
+        }
+        let partial = self.partial_path();
+        if let Some(dir) = partial.parent().filter(|dir| !dir.as_os_str().is_empty()) {
+            fs::create_dir_all(dir)
+                .map_err(|e| format!("{} cannot be made: {e}", dir.display()))?;
+        }
+        let copied = (|| -> Result<Vec<Addon>, String> {
+            let mut file = File::create(&partial).map_err(io_text(&partial))?;
+            io::copy(source, &mut file)
+                .map_err(|e| format!("the earlier disk cannot be read: {e}"))?;
+            file.sync_all().map_err(io_text(&partial))?;
+            drop(file);
+            let mut file = File::open(&partial).map_err(io_text(&partial))?;
+            let length = file.metadata().map_err(io_text(&partial))?.len();
+            let entries = read_entries_of(&mut file, length)
+                .map_err(|e| format!("the earlier disk is refused: {e}"))?;
+            let mut records = BTreeMap::new();
+            for entry in &entries {
+                let digest = digest_of(&mut file, entry)
+                    .map_err(|e| format!("the earlier disk cannot be read: {e}"))?;
+                records.insert(entry.addon, digest);
+            }
+            drop(file);
+            self.place(&partial, &target, &records)?;
+            Ok(entries.into_iter().map(|entry| entry.addon).collect())
+        })();
+        if copied.is_err() {
+            let _ = fs::remove_file(&partial);
+        }
+        copied
+    }
+
+    /// Checks the images on the disk in place against their digests, once for each version of
+    /// the file. A disk an earlier DSA wrote has no digests: those of its images as they are
+    /// now are recorded. Returns the add-ons whose images are intact, and those that are not,
+    /// with why.
+    fn check(&self, entries: &[Entry]) -> (Vec<Addon>, Vec<(Addon, String)>) {
+        let all = || entries.iter().map(|entry| entry.addon).collect::<Vec<_>>();
+        let stamp = stamp_of(&self.path);
+        if stamp.is_some()
+            && CHECKED
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&self.path)
+                == stamp.as_ref()
+        {
+            return (all(), Vec::new());
+        }
+        let records = match read_records(&self.path) {
+            Ok(records) => records,
+            Err(e) => {
+                let why = format!("its digest record cannot be read ({e})");
+                return (
+                    Vec::new(),
+                    entries
+                        .iter()
+                        .map(|entry| (entry.addon, why.clone()))
+                        .collect(),
+                );
+            }
+        };
+        let mut file = match File::open(&self.path) {
+            Ok(file) => file,
+            Err(e) => {
+                let why = format!("the disk cannot be read ({e})");
+                return (
+                    Vec::new(),
+                    entries
+                        .iter()
+                        .map(|entry| (entry.addon, why.clone()))
+                        .collect(),
+                );
+            }
+        };
+        let mut good = Vec::new();
+        let mut bad = Vec::new();
+        let mut found = BTreeMap::new();
+        for entry in entries {
+            match digest_of(&mut file, entry) {
+                Ok(digest) => {
+                    found.insert(entry.addon, digest);
+                    match records.as_ref().map(|records| records.get(&entry.addon)) {
+                        None => good.push(entry.addon),
+                        Some(Some(wanted)) if *wanted == digest => good.push(entry.addon),
+                        Some(Some(_)) => bad.push((
+                            entry.addon,
+                            "its SHA-256 differs from the one recorded when it was installed"
+                                .to_string(),
+                        )),
+                        Some(None) => bad.push((
+                            entry.addon,
+                            "no digest was recorded for it when it was installed".to_string(),
+                        )),
+                    }
+                }
+                Err(e) => bad.push((entry.addon, format!("it cannot be read ({e})"))),
+            }
+        }
+        drop(file);
+        if records.is_none() {
+            match write_records(&self.path, &found) {
+                Ok(()) => eprintln!(
+                    "add-ons: the add-on disk {} came from an earlier DSA without digests; the \
+                     digests of its images are recorded now",
+                    self.path.display()
+                ),
+                Err(e) => eprintln!(
+                    "add-ons: the digests of the add-on disk {} cannot be recorded ({e}); they \
+                     are checked again at the next start",
+                    self.path.display()
+                ),
+            }
+        }
+        if bad.is_empty() {
+            if let Some(stamp) = stamp {
+                CHECKED
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(self.path.clone(), stamp);
+            }
+        }
+        (good, bad)
+    }
+
+    /// Checks the images of the disk in place against their digests now, as the next start
+    /// would, so that start need not read them. A service calls it when it starts, at low
+    /// priority. Returns the add-ons whose images are intact.
+    pub fn verify(&self) -> Vec<Addon> {
+        let _change = lock();
+        let entries = Self::entries_of(&self.path);
+        self.check(&entries).0
     }
 
     /// Readies the disk for a start of the VM, which must not be running: the pending disk, if
@@ -352,6 +703,19 @@ impl AddonDisk {
         let _change = lock();
         let pending = self.pending_path();
         if pending.is_file() {
+            forget_checked(&self.path);
+            // The digests first, as the pending disk was written: a disk is never in place
+            // with the digests of another for longer than this step.
+            let records = records_path(&pending);
+            if records.is_file() {
+                if let Err(e) = fs::rename(&records, records_path(&self.path)) {
+                    eprintln!(
+                        "add-ons: the digests of the new add-on disk {} cannot be put in place \
+                         ({e})",
+                        pending.display()
+                    );
+                }
+            }
             if let Err(e) = fs::rename(&pending, &self.path) {
                 eprintln!(
                     "add-ons: the new add-on disk {} cannot take the place of {} ({e}); Android \
@@ -376,14 +740,94 @@ impl AddonDisk {
         };
         if entries.is_empty() {
             let _ = fs::remove_file(&self.path);
+            let _ = fs::remove_file(records_path(&self.path));
+            return Vec::new();
         }
-        entries.into_iter().map(|entry| entry.addon).collect()
+        let (good, bad) = self.check(&entries);
+        if bad.is_empty() {
+            return good;
+        }
+        for (addon, why) in &bad {
+            eprintln!(
+                "add-ons: {} on the add-on disk {} is refused: {why}. Android starts without \
+                 it; install it again to use it",
+                addon.what(),
+                self.path.display()
+            );
+        }
+        // The disk again with the intact images alone, so Android starts with those.
+        let records = read_records(&self.path).ok().flatten();
+        let kept: Vec<Entry> = entries
+            .into_iter()
+            .filter(|entry| good.contains(&entry.addon))
+            .collect();
+        if kept.is_empty() {
+            forget_checked(&self.path);
+            let _ = fs::remove_file(&self.path);
+            let _ = fs::remove_file(records_path(&self.path));
+            return Vec::new();
+        }
+        let base = self.path.clone();
+        let rewritten = self.write_disk_at(&base, &good, &mut |stream, which| {
+            let entry = kept
+                .iter()
+                .find(|entry| entry.addon == which)
+                .expect("every add-on written is kept");
+            copy_kept(stream, entry, &base, records.as_ref())
+        });
+        match rewritten {
+            Ok(()) => good,
+            Err(why) => {
+                eprintln!(
+                    "add-ons: the add-on disk {} cannot be written again without the refused \
+                     images ({why}); Android starts without its add-ons",
+                    self.path.display()
+                );
+                Vec::new()
+            }
+        }
     }
 
-    /// Removes the disk, the pending one and any half-written one, as removing DSA does.
+    /// Whether the disk in place can be persistent memory in the host's direct-mapped mode: a
+    /// whole number of 2 MiB, with a partition over each image it holds. A disk written by a
+    /// DSA from before the mode has neither.
+    pub fn is_mappable(&self) -> bool {
+        let _change = lock();
+        is_mappable(&self.path, self.format)
+    }
+
+    /// Writes the disk in place again in the layout the direct-mapped mode maps, with the same
+    /// images, when it is not in it already. For a start of the VM, which must not be running,
+    /// after [`prepare_for_boot`](Self::prepare_for_boot). A disk that cannot be written again
+    /// is left as it was, and the error says why.
+    pub fn bring_to_mappable_layout(&self) -> Result<(), String> {
+        let _change = lock();
+        if !self.path.is_file() || is_mappable(&self.path, self.format) {
+            return Ok(());
+        }
+        let entries = Self::entries_of(&self.path);
+        if entries.is_empty() {
+            return Ok(());
+        }
+        let records = read_records(&self.path).ok().flatten();
+        let base = self.path.clone();
+        let order: Vec<Addon> = entries.iter().map(|entry| entry.addon).collect();
+        self.write_disk_at(&base, &order, &mut |stream, which| {
+            let entry = entries
+                .iter()
+                .find(|entry| entry.addon == which)
+                .expect("every add-on written is on the disk");
+            copy_kept(stream, entry, &base, records.as_ref())
+        })
+    }
+
+    /// Removes the disk, the pending one and any half-written one, with their digests, as
+    /// removing DSA does.
     pub fn delete(&self) {
         let _change = lock();
         for path in [self.path.clone(), self.pending_path(), self.partial_path()] {
+            forget_checked(&path);
+            let _ = fs::remove_file(records_path(&path));
             let _ = fs::remove_file(path);
         }
     }
@@ -393,8 +837,8 @@ fn lock() -> std::sync::MutexGuard<'static, ()> {
     CHANGES.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Writes one add-on's image into the erofs file system of a new disk.
-type Fill<'a> = dyn FnMut(&mut Stream<At<File>>, Addon) -> Result<(), String> + 'a;
+/// Writes one add-on's image into the erofs file system of a new disk, and gives its digest.
+type Fill<'a> = dyn FnMut(&mut Stream<At<File>>, Addon) -> Result<Sha256, String> + 'a;
 
 /// A file seen from `base` on: what the erofs writer writes at 0 lands at `base`.
 struct At<W> {
@@ -448,14 +892,29 @@ fn write_disk(
     let mut out = stream.finish()?;
     let fs_bytes = out.stream_position().map_err(io_text(path))?;
     let mut file = out.inner;
-    let partition_sectors = fs_bytes.div_ceil(MIB) * MIB / SECTOR;
+    // 1 MiB before the partition and 1 MiB after it, so the disk is a whole number of sections
+    // when the partition is.
+    let partition_sectors = fs_bytes.div_ceil(SECTION) * SECTION / SECTOR;
     let sectors = PARTITION_FIRST_SECTOR + partition_sectors + MIB / SECTOR;
     let disk_bytes = sectors * SECTOR;
     file.set_len(disk_bytes).map_err(io_text(path))?;
-    for (at, data) in partition_table(sectors, partition_sectors) {
-        file.seek(SeekFrom::Start(at)).map_err(io_text(path))?;
-        file.write_all(&data).map_err(io_text(path))?;
-    }
+    let write_table = |file: &mut File, images: &[Entry]| -> Result<(), String> {
+        for (at, data) in partition_table(sectors, partition_sectors, images) {
+            file.seek(SeekFrom::Start(at)).map_err(io_text(path))?;
+            file.write_all(&data).map_err(io_text(path))?;
+        }
+        file.flush().map_err(io_text(path))
+    };
+    // Each image's own partition comes from where the file system put the image, which the
+    // disk is read back for once its erofs partition is in the table.
+    write_table(&mut file, &[])?;
+    let images = read_entries(path).map_err(|e| {
+        format!(
+            "the new add-on disk {} cannot be read back: {e}",
+            path.display()
+        )
+    })?;
+    write_table(&mut file, &images)?;
     if format == Format::Vhd {
         file.seek(SeekFrom::Start(disk_bytes))
             .map_err(io_text(path))?;
@@ -465,12 +924,26 @@ fn write_disk(
     file.sync_all().map_err(io_text(path))
 }
 
-/// Copies the image `entry` from the disk at `from` into `stream`.
+/// Copies the image `entry` from the disk at `from` into `stream`. With `records`, the digests
+/// recorded for that disk, the image must have the one recorded for it, so an image that
+/// changed since it was installed is not carried onto a new disk; a disk an earlier DSA wrote
+/// has no record.
 fn copy_kept<W: Write + Seek>(
     stream: &mut Stream<W>,
     entry: &Entry,
     from: &Path,
-) -> Result<(), String> {
+    records: Option<&BTreeMap<Addon, Sha256>>,
+) -> Result<Sha256, String> {
+    let wanted = match records {
+        Some(records) => Some(records.get(&entry.addon).ok_or_else(|| {
+            format!(
+                "{} on {} has no digest recorded; install it again",
+                entry.addon.what(),
+                from.display()
+            )
+        })?),
+        None => None,
+    };
     let mut source =
         File::open(from).map_err(|e| format!("{} cannot be read: {e}", from.display()))?;
     source
@@ -480,20 +953,20 @@ fn copy_kept<W: Write + Seek>(
         stream,
         entry.addon,
         entry.size,
-        None,
+        wanted.map(|digest| digest.as_slice()),
         &mut source.take(entry.size),
     )
 }
 
 /// Copies `addon`'s image, `size` bytes of `content`, into `stream` as its file, checking that
-/// it is an erofs image and, with `sha256`, that it has that digest.
+/// it is an erofs image and, with `sha256`, that it has that digest. Gives its digest.
 fn copy_image<W: Write + Seek>(
     stream: &mut Stream<W>,
     addon: Addon,
     size: u64,
     sha256: Option<&[u8]>,
     content: &mut dyn Read,
-) -> Result<(), String> {
+) -> Result<Sha256, String> {
     let what = addon.what();
     if size < SUPERBLOCK + 4 {
         return Err(format!(
@@ -517,14 +990,16 @@ fn copy_image<W: Write + Seek>(
         stream.write_data(piece)?;
         done += length as u64;
     }
+    let digest: Sha256 = hasher.finalize().into();
     if let Some(wanted) = sha256 {
-        if hasher.finalize().as_slice() != wanted {
+        if digest.as_slice() != wanted {
             return Err(format!(
                 "{what} did not arrive intact (its SHA-256 differs); install it again"
             ));
         }
     }
-    stream.end_file()
+    stream.end_file()?;
+    Ok(digest)
 }
 
 /// A GUID's 16 bytes as GPT and VHD store them: the first three fields little endian.
@@ -560,9 +1035,21 @@ fn gpt_header(sectors: u64, current: u64, backup: u64, entries_lba: u64, crc: u3
     h
 }
 
-/// The partition table of a disk of `sectors` whose one partition has `partition_sectors`:
-/// each piece with the byte it goes at.
-fn partition_table(sectors: u64, partition_sectors: u64) -> Vec<(u64, Vec<u8>)> {
+/// Writes one partition entry: its type, UUID, first and last sector, and name.
+fn put_entry(entry: &mut [u8], uuid: &str, first: u64, last: u64, name: &str) {
+    entry[0..16].copy_from_slice(&guid_bytes(LINUX_DATA_TYPE));
+    entry[16..32].copy_from_slice(&guid_bytes(uuid));
+    entry[32..40].copy_from_slice(&first.to_le_bytes());
+    entry[40..48].copy_from_slice(&last.to_le_bytes());
+    for (i, unit) in name.encode_utf16().enumerate() {
+        entry[56 + i * 2..58 + i * 2].copy_from_slice(&unit.to_le_bytes());
+    }
+}
+
+/// The partition table of a disk of `sectors` whose erofs partition has `partition_sectors`,
+/// then a partition for each image in `images` over the image's bytes inside the erofs
+/// partition, in whole blocks: each piece with the byte it goes at.
+fn partition_table(sectors: u64, partition_sectors: u64, images: &[Entry]) -> Vec<(u64, Vec<u8>)> {
     let mut mbr = vec![0u8; 512];
     mbr[446 + 1..446 + 4].copy_from_slice(&[0x00, 0x02, 0x00]);
     mbr[446 + 4] = 0xEE;
@@ -574,13 +1061,26 @@ fn partition_table(sectors: u64, partition_sectors: u64) -> Vec<(u64, Vec<u8>)> 
     mbr[511] = 0xAA;
 
     let mut entries = vec![0u8; (ENTRIES * ENTRY_BYTES) as usize];
-    entries[0..16].copy_from_slice(&guid_bytes(LINUX_DATA_TYPE));
-    entries[16..32].copy_from_slice(&guid_bytes(PARTITION_UUID));
-    entries[32..40].copy_from_slice(&PARTITION_FIRST_SECTOR.to_le_bytes());
     let last = PARTITION_FIRST_SECTOR + partition_sectors - 1;
-    entries[40..48].copy_from_slice(&last.to_le_bytes());
-    for (i, unit) in PARTITION_NAME.encode_utf16().enumerate() {
-        entries[56 + i * 2..58 + i * 2].copy_from_slice(&unit.to_le_bytes());
+    let mut slots = entries.chunks_mut(ENTRY_BYTES as usize);
+    if let Some(slot) = slots.next() {
+        put_entry(
+            slot,
+            PARTITION_UUID,
+            PARTITION_FIRST_SECTOR,
+            last,
+            PARTITION_NAME,
+        );
+    }
+    for (image, slot) in images.iter().zip(slots) {
+        let end = (image.offset + image.size.div_ceil(BLOCK) * BLOCK) / SECTOR;
+        put_entry(
+            slot,
+            image.addon.partition_uuid(),
+            image.offset / SECTOR,
+            end.min(last + 1) - 1,
+            image.addon.partition_name(),
+        );
     }
     let crc = crc32(&entries);
     let backup_entries = sectors - 1 - ENTRY_SECTORS;
@@ -597,7 +1097,7 @@ fn partition_table(sectors: u64, partition_sectors: u64) -> Vec<(u64, Vec<u8>)> 
 }
 
 /// The VHD disk geometry for `sectors`, by the algorithm of the VHD format.
-fn geometry(sectors: u64) -> (u16, u8, u8) {
+pub(crate) fn geometry(sectors: u64) -> (u16, u8, u8) {
     let total = sectors.min(65535 * 16 * 255);
     let (mut spt, mut heads, mut cth);
     if total >= 65535 * 16 * 63 {
@@ -669,43 +1169,178 @@ fn u64_at(data: &[u8], at: usize) -> u64 {
     u64::from_le_bytes(data[at..at + 8].try_into().expect("eight bytes"))
 }
 
+/// Whether the disk at `path`, kept in `format`, is in the layout the direct-mapped mode maps:
+/// a whole number of 2 MiB, and each image on it covered from its first byte by a partition of
+/// its own, named for it, in whole blocks.
+fn is_mappable(path: &Path, format: Format) -> bool {
+    let check = || -> io::Result<bool> {
+        let mut file = File::open(path)?;
+        let length = file.metadata()?.len();
+        let footer = if format == Format::Vhd {
+            FOOTER_BYTES
+        } else {
+            0
+        };
+        if length < footer || (length - footer) % SECTION != 0 {
+            return Ok(false);
+        }
+        let header = read_at(&mut file, SECTOR, 92)?;
+        let entries_lba = u64_at(&header, 72);
+        let count = u64::from(u32_at(&header, 80)).min(ENTRIES * 4);
+        let entry_bytes = u64::from(u32_at(&header, 84));
+        if entry_bytes < 128 {
+            return Ok(false);
+        }
+        let table = read_at(
+            &mut file,
+            entries_lba * SECTOR,
+            (count * entry_bytes) as usize,
+        )?;
+        let images = read_entries(path)?;
+        Ok(!images.is_empty()
+            && images.iter().all(|image| {
+                table.chunks(entry_bytes as usize).any(|entry| {
+                    let first = u64_at(entry, 32);
+                    let last = u64_at(entry, 40);
+                    entry_named(&entry[56..128], image.addon.partition_name())
+                        && first.checked_mul(SECTOR) == Some(image.offset)
+                        && last
+                            .checked_sub(first)
+                            .and_then(|span| span.checked_add(1))
+                            .and_then(|sectors| sectors.checked_mul(SECTOR))
+                            == Some(image.size.div_ceil(BLOCK) * BLOCK)
+                })
+            }))
+    };
+    check().unwrap_or(false)
+}
+
+/// The most partition entries a disk may list. This host writes [`ENTRIES`]; a table longer
+/// than this is not one it made.
+const MAX_ENTRIES: u64 = 512;
+/// The largest partition entry accepted. The entry size must be a power of two from 128 bytes
+/// on, and every partitioning tool writes 128.
+const MAX_ENTRY_BYTES: u64 = 512;
+/// The largest root folder accepted. The disk's root holds one name per add-on.
+const MAX_ROOT_FOLDER: u64 = 64 * BLOCK;
+
+fn too_big(what: &str) -> io::Error {
+    invalid(format!("its {what} lies outside any size a disk can have"))
+}
+
+fn entry_named(raw: &[u8], expected: &str) -> bool {
+    let wanted: Vec<u8> = expected.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    raw.starts_with(&wanted) && raw[wanted.len()..].iter().all(|&b| b == 0)
+}
+
 /// The add-on images on the disk at `path`, read the way the guest finds them: the partition
 /// by its name in the partition table, then the files at the root of its erofs file system.
+///
+/// Every number is read from a file the service did not make itself at this moment, so each
+/// is checked before it sizes a buffer or a read: a disk that does not fit is refused with a
+/// reason, and the service goes on. Every partition in the table must be the add-on partition
+/// or one of the add-on image partitions, since Android makes a by-name link for each
+/// partition of every disk, and another partition could take the name of one of Android's own.
 fn read_entries(path: &Path) -> io::Result<Vec<Entry>> {
     let mut file = File::open(path)?;
     let length = file.metadata()?.len();
-    let header = read_at(&mut file, SECTOR, 92)?;
+    read_entries_of(&mut file, length)
+}
+
+fn read_entries_of(file: &mut File, length: u64) -> io::Result<Vec<Entry>> {
+    let header = read_at(file, SECTOR, 92)?;
     if &header[0..8] != b"EFI PART" {
         return Err(invalid("it has no GPT partition table"));
     }
     let entries_lba = u64_at(&header, 72);
-    let count = u64::from(u32_at(&header, 80)).min(ENTRIES * 4);
+    let count = u64::from(u32_at(&header, 80));
     let entry_bytes = u64::from(u32_at(&header, 84));
-    if entry_bytes < 128 {
-        return Err(invalid("its partition entries are too small"));
+    if !(128..=MAX_ENTRY_BYTES).contains(&entry_bytes) || !entry_bytes.is_power_of_two() {
+        return Err(invalid(format!(
+            "its partition entries are {entry_bytes} bytes each, where 128 is the size a \
+             partition table has"
+        )));
     }
-    let table = read_at(
-        &mut file,
-        entries_lba * SECTOR,
-        (count * entry_bytes) as usize,
-    )?;
-    let wanted: Vec<u8> = PARTITION_NAME
-        .encode_utf16()
-        .flat_map(u16::to_le_bytes)
-        .collect();
-    let partition = table.chunks(entry_bytes as usize).find(|entry| {
+    if count == 0 || count > MAX_ENTRIES {
+        return Err(invalid(format!(
+            "its partition table lists {count} entries, more than this host reads ({MAX_ENTRIES})"
+        )));
+    }
+    let table_bytes = count
+        .checked_mul(entry_bytes)
+        .ok_or_else(|| too_big("partition table"))?;
+    let table_at = entries_lba
+        .checked_mul(SECTOR)
+        .ok_or_else(|| too_big("partition table"))?;
+    if entries_lba < 2
+        || table_at
+            .checked_add(table_bytes)
+            .is_none_or(|end| end > length)
+    {
+        return Err(invalid("its partition table does not fit the disk"));
+    }
+    let table = read_at(file, table_at, table_bytes as usize)?;
+    let mut partition = None;
+    let mut image_partitions: Vec<(Addon, u64, u64)> = Vec::new();
+    for entry in table.chunks(entry_bytes as usize) {
+        // An entry whose type is all zeros is unused.
+        if entry[0..16].iter().all(|&b| b == 0) {
+            continue;
+        }
         let name = &entry[56..128];
-        name.starts_with(&wanted) && name[wanted.len()..].iter().all(|&b| b == 0)
-    });
+        if entry_named(name, PARTITION_NAME) {
+            if partition.is_some() {
+                return Err(invalid(format!(
+                    "it has more than one {PARTITION_NAME} partition"
+                )));
+            }
+            partition = Some(entry);
+            continue;
+        }
+        let Some(addon) = Addon::ALL
+            .into_iter()
+            .find(|addon| entry_named(name, addon.partition_name()))
+        else {
+            return Err(invalid(format!(
+                "it has a partition named {:?}, and an add-on disk holds only its \
+                 {PARTITION_NAME} partition",
+                partition_name(name)
+            )));
+        };
+        if image_partitions.iter().any(|(seen, _, _)| *seen == addon) {
+            return Err(invalid(format!(
+                "it has more than one {} partition",
+                addon.partition_name()
+            )));
+        }
+        let first = u64_at(entry, 32)
+            .checked_mul(SECTOR)
+            .ok_or_else(|| too_big("partition"))?;
+        let stop = u64_at(entry, 40)
+            .checked_add(1)
+            .and_then(|last| last.checked_mul(SECTOR))
+            .ok_or_else(|| too_big("partition"))?;
+        image_partitions.push((addon, first, stop));
+    }
     let Some(partition) = partition else {
         return Err(invalid(format!("it has no {PARTITION_NAME} partition")));
     };
-    let base = u64_at(partition, 32) * SECTOR;
-    let end = (u64_at(partition, 40) + 1) * SECTOR;
-    if end > length || base >= end {
+    let base = u64_at(partition, 32)
+        .checked_mul(SECTOR)
+        .ok_or_else(|| too_big("partition"))?;
+    let end = u64_at(partition, 40)
+        .checked_add(1)
+        .and_then(|last| last.checked_mul(SECTOR))
+        .ok_or_else(|| too_big("partition"))?;
+    if end > length || base >= end || end - base < SUPERBLOCK + 128 {
         return Err(invalid("its partition does not fit the disk"));
     }
-    let superblock = read_at(&mut file, base + SUPERBLOCK, 128)?;
+    for (_, first, stop) in &image_partitions {
+        if *first < base || *stop > end || *first >= *stop {
+            return Err(invalid("an add-on image partition does not fit the disk"));
+        }
+    }
+    let superblock = read_at(file, base + SUPERBLOCK, 128)?;
     if u32_at(&superblock, 0) != EROFS_MAGIC || superblock[12] != 12 {
         return Err(invalid(
             "its partition is not an erofs file system of 4 KiB blocks",
@@ -714,7 +1349,13 @@ fn read_entries(path: &Path) -> io::Result<Vec<Entry>> {
     let root = u64::from(u16_at(&superblock, 14));
     let meta = u64::from(u32_at(&superblock, 40)) * BLOCK;
     let inode = |file: &mut File, nid: u64| -> io::Result<(u16, u64, u64)> {
-        let raw = read_at(file, base + meta + nid * INODE, INODE as usize)?;
+        let at = nid
+            .checked_mul(INODE)
+            .and_then(|offset| offset.checked_add(meta))
+            .and_then(|offset| offset.checked_add(base))
+            .filter(|at| at.checked_add(INODE).is_some_and(|stop| stop <= end))
+            .ok_or_else(|| invalid("an inode lies outside its partition"))?;
+        let raw = read_at(file, at, INODE as usize)?;
         let format = u16_at(&raw, 0);
         // A compact inode (bit 0 clear) whose data is stored whole (layout 0).
         if format & 1 != 0 || (format >> 1) & 7 != 0 {
@@ -725,16 +1366,21 @@ fn read_entries(path: &Path) -> io::Result<Vec<Entry>> {
         let mode = u16_at(&raw, 4);
         let size = u64::from(u32_at(&raw, 8));
         let start = base + u64::from(u32_at(&raw, 16)) * BLOCK;
-        if start + size > end {
+        if start.checked_add(size).is_none_or(|stop| stop > end) {
             return Err(invalid("a file runs past the end of its partition"));
         }
         Ok((mode, size, start))
     };
-    let (mode, size, start) = inode(&mut file, root)?;
+    let (mode, size, start) = inode(file, root)?;
     if mode & 0o170_000 != 0o040_000 {
         return Err(invalid("its file system's root is not a folder"));
     }
-    let folder = read_at(&mut file, start, size as usize)?;
+    if size > MAX_ROOT_FOLDER {
+        return Err(invalid(format!(
+            "its root folder is {size} bytes, more than an add-on disk's root holds"
+        )));
+    }
+    let folder = read_at(file, start, size as usize)?;
     let mut found = Vec::new();
     for block in folder.chunks(BLOCK as usize) {
         if block.len() < 12 {
@@ -760,8 +1406,14 @@ fn read_entries(path: &Path) -> io::Result<Vec<Entry>> {
             let Some(addon) = Addon::of_file_name(name) else {
                 continue;
             };
-            let (mode, size, offset) = inode(&mut file, nid)?;
+            let (mode, size, offset) = inode(file, nid)?;
             if mode & 0o170_000 == 0o100_000 {
+                if found.iter().any(|entry: &Entry| entry.addon == addon) {
+                    return Err(invalid(format!(
+                        "its root folder holds {} twice",
+                        addon.file_name()
+                    )));
+                }
                 found.push(Entry {
                     addon,
                     offset,
@@ -772,6 +1424,16 @@ fn read_entries(path: &Path) -> io::Result<Vec<Entry>> {
     }
     found.sort_by_key(|entry| entry.addon);
     Ok(found)
+}
+
+/// A partition's name from its entry, for a reason given to a person.
+fn partition_name(raw: &[u8]) -> String {
+    let units: Vec<u16> = raw
+        .chunks(2)
+        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+        .take_while(|&unit| unit != 0)
+        .collect();
+    String::from_utf16_lossy(&units)
 }
 
 #[cfg(test)]
@@ -992,6 +1654,291 @@ mod tests {
             read_back(&dir.join("addons.vhd"), Addon::Gapps).unwrap(),
             gapps
         );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The partition entry `index` of the disk `bytes`: its first and last sector and name.
+    fn partition(bytes: &[u8], index: usize) -> (u64, u64, String) {
+        let entry = &bytes[1024 + index * 128..1024 + (index + 1) * 128];
+        let name: Vec<u16> = entry[56..128]
+            .chunks(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .take_while(|&unit| unit != 0)
+            .collect();
+        (
+            u64_at(entry, 32),
+            u64_at(entry, 40),
+            String::from_utf16(&name).unwrap(),
+        )
+    }
+
+    #[test]
+    fn fr37_the_widevine_image_has_its_own_partition_beside_the_other_addons() {
+        let dir = scratch("widevine");
+        let disk = AddonDisk::new(dir.join("addons.vhd"), Format::Vhd);
+        let gapps = image("product/app/a.apk", &[7u8; 10_000]);
+        let widevine = image("com.google.android.widevine.apex", b"apex");
+        install(&disk, Addon::Widevine, &widevine).unwrap();
+        install(&disk, Addon::Gapps, &gapps).unwrap();
+        // In the order the disk holds them, whatever the order they were installed in.
+        assert_eq!(disk.prepare_for_boot(), [Addon::Gapps, Addon::Widevine]);
+        let bytes = fs::read(disk.path()).unwrap();
+        assert_eq!(partition(&bytes, 0).2, PARTITION_NAME);
+        assert_eq!(partition(&bytes, 1).2, "dsa_gapps");
+        assert_eq!(partition(&bytes, 2).2, "dsa_widevine");
+        assert_eq!(read_back(disk.path(), Addon::Widevine).unwrap(), widevine);
+        // The disk the service wrote is one it reads back: its partition is allowed.
+        assert_eq!(disk.attached(), [Addon::Gapps, Addon::Widevine]);
+        assert!(disk.remove(Addon::Widevine).unwrap());
+        assert_eq!(disk.prepare_for_boot(), [Addon::Gapps]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn nfr1_each_image_has_a_partition_of_its_own_for_the_direct_mapped_mode() {
+        // In the host's direct-mapped mode the disk is persistent memory, and the guest mounts
+        // each image from a partition over its own bytes with DAX, which a file-backed mount
+        // cannot have.
+        let dir = scratch("mapped");
+        let disk = AddonDisk::new(dir.join("addons.vhd"), Format::Vhd);
+        let gapps = image("product/app/a.apk", &[7u8; 10_000]);
+        let translator = image("system/lib64/libdsa_native_bridge.so", b"bridge");
+        install(&disk, Addon::Gapps, &gapps).unwrap();
+        install(&disk, Addon::ArmTranslation, &translator).unwrap();
+        disk.prepare_for_boot();
+        let bytes = fs::read(disk.path()).unwrap();
+        let disk_bytes = bytes.len() as u64 - FOOTER_BYTES;
+        assert_eq!(disk_bytes % SECTION, 0, "a whole number of 2 MiB sections");
+        let (first, last, name) = partition(&bytes, 0);
+        assert_eq!(name, PARTITION_NAME);
+        assert_eq!(first, PARTITION_FIRST_SECTOR);
+        for (index, (addon, data)) in [(Addon::Gapps, &gapps), (Addon::ArmTranslation, &translator)]
+            .into_iter()
+            .enumerate()
+        {
+            let (start, end, name) = partition(&bytes, index + 1);
+            assert_eq!(name, addon.partition_name());
+            // Inside the erofs partition, on a page, a whole number of pages, and holding the
+            // image byte for byte from its first sector.
+            assert!(start >= first && end <= last, "{name}");
+            assert_eq!(start * SECTOR % BLOCK, 0, "{name}");
+            assert_eq!((end + 1 - start) * SECTOR % BLOCK, 0, "{name}");
+            assert_eq!(
+                (end + 1 - start) * SECTOR,
+                (data.len() as u64).div_ceil(BLOCK) * BLOCK,
+                "{name}"
+            );
+            let at = (start * SECTOR) as usize;
+            assert_eq!(&bytes[at..at + data.len()], &data[..], "{name}");
+        }
+        assert_eq!(partition(&bytes, 3).2, "", "nothing else");
+        // Both partition tables carry them, under one checksum.
+        let header = &bytes[512..604];
+        let crc = u32_at(header, 88);
+        assert_eq!(crc32(&bytes[1024..1024 + 128 * 128]), crc);
+        let backup_entries = (disk_bytes / SECTOR - 1 - ENTRY_SECTORS) * SECTOR;
+        assert_eq!(
+            bytes[backup_entries as usize..backup_entries as usize + 128 * 128],
+            bytes[1024..1024 + 128 * 128]
+        );
+        // The disk still reads as before: the images by name in the erofs partition.
+        assert_eq!(disk.attached(), [Addon::Gapps, Addon::ArmTranslation]);
+        assert_eq!(read_back(disk.path(), Addon::Gapps).unwrap(), gapps);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Changes the disk file at `path` with `change`, and moves its time of change on, as any
+    /// later write would.
+    fn alter(path: &Path, change: impl FnOnce(&mut Vec<u8>)) {
+        let mut bytes = fs::read(path).unwrap();
+        change(&mut bytes);
+        fs::write(path, &bytes).unwrap();
+        let later = SystemTime::now() + std::time::Duration::from_secs(5);
+        File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
+    }
+
+    #[test]
+    fn fr32_a_gpt_with_a_huge_entry_size_or_count_is_refused_without_aborting() {
+        let dir = scratch("huge-gpt");
+        let disk = AddonDisk::new(dir.join("addons.img"), Format::Raw);
+        install(&disk, Addon::Gapps, &image("a", b"google")).unwrap();
+        assert_eq!(disk.prepare_for_boot(), [Addon::Gapps]);
+        for (at, value) in [
+            (84usize, u32::MAX),
+            (84, 0x8000_0000),
+            (84, 1024),
+            (84, 192),
+            (80, u32::MAX),
+            (80, 0),
+            (72, u32::MAX),
+        ] {
+            let path = disk.path().to_path_buf();
+            let before = fs::read(&path).unwrap();
+            alter(&path, |bytes| {
+                let field = SECTOR as usize + at;
+                if at == 72 {
+                    bytes[field..field + 8].copy_from_slice(&u64::MAX.to_le_bytes());
+                } else {
+                    bytes[field..field + 4].copy_from_slice(&value.to_le_bytes());
+                }
+            });
+            let why = read_entries(&path).unwrap_err();
+            assert_eq!(why.kind(), io::ErrorKind::InvalidData, "{at}: {why}");
+            assert_eq!(disk.prepare_for_boot(), Vec::<Addon>::new(), "{at}");
+            fs::write(&path, before).unwrap();
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fr32_a_partition_named_other_than_the_addon_partition_is_refused() {
+        let dir = scratch("other-partition");
+        let disk = AddonDisk::new(dir.join("addons.img"), Format::Raw);
+        install(&disk, Addon::Gapps, &image("a", b"google")).unwrap();
+        assert_eq!(disk.prepare_for_boot(), [Addon::Gapps]);
+        alter(disk.path(), |bytes| {
+            // An extra entry in the table, after the add-on and image partitions.
+            let entry = 2 * SECTOR as usize + 2 * ENTRY_BYTES as usize;
+            bytes[entry..entry + 16].copy_from_slice(&guid_bytes(LINUX_DATA_TYPE));
+            bytes[entry + 32..entry + 40].copy_from_slice(&PARTITION_FIRST_SECTOR.to_le_bytes());
+            bytes[entry + 40..entry + 48]
+                .copy_from_slice(&(PARTITION_FIRST_SECTOR + 7).to_le_bytes());
+            for (i, unit) in "vbmeta_a".encode_utf16().enumerate() {
+                bytes[entry + 56 + i * 2..entry + 58 + i * 2].copy_from_slice(&unit.to_le_bytes());
+            }
+        });
+        let why = read_entries(disk.path()).unwrap_err().to_string();
+        assert!(why.contains("vbmeta_a"), "{why}");
+        assert_eq!(disk.prepare_for_boot(), Vec::<Addon>::new());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fr32_a_tampered_image_is_refused_and_android_starts_without_it() {
+        let dir = scratch("tampered");
+        let disk = AddonDisk::new(dir.join("addons.img"), Format::Raw);
+        let gapps = image("a", &[3u8; 20_000]);
+        let translator = image("b", b"translator");
+        install(&disk, Addon::Gapps, &gapps).unwrap();
+        install(&disk, Addon::ArmTranslation, &translator).unwrap();
+        assert_eq!(
+            disk.prepare_for_boot(),
+            [Addon::Gapps, Addon::ArmTranslation]
+        );
+        assert!(records_path(disk.path()).is_file(), "digests recorded");
+        let gapps_at = read_entries(disk.path())
+            .unwrap()
+            .into_iter()
+            .find(|entry| entry.addon == Addon::Gapps)
+            .unwrap();
+        alter(disk.path(), |bytes| {
+            let at = (gapps_at.offset + gapps_at.size - 1) as usize;
+            bytes[at] ^= 0xFF;
+        });
+        assert_eq!(disk.prepare_for_boot(), [Addon::ArmTranslation]);
+        // The disk now holds the intact image alone, as it was installed.
+        assert_eq!(read_back(disk.path(), Addon::Gapps), None);
+        assert_eq!(
+            read_back(disk.path(), Addon::ArmTranslation).unwrap(),
+            translator
+        );
+        assert_eq!(disk.prepare_for_boot(), [Addon::ArmTranslation]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn nfr1_a_disk_from_before_the_direct_mapped_mode_is_written_again_in_its_layout() {
+        let dir = scratch("older");
+        let disk = AddonDisk::new(dir.join("addons.img"), Format::Raw);
+        let gapps = image("product/app/a.apk", &[9u8; 30_000]);
+        install(&disk, Addon::Gapps, &gapps).unwrap();
+        disk.prepare_for_boot();
+        assert!(disk.is_mappable());
+        // As an older DSA wrote it: no partition over the image.
+        let mut bytes = fs::read(disk.path()).unwrap();
+        let sectors = bytes.len() as u64 / SECTOR;
+        let (first, last, _) = partition(&bytes, 0);
+        for (at, data) in partition_table(sectors, last + 1 - first, &[]) {
+            bytes[at as usize..at as usize + data.len()].copy_from_slice(&data);
+        }
+        fs::write(disk.path(), &bytes).unwrap();
+        assert!(!disk.is_mappable());
+        assert_eq!(disk.attached(), [Addon::Gapps], "it still reads as before");
+        disk.bring_to_mappable_layout().unwrap();
+        assert!(disk.is_mappable());
+        assert_eq!(disk.attached(), [Addon::Gapps]);
+        assert_eq!(read_back(disk.path(), Addon::Gapps).unwrap(), gapps);
+        assert!(!disk.partial_path().exists());
+        // A disk in the layout already is left alone, and no disk at all is nothing to do.
+        let before = fs::metadata(disk.path()).unwrap().modified().unwrap();
+        disk.bring_to_mappable_layout().unwrap();
+        assert_eq!(
+            fs::metadata(disk.path()).unwrap().modified().unwrap(),
+            before
+        );
+        disk.delete();
+        disk.bring_to_mappable_layout().unwrap();
+        assert!(!disk.is_mappable());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fr32_an_image_changed_after_install_is_not_carried_onto_a_new_disk() {
+        let dir = scratch("tampered-kept");
+        let disk = AddonDisk::new(dir.join("addons.img"), Format::Raw);
+        install(&disk, Addon::Gapps, &image("a", &[5u8; 9_000])).unwrap();
+        let entry = read_entries(&disk.pending_path()).unwrap()[0];
+        alter(&disk.pending_path(), |bytes| {
+            bytes[(entry.offset + entry.size - 1) as usize] ^= 1;
+        });
+        let why = install(&disk, Addon::ArmTranslation, &image("b", b"t")).unwrap_err();
+        assert!(why.contains("SHA-256"), "{why}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn nfr1_a_direct_mapped_boot_mounts_each_image_from_its_partition() {
+        let normal = format!(
+            "{BOOTCONFIG_ON}androidboot.dsa.gapps = \"on\"\n{}{}",
+            image_bootconfig("gapps_image", true),
+            image_bootconfig("arm_translation_image", false)
+        );
+        assert_eq!(
+            direct_mapped_bootconfig(&normal),
+            "androidboot.dsa.addon_disk = \"on\"\nandroidboot.dsa.gapps = \"on\"\n\
+             androidboot.dsa.gapps_image = \"dax\"\n\
+             androidboot.dsa.arm_translation_image = \"data\"\n\
+             androidboot.dsa.direct_mapped = \"on\"\n"
+        );
+        assert_eq!(direct_mapped_bootconfig(""), DIRECT_MAPPED_BOOTCONFIG);
+    }
+
+    #[test]
+    fn fr32_a_disk_taken_over_from_an_earlier_place_is_checked_and_its_digests_recorded() {
+        let dir = scratch("take-over");
+        let old = AddonDisk::new(dir.join("old").join("addons.img"), Format::Raw);
+        let gapps = image("a", b"google");
+        install(&old, Addon::Gapps, &gapps).unwrap();
+        old.prepare_for_boot();
+        let disk = AddonDisk::new(dir.join("new").join("addons.img"), Format::Raw);
+        let mut source = File::open(old.path()).unwrap();
+        assert_eq!(disk.take_over(&mut source, false).unwrap(), [Addon::Gapps]);
+        assert!(records_path(disk.path()).is_file());
+        assert_eq!(disk.prepare_for_boot(), [Addon::Gapps]);
+        assert_eq!(read_back(disk.path(), Addon::Gapps).unwrap(), gapps);
+        // Never over a disk that is there, and never a file that is not an add-on disk.
+        let mut again = File::open(old.path()).unwrap();
+        assert!(disk.take_over(&mut again, false).is_err());
+        let junk = vec![0u8; 4 << 20];
+        let why = disk.take_over(&mut &junk[..], true).unwrap_err();
+        assert!(why.contains("refused"), "{why}");
+        assert!(!disk.pending_path().exists());
+        assert!(!disk.partial_path().exists());
         let _ = fs::remove_dir_all(&dir);
     }
 

@@ -1,0 +1,94 @@
+diff --git a/mm/page_reporting.c b/mm/page_reporting.c
+--- a/mm/page_reporting.c
++++ b/mm/page_reporting.c
+@@ -57,6 +57,9 @@
+ #define PAGE_REPORTING_DELAY	0
+ static struct page_reporting_dev_info __rcu *pr_dev_info __read_mostly;
+ 
++/* The pages reported to the host since boot (page_reporting.reported_total_kb). */
++static atomic_long_t page_reporting_reported_pages = ATOMIC_LONG_INIT(0);
++
+ enum {
+ 	PAGE_REPORTING_IDLE = 0,
+ 	PAGE_REPORTING_REQUESTED,
+@@ -129,6 +132,9 @@
+ 		/* If the pages were not reported due to error skip flagging */
+ 		if (!reported)
+ 			continue;
++
++		/* The host has been told about them, merged since or not. */
++		atomic_long_add(1UL << order, &page_reporting_reported_pages);
+ 
+ 		/*
+ 		 * If page was not comingled with another page we can
+@@ -427,6 +433,70 @@
+ module_param_cb(rereport, &page_reporting_rereport_ops, NULL, 0200);
+ MODULE_PARM_DESC(rereport, "Write 1 to report every free page to the host again");
+ 
++/*
++ * How free page reporting is doing, for the guest's memory report. reported_kb is the free
++ * memory marked reported now, which the host has taken back; MemFree less it is free memory
++ * the host still backs (pages on the per-CPU lists, blocks below the reporting order, pages
++ * freed since the last pass, and reported pages a host that faults in clusters took in
++ * again). It is counted from the free lists when read, one list at a time, so a read costs
++ * a walk of the free lists. reported_total_kb is the memory reported since boot: how fast it
++ * grows is how fast freed memory goes back. Both are read only.
++ */
++static int page_reporting_read_only_set(const char *val,
++					const struct kernel_param *kp)
++{
++	return -EPERM;
++}
++
++static int page_reporting_reported_get(char *buffer,
++				       const struct kernel_param *kp)
++{
++	unsigned long pages = 0;
++	unsigned int order, mt;
++	struct zone *zone;
++	struct page *page;
++
++	for_each_populated_zone(zone) {
++		for (order = page_reporting_order; order < NR_PAGE_ORDERS; order++) {
++			for (mt = 0; mt < MIGRATE_TYPES; mt++) {
++				struct list_head *list = &zone->free_area[order].free_list[mt];
++
++				spin_lock_irq(&zone->lock);
++				list_for_each_entry(page, list, lru)
++					if (PageReported(page))
++						pages += 1UL << order;
++				spin_unlock_irq(&zone->lock);
++				cond_resched();
++			}
++		}
++	}
++
++	return sysfs_emit(buffer, "%lu\n", pages << (PAGE_SHIFT - 10));
++}
++
++static int page_reporting_reported_total_get(char *buffer,
++					     const struct kernel_param *kp)
++{
++	unsigned long pages = atomic_long_read(&page_reporting_reported_pages);
++
++	return sysfs_emit(buffer, "%lu\n", pages << (PAGE_SHIFT - 10));
++}
++
++static const struct kernel_param_ops page_reporting_reported_ops = {
++	.set = page_reporting_read_only_set,
++	.get = page_reporting_reported_get,
++};
++
++static const struct kernel_param_ops page_reporting_reported_total_ops = {
++	.set = page_reporting_read_only_set,
++	.get = page_reporting_reported_total_get,
++};
++
++module_param_cb(reported_kb, &page_reporting_reported_ops, NULL, 0444);
++MODULE_PARM_DESC(reported_kb, "Free memory the host has taken back now, in KiB");
++module_param_cb(reported_total_kb, &page_reporting_reported_total_ops, NULL, 0444);
++MODULE_PARM_DESC(reported_total_kb, "Memory reported to the host since boot, in KiB");
++
+ int page_reporting_register(struct page_reporting_dev_info *prdev)
+ {
+ 	int err = 0;

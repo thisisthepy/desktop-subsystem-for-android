@@ -4,10 +4,9 @@
 ; the cache drop and compaction that let free page reporting hand idle memory back to the
 ; host, and how readily the kernel swaps to zram.
 
-; /proc/sys/vm/compact_memory, /proc/sys/vm/swappiness, /proc/sys/vm/compaction_proactiveness,
-; /proc/sys/vm/vfs_cache_pressure and /proc/sys/vm/percpu_pagelist_high_fraction have no label
-; of their own, so they would be plain proc, which vendor_init may not write. A type of their
-; own opens these five and nothing else.
+; /proc/sys/vm/compact_memory, /proc/sys/vm/swappiness, /proc/sys/vm/compaction_proactiveness
+; and /proc/sys/vm/vfs_cache_pressure have no label of their own, so they would be plain proc,
+; which vendor_init may not write. A type of their own opens these four and nothing else.
 (type dsa_proc_vm_tunable)
 (roletype object_r dsa_proc_vm_tunable)
 (typeattributeset fs_type (dsa_proc_vm_tunable))
@@ -16,11 +15,13 @@
 (genfscon proc "/sys/vm/swappiness" (u object_r dsa_proc_vm_tunable ((s0) (s0))))
 (genfscon proc "/sys/vm/compaction_proactiveness" (u object_r dsa_proc_vm_tunable ((s0) (s0))))
 (genfscon proc "/sys/vm/vfs_cache_pressure" (u object_r dsa_proc_vm_tunable ((s0) (s0))))
-(genfscon proc "/sys/vm/percpu_pagelist_high_fraction" (u object_r dsa_proc_vm_tunable ((s0) (s0))))
 (allow vendor_init dsa_proc_vm_tunable (file (write open getattr)))
 (allow init dsa_proc_vm_tunable (file (read write open getattr)))
 (allow vendor_init proc_drop_caches (file (write open getattr)))
 (allow vendor_init proc_page_cluster (file (write open getattr)))
+; Android 16 and 17 label /proc/sys/vm/percpu_pagelist_high_fraction themselves. A second
+; genfscon for the same path makes secilc refuse the whole policy, and init then cannot boot.
+(allow vendor_init proc_percpu_pagelist_high_fraction (file (write open getattr)))
 
 ; vendor.dsa.memory.reclaim (vendor_property_contexts): set to 1 by dsa-channeld when the
 ; guest should drop its caches, and back to 0 by init once it has. Nothing else may set it.
@@ -68,6 +69,21 @@
 (typeattributeset sysfs_type (dsa_sysfs_page_reporting))
 (genfscon sysfs "/module/page_reporting/parameters/rereport" (u object_r dsa_sysfs_page_reporting ((s0) (s0))))
 (allow vendor_init dsa_sysfs_page_reporting (file (write open getattr)))
+
+; The agent reports how free page reporting is doing with the rest of the guest's memory: the
+; free memory the host has back now, the memory reported since boot, and the reported memory
+; the host took back in with a neighbour (read-only parameters DSA's kernel adds). They are
+; plain sysfs otherwise, which no app may read; a type of their own opens these three files to
+; the agent alone, for reading.
+(type dsa_sysfs_page_reporting_stats)
+(roletype object_r dsa_sysfs_page_reporting_stats)
+(typeattributeset fs_type (dsa_sysfs_page_reporting_stats))
+(typeattributeset sysfs_type (dsa_sysfs_page_reporting_stats))
+(genfscon sysfs "/module/page_reporting/parameters/reported_kb" (u object_r dsa_sysfs_page_reporting_stats ((s0) (s0))))
+(genfscon sysfs "/module/page_reporting/parameters/reported_total_kb" (u object_r dsa_sysfs_page_reporting_stats ((s0) (s0))))
+(genfscon sysfs "/module/page_reporting/parameters/refaulted_total_kb" (u object_r dsa_sysfs_page_reporting_stats ((s0) (s0))))
+(allow system_app dsa_sysfs_page_reporting_stats (file (read open getattr)))
+(allow platform_app dsa_sysfs_page_reporting_stats (file (read open getattr)))
 
 ; The agent reports how much compressed swap holds (zram's mm_stat) with the rest of the
 ; guest's memory.
@@ -158,3 +174,26 @@
 (allow hal_codec2_server dsa_codec2_tmpfs (file (ioctl read write getattr map)))
 (allowx hal_codec2_server dsa_codec2_tmpfs (ioctl file ((range 0x7701 0x770b))))
 (allow hal_codec2_client dsa_codec2_tmpfs (file (read write getattr map)))
+
+; Google Play sees the computer's memory as the device's (dsa-memory.rc). The kernel's two
+; parameters, /sys/module/dsa_host_memory/parameters/uids (which apps) and total_kb (how much),
+; get a type of their own: init writes the list of apps when dsa-channeld names them, and
+; system_server reads both to answer those apps' ActivityManager.getMemoryInfo. Nothing else
+; may write the list, so an app cannot name itself, and no app reads either.
+(type dsa_sysfs_host_memory)
+(roletype object_r dsa_sysfs_host_memory)
+(typeattributeset fs_type (dsa_sysfs_host_memory))
+(typeattributeset sysfs_type (dsa_sysfs_host_memory))
+(genfscon sysfs "/module/dsa_host_memory" (u object_r dsa_sysfs_host_memory ((s0) (s0))))
+(allow vendor_init dsa_sysfs_host_memory (dir (search)))
+(allow vendor_init dsa_sysfs_host_memory (file (write open getattr)))
+(allow system_server dsa_sysfs_host_memory (dir (search)))
+(allow system_server dsa_sysfs_host_memory (file (read open getattr)))
+
+; vendor.dsa.host_memory.uids (vendor_property_contexts): dsa-channeld sets it to the apps' uids
+; and init reads it. Only the daemon may set it (channeld.cil).
+(type dsa_host_memory_prop)
+(roletype object_r dsa_host_memory_prop)
+(typeattributeset property_type (dsa_host_memory_prop))
+(typeattributeset vendor_property_type (dsa_host_memory_prop))
+(allow vendor_init dsa_host_memory_prop (file (read open getattr map)))

@@ -51,3 +51,49 @@ fn pr4_a_surface_too_short_for_its_size_gives_no_picture() {
     assert!(picture_from_planes(1, &surface(), 2, 4, 4, 2).is_none());
     assert!(picture_from_planes(1, &surface(), 8, 1, 4, 2).is_none());
 }
+
+#[cfg(windows)]
+#[test]
+fn nfr2_the_decoders_let_their_device_go_with_the_last_of_them() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    use dsa_host_core::video::VideoDecoders;
+    use dsa_host_windows::video_decoder::MediaFoundationDecoders;
+
+    let let_go = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&let_go);
+    let decoders = MediaFoundationDecoders::lazy(
+        Box::new(|_: &str| {}),
+        Box::new(move || {
+            counted.fetch_add(1, Ordering::SeqCst);
+        }),
+    );
+    let first = match decoders.open(Codec::H264, 1280, 720) {
+        Ok(decoder) => decoder,
+        Err(why) => {
+            eprintln!("skipped: this machine decodes no H.264 on a GPU ({why})");
+            return;
+        }
+    };
+    let second = decoders
+        .open(Codec::H264, 1280, 720)
+        .expect("a second decoder shares the first one's device");
+    drop(first);
+    // One decoder still open: what they share stays.
+    decoders.all_closed();
+    assert_eq!(let_go.load(Ordering::SeqCst), 0);
+    drop(second);
+    decoders.all_closed();
+    assert_eq!(let_go.load(Ordering::SeqCst), 1);
+    // Nothing opened since: nothing more to let go.
+    decoders.all_closed();
+    assert_eq!(let_go.load(Ordering::SeqCst), 1);
+    // A decoder opened after that makes a new device, and lets it go in turn.
+    let again = decoders
+        .open(Codec::H264, 1280, 720)
+        .expect("a decoder opens again after the device was let go");
+    drop(again);
+    decoders.all_closed();
+    assert_eq!(let_go.load(Ordering::SeqCst), 2);
+}

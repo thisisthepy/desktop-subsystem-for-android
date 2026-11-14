@@ -10,8 +10,8 @@ struct AppsPage: View {
     var body: some View {
         Form {
             Section {
-                Text(T("AppsIntro.Text")).font(.callout).foregroundStyle(.secondary)
-                Text(T("AppsRootNote.Text")).font(.callout).foregroundStyle(.secondary)
+                Note(text: T("AppsIntro.Text"))
+                Note(text: T("AppsRootNote.Text"))
             }
             BannerSection(shown: vm.error != nil, kind: .error, title: T("AppsErrorBar.Title"), message: vm.error ?? "")
             BannerSection(shown: vm.message != nil, kind: .success, title: T("AppsDoneBar.Title"), message: vm.message ?? "")
@@ -126,7 +126,7 @@ struct AppRowView: View {
                     .disabled(!row.canRunAsArm || vm.isBusy)
                     .help(row.runAsArmTip ?? "")
                 if let tip = row.runAsArmTip {
-                    Text(tip).font(.callout).foregroundStyle(.secondary)
+                    Note(text: tip)
                 }
                 // How far the app may use root: not at all, asking an administrator each time,
                 // or without asking.
@@ -146,8 +146,11 @@ struct AppRowView: View {
                 .help(row.rootTip ?? T("AppsRootNote.Text"))
                 Spacer()
             }
+            // Apps that share a user ID: which, and that root is one setting for them.
+            if let note = row.rootGroupNote {
+                Note(text: note)
+            }
         }
-        .padding(.vertical, 2)
     }
 
     /// Asks whether to erase the app's data, which Android cannot keep when the app's ABI changes.
@@ -177,7 +180,7 @@ struct BackgroundPage: View {
     var body: some View {
         Form {
             Section {
-                Text(T("BackgroundIntro.Text")).font(.callout).foregroundStyle(.secondary)
+                Note(text: T("BackgroundIntro.Text"))
             }
             BannerSection(shown: vm.error != nil, kind: .error, title: T("BackgroundErrorBar.Title"), message: vm.error ?? "")
             BannerSection(shown: vm.message != nil, kind: .success, title: T("BackgroundDoneBar.Title"), message: vm.message ?? "")
@@ -225,7 +228,7 @@ struct WidgetsPage: View {
     var body: some View {
         Form {
             Section {
-                Text(T("WidgetsIntro.Text")).font(.callout).foregroundStyle(.secondary)
+                Note(text: T("WidgetsIntro.Text"))
             }
             BannerSection(shown: vm.error != nil, kind: .error, title: T("WidgetsErrorBar.Title"), message: vm.error ?? "")
             BannerSection(shown: vm.message != nil, kind: .success, title: T("WidgetsDoneBar.Title"), message: vm.message ?? "")
@@ -318,7 +321,6 @@ struct DeviceIdentityPage: View {
                     Text(vm.computerMakeModel).foregroundStyle(.secondary).textSelection(.enabled)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 4)
             }
             Section {
                 ForEach(DeviceIdentityViewModel.aboutKeys, id: \.self) { key in
@@ -337,10 +339,10 @@ struct DeviceIdentityPage: View {
                     .buttonStyle(.borderless)
                 }
             } footer: {
-                Text(T("IdentityComputerNote.Text")).font(.callout).foregroundStyle(.secondary)
+                Note(text: T("IdentityComputerNote.Text"))
             }
             Section(T("IdentityAndroidHeader.Text")) {
-                Text(T("IdentityIntro.Text")).font(.callout).foregroundStyle(.secondary)
+                Note(text: T("IdentityIntro.Text"))
                 Banner(kind: .warning, title: T("IdentityWarning.Title"), message: T("IdentityWarning.Message"))
             }
             BannerSection(shown: vm.error != nil, kind: .error, title: T("SettingsErrorBar.Title"), message: vm.error ?? "")
@@ -392,8 +394,8 @@ struct ImportedCertificateRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(certificate.subject).textSelection(.enabled)
-            Text(issuer).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
-            Text(source).font(.callout).foregroundStyle(.secondary)
+            Note(text: issuer, selectable: true)
+            Note(text: source)
             if !certificate.location.isEmpty {
                 Text(certificate.location).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
             }
@@ -439,10 +441,10 @@ struct NetworkPage: View {
                 SwitchRow(title: T("HostCertificatesCard.Header"), detail: T("HostCertificatesCard.Description"),
                           isOn: vm.hostCertificates, enabled: vm.canChange, set: { await vm.setHostCertificates($0) })
                 if vm.hasNoImportedCertificates {
-                    Text(T("HostCertificatesEmpty.Text")).font(.callout).foregroundStyle(.secondary)
+                    Note(text: T("HostCertificatesEmpty.Text"))
                 } else {
                     if !vm.hostCertificates {
-                        Text(T("HostCertificatesOff.Text")).font(.callout).foregroundStyle(.secondary)
+                        Note(text: T("HostCertificatesOff.Text"))
                     }
                     ForEach(Array(vm.importedCertificates.enumerated()), id: \.offset) { item in
                         ImportedCertificateRow(certificate: item.element, issuer: vm.certificateIssuerText(item.element),
@@ -455,7 +457,7 @@ struct NetworkPage: View {
                           isOn: vm.developerMode, enabled: vm.canChange, set: { await vm.setDeveloperMode($0) })
                 SwitchRow(title: T("AdbAutoConnectCard.Header"), detail: T("AdbAutoConnectCard.Description"),
                           isOn: vm.adbAutoConnect, enabled: vm.canChange, set: { await vm.setAdbAutoConnect($0) })
-                Text(vm.adbAutoConnectStateText).font(.callout).foregroundStyle(.secondary)
+                Note(text: vm.adbAutoConnectStateText)
                 LabeledContent {
                     HStack {
                         Text(vm.adbConnect).font(.system(.body, design: .monospaced)).textSelection(.enabled)
@@ -494,6 +496,7 @@ struct NetworkPage: View {
 struct AdvancedPage: View {
     @ObservedObject var vm: SettingsViewModel
     @ObservedObject var gapps: GappsViewModel
+    @ObservedObject var widevine: WidevineViewModel
     @ObservedObject var backup: BackupViewModel
 
     var body: some View {
@@ -547,6 +550,7 @@ struct AdvancedPage: View {
             Section(T("ArmHeader.Text")) {
                 SwitchRow(title: T("ArmCard.Header"), detail: vm.armStatus + "\n" + vm.armAbis + "\n" + T("ArmCard.Description"),
                           isOn: vm.armTranslation, enabled: vm.canChange, set: { await vm.setArmTranslation($0) })
+                LearnMore(text: T("ArmCard.More"))
                 if vm.armRestartNeeded {
                     Banner(kind: .info, title: T("ArmRestartBar.Title"), message: T("ArmRestartBar.Message"))
                 }
@@ -572,12 +576,14 @@ struct AdvancedPage: View {
                         }
                         Task { await vm.fetchGoogleArmTranslator() }
                     }
+                    LearnMore(text: T("ArmGoogleCard.More"))
                     if let terms = URL(string: vm.googleArmTermsUrl) {
                         Link(T("ArmGoogleTermsLink.Content"), destination: terms).font(.callout)
                     }
                 }
             }
             GappsSection(vm: gapps)
+            WidevineSection(vm: widevine)
             Section(T("RootHeader.Text")) {
                 AdministratorSwitchRow(
                     title: T("RootElevationCard.Header"), detail: T("RootElevationCard.Description"),
@@ -587,7 +593,7 @@ struct AdvancedPage: View {
                 }
                 // Why the switch does not move for this user.
                 if vm.rootElevationNeedsAdministrator {
-                    Text(T("RootElevationAdminReason.Text")).font(.callout).foregroundStyle(.secondary)
+                    Note(text: T("RootElevationAdminReason.Text"))
                 }
                 if vm.rootElevationRestartNeeded {
                     Banner(kind: .info, title: T("RootElevationRestartBar.Title"), message: T("RootElevationRestartBar.Message"))
@@ -595,7 +601,7 @@ struct AdvancedPage: View {
                 LinkRow(title: T("RootLogCard.Header"), detail: vm.rootElevationLog) {
                     Shell.open(folder: Shell.serviceLogFolder(vm.logDir))
                 }
-                Text(T("RootNote.Text")).font(.callout).foregroundStyle(.secondary)
+                Note(text: T("RootNote.Text"))
             }
             Section(T("DiagnosticsHeader.Text")) {
                 AdministratorSwitchRow(
@@ -608,7 +614,7 @@ struct AdvancedPage: View {
                     canChange: vm.canChangeTraces, needsAdministrator: vm.tracesNeedAdministrator, set: { await vm.setResizeTrace($0) }) {
                     Task { await changeAsAdministrator(vm, ["settings", "set", "resize-trace", vm.resizeTrace ? "off" : "on"]) }
                 }
-                Text(T("DiagnosticsNote.Text")).font(.callout).foregroundStyle(.secondary)
+                Note(text: T("DiagnosticsNote.Text"))
             }
             Section(T("LogsHeader.Text")) {
                 LinkRow(title: T("UserLogsCard.Header"), detail: T("UserLogsCard.Description")) {
@@ -669,7 +675,7 @@ struct LogsPage: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(T("LogsNote.Text")).font(.callout).foregroundStyle(.secondary)
+            Note(text: T("LogsNote.Text"))
             if let error = vm.error {
                 Banner(kind: .error, title: T("LogsErrorBar.Title"), message: error)
             }
@@ -718,7 +724,7 @@ struct LogsPage: View {
                 }
             }
             if vm.paused {
-                Text(vm.pausedText).font(.callout).foregroundStyle(.secondary)
+                Note(text: vm.pausedText)
             }
         }
         .padding(20)

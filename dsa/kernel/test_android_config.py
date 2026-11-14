@@ -2,6 +2,8 @@
 
 import os
 import re
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -11,6 +13,7 @@ ARM64_CONFIG = Path(__file__).with_name("android-arm64.config")
 VIRTIO_CONFIG = Path(__file__).with_name("virtio.config")
 PATCHES = Path(__file__).with_name("patches")
 BUILD = Path(__file__).with_name("build.sh")
+APPLY = Path(__file__).with_name("apply-patches.sh")
 
 
 def fragment_lines(path):
@@ -41,6 +44,51 @@ class AndroidKernelConfigTests(unittest.TestCase):
         config = CONFIG.read_text()
         for option in ["CONFIG_IP_NF_NAT=y", "CONFIG_IP6_NF_NAT=y", "CONFIG_NETFILTER_XT_TARGET_REDIRECT=y"]:
             self.assertIn(option, config)
+
+    def test_fr32_listed_apps_see_the_computers_memory_in_meminfo_and_sysinfo(self):
+        # Google Play reads the device's memory from /proc/meminfo and sysinfo(); the apps the
+        # guest lists see the computer's memory there, every other process the VM's own.
+        self.assertIn("CONFIG_DSA_HOST_MEMORY=y", CONFIG.read_text())
+        patch = (PATCHES / "dsa-host-memory.patch").read_text()
+        self.assertIn("+++ b/fs/proc/dsa_host_memory.c", patch)
+        # Both read paths take it: MemTotal in /proc/meminfo and sysinfo()'s totalram.
+        for path in ("fs/proc/meminfo.c", "kernel/sys.c"):
+            hunk = patch[patch.index(f"+++ b/{path}"):]
+            hunk = hunk[:hunk.find("diff --git", 1)] if "diff --git" in hunk[1:] else hunk
+            self.assertIn("+\tdsa_host_memory_adjust(", hunk, path)
+        # Keyed on the calling process's own uid, never on anything a binder peer says.
+        self.assertIn("dsa_app_listed(current_uid())", patch)
+        self.assertNotIn("drivers/android/binder.c", patch)
+        # Only the total changes, and only upwards; free and available memory stay the VM's.
+        self.assertIn("+\tif (pages > info->totalram)\n+\t\tinfo->totalram = pages;", patch)
+        self.assertNotIn("freeram =", patch)
+        # Parameters the bootconfig's kernel.dsa_host_memory.* reach.
+        self.assertIn('+#define MODULE_PARAM_PREFIX "dsa_host_memory."', patch)
+        self.assertIn("+module_param_named(total_kb, dsa_total_kb, ulong, 0444);", patch)
+        self.assertIn("+module_param_cb(uids, &dsa_uids_ops, NULL, 0644);", patch)
+
+    def test_fr32_the_host_memory_patch_hunks_count_their_lines(self):
+        header = re.compile(r"^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@")
+        old_left = new_left = 0
+        current = None
+        for line in (PATCHES / "dsa-host-memory.patch").read_text().splitlines():
+            match = header.match(line)
+            if match:
+                self.assertEqual((old_left, new_left), (0, 0), current)
+                current = line
+                old_left = int(match.group(1) or 1)
+                new_left = int(match.group(2) or 1)
+                continue
+            if old_left == 0 and new_left == 0:
+                continue
+            if line.startswith("+"):
+                new_left -= 1
+            elif line.startswith("-"):
+                old_left -= 1
+            else:
+                old_left -= 1
+                new_left -= 1
+        self.assertEqual((old_left, new_left), (0, 0), current)
 
     def test_fr35_the_su_guard_is_built_in_and_hides_su_by_inode(self):
         # su exists only for the uids the host allows; the guard returns -ENOENT for any
@@ -242,10 +290,20 @@ class AndroidKernelConfigTests(unittest.TestCase):
             "dsa-arm-translation.rc": ["/mnt/dsa-addons/arm-translation.img",
                                        "/data/vendor/dsa/arm-translation/system.img",
                                        "/system/etc/dsa/arm-translation/default.img"],
+            "dsa-widevine.rc": ["/mnt/dsa-addons/widevine.img"],
         }
+        # In the host's direct-mapped mode each add-on image is mounted from its own partition on
+        # the persistent memory the add-on disk is then, with DAX, so it is not read into a cache.
+        partitions = {"dsa-gapps.rc": "/dev/block/by-name/dsa_gapps",
+                      "dsa-arm-translation.rc": "/dev/block/by-name/dsa_arm_translation",
+                      "dsa-widevine.rc": "/dev/block/by-name/dsa_widevine"}
         for name, files in images.items():
             mounts = [line.split() for line in (image / name).read_text().splitlines()
                       if line.strip().startswith("mount erofs ")]
+            mapped = [words for words in mounts if words[2] == partitions[name]]
+            self.assertEqual(len(mapped), 1, name)
+            self.assertIn("dax=always", mapped[0][-1].split(","), name)
+            mounts = [words for words in mounts if words not in mapped]
             self.assertEqual(sorted(words[2] for words in mounts), sorted(files), name)
             for words in mounts:
                 self.assertNotIn("loop@", " ".join(words), name)
@@ -258,6 +316,55 @@ class AndroidKernelConfigTests(unittest.TestCase):
         self.assertEqual([words[2] for words in disk], ["/dev/block/by-name/dsa_addons"])
         # The loop driver stays for apexd.
         self.assertIn("CONFIG_BLK_DEV_LOOP=y", lines)
+
+    def test_nfr1_the_system_images_can_be_mapped_from_persistent_memory_with_dax(self):
+        # With the direct-mapped system setting the host attaches the read-only disks as
+        # persistent memory (Hyper-V's through ACPI NFIT, virtio-pmem under KVM), and erofs maps
+        # their files with dax=always instead of caching them in the guest.
+        lines = fragment_lines(CONFIG)
+        for option in ["CONFIG_ACPI_NFIT=y", "CONFIG_LIBNVDIMM=y", "CONFIG_BLK_DEV_PMEM=y",
+                       "CONFIG_VIRTIO_PMEM=y", "CONFIG_ZONE_DEVICE=y", "CONFIG_DAX=y",
+                       "CONFIG_FS_DAX=y", "CONFIG_EROFS_FS=y"]:
+            self.assertIn(option, lines)
+        # dm-linear carries DAX for the logical partitions; dm-verity cannot, so the image's
+        # direct-mapped table verifies nothing itself (the host checks the disk instead).
+        patch = (PATCHES / "pmem-dax.patch").read_text()
+        self.assertIn("drivers/acpi/nfit/core.c", patch)
+        # A raw namespace on Hyper-V gets page structs, which DAX needs, without a pfn info
+        # block the read-only device could not hold.
+        self.assertIn("+\t\tset_bit(ND_REGION_PAGEMAP, &ndr_desc->flags);", patch)
+        # The NVDIMM bus sits below the platform device "nfit", which the image names as a boot
+        # device, so first stage init makes by-name links for the persistent memory disk.
+        self.assertIn('platform_device_register_simple("nfit", PLATFORM_DEVID_NONE,', patch)
+        self.assertIn("nvdimm_bus_register(acpi_nfit_bus_parent(dev),", patch)
+        self.assertIn("+#include <linux/platform_device.h>", patch)
+        # virtio-pmem's bus moves below the platform device "virtio-pmem" the same way: the VMM
+        # picks a pmem device's PCI slot itself, so the slot cannot be named as a boot device.
+        self.assertIn("drivers/nvdimm/virtio_pmem.c", patch)
+        self.assertIn('platform_device_register_simple("virtio-pmem",', patch)
+        self.assertIn("nvdimm_bus_register(virtio_pmem_bus_parent(vdev),", patch)
+
+    def test_nfr1_persistent_memory_disks_are_read_only_in_the_guest(self):
+        # Every persistent memory device in the guest is a disk image the host maps read only,
+        # so its region is read only and the pmem driver marks its disk read only: a write
+        # fails in the guest rather than reaching the host's mapping, as on the read-only SCSI
+        # disk outside the direct-mapped mode.
+        patch = (PATCHES / "pmem-dax.patch").read_text().replace("\r\n", "\n")
+        self.assertIn("+\tND_REGION_READONLY = 5,", patch)
+        self.assertIn("+\tif (test_bit(ND_REGION_READONLY, &ndr_desc->flags))\n+\t\tro = 1;", patch)
+        self.assertIn("+\t\tset_bit(ND_REGION_READONLY, &ndr_desc->flags);", patch)
+        self.assertIn("+\tset_bit(ND_REGION_READONLY, &ndr_desc.flags);", patch)
+
+    def test_nfr1_the_pmem_patch_hunks_count_their_lines(self):
+        text = (PATCHES / "pmem-dax.patch").read_text().replace("\r\n", "\n")
+        hunks = re.split(r"(?m)^(@@ -\d+,(\d+) \+\d+,(\d+) @@.*)$", text)
+        self.assertGreater(len(hunks), 1)
+        for at in range(1, len(hunks), 4):
+            old, new = int(hunks[at + 1]), int(hunks[at + 2])
+            body = [line for line in hunks[at + 3].strip("\n").split("\n")
+                    if not line.startswith(("diff --git ", "--- a/", "+++ b/"))]
+            self.assertEqual(sum(1 for line in body if line[:1] in (" ", "-")), old, hunks[at])
+            self.assertEqual(sum(1 for line in body if line[:1] in (" ", "+")), new, hunks[at])
 
     def test_fr1_binder_device_nodes_are_created_for_android_init(self):
         config = CONFIG.read_text()
@@ -345,6 +452,41 @@ class AndroidKernelConfigTests(unittest.TestCase):
         names = sorted(p.name for p in PATCHES.glob("*.patch"))
         self.assertLess(names.index("page-reporting-no-delay.patch"),
                         names.index("page-reporting-rereport.patch"))
+
+    def test_nfr2_the_guest_says_how_much_free_memory_the_host_has_back(self):
+        # Read-only parameters for the agent's memory report: the free memory marked reported
+        # now (counted from the free lists when read) and the memory reported since boot. A
+        # write is refused rather than reaching a missing set operation.
+        patch = (PATCHES / "page-reporting-stats.patch").read_text()
+        self.assertIn("+++ b/mm/page_reporting.c", patch)
+        self.assertIn("+module_param_cb(reported_kb, &page_reporting_reported_ops, NULL, 0444);", patch)
+        self.assertIn("+module_param_cb(reported_total_kb, &page_reporting_reported_total_ops, NULL, 0444);",
+                      patch)
+        self.assertIn("+\t\tatomic_long_add(1UL << order, &page_reporting_reported_pages);", patch)
+        self.assertIn("+\treturn -EPERM;", patch)
+        names = sorted(p.name for p in PATCHES.glob("*.patch"))
+        self.assertLess(names.index("page-reporting-rereport.patch"),
+                        names.index("page-reporting-stats.patch"))
+
+    def test_nfr2_free_pages_the_host_backs_again_with_a_neighbour_are_reported_again(self):
+        # Hyper-V faults guest memory in 64 KiB clusters. When the allocator hands out a reported
+        # block smaller than the cluster the host names (page_reporting.fault_cluster_order), the
+        # free blocks in the rest of the cluster lose their reported mark and the next pass
+        # reports them again. Off (0) unless the host sets it.
+        patch = (PATCHES / "page-reporting-taken-clusters.patch").read_text()
+        for path in ["mm/page_alloc.c", "mm/page_reporting.c", "mm/page_reporting.h"]:
+            self.assertIn(f"+++ b/{path}", patch)
+        self.assertIn("+\tbool reported = page_reported(page);", patch)
+        self.assertIn("+\tif (reported)\n+\t\tpage_reporting_taken(zone, page, high);", patch)
+        self.assertIn("+\tif (order < page_reporting_fault_cluster_order)", patch)
+        self.assertIn("+unsigned int page_reporting_fault_cluster_order __read_mostly;", patch)
+        self.assertIn("+module_param_cb(fault_cluster_order, &page_reporting_fault_cluster_ops,", patch)
+        self.assertIn("+\t\t\t__ClearPageReported(p);", patch)
+        self.assertIn("+module_param_cb(refaulted_total_kb, &page_reporting_refaulted_total_ops, NULL, 0444);",
+                      patch)
+        names = sorted(p.name for p in PATCHES.glob("*.patch"))
+        self.assertLess(names.index("page-reporting-stats.patch"),
+                        names.index("page-reporting-taken-clusters.patch"))
 
     def test_nfr1_cold_zram_pages_can_be_written_to_a_backing_file_by_age(self):
         # Writeback by age needs the access time; compressing a page again with zstd must not
@@ -552,6 +694,71 @@ class AndroidKernelConfigTests(unittest.TestCase):
         body = [line[1:] for line in patch if line[:1] in (" ", "+") and "obj-" in line]
         self.assertLess(body.index("obj-$(CONFIG_HYPERV_VSOCKETS) += hv_sock.o"),
                         body.index("obj-$(CONFIG_VIRTIO_VSOCKETS) += vmw_vsock_virtio_transport.o"))
+
+    def test_fr1_a_stacked_patch_series_applies_again_to_the_tree_it_patched(self):
+        # CI runs build.sh twice in one job (configure, then build). The page_reporting
+        # patches stack on mm/page_reporting.c, so once a later one rewrites the lines an
+        # earlier one left, the earlier one no longer reverses alone, and a check made one
+        # patch at a time tried to apply it again and failed.
+        self.assertIn('"$kernel_dir/apply-patches.sh" --reset "$src"', BUILD.read_text())
+        self.assertNotIn("apply --reverse --check", BUILD.read_text())
+        scratch = Path(__file__).resolve().parents[2] / ".scratch"
+        scratch.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=scratch, prefix="kernel-patch-test.") as work:
+            work = Path(work)
+            src, patches = work / "src", work / "patches"
+            src.mkdir()
+            patches.mkdir()
+            env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
+                       GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
+
+            def git(*args, check=True):
+                return subprocess.run(["git", "-C", str(src), *args], env=env, check=check,
+                                      capture_output=True, text=True)
+
+            lines = [f"line {i}\n" for i in range(12)]
+            source = src / "page_reporting.c"
+            source.write_text("".join(lines))
+            git("init", "-q")
+            git("add", ".")
+            git("commit", "-q", "-m", "tag")
+            lines[5] = "line 5, first patch\n"
+            source.write_text("".join(lines))
+            (patches / "a-first.patch").write_text(git("diff").stdout)
+            git("add", ".")
+            lines[6] = "line 6, second patch\n"
+            source.write_text("".join(lines))
+            (src / "added.c").write_text("added\n")
+            git("add", "-N", "added.c")
+            (patches / "b-second.patch").write_text(git("diff").stdout)
+            git("reset", "-q", "--hard")
+            (src / "added.c").unlink(missing_ok=True)
+            patched = "".join(lines)
+
+            def apply(*flags):
+                return subprocess.run(["bash", str(APPLY), *flags, str(src)], check=False,
+                                      capture_output=True, text=True,
+                                      env=dict(env, DSA_KERNEL_PATCHES=str(patches)))
+
+            for _ in range(2):
+                result = apply("--reset")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(source.read_text(), patched)
+                self.assertEqual((src / "added.c").read_text(), "added\n")
+            # The second run wrote nothing, and the first patch alone no longer reverses.
+            self.assertIn("0 written", result.stderr)
+            self.assertNotEqual(git("apply", "--reverse", "--check",
+                                    str(patches / "a-first.patch"), check=False).returncode, 0)
+
+            # A file the series does not explain is kept unless the caller owns the tree.
+            source.write_text("edited\n")
+            result = apply()
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("page_reporting.c has changes the patches do not make", result.stderr)
+            self.assertEqual(source.read_text(), "edited\n")
+            result = apply("--reset")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(source.read_text(), patched)
 
     def test_fr27_no_patch_touches_x86_only_code(self):
         # The same patches apply to both architectures' builds.

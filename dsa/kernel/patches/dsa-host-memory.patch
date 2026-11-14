@@ -1,0 +1,263 @@
+diff --git a/fs/proc/Kconfig b/fs/proc/Kconfig
+index 6ae966c..6410cdf 100644
+--- a/fs/proc/Kconfig
++++ b/fs/proc/Kconfig
+@@ -120,6 +120,21 @@ config PROC_CHILDREN
+ 	  Say Y if you are running any user-space software which takes benefit from
+ 	  this interface. For example, rkt is such a piece of software.
+ 
++config DSA_HOST_MEMORY
++	bool "DSA: show chosen apps the computer's memory as the device's"
++	depends on PROC_FS
++	default n
++	help
++	  The Desktop Subsystem for Android guest starts small and grows, so
++	  its memory size says nothing about the computer it runs on. This
++	  shows the apps whose uids are written to
++	  /sys/module/dsa_host_memory/parameters/uids the computer's memory
++	  (kernel.dsa_host_memory.total_kb in bootconfig) as MemTotal in
++	  /proc/meminfo and as totalram in sysinfo(). Every other process
++	  sees the guest's own memory.
++
++	  Unless you are building the DSA guest kernel, say N.
++
+ config PROC_PID_ARCH_STATUS
+ 	def_bool n
+ 	depends on PROC_FS
+diff --git a/fs/proc/Makefile b/fs/proc/Makefile
+index 7b4db9c..897fc67 100644
+--- a/fs/proc/Makefile
++++ b/fs/proc/Makefile
+@@ -34,3 +34,4 @@ proc-$(CONFIG_PROC_VMCORE)	+= vmcore.o
+ proc-$(CONFIG_PRINTK)	+= kmsg.o
+ proc-$(CONFIG_PROC_PAGE_MONITOR)	+= page.o
+ proc-$(CONFIG_BOOT_CONFIG)	+= bootconfig.o
++proc-$(CONFIG_DSA_HOST_MEMORY)	+= dsa_host_memory.o
+diff --git a/fs/proc/dsa_host_memory.c b/fs/proc/dsa_host_memory.c
+new file mode 100644
+index 0000000..eb19e68
+--- /dev/null
++++ b/fs/proc/dsa_host_memory.c
+@@ -0,0 +1,156 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * DSA host memory: the apps the guest names see the computer's memory as the
++ * device's memory.
++ *
++ * The DSA guest starts with a small VM and grows it as it needs, so the size
++ * its kernel reports says nothing about the computer it runs on. Some apps
++ * pick what to install by that size: an app store hands a device with little
++ * memory a build a 64-bit only guest cannot run. For the apps the guest
++ * names, MemTotal in /proc/meminfo and totalram in sysinfo() are the
++ * computer's physical memory instead. Every other process sees the guest's
++ * own memory, so memory management (lmkd, cache limits) is unchanged.
++ *
++ * Two parameters:
++ *
++ *   dsa_host_memory.total_kb   the computer's physical memory in KiB, which
++ *                              the host passes in the boot's bootconfig
++ *                              (kernel.dsa_host_memory.total_kb). 0, or no
++ *                              more than the guest has, changes nothing.
++ *   dsa_host_memory.uids       the Android app IDs that see it (a uid modulo
++ *                              100000, so the app's copy for every Android
++ *                              user is included), comma separated, at most
++ *                              DSA_HOST_MEMORY_MAX_UIDS. The guest's control
++ *                              daemon names them from the package manager's
++ *                              list, and init writes them here. "none" names
++ *                              no app.
++ *
++ * Only MemTotal and totalram change. Free and available memory stay the
++ * guest's, so an app that sizes a cache from what is free takes no more than
++ * the guest has.
++ */
++
++#include <linux/cred.h>
++#include <linux/dsa_host_memory.h>
++#include <linux/kernel.h>
++#include <linux/mm.h>
++#include <linux/moduleparam.h>
++#include <linux/seqlock.h>
++#include <linux/slab.h>
++#include <linux/string.h>
++#include <linux/uidgid.h>
++
++/*
++ * Built into proc, whose parameters would otherwise be proc.*: these are
++ * dsa_host_memory.* on the command line and in /sys/module/dsa_host_memory.
++ */
++#undef MODULE_PARAM_PREFIX
++#define MODULE_PARAM_PREFIX "dsa_host_memory."
++
++#define DSA_HOST_MEMORY_MAX_UIDS 16
++/* An Android uid is the user ID times 100000 plus the app ID. */
++#define DSA_ANDROID_PER_USER_RANGE 100000
++
++static unsigned long dsa_total_kb;
++module_param_named(total_kb, dsa_total_kb, ulong, 0444);
++MODULE_PARM_DESC(total_kb, "The computer's physical memory in KiB, which the named apps see");
++
++static DEFINE_SEQLOCK(dsa_uids_lock);
++static unsigned int dsa_uids[DSA_HOST_MEMORY_MAX_UIDS];
++static unsigned int dsa_uid_count;
++
++static bool dsa_app_listed(kuid_t kuid)
++{
++	unsigned int app = from_kuid(&init_user_ns, kuid) % DSA_ANDROID_PER_USER_RANGE;
++	unsigned int seq, i;
++	bool listed;
++
++	do {
++		seq = read_seqbegin(&dsa_uids_lock);
++		listed = false;
++		for (i = 0; i < dsa_uid_count; i++) {
++			if (dsa_uids[i] == app) {
++				listed = true;
++				break;
++			}
++		}
++	} while (read_seqretry(&dsa_uids_lock, seq));
++	return listed;
++}
++
++void dsa_host_memory_adjust(struct sysinfo *info)
++{
++	unsigned long pages;
++
++	if (!dsa_total_kb || !READ_ONCE(dsa_uid_count) || !dsa_app_listed(current_uid()))
++		return;
++	pages = dsa_total_kb >> (PAGE_SHIFT - 10);
++	/* si_meminfo() counts in pages, with mem_unit set to the page size. */
++	if (pages > info->totalram)
++		info->totalram = pages;
++}
++
++static int dsa_uids_set(const char *val, const struct kernel_param *kp)
++{
++	unsigned int parsed[DSA_HOST_MEMORY_MAX_UIDS];
++	unsigned int count = 0;
++	char *copy, *cursor, *word;
++	int err = 0;
++
++	copy = kstrdup(val, GFP_KERNEL);
++	if (!copy)
++		return -ENOMEM;
++	cursor = strim(copy);
++	/* "none" names no app: init cannot write an empty value. */
++	if (!strcmp(cursor, "none"))
++		*cursor = 0;
++	while ((word = strsep(&cursor, ",")) != NULL) {
++		unsigned int uid;
++
++		word = strim(word);
++		if (!*word)
++			continue;
++		if (count == DSA_HOST_MEMORY_MAX_UIDS) {
++			err = -E2BIG;
++			break;
++		}
++		err = kstrtouint(word, 10, &uid);
++		if (err)
++			break;
++		parsed[count++] = uid % DSA_ANDROID_PER_USER_RANGE;
++	}
++	kfree(copy);
++	if (err)
++		return err;
++
++	write_seqlock(&dsa_uids_lock);
++	memcpy(dsa_uids, parsed, count * sizeof(parsed[0]));
++	WRITE_ONCE(dsa_uid_count, count);
++	write_sequnlock(&dsa_uids_lock);
++	return 0;
++}
++
++static int dsa_uids_get(char *buffer, const struct kernel_param *kp)
++{
++	unsigned int uids[DSA_HOST_MEMORY_MAX_UIDS];
++	unsigned int count, seq, i;
++	int len = 0;
++
++	do {
++		seq = read_seqbegin(&dsa_uids_lock);
++		count = dsa_uid_count;
++		memcpy(uids, dsa_uids, count * sizeof(uids[0]));
++	} while (read_seqretry(&dsa_uids_lock, seq));
++	for (i = 0; i < count; i++)
++		len += scnprintf(buffer + len, PAGE_SIZE - len, "%s%u", i ? "," : "", uids[i]);
++	len += scnprintf(buffer + len, PAGE_SIZE - len, "\n");
++	return len;
++}
++
++static const struct kernel_param_ops dsa_uids_ops = {
++	.set = dsa_uids_set,
++	.get = dsa_uids_get,
++};
++
++module_param_cb(uids, &dsa_uids_ops, NULL, 0644);
++MODULE_PARM_DESC(uids, "Android app IDs that see the computer's memory, comma separated");
+diff --git a/fs/proc/meminfo.c b/fs/proc/meminfo.c
+index a458f1e..7f31a90 100644
+--- a/fs/proc/meminfo.c
++++ b/fs/proc/meminfo.c
+@@ -19,6 +19,7 @@
+ #endif
+ #include <linux/zswap.h>
+ #include <asm/page.h>
++#include <linux/dsa_host_memory.h>
+ #include "internal.h"
+ 
+ void __attribute__((weak)) arch_report_meminfo(struct seq_file *m)
+@@ -42,6 +43,7 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
+ 	int lru;
+ 
+ 	si_meminfo(&i);
++	dsa_host_memory_adjust(&i);
+ 	si_swapinfo(&i);
+ 	committed = vm_memory_committed();
+ 
+diff --git a/include/linux/dsa_host_memory.h b/include/linux/dsa_host_memory.h
+new file mode 100644
+index 0000000..324fdce
+--- /dev/null
++++ b/include/linux/dsa_host_memory.h
+@@ -0,0 +1,19 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * DSA host memory: the apps the guest names see the computer's memory as the
++ * device's memory, in /proc/meminfo and sysinfo(). See fs/proc/dsa_host_memory.c.
++ */
++#ifndef _LINUX_DSA_HOST_MEMORY_H
++#define _LINUX_DSA_HOST_MEMORY_H
++
++struct sysinfo;
++
++#ifdef CONFIG_DSA_HOST_MEMORY
++void dsa_host_memory_adjust(struct sysinfo *info);
++#else
++static inline void dsa_host_memory_adjust(struct sysinfo *info)
++{
++}
++#endif
++
++#endif /* _LINUX_DSA_HOST_MEMORY_H */
+diff --git a/kernel/sys.c b/kernel/sys.c
+index c8376d7..14366f8 100644
+--- a/kernel/sys.c
++++ b/kernel/sys.c
+@@ -78,6 +78,8 @@
+ 
+ #include <trace/events/task.h>
+ 
++#include <linux/dsa_host_memory.h>
++
+ #include "uid16.h"
+ 
+ #ifndef SET_UNALIGN_CTL
+@@ -2910,6 +2912,7 @@ static int do_sysinfo(struct sysinfo *info)
+ 	info->procs = nr_threads;
+ 
+ 	si_meminfo(info);
++	dsa_host_memory_adjust(info);
+ 	si_swapinfo(info);
+ 
+ 	/*

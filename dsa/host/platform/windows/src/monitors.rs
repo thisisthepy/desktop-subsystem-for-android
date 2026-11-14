@@ -3,7 +3,10 @@
 //! The service runs in session 0, whose desktop is not the user's: monitor calls made there
 //! describe session 0's. So the processes in the user's session record the monitors in a small
 //! file in the user's local application data, before they ask for Android and whenever the
-//! monitors change, and the service reads it when it starts the VM. The record outlives them
+//! monitors change, and the service reads it when it starts the VM. Each monitor is recorded
+//! with its size in physical pixels, its DPI and whether it is the main one, so the display is
+//! sized in guest pixels: a task drawn at the main monitor's density on a monitor of a lower
+//! scale needs more of them than the monitor has pixels. The record outlives them
 //! all, so an Android started with no window process running still gets the last known size.
 //! Without a record the size the image names stays.
 //!
@@ -21,12 +24,28 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use dsa_host_core::guest_display::{
-    boot_density, density_record_text, display_for, parse_density_record, parse_record, record_text,
+    boot_density, density_record_text, display_for, parse_density_record, parse_record,
+    record_text, Monitor,
 };
 use dsa_host_core::guest_refresh;
 
 /// More than any real record.
 const MAX_RECORD_BYTES: u64 = 4096;
+
+/// Opens the plain record file `path` below `local_app_data`, refusing links and hard links
+/// in the user's folder.
+fn open_record(local_app_data: &Path, path: &Path) -> Option<std::fs::File> {
+    #[cfg(windows)]
+    {
+        let root = crate::paths::UserRoot::in_local_app_data(local_app_data);
+        if std::fs::symlink_metadata(root.dir()).is_ok() {
+            crate::safe_fs::guard_files(root.dir(), &[path]).ok()?;
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = local_app_data;
+    std::fs::File::open(path).ok()
+}
 
 /// Where the monitors are recorded, below a user's local application data.
 pub fn record_path(local_app_data: &Path) -> PathBuf {
@@ -36,14 +55,14 @@ pub fn record_path(local_app_data: &Path) -> PathBuf {
 /// The guest display for the monitors recorded below `local_app_data`, when there is a record
 /// with a usable monitor in it.
 pub fn recorded_display(local_app_data: &Path) -> Option<(u32, u32)> {
-    let file = std::fs::File::open(record_path(local_app_data)).ok()?;
+    let file = open_record(local_app_data, &record_path(local_app_data))?;
     let mut text = String::new();
     file.take(MAX_RECORD_BYTES).read_to_string(&mut text).ok()?;
     display_for(&parse_record(&text))
 }
 
 /// Writes the record whole, so the service never reads half of one.
-pub fn write_record(local_app_data: &Path, monitors: &[(u32, u32)]) -> std::io::Result<()> {
+pub fn write_record(local_app_data: &Path, monitors: &[Monitor]) -> std::io::Result<()> {
     let path = record_path(local_app_data);
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
@@ -62,7 +81,7 @@ pub fn refresh_record_path(local_app_data: &Path) -> PathBuf {
 /// The refresh rate of the fastest monitor recorded below `local_app_data`, in hertz, when
 /// there is a record with a rate in it.
 pub fn recorded_refresh(local_app_data: &Path) -> Option<u32> {
-    let file = std::fs::File::open(refresh_record_path(local_app_data)).ok()?;
+    let file = open_record(local_app_data, &refresh_record_path(local_app_data))?;
     let mut text = String::new();
     file.take(MAX_RECORD_BYTES).read_to_string(&mut text).ok()?;
     guest_refresh::parse_record(&text)
@@ -87,13 +106,11 @@ pub fn density_record_path(local_app_data: &Path) -> PathBuf {
 /// The density Android starts at for the main monitor recorded below `local_app_data`: that
 /// monitor's, or a 100% monitor's when there is no record.
 pub fn recorded_density(local_app_data: &Path) -> u32 {
-    let dpi = std::fs::File::open(density_record_path(local_app_data))
-        .ok()
-        .and_then(|file| {
-            let mut text = String::new();
-            file.take(MAX_RECORD_BYTES).read_to_string(&mut text).ok()?;
-            parse_density_record(&text)
-        });
+    let dpi = open_record(local_app_data, &density_record_path(local_app_data)).and_then(|file| {
+        let mut text = String::new();
+        file.take(MAX_RECORD_BYTES).read_to_string(&mut text).ok()?;
+        parse_density_record(&text)
+    });
     boot_density(dpi)
 }
 
@@ -137,8 +154,9 @@ mod session {
         GetDpiForMonitor, GetDpiForSystem, SetThreadDpiAwarenessContext,
         DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, MDT_EFFECTIVE_DPI,
     };
+    use windows_sys::Win32::UI::WindowsAndMessaging::MONITORINFOF_PRIMARY;
 
-    use super::{frequency_hz, write_density_record, write_record, write_refresh_record};
+    use super::{frequency_hz, write_density_record, write_record, write_refresh_record, Monitor};
 
     /// The DPI of this session's main monitor (96 is 100%) as it is now. Windows' system DPI
     /// is the main monitor's as of sign-in, so it stands in only when the monitor's own cannot
@@ -177,31 +195,38 @@ mod session {
         _: *mut RECT,
         list: LPARAM,
     ) -> i32 {
-        let list = &mut *(list as *mut Vec<(u32, u32)>);
+        let list = &mut *(list as *mut Vec<Monitor>);
         let mut info: MONITORINFO = std::mem::zeroed();
         info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
         if GetMonitorInfoW(monitor, &mut info) != 0 {
             let rect = info.rcMonitor;
-            list.push((
-                (rect.right - rect.left).max(0) as u32,
-                (rect.bottom - rect.top).max(0) as u32,
-            ));
+            let (mut x, mut y) = (0u32, 0u32);
+            let dpi = (GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut x, &mut y) == 0 && x > 0)
+                .then_some(x);
+            list.push(Monitor {
+                width: (rect.right - rect.left).max(0) as u32,
+                height: (rect.bottom - rect.top).max(0) as u32,
+                dpi,
+                main: info.dwFlags & MONITORINFOF_PRIMARY != 0,
+            });
         }
         TRUE
     }
 
-    /// The monitors of this session in physical pixels, in the order Windows lists them.
-    pub fn current() -> Vec<(u32, u32)> {
-        let mut monitors: Vec<(u32, u32)> = Vec::new();
+    /// The monitors of this session in physical pixels, with their DPI and which is the main
+    /// one, in the order Windows lists them.
+    pub fn current() -> Vec<Monitor> {
+        let mut monitors: Vec<Monitor> = Vec::new();
         // SAFETY: the callback only runs during the call, while `monitors` lives. A thread
-        // that is not per-monitor aware would see a 200% monitor at half its pixels.
+        // that is not per-monitor aware would see a 200% monitor at half its pixels, and
+        // every monitor at 96 DPI.
         unsafe {
             let previous = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
             EnumDisplayMonitors(
                 std::ptr::null_mut(),
                 std::ptr::null(),
                 Some(add_monitor),
-                &mut monitors as *mut Vec<(u32, u32)> as LPARAM,
+                &mut monitors as *mut Vec<Monitor> as LPARAM,
             );
             SetThreadDpiAwarenessContext(previous);
         }
@@ -264,7 +289,7 @@ mod session {
 
     /// A session that reports no monitors (no desktop, as over SSH) leaves the last record,
     /// and one that names no monitor's rate leaves the last rate.
-    fn record(monitors: &[(u32, u32)], refresh: Option<u32>, dpi: u32) -> Result<(), String> {
+    fn record(monitors: &[Monitor], refresh: Option<u32>, dpi: u32) -> Result<(), String> {
         if monitors.is_empty() {
             return Ok(());
         }
@@ -279,9 +304,9 @@ mod session {
         }
     }
 
-    /// The monitors' sizes, the fastest one's refresh rate and the main one's DPI, as last
-    /// recorded.
-    type Recorded = (Vec<(u32, u32)>, Option<u32>, u32);
+    /// The monitors' sizes and scales, the fastest one's refresh rate and the main one's DPI,
+    /// as last recorded.
+    type Recorded = (Vec<Monitor>, Option<u32>, u32);
 
     /// Keeps the record up to date from a loop that runs anyway.
     #[derive(Default)]

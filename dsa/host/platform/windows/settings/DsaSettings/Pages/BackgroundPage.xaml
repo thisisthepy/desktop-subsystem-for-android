@@ -18,14 +18,14 @@
         </Grid>
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
             <StackPanel Style="{StaticResource PageContent}">
-                <TextBlock Text="{l:Text BackgroundIntro.Text}" Style="{StaticResource Note}" />
+                <TextBlock Text="{l:Text BackgroundIntro.Text}" Style="{StaticResource PageIntro}" />
 
                 <ProgressBar IsIndeterminate="True" Margin="0,8,0,0"
                              Visibility="{Binding IsBusy, Converter={StaticResource Visible}}" />
                 <ui:InfoBar Title="{l:Text BackgroundErrorBar.Title}" Severity="Error" IsClosable="False"
-                            IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" Margin="0,0,0,4" />
+                            IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" />
                 <ui:InfoBar Title="{l:Text BackgroundDoneBar.Title}" Severity="Success" IsClosable="False"
-                            IsOpen="{Binding HasMessage, Mode=OneWay}" Message="{Binding Message, Mode=OneWay}" Margin="0,0,0,4" />
+                            IsOpen="{Binding HasMessage, Mode=OneWay}" Message="{Binding Message, Mode=OneWay}" />
 
                 <TextBlock Text="{l:Text BackgroundAppsHeader.Text}" Style="{StaticResource SectionHeader}" />
                 <TextBlock Text="{l:Text BackgroundNone.Text}" Style="{StaticResource Note}"
@@ -33,7 +33,7 @@
                 <l:RowList ItemsSource="{Binding Apps, Mode=OneWay}">
                     <l:RowList.ItemTemplate>
                         <DataTemplate>
-                            <ui:CardControl Margin="0,0,0,4">
+                            <ui:CardControl>
                                 <ui:CardControl.Header>
                                     <StackPanel Orientation="Horizontal">
                                         <Border Width="40" Height="40" Margin="0,0,12,0">

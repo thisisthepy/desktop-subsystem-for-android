@@ -631,6 +631,9 @@ pub struct App {
     /// How far the app may use root: `off`, `ask` or `remember`, or `unavailable` while root
     /// elevation is off for the computer. Empty from a `dsa` that does not say.
     pub root: String,
+    /// The user ID the app shares with other apps (`android:sharedUserId`); empty for an app
+    /// with a user ID of its own, and from a `dsa` that does not say.
+    pub shared_user_id: String,
 }
 
 /// The "Run as ARM" switch of an app, as `dsa apps list` reports it.
@@ -675,6 +678,7 @@ impl App {
             icon_png: base64_decode(json["icon_png"].as_str().unwrap_or_default()),
             run_as_arm: RunAsArm::read(&json["run_as_arm"]),
             root: text(json, "root"),
+            shared_user_id: text(json, "shared_user_id"),
         }
     }
 }
@@ -1115,6 +1119,90 @@ impl Gapps {
 
     /// Whether the remove button may be pressed: only with a package, and not while a
     /// request is under way.
+    pub fn can_remove(&self, busy: bool) -> bool {
+        !busy && self.package.is_some()
+    }
+}
+
+/// Google's terms for what its SDK repository gives, which Widevine comes from.
+pub const WIDEVINE_TERMS_URL: &str = "https://developer.android.com/studio/terms";
+/// Where the emulator image Widevine is taken from is downloaded.
+pub const WIDEVINE_SOURCE: &str = "https://dl.google.com/android/repository/sys-img/google_apis/";
+
+/// The Widevine module DSA installed for the user, as dsa describes it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WidevinePackage {
+    /// The APEX's file name, `com.google.android.widevine.apex`.
+    pub apex: String,
+    /// Google's image it came from: its build, API level and revision.
+    pub version: String,
+    pub android_major: u64,
+    pub abi: String,
+    pub source: String,
+}
+
+/// What the protected content item shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WidevineState {
+    /// No module is installed, and the running Android has none.
+    NotInstalled,
+    /// A module is installed, and the running Android uses it (or does not run).
+    Installed,
+    /// What is installed differs from what the running Android started with.
+    RestartPending,
+}
+
+/// Where Widevine stands for the user.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Widevine {
+    pub package: Option<WidevinePackage>,
+    /// Whether Android runs now, and whether it was started with Widevine.
+    pub running: bool,
+    pub active: bool,
+    pub restart_needed: bool,
+    /// The security level the module gives: L3.
+    pub security_level: String,
+}
+
+impl Widevine {
+    pub fn read(json: &Value) -> Widevine {
+        let package = json
+            .get("package")
+            .filter(|p| p.is_object())
+            .map(|p| WidevinePackage {
+                apex: text(p, "apex"),
+                version: text(p, "version"),
+                android_major: number(p, "android_major"),
+                abi: text(p, "abi"),
+                source: text(p, "source"),
+            });
+        Widevine {
+            package,
+            running: flag(json, "running", false),
+            active: flag(json, "active", false),
+            restart_needed: flag(json, "restart_needed", false),
+            security_level: optional_text(json, "security_level").unwrap_or_else(|| "L3".into()),
+        }
+    }
+
+    pub fn state(&self) -> WidevineState {
+        if self.restart_needed {
+            WidevineState::RestartPending
+        } else if self.package.is_some() {
+            WidevineState::Installed
+        } else {
+            WidevineState::NotInstalled
+        }
+    }
+
+    /// Whether the install button may be pressed: without a module, and not while a request is
+    /// under way.
+    pub fn can_install(&self, busy: bool) -> bool {
+        !busy && self.package.is_none()
+    }
+
+    /// Whether the remove button may be pressed: only with a module, and not while a request
+    /// is under way.
     pub fn can_remove(&self, busy: bool) -> bool {
         !busy && self.package.is_some()
     }
@@ -1807,6 +1895,24 @@ impl Client {
     /// Google's apps keep Android from starting; Android goes without them from its next start.
     pub fn remove_gapps(&self) -> Result<Gapps, Failure> {
         Ok(Gapps::read(&self.json(&["gapps", "remove"])?))
+    }
+
+    /// Where Widevine stands.
+    pub fn widevine(&self) -> Result<Widevine, Failure> {
+        Ok(Widevine::read(&self.json(&["drm", "widevine", "status"])?))
+    }
+
+    /// Downloads Google's emulator image for this Android, takes Widevine out of it unchanged
+    /// and installs it. The user agreed to Google's terms in the app first, so dsa does not ask
+    /// again. It takes minutes; Android uses the module from its next start.
+    pub fn install_widevine(&self) -> Result<Widevine, Failure> {
+        let args = ["drm", "widevine", "install", "--yes"];
+        Ok(Widevine::read(&self.json(&args)?))
+    }
+
+    /// Removes Widevine and the device certificates it kept, from Android's next start.
+    pub fn remove_widevine(&self) -> Result<Widevine, Failure> {
+        Ok(Widevine::read(&self.json(&["drm", "widevine", "remove"])?))
     }
 
     /// Where the app data backup stands. It never starts Android.

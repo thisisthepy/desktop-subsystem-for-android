@@ -452,6 +452,16 @@ fn alert_of(outcome: &Outcome) -> Option<UpdateAlert> {
     }
 }
 
+/// The news that `image`, new on trial, booted and is kept: the first image since an
+/// installation without a bundled one is installed, any later one is an update.
+fn kept_notice(image: &InstalledImage, first: bool) -> String {
+    if first {
+        format!("Android {} is installed", image.version)
+    } else {
+        format!("Android was updated to {}", image.version)
+    }
+}
+
 /// What happens to an image that failed its trial, in words for the user.
 fn not_retried(failed: &InstalledImage) -> String {
     format!(
@@ -475,6 +485,15 @@ impl UpdatingAndroid {
             .map(|state| !self.store.has_image(&state.current.version))
             .unwrap_or(false)
     }
+
+    /// Whether the current image is the first one since an installation without a bundled
+    /// image: there is no image before it to go back to.
+    fn first_image(&self, state: &super::store::State) -> bool {
+        state
+            .previous
+            .as_ref()
+            .is_none_or(|previous| !self.store.has_image(&previous.version))
+    }
 }
 
 /// A user's Android in a service that updates its image. A start while a new image is on
@@ -496,9 +515,40 @@ pub struct UpdatingAndroid {
 /// How often a user's Android looks whether a downloaded image waits for it.
 pub const WAITING_IMAGE_CHECK: Duration = Duration::from_secs(1);
 
-/// Restarts `android` into each image downloaded while it runs, from a thread of its own that
-/// looks every `every` ([`UpdatingAndroid::apply_waiting_image`]), until `android` is dropped.
+/// Restarts `android` into each image downloaded while it runs, and keeps a new image once
+/// Android has finished booting from it, from a thread of its own that looks every `every`
+/// ([`UpdatingAndroid::apply_waiting_image`]), until `android` is dropped.
+///
+/// A second thread follows each boot as it begins, so that the image it runs is known
+/// whatever started it: the session reads the current image when it launches the guest, and
+/// reading it here a second later could see an image installed in between.
 pub fn follow_waiting_image(android: &Arc<UpdatingAndroid>, every: Duration) {
+    let events = android.session.events();
+    let watched = Arc::downgrade(android);
+    let spawned = thread::Builder::new()
+        .name("dsa-image-boots".into())
+        .spawn(move || loop {
+            match events.recv_timeout(every) {
+                Ok(event) => {
+                    let Some(android) = watched.upgrade() else {
+                        return;
+                    };
+                    android.follow_boot(event.state);
+                }
+                Err(RecvTimeoutError::Timeout) => {
+                    if watched.strong_count() == 0 {
+                        return;
+                    }
+                }
+                Err(RecvTimeoutError::Disconnected) => return,
+            }
+        });
+    if let Err(why) = spawned {
+        eprintln!(
+            "update: which image each boot runs is read about once a second, since nothing \
+             can follow the boots as they begin: {why}"
+        );
+    }
     let watched = Arc::downgrade(android);
     let spawned = thread::Builder::new()
         .name("dsa-image-restart".into())
@@ -545,6 +595,62 @@ impl UpdatingAndroid {
         }
     }
 
+    /// Follows a change of the session as it happens: a guest that stopped runs no image, and
+    /// a guest launched after that runs the image current at its launch. A stalled guest
+    /// that starts again (`Stalled` to `Starting`) is the same boot, so it keeps its image.
+    fn follow_boot(&self, state: SessionState) {
+        match state {
+            SessionState::Stopped => self.image_restart.set_booted(None),
+            SessionState::Starting => {
+                if let Ok(store) = self.store.state() {
+                    self.image_restart.learn_booted(&store.current.version);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Keeps the image on trial once Android has finished booting from it, whatever started
+    /// that boot: a trial that ended undecided and a guest that got ready later, a start made
+    /// while Android was not stopped, or a guest the session launched by itself. Only a
+    /// trial, which goes back to the previous image when the new one fails, runs on its own
+    /// and is left to decide.
+    fn confirm_completed_boot(&self) {
+        // Ready means the guest finished booting and its agent connected.
+        if !Self::running(self.session.state()) {
+            return;
+        }
+        let Some(booted) = self.image_restart.booted() else {
+            return;
+        };
+        let Ok(state) = self.store.state() else {
+            return;
+        };
+        if !state.on_trial || state.current.version != booted {
+            return;
+        }
+        let first = self.first_image(&state);
+        match self.store.confirm_booted(&booted) {
+            Ok(true) => {}
+            Ok(false) => return,
+            Err(error) => {
+                return eprintln!(
+                    "update: Android finished starting from {booted}, but keeping it failed, \
+                     so it stays on trial: {error}"
+                )
+            }
+        }
+        eprintln!("update: Android finished starting from {booted}, which is kept");
+        let outcome = Outcome::Booted {
+            image: state.current.clone(),
+            confirmed: true,
+        };
+        if let Some(alert) = alert_of(&outcome) {
+            self.notices.raise(alert);
+        }
+        self.notices.set(kept_notice(&state.current, first));
+    }
+
     /// The image the running Android waits to restart into: the current one, when it booted
     /// from another.
     fn waiting_image(&self) -> Option<String> {
@@ -562,12 +668,15 @@ impl UpdatingAndroid {
     /// Applies the image downloaded since this Android started, if one waits: restarts into it
     /// at once when the user asked to, or when the auto-restart setting is on and no app window
     /// is open (Android dozes, or is frozen); with windows open, asks the user. With the
-    /// setting off, the image waits for the next start. [`follow_waiting_image`] calls this.
+    /// setting off, the image waits for the next start. Before that, a new image Android has
+    /// finished booting from is kept, however that boot was started. [`follow_waiting_image`]
+    /// calls this.
     pub fn apply_waiting_image(&self) {
         if self.image_restart.restarting() || self.trying_image() {
             return;
         }
         self.follow_booted();
+        self.confirm_completed_boot();
         let waiting = self.waiting_image();
         self.image_restart.waiting(waiting.as_deref());
         let Some(version) = waiting else {
@@ -881,11 +990,7 @@ impl UserAndroid for UpdatingAndroid {
         let state = self.store.state().ok();
         let on_trial = state.as_ref().is_some_and(|s| s.on_trial);
         // The first image since an installation without a bundled one has nothing before it.
-        let first = state.as_ref().is_some_and(|s| {
-            s.previous
-                .as_ref()
-                .is_none_or(|previous| !self.store.has_image(&previous.version))
-        });
+        let first = state.as_ref().is_some_and(|s| self.first_image(s));
         // A stopped Android boots the current image, which it runs from now on.
         if self.session.state() == SessionState::Stopped {
             self.image_restart
@@ -928,13 +1033,7 @@ impl UserAndroid for UpdatingAndroid {
                 Ok(Outcome::Booted {
                     image,
                     confirmed: true,
-                }) if first => format!("Android {} is installed", image.version),
-                Ok(Outcome::Booted {
-                    image,
-                    confirmed: true,
-                }) => {
-                    format!("Android was updated to {}", image.version)
-                }
+                }) => kept_notice(&image, first),
                 Ok(Outcome::Booted { .. }) => return running.store(false, Ordering::SeqCst),
                 Ok(Outcome::RolledBack {
                     failed,

@@ -47,6 +47,20 @@ class InsetsSourceFormTest {
     }
 
     @Test
+    fun fr22_the_bottom_band_takes_the_size_form_and_a_frame_where_there_is_none() {
+        val forms = listOf(
+            form("android.graphics.Rect", "android.view.InsetsBoundingRect[]", "int"),
+            form("android.graphics.Insets", "android.graphics.Rect[]", "int"),
+            form("android.graphics.Rect", "android.graphics.Rect[]", "int"),
+        )
+        assertEquals(InsetsSourceForm.Size(1, 7), InsetsSourceForm.choose(forms, preferSize = true))
+        assertEquals(
+            InsetsSourceForm.Frame(0, 6),
+            InsetsSourceForm.choose(listOf(form("android.graphics.Rect", "android.graphics.Rect[]")), preferSize = true),
+        )
+    }
+
+    @Test
     fun fr4_no_known_form_is_reported_as_none() {
         assertNull(InsetsSourceForm.choose(listOf(head)))
     }

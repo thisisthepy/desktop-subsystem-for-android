@@ -100,6 +100,7 @@ import io.github.thisisthepy.dsa.agent.widgets.WidgetStore
 import io.github.thisisthepy.dsa.agent.windowing.FreeformSetup
 import io.github.thisisthepy.dsa.agent.windowing.GestureExclusion
 import io.github.thisisthepy.dsa.agent.windowing.CaptionInsets
+import io.github.thisisthepy.dsa.agent.windowing.NavigationBarInsets
 import io.github.thisisthepy.dsa.agent.windowing.TaskArranger
 import io.github.thisisthepy.dsa.agent.windowing.WindowingControl
 import io.github.thisisthepy.dsa.agent.backup.BackupManagerPort
@@ -422,6 +423,7 @@ class Agent(
     private val freeform = FreeformSetup(windowing, scheduler, log)
     private val arranger = TaskArranger(actions, windowing::displaySize, log)
     private val captions = CaptionInsets(actions, log)
+    private val navigationBars = NavigationBarInsets(actions, log)
     private val installed = InstalledAppReporter(ownPackage) { frame -> channel.send(frame) }
     private val shortcutReporter = ShortcutReporter(ownPackage) { frame -> channel.send(frame) }
     private val pinRequests = PinRequests(
@@ -1095,7 +1097,17 @@ class Agent(
         pastFirstScreen = placedTasks.filter { it.canGoBack }.map { it.taskId }.toSet()
         val reported = reporter.reported
         val told = reported.mapNotNull { taskId -> reporter.reportedBounds(taskId)?.let { taskId to it } }.toMap()
-        captions.update(told, placedTasks.filter { it.transparentCaption }.map { it.taskId }.toSet())
+        // A task's band is given as soon as the host is told of it, before its window has
+        // opened and said how high its title bar is, so the app's first screen lays out below it.
+        val titled = placedTasks.filter { it.taskId in told && !it.fullscreen && !it.pictureInPicture }
+        captions.update(
+            told,
+            placedTasks.filter { it.transparentCaption }.map { it.taskId }.toSet(),
+            awaiting = titled.associate { it.taskId to it.densityDpi },
+        )
+        // The navigation bar band goes with the title bar: from the task's first layout, at
+        // its density, and not while it fills the screen or is in picture-in-picture.
+        navigationBars.update(told, titled.associate { it.taskId to it.densityDpi })
         if (told != taskBounds) {
             taskBounds = told
             inputScheduler.post { pointer.retainTasks(reported) }

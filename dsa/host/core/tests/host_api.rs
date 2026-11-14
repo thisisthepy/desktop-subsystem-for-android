@@ -985,9 +985,14 @@ fn fr35_the_running_android_is_given_each_change_to_root_elevation() {
     }];
     assert_eq!(android_of("alice").last(), Some((true, ask.clone())));
 
-    // Set back to off, the app is no longer listed.
+    // Set back to off, the app is listed as off, so the guest keeps any app that shares its
+    // user ID from root too.
     alice.set_app_root("com.example.root", "off").unwrap();
-    assert_eq!(android_of("alice").last(), Some((true, Vec::new())));
+    let off = vec![AppLevel {
+        package: "com.example.root".into(),
+        level: Level::Off,
+    }];
+    assert_eq!(android_of("alice").last(), Some((true, off)));
     alice.set_app_root("com.example.root", "ask").unwrap();
 
     // The administrator turns the feature off: every user's Android is told, not only theirs.

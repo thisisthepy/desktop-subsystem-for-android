@@ -244,13 +244,12 @@ pub fn guest_choice(
 
 /// Where a maximised window of `outer` pixels goes, along one direction, on a work area
 /// that starts at `start` and is `area` pixels long, when the window's border on that side
-/// is `border` pixels thick. A window is never larger than the guest can draw, so on a
-/// monitor larger than that it maximises to the guest's largest size, shown 1:1, and is
-/// centred on the work area rather than left in its corner. A window that fills the work
-/// area hangs its border off the work area's edge, so its client area starts exactly at
-/// `start`. That holds wherever the window was before: a maximised window that takes a
-/// frame of the work area's size while it still stands where its smaller frame was centred
-/// goes to the work area's edge, rather than staying put and running off the screen.
+/// is `border` pixels thick. A maximised window smaller than the work area is centred on it
+/// rather than left in its corner. A window that fills the work area hangs its border off the
+/// work area's edge, so its client area starts exactly at `start`. That holds wherever the
+/// window was before: a maximised window that takes a frame of the work area's size while it
+/// still stands where a smaller one was centred goes to the work area's edge, rather than
+/// staying put and running off the screen.
 pub fn maximized_position(start: i32, area: i32, outer: i32, border: i32) -> i32 {
     if outer >= area {
         return start - border;
@@ -258,15 +257,127 @@ pub fn maximized_position(start: i32, area: i32, outer: i32, border: i32) -> i32
     start + (area - outer) / 2
 }
 
-/// The outer size a maximised task window takes: the most the guest can draw (`guest`, with
-/// the borders of a maximised window) and no more than the work area of the window's own
-/// monitor with those borders, which Windows hangs off its edges (`work`). Windows proposes a
-/// maximised size measured on the primary monitor, and adjusts it to the monitor the window
-/// maximises on only while it is at least the primary monitor's size; a smaller one, such as
-/// the guest's largest size, it takes as it is. So on a monitor smaller than the primary one
-/// a window would maximise past the bottom of its own screen unless its work area limits it.
-pub fn maximized_outer(guest: (i32, i32), work: (i32, i32)) -> (i32, i32) {
-    (guest.0.min(work.0).max(1), guest.1.min(work.1).max(1))
+/// The outer size a maximised task window takes on a monitor whose work area is `work`
+/// pixels, when the borders a maximised window hangs off the work area's edges add up to
+/// `frame` pixels in each direction: its client area is the whole work area, and never the
+/// whole monitor. The taskbar stays visible, and the guest is asked for the work area's size.
+///
+/// Windows does not give a task window that size by itself. It proposes a maximised size
+/// measured on the primary monitor, and the client area of a window whose title bar is drawn
+/// in its client area can come out as large as the monitor, under the taskbar. So the window
+/// keeps every maximised size to this one, on its own monitor: on a monitor smaller than the
+/// primary one, a size measured on the primary would also reach past its screen's edge.
+pub fn maximized_outer(work: (i32, i32), frame: (i32, i32)) -> (i32, i32) {
+    ((work.0 + frame.0).max(1), (work.1 + frame.1).max(1))
+}
+
+/// What the window system is doing with a window when a size is proposed for it, as far as
+/// whose size it is goes ([`size_is_held`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SizeProposal {
+    /// The window is maximised.
+    pub maximized: bool,
+    /// The window fills its monitor without a frame (full screen).
+    pub fills_monitor: bool,
+    /// The user is dragging one of the window's edges.
+    pub user_sizing: bool,
+    /// The window gives itself the size: for a frame of the task, for a change of mode, for
+    /// a new monitor scale, or for a size the guest gave the task on its own.
+    pub host_sizing: bool,
+    /// The proposed size is not the size the window has when it is restored, outside all of
+    /// the above: the desktop snapped the window to a part of its monitor.
+    pub off_normal_size: bool,
+}
+
+/// Whether a window keeps the size the desktop gives it whatever size the guest gives its
+/// task: while it is maximised, snapped or full screen. The desktop chose that size for the
+/// window's place on the monitor, so a frame the guest keeps smaller (its display holds no
+/// more) is shown in the window ([`frame_placement`]) rather than the window shrinking to it
+/// and leaving its place. Only a size the user drags to, or one the window gives itself,
+/// takes the size the guest gave the task as its answer.
+pub fn size_is_held(proposal: SizeProposal) -> bool {
+    if proposal.maximized || proposal.fills_monitor {
+        return true;
+    }
+    if proposal.user_sizing || proposal.host_sizing {
+        return false;
+    }
+    proposal.off_normal_size
+}
+
+/// Where a window shows its task's frame: at `scale` (window pixels per task pixels), with
+/// its top left at `origin` in the client area, filling `size` of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FramePlacement {
+    pub scale: Scale,
+    pub origin: (u32, u32),
+    pub size: (u32, u32),
+}
+
+impl FramePlacement {
+    /// The point of the frame a point of the client area (`position`, in window pixels) is
+    /// on, in window pixels from the frame's top left at [`Self::scale`]. A point in the
+    /// client area but beside the frame is on the frame's nearest edge, so a click there
+    /// never reaches past the task on the guest's display. A point outside the client area
+    /// (the mouse dragged out while a button is down) keeps going.
+    pub fn to_frame(&self, (x, y): (f64, f64), view: (u32, u32)) -> (f64, f64) {
+        let axis = |position: f64, origin: u32, size: u32, view: u32| -> f64 {
+            let local = position - f64::from(origin);
+            if (0.0..f64::from(view)).contains(&position) {
+                local.clamp(0.0, f64::from(size.max(1) - 1))
+            } else {
+                local
+            }
+        };
+        (
+            axis(x, self.origin.0, self.size.0, view.0),
+            axis(y, self.origin.1, self.size.1, view.1),
+        )
+    }
+}
+
+/// Where a window of `view` pixels shows a frame of `frame` task pixels at `scale`. Unless
+/// the window holds its size ([`size_is_held`]), the window takes the size of each frame it
+/// shows, so the frame is at its top left at `scale`. A window that holds its size shows a
+/// frame of another size in its middle: 1:1 for a task drawn at its window's density, made
+/// smaller only when it would not fit, and for a task that keeps its density (`scale` is not
+/// 1:1, so it is already scaled) scaled to fit the window, keeping its shape.
+pub fn frame_placement(
+    frame: (u32, u32),
+    view: (u32, u32),
+    scale: Scale,
+    held: bool,
+) -> FramePlacement {
+    let at_scale = to_window_size(frame, scale);
+    let top_left = FramePlacement {
+        scale,
+        origin: (0, 0),
+        size: at_scale,
+    };
+    if !held || frame.0 == 0 || frame.1 == 0 || view.0 == 0 || view.1 == 0 || at_scale == view {
+        return top_left;
+    }
+    let one_to_one = scale.0 == scale.1;
+    let fits = at_scale.0 <= view.0 && at_scale.1 <= view.1;
+    let scale = if one_to_one && fits {
+        scale
+    } else {
+        // The direction that fills the window first sets the scale.
+        let wide = u64::from(view.0) * u64::from(frame.1) <= u64::from(view.1) * u64::from(frame.0);
+        let (numerator, denominator) = if wide {
+            (view.0, frame.0)
+        } else {
+            (view.1, frame.1)
+        };
+        scale_between(numerator, denominator)
+    };
+    let size = to_window_size(frame, scale);
+    let size = (size.0.min(view.0), size.1.min(view.1));
+    FramePlacement {
+        scale,
+        origin: ((view.0 - size.0) / 2, (view.1 - size.1) / 2),
+        size,
+    }
 }
 
 /// Where a window goes and how large it is (left, top, width, height, all of its outer
@@ -851,15 +962,157 @@ mod tests {
     }
 
     #[test]
+    fn fr4_a_maximised_snapped_or_full_screen_window_keeps_its_size_and_only_a_drag_takes_the_guests(
+    ) {
+        let held = size_is_held;
+        // Maximised or full screen: the desktop's size, whatever else goes on.
+        for user_sizing in [false, true] {
+            for host_sizing in [false, true] {
+                let maximized = SizeProposal {
+                    maximized: true,
+                    user_sizing,
+                    host_sizing,
+                    ..SizeProposal::default()
+                };
+                assert!(held(maximized), "{maximized:?}");
+                let full = SizeProposal {
+                    fills_monitor: true,
+                    ..maximized
+                };
+                assert!(held(SizeProposal {
+                    maximized: false,
+                    ..full
+                }));
+            }
+        }
+        // Snapped: the desktop proposes a size other than the restored one, and nobody drags.
+        assert!(held(SizeProposal {
+            off_normal_size: true,
+            ..SizeProposal::default()
+        }));
+        // A drag of an edge takes the guest's answer, as does a size the window gives itself
+        // (a frame's, a new scale's).
+        assert!(!held(SizeProposal {
+            off_normal_size: true,
+            user_sizing: true,
+            ..SizeProposal::default()
+        }));
+        assert!(!held(SizeProposal {
+            off_normal_size: true,
+            host_sizing: true,
+            ..SizeProposal::default()
+        }));
+        // Restored to its own size.
+        assert!(!held(SizeProposal::default()));
+    }
+
+    #[test]
+    fn fr4_a_maximised_window_asks_the_guest_for_its_work_area_not_its_whole_monitor() {
+        // A 2880x1800 monitor at 200% whose taskbar takes 96 pixels: the work area is
+        // 2880x1704, and a maximised window hangs 13 pixels of border off each edge.
+        let frame = (26, 26);
+        let outer = maximized_outer((2880, 1704), frame);
+        assert_eq!(outer, (2906, 1730));
+        // Its client area is the work area, so the taskbar stays visible.
+        let client = ((outer.0 - frame.0) as u32, (outer.1 - frame.1) as u32);
+        assert_eq!(client, (2880, 1704));
+        // The guest is asked for that size, not the monitor's 2880x1800.
+        let mut settings = task(1041, 1495, 262);
+        settings.max_width = 2880;
+        settings.max_height = 2880;
+        let mut sizing = WindowSizing::new(&settings);
+        assert_eq!(
+            sizing.view_resized(client, Instant::now()),
+            live_resize(2880, 1704)
+        );
+        // Its client area starts at the work area's corner.
+        assert_eq!(maximized_position(0, 2880, outer.0, 13), -13);
+        assert_eq!(maximized_position(0, 1704, outer.1, 13), -13);
+    }
+
+    #[test]
     fn fr4_a_window_maximised_on_a_monitor_smaller_than_the_primary_stays_on_its_screen() {
-        // The guest draws 2880x2880, 1803x1800 at the window's scale: 1819x1816 outer with a
-        // maximised window's borders at 100%. On a 2048x1152 monitor whose work area is
-        // 2048x1104, the window fills the work area (2064x1120 with the borders) in height.
-        assert_eq!(maximized_outer((1819, 1816), (2064, 1120)), (1819, 1120));
-        // On a 4K monitor the guest's size is the smaller, and the window is centred instead.
-        assert_eq!(maximized_outer((1819, 1816), (3856, 2128)), (1819, 1816));
-        // A guest larger than every monitor fills the work area.
-        assert_eq!(maximized_outer((8016, 8016), (2064, 1120)), (2064, 1120));
+        // A 2048x1152 monitor whose work area is 2048x1104, beside a larger primary one, at
+        // 100%: the window fills its own work area, 2064x1120 with its borders, whatever size
+        // Windows measured on the primary monitor.
+        assert_eq!(maximized_outer((2048, 1104), (16, 16)), (2064, 1120));
+        // On a 4K monitor it fills that work area as well: the guest's largest frame is shown
+        // in it, and the window does not shrink to it.
+        assert_eq!(maximized_outer((3840, 2112), (16, 16)), (3856, 2128));
+        // A work area of nothing still gives a window.
+        assert_eq!(maximized_outer((0, 0), (0, 0)), (1, 1));
+    }
+
+    #[test]
+    fn fr4_a_maximised_window_holds_its_size_even_at_its_restored_size() {
+        // The restored-size bookkeeping (a proposal of the window's restored size) never lets
+        // a maximised window go: only a restore does, which is no longer maximised.
+        for off_normal_size in [false, true] {
+            for user_sizing in [false, true] {
+                for host_sizing in [false, true] {
+                    let proposal = SizeProposal {
+                        maximized: true,
+                        fills_monitor: false,
+                        user_sizing,
+                        host_sizing,
+                        off_normal_size,
+                    };
+                    assert!(size_is_held(proposal), "{proposal:?}");
+                }
+            }
+        }
+        // Restored to its restored size, it takes its frames' size again.
+        assert!(!size_is_held(SizeProposal {
+            host_sizing: true,
+            ..SizeProposal::default()
+        }));
+    }
+
+    #[test]
+    fn fr4_a_capped_frame_is_shown_in_a_maximised_window_centred_or_scaled_to_fit() {
+        // A task at the 200% main monitor's density, maximised on a 125% monitor: the window
+        // is 2560x1380 and shows its task at 82:131, so it asked for 4087x2204 task pixels.
+        // The guest's display holds 2880 across, so the frame is 2880x2205.
+        let scale = scale_between(density_for_dpi(120), density_for_dpi(192));
+        assert_eq!(scale, (82, 131));
+        let view = (2560, 1380);
+        let placed = frame_placement((2880, 2205), view, scale, true);
+        // Scaled to fill the height, keeping its shape, and centred across.
+        assert_eq!(placed.scale, (92, 147));
+        assert_eq!(placed.size, (1802, 1380));
+        assert_eq!(placed.origin, (379, 0));
+        // A click beside the frame lands on its nearest edge; one on it, where it shows.
+        assert_eq!(placed.to_frame((100.0, 10.0), view), (0.0, 10.0));
+        assert_eq!(placed.to_frame((2559.0, 10.0), view), (1801.0, 10.0));
+        assert_eq!(placed.to_frame((384.0, 7.0), view), (5.0, 7.0));
+        // Dragged out of the window, it keeps going.
+        assert_eq!(placed.to_frame((-10.0, 5.0), view), (-389.0, 5.0));
+
+        // A task drawn at its window's density is shown 1:1 in the window's middle.
+        let placed = frame_placement((3840, 2000), (4096, 2100), (1, 1), true);
+        assert_eq!(
+            placed,
+            FramePlacement {
+                scale: (1, 1),
+                origin: (128, 50),
+                size: (3840, 2000),
+            }
+        );
+        // And made smaller only when it does not fit.
+        let placed = frame_placement((2000, 1000), (1000, 1000), (1, 1), true);
+        assert_eq!(placed.scale, (1, 2));
+        assert_eq!(placed.size, (1000, 500));
+        assert_eq!(placed.origin, (0, 250));
+
+        // A window that does not hold its size has the size of its frame, at its top left.
+        let placed = frame_placement((2880, 2205), view, scale, false);
+        assert_eq!(placed.origin, (0, 0));
+        assert_eq!(placed.scale, scale);
+        assert_eq!(placed.size, to_window_size((2880, 2205), scale));
+        // Nor is a frame that fills the window moved.
+        let placed = frame_placement((1000, 800), (1000, 800), (1, 1), true);
+        assert_eq!(placed.origin, (0, 0));
+        assert_eq!(placed.size, (1000, 800));
     }
 
     #[test]

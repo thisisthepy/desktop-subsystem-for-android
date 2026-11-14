@@ -18,9 +18,9 @@
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
             <StackPanel Style="{StaticResource PageContent}">
                 <ui:InfoBar Title="{l:Text SettingsErrorBar.Title}" Severity="Error" IsClosable="False"
-                            IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" Margin="0,0,0,4" />
+                            IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" />
                 <ui:InfoBar Title="{l:Text AdminBar.Title}" Message="{l:Text AdminBar.Message}" Severity="Warning"
-                            IsClosable="False" IsOpen="{Binding NeedsAdministrator, Mode=OneWay}" Margin="0,0,0,4" />
+                            IsClosable="False" IsOpen="{Binding NeedsAdministrator, Mode=OneWay}" />
 
                 <!-- Android: the image and its updates. -->
                 <TextBlock Text="{l:Text UpdatesAndroidHeader.Text}" Style="{StaticResource SectionHeader}" />
@@ -28,8 +28,8 @@
                     <ProgressBar IsIndeterminate="True" Margin="0,0,0,4"
                                  Visibility="{Binding IsBusy, Converter={StaticResource Visible}}" />
                     <ui:InfoBar Title="{l:Text SettingsErrorBar.Title}" Severity="Error" IsClosable="False"
-                                IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" Margin="0,0,0,4" />
-                    <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Phone24}">
+                                IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" />
+                    <ui:CardControl Icon="{ui:SymbolIcon Phone24}">
                         <ui:CardControl.Header>
                             <StackPanel>
                                 <TextBlock Text="{Binding VersionText, Mode=OneWay}" Style="{StaticResource CardTitle}" />
@@ -37,25 +37,25 @@
                             </StackPanel>
                         </ui:CardControl.Header>
                     </ui:CardControl>
-                    <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Wrench24}">
+                    <ui:CardControl Icon="{ui:SymbolIcon Wrench24}">
                         <ui:CardControl.Header>
                             <TextBlock Text="{l:Text AndroidBuildCard.Header}" Style="{StaticResource CardTitle}" />
                         </ui:CardControl.Header>
                         <TextBlock Text="{Binding BuildId, Mode=OneWay}" Style="{StaticResource CardValue}" />
                     </ui:CardControl>
-                    <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Shield24}">
+                    <ui:CardControl Icon="{ui:SymbolIcon Shield24}">
                         <ui:CardControl.Header>
                             <TextBlock Text="{l:Text AndroidPatchCard.Header}" Style="{StaticResource CardTitle}" />
                         </ui:CardControl.Header>
                         <TextBlock Text="{Binding SecurityPatch, Mode=OneWay}" Style="{StaticResource CardValue}" />
                     </ui:CardControl>
-                    <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon BranchFork24}">
+                    <ui:CardControl Icon="{ui:SymbolIcon BranchFork24}">
                         <ui:CardControl.Header>
                             <TextBlock Text="{l:Text AndroidFollowsCard.Header}" Style="{StaticResource CardTitle}" />
                         </ui:CardControl.Header>
                         <TextBlock Text="{Binding ChannelText, Mode=OneWay}" Style="{StaticResource CardValue}" />
                     </ui:CardControl>
-                    <ui:CardControl x:Name="AndroidUpdateCard" Margin="0,0,0,4" Icon="{ui:SymbolIcon ArrowDownload24}">
+                    <ui:CardControl x:Name="AndroidUpdateCard" Icon="{ui:SymbolIcon ArrowDownload24}">
                         <ui:CardControl.Header>
                             <StackPanel>
                                 <StackPanel Orientation="Horizontal">
@@ -77,7 +77,7 @@
                         </StackPanel>
                     </ui:CardControl>
                 </StackPanel>
-                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon ArrowClockwise24}">
+                <ui:CardControl Icon="{ui:SymbolIcon ArrowClockwise24}">
                     <ui:CardControl.Header>
                         <StackPanel>
                             <TextBlock Text="{l:Text ImageAutoRestartCard.Header}" Style="{StaticResource CardTitle}" />
@@ -88,7 +88,7 @@
                                      IsEnabled="{Binding CanChange, Mode=OneWay}" Click="OnAutoRestartToggled"
                                      AutomationProperties.Name="{l:Text ImageAutoRestartCard.Header}" />
                 </ui:CardControl>
-                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon ArrowSync24}">
+                <ui:CardControl Icon="{ui:SymbolIcon ArrowSync24}">
                     <ui:CardControl.Header>
                         <StackPanel>
                             <StackPanel Orientation="Horizontal">
@@ -107,7 +107,7 @@
                     </StackPanel>
                 </ui:CardControl>
                 <StackPanel x:Name="AndroidChoice">
-                    <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon ArrowSwap24}">
+                    <ui:CardControl Icon="{ui:SymbolIcon ArrowSwap24}">
                         <ui:CardControl.Header>
                             <StackPanel>
                                 <StackPanel Orientation="Horizontal">
@@ -131,11 +131,10 @@
 
                 <!-- DSA itself. -->
                 <TextBlock Text="{l:Text UpdatesProgramHeader.Text}" Style="{StaticResource SectionHeader}" />
-                <ui:InfoBar x:Name="NoticeBar" Title="{l:Text UpdateNoticeBar.Title}" Severity="Informational" IsClosable="False"
-                            Margin="0,0,0,4" />
+                <ui:InfoBar x:Name="NoticeBar" Title="{l:Text UpdateNoticeBar.Title}" Severity="Informational" IsClosable="False" />
                 <!-- An update of DSA while it runs, across the service's restart, and how it ended. -->
                 <StackPanel x:Name="ProgramProgress">
-                    <ui:CardControl x:Name="ProgramProgressCard" Margin="0,0,0,4" Icon="{ui:SymbolIcon ArrowSync24}"
+                    <ui:CardControl x:Name="ProgramProgressCard" Icon="{ui:SymbolIcon ArrowSync24}"
                                     Visibility="{Binding InProgress, Converter={StaticResource Visible}}">
                         <ui:CardControl.Header>
                             <StackPanel>
@@ -148,12 +147,12 @@
                             </StackPanel>
                         </ui:CardControl.Header>
                     </ui:CardControl>
-                    <ui:InfoBar Title="{l:Text ProgramUpdateDone.Title}" Severity="Success" IsClosable="False" Margin="0,0,0,4"
+                    <ui:InfoBar Title="{l:Text ProgramUpdateDone.Title}" Severity="Success" IsClosable="False"
                                 IsOpen="{Binding IsApplied, Mode=OneWay}" Message="{Binding AppliedText, Mode=OneWay}" />
-                    <ui:InfoBar Title="{l:Text UpdateNowFailed}" Severity="Error" IsClosable="False" Margin="0,0,0,4"
+                    <ui:InfoBar Title="{l:Text UpdateNowFailed}" Severity="Error" IsClosable="False"
                                 IsOpen="{Binding IsFailed, Mode=OneWay}" Message="{Binding FailedText, Mode=OneWay}" />
                 </StackPanel>
-                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon ArrowSync24}">
+                <ui:CardControl Icon="{ui:SymbolIcon ArrowSync24}">
                     <ui:CardControl.Header>
                         <StackPanel>
                             <StackPanel Orientation="Horizontal">
@@ -171,7 +170,7 @@
                                          IsEnabled="{Binding CanChangeProgramUpdates, Mode=OneWay}" Click="OnProgramToggled" />
                     </StackPanel>
                 </ui:CardControl>
-                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Beaker24}">
+                <ui:CardControl Icon="{ui:SymbolIcon Beaker24}">
                     <ui:CardControl.Header>
                         <StackPanel>
                             <StackPanel Orientation="Horizontal">
@@ -189,7 +188,7 @@
                                          IsEnabled="{Binding CanChangePrereleaseUpdates, Mode=OneWay}" Click="OnPrereleaseToggled" />
                     </StackPanel>
                 </ui:CardControl>
-                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon ArrowUpload24}">
+                <ui:CardControl Icon="{ui:SymbolIcon ArrowUpload24}">
                     <ui:CardControl.Header>
                         <StackPanel>
                             <TextBlock Text="{l:Text UpdateNowCard.Header}" Style="{StaticResource CardTitle}" />

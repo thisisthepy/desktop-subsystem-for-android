@@ -114,11 +114,14 @@ pub mod installed_apps;
 pub mod installer_actions;
 #[cfg(windows)]
 pub mod jump_list;
+#[cfg(windows)]
+pub mod machine_user_folder;
 pub mod monitors;
 pub mod network;
 pub mod paths;
 #[cfg(windows)]
 pub mod pipe;
+pub mod pmem_disk;
 pub mod power;
 #[cfg(windows)]
 pub mod profile;
@@ -126,6 +129,9 @@ pub mod pstore_disk;
 pub mod render_gpu;
 pub mod renderer;
 pub mod root_approval;
+#[cfg(windows)]
+pub mod safe_fs;
+pub mod safe_paths;
 #[cfg(windows)]
 pub mod scheduling;
 #[cfg(windows)]

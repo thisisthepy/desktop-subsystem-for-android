@@ -1,0 +1,247 @@
+diff --git a/src/gfxstream/guest/android/GrallocMinigbm.cpp b/src/gfxstream/guest/android/GrallocMinigbm.cpp
+--- a/src/gfxstream/guest/android/GrallocMinigbm.cpp
++++ b/src/gfxstream/guest/android/GrallocMinigbm.cpp
+@@ -110,46 +110,57 @@
+ void MinigbmGralloc::release(AHardwareBuffer* ahb) {
+     if (ahb) {
+         const native_handle_t* handle = AHardwareBuffer_getNativeHandle(ahb);
++        const uint32_t bufferId =
++            handle ? reinterpret_cast<cros_gralloc_handle const*>(handle)->id : 0;
++        // Let go first: when the device memory held the last AHardwareBuffer on the handle,
++        // the buffer's descriptors close now and its reference can close with them.
++        AHardwareBuffer_release(ahb);
+         if (handle) {
+-            cros_gralloc_handle const* cros_handle =
+-                reinterpret_cast<cros_gralloc_handle const*>(handle);
+             // The device memory that imported the buffer is one of its holders; a window's
+-            // VkImage on the same buffer may still hold it.
+-            uint32_t hostHandle = 0;
++            // VkImage on the same buffer may still hold it, and the process may still have
++            // the buffer (dsa_color_buffer_refs.h).
++            dsa::ColorBufferRefs::Closed closed;
+             {
+                 std::lock_guard<std::mutex> lock(mColorBufferMutex);
+-                hostHandle = dropLocked(cros_handle->id);
+-            }
+-            if (hostHandle != 0) {
+-                closeHostHandle(cros_handle->id, hostHandle);
++                closed = mColorBufferRefs.drop(bufferId);
+             }
++            closeHostHandle(closed);
++            // A process in the background submits nothing, so the buffers it let go of since
++            // its last submit close here, as its Vulkan objects go, rather than never.
++            closeReleasedBuffers();
+         }
+-        AHardwareBuffer_release(ahb);
+     }
+ }
+ 
+-uint32_t MinigbmGralloc::dropLocked(uint32_t bufferId) {
+-    auto it = mBufferIdToColorBuffer.find(bufferId);
+-    if (it == mBufferIdToColorBuffer.end()) {
+-        return 0;
+-    }
+-    if (it->second.holders > 0) {
+-        it->second.holders--;
++void MinigbmGralloc::closeHostHandle(const dsa::ColorBufferRefs::Closed& closed) {
++    if (closed.hostHandle == 0) {
++        return;
+     }
+-    if (it->second.holders > 0) {
+-        return 0;
++    if (auto* rcEnc = renderControl()) {
++        rcEnc->rcCloseColorBuffer(rcEnc, closed.hostHandle);
+     }
+-    const uint32_t hostHandle = it->second.hostHandle;
+-    mBufferIdToColorBuffer.erase(it);
+-    return hostHandle;
++    std::lock_guard<std::mutex> lock(mUploadMutex);
++    mUploads.forget(closed.bufferId);
+ }
+ 
+-void MinigbmGralloc::closeHostHandle(uint32_t bufferId, uint32_t hostHandle) {
+-    if (auto* rcEnc = renderControl()) {
+-        rcEnc->rcCloseColorBuffer(rcEnc, hostHandle);
++void MinigbmGralloc::closeReleasedBuffers() {
++    if (mDevice) {
++        return;
++    }
++    timespec now = {};
++    clock_gettime(CLOCK_MONOTONIC, &now);
++    const uint64_t nowNs = uint64_t(now.tv_sec) * 1000000000ULL + uint64_t(now.tv_nsec);
++    std::vector<dsa::ColorBufferRefs::Closed> closed;
++    {
++        std::lock_guard<std::mutex> lock(mColorBufferMutex);
++        if (mColorBufferRefs.size() == 0 || !mColorBufferRefs.sweepDue(nowNs)) {
++            return;
++        }
++        closed = mColorBufferRefs.sweep();
++    }
++    for (const dsa::ColorBufferRefs::Closed& one : closed) {
++        closeHostHandle(one);
+     }
+-    std::lock_guard<std::mutex> lock(mUploadMutex);
+-    mUploads.forget(bufferId);
+ }
+ 
+ uint32_t MinigbmGralloc::holdHostHandle(const native_handle_t* handle) {
+@@ -160,10 +171,8 @@
+     }
+     cros_gralloc_handle const* cros_handle = reinterpret_cast<cros_gralloc_handle const*>(handle);
+     std::lock_guard<std::mutex> lock(mColorBufferMutex);
+-    auto it = mBufferIdToColorBuffer.find(cros_handle->id);
+-    if (it != mBufferIdToColorBuffer.end() && it->second.hostHandle == hostHandle) {
+-        it->second.holders++;
+-    }
++    mColorBufferRefs.hold(cros_handle->id, hostHandle, handle->data,
++                          static_cast<size_t>(handle->numFds > 0 ? handle->numFds : 0));
+     return hostHandle;
+ }
+ 
+@@ -171,24 +180,18 @@
+     if (hostHandle == 0 || mDevice) {
+         return;
+     }
+-    uint32_t bufferId = 0;
+-    uint32_t toClose = 0;
++    dsa::ColorBufferRefs::Closed closed;
+     {
+         std::lock_guard<std::mutex> lock(mColorBufferMutex);
+-        for (const auto& [id, open] : mBufferIdToColorBuffer) {
+-            if (open.hostHandle == hostHandle) {
+-                bufferId = id;
+-                break;
+-            }
+-        }
++        const uint32_t bufferId = mColorBufferRefs.bufferOf(hostHandle);
+         if (bufferId == 0) {
+             return;
+         }
+-        toClose = dropLocked(bufferId);
+-    }
+-    if (toClose != 0) {
+-        closeHostHandle(bufferId, toClose);
++        closed = mColorBufferRefs.drop(bufferId);
+     }
++    closeHostHandle(closed);
++    // As in release: a window's images go when its app goes to the background.
++    closeReleasedBuffers();
+ }
+ 
+ int MinigbmGralloc::lock(AHardwareBuffer* ahb, uint8_t** ptr) {
+@@ -233,14 +236,16 @@
+     // ColorBuffer, so its handle is derived from the buffer ID the allocator writes into
+     // the gralloc handle (dsa_shared_color_buffer.h). The first process to use the buffer
+     // creates the ColorBuffer with that handle; the others open it. Each process holds one
+-    // reference, cached per buffer ID and dropped with rcCloseColorBuffer when its last
+-    // holder goes (release of the memory that imported it, dropHostHandle of a VkImage).
++    // reference, cached per buffer ID and dropped with rcCloseColorBuffer once its last
++    // holder has gone (release of the memory that imported it, dropHostHandle of a VkImage)
++    // and the process no longer has the buffer (dsa_color_buffer_refs.h): the host frees
++    // the ColorBuffer, and a GPU's writes into it, when no process has it open.
+     const uint32_t bufferId = cros_handle->id;
+     {
+         std::lock_guard<std::mutex> lock(mColorBufferMutex);
+-        auto it = mBufferIdToColorBuffer.find(bufferId);
+-        if (it != mBufferIdToColorBuffer.end()) {
+-            return it->second.hostHandle;
++        const uint32_t open = mColorBufferRefs.find(bufferId);
++        if (open != 0) {
++            return open;
+         }
+     }
+ 
+@@ -270,7 +275,9 @@
+     {
+         std::lock_guard<std::mutex> lock(mColorBufferMutex);
+         // Another thread may have opened it meanwhile: this process keeps one reference.
+-        if (!mBufferIdToColorBuffer.emplace(bufferId, OpenColorBuffer{hostHandle, 0}).second) {
++        if (!mColorBufferRefs.opened(bufferId, hostHandle, handle->data,
++                                     static_cast<size_t>(handle->numFds > 0 ? handle->numFds
++                                                                            : 0))) {
+             rcEnc->rcCloseColorBuffer(rcEnc, hostHandle);
+         }
+     }
+diff --git a/src/gfxstream/guest/android/GrallocMinigbm.h b/src/gfxstream/guest/android/GrallocMinigbm.h
+--- a/src/gfxstream/guest/android/GrallocMinigbm.h
++++ b/src/gfxstream/guest/android/GrallocMinigbm.h
+@@ -12,6 +12,7 @@
+ #include <unordered_map>
+ #include <vector>
+ 
++#include "dsa_color_buffer_refs.h"
+ #include "dsa_cpu_upload.h"
+ 
+ #include "VirtGpu.h"
+@@ -69,21 +70,12 @@
+ 
+     uint32_t holdHostHandle(const native_handle_t* handle) override;
+     void dropHostHandle(uint32_t hostHandle) override;
++    void closeReleasedBuffers() override;
+ 
+    private:
+-    // This process's reference to a buffer's host ColorBuffer, and how many users hold it:
+-    // the device memory that imported the buffer, and each VkImage made on it as a window
+-    // buffer. The last one to go closes the reference, so a window's buffers do not stay on
+-    // the host after they are freed while the process runs.
+-    struct OpenColorBuffer {
+-        uint32_t hostHandle = 0;
+-        uint32_t holders = 0;
+-    };
+-    // Closes the reference to buffer `bufferId` once it has no holders left. Called with
+-    // mColorBufferMutex held; returns the handle to close after unlocking, or 0.
+-    uint32_t dropLocked(uint32_t bufferId);
+-    // Closes one reference with the host and forgets what was uploaded into it.
+-    void closeHostHandle(uint32_t bufferId, uint32_t hostHandle);
++    // Closes one reference with the host and forgets what was uploaded into it. Nothing for
++    // an empty one.
++    void closeHostHandle(const dsa::ColorBufferRefs::Closed& closed);
+ 
+     // The renderControl encoder of the calling thread's host connection.
+     ExtendedRCEncoderContext* renderControl();
+@@ -92,7 +84,12 @@
+ 
+     std::unique_ptr<VirtGpuDevice> mDevice;
+     std::mutex mColorBufferMutex;
+-    std::unordered_map<uint32_t, OpenColorBuffer> mBufferIdToColorBuffer;
++    // This process's reference to each buffer's host ColorBuffer, by buffer ID: who holds it
++    // (the device memory that imported the buffer, each VkImage made on it as a window
++    // buffer) and whether the process still has the buffer. A window's buffers do not stay
++    // on the host after they are freed, and a buffer the GPU filled keeps its pixels while
++    // the process has it, between one import and the next.
++    dsa::ColorBufferRefs mColorBufferRefs;
+     // -1 until asked, then 0 or 1.
+     std::atomic<int> mHostYuv{-1};
+     // Guards the upload state: what each buffer was last uploaded with, the staging copy and
+diff --git a/src/gfxstream/guest/android/include/gfxstream/guest/GfxStreamGralloc.h b/src/gfxstream/guest/android/include/gfxstream/guest/GfxStreamGralloc.h
+--- a/src/gfxstream/guest/android/include/gfxstream/guest/GfxStreamGralloc.h
++++ b/src/gfxstream/guest/android/include/gfxstream/guest/GfxStreamGralloc.h
+@@ -200,8 +200,12 @@
+     virtual uint32_t holdHostHandle(const native_handle_t* handle) {
+         return getHostHandle(handle);
+     }
+-    // One user of holdHostHandle's handle is gone. The reference closes with the last one.
++    // One user of holdHostHandle's handle is gone. The reference closes once the last one has
++    // and the process no longer has the buffer.
+     virtual void dropHostHandle(uint32_t /*hostHandle*/) {}
++    // Closes the references to buffers the process no longer has and nothing holds. Cheap
++    // enough to call at every submit: it looks at most once a second.
++    virtual void closeReleasedBuffers() {}
+ };
+ 
+ Gralloc* createPlatformGralloc(int32_t descriptor = -1);
+diff --git a/src/gfxstream/guest/vulkan_enc/ResourceTracker.cpp b/src/gfxstream/guest/vulkan_enc/ResourceTracker.cpp
+--- a/src/gfxstream/guest/vulkan_enc/ResourceTracker.cpp
++++ b/src/gfxstream/guest/vulkan_enc/ResourceTracker.cpp
+@@ -6598,6 +6598,11 @@
+                                                    VkFence fence) {
+     // Before the host sees the work, which may sample a buffer a CPU has written since.
+     uploadForGpu();
++#ifdef VK_USE_PLATFORM_ANDROID_KHR
++    // A ColorBuffer stays open while the process has its buffer, past its last Vulkan object
++    // (dsa_color_buffer_refs.h); the ones it let go of close here.
++    if (mGralloc) mGralloc->closeReleasedBuffers();
++#endif
+     flushStagingStreams(context, queue, submitCount, pSubmits);
+ 
+     if (!usingDirectMapping()) {

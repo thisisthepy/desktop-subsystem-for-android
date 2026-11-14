@@ -25,8 +25,36 @@ edge. The guest's gralloc has no NV12 buffer the composer may use, so a dequeue 
 buffer from an app's surface failed (`C2_CORRUPTED`) on every picture and no video reached
 the screen. While every buffer of the surface is shown or queued the allocator answers
 `C2_BLOCKING`, and the component waits on its waitable descriptor, up to 2 s, before it drops
-the picture; a flush or a stop ends the wait. A failure that repeats is logged once in a
-hundred.
+the picture; a flush or a stop ends the wait. A buffer that comes back is written only once its
+release fence signals (up to 1 s), so a picture never lands in a buffer the screen still shows.
+A picture goes out only in a buffer that holds all of it: a buffer that is too small, cannot
+be locked or unlocked, or a picture shorter than its size, ends the work with no output and
+gives the buffer back to the surface (`src/picture_copy.h`), rather than showing zeros (green)
+or an older picture. A failure that repeats is logged once in a hundred.
+
+Packets go to the host through a queue that a thread of the link's own writes
+(`src/send_queue.h`), so the framework's `queue()` call never waits on the host. The host
+decodes on one thread and reads no packet while the guest has not taken its last picture, and
+the app gives the surface's buffers back from the thread that calls `queue()`: when
+`queue()` wrote to the socket itself, each picture waited its full 2 s for a buffer and
+`queue()` took 8 s. A flush drops every picture that arrives before the host's answer without
+waiting for a buffer (`src/output_gate.h`), so the flush returns as soon as the host answers.
+
+The host's pictures wait for a thread of the component's own in a short queue
+(`src/arrival_queue.h`: four pictures, 32 MiB at most). The thread that reads the socket only
+puts each picture there, so the host decodes the next ones while a picture waits for a buffer
+of the app's surface; when the reader wrote each picture itself, the host's decoder stood
+still for every such wait, and the stream played at the pace of its slowest buffer. A full
+queue holds the host back, and a flush's answer is taken at once: the pictures before it are
+dropped as the thread comes to them.
+
+Every 5 s while a video plays, each decoder logs its numbers (`src/picture_stats.h`): the
+pictures from the host and those shown, each a second; the pictures dropped and why (flushed,
+no buffer came back, not written); and the average time a picture spent queued, waiting for a
+buffer and its release fence, being written, and being handed to the framework. The host logs
+its side the same way (`video: AV1 640x360 over 5.0 s: ...` in the window manager's log): the
+packets decoded, the copy out of its GPU, the wait for the guest to take a picture, the send,
+and how the decoder's surface was laid out.
 
 The store asks the host which formats it decodes when it starts, and lists only those. The
 framework builds its list of codecs once a boot, so the first list waits up to 20 s for the
@@ -60,8 +88,10 @@ and to surfaces on screen that change partway, as a player and a feed of short v
 
 - `build.sh [scratch] [out]` fetches the pinned sources and builds `dsa-codec2` with the NDK.
 - `test.sh` builds and runs the rules on the build machine: the video port's messages against
-  the protocol vectors, the copy of a picture into a buffer's planes, and the output buffers'
-  format, size, crop and allocation failures.
+  the protocol vectors, the copy of a picture into a buffer's planes, the output buffers'
+  format, size, crop and allocation failures, the pictures that never go out, the waits a
+  flush ends, the queue of packets to the host, the queue of pictures from it, and the numbers
+  the log reports.
 
 `make-image.py --codec2 <out>/dsa-codec2` installs it with its init script, VINTF fragment,
 label (`mediacodec`), service label, `media_codecs_c2.xml` and `sepolicy/codec2.cil`.
@@ -70,5 +100,7 @@ label (`mediacodec`), service label, `media_codecs_c2.xml` and `sepolicy/codec2.
 
 - `logcat -s dsa-codec2` shows `serving android.hardware.media.c2.IComponentStore/default`,
   then `the host decodes format 1 up to 4096x2304 on its GPU` for each format.
-- Playing an H.264 video logs `c2.dsa.avc.decoder: decoding WxH on the host's GPU`.
+- Playing an H.264 video logs `c2.dsa.avc.decoder: decoding WxH on the host's GPU`, then a
+  line every 5 s such as `c2.dsa.avc.decoder 640x360 over 5.0 s: 150 pictures from the host
+  (30.0/s), 150 shown (30.0/s), ...`.
 - The window manager's log on the host shows `video: H.264 decodes on the GPU` at start.

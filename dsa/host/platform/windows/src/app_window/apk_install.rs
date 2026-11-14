@@ -62,6 +62,11 @@ pub fn open(path: &Path) -> Result<InstallFile, String> {
 pub fn install(api: &mut dyn Connector, file: &mut InstallFile) -> Result<InstallOutcome, String> {
     let mut client = HostApiClient::connect(api, BUILD, Duration::from_secs(5))
         .map_err(|e| format!("the DSA service cannot be reached: {e}"))?;
+    // An app whose 64-bit code is for arm64-v8a only is refused, with the reason, while the
+    // running Android does not translate ARM code.
+    let translation = client.arm_translation().ok();
+    file.check_translation(translation.as_ref())
+        .map_err(|refusal| refusal.to_string())?;
     match file {
         InstallFile::Apk(apk) => {
             let name = apk.name.clone();
@@ -72,7 +77,6 @@ pub fn install(api: &mut dyn Connector, file: &mut InstallFile) -> Result<Instal
                 .map_err(|e| e.to_string())
         }
         InstallFile::Bundle(bundle) => {
-            let translation = client.arm_translation().ok();
             let device = Device::of_host(
                 translation.as_ref(),
                 cfg!(target_arch = "aarch64"),

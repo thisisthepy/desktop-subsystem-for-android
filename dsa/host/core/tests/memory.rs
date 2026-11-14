@@ -350,6 +350,9 @@ fn report() -> control::GuestMemory {
         cma_total_kb: 0,
         hugetlb_kb: 0,
         mem_online_kb: 4200 * MIB,
+        free_reported_kb: 2000 * MIB,
+        reported_total_kb: 9000 * MIB,
+        refaulted_total_kb: 300 * MIB,
     }
 }
 
@@ -454,6 +457,33 @@ fn nfr1_the_session_keeps_the_guests_last_memory_report_until_it_stops() {
 }
 
 #[test]
+fn nfr2_the_session_works_out_how_fast_memory_goes_back_from_two_reports() {
+    let mut setup = setup();
+    send(&mut setup.agent, Body::GuestMemory(report()));
+    let first = wait_for_report(&setup.session);
+    assert_eq!(
+        first.memory.page_reporting.unwrap().reported_kb_per_minute,
+        None
+    );
+    // A rate needs at least a second between the two reports.
+    thread::sleep(Duration::from_millis(1100));
+    let mut next = report();
+    next.reported_total_kb += 60 * MIB;
+    send(&mut setup.agent, Body::GuestMemory(next));
+    let deadline = Instant::now() + WAIT;
+    let rate = loop {
+        let report = wait_for_report(&setup.session);
+        if let Some(rate) = report.memory.page_reporting.unwrap().reported_kb_per_minute {
+            break rate;
+        }
+        assert!(Instant::now() < deadline, "the second report never arrived");
+        thread::sleep(Duration::from_millis(5));
+    };
+    // 60 MiB in a bit over a second: at most 60 MiB a second, well above 0.
+    assert!(rate > 0 && rate <= 3600 * MIB, "{rate}");
+}
+
+#[test]
 fn nfr1_dsa_memory_asks_the_guest_and_shows_it_beside_the_host_processes() {
     let mut setup = setup();
     let api = &mut setup.api;
@@ -517,7 +547,8 @@ fn nfr1_the_log_line_sums_the_host_and_says_where_the_guests_memory_goes() {
         "memory: host 900 MiB (vm 600, window manager 120, graphics renderer 80, 2 app windows \
          100); guest 2048/4096 MiB used, cache 910, apps 700, swap 100 (zram 30), processes 440 \
          MiB (350 resident, 90 compressed in zram), Google Play services 51 MiB (15 resident, 36 \
-         compressed in zram), 42 s ago"
+         compressed in zram), 42 s ago; free 2048 MiB, 2000 back on the host, 9000 reported since \
+         boot"
     );
     let no_guest = MemorySnapshot {
         guest: None,
@@ -559,6 +590,80 @@ fn nfr1_the_report_dsa_memory_prints_names_every_part() {
     ] {
         assert!(text.contains(part), "{part:?} missing from:\n{text}");
     }
+}
+
+#[test]
+fn nfr2_dsa_memory_says_how_much_free_memory_is_back_on_the_host_and_how_fast_it_went() {
+    let first = GuestMemory::from_control(report());
+    let reporting = first.page_reporting.expect("the guest sent its counts");
+    assert_eq!(reporting.free_reported_kb, 2000 * MIB);
+    assert_eq!(
+        reporting.reported_kb_per_minute, None,
+        "no report before it"
+    );
+    // MemFree is 2048 MiB, 2000 of it back on the host.
+    assert_eq!(first.free_not_reported_kb(), Some(48 * MIB));
+
+    // Two minutes later 600 MiB more went back: 300 MiB a minute.
+    let mut later = report();
+    later.reported_total_kb += 600 * MIB;
+    let later = GuestMemory::from_control(later).following(&first, Duration::from_secs(120));
+    assert_eq!(
+        later.page_reporting.unwrap().reported_kb_per_minute,
+        Some(300 * MIB)
+    );
+    let text = MemorySnapshot {
+        guest: Some(GuestMemoryReport {
+            memory: later.clone(),
+            age: Duration::from_secs(1),
+        }),
+        host: Vec::new(),
+    }
+    .to_string();
+    let line = "free page reporting: 2000 of 2048 MiB free is back on the host, 48 MiB not yet; \
+                9600 MiB reported since boot (300 MiB a minute since the report before); 300 MiB \
+                taken back in with a neighbour and reported again";
+    assert!(text.contains(line), "{line:?} missing from:\n{text}");
+
+    // A count lower than before's is a guest that restarted: no rate across the restart.
+    let restarted = GuestMemory::from_control(report()).following(&later, Duration::from_secs(60));
+    assert_eq!(
+        restarted.page_reporting.unwrap().reported_kb_per_minute,
+        None
+    );
+
+    // The rate crosses the local API.
+    let snapshot = MemorySnapshot {
+        guest: Some(GuestMemoryReport {
+            memory: later,
+            age: Duration::from_secs(3),
+        }),
+        host: Vec::new(),
+    };
+    assert_eq!(snapshot_from_wire(snapshot_to_wire(&snapshot)), snapshot);
+}
+
+#[test]
+fn nfr2_an_older_guest_without_reporting_counts_is_said_to_be_so() {
+    let mut older = report();
+    older.free_reported_kb = 0;
+    older.reported_total_kb = 0;
+    older.refaulted_total_kb = 0;
+    let memory = GuestMemory::from_control(older);
+    assert_eq!(memory.page_reporting, None);
+    assert_eq!(memory.free_not_reported_kb(), None);
+    let text = MemorySnapshot {
+        guest: Some(GuestMemoryReport {
+            memory,
+            age: Duration::from_secs(1),
+        }),
+        host: Vec::new(),
+    }
+    .to_string();
+    assert!(
+        text.contains("free page reporting: Android does not say what it reported"),
+        "{text}"
+    );
 }
 
 #[test]
@@ -900,6 +1005,52 @@ fn nfr2_the_window_manager_gives_memory_back_as_soon_as_no_window_is_open() {
 }
 
 #[test]
+fn nfr2_the_window_manager_gives_back_what_the_last_video_left_while_windows_stay_shown() {
+    use dsa_host_core::memory::{IDLE_TRIM_DELAY, LET_GO_TRIM_DELAY};
+    let start = Instant::now();
+    let mut trim = IdleTrim::new(IDLE_TRIM_DELAY, start);
+    trim.sync(&[opened(1), opened(2), opened(3)], start);
+    // The windows animate (no quiet trim) while a video plays and then closes.
+    assert!(!trim.spare_due(start));
+    let closed = start + Duration::from_secs(60);
+    trim.let_go(closed);
+    assert!(!trim.spare_due(closed + LET_GO_TRIM_DELAY - Duration::from_secs(1)));
+    assert!(trim.spare_due(closed + LET_GO_TRIM_DELAY));
+    // Once only for each let-go.
+    assert!(!trim.spare_due(closed + LET_GO_TRIM_DELAY + Duration::from_secs(1)));
+    assert!(LET_GO_TRIM_DELAY <= Duration::from_secs(10));
+}
+
+#[test]
+fn nfr2_shown_windows_that_keep_drawing_still_get_a_give_back_every_round() {
+    use dsa_host_core::memory::{IDLE_TRIM_DELAY, IDLE_TRIM_REPEAT};
+    let start = Instant::now();
+    let mut trim = IdleTrim::new(IDLE_TRIM_DELAY, start);
+    trim.sync(&[opened(1)], start);
+    assert!(!trim.spare_due(start));
+    assert!(!trim.spare_due(start + IDLE_TRIM_REPEAT - Duration::from_secs(1)));
+    assert!(trim.spare_due(start + IDLE_TRIM_REPEAT));
+    assert!(!trim.spare_due(start + IDLE_TRIM_REPEAT + Duration::from_secs(1)));
+    assert!(trim.spare_due(start + IDLE_TRIM_REPEAT * 2));
+}
+
+#[test]
+fn nfr2_with_no_window_shown_the_idle_give_back_takes_what_a_video_let_go() {
+    use dsa_host_core::memory::{IDLE_TRIM_DELAY, LET_GO_TRIM_DELAY};
+    let start = Instant::now();
+    let mut trim = IdleTrim::new(IDLE_TRIM_DELAY, start);
+    // Before the idle give-back has run, it takes it: no second give-back.
+    trim.let_go(start);
+    assert!(!trim.spare_due(start + LET_GO_TRIM_DELAY));
+    assert!(trim.due(start + LET_GO_TRIM_DELAY));
+    // After it ran, the next one is minutes away: the let-go gets its own.
+    let later = start + Duration::from_secs(30);
+    trim.let_go(later);
+    assert!(trim.spare_due(later + LET_GO_TRIM_DELAY));
+    assert!(!trim.spare_due(later + LET_GO_TRIM_DELAY * 2));
+}
+
+#[test]
 fn nfr2_a_still_screen_gets_the_gpu_driver_trim_within_seconds() {
     use dsa_host_core::memory::QUIET_TRIM_DELAY;
     assert!(QUIET_TRIM_DELAY <= Duration::from_secs(5));
@@ -929,6 +1080,29 @@ fn nfr2_the_window_managers_committed_memory_is_broken_down_by_owner() {
     );
     let unknown = CommittedMemory::default();
     assert!(committed_line(&unknown).contains("(largest allocations none MiB)"));
+}
+
+#[test]
+fn nfr1_the_renderers_gpu_memory_is_logged_by_whose_device_it_is_on() {
+    use dsa_host_core::renderer::{renderer_owners_line, Allocations, RendererOwners};
+    let at = |mib: u64, count: u32| Allocations {
+        kb: mib * MIB,
+        count,
+    };
+    let owners = RendererOwners {
+        renderer: [at(300, 120), at(0, 0), at(159, 126)],
+        guests: [at(104, 49), at(116, 56), at(0, 0)],
+        guest_devices: 10,
+        largest_guest_devices_kb: vec![60 * MIB, 40 * MIB, 20 * MIB, 0],
+    };
+    assert_eq!(
+        renderer_owners_line(&owners),
+        "graphics renderer by owner: color buffers and window textures: GPU-only 300 MiB in \
+         120, CPU-mapped 0 MiB in 0, imported 159 MiB in 126; 10 guest devices: GPU-only 104 \
+         MiB in 49, CPU-mapped 116 MiB in 56, imported 0 MiB in 0 (the largest hold 60, 40, 20 \
+         MiB)"
+    );
+    assert!(renderer_owners_line(&RendererOwners::default()).ends_with("(none holds any)"));
 }
 
 #[test]

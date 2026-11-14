@@ -593,6 +593,8 @@ enum Command {
     Refresh(RefreshInput),
     /// Whether the host is short of memory changed.
     HostMemoryLow(bool),
+    /// Which tasks have their window shown changed.
+    TasksShown(Vec<i32>),
     /// The host's system settings or one of its game controllers changed.
     System(SystemInput),
     /// Freeze the guest after this long in Doze, or never.
@@ -789,7 +791,9 @@ struct Shared {
 struct RootElevationNow {
     /// The computer's switch, as it stands now.
     on: bool,
-    /// The apps with a level other than off.
+    /// The apps with a level the user set, off included: apps that share an Android user ID
+    /// are one group, and one of them set to off hides su from the whole group, which only
+    /// the guest can tell apart by uid.
     apps: Vec<AppLevel>,
     /// The switch as it stood when the running boot started; `None` while no boot runs. The
     /// kernel's su guard and the relay are set up at boot, so a boot that started with the
@@ -1031,8 +1035,17 @@ impl Shared {
             .clone()
     }
 
+    /// Keeps the guest's latest memory report. A report that follows one from the same boot
+    /// says how fast memory went back to the host in between ([`GuestMemory::following`]).
     fn set_guest_memory(&self, memory: Option<(GuestMemory, Instant)>) {
-        *self.guest_memory.lock().unwrap_or_else(|e| e.into_inner()) = memory;
+        let mut kept = self.guest_memory.lock().unwrap_or_else(|e| e.into_inner());
+        *kept = match (memory, kept.take()) {
+            (Some((memory, at)), Some((before, then))) => Some((
+                memory.following(&before, at.saturating_duration_since(then)),
+                at,
+            )),
+            (memory, _) => memory,
+        };
     }
 
     fn set_vm_memory_mb(&self, mb: Option<u64>) {
@@ -1481,6 +1494,8 @@ impl Session {
             refresh_pending: false,
             host_memory_low: false,
             host_memory_pending: false,
+            tasks_shown: None,
+            tasks_shown_pending: false,
             system_settings: None,
             gamepads: GamepadTable::new(),
             system_pending: false,
@@ -1711,7 +1726,7 @@ impl Session {
     }
 
     /// Sets the user's root elevation settings: the computer's switch and the apps with a
-    /// level other than off. The running Android is told at once, so a changed level applies
+    /// level the user set, off included. The running Android is told at once, so a changed level applies
     /// without a restart; so does turning the switch off. Turning it on applies from the next
     /// start of Android, as the kernel's su guard and the relay are set up at boot. Each boot
     /// is told again once its agent connects.
@@ -1726,11 +1741,9 @@ impl Session {
             if !on && now.boot_on.is_some() {
                 now.off_since_boot = true;
             }
-            now.apps = apps
-                .into_iter()
-                .filter(|app| app.level != Level::Off)
-                .collect();
+            now.apps = apps;
             now.apps.sort_by(|a, b| a.package.cmp(&b.package));
+            now.apps.dedup_by(|a, b| a.package == b.package);
         }
         if let Some(body) = self.shared.root_elevation_body(false) {
             send_quietly(&self.shared, &self.commands, body);
@@ -2457,6 +2470,15 @@ impl Session {
             .map_err(|_| SessionError::Gone)
     }
 
+    /// Says which tasks have their window shown: open and not minimized. The session keeps the
+    /// latest word in every state; the guest is told now if it is up, and each time it connects,
+    /// so it keeps less memory for a minimized task's app.
+    pub fn tasks_shown(&self, task_ids: Vec<i32>) -> Result<(), SessionError> {
+        self.commands
+            .send(Command::TasksShown(task_ids))
+            .map_err(|_| SessionError::Gone)
+    }
+
     /// Records the host's power, which the guest is told now if it is up, and each time its
     /// agent connects.
     pub fn set_power(&self, state: PowerState) {
@@ -3050,10 +3072,11 @@ impl Session {
     }
 
     /// Asks the guest to close, resize or rescale a task, or to launch an app. Needs an
-    /// active session, except for the word on shown windows, which is always taken.
+    /// active session, except for the words on shown windows and tasks, which are always taken.
     pub fn request(&self, request: TaskRequest) -> Result<(), SessionError> {
         let body = match request {
             TaskRequest::WindowsShown { shown } => return self.windows_shown(shown),
+            TaskRequest::TasksShown { task_ids } => return self.tasks_shown(task_ids),
             TaskRequest::Close { task_id } => Body::CloseTask(control::CloseTask { task_id }),
             TaskRequest::Launch { package_name } => Body::LaunchApp(control::LaunchApp {
                 package_name,
@@ -4163,6 +4186,10 @@ struct Worker {
     host_memory_low: bool,
     /// Set when that changed while the guest was frozen, so it is told after the thaw.
     host_memory_pending: bool,
+    /// The tasks whose window is shown, as last recorded, once the window manager has said.
+    tasks_shown: Option<Vec<i32>>,
+    /// Set when they changed while the guest was frozen, so it is told after the thaw.
+    tasks_shown_pending: bool,
     /// The host's system settings, as last recorded.
     system_settings: Option<SystemSettings>,
     /// The host's game controllers that are connected, and the latest state of each.
@@ -4252,6 +4279,7 @@ impl Worker {
                         Ok(Command::Power(state)) => self.set_power(state),
                         Ok(Command::Refresh(input)) => self.refresh_input(input),
                         Ok(Command::HostMemoryLow(low)) => self.set_host_memory_low(low),
+                        Ok(Command::TasksShown(task_ids)) => self.set_tasks_shown(task_ids),
                         Ok(Command::System(input)) => self.system_input(input),
                         Ok(Command::FreezeAfter(after)) => self.config.freeze_after = after,
                         Ok(Command::LinksInAndroid(on)) => self.set_links_in_android(on),
@@ -4285,6 +4313,7 @@ impl Worker {
                         Ok(Command::Power(state)) => self.set_power(state),
                         Ok(Command::Refresh(input)) => self.refresh_input(input),
                         Ok(Command::HostMemoryLow(low)) => self.set_host_memory_low(low),
+                        Ok(Command::TasksShown(task_ids)) => self.set_tasks_shown(task_ids),
                         Ok(Command::System(input)) => self.system_input(input),
                         Ok(Command::FreezeAfter(after)) => self.config.freeze_after = after,
                         Ok(Command::LinksInAndroid(on)) => self.set_links_in_android(on),
@@ -4360,6 +4389,10 @@ impl Worker {
             }
             Command::HostMemoryLow(low) => {
                 self.set_host_memory_low(low);
+                true
+            }
+            Command::TasksShown(task_ids) => {
+                self.set_tasks_shown(task_ids);
                 true
             }
             Command::System(input) => {
@@ -4763,13 +4796,34 @@ impl Worker {
             }));
             return;
         };
-        let app = self.shared.installed_app(&request.package);
+        // The guest names every app of a shared user ID group, since the uid alone is all the
+        // kernel knows of the caller; the prompt shows each of them with its name and icon.
+        let packages = crate::root_approval::package_group(&request.package);
+        let app = packages
+            .first()
+            .and_then(|package| self.shared.installed_app(package));
+        let mut approval_request =
+            crate::root_approval::ApprovalRequest::from_su(&request, app.as_ref());
+        if packages.len() > 1 {
+            let shared_apps = packages
+                .iter()
+                .map(|package| {
+                    self.shared
+                        .installed_app(package)
+                        .unwrap_or_else(|| AppInfo {
+                            package_name: package.to_string(),
+                            ..Default::default()
+                        })
+                })
+                .collect();
+            approval_request = approval_request.with_shared_apps(shared_apps);
+        }
         let shared = Arc::clone(&self.shared);
         let request_id = request.request_id;
         let spawned = thread::Builder::new()
             .name("dsa-su-approval".into())
             .spawn(move || {
-                let decision = approval.decide(&request, app.as_ref());
+                let decision = approval.answer(&approval_request);
                 send_quietly(&shared, &commands, Body::SuDecision(decision));
             });
         if let Err(error) = spawned {
@@ -5316,6 +5370,11 @@ impl Worker {
             let low = self.host_memory_low;
             self.send_body(Body::HostMemory(control::HostMemory { low }));
         }
+        if std::mem::take(&mut self.tasks_shown_pending) {
+            if let Some(task_ids) = self.tasks_shown.clone() {
+                self.send_body(Body::TasksShown(control::TasksShown { task_ids }));
+            }
+        }
         if std::mem::take(&mut self.system_pending) {
             self.replay_system_settings();
             self.replay_gamepads();
@@ -5485,6 +5544,24 @@ impl Worker {
                 self.send_body(Body::HostMemory(control::HostMemory { low }));
             }
             SessionState::Frozen => self.host_memory_pending = true,
+            _ => {}
+        }
+    }
+
+    /// Records which tasks have their window shown, and tells a guest that is up.
+    fn set_tasks_shown(&mut self, task_ids: Vec<i32>) {
+        if self.tasks_shown.as_ref() == Some(&task_ids) {
+            return;
+        }
+        self.tasks_shown = Some(task_ids.clone());
+        match self.state() {
+            SessionState::Starting
+            | SessionState::Stalled
+            | SessionState::Active
+            | SessionState::Dozing => {
+                self.send_body(Body::TasksShown(control::TasksShown { task_ids }));
+            }
+            SessionState::Frozen => self.tasks_shown_pending = true,
             _ => {}
         }
     }
@@ -6064,6 +6141,11 @@ impl Worker {
                             self.dozing_since = None;
                             self.power_pending = false;
                             self.host_memory_pending = false;
+                            // The control daemon takes every task to be shown until it is told.
+                            self.tasks_shown_pending = false;
+                            if let Some(task_ids) = self.tasks_shown.clone() {
+                                self.send_body(Body::TasksShown(control::TasksShown { task_ids }));
+                            }
                             // A new boot's control daemon has no controller yet.
                             self.system_pending = false;
                             self.replay_gamepads();
@@ -6122,6 +6204,10 @@ impl Worker {
             }
             Command::HostMemoryLow(low) => {
                 self.set_host_memory_low(low);
+                true
+            }
+            Command::TasksShown(task_ids) => {
+                self.set_tasks_shown(task_ids);
                 true
             }
             Command::System(input) => {
@@ -6354,6 +6440,7 @@ impl Worker {
                     cache_bytes: app.cache_bytes,
                     native_libraries: NativeLibraries::from_control(&app.native_libraries),
                     primary_abi: native_abi::checked_abi(&app.primary_abi),
+                    shared_user_id: app.shared_user_id,
                     ..Default::default()
                 });
             }
@@ -6656,6 +6743,7 @@ impl Worker {
                 );
             }
             Some(Body::ScreenState(_))
+            | Some(Body::TasksShown(_))
             | Some(Body::PowerState(_))
             | Some(Body::DisplayRefresh(_))
             | Some(Body::HostMemory(_))

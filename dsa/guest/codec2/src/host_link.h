@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // One decoder's connection to the host's video port (vsock 5569). The host decodes the
-// stream on its own GPU: packets go out on the component's thread, and a thread of the
-// link's own reads the pictures back and hands each to the component.
+// stream on its own GPU. Packets are queued by the component's thread and written by a
+// thread of the link's own (send_queue.h says why), and another reads the pictures back and
+// hands each to the component.
 
 #pragma once
 
@@ -16,6 +17,7 @@
 #include <thread>
 #include <vector>
 
+#include "send_queue.h"
 #include "video_messages.h"
 
 namespace dsa::codec2 {
@@ -29,7 +31,8 @@ std::optional<std::vector<CodecSupport>> queryCapabilities();
 
 class HostDecoder {
    public:
-    using MessageHandler = std::function<void(const HostMessage&)>;
+    // Takes each message as it comes, on the reading thread.
+    using MessageHandler = std::function<void(HostMessage)>;
 
     ~HostDecoder();
 
@@ -37,21 +40,26 @@ class HostDecoder {
     static std::unique_ptr<HostDecoder> open(Codec codec, uint32_t width, uint32_t height,
                                              MessageHandler onMessage, std::string* error);
 
-    // Sends one encoded Envelope. False once the host has gone.
+    // Queues one encoded Envelope for the host, in order, without waiting for the host to
+    // read it. False once the host has gone.
     bool send(const std::vector<uint8_t>& frame);
 
-    // Closes the connection and waits for the reader to end; no message is handed on after.
+    // Closes the connection and waits for the reader and the writer to end; no message is
+    // handed on after.
     void close();
 
    private:
     HostDecoder(int fd, MessageHandler onMessage);
     void read();
+    void write();
 
     int mFd;
     MessageHandler mOnMessage;
-    std::mutex mSendLock;
+    SendQueue mOutgoing;
     std::atomic<bool> mClosed{false};
+    std::atomic<bool> mWriteFailed{false};
     std::thread mReader;
+    std::thread mWriter;
 };
 
 }  // namespace dsa::codec2

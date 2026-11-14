@@ -1472,6 +1472,104 @@ fn fr25_dsa_refuses_googles_image_when_its_hash_differs() {
 }
 
 #[test]
+fn fr37_dsa_drm_widevine_commands_are_parsed() {
+    assert_eq!(
+        parse(&args("drm widevine")).unwrap().command,
+        Cmd::WidevineStatus
+    );
+    assert_eq!(
+        parse(&args("drm widevine status --json")).unwrap().command,
+        Cmd::WidevineStatus
+    );
+    let install = parse(&args("drm widevine install --yes")).unwrap();
+    assert_eq!(install.command, Cmd::WidevineInstall);
+    assert!(install.yes);
+    assert_eq!(
+        parse(&args("drm widevine remove")).unwrap().command,
+        Cmd::WidevineRemove
+    );
+    assert!(parse(&args("drm playready")).is_err());
+    assert!(parse(&args("drm widevine upgrade")).is_err());
+    assert!(parse(&args("drm widevine remove --yes")).is_err());
+}
+
+#[test]
+fn fr37_dsa_takes_widevine_from_googles_image_only_when_agreed_and_removes_it() {
+    use dsa_host_core::widevine::{self, fixture};
+    let id = std::process::id();
+    let repository = std::env::temp_dir().join(format!("dsa-cli-widevine-{id}"));
+    let _ = std::fs::remove_dir_all(&repository);
+    let abi = widevine::guest_abi();
+    let module = fixture::apex(widevine::MODULE, abi);
+    // The service's facts say Android 17, so the image of API 37 is the one taken.
+    let zip = fixture::image_archive("37", abi, Some(&module));
+    fixture::write_repository(&repository, &[("37.0", abi, &zip)]).unwrap();
+    let ((listener, _, _), endpoint) = local_pair();
+    let _service = settings_service(listener);
+    let none = json_of(&dsa(&endpoint, "drm widevine --json"));
+    assert!(none["package"].is_null(), "{none}");
+    assert_eq!(none["installed"], false);
+    assert_eq!(none["security_level"], "L3");
+
+    // Asked with nobody to answer, it says where the download comes from and its terms, and
+    // changes nothing.
+    let asked = dsa_with_repository(&endpoint, "drm widevine install", &repository);
+    assert!(!asked.status.success());
+    let said = stderr(&asked);
+    assert!(said.contains("Android SDK License"), "{said}");
+    assert!(said.contains("nothing was changed"), "{said}");
+    assert!(json_of(&dsa(&endpoint, "drm widevine --json"))["package"].is_null());
+
+    let line = "drm widevine install --yes --json";
+    let installed = json_of(&dsa_with_repository(&endpoint, line, &repository));
+    assert_eq!(installed["installed"], true, "{installed}");
+    assert_eq!(installed["on_disk"], true);
+    assert_eq!(installed["package"]["abi"], abi);
+    assert_eq!(installed["package"]["android_major"], 17);
+    assert_eq!(
+        installed["package"]["apex"],
+        "com.google.android.widevine.apex"
+    );
+    assert_eq!(installed["package"]["size"], module.len());
+    assert_eq!(
+        installed["package"]["sha256"],
+        widevine::sha256_hex(&module)
+    );
+    let text = stdout(&dsa(&endpoint, "drm widevine status"));
+    assert!(text.contains("standard definition"), "{text}");
+    assert!(text.contains("browser or app"), "{text}");
+
+    let removed = json_of(&dsa(&endpoint, "drm widevine remove --json"));
+    assert!(removed["package"].is_null());
+    assert_eq!(removed["on_disk"], false);
+    let _ = std::fs::remove_dir_all(&repository);
+}
+
+#[test]
+fn fr37_dsa_refuses_an_image_without_widevine_and_changes_nothing() {
+    use dsa_host_core::widevine::{self, fixture};
+    let id = std::process::id();
+    let repository = std::env::temp_dir().join(format!("dsa-cli-widevine-none-{id}"));
+    let _ = std::fs::remove_dir_all(&repository);
+    let abi = widevine::guest_abi();
+    let zip = fixture::image_archive("37", abi, None);
+    fixture::write_repository(&repository, &[("37.0", abi, &zip)]).unwrap();
+    let ((listener, _, _), endpoint) = local_pair();
+    let _service = settings_service(listener);
+    let refused = dsa_with_repository(&endpoint, "drm widevine install --yes", &repository);
+    assert!(!refused.status.success());
+    assert!(
+        stderr(&refused).contains("holds no Widevine module"),
+        "{}",
+        stderr(&refused)
+    );
+    let none = json_of(&dsa(&endpoint, "drm widevine --json"));
+    assert!(none["package"].is_null(), "the stored state is unchanged");
+    assert_eq!(none["on_disk"], false);
+    let _ = std::fs::remove_dir_all(&repository);
+}
+
+#[test]
 fn fr17_dsa_status_json_reports_the_state_and_the_last_reason() {
     let ((listener, _, _), endpoint) = local_pair();
     let _service = RunningService::start(listener, Arc::new(FakeAndroids::default()));
@@ -2003,6 +2101,48 @@ fn fr11_dsa_install_says_why_android_refused_the_apk_and_fails() {
         "{error}"
     );
     assert!(error.contains("INSTALL_PARSE_FAILED_NOT_APK"), "{error}");
+}
+
+#[test]
+fn fr25_dsa_install_refuses_an_arm64_only_app_with_its_reason_while_translation_is_off() {
+    use dsa_host_core::apk_info::fixture::archive;
+    use dsa_host_core::host_api::{HostApiService, ServiceFacts};
+    use dsa_host_core::settings::MemorySettings;
+    let ((listener, _, user), endpoint) = local_pair();
+    let androids = Arc::new(FakeAndroids::default());
+    let service = HostApiService::new(androids.clone(), "test service")
+        .with_settings(Arc::new(MemorySettings::default()), ServiceFacts::default());
+    let _service = RunningService::start_service(listener, service);
+    let content = archive(
+        &[
+            ("AndroidManifest.xml", &b"manifest"[..]),
+            ("lib/arm64-v8a/libgame.so", &b"\x7fELF"[..]),
+        ],
+        b"",
+    );
+    let path = apk_file("arm-game.apk", &content);
+
+    // The running Android does not translate ARM code: refused with the reason, unsent.
+    let output = dsa_with_path(&endpoint, "install", &path, "");
+    assert_eq!(output.status.code(), Some(1));
+    let error = stderr(&output);
+    assert!(
+        error.starts_with("dsa: not installed (translation-off): arm-game.apk: "),
+        "{error}"
+    );
+    assert!(error.contains("ARM translation is not on"), "{error}");
+    assert!(error.contains("Turn it on under ARM apps"), "{error}");
+    let android = androids.of(&user).unwrap();
+    assert!(android.installs.lock().unwrap().is_empty());
+
+    // It does: installed as arm64-v8a.
+    *android.translating.lock().unwrap() = true;
+    let output = dsa_with_path(&endpoint, "install", &path, "");
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        *android.install_abis.lock().unwrap(),
+        vec![Some("arm64-v8a".to_string())]
+    );
 }
 
 #[test]

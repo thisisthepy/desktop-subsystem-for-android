@@ -16,9 +16,9 @@
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
             <StackPanel Style="{StaticResource PageContent}">
                 <ui:InfoBar Title="{l:Text SettingsErrorBar.Title}" Severity="Error" IsClosable="False"
-                            IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" Margin="0,0,0,4" />
+                            IsOpen="{Binding HasError, Mode=OneWay}" Message="{Binding Error, Mode=OneWay}" />
 
-                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Globe24}">
+                <ui:CardControl Icon="{ui:SymbolIcon Globe24}">
                     <ui:CardControl.Header>
                         <StackPanel>
                             <TextBlock Text="{l:Text NetworkStatusCard.Header}" Style="{StaticResource CardTitle}" />
@@ -29,9 +29,9 @@
                                Click="OnRefresh" />
                 </ui:CardControl>
                 <ui:InfoBar Title="{l:Text NetworkProblemBar.Title}" Severity="Warning" IsClosable="False"
-                            IsOpen="{Binding HasNetworkProblem, Mode=OneWay}" Message="{Binding NetworkProblem, Mode=OneWay}" Margin="0,0,0,4" />
+                            IsOpen="{Binding HasNetworkProblem, Mode=OneWay}" Message="{Binding NetworkProblem, Mode=OneWay}" />
 
-                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Info24}"
+                <ui:CardControl Icon="{ui:SymbolIcon Info24}"
                                 Visibility="{Binding HasNetworkDetails, Converter={StaticResource Visible}}">
                     <ui:CardControl.Header>
                         <Grid>
@@ -55,7 +55,7 @@
                 </ui:CardControl>
 
                 <TextBlock Text="{l:Text NetworkAdvancedHeader.Text}" Style="{StaticResource SectionHeader}" />
-                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon PlugConnected24}">
+                <ui:CardControl Icon="{ui:SymbolIcon PlugConnected24}">
                     <ui:CardControl.Header>
                         <StackPanel>
                             <TextBlock Text="{l:Text AdvancedNetworkingCard.Header}" Style="{StaticResource CardTitle}" />
@@ -67,12 +67,12 @@
                 </ui:CardControl>
                 <ui:InfoBar Title="{l:Text NetworkRestartBar.Title}" Message="{l:Text NetworkRestartBar.Message}"
                             Severity="Informational" IsClosable="False"
-                            IsOpen="{Binding NetworkRestartNeeded, Mode=OneWay}" Margin="0,0,0,4" />
+                            IsOpen="{Binding NetworkRestartNeeded, Mode=OneWay}" />
 
                 <!-- The root certificates a user or an administrator added to this PC, which
                      Android trusts while the switch is on. The change applies at once. -->
                 <TextBlock Text="{l:Text NetworkCertificatesHeader.Text}" Style="{StaticResource SectionHeader}" />
-                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon ShieldCheckmark24}">
+                <ui:CardControl Icon="{ui:SymbolIcon ShieldCheckmark24}">
                     <ui:CardControl.Header>
                         <StackPanel>
                             <TextBlock Text="{l:Text HostCertificatesCard.Header}" Style="{StaticResource CardTitle}" />
@@ -88,7 +88,7 @@
                 <l:RowList ItemsSource="{Binding ImportedCertificates, Mode=OneWay}">
                     <l:RowList.ItemTemplate>
                         <DataTemplate>
-                            <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon Certificate24}"
+                            <ui:CardControl Icon="{ui:SymbolIcon Certificate24}"
                                             ToolTip="{Binding Location, TargetNullValue={x:Null}}"
                                             AutomationProperties.Name="{Binding Subject}"
                                             AutomationProperties.HelpText="{Binding SourceText}">
@@ -105,7 +105,7 @@
                 </l:RowList>
 
                 <TextBlock Text="{l:Text DeveloperHeader.Text}" Style="{StaticResource SectionHeader}" />
-                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon DeveloperBoard24}">
+                <ui:CardControl Icon="{ui:SymbolIcon DeveloperBoard24}">
                     <ui:CardControl.Header>
                         <StackPanel>
                             <TextBlock Text="{l:Text DeveloperModeCard.Header}" Style="{StaticResource CardTitle}" />
@@ -115,7 +115,7 @@
                     <ui:ToggleSwitch x:Name="DeveloperModeSwitch" IsChecked="{Binding DeveloperMode, Mode=OneWay}"
                                      IsEnabled="{Binding CanChange, Mode=OneWay}" Click="OnDeveloperModeToggled" />
                 </ui:CardControl>
-                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon ArrowSync24}">
+                <ui:CardControl Icon="{ui:SymbolIcon ArrowSync24}">
                     <ui:CardControl.Header>
                         <StackPanel>
                             <TextBlock Text="{l:Text AdbAutoConnectCard.Header}" Style="{StaticResource CardTitle}" />
@@ -128,7 +128,7 @@
                                      IsEnabled="{Binding CanChange, Mode=OneWay}" Click="OnAdbAutoConnectToggled"
                                      AutomationProperties.Name="{l:Text AdbAutoConnectCard.Header}" />
                 </ui:CardControl>
-                <ui:CardControl Margin="0,0,0,4" Icon="{ui:SymbolIcon PlugConnected24}">
+                <ui:CardControl Icon="{ui:SymbolIcon PlugConnected24}">
                     <ui:CardControl.Header>
                         <StackPanel>
                             <TextBlock Text="{l:Text AdbCard.Header}" Style="{StaticResource CardTitle}" />

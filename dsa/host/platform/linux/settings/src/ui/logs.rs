@@ -41,7 +41,7 @@ pub fn logs(ctx: &Shared) -> gtk::Widget {
     root.append(&clamp);
 
     let note = gtk::Label::builder()
-        .label(tr("Android sends its log only while this page is open, and nothing is written to disk. Save diagnostics gathers what a problem report needs into one zip file."))
+        .label(tr("Android sends its log only while this page is open, and nothing is written to disk.\nSave diagnostics gathers what a problem report needs into one zip file."))
         .wrap(true)
         .xalign(0.0)
         .build();

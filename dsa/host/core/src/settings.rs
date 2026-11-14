@@ -40,6 +40,8 @@
 //!                             the translator the user's latest boot of Android was told to use
 //! <dir>/users/<user>.gapps.json
 //!                             the build of Google's apps the user installed, if any
+//! <dir>/users/<user>.widevine.json
+//!                             the Widevine module the user installed, if any
 //! ```
 //!
 //! A missing file means the defaults. A user who has never saved settings starts from what
@@ -62,6 +64,7 @@ use crate::arm_translation::{Package, Translator};
 use crate::file_share;
 use crate::gapps::GappsPackage;
 use crate::update::program::ReleaseChannel;
+use crate::widevine::WidevinePackage;
 
 /// The longest render GPU value accepted, in characters.
 const MAX_RENDER_GPU: usize = 128;
@@ -413,6 +416,16 @@ pub trait SettingsStore: Send + Sync {
         let _ = (user, package);
         Err("this service keeps no Google apps".into())
     }
+    /// The Widevine module `user` has installed, if any.
+    fn widevine(&self, user: &str) -> Result<Option<WidevinePackage>, String> {
+        let _ = user;
+        Ok(None)
+    }
+    /// Records the Widevine module `user` has installed, or that there is none.
+    fn set_widevine(&self, user: &str, package: Option<&WidevinePackage>) -> Result<(), String> {
+        let _ = (user, package);
+        Err("this service keeps no Widevine module".into())
+    }
     /// The root elevation level of each of `user`'s apps that has one other than off, by
     /// package name. Apps the user has not set are off and are not listed.
     fn root_apps(&self, user: &str) -> Result<Vec<RootApp>, String> {
@@ -518,6 +531,13 @@ impl FileSettings {
             .dir
             .join("users")
             .join(format!("{}.gapps.json", user_file_stem(user)?)))
+    }
+
+    fn widevine_file(&self, user: &str) -> Result<PathBuf, String> {
+        Ok(self
+            .dir
+            .join("users")
+            .join(format!("{}.widevine.json", user_file_stem(user)?)))
     }
 
     fn root_apps_file(&self, user: &str) -> Result<PathBuf, String> {
@@ -748,6 +768,25 @@ impl SettingsStore for FileSettings {
         }
     }
 
+    fn widevine(&self, user: &str) -> Result<Option<WidevinePackage>, String> {
+        let file = self.widevine_file(user)?;
+        let _held = self.lock.lock().unwrap_or_else(|e| e.into_inner());
+        read_json(&file)
+    }
+
+    fn set_widevine(&self, user: &str, package: Option<&WidevinePackage>) -> Result<(), String> {
+        let file = self.widevine_file(user)?;
+        let _held = self.lock.lock().unwrap_or_else(|e| e.into_inner());
+        match package {
+            Some(package) => write_json(&file, package),
+            None => match std::fs::remove_file(&file) {
+                Ok(()) => Ok(()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(e) => Err(format!("removing {}: {e}", file.display())),
+            },
+        }
+    }
+
     fn root_apps(&self, user: &str) -> Result<Vec<RootApp>, String> {
         let file = self.root_apps_file(user)?;
         let _held = self.lock.lock().unwrap_or_else(|e| e.into_inner());
@@ -758,14 +797,7 @@ impl SettingsStore for FileSettings {
         let file = self.root_apps_file(user)?;
         let _held = self.lock.lock().unwrap_or_else(|e| e.into_inner());
         let mut apps = read_json::<Vec<RootApp>>(&file)?.unwrap_or_default();
-        apps.retain(|app| app.package != package);
-        if level != crate::root_elevation::default_level(package).code() {
-            apps.push(RootApp {
-                package: package.to_string(),
-                level: level.to_string(),
-            });
-        }
-        apps.sort_by(|a, b| a.package.cmp(&b.package));
+        update_root_apps(&mut apps, package, level);
         if apps.is_empty() {
             match std::fs::remove_file(&file) {
                 Ok(()) => Ok(()),
@@ -778,6 +810,23 @@ impl SettingsStore for FileSettings {
     }
 }
 
+/// Sets `package`'s level among `apps`. The adb shell item is kept only while it differs from
+/// its default (ask). An app's level is kept even when it is off: apps that share an Android
+/// user ID are one group, and one of them set to off keeps the whole group off, which an app
+/// merely left at the default does not.
+fn update_root_apps(apps: &mut Vec<RootApp>, package: &str, level: &str) {
+    apps.retain(|app| app.package != package);
+    if !crate::root_elevation::is_adb_shell(package)
+        || level != crate::root_elevation::default_level(package).code()
+    {
+        apps.push(RootApp {
+            package: package.to_string(),
+            level: level.to_string(),
+        });
+    }
+    apps.sort_by(|a, b| a.package.cmp(&b.package));
+}
+
 /// Settings kept in memory, for tests and for a service that keeps no folder.
 #[derive(Default)]
 pub struct MemorySettings {
@@ -787,6 +836,7 @@ pub struct MemorySettings {
     arm_translation_boot: Mutex<std::collections::HashMap<String, Translator>>,
     app_windows: Mutex<std::collections::HashMap<String, Vec<AppWindowSettings>>>,
     gapps: Mutex<std::collections::HashMap<String, GappsPackage>>,
+    widevine: Mutex<std::collections::HashMap<String, WidevinePackage>>,
     root_apps: Mutex<std::collections::HashMap<String, Vec<RootApp>>>,
 }
 
@@ -909,6 +959,24 @@ impl SettingsStore for MemorySettings {
         Ok(())
     }
 
+    fn widevine(&self, user: &str) -> Result<Option<WidevinePackage>, String> {
+        Ok(self
+            .widevine
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(user)
+            .cloned())
+    }
+
+    fn set_widevine(&self, user: &str, package: Option<&WidevinePackage>) -> Result<(), String> {
+        let mut packages = self.widevine.lock().unwrap_or_else(|e| e.into_inner());
+        match package {
+            Some(package) => packages.insert(user.to_string(), package.clone()),
+            None => packages.remove(user),
+        };
+        Ok(())
+    }
+
     fn root_apps(&self, user: &str) -> Result<Vec<RootApp>, String> {
         Ok(self
             .root_apps
@@ -922,14 +990,7 @@ impl SettingsStore for MemorySettings {
     fn set_root_app(&self, user: &str, package: &str, level: &str) -> Result<(), String> {
         let mut all = self.root_apps.lock().unwrap_or_else(|e| e.into_inner());
         let apps = all.entry(user.to_string()).or_default();
-        apps.retain(|app| app.package != package);
-        if level != crate::root_elevation::default_level(package).code() {
-            apps.push(RootApp {
-                package: package.to_string(),
-                level: level.to_string(),
-            });
-        }
-        apps.sort_by(|a, b| a.package.cmp(&b.package));
+        update_root_apps(apps, package, level);
         Ok(())
     }
 }
@@ -1498,6 +1559,31 @@ mod tests {
         assert_eq!(again.gapps("uid:1000").unwrap(), None);
         // Removing what is not there is not an error.
         again.set_gapps("uid:1000", None).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn fr37_the_widevine_module_a_user_installed_is_kept_per_user() {
+        let dir = scratch("widevine");
+        let store = FileSettings::new(&dir);
+        assert_eq!(store.widevine("uid:1000").unwrap(), None);
+        let package = WidevinePackage {
+            apex: "com.google.android.widevine.apex".into(),
+            version: "BE2A.250530.026.F3 (API 36, r7)".into(),
+            android_major: 16,
+            abi: "x86_64".into(),
+            source: "https://dl.google.com/android/repository/sys-img/google_apis/x.zip".into(),
+            size: 4096,
+            sha256: "0".repeat(64),
+            license: "android-sdk-license".into(),
+        };
+        store.set_widevine("uid:1000", Some(&package)).unwrap();
+        let again = FileSettings::new(&dir);
+        assert_eq!(again.widevine("uid:1000").unwrap(), Some(package));
+        assert_eq!(again.widevine("uid:1001").unwrap(), None);
+        again.set_widevine("uid:1000", None).unwrap();
+        assert_eq!(again.widevine("uid:1000").unwrap(), None);
+        again.set_widevine("uid:1000", None).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -43,8 +43,9 @@ data class TaskSnapshot(
     val minWidth: Int = 0,
     val minHeight: Int = 0,
     /**
-     * What the task's app told the system about its status bar's icons, which the host's
-     * caption buttons follow.
+     * What the task's app tells the system about its status bar's icons now, which the host's
+     * caption buttons follow: filled in by the agent from the window manager's live reports
+     * ([SystemBarAppearances]); unknown while the app has expressed nothing.
      */
     val statusBar: StatusBarAppearance = StatusBarAppearance.UNKNOWN,
     /** The status bar color the app set, as ARGB; 0 when it set none. */

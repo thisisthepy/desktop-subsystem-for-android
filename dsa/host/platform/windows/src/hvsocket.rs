@@ -15,12 +15,13 @@ use dsa_transport::stream::{
     accept_with_timeout, FramedConnection, RawStreamConnection, StreamSocket,
 };
 use dsa_transport::{Connection, Connector, Listener, TransportError};
+use windows_sys::Win32::Foundation::{SetHandleInformation, HANDLE, HANDLE_FLAG_INHERIT};
 use windows_sys::Win32::Networking::WinSock::{
     accept, bind, closesocket, connect, ioctlsocket, listen, recv, send, setsockopt, shutdown,
     socket, WSADuplicateSocketW, WSAGetLastError, WSAPoll, WSASocketW, WSAStartup, FIONBIO,
     FROM_PROTOCOL_INFO, INVALID_SOCKET, POLLRDNORM, SD_BOTH, SOCKADDR, SOCKET, SOCKET_ERROR,
     SOCK_STREAM, SOMAXCONN, WSADATA, WSAEAFNOSUPPORT, WSAEPROTONOSUPPORT, WSAESOCKTNOSUPPORT,
-    WSAPOLLFD, WSAPROTOCOL_INFOW,
+    WSAPOLLFD, WSAPROTOCOL_INFOW, WSA_FLAG_NO_HANDLE_INHERIT,
 };
 use windows_sys::Win32::System::Threading::GetCurrentProcessId;
 
@@ -112,6 +113,12 @@ impl HvSocket {
     }
 
     fn from_raw(raw: SOCKET) -> HvSocket {
+        // Winsock sockets are inheritable. A process this one starts (the window manager's
+        // graphics renderer, its app windows) would otherwise hold a copy of each, and a
+        // listener's copy keeps its address bound after this process closes it, so the same
+        // port cannot listen again when Android restarts in the same VM.
+        // SAFETY: raw is a socket this process owns; a socket is a kernel handle.
+        unsafe { SetHandleInformation(raw as HANDLE, HANDLE_FLAG_INHERIT, 0) };
         HvSocket {
             raw,
             read_timeout: None,
@@ -223,7 +230,7 @@ impl StreamSocket for HvSocket {
                 FROM_PROTOCOL_INFO,
                 &info,
                 0,
-                0,
+                WSA_FLAG_NO_HANDLE_INHERIT,
             )
         };
         if raw == INVALID_SOCKET {

@@ -33,6 +33,12 @@ mkdir -p "$out"
     "$here/shadow_memory_test.cpp" -o "$out/shadow_memory_test"
 "$out/shadow_memory_test"
 
+# The memory types the guest reports without shared memory, and which of them are read back
+# when the app's work finishes (guest/mesa 0012).
+"$cxx" -std=c++17 -O2 -Wall -Wextra -Werror -I"$here/../include" \
+    "$here/memory_types_test.cpp" -o "$out/memory_types_test"
+"$out/memory_types_test"
+
 "$cxx" -std=c++17 -O2 -Wall -Wextra -Werror -I"$here/../include" \
     "$here/lost_stream_test.cpp" -o "$out/lost_stream_test"
 "$out/lost_stream_test"
@@ -44,6 +50,11 @@ mkdir -p "$out"
 "$cxx" -std=c++17 -O2 -Wall -Wextra -Werror -I"$here/../include" \
     "$here/cpu_upload_test.cpp" -o "$out/cpu_upload_test"
 "$out/cpu_upload_test"
+
+# How long a process keeps a gralloc buffer's host ColorBuffer open (guest/mesa 0013).
+"$cxx" -std=c++17 -O2 -Wall -Wextra -Werror -I"$here/../include" \
+    "$here/color_buffer_refs_test.cpp" -o "$out/color_buffer_refs_test"
+"$out/color_buffer_refs_test"
 
 "$cxx" -std=c++17 -O2 -Wall -Wextra -Werror -I"$here/../include" \
     "$here/spare_pages_test.cpp" -o "$out/spare_pages_test"

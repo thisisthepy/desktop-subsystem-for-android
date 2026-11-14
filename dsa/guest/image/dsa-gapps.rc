@@ -44,6 +44,14 @@ on post-fs-data && property:ro.boot.dsa.gapps=on && property:ro.boot.dsa.gapps_i
     mkdir /mnt/dsa-gapps 0755 root root
     mount erofs /mnt/dsa-addons/gapps.img /mnt/dsa-gapps ro nodev nosuid directio,fscontext=u:object_r:dsa_gapps_fs:s0,context=u:object_r:system_file:s0
 
+# In the host's direct-mapped mode ("dax") the add-on disk is persistent memory, and the host's
+# partition table also names the image's own bytes on it (dsa_gapps). erofs mounts that
+# partition as a block device with dax=always, so it maps each file of the image from the host
+# and keeps no page cache of it; mounted from the file, its pages would be cached as before.
+on post-fs-data && property:ro.boot.dsa.gapps=on && property:ro.boot.dsa.gapps_image=dax
+    mkdir /mnt/dsa-gapps 0755 root root
+    mount erofs /dev/block/by-name/dsa_gapps /mnt/dsa-gapps ro nodev nosuid dax=always,fscontext=u:object_r:dsa_gapps_fs:s0,context=u:object_r:system_file:s0
+
 on post-fs-data && property:ro.boot.dsa.gapps=on && property:ro.boot.dsa.gapps_image=data
     mkdir /mnt/dsa-gapps 0755 root root
     mount erofs /data/vendor/dsa/gapps/system.img /mnt/dsa-gapps ro nodev nosuid directio,fscontext=u:object_r:dsa_gapps_fs:s0,context=u:object_r:system_file:s0

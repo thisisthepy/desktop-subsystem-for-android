@@ -7,10 +7,12 @@ could start without developer mode, listen on TCP or ask for an authorisation, w
 app is not signed with one of the keys in the key folder, when a system screen overlay is
 missing or was built against another framework-res or another build of the app it overlays,
 when Settings' pages would open with their large title folded, when the trace script is missing, when the agent is missing or not signed with the platform key, when
-Settings still has the preferences or code that crash it without Bluetooth, when a list in
-Settings or Files that sets its own padding keeps no room below its last row, when the window
-manager would not give a freeform window its status bar inset or services.jar stores its dex
-unaligned, when the framework overlay's status bar heights are not the window title bar's, when a system
+Settings still has the preferences or code that crash it without Bluetooth, when Settings'
+home list would add Android's freeform padding to the navigation bar inset, when the window
+manager would not give a freeform window its status bar and navigation bar insets, when the
+package manager would refuse a multiArch app with arm64-v8a code only while ARM translation is
+on, or services.jar stores its dex unaligned, when the framework overlay's status bar heights
+are not the window title bar's or its navigation bar heights are not 24 dp, when a system
 app users open is not compiled for the guest's boot image and its own dex, when an app the
 published build shipped compiled lost its odex, vdex or app image, or has one made for
 other dex, another boot image or another compiler filter, when the files
@@ -204,20 +206,14 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
                 if left:
                     problems.append(f"{name}:{dex} still has the code in {', '.join(sorted(set(left)))} "
                                     "that crashes Settings without the Bluetooth adapter")
-    # The lists that set their own bottom padding, in Settings and Files, keep room below
-    # their last row. (PermissionController's, inside the permission APEX, make-image.py
-    # checks after signing: reading an APEX payload takes otatools' deapexer.)
-    for suffix, edits in [
-        (make_image.SETTINGS_APK, {"code": make_image.SETTINGS_CODE_LIST_MARGIN,
-                                   "dimensions": make_image.SETTINGS_LIST_DIMENSIONS}),
-        (make_image.DOCUMENTSUI_APK, {"code": make_image.DOCUMENTSUI_CODE}),
-    ]:
-        for name in names:
-            if name.endswith(suffix):
-                left = make_image.apk_edits_left(z.read(name), **edits)
-                if left:
-                    problems.append(f"{name} still has {'; '.join(left)}, so the last row of its list "
-                                    "sits on the window's bottom edge")
+    # Settings' home list is padded by the navigation bar inset alone, as its other lists are,
+    # not by Android 17's freeform padding on top of it.
+    for name in names:
+        if name.endswith(make_image.SETTINGS_APK):
+            left = make_image.apk_edits_left(z.read(name), code=make_image.SETTINGS_CODE_FREEFORM_PADDING)
+            if left:
+                problems.append(f"{name} still has {'; '.join(left)}, so its home list ends higher above "
+                                "the window's bottom edge than its other lists")
     # Settings' pages take whether their large title opens expanded from the theme, which the
     # Settings overlay sets by the window's height.
     for name in names:
@@ -228,21 +224,43 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
                 problems.append(f"{name} still has {'; '.join(left)}, so its pages open with the large "
                                 "title folded in every window")
     # The window manager hands a freeform window its status bar inset, so an app that pads its
-    # toolbar by that inset keeps it below the window's title bar. services.jar keeps its dex
+    # toolbar by that inset keeps it below the window's title bar, and its navigation bar
+    # inset, so its bottom bar keeps clear of the window's bottom edge. services.jar keeps its dex
     # aligned, or system_server copies 20 MiB of it into memory; its odex is checked with the
     # apps the published build compiled, below.
     if make_image.SERVICES_JAR not in names:
         problems.append(f"{make_image.SERVICES_JAR} is missing")
     else:
         services = z.read(make_image.SERVICES_JAR)
-        left = make_image.apk_edits_left(services, code=make_image.SERVICES_CODE)
+        left = make_image.apk_edits_left(services, code=make_image.SERVICES_INSETS_CODE)
         if left:
             problems.append(f"{make_image.SERVICES_JAR} still has {'; '.join(left)}, so a freeform window "
-                            "gets no status bar inset and an app that pads by it draws under the title bar")
+                            "gets no status bar or navigation bar inset, and an app that pads by them draws "
+                            "under the title bar and on the window's bottom edge")
+        # The package manager takes every 64-bit ABI the guest lists for a multiArch app, so an
+        # app with arm64-v8a code only installs while ARM translation is on.
+        left = make_image.apk_edits_left(services, code=make_image.SERVICES_ABI_CODE)
+        if left:
+            problems.append(f"{make_image.SERVICES_JAR} still has {'; '.join(left)}, so Android refuses a "
+                            "multiArch app with arm64-v8a code only even while ARM translation is on")
+        # The WebView zygote starts with the first WebView renderer, so nothing in services.jar
+        # starts it at boot.
+        callers = make_image.jar_callers(services, make_image.WEBVIEW_ZYGOTE_START)
+        if callers:
+            problems.append(f"{make_image.SERVICES_JAR} still starts the WebView zygote from "
+                            f"{', '.join(callers)}, so it holds its memory from boot whether or not an "
+                            "app uses WebView")
         misaligned = make_image.zip_misaligned(services)
         if misaligned:
             problems.append(f"{make_image.SERVICES_JAR} stores {', '.join(misaligned)} unaligned, so "
                             "system_server copies them into memory")
+    # The system apps that had nothing to do at boot are not started by it.
+    for name in names:
+        if name.endswith(tuple(make_image.BOOT_RECEIVER_FREE_APKS)):
+            left = make_image.boot_receivers_left(z.read(name))
+            if left:
+                problems.append(f"{name} still starts at every boot ({', '.join(map(str, left))}) and "
+                                "stays as a cached process")
     # The system apps users open, compiled when the image was made: each odex must be there,
     # made for the APK's own (edited, signed) dex and the guest's boot image, or ART drops it
     # and the app runs interpreted again.
@@ -261,6 +279,7 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
     if plat_contexts in names and make_image.ZRAM_BACKING_CONTEXT not in z.read(plat_contexts).decode().splitlines():
         problems.append("plat_file_contexts does not label zram's backing folder, so the loop driver "
                         "may not read or write the file")
+    problems += make_image.direct_mapped_problems(names, z.read, manifest.get("direct_mapped"))
     if "SYSTEM/etc/selinux/plat_sepolicy.cil" not in names:
         problems.append("plat_sepolicy.cil is missing from the image")
     else:
@@ -468,6 +487,9 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
         problems += make_image.gapps_folder_problems(names)
     # The add-on disk the Google apps and a user's ARM translation package are mounted from.
     problems += make_image.addon_disk_problems(names, z.read)
+    problems += make_image.widevine_problems(names, z.read)
+    # Google Play sees the computer's memory, and only Google Play does.
+    problems += make_image.host_memory_problems(manifest, names, z.read)
     if "SYSTEM/etc/dsa/gapps-on.prop" in names:
         on = [line.strip() for line in
               z.read("SYSTEM/etc/dsa/gapps-on.prop").decode(errors="replace").splitlines()]
