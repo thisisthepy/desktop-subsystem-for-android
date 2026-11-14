@@ -33,6 +33,7 @@ use wayland_protocols::xdg::shell::client::xdg_toplevel::ResizeEdge;
 
 use super::menu::{MenuPlace, MenuSurface};
 use super::shm::ShmBuffer;
+use super::widgets::WidgetSurface;
 use super::{task_of, Event, State};
 use crate::compositor::window_menu::{desktop_menu_point, opens_window_menu, size_edge, MoveSize};
 use crate::input::keymap::{self, evdev_key, guest_key};
@@ -53,6 +54,8 @@ enum Repeating {
 #[derive(Debug, Default)]
 struct Pen {
     task: Option<i32>,
+    /// The widget whose window the pen is over.
+    widget: Option<i32>,
     position: (f64, f64),
     pressure: Option<f32>,
     down: bool,
@@ -165,7 +168,7 @@ impl State {
         }
     }
 
-    fn set_shape(&mut self, shape: Shape) {
+    pub(crate) fn set_shape(&mut self, shape: Shape) {
         if self.seat_state.shape == Some(shape) {
             return;
         }
@@ -513,6 +516,10 @@ impl State {
                 return;
             }
         }
+        // A widget's menu, or a widget being edited, takes the keyboard.
+        if self.widget_key(code, down) {
+            return;
+        }
         // The window menu takes the keyboard while it is open.
         if self.menu.is_some() {
             if down {
@@ -729,6 +736,18 @@ impl State {
     }
 
     fn pen_frame(&mut self) {
+        // A pen on a widget presses it as a finger does.
+        if let Some(widget_id) = self.seat_state.pen.widget {
+            let pen = &mut self.seat_state.pen;
+            let (down, was_down, position) = (pen.down, pen.was_down, pen.position);
+            pen.was_down = pen.down;
+            let left = std::mem::take(&mut pen.left);
+            if left {
+                pen.widget = None;
+            }
+            self.widget_pen(widget_id, position, (down, was_down), left);
+            return;
+        }
         let pen = &mut self.seat_state.pen;
         let Some(task_id) = pen.task else {
             return;
@@ -890,6 +909,10 @@ impl Dispatch<WlPointer, ()> for State {
                     state.menu_pointer((surface_x, surface_y));
                     return;
                 }
+                if state.widget_pointer_enter(&surface, (surface_x, surface_y)) {
+                    state.seat_state.pointer_focus = None;
+                    return;
+                }
                 state.seat_state.pointer_focus = task_of(&surface);
                 let offset = state
                     .seat_state
@@ -905,6 +928,9 @@ impl Dispatch<WlPointer, ()> for State {
             wl_pointer::Event::Leave { .. } => {
                 if std::mem::take(&mut state.seat_state.on_menu) {
                     state.menu_pointer_left();
+                    return;
+                }
+                if state.widget_pointer_leave() {
                     return;
                 }
                 if let Some(task_id) = state.seat_state.pointer_focus.take() {
@@ -928,6 +954,9 @@ impl Dispatch<WlPointer, ()> for State {
                     state.menu_pointer((surface_x, surface_y));
                     return;
                 }
+                if state.widget_pointer_motion((surface_x, surface_y)) {
+                    return;
+                }
                 let offset = state.seat_state.offset;
                 state.seat_state.position = (surface_x + offset.0, surface_y + offset.1);
                 if let Some(task_id) = state.seat_state.pointer_focus {
@@ -945,6 +974,10 @@ impl Dispatch<WlPointer, ()> for State {
                     state.serial = serial;
                     let position = state.seat_state.menu_position;
                     state.menu_button(serial, position, down);
+                    return;
+                }
+                state.serial = serial;
+                if state.widget_pointer_button(serial, button, down) {
                     return;
                 }
                 if let Some(task_id) = state.seat_state.pointer_focus {
@@ -1012,9 +1045,13 @@ impl Dispatch<WlKeyboard, ()> for State {
             } => {
                 state.serial = serial;
                 state.seat_state.keyboard_focus = task_of(&surface);
+                state.widget_keyboard_enter(&surface);
                 state.data_focus_changed();
             }
-            wl_keyboard::Event::Leave { .. } => state.keyboard_left(),
+            wl_keyboard::Event::Leave { .. } => {
+                state.widget_keyboard_leave();
+                state.keyboard_left();
+            }
             wl_keyboard::Event::Key {
                 serial,
                 time,
@@ -1081,6 +1118,9 @@ impl Dispatch<WlTouch, ()> for State {
                     state.menu_touch(serial, (x, y));
                     return;
                 }
+                if state.widget_touch_down(&surface, id, (x, y), serial) {
+                    return;
+                }
                 let Some(task_id) = task_of(&surface) else {
                     return;
                 };
@@ -1096,6 +1136,9 @@ impl Dispatch<WlTouch, ()> for State {
                 state.contact(task_id, touch(id, ContactPhase::Down, position));
             }
             wl_touch::Event::Motion { id, x, y, .. } => {
+                if state.widget_touch_motion(id, (x, y)) {
+                    return;
+                }
                 let Some((task_id, _)) = state.seat_state.touches.get(&id).copied() else {
                     return;
                 };
@@ -1107,11 +1150,15 @@ impl Dispatch<WlTouch, ()> for State {
                 state.contact(task_id, touch(id, ContactPhase::Move, position));
             }
             wl_touch::Event::Up { id, .. } => {
+                if state.widget_touch_up(id) {
+                    return;
+                }
                 if let Some((task_id, position)) = state.seat_state.touches.remove(&id) {
                     state.contact(task_id, touch(id, ContactPhase::Up, position));
                 }
             }
             wl_touch::Event::Cancel => {
+                state.widget_touch_cancel();
                 let touches: Vec<_> = state.seat_state.touches.drain().collect();
                 for (id, (task_id, position)) in touches {
                     state.contact(task_id, touch(id, ContactPhase::Cancel, position));
@@ -1278,6 +1325,7 @@ impl Dispatch<ZwpTabletToolV2, ()> for State {
             } => pen.eraser = kind == zwp_tablet_tool_v2::Type::Eraser,
             zwp_tablet_tool_v2::Event::ProximityIn { surface, .. } => {
                 pen.task = task_of(&surface);
+                pen.widget = surface.data::<WidgetSurface>().map(|widget| widget.0);
                 pen.left = false;
             }
             zwp_tablet_tool_v2::Event::ProximityOut => pen.left = true,

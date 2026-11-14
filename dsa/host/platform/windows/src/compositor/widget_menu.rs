@@ -14,155 +14,18 @@
 //!
 //! The menu speaks the user's display language when DSA has it (Korean), else English.
 
-use dsa_host_core::widgets::{clamp_size, Placement, WidgetProvider};
+//!
+//! What it offers is the platform-neutral menu every host shares
+//! (`dsa_host_core::widget_windows::menu`); what is here is its Windows 11 look.
+
+pub use dsa_host_core::widget_windows::menu::{
+    choice_of, is_current, menu_name, menu_text, size_choices, size_label, MenuChoice, MenuText,
+    SizeChoice, SizeName, FIRST_SIZE, REMOVE, RESIZE, SETTINGS,
+};
+use dsa_host_core::widgets::{Placement, WidgetProvider};
 
 use super::fluent::glyph;
 use super::fluent_menu::{MenuEntry, MenuItem};
-
-/// A size the Resize menu offers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SizeName {
-    /// The smallest the widget allows.
-    Small,
-    /// The size the widget is placed at.
-    Default,
-    /// One and a half times its default.
-    Large,
-    /// Twice its default.
-    ExtraLarge,
-}
-
-/// One size of the Resize menu, in dp.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SizeChoice {
-    pub name: SizeName,
-    pub width_dp: u32,
-    pub height_dp: u32,
-}
-
-/// What the user chose in the menu.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MenuChoice {
-    /// Resize the window to this size, in dp.
-    Resize { width_dp: u32, height_dp: u32 },
-    /// Remove the widget.
-    Remove,
-    /// Open the widget's setup again.
-    Settings,
-}
-
-/// The menu item of Remove. A size is [`FIRST_SIZE`] plus its place in the list.
-pub const REMOVE: u32 = 1;
-/// The menu item that opens the sizes.
-pub const RESIZE: u32 = 2;
-/// The menu item of Widget settings.
-pub const SETTINGS: u32 = 3;
-/// The menu item of the first size.
-pub const FIRST_SIZE: u32 = 100;
-
-/// The sizes the Resize menu offers for `provider`, each within what the widget allows. A
-/// size equal to one before it is left out, so a widget that cannot be resized offers one.
-pub fn size_choices(provider: &WidgetProvider) -> Vec<SizeChoice> {
-    let (width, height) = clamp_size(
-        provider,
-        provider.default_width_dp,
-        provider.default_height_dp,
-    );
-    let asked = [
-        (SizeName::Small, 0, 0),
-        (SizeName::Default, width, height),
-        (SizeName::Large, width * 3 / 2, height * 3 / 2),
-        (SizeName::ExtraLarge, width * 2, height * 2),
-    ];
-    let mut out: Vec<SizeChoice> = Vec::with_capacity(asked.len());
-    for (name, w, h) in asked {
-        let (width_dp, height_dp) = clamp_size(provider, w, h);
-        if out
-            .iter()
-            .all(|c| (c.width_dp, c.height_dp) != (width_dp, height_dp))
-        {
-            out.push(SizeChoice {
-                name,
-                width_dp,
-                height_dp,
-            });
-        }
-    }
-    out
-}
-
-/// What the menu item `command` chose among `sizes`; None for no choice (as when the menu was
-/// dismissed) or an unknown one.
-pub fn choice_of(command: u32, sizes: &[SizeChoice]) -> Option<MenuChoice> {
-    if command == REMOVE {
-        return Some(MenuChoice::Remove);
-    }
-    if command == SETTINGS {
-        return Some(MenuChoice::Settings);
-    }
-    let size = sizes.get(command.checked_sub(FIRST_SIZE)? as usize)?;
-    Some(MenuChoice::Resize {
-        width_dp: size.width_dp,
-        height_dp: size.height_dp,
-    })
-}
-
-/// Whether `placement` is at the size of `choice`, which the menu marks.
-pub fn is_current(choice: &SizeChoice, placement: &Placement) -> bool {
-    (choice.width_dp, choice.height_dp) == (placement.width_dp, placement.height_dp)
-}
-
-/// The words of the menu in one language.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct MenuText {
-    pub settings: &'static str,
-    pub resize: &'static str,
-    pub remove: &'static str,
-    small: &'static str,
-    default: &'static str,
-    large: &'static str,
-    extra_large: &'static str,
-    /// What UI Automation calls a widget with no name of its own.
-    pub widget: &'static str,
-}
-
-/// The menu's words: Korean for a Korean display language, else English.
-pub fn menu_text(korean: bool) -> MenuText {
-    if korean {
-        MenuText {
-            settings: "위젯 설정",
-            resize: "크기 조정",
-            remove: "제거",
-            small: "작게",
-            default: "기본 크기",
-            large: "크게",
-            extra_large: "아주 크게",
-            widget: "위젯",
-        }
-    } else {
-        MenuText {
-            settings: "Widget settings",
-            resize: "Resize",
-            remove: "Remove",
-            small: "Small",
-            default: "Default size",
-            large: "Large",
-            extra_large: "Extra large",
-            widget: "Widget",
-        }
-    }
-}
-
-/// The label of a size in the menu, with the size itself, such as "Large (270 × 165)".
-pub fn size_label(text: &MenuText, choice: &SizeChoice) -> String {
-    let name = match choice.name {
-        SizeName::Small => text.small,
-        SizeName::Default => text.default,
-        SizeName::Large => text.large,
-        SizeName::ExtraLarge => text.extra_large,
-    };
-    format!("{name} ({} × {})", choice.width_dp, choice.height_dp)
-}
 
 /// The key that chooses a size while the menu is open: the first letter of its English
 /// name, which Windows' Korean menus use as well.
@@ -209,15 +72,6 @@ pub fn entries(
     }
     out.push(MenuEntry::Item(remove.with_access_key('M')));
     out
-}
-
-/// What UI Automation calls the menu of a widget: the widget's own name, or "Widget".
-pub fn menu_name(text: &MenuText, provider: &WidgetProvider) -> String {
-    if provider.label.trim().is_empty() {
-        text.widget.to_string()
-    } else {
-        provider.label.clone()
-    }
 }
 
 /// Whether a Windows language ID is Korean (its primary language is 0x12).

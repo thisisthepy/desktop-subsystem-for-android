@@ -9312,13 +9312,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Place the widgets your Android apps offer on the desktop, each in a window of its own below your other windows.\nDrag a widget's top band to move it, and its edges to resize it. Right-click it to resize or remove it.\nAndroid starts when you open this page."
+            "value": "Place the widgets your Android apps offer on the desktop, each in a window of its own below your other windows, on every Space.\nPress and hold a widget, or force click it, to edit it: drag it to move it, and drag its handles to resize it. Control-click it for its settings, its sizes and Remove.\nAndroid starts when you open this page."
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "Android 앱이 제공하는 위젯을 바탕 화면에 놓습니다. 위젯마다 다른 창 아래에 자기 창이 생깁니다.\n위쪽 띠를 끌어 옮기고, 가장자리를 끌어 크기를 바꿉니다. 마우스 오른쪽 단추로 누르면 크기를 바꾸거나 제거합니다.\n이 페이지를 열면 Android가 시작됩니다."
+            "value": "Android 앱이 제공하는 위젯을 바탕 화면에 놓습니다. 위젯마다 다른 창 아래, 모든 Space에 자기 창이 생깁니다.\n위젯을 길게 누르거나 강하게 클릭하면 편집할 수 있습니다. 끌어서 옮기고, 손잡이를 끌어 크기를 바꿉니다. Control-클릭하면 위젯 설정, 크기, 제거가 나옵니다.\n이 페이지를 열면 Android가 시작됩니다."
           }
         }
       }

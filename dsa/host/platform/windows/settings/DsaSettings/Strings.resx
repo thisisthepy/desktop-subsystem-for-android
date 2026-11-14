@@ -974,8 +974,8 @@ It is not affiliated with, endorsed by or sponsored by Microsoft or Google.</val
   <data name="WidgetsIntro.Text" xml:space="preserve">
     <value>Place the widgets your Android apps offer on your desktop. Android starts when you open this page.
 • Each widget gets a window of its own, below your other windows.
-• Drag the band along its top to move it, and its edges to resize it.
-• Right-click a widget to resize or remove it.</value>
+• Press and hold a widget to edit it: drag it to move it, and drag its handles to resize it.
+• Right-click a widget for its settings, its sizes and Remove.</value>
   </data>
   <data name="WidgetsErrorBar.Title" xml:space="preserve">
     <value>Widgets could not be read or changed</value>
