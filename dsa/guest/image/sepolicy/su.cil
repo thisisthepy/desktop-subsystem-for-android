@@ -131,3 +131,17 @@
 (dontaudit dsa_su dsa_su_root (process (noatsecure)))
 ; The helper ends a command whose client went away or whose call timed out.
 (allow dsa_su dsa_su_root (process (signal sigkill)))
+
+; The services an approved command talks to. The domain is permissive only for what the
+; command does itself; a service it calls stays enforcing, so the files it hands over and the
+; callbacks it passes are refused unless allowed here. dumpsys passes the write end of a pipe
+; it made, and `dumpsys SurfaceFlinger` failed with FAILED_TRANSACTION: the binder driver
+; refused the pipe ("surfaceflinger dsa_su_root fd use" denied). `cmd` passes a shell callback
+; and a result receiver the service calls back on. These are the rules AOSP gives its own su
+; domain on userdebug builds (private/domain.te), for a domain that likewise exists only while
+; a root command runs.
+(allow domain dsa_su_root (fd (use)))
+(allow domain dsa_su_root (fifo_file (write getattr)))
+(typeattribute dsa_su_root_callers)
+(typeattributeset dsa_su_root_callers (and (domain) (not (init))))
+(allow dsa_su_root_callers dsa_su_root (binder (call transfer)))
