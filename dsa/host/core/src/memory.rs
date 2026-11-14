@@ -206,10 +206,23 @@ impl HostRole {
 pub struct HostProcessMemory {
     pub role: HostRole,
     pub pid: u32,
-    /// Resident in RAM now: what the host's task manager shows as the process's memory.
+    /// Resident in RAM now, `mapped_kb` included.
     pub working_set_kb: u64,
     /// Committed to it alone.
     pub private_kb: u64,
+    /// Of `working_set_kb`, the VM's pages of the read-only disk files it maps directly (the
+    /// host's direct-mapped mode). They are clean pages of those files, shared with the
+    /// host's file cache: the host drops them without writing anything and reads them again
+    /// when the guest next touches them, so they are not memory the VM holds for itself.
+    /// 0 for every other process, and for a VM that maps no disk.
+    pub mapped_kb: u64,
+}
+
+impl HostProcessMemory {
+    /// What the process holds for itself: its working set without `mapped_kb`.
+    pub fn own_kb(&self) -> u64 {
+        self.working_set_kb.saturating_sub(self.mapped_kb)
+    }
 }
 
 /// Everything known about a user's Android's memory at one moment.
@@ -446,6 +459,18 @@ impl MemorySnapshot {
         self.host.iter().map(|p| p.working_set_kb).sum()
     }
 
+    /// Of [`host_total_kb`](Self::host_total_kb), the VM's pages of the disk files it maps
+    /// directly ([`HostProcessMemory::mapped_kb`]).
+    pub fn host_mapped_kb(&self) -> u64 {
+        self.host.iter().map(|p| p.mapped_kb).sum()
+    }
+
+    /// What the user's Android holds on the host for itself: every process's working set
+    /// without the mapped disk pages, which the host can drop at no cost.
+    pub fn host_own_kb(&self) -> u64 {
+        self.host.iter().map(HostProcessMemory::own_kb).sum()
+    }
+
     fn role_total_kb(&self, role: HostRole) -> (u64, usize) {
         self.host
             .iter()
@@ -460,11 +485,23 @@ impl MemorySnapshot {
     /// MemTotal, so it is not in the guest's use either, but it is in use for as long as the
     /// VM runs and the host can never take it back. It counts as used here; counting it as
     /// free memory not returned would show a gap that no reclaim can close.
+    ///
+    /// The VM's mapped disk pages are left out: the guest's memory does not hold them, and
+    /// counting them would show the disk files the guest read as memory it did not return.
     pub fn vm_beyond_guest_kb(&self) -> Option<u64> {
         let guest = &self.guest.as_ref()?.memory;
         let (vm, count) = self.role_total_kb(HostRole::Vm);
+        let vm = vm.saturating_sub(self.vm_mapped_kb());
         let held = guest.used_kb() + guest.reserved_at_boot_kb().unwrap_or(0);
         (count > 0).then(|| vm.saturating_sub(held))
+    }
+
+    fn vm_mapped_kb(&self) -> u64 {
+        self.host
+            .iter()
+            .filter(|p| p.role == HostRole::Vm)
+            .map(|p| p.mapped_kb)
+            .sum()
     }
 
     /// One line for the service's log: the host's total and its parts, then what the guest
@@ -483,6 +520,15 @@ impl MemorySnapshot {
             mib(renderer),
             mib(apps)
         );
+        let mapped = self.host_mapped_kb();
+        if mapped > 0 {
+            line.push_str(&format!(
+                "; {} MiB of the vm's are pages of the disk files it maps, which the host drops \
+                 without writing: {} MiB without them",
+                mib(mapped),
+                mib(self.host_own_kb())
+            ));
+        }
         match &self.guest {
             None => line.push_str("; guest has not reported"),
             Some(report) => {
@@ -566,11 +612,22 @@ impl fmt::Display for MemorySnapshot {
     /// details.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "Host: {} MiB in all", mib(self.host_total_kb()))?;
+        let mapped = self.host_mapped_kb();
+        if mapped > 0 {
+            writeln!(
+                f,
+                "  {} MiB without the {} MiB of the disk files the VM maps (clean pages shared \
+                 with the host's file cache, which it drops without writing and reads again \
+                 when Android touches them)",
+                mib(self.host_own_kb()),
+                mib(mapped)
+            )?;
+        }
         if self.host.is_empty() {
             writeln!(f, "  no process of this Android is running")?;
         }
         for p in &self.host {
-            writeln!(
+            write!(
                 f,
                 "  {:<17} pid {:<6} {:>6} MiB resident, {:>6} MiB private",
                 p.role.name(),
@@ -578,6 +635,14 @@ impl fmt::Display for MemorySnapshot {
                 mib(p.working_set_kb),
                 mib(p.private_kb)
             )?;
+            if p.mapped_kb > 0 {
+                write!(
+                    f,
+                    ", {} MiB of it mapped from the disk files",
+                    mib(p.mapped_kb)
+                )?;
+            }
+            writeln!(f)?;
         }
         let Some(report) = &self.guest else {
             return writeln!(
@@ -748,6 +813,7 @@ pub fn snapshot_to_wire(snapshot: &MemorySnapshot) -> types::Memory {
                 pid: p.pid,
                 working_set_kb: p.working_set_kb,
                 private_kb: p.private_kb,
+                mapped_kb: p.mapped_kb,
             })
             .collect(),
     }
@@ -822,6 +888,8 @@ pub fn snapshot_from_wire(memory: types::Memory) -> MemorySnapshot {
                     pid: p.pid,
                     working_set_kb: p.working_set_kb,
                     private_kb: p.private_kb,
+                    // A service from before the field sends 0, as for a VM that maps nothing.
+                    mapped_kb: p.mapped_kb.min(p.working_set_kb),
                 })
             })
             .collect(),

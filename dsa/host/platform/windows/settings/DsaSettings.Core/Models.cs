@@ -240,7 +240,13 @@ public enum HostRole
     AppWindow,
 }
 
-public sealed record HostProcess(HostRole Role, uint Pid, ulong WorkingSetKb, ulong PrivateKb);
+/// <summary>One host process of the user's Android. <see cref="MappedKb"/> is the part of the
+/// working set that is pages of the disk files the VM maps directly: clean file pages Windows
+/// drops without writing, so <see cref="OwnKb"/> is what the process holds for itself.</summary>
+public sealed record HostProcess(HostRole Role, uint Pid, ulong WorkingSetKb, ulong PrivateKb, ulong MappedKb = 0)
+{
+    public ulong OwnKb => WorkingSetKb - Math.Min(MappedKb, WorkingSetKb);
+}
 
 /// <summary>What some of Android's processes cost, in KiB: their pages in memory, and their
 /// share of compressed memory (zram) at the compression zram measures. PSS counts what is

@@ -1575,6 +1575,10 @@ message HostProcessMemory {
   uint64 working_set_kb = 3;
   // The memory committed to it alone, in KiB.
   uint64 private_kb = 4;
+  // Of working_set_kb, the pages of the disk files the VM maps directly (the host's
+  // direct-mapped mode), in KiB: clean file pages the host drops without writing anything.
+  // 0 for every other process, and from a service that does not count them.
+  uint64 mapped_kb = 5;
 }
 
 // The answer to GetMemory.

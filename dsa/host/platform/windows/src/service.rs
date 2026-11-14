@@ -1100,6 +1100,79 @@ fn log_memory(androids: &dyn UserAndroids, host: &dyn HostMemory, build: &str, s
     }
 }
 
+/// Takes the pages of the disks each running VM maps directly (the host's direct-mapped mode)
+/// out of the VM's working set until `stop` is set, as [`MappedPagesTrim`] decides: the pages
+/// Android read once, at boot or when an app started, would otherwise stay in `vmmem` until
+/// Windows ran short of memory (see [`crate::mapped_pages`]). Only the views of the
+/// machine's direct-mapped disks and of the user's add-on disk are touched.
+///
+/// [`MappedPagesTrim`]: dsa_host_core::direct_mapped::MappedPagesTrim
+fn give_back_mapped_pages(
+    androids: &dyn UserAndroids,
+    root: &crate::paths::MachineRoot,
+    build: &str,
+    stop: &AtomicBool,
+) {
+    use dsa_host_core::direct_mapped::{MappedPagesTrim, MAPPED_PAGES_CHECK};
+    let mut trims: std::collections::HashMap<(String, String), MappedPagesTrim> =
+        std::collections::HashMap::new();
+    let mut failed: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+    let mut next = Instant::now() + MAPPED_PAGES_CHECK;
+    while !stop.load(Ordering::Relaxed) {
+        thread::sleep(Duration::from_secs(1));
+        if Instant::now() < next {
+            continue;
+        }
+        next = Instant::now() + MAPPED_PAGES_CHECK;
+        let mut running = std::collections::HashSet::new();
+        for (user, state) in androids.running() {
+            if state == dsa_host_core::session::SessionState::Stopped {
+                continue;
+            }
+            let Some(vm_id) = androids.android(&user).ok().and_then(|a| a.vm_id()) else {
+                continue;
+            };
+            let key = (user.clone(), vm_id.clone());
+            running.insert(key.clone());
+            let pids = crate::host_memory::vm_processes(&vm_id).unwrap_or_default();
+            for pid in pids {
+                let Some((_, before)) = crate::host_memory::shared_working_set(pid) else {
+                    continue;
+                };
+                let now = Instant::now();
+                let trim = trims.entry(key.clone()).or_default();
+                if !trim.due(now, before) {
+                    continue;
+                }
+                let disks = root.direct_mapped();
+                let addons = root.user_addon_disk(&user);
+                match crate::mapped_pages::give_back(pid, &[&disks, &addons]) {
+                    Ok(_) => {
+                        let after = crate::host_memory::shared_working_set(pid)
+                            .map_or(before, |(_, shared)| shared);
+                        if let Some(line) = trim.gave_back(now, before, after) {
+                            eprintln!("{build}: {user}: {line}");
+                        }
+                    }
+                    Err(why) => {
+                        // Said once a boot; tried again after the gap.
+                        trim.failed(now);
+                        if failed.insert(key.clone()) {
+                            eprintln!(
+                                "{build}: {user}: direct-mapped: the mapped disks' pages cannot \
+                                 be taken out of the VM's working set ({why}); they stay until \
+                                 Windows is short of memory"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        trims.retain(|key, _| running.contains(key));
+        failed.retain(|key| running.contains(key));
+    }
+}
+
 /// Serves the local API until `stop` is set, then stops every user's VM.
 pub fn serve(config: HostConfig, build: &str, stop: Arc<AtomicBool>) -> Result<(), String> {
     // A service, yet every pointer event passes through this process.
@@ -1373,6 +1446,17 @@ where
             .spawn(move || log_memory(&*androids, &*host_memory, &worker_build, &stop))
         {
             eprintln!("{build}: starting the memory log failed: {error}");
+        }
+    }
+    if config.direct_mapped_images {
+        let androids = androids.clone();
+        let (worker_build, stop, root) =
+            (build.to_string(), Arc::clone(&stop), config.machine_root());
+        if let Err(error) = thread::Builder::new()
+            .name("dsa-mapped-pages".into())
+            .spawn(move || give_back_mapped_pages(&*androids, &root, &worker_build, &stop))
+        {
+            eprintln!("{build}: starting the give-back of the mapped disks' pages failed: {error}");
         }
     }
     if let Some(source) = android_version {

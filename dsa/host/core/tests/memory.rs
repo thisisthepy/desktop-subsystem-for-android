@@ -313,6 +313,7 @@ fn host(role: HostRole, pid: u32, mib: u64) -> HostProcessMemory {
         pid,
         working_set_kb: mib * MIB,
         private_kb: mib * MIB / 2,
+        mapped_kb: 0,
     }
 }
 
@@ -930,6 +931,70 @@ fn nfr2_the_window_manager_gives_memory_back_once_no_window_has_been_open_a_whil
     trim.task_event(Some(&opened(3)), at(410));
     trim.task_event(None, at(420));
     assert!(trim.due(at(450)));
+}
+
+/// The snapshot with the VM mapping its disks directly: 600 MiB resident, 450 of them pages
+/// of the disk files.
+fn mapped_snapshot() -> MemorySnapshot {
+    let mut snapshot = snapshot();
+    snapshot.host[0].mapped_kb = 450 * MIB;
+    snapshot
+}
+
+#[test]
+fn nfr1_the_log_line_tells_the_mapped_disk_pages_from_what_the_vm_holds() {
+    let snapshot = mapped_snapshot();
+    assert_eq!(snapshot.host_total_kb(), 900 * MIB);
+    assert_eq!(snapshot.host_mapped_kb(), 450 * MIB);
+    assert_eq!(snapshot.host_own_kb(), 450 * MIB);
+    let line = snapshot.summary_line();
+    assert!(
+        line.starts_with(
+            "memory: host 900 MiB (vm 600, window manager 120, graphics renderer 80, 2 app \
+             windows 100); 450 MiB of the vm's are pages of the disk files it maps, which the \
+             host drops without writing: 450 MiB without them; guest 2048/4096 MiB used"
+        ),
+        "{line}"
+    );
+}
+
+#[test]
+fn nfr1_dsa_memory_shows_the_mapped_disk_pages_apart_from_private_memory() {
+    let text = mapped_snapshot().to_string();
+    for part in [
+        "Host: 900 MiB in all",
+        "450 MiB without the 450 MiB of the disk files the VM maps",
+        "600 MiB resident,    300 MiB private, 450 MiB of it mapped from the disk files",
+    ] {
+        assert!(text.contains(part), "{part:?} missing from:\n{text}");
+    }
+    // Without mapped disks the report is as before.
+    let plain = snapshot().to_string();
+    assert!(!plain.contains("disk files"), "{plain}");
+}
+
+#[test]
+fn nfr1_the_mapped_disk_pages_cross_the_local_api() {
+    let snapshot = mapped_snapshot();
+    let wire = snapshot_to_wire(&snapshot);
+    assert_eq!(wire.host[0].mapped_kb, 450 * MIB);
+    assert_eq!(snapshot_from_wire(wire), snapshot);
+    // A service that does not send them, and one whose counters disagreed for a moment.
+    let mut wire = snapshot_to_wire(&snapshot);
+    wire.host[0].mapped_kb = 0;
+    assert_eq!(snapshot_from_wire(wire).host[0].mapped_kb, 0);
+    let mut wire = snapshot_to_wire(&snapshot);
+    wire.host[0].mapped_kb = 9000 * MIB;
+    assert_eq!(snapshot_from_wire(wire).host[0].mapped_kb, 600 * MIB);
+}
+
+#[test]
+fn nfr2_the_mapped_disk_pages_are_not_counted_as_free_memory_held() {
+    // The guest holds 2152 MiB (as below); the VM's 2160 MiB resident plus 450 MiB of the disk
+    // files it read are not memory it failed to return.
+    let mut snapshot = mapped_snapshot();
+    snapshot.host[0].working_set_kb = 2610 * MIB;
+    assert_eq!(snapshot.vm_beyond_guest_kb(), Some(8 * MIB));
 }
 
 #[test]

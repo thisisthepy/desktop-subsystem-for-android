@@ -392,6 +392,23 @@ fn nfr2_the_memory_page_counts_zram_compressed_and_google_play_services_apart() 
 }
 
 #[test]
+fn nfr1_the_memory_page_leaves_out_the_disk_pages_the_vm_maps() {
+    let memory = Memory::read(&json!({
+        "host": [
+            { "role": "vm", "pid": 10, "working_set_kb": 1368064, "private_kb": 1000000,
+              "mapped_kb": 489472 },
+            { "role": "window manager", "pid": 11, "working_set_kb": 40960, "private_kb": 30000 }
+        ],
+        "host_total_kb": 1409024
+    }));
+    assert_eq!(memory.host[0].mapped_kb, 489472);
+    assert_eq!(view::vm_size_kb(&memory), Some(1368064 - 489472));
+    assert_eq!(view::host_own_kb(&memory), 1409024 - 489472);
+    // A service that does not count them sends none.
+    assert_eq!(memory.host[1].mapped_kb, 0);
+}
+
+#[test]
 fn fr17_the_memory_page_shows_the_vm_and_the_guest_breakdown() {
     let memory = Memory::read(&json!({
         "host": [

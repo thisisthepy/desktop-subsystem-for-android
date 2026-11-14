@@ -116,6 +116,7 @@ pub mod installer_actions;
 pub mod jump_list;
 #[cfg(windows)]
 pub mod machine_user_folder;
+pub mod mapped_pages;
 pub mod monitors;
 pub mod network;
 pub mod paths;

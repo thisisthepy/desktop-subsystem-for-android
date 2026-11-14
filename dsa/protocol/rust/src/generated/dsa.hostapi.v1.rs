@@ -1706,6 +1706,11 @@ pub struct HostProcessMemory {
     /// The memory committed to it alone, in KiB.
     #[prost(uint64, tag = "4")]
     pub private_kb: u64,
+    /// Of working_set_kb, the pages of the disk files the VM maps directly (the host's
+    /// direct-mapped mode), in KiB: clean file pages the host drops without writing anything.
+    /// 0 for every other process, and from a service that does not count them.
+    #[prost(uint64, tag = "5")]
+    pub mapped_kb: u64,
 }
 /// The answer to GetMemory.
 #[derive(Clone, PartialEq, ::prost::Message)]
