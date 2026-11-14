@@ -764,5 +764,141 @@ class KeyMintLockTests(unittest.TestCase):
         self.assertFalse([p for p, _ in framework_lock.patch_files("android17") if p == "system/keymint"])
 
 
+class WorkflowTests(unittest.TestCase):
+    """How the Framework build keeps its compiler caches and how the image release finds its
+    files: the build is two hours cold and twenty minutes warm, and a development build waits
+    on it."""
+
+    def setUp(self):
+        self.framework = (REPO / ".github/workflows/framework.yml").read_text(encoding="utf-8")
+        self.release = (REPO / ".github/workflows/release-image.yml").read_text(encoding="utf-8")
+        self.build = (REPO / ".github/scripts/framework/build.sh").read_text(encoding="utf-8")
+
+    def _step(self, text, name):
+        start = text.index(f"- name: {name}\n")
+        end = text.find("\n      - ", start + 1)
+        return text[start:end if end != -1 else len(text)]
+
+    def test_nfr5_a_development_build_waits_only_for_the_job_it_takes_files_from(self):
+        find = self._step(self.release, "Find the Framework build run with the pinned files")
+        dev = find[find.index('if [[ "$DEV_BUILD" == true ]]'):find.index("wanted=()")]
+        # The newest supported Android's x86_64 files, from the job framework.yml names so.
+        self.assertIn('android="android$(jq \'.supported_majors | max\' dsa/android-versions.json)"', dev)
+        self.assertIn('name="framework-$android-x86_64-', dev)
+        self.assertIn('job="Build the framework (ubuntu-24.04, $android, x86_64)"', dev)
+        self.assertIn("name: Build the framework (ubuntu-24.04, ${{ matrix.android }}, ${{ matrix.arch }})",
+                      self.framework)
+        # Its job's conclusion, not the run's: the run may still be going or have failed.
+        self.assertIn('[[ "$conclusion" == success ]] || continue', dev)
+        self.assertNotIn("--status success", dev)
+        # A release still takes every version and architecture from one passing run.
+        release = find[find.index("wanted=()"):]
+        self.assertIn("--status success", release)
+        self.assertIn("for arch in x86_64 arm64; do", release)
+
+    def test_nfr5_the_image_downloads_the_framework_while_its_run_still_goes(self):
+        download = self._step(self.release, "Download the patched framework")
+        self.assertNotIn('gh run download "', download)
+        self.assertIn("/actions/artifacts/$id/zip", download)
+
+    def test_nfr5_the_newest_android_and_x86_64_build_first(self):
+        self.assertIn("sort_by(ltrimstr(\"android\") | tonumber) | reverse", self.framework)
+        self.assertIn("arches='[\"x86_64\",\"arm64\"]'", self.framework)
+
+    def test_nfr5_the_compiler_cache_is_kept_as_an_artifact_and_restored_before_the_build(self):
+        steps = [line.strip()[len("- name: "):] for line in self.framework.splitlines()
+                 if line.strip().startswith("- name: ")]
+        order = ["Restore the compiler cache", "Build SurfaceFlinger, libhwui, libEGL and the KeyMint",
+                 "Pack the compiler cache", "Keep the compiler cache", "Delete the compiler caches it replaces"]
+        self.assertEqual([s for s in steps if s in order], order)
+        keep = self._step(self.framework, "Keep the compiler cache")
+        self.assertIn("uses: actions/upload-artifact@v4", keep)
+        self.assertIn("name: framework-ccache-${{ matrix.android }}-${{ matrix.arch }}\n", keep)
+        self.assertIn("compression-level: 0", keep)
+        # Nothing is saved to the Actions cache any more, where GitHub evicted it.
+        self.assertNotIn("actions/cache/save", self.framework)
+        # An empty cache from a build that never ran must not replace a full one.
+        self.assertIn("steps.build.outcome", self._step(self.framework, "Pack the compiler cache"))
+
+    def test_nfr5_the_build_reports_its_compiler_cache_hits(self):
+        self.assertIn("ccache --zero-stats", self.build)
+        self.assertIn("ccache --show-stats --verbose", self.build)
+        self.assertIn("-o max_size=3G", self.build)
+
+
+@unittest.skipIf(sys.platform == "win32", "runs the shell script with a fake gh and curl")
+class CcacheArtifactTests(unittest.TestCase):
+    SCRIPT = REPO / ".github/scripts/framework/ccache-artifact.sh"
+
+    def _run(self, root, listing, *args, branch="feat/x"):
+        root = Path(root)
+        bin_dir = root / "bin"
+        bin_dir.mkdir(exist_ok=True)
+        (root / "listing.tsv").write_text(listing)
+        log = root / "calls.log"
+        # gh prints the listing as the script's own jq would; curl hands out a zip holding
+        # ccache.tar with one file, named after the artifact it was asked for.
+        (bin_dir / "gh").write_text(
+            "#!/bin/sh\n"
+            f'echo "gh $*" >> "{log}"\n'
+            'case "$*" in *DELETE*) exit 0 ;; esac\n'
+            f'cat "{root}/listing.tsv"\n')
+        (bin_dir / "curl").write_text(
+            "#!/bin/sh\n"
+            f'echo "curl $*" >> "{log}"\n'
+            'out=""; prev=""; url=""\n'
+            'for a in "$@"; do [ "$prev" = "-o" ] && out="$a"; prev="$a"; url="$a"; done\n'
+            'id="$(echo "$url" | sed -E \'s#.*/artifacts/([0-9]+)/zip#\\1#\')"\n'
+            f'w="{root}/pack-$id"; mkdir -p "$w/c"; echo "$id" > "$w/c/from"\n'
+            'tar -C "$w/c" -cf "$w/ccache.tar" . && (cd "$w" && zip -q "$out" ccache.tar)\n')
+        for tool in ("gh", "curl"):
+            (bin_dir / tool).chmod(0o755)
+        env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}", GH_TOKEN="t",
+                   GITHUB_REPOSITORY="o/r", GITHUB_REF_NAME=branch, GITHUB_OUTPUT=str(root / "out"))
+        env.pop("GITHUB_HEAD_REF", None)
+        result = subprocess.run(["bash", str(self.SCRIPT), *args], env=env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = log.read_text() if log.exists() else ""
+        out = (root / "out").read_text() if (root / "out").exists() else ""
+        return calls, out
+
+    LISTING = ("30\t300\tdevelop\t2026-11-14T09:00:00Z\n"
+               "20\t200\tfeat/x\t2026-11-13T09:00:00Z\n"
+               "10\t100\tdevelop\t2026-11-12T09:00:00Z\n")
+
+    @unittest.skipUnless(subprocess.run(["sh", "-c", "command -v zip unzip"], capture_output=True).returncode == 0,
+                         "needs zip and unzip")
+    def test_nfr5_a_branch_restores_its_own_cache_before_develops(self):
+        with tempfile.TemporaryDirectory() as root:
+            cache = Path(root, "ccache")
+            _, out = self._run(root, self.LISTING, "restore", "framework-ccache-android17-x86_64",
+                               str(cache), str(Path(root, "dl")))
+            self.assertIn("found=true", out)
+            self.assertEqual((cache / "from").read_text().strip(), "20")
+
+    @unittest.skipUnless(subprocess.run(["sh", "-c", "command -v zip unzip"], capture_output=True).returncode == 0,
+                         "needs zip and unzip")
+    def test_nfr5_develop_restores_its_newest_cache_whatever_lock_made_it(self):
+        with tempfile.TemporaryDirectory() as root:
+            cache = Path(root, "ccache")
+            _, out = self._run(root, self.LISTING, "restore", "framework-ccache-android17-x86_64",
+                               str(cache), str(Path(root, "dl")), branch="develop")
+            self.assertIn("found=true", out)
+            self.assertEqual((cache / "from").read_text().strip(), "30")
+
+    def test_nfr5_no_cache_to_restore_is_a_cold_build_not_a_failure(self):
+        with tempfile.TemporaryDirectory() as root:
+            calls, out = self._run(root, "", "restore", "framework-ccache-android17-x86_64",
+                                   str(Path(root, "ccache")), str(Path(root, "dl")))
+            self.assertIn("found=false", out)
+            self.assertNotIn("curl", calls)
+
+    def test_nfr5_only_develops_older_caches_are_deleted(self):
+        with tempfile.TemporaryDirectory() as root:
+            calls, _ = self._run(root, self.LISTING, "prune", "framework-ccache-android17-x86_64", "30")
+            deleted = [line for line in calls.splitlines() if "DELETE" in line]
+            self.assertEqual(deleted, ["gh api -X DELETE repos/o/r/actions/artifacts/10"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -42,7 +42,9 @@
 # Each image carries the patched SurfaceFlinger, libhwui and libEGL that recover from a GPU
 # device loss (described in its image.json under "framework"): the files the newest passing
 # "Framework build" run on develop made for that Android version and architecture from the
-# pinned lock and patches. Run that workflow first when dsa/guest/framework changes.
+# pinned lock and patches. Run that workflow first when dsa/guest/framework changes. A
+# development build needs only the newest Android's x86_64 files, so it takes them from the
+# newest run whose job for those passed, without waiting for that run's other jobs.
 #
 # The Development build (dev-build.yml) calls this workflow with dev_build set, so a build for
 # testing is made by exactly these jobs and steps: the kernel, the image of the newest Android
@@ -612,7 +614,33 @@ jobs:
       - name: Find the Framework build run with the pinned files
         id: framework
         if: ${{ !cancelled() && inputs.framework }}
+        env:
+          DEV_BUILD: ${{ inputs.dev_build }}
         run: |
+          if [[ "$DEV_BUILD" == true ]]; then
+            # A development build makes only the newest Android's x86_64 image, so it takes the
+            # files of the newest Framework build run on develop whose job for those passed,
+            # while that run's other jobs are still building or after they failed. The name
+            # is the job's in framework.yml.
+            android="android$(jq '.supported_majors | max' dsa/android-versions.json)"
+            name="framework-$android-x86_64-$(python3 dsa/guest/framework/framework_lock.py version "$android")"
+            job="Build the framework (ubuntu-24.04, $android, x86_64)"
+            echo "looking for $name from a passing \"$job\""
+            for run in $(gh run list --repo "${{ github.repository }}" --workflow framework.yml --branch develop \
+                           --limit 30 --json databaseId --jq '.[].databaseId'); do
+              conclusion="$(gh api "repos/${{ github.repository }}/actions/runs/$run/jobs?per_page=100" \
+                              --jq ".jobs[] | select(.name == \"$job\") | .conclusion")"
+              [[ "$conclusion" == success ]] || continue
+              if gh api "repos/${{ github.repository }}/actions/runs/$run/artifacts?name=$name" \
+                   --jq '.artifacts[] | select(.expired | not) | .id' | grep -q .; then
+                echo "run $run has it"
+                echo "run_id=$run" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+            done
+            echo "::error::No Framework build run on develop has a passing \"$job\" with $name. Run the Framework build workflow; with android set to $android and arch to x86_64 is enough."
+            exit 1
+          fi
           wanted=()
           for android in $(python3 dsa/guest/framework/framework_lock.py versions | jq -r '.[]'); do
             version="$(python3 dsa/guest/framework/framework_lock.py version "$android")"
@@ -775,8 +803,18 @@ jobs:
         run: |
           android="android${{ matrix.android }}"
           name="framework-$android-${{ matrix.arch }}-$(python3 dsa/guest/framework/framework_lock.py version "$android")"
-          gh run download "${{ needs.prebuilt.outputs.framework_run_id }}" --repo "${{ github.repository }}" \
-            --name "$name" --dir .scratch/framework
+          run="${{ needs.prebuilt.outputs.framework_run_id }}"
+          id="$(gh api "repos/${{ github.repository }}/actions/runs/$run/artifacts?name=$name" \
+                  --jq '.artifacts[] | select(.expired | not) | .id' | head -1)"
+          [[ -n "$id" ]] || { echo "::error::run $run has no $name" >&2; exit 1; }
+          # Through the artifact API: it serves the artifact while the run is still going (a
+          # development build takes it as soon as its job passed), where gh run download waits
+          # for the whole run. curl drops the token on the storage host it is sent on to.
+          mkdir -p .scratch/framework
+          curl -fsSL --retry 5 --retry-all-errors -H "Authorization: Bearer $GH_TOKEN" \
+            -o .scratch/framework.zip "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/$id/zip"
+          unzip -q .scratch/framework.zip -d .scratch/framework
+          rm .scratch/framework.zip
           cat .scratch/framework/framework.json
           echo "args=--framework .scratch/framework" >> "$GITHUB_OUTPUT"
 
