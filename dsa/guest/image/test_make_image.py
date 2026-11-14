@@ -1274,8 +1274,10 @@ class ImageLayoutTests(unittest.TestCase):
                     self.assertIn(f"(allow {client} dsa_channeld (binder (call transfer)))", policy)
                     # The listener callbacks go the other way.
                     self.assertIn(f"(allow dsa_channeld {client} (binder (call transfer)))", policy)
-                # Only the daemon registers the service.
-                self.assertEqual(policy.count("(service_manager (add"), 1)
+                # Only the daemon registers the service. (The other add is Widevine's service,
+                # declared because this vendor policy has none of its types.)
+                self.assertEqual(re.findall(r"\(allow (\S+) dsa_channel_service \(service_manager \(add", policy),
+                                 ["dsa_channeld"])
                 # The agent's process carries MLS categories; without this the daemon cannot read
                 # its name, refuses it as the sender, and every boot ends Stalled. Opening
                 # /proc/<pid>/cmdline also checks getattr, and a refusal is logged on every call.
@@ -1295,9 +1297,11 @@ class ImageLayoutTests(unittest.TestCase):
             modified = root / "modified.zip"
             make_image.modify(source, modified, channeld=daemon)
             with zipfile.ZipFile(modified) as archive:
+                # With Widevine's service, which the image always labels.
                 self.assertEqual(
                     archive.read("VENDOR/etc/selinux/vendor_service_contexts").decode(),
-                    "io.github.thisisthepy.dsa.channel.IChannel/default u:object_r:dsa_channel_service:s0\n",
+                    "io.github.thisisthepy.dsa.channel.IChannel/default u:object_r:dsa_channel_service:s0\n"
+                    f"{make_image.WIDEVINE_SERVICE_CONTEXT}\n",
                 )
 
     def test_fr3_the_service_name_matches_the_aidl_package(self):
@@ -1341,7 +1345,9 @@ class ImageLayoutTests(unittest.TestCase):
                 self.assertNotIn("VENDOR/bin/dsa-channeld", archive.namelist())
                 self.assertNotIn("VENDOR/etc/init/dsa-channeld.rc", archive.namelist())
                 self.assertNotIn("VENDOR/etc/vintf/manifest/dsa-channel.xml", archive.namelist())
-                self.assertNotIn("VENDOR/etc/selinux/vendor_service_contexts", archive.namelist())
+                # vendor_service_contexts labels Widevine's service alone.
+                self.assertEqual(archive.read("VENDOR/etc/selinux/vendor_service_contexts").decode(),
+                                 make_image.WIDEVINE_SERVICE_CONTEXT + "\n")
                 self.assertNotIn("dsa_channeld", archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode())
 
     def _target_files_with_system_ext(self, root):
@@ -5817,6 +5823,7 @@ class ArmTranslationImageTests(unittest.TestCase):
             archive.writestr("META/vendor_filesystem_config.txt", "vendor/bin/sh 0 2000 755 capabilities=0x0\n")
             archive.writestr("META/filesystem_config.txt", "system/bin/sh 0 2000 755 capabilities=0x0\n")
             archive.writestr("PRODUCT/etc/build.prop", "ro.product.product.name=dsa\nro.dalvik.vm.native.bridge=0\n")
+            archive.writestr(make_image.INIT_RC, self.ANDROID_17_INIT_RC)
         modified = root / "modified.zip"
         make_image.modify(source, modified, arm_translation=arm_translation)
         return zipfile.ZipFile(modified)
@@ -5969,7 +5976,7 @@ class ArmTranslationImageTests(unittest.TestCase):
         return dropped
 
     def test_fr25_fr32_init_hands_every_mount_option_to_the_kernel(self):
-        for name in ["dsa-arm-translation.rc", "dsa-gapps.rc", "dsa-addons.rc", "dsa-widevine.rc"]:
+        for name in ["dsa-arm-translation.rc", "dsa-gapps.rc", "dsa-addons.rc", "dsa-widevine-early.rc"]:
             rc = (Path(make_image.__file__).with_name(name)).read_text()
             self.assertEqual(self._dropped_mount_options(rc), [], name)
         # develop 406c30d7 named fscontext= and context= as two arguments. Init dropped
@@ -6521,39 +6528,147 @@ class ArmTranslationImageTests(unittest.TestCase):
             # No domain is given filesystem getattr on a file type: the superblock is not one.
             self.assertNotIn("(allow init system_file (filesystem (getattr)))", policy)
 
+    # The early-init of Android 17's init.rc (system/core/rootdir/init.rc, CE2A.260420), cut to
+    # the lines around apexd-bootstrap.
+    ANDROID_17_INIT_RC = """\
+import /init.environ.rc
+
+# Cgroups are mounted right before early-init using list from /etc/cgroups.json
+on early-init
+    # Mount bootstrap linker configuration as current
+    mount none /linkerconfig/bootstrap /linkerconfig bind rec
+
+    start ueventd
+
+    # Run the init_dev_config service to configure the device.
+    exec_start init_dev_config
+
+    # Fix permissions before apexd reads /metadata
+    restorecon /metadata
+
+    # Run apexd-bootstrap so that APEXes that provide critical libraries
+    # become available. Note that this is executed as exec_start to ensure that
+    # the libraries are available to the processes started after this statement.
+    exec_start apexd-bootstrap
+    perform_apex_config
+
+    # These must already exist by the time boringssl_self_test32 / boringssl_self_test64 run.
+    mkdir /dev/boringssl 0755 root root
+
+on early-init && property:ro.boot.bootchart.enabled=""
+    rmdir /dev/bootchart
+
+on init
+    sysclktz 0
+
+on post-fs-data
+    exec_start apexd
+"""
+
     def test_fr37_widevine_is_laid_over_vendor_apex_only_when_the_host_says_it_is_installed(self):
-        rc = (Path(make_image.__file__).with_name("dsa-widevine.rc")).read_text()
+        rc = make_image.WIDEVINE_EARLY_RC.read_text()
         sections = self._sections(rc)
         triggers = [trigger for trigger, _ in sections]
         on = make_image.WIDEVINE_TRIGGER
         images = {
-            f"{on} && property:ro.boot.dsa.widevine_image=disk": "/mnt/dsa-addons/widevine.img",
+            f"{on} && property:ro.boot.dsa.widevine_image=disk": "/mnt/dsa-widevine-disk/widevine.img",
             # In the host's direct-mapped mode, the image's own partition on persistent memory.
             f"{on} && property:ro.boot.dsa.widevine_image=dax": "/dev/block/by-name/dsa_widevine",
         }
+        self.assertEqual({f"{on} && property:ro.boot.dsa.widevine_image={kind}": image
+                          for kind, image in make_image.WIDEVINE_IMAGES.items()}, images)
         for trigger, image in images.items():
             commands = dict(sections)[trigger]
             option = "dax=always" if trigger.endswith("=dax") else "directio"
             mount = (f"mount erofs {image} /mnt/dsa-widevine ro nodev nosuid noexec "
                      f"{option},fscontext=u:object_r:dsa_widevine_fs:s0,"
                      "context=u:object_r:vendor_apex_file:s0")
-            self.assertEqual([c for c in commands if c.startswith("mount ")], [mount], trigger)
+            self.assertEqual([c for c in commands if c.startswith("mount erofs ")][-1], mount, trigger)
+            # ueventd has only just started: the partition is waited for before it is mounted.
+            partition = commands[0].split()[1]
+            self.assertTrue(commands[0].startswith("wait /dev/block/by-name/"), trigger)
+            self.assertIn(partition, [c.split()[2] for c in commands if c.startswith("mount erofs ")], trigger)
             # Mounted before it is laid over: init runs one trigger's actions in file order.
             self.assertLess(triggers.index(trigger), triggers.index(on), trigger)
-        # Laid over /vendor/apex at post-fs, before apexd activates the vendor's APEXes at
-        # post-fs-data, with the vendor's own beneath it.
+        # The add-on disk is mounted for it at a point of its own, read only and labelled as
+        # dsa-addons.rc labels it, so that script's own mount at post-fs shares the superblock.
+        disk = dict(sections)[f"{on} && property:ro.boot.dsa.widevine_image=disk"]
+        self.assertIn(make_image.ADDONS_MOUNT.replace("/mnt/dsa-addons", "/mnt/dsa-widevine-disk"), disk)
+        # Laid over /vendor/apex at early-init, with the vendor's own beneath it.
         self.assertEqual([c for c in dict(sections)[on] if c.startswith("mount ")],
                          [make_image.WIDEVINE_OVERLAY])
-        self.assertTrue(on.startswith("on post-fs "), on)
-        # After dsa-addons.rc mounts the disk in the same trigger: init reads the scripts in the
-        # order of their names.
-        self.assertLess("dsa-addons.rc", "dsa-widevine.rc")
-        # Every mount waits for the host's word; a boot after removal removes the certificates.
+        self.assertTrue(on.startswith("on early-init "), on)
+        # Every action waits for the host's word; nothing else mounts.
         for trigger, commands in sections:
-            if "widevine=on" not in trigger:
-                self.assertFalse([c for c in commands if c.startswith("mount ")], trigger)
-        self.assertIn(make_image.WIDEVINE_RESET, dict(sections)[make_image.WIDEVINE_OFF_TRIGGER])
+            self.assertIn("widevine=on", trigger)
         self.assertEqual(self._dropped_mount_options(rc), [])
+        # dsa-widevine.rc mounts nothing: by post-fs apexd no longer activates what appears in
+        # /vendor/apex. A boot after removal removes the certificates.
+        late = self._sections((Path(make_image.__file__).with_name("dsa-widevine.rc")).read_text())
+        self.assertFalse([c for _, commands in late for c in commands if c.startswith("mount ")])
+        self.assertIn(make_image.WIDEVINE_RESET, dict(late)[make_image.WIDEVINE_OFF_TRIGGER])
+
+    def test_fr37_widevine_is_laid_over_vendor_apex_before_apexd_bootstrap_activates_the_apexes(self):
+        # On the owner's PC (0.2.4-dev.15, image dev.14, Android 17) dsa-widevine.rc laid the
+        # module over /vendor/apex at post-fs. apexd-bootstrap had activated "62 packages" at
+        # early-init; apexd at post-fs-data found the module ("Found pre-installed APEX
+        # /vendor/apex/com.google.android.widevine.apex") but only restored the mounts it found,
+        # so the module was never in /apex/apex-info-list.xml and dumpsys -l listed only
+        # android.hardware.drm.IDrmFactory/clearkey.
+        spliced = make_image.with_widevine_early(self.ANDROID_17_INIT_RC)
+        sections = self._sections(spliced)
+        early = [(t, c) for t, c in sections if t.startswith("on early-init")]
+        commands = [c for _, cs in early for c in cs]
+        # In the order init runs them: ueventd first, then the module, then apexd-bootstrap.
+        overlay = commands.index(make_image.WIDEVINE_OVERLAY)
+        self.assertLess(commands.index("start ueventd"), overlay)
+        self.assertLess(commands.index("restorecon /metadata"), overlay)
+        self.assertLess(overlay, commands.index(make_image.APEXD_BOOTSTRAP))
+        self.assertLess(commands.index(make_image.APEXD_BOOTSTRAP), commands.index("perform_apex_config"))
+        # The split keeps every line of the original, in its order, and adds only the fragment.
+        fragment = make_image.WIDEVINE_EARLY_RC.read_text()
+        original = [line for line in self.ANDROID_17_INIT_RC.splitlines() if line.strip()]
+        kept = [line for line in spliced.splitlines() if line.strip() and line not in fragment.splitlines()]
+        self.assertEqual([line for line in kept if line != "on early-init"],
+                         [line for line in original if line != "on early-init"])
+        self.assertEqual(kept.count("on early-init"), 2)
+        # The comment on apexd-bootstrap stays with it.
+        lines = spliced.splitlines()
+        at = lines.index("    " + make_image.APEXD_BOOTSTRAP)
+        self.assertEqual(lines[at - 4], "on early-init")
+        # Splicing twice changes nothing.
+        self.assertEqual(make_image.with_widevine_early(spliced), spliced)
+        # An init.rc without apexd-bootstrap in its early-init is refused rather than shipped
+        # without Widevine.
+        with self.assertRaises(ValueError):
+            make_image.with_widevine_early(self.ANDROID_17_INIT_RC.replace("exec_start apexd-bootstrap", ""))
+        with self.assertRaises(ValueError):
+            make_image.with_widevine_early("on post-fs-data\n    exec_start apexd-bootstrap\n")
+        # The checker finds the module before apexd-bootstrap only in the spliced file.
+        widevine_rc = (Path(make_image.__file__).with_name("dsa-widevine.rc")).read_bytes()
+        files = {make_image.WIDEVINE_RC: widevine_rc, make_image.INIT_RC: spliced.encode()}
+        self.assertEqual(make_image.widevine_problems(list(files), files.__getitem__), [])
+        before = dict(files, **{make_image.INIT_RC: self.ANDROID_17_INIT_RC.encode()})
+        self.assertTrue(any("before apexd-bootstrap" in p
+                            for p in make_image.widevine_problems(list(before), before.__getitem__)))
+        # What dev.14 had: the fragment's actions at post-fs, after apexd-bootstrap.
+        old = self.ANDROID_17_INIT_RC + "\n" + fragment.replace("on early-init", "on post-fs")
+        late = dict(files, **{make_image.INIT_RC: old.encode()})
+        self.assertTrue(make_image.widevine_problems(list(late), late.__getitem__))
+        after = self.ANDROID_17_INIT_RC.replace("    perform_apex_config\n", "    perform_apex_config\n" + "\n".join(
+            "    " + c for c in [make_image.WIDEVINE_OVERLAY]) + "\n")
+        after = dict(files, **{make_image.INIT_RC: after.encode()})
+        self.assertTrue(make_image.widevine_problems(list(after), after.__getitem__))
+        mounting = dict(files, **{make_image.WIDEVINE_RC: widevine_rc + (
+            "\non post-fs && property:ro.boot.dsa.widevine=on\n    " + make_image.WIDEVINE_OVERLAY + "\n").encode()})
+        self.assertTrue(any("after apexd-bootstrap" in p
+                            for p in make_image.widevine_problems(list(mounting), mounting.__getitem__)))
+
+    def test_fr37_the_image_splices_widevine_into_init_rc(self):
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
+            init_rc = archive.read(make_image.INIT_RC).decode()
+        self.assertEqual(init_rc, make_image.with_widevine_early(self.ANDROID_17_INIT_RC))
+        self.assertIn(make_image.WIDEVINE_OVERLAY, init_rc)
 
     def test_fr37_the_image_carries_widevines_policy_ahead_of_any_install(self):
         with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
@@ -6564,10 +6679,13 @@ class ArmTranslationImageTests(unittest.TestCase):
             services = archive.read(make_image.VENDOR_SERVICE_CONTEXTS).decode()
             contexts = archive.read("VENDOR/etc/selinux/vendor_file_contexts").decode()
             files = {name: archive.read(name) for name in archive.namelist()}
-        self.assertEqual(self._context_mount_problems("dsa-widevine.rc", policy), [])
-        for point, fs, files_type in self._erofs_mounts(
-                (Path(make_image.__file__).with_name("dsa-widevine.rc")).read_text()):
-            self.assertEqual((fs, files_type), ("dsa_widevine_fs", "vendor_apex_file"), point)
+        self.assertEqual(self._context_mount_problems("dsa-widevine-early.rc", policy), [])
+        for point, fs, files_type in self._erofs_mounts(make_image.WIDEVINE_EARLY_RC.read_text()):
+            if point == "/mnt/dsa-widevine-disk":
+                # The add-on disk, labelled as dsa-addons.rc labels it.
+                self.assertEqual((fs, files_type), ("dsa_addons_fs", "system_file"), point)
+            else:
+                self.assertEqual((fs, files_type), ("dsa_widevine_fs", "vendor_apex_file"), point)
         for rule in make_image.WIDEVINE_FS_CONFIG:
             self.assertIn(rule, config)
         # This build's vendor policy has no Widevine types, so the image declares them, and labels
@@ -6580,13 +6698,17 @@ class ArmTranslationImageTests(unittest.TestCase):
         self.assertIn("(allow init dsa_widevine_fs (filesystem (mount relabelfrom relabelto)))", policy)
         self.assertIn("(allow init vendor_apex_file (dir (mounton search read open getattr)))", policy)
         self.assertEqual(make_image.widevine_problems(list(files), files.__getitem__), [])
-        # An image without the script, or whose script lays nothing over /vendor/apex, is refused.
+        # An image without the script, whose init.rc lays nothing over /vendor/apex, or whose
+        # vendor_service_contexts does not label the service, is refused.
         gone = {n: d for n, d in files.items() if n != make_image.WIDEVINE_RC}
         self.assertIn("is missing", make_image.widevine_problems(list(gone), gone.__getitem__)[0])
-        rc = files[make_image.WIDEVINE_RC].decode()
-        late = dict(files, **{make_image.WIDEVINE_RC: rc.replace(
-            make_image.WIDEVINE_TRIGGER, "on post-fs-data && property:ro.boot.dsa.widevine=on").encode()})
-        self.assertTrue(make_image.widevine_problems(list(late), late.__getitem__))
+        unspliced = dict(files, **{make_image.INIT_RC: self.ANDROID_17_INIT_RC.encode()})
+        self.assertTrue(make_image.widevine_problems(list(unspliced), unspliced.__getitem__))
+        no_init = {n: d for n, d in files.items() if n != make_image.INIT_RC}
+        self.assertTrue(make_image.widevine_problems(list(no_init), no_init.__getitem__))
+        unlabelled = dict(files, **{make_image.VENDOR_SERVICE_CONTEXTS: b""})
+        self.assertTrue(any("vendor_service_contexts" in p
+                            for p in make_image.widevine_problems(list(unlabelled), unlabelled.__getitem__)))
 
     def test_fr37_a_vendor_policy_with_widevines_types_keeps_its_own(self):
         cuttlefish = "(type hal_drm_widevine)\n(type hal_drm_widevine_exec)\n(type mediadrm_vendor_data_file)\n"
@@ -6602,6 +6724,10 @@ class ArmTranslationImageTests(unittest.TestCase):
                 archive.writestr("META/vendor_filesystem_config.txt", "vendor/bin/sh 0 2000 755 capabilities=0x0\n")
                 archive.writestr("META/filesystem_config.txt", "system/bin/sh 0 2000 755 capabilities=0x0\n")
                 archive.writestr("PRODUCT/etc/build.prop", "ro.product.product.name=dsa\n")
+                archive.writestr(make_image.INIT_RC, self.ANDROID_17_INIT_RC)
+                # A vendor that labels other services but not Widevine's, as Cuttlefish's may.
+                archive.writestr(make_image.VENDOR_SERVICE_CONTEXTS,
+                                 "android.hardware.drm.IDrmFactory/clearkey u:object_r:hal_drm_service:s0\n")
             modified = root / "modified.zip"
             make_image.modify(source, modified)
             with zipfile.ZipFile(modified) as archive:
@@ -6611,6 +6737,13 @@ class ArmTranslationImageTests(unittest.TestCase):
         for name in make_image.WIDEVINE_HAL_TYPES:
             self.assertNotIn(f"(type {name})", policy)
         self.assertIn("(type dsa_widevine_fs)", policy)
+        # The service is labelled all the same, once: servicemanager refuses a name it cannot
+        # label, so the HAL would never register.
+        services = files[make_image.VENDOR_SERVICE_CONTEXTS].decode().splitlines()
+        self.assertEqual(services.count(make_image.WIDEVINE_SERVICE_CONTEXT), 1)
+        self.assertIn("android.hardware.drm.IDrmFactory/clearkey u:object_r:hal_drm_service:s0", services)
+        config = files["META/vendor_filesystem_config.txt"].decode()
+        self.assertIn("vendor/etc/selinux/vendor_service_contexts 0 0 644 capabilities=0x0", config)
         self.assertEqual(make_image.widevine_problems(list(files), files.__getitem__), [])
         twice = dict(files, **{"SYSTEM/etc/selinux/plat_sepolicy.cil": (policy + cuttlefish).encode()})
         self.assertTrue(any("declared twice" in p for p in

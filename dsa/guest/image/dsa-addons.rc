@@ -1,6 +1,7 @@
 # The user's add-on disk: the images of the add-ons they installed (the Google apps, an ARM
-# translation package, Widevine), which dsa-gapps.rc, dsa-arm-translation.rc and dsa-widevine.rc
-# mount. The host builds the disk, one per user, and attaches it to the VM read only; only the
+# translation package, Widevine), which dsa-gapps.rc, dsa-arm-translation.rc and
+# dsa-widevine-early.rc mount (Widevine's mounts the disk itself, earlier, at a point of its
+# own, as apexd needs the module before post-fs). The host builds the disk, one per user, and attaches it to the VM read only; only the
 # host changes it, when the user installs or removes an add-on, and the change takes effect at
 # the next start. The host adds androidboot.dsa.addon_disk=on to the boot's bootconfig only
 # while it attaches one.

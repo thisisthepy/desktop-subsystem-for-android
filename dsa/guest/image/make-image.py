@@ -4021,7 +4021,6 @@ ADDONS_MOUNT = ("mount erofs /dev/block/by-name/dsa_addons /mnt/dsa-addons ro no
 ADDON_IMAGES = {
     "dsa-gapps.rc": "/mnt/dsa-addons/gapps.img",
     "dsa-arm-translation.rc": "/mnt/dsa-addons/arm-translation.img",
-    "dsa-widevine.rc": "/mnt/dsa-addons/widevine.img",
 }
 
 
@@ -4133,15 +4132,28 @@ def host_memory_problems(manifest, names, read):
 # Widevine, for a user who installs it (`dsa drm widevine install`). DSA ships none of Google's
 # software: the host takes Google's Widevine APEX, unchanged, out of Google's emulator image and
 # puts it on the user's add-on disk as widevine.img. The host puts androidboot.dsa.widevine=on in
-# the boot's bootconfig only while it is there; the script then lays the image over /vendor/apex
-# at post-fs, before apexd activates the vendor's APEXes at post-fs-data. With "off", after the
-# user removed it, the script removes the device certificates the module kept. The image carries
-# the SELinux policy the module's service runs under ahead of any install: the vendor policy's
-# own types where it declares them (Cuttlefish's does), widevine-hal.cil's where it does not.
+# the boot's bootconfig only while it is there. The image is then laid over /vendor/apex at
+# early-init, before apexd-bootstrap: on Android 17 that one run activates every pre-installed
+# APEX, the vendor's included, and apexd at post-fs-data only takes over its mounts, so a module
+# laid over later is listed but never activated and its HAL never registers. Only actions in the
+# system's init.rc run that early, so dsa-widevine-early.rc is spliced into it, right before
+# apexd-bootstrap. With "off", after the user removed it, dsa-widevine.rc removes the device
+# certificates the module kept. The image carries the SELinux policy the module's service runs
+# under ahead of any install: the vendor policy's own types where it declares them (Cuttlefish's
+# does), widevine-hal.cil's where it does not.
 WIDEVINE_RC = "SYSTEM/etc/init/dsa-widevine.rc"
 WIDEVINE_FS_CONFIG = ["system/etc/init/dsa-widevine.rc 0 0 644 capabilities=0x0"]
-WIDEVINE_TRIGGER = "on post-fs && property:ro.boot.dsa.widevine=on"
+INIT_RC = "SYSTEM/etc/init/hw/init.rc"
+WIDEVINE_EARLY_RC = HERE / "dsa-widevine-early.rc"
+APEXD_BOOTSTRAP = "exec_start apexd-bootstrap"
+WIDEVINE_TRIGGER = "on early-init && property:ro.boot.dsa.widevine=on"
 WIDEVINE_OVERLAY = "mount overlay overlay /vendor/apex ro nodev noexec lowerdir=/mnt/dsa-widevine:/vendor/apex"
+# Where the module's image is mounted from: its file on the add-on disk, or its own partition in
+# the host's direct-mapped mode.
+WIDEVINE_IMAGES = {
+    "disk": "/mnt/dsa-widevine-disk/widevine.img",
+    "dax": "/dev/block/by-name/dsa_widevine",
+}
 WIDEVINE_OFF_TRIGGER = "on post-fs-data && property:ro.boot.dsa.widevine=off"
 WIDEVINE_RESET = ("exec u:r:dsa_widevine_reset:s0 root root -- /vendor/bin/toybox_vendor rm -rf "
                   "/data/vendor/mediadrm")
@@ -4177,37 +4189,97 @@ def with_widevine_file_contexts(fc_text):
 
 def with_widevine_service_context(text):
     """vendor_service_contexts with the label of Widevine's service, where it has none."""
-    lines = text.splitlines()
+    lines = text.splitlines() if text.strip() else []
     if not any(line.split()[:1] == [WIDEVINE_INSTANCE] for line in lines):
         lines.append(WIDEVINE_SERVICE_CONTEXT)
     return "\n".join(lines) + "\n"
 
 
+def rc_sections(rc):
+    """Each section of an init script, in order: its first line (an action's trigger, a service's
+    name) and its command lines."""
+    sections = []
+    for line in rc.splitlines():
+        if line.startswith(("on ", "service ", "import ")):
+            sections.append((line.strip(), []))
+        elif line.strip() and not line.lstrip().startswith("#") and sections:
+            sections[-1][1].append(line.strip())
+    return sections
+
+
+def with_widevine_early(init_rc, fragment=None):
+    """The system's init.rc with dsa-widevine-early.rc's actions spliced into its early-init, right
+    before apexd-bootstrap. init.rc's early-init action is split there and the fragment's actions
+    go between the two halves: init runs one trigger's actions in the order it read them, so they
+    run after ueventd has started and before apexd activates the APEXes. An init.rc that has them
+    already is returned as it is. One without apexd-bootstrap in its early-init is refused: a
+    Widevine module could never be activated on it."""
+    if fragment is None:
+        fragment = WIDEVINE_EARLY_RC.read_text()
+    if WIDEVINE_OVERLAY in init_rc:
+        return init_rc
+    lines = init_rc.splitlines()
+    trigger = None
+    at = None
+    for index, line in enumerate(lines):
+        if line.startswith(("on ", "service ", "import ")):
+            trigger = line.strip()
+        elif line.strip() == APEXD_BOOTSTRAP and trigger == "on early-init":
+            at = index
+            break
+    if at is None:
+        raise ValueError(f'init.rc has no "{APEXD_BOOTSTRAP}" in its early-init, so a Widevine module the '
+                         "user installs could never be laid over /vendor/apex before apexd activates it")
+    # The comment that explains apexd-bootstrap stays with it.
+    while at > 0 and lines[at - 1].lstrip().startswith("#"):
+        at -= 1
+    spliced = lines[:at] + [""] + fragment.rstrip("\n").splitlines() + ["", "on early-init"] + lines[at:]
+    return "\n".join(spliced) + "\n"
+
+
 def widevine_problems(names, read):
     """The problems with how an image takes the Widevine module a user installs, given the names in
-    its target files and a function that reads one: the script lays the module's image over
-    /vendor/apex at post-fs, only when the host says it is installed, removes the certificates
-    after it was removed, and the policy has the image's superblock type and the service's types."""
+    its target files and a function that reads one: init.rc mounts the module's image and lays it
+    over /vendor/apex in its early-init before apexd-bootstrap, only when the host says it is
+    installed, and nothing mounts it later; dsa-widevine.rc removes the certificates after it was
+    removed; the policy has the image's superblock type and the service's types, and the service's
+    name is labelled."""
     if WIDEVINE_RC not in names:
         return [f"{WIDEVINE_RC} is missing, so a Widevine module the user installs is never activated"]
     problems = []
-    rc = read(WIDEVINE_RC).decode(errors="replace")
-    sections = {}
-    trigger = None
-    for line in rc.splitlines():
-        if line.startswith("on "):
-            trigger = line.strip()
-            sections.setdefault(trigger, [])
-        elif line.strip() and not line.lstrip().startswith("#") and trigger:
-            sections[trigger].append(line.strip())
-    if WIDEVINE_OVERLAY not in sections.get(WIDEVINE_TRIGGER, []):
-        problems.append("dsa-widevine.rc does not lay the module's image over /vendor/apex at post-fs once "
-                        f"the host says it is installed ({WIDEVINE_OVERLAY}), so apexd never sees it")
-    if WIDEVINE_RESET not in sections.get(WIDEVINE_OFF_TRIGGER, []):
+    early = []
+    if INIT_RC in names:
+        for trigger, commands in rc_sections(read(INIT_RC).decode(errors="replace")):
+            if APEXD_BOOTSTRAP in commands:
+                break
+            if trigger.startswith("on early-init"):
+                early.append((trigger, commands))
+        else:
+            early = []
+    if not any(WIDEVINE_OVERLAY in commands for trigger, commands in early if trigger == WIDEVINE_TRIGGER):
+        problems.append("init.rc does not lay the module's image over /vendor/apex in its early-init before "
+                        f"apexd-bootstrap once the host says it is installed ({WIDEVINE_OVERLAY}), so apexd "
+                        "never activates it and its HAL never registers")
+    for kind, image in WIDEVINE_IMAGES.items():
+        trigger = f"{WIDEVINE_TRIGGER} && property:ro.boot.dsa.widevine_image={kind}"
+        if not any(c.startswith(f"mount erofs {image} /mnt/dsa-widevine ")
+                   for t, commands in early if t == trigger for c in commands):
+            problems.append(f"init.rc does not mount the module's image ({image}) before apexd-bootstrap "
+                            f"when the host says it is there ({kind})")
+    for trigger, commands in early:
+        if "widevine=on" not in trigger and any("dsa-widevine" in c for c in commands if c.startswith("mount ")):
+            problems.append(f"init.rc mounts Widevine's image without the host's word: {trigger}")
+    sections = rc_sections(read(WIDEVINE_RC).decode(errors="replace"))
+    if any(c.startswith("mount ") for _, commands in sections for c in commands):
+        problems.append("dsa-widevine.rc mounts something after apexd-bootstrap, where apexd no longer "
+                        "activates what appears in /vendor/apex")
+    if WIDEVINE_RESET not in dict(sections).get(WIDEVINE_OFF_TRIGGER, []):
         problems.append("dsa-widevine.rc does not remove the certificates a removed module kept")
-    for trigger, commands in sections.items():
-        if "widevine=on" not in trigger and any(c.startswith("mount ") for c in commands):
-            problems.append(f"dsa-widevine.rc mounts something without the host's word: {trigger}")
+    if VENDOR_SERVICE_CONTEXTS in names:
+        services = read(VENDOR_SERVICE_CONTEXTS).decode(errors="replace").splitlines()
+        if not any(line.split()[:1] == [WIDEVINE_INSTANCE] for line in services):
+            problems.append(f"vendor_service_contexts does not label {WIDEVINE_INSTANCE}, so servicemanager "
+                            "refuses the module's service")
     policy_name = "SYSTEM/etc/selinux/plat_sepolicy.cil"
     if policy_name in names:
         plat = read(policy_name).decode(errors="replace")
@@ -5094,6 +5166,9 @@ def update_vendor_filesystem_config(fs_config_text, channeld=False, hwcomposer=F
         ("vendor/etc/init/dsa-display.rc", "vendor/etc/init/dsa-display.rc 0 0 644 capabilities=0x0"),
         ("vendor/etc/selinux/vendor_property_contexts",
          "vendor/etc/selinux/vendor_property_contexts 0 0 644 capabilities=0x0"),
+        # Always labels Widevine's service, so it is always there.
+        ("vendor/etc/selinux/vendor_service_contexts",
+         "vendor/etc/selinux/vendor_service_contexts 0 0 644 capabilities=0x0"),
         ("vendor/etc/permissions/dsa-unavailable-features.xml",
          "vendor/etc/permissions/dsa-unavailable-features.xml 0 0 644 capabilities=0x0"),
     ]
@@ -5103,8 +5178,6 @@ def update_vendor_filesystem_config(fs_config_text, channeld=False, hwcomposer=F
             ("vendor/etc/init/dsa-channeld.rc", "vendor/etc/init/dsa-channeld.rc 0 0 644 capabilities=0x0"),
             ("vendor/etc/vintf/manifest/dsa-channel.xml",
              "vendor/etc/vintf/manifest/dsa-channel.xml 0 0 644 capabilities=0x0"),
-            ("vendor/etc/selinux/vendor_service_contexts",
-             "vendor/etc/selinux/vendor_service_contexts 0 0 644 capabilities=0x0"),
         ]
     if hwcomposer:
         entries += [
@@ -6035,17 +6108,21 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                                                        audio=has_audio, gnss=has_gnss, sensors=has_sensors, camera=has_camera, keymint=has_keymint).encode()
                     if widevine_hal:
                         data = with_widevine_file_contexts(data.decode()).encode()
-                elif name == VENDOR_SERVICE_CONTEXTS and (channeld_payload is not None or has_codec2
-                                                          or has_camera or widevine_hal):
-                    data = update_vendor_service_contexts(
-                        data.decode(), codec2=has_codec2, channeld=channeld_payload is not None,
-                        camera=has_camera).encode()
-                    if widevine_hal:
-                        data = with_widevine_service_context(data.decode()).encode()
+                elif name == VENDOR_SERVICE_CONTEXTS:
+                    if channeld_payload is not None or has_codec2 or has_camera:
+                        data = update_vendor_service_contexts(
+                            data.decode(), codec2=has_codec2, channeld=channeld_payload is not None,
+                            camera=has_camera).encode()
+                    # Whatever the vendor policy declares: a vendor built without Widevine
+                    # labels no such service, and servicemanager would refuse the module's.
+                    data = with_widevine_service_context(data.decode()).encode()
                 elif has_audio and AUDIO_POLICY_CONFIG.match(name):
                     data = without_primary_audio_module(data.decode()).encode()
                 elif name == VENDOR_PROPERTY_CONTEXTS:
                     data = update_vendor_property_contexts(data.decode()).encode()
+            if name == INIT_RC:
+                # The Widevine module's image, laid over /vendor/apex before apexd-bootstrap.
+                data = with_widevine_early(data.decode()).encode()
             info.compress_type = zipfile.ZIP_STORED
             zout.writestr(info, data)
         zout.writestr(PREBUILT_OAT_RECORD, json.dumps(prebuilt, indent=2, sort_keys=True) + "\n")
@@ -6121,12 +6198,10 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                     zout.writestr(name, framework[name])
                     replaced_framework.add(name)
             zout.writestr(KEYMINT_RC, KEYMINT_RC_SOURCE.read_bytes())
-        if (channeld_payload is not None or has_codec2 or has_camera or widevine_hal) \
-                and VENDOR_SERVICE_CONTEXTS not in names:
+        if VENDOR_SERVICE_CONTEXTS not in names:
             contexts = update_vendor_service_contexts(
                 "", codec2=has_codec2, channeld=channeld_payload is not None, camera=has_camera)
-            if widevine_hal:
-                contexts = with_widevine_service_context(contexts)
+            contexts = with_widevine_service_context(contexts)
             zout.writestr(VENDOR_SERVICE_CONTEXTS, contexts)
         if overlay_payload is not None:
             zout.writestr(FRAMEWORK_OVERLAY_APK, overlay_payload)

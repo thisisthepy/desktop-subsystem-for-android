@@ -1,0 +1,36 @@
+# Widevine's image, laid over /vendor/apex before apexd activates the APEXes (dsa-widevine.rc has
+# the rest of the module's script). make-image.py splices these actions into the system's own
+# init.rc, inside its early-init, right before "exec_start apexd-bootstrap": init runs the
+# actions of one trigger in the order it read them, and it reads init.rc before every other
+# script, so only there do they run before apexd does.
+#
+# They must. On Android 17, apexd-bootstrap activates every pre-installed APEX at early-init,
+# the vendor's included, and init reads the activated APEXes' init scripts and VINTF fragments
+# right after it (perform_apex_config). apexd at post-fs-data then only takes over those mounts
+# ("Populating APEX database from mounts", "62 packages restored"): an APEX that appears in
+# /vendor/apex after early-init is listed as pre-installed and never mounted, so its service is
+# never declared or started.
+#
+# ueventd has just started here, so each action waits for the partition it mounts. In the host's
+# direct-mapped mode ("dax") the image is its own partition (dsa_widevine) on persistent memory;
+# otherwise ("disk") it is widevine.img on the add-on disk, which is mounted here for it at a
+# point of its own, /mnt/dsa-widevine-disk. dsa-addons.rc mounts the same disk at /mnt/dsa-addons
+# at post-fs for the other add-ons, as before: a second mount of one read-only file system, with
+# the same options, shares its superblock and reads nothing twice. /mnt is the tmpfs first stage
+# init made, which nothing mounts over later. The APEX's files are labelled as the vendor's
+# APEXes are (context=) and its superblock gets a type of its own (fscontext=,
+# sepolicy/widevine.cil); the overlay keeps the vendor's own APEXes beneath it.
+on early-init && property:ro.boot.dsa.widevine=on && property:ro.boot.dsa.widevine_image=disk
+    wait /dev/block/by-name/dsa_addons
+    mkdir /mnt/dsa-widevine-disk 0755 root root
+    mount erofs /dev/block/by-name/dsa_addons /mnt/dsa-widevine-disk ro nodev nosuid noexec fscontext=u:object_r:dsa_addons_fs:s0,context=u:object_r:system_file:s0
+    mkdir /mnt/dsa-widevine 0755 root root
+    mount erofs /mnt/dsa-widevine-disk/widevine.img /mnt/dsa-widevine ro nodev nosuid noexec directio,fscontext=u:object_r:dsa_widevine_fs:s0,context=u:object_r:vendor_apex_file:s0
+
+on early-init && property:ro.boot.dsa.widevine=on && property:ro.boot.dsa.widevine_image=dax
+    wait /dev/block/by-name/dsa_widevine
+    mkdir /mnt/dsa-widevine 0755 root root
+    mount erofs /dev/block/by-name/dsa_widevine /mnt/dsa-widevine ro nodev nosuid noexec dax=always,fscontext=u:object_r:dsa_widevine_fs:s0,context=u:object_r:vendor_apex_file:s0
+
+on early-init && property:ro.boot.dsa.widevine=on
+    mount overlay overlay /vendor/apex ro nodev noexec lowerdir=/mnt/dsa-widevine:/vendor/apex
