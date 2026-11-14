@@ -85,7 +85,7 @@ mod system {
         staging_rows, stream_frame_size, visible_area, Area, Size, StreamSizes, SurfaceFormat,
     };
     use windows::core::{Interface, GUID};
-    use windows::Win32::Foundation::HMODULE;
+    use windows::Win32::Foundation::{HMODULE, VARIANT_TRUE};
     use windows::Win32::Graphics::Direct3D::{
         D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_11_1,
     };
@@ -100,11 +100,12 @@ mod system {
     };
     use windows::Win32::Graphics::Dxgi::{IDXGIAdapter, IDXGIDevice3};
     use windows::Win32::Media::MediaFoundation::{
-        IMF2DBuffer, IMFActivate, IMFDXGIBuffer, IMFDXGIDeviceManager, IMFMediaType, IMFSample,
-        IMFShutdown, IMFTransform, MFCreateDXGIDeviceManager, MFCreateMediaType,
-        MFCreateMemoryBuffer, MFCreateSample, MFMediaType_Video, MFShutdown, MFStartup, MFTEnumEx,
-        MFVideoArea, MFVideoFormat_AV1, MFVideoFormat_H264, MFVideoFormat_HEVC, MFVideoFormat_NV12,
-        MFVideoFormat_P010, MFVideoFormat_VP90, MFSTARTUP_NOSOCKET, MFT_CATEGORY_VIDEO_DECODER,
+        CODECAPI_AVDecVideoDropPicWithMissingRef, ICodecAPI, IMF2DBuffer, IMFActivate,
+        IMFDXGIBuffer, IMFDXGIDeviceManager, IMFMediaType, IMFSample, IMFShutdown, IMFTransform,
+        MFCreateDXGIDeviceManager, MFCreateMediaType, MFCreateMemoryBuffer, MFCreateSample,
+        MFMediaType_Video, MFShutdown, MFStartup, MFTEnumEx, MFVideoArea, MFVideoFormat_AV1,
+        MFVideoFormat_H264, MFVideoFormat_HEVC, MFVideoFormat_NV12, MFVideoFormat_P010,
+        MFVideoFormat_VP90, MFSTARTUP_NOSOCKET, MFT_CATEGORY_VIDEO_DECODER,
         MFT_ENUM_FLAG_SORTANDFILTER, MFT_ENUM_FLAG_SYNCMFT, MFT_MESSAGE_COMMAND_DRAIN,
         MFT_MESSAGE_COMMAND_FLUSH, MFT_MESSAGE_NOTIFY_BEGIN_STREAMING,
         MFT_MESSAGE_NOTIFY_END_OF_STREAM, MFT_MESSAGE_NOTIFY_END_STREAMING,
@@ -115,6 +116,9 @@ mod system {
         MF_MT_PAN_SCAN_APERTURE, MF_MT_SUBTYPE, MF_SA_D3D11_AWARE, MF_VERSION,
     };
     use windows::Win32::System::Com::{CoInitializeEx, CoTaskMemFree, COINIT_MULTITHREADED};
+    use windows::Win32::System::Variant::{
+        VARIANT, VARIANT_0, VARIANT_0_0, VARIANT_0_0_0, VT_BOOL,
+    };
 
     /// The largest picture offered for each format: 4096 by 2304, what H.264's highest
     /// common level and every hardware decoder of the others take.
@@ -344,6 +348,35 @@ mod system {
         found.ok_or_else(|| format!("this computer has no {} decoder", codec.name()))
     }
 
+    /// Asks the decoder to drop the pictures it would have to conceal (decoded against a
+    /// reference it lost to a flush or a corrupt packet), which would come out green or
+    /// smeared. The host's own key frame gate keeps such packets from the decoder in the
+    /// first place; this covers what the gate cannot see, such as a reference the decoder
+    /// itself failed to decode. A decoder that does not have the setting (not every one
+    /// does) decodes as before.
+    fn drop_pictures_with_missing_references(decoder: &IMFTransform) {
+        let Ok(api) = decoder.cast::<ICodecAPI>() else {
+            return;
+        };
+        // A VT_BOOL holding VARIANT_TRUE, as the setting takes it.
+        let on = VARIANT {
+            Anonymous: VARIANT_0 {
+                Anonymous: std::mem::ManuallyDrop::new(VARIANT_0_0 {
+                    vt: VT_BOOL,
+                    wReserved1: 0,
+                    wReserved2: 0,
+                    wReserved3: 0,
+                    Anonymous: VARIANT_0_0_0 {
+                        boolVal: VARIANT_TRUE,
+                    },
+                }),
+            },
+        };
+        // SAFETY: a plain call with a VARIANT that lives for it; a VT_BOOL holds nothing to
+        // free.
+        let _ = unsafe { api.SetValue(&CODECAPI_AVDecVideoDropPicWithMissingRef, &on) };
+    }
+
     fn video_type(subtype: &GUID, width: u32, height: u32) -> Result<IMFMediaType, String> {
         // SAFETY: plain Media Foundation calls on a new type.
         unsafe {
@@ -547,6 +580,7 @@ mod system {
                 )
             }
             .map_err(|e| format!("the {} decoder did not take the GPU: {e}", codec.name()))?;
+            drop_pictures_with_missing_references(&decoder);
             let input = video_type(&subtype(codec), width, height)?;
             // SAFETY: plain Media Foundation calls.
             unsafe { decoder.SetInputType(0, &input, 0) }.map_err(|e| {
@@ -634,6 +668,15 @@ mod system {
                     Err(e) if e.code() == MF_E_TRANSFORM_NEED_MORE_INPUT => return Ok(out),
                     Err(e) if e.code() == MF_E_TRANSFORM_STREAM_CHANGE => {
                         self.output = choose_output(&self.decoder)?;
+                        // A new size may come with samples of a new size, or from the
+                        // decoder's own pool where it gave none before: an output sample made
+                        // for the old size would be too small for the first new picture.
+                        // SAFETY: a plain Media Foundation call.
+                        if let Ok(info) = unsafe { self.decoder.GetOutputStreamInfo(0) } {
+                            self.provides_samples =
+                                info.dwFlags & MFT_OUTPUT_STREAM_PROVIDES_SAMPLES.0 as u32 != 0;
+                            self.sample_size = info.cbSize;
+                        }
                         continue;
                     }
                     Err(e) => return Err(format!("the {} decoder failed: {e}", self.codec.name())),

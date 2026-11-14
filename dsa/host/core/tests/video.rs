@@ -511,7 +511,7 @@ fn fr26_a_streams_numbers_go_to_the_log_every_few_seconds() {
     assert!(line.contains("150 pictures decoded (30.0/s)"), "{line}");
     assert!(line.contains("148 handed on (29.6/s)"), "{line}");
     assert!(
-        line.contains("2 dropped (2 flushed, 0 malformed)"),
+        line.contains("2 dropped (2 flushed, 0 malformed, 0 before a key frame)"),
         "{line}"
     );
     assert!(
