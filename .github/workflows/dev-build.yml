@@ -62,12 +62,9 @@
 name: Development build
 
 on:
-  # GitHub starts a hand-run workflow only once it is on the default branch or has run at
-  # least once. A push to develop that changes this file runs it with the defaults, which
-  # registers it until the release sync carries it to main.
-  push:
-    branches: [develop]
-    paths: [.github/workflows/dev-build.yml]
+  # Started by hand only. GitHub dispatches a workflow once it is on the default branch or
+  # has run at least once; this one has run in the official repository, and a fork runs it
+  # by hand after its first push (gh workflow run dev-build.yml --ref develop).
   workflow_dispatch:
     inputs:
       build:
