@@ -1,0 +1,57 @@
+Subject: Convert a synchronization2 barrier's foreign queue family as its own type
+
+The decoder replaces VK_QUEUE_FAMILY_FOREIGN_EXT in a guest's barriers with
+VK_QUEUE_FAMILY_EXTERNAL, the queue family the host's ColorBuffers are released to, and records
+which ColorBuffers a command buffer takes and gives back. For vkCmdPipelineBarrier2 it read each
+VkImageMemoryBarrier2 and VkBufferMemoryBarrier2 as the first version's struct, whose queue
+family fields sit where the second version keeps its 64-bit stage masks. So a guest's acquire
+of an AHardwareBuffer recorded with synchronization2 (as ANGLE records barriers where the driver
+has it) reached the host's driver from the foreign queue family as it was, with
+nothing recorded, and the rare barrier whose stage mask held that value had its mask changed.
+
+Now each barrier is converted through its own type.
+
+diff --git a/host/vulkan/VkDecoderGlobalState.cpp b/host/vulkan/VkDecoderGlobalState.cpp
+--- a/host/vulkan/VkDecoderGlobalState.cpp
++++ b/host/vulkan/VkDecoderGlobalState.cpp
+@@ -4950,6 +4950,22 @@
+         convertQueueFamilyForeignToExternal(&barrier->dstQueueFamilyIndex);
+     }
+ 
++    // A synchronization2 barrier has its own layout (64-bit stage and access masks first), so
++    // it is converted through its own type: read as the first version's struct, the queue
++    // family fields landed in its stage masks, and a guest's acquire from the foreign queue
++    // family reached the host's driver as it was.
++    inline void convertQueueFamilyForeignToExternal_VkBufferMemoryBarrier2(
++        VkBufferMemoryBarrier2* barrier) {
++        convertQueueFamilyForeignToExternal(&barrier->srcQueueFamilyIndex);
++        convertQueueFamilyForeignToExternal(&barrier->dstQueueFamilyIndex);
++    }
++
++    inline void convertQueueFamilyForeignToExternal_VkImageMemoryBarrier2(
++        VkImageMemoryBarrier2* barrier) {
++        convertQueueFamilyForeignToExternal(&barrier->srcQueueFamilyIndex);
++        convertQueueFamilyForeignToExternal(&barrier->dstQueueFamilyIndex);
++    }
++
+     inline VkImage getIMBImage(const VkImageMemoryBarrier& imb) { return imb.image; }
+     inline VkImage getIMBImage(const VkImageMemoryBarrier2& imb) { return imb.image; }
+ 
+@@ -5095,13 +5111,13 @@
+         auto vk = dispatch_VkCommandBuffer(boxed_commandBuffer);
+ 
+         for (uint32_t i = 0; i < pDependencyInfo->bufferMemoryBarrierCount; ++i) {
+-            convertQueueFamilyForeignToExternal_VkBufferMemoryBarrier(
+-                ((VkBufferMemoryBarrier*)pDependencyInfo->pBufferMemoryBarriers) + i);
++            convertQueueFamilyForeignToExternal_VkBufferMemoryBarrier2(
++                ((VkBufferMemoryBarrier2*)pDependencyInfo->pBufferMemoryBarriers) + i);
+         }
+ 
+         for (uint32_t i = 0; i < pDependencyInfo->imageMemoryBarrierCount; ++i) {
+-            convertQueueFamilyForeignToExternal_VkImageMemoryBarrier(
+-                ((VkImageMemoryBarrier*)pDependencyInfo->pImageMemoryBarriers) + i);
++            convertQueueFamilyForeignToExternal_VkImageMemoryBarrier2(
++                ((VkImageMemoryBarrier2*)pDependencyInfo->pImageMemoryBarriers) + i);
+         }
+ 
+         std::lock_guard<std::mutex> lock(mMutex);
