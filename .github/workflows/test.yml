@@ -10,8 +10,11 @@ name: Test
 on:
   # Features are integrated on develop and fixed there, so develop is what is tested. The
   # release pull request into main is gated by the same run.
-  push:
-    branches: [develop]
+  # Paused by the owner's decision (2026-11-14): while memory and resizing are fixed on
+  # the owner's PC, tests run only by hand (workflow_dispatch), so a push to develop does
+  # not take the runners the Development and Framework builds wait for. Uncomment to resume.
+  # push:
+  #   branches: [develop]
   pull_request:
     branches: [main]
   workflow_dispatch:
