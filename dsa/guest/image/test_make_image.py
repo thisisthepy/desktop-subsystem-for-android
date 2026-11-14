@@ -7646,6 +7646,21 @@ class RootElevationImageTests(unittest.TestCase):
         # The helper itself stays enforcing.
         self.assertNotIn("(typepermissive dsa_su)", self.POLICY)
 
+    def test_fr35_services_take_the_pipes_and_callbacks_of_an_approved_root_command(self):
+        # Issue #387: `su -c dumpsys SurfaceFlinger` failed with FAILED_TRANSACTION, since
+        # SurfaceFlinger (enforcing) was refused the pipe dumpsys made in dsa_su_root
+        # ("surfaceflinger dsa_su_root fd use" denied).
+        rules = self._rules(self.POLICY)
+        self.assertIn(("allow", "domain", "dsa_su_root", "fd", {"use"}), rules)
+        self.assertIn(("allow", "domain", "dsa_su_root", "fifo_file", {"write", "getattr"}), rules)
+        # `cmd` passes callbacks the service calls back on; init, as in AOSP, is left out.
+        self.assertIn(("allow", "dsa_su_root_callers", "dsa_su_root", "binder", {"call", "transfer"}), rules)
+        self.assertIn("(typeattributeset dsa_su_root_callers (and (domain) (not (init))))", self.POLICY)
+        # None of it lets another domain into the root domain or act on its processes.
+        for kind, source, target, cls, perms in rules:
+            if kind == "allow" and target == "dsa_su_root" and source != "dsa_su":
+                self.assertNotEqual(cls, "process", (source, perms))
+
     def test_fr35_only_init_and_the_helper_write_the_su_guard(self):
         writers = {source for kind, source, target, cls, perms in self._rules(self.POLICY)
                    if kind == "allow" and target == "dsa_su_control_file" and cls == "file"
