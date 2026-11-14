@@ -8,7 +8,9 @@
 //! memory, or virtio-pmem under KVM) the guest kernel maps the device into its physical address
 //! space, and erofs mounted with `dax=always` reads and maps each file straight from there
 //! (DAX): no guest page cache, and the pages are the host's file mapping of the image, which
-//! the host can drop and read again like any clean file page.
+//! the host can drop and read again like any clean file page. The host drops them only when
+//! short of memory, though, so each page the guest read once stays in the VM's working set
+//! until the host takes it out itself ([`MappedPagesTrim`]).
 //!
 //! The mode is a host setting, off by default. A boot in it differs from a normal one in four
 //! places, which this module gives every host:
@@ -34,6 +36,7 @@
 //! description, so the host boots it normally ([`ImageSupport::from_image_dir`] finds none).
 
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
@@ -185,9 +188,160 @@ fn with_super_size(list: &str, bytes: u64) -> String {
         .join(";")
 }
 
+/// How often the host looks at how many pages of the mapped disks the VM's process holds.
+/// The look is one process counter.
+pub const MAPPED_PAGES_CHECK: Duration = Duration::from_secs(10);
+
+/// The pages of the mapped disks the VM's process may hold before the host takes them out of
+/// its working set, in KiB. What Android uses all the time (the code it runs while it dozes)
+/// comes back at once and stays below this, so an idle Android is not given back to every
+/// minute for nothing.
+pub const MAPPED_PAGES_FLOOR_KB: u64 = 32 * 1024;
+
+/// The least time between two give-backs of the same VM. After one, the pages Android is
+/// using come back from the host's standby list as it touches them (a soft fault, no disk
+/// read); a minute keeps that to once a minute for the pages an open app keeps using, a few
+/// milliseconds of the guest's time, while the pages a boot or an app's start read once and
+/// left go back within a minute.
+pub const MAPPED_PAGES_GAP: Duration = Duration::from_secs(60);
+
+/// How often the log says what the give-backs did, at most: as often as the memory log.
+pub const MAPPED_PAGES_LOG_INTERVAL: Duration = crate::memory::LOG_INTERVAL;
+
+/// Decides when the host takes the pages of the disks a VM maps directly out of the VM's
+/// working set, and what the log says of it.
+///
+/// A page of a mapped disk the guest reads joins the working set of the VM's process on the
+/// host and stays there until the host is short of memory: the guest cannot give it back,
+/// because its own reclaim and free page reporting cover its RAM only. The pages are clean
+/// pages of the disk files, so taking them out costs nothing: they stay in the host's file
+/// cache, and a page the guest touches again comes back from there. One VM's boot gets one
+/// of these; a new boot (a new VM ID) starts a new one.
+#[derive(Debug, Clone)]
+pub struct MappedPagesTrim {
+    last: Option<Instant>,
+    logged_at: Option<Instant>,
+    /// Since the last log line.
+    given_back_kb: u64,
+    trims: u32,
+}
+
+impl MappedPagesTrim {
+    /// For a VM that has not had a give-back yet.
+    pub fn new() -> MappedPagesTrim {
+        MappedPagesTrim {
+            last: None,
+            logged_at: None,
+            given_back_kb: 0,
+            trims: 0,
+        }
+    }
+
+    /// Whether to give back now, with the VM's process holding `mapped_kb` of the disks'
+    /// pages: once there are [`MAPPED_PAGES_FLOOR_KB`] or more, and [`MAPPED_PAGES_GAP`] after
+    /// the give-back before.
+    pub fn due(&self, now: Instant, mapped_kb: u64) -> bool {
+        mapped_kb >= MAPPED_PAGES_FLOOR_KB
+            && self
+                .last
+                .is_none_or(|last| now.saturating_duration_since(last) >= MAPPED_PAGES_GAP)
+    }
+
+    /// Takes in a give-back at `now` that failed: the next try waits [`MAPPED_PAGES_GAP`], as
+    /// after one that worked, and the log says nothing of it here.
+    pub fn failed(&mut self, now: Instant) {
+        self.last = Some(now);
+    }
+
+    /// Takes in a give-back at `now` that took the VM's process from `before_kb` to `after_kb`
+    /// of the disks' pages, and returns the log line for it when one is due: the first
+    /// give-back of a boot, then one line for every [`MAPPED_PAGES_LOG_INTERVAL`] that had
+    /// give-backs.
+    pub fn gave_back(&mut self, now: Instant, before_kb: u64, after_kb: u64) -> Option<String> {
+        self.last = Some(now);
+        self.given_back_kb += before_kb.saturating_sub(after_kb);
+        self.trims += 1;
+        let due = self
+            .logged_at
+            .is_none_or(|at| now.saturating_duration_since(at) >= MAPPED_PAGES_LOG_INTERVAL);
+        if !due {
+            return None;
+        }
+        let line = format!(
+            "direct-mapped: gave back {} MiB of the mapped disks' pages from the VM's working set \
+             in {} {} (they stay in the host's file cache); it holds {} MiB of them now",
+            crate::memory::mib(self.given_back_kb),
+            self.trims,
+            if self.trims == 1 { "pass" } else { "passes" },
+            crate::memory::mib(after_kb)
+        );
+        self.logged_at = Some(now);
+        self.given_back_kb = 0;
+        self.trims = 0;
+        Some(line)
+    }
+}
+
+impl Default for MappedPagesTrim {
+    fn default() -> Self {
+        MappedPagesTrim::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nfr1_the_mapped_disks_pages_are_given_back_once_there_are_enough() {
+        let start = Instant::now();
+        let trim = MappedPagesTrim::new();
+        assert!(!trim.due(start, 0));
+        assert!(!trim.due(start, MAPPED_PAGES_FLOOR_KB - 1));
+        assert!(trim.due(start, MAPPED_PAGES_FLOOR_KB));
+        // A boot's reads: given back at the first look.
+        assert!(trim.due(start, 480 << 10));
+    }
+
+    #[test]
+    fn nfr1_the_mapped_disks_pages_are_given_back_at_most_once_a_minute() {
+        let start = Instant::now();
+        let mut trim = MappedPagesTrim::new();
+        trim.gave_back(start, 480 << 10, 1 << 10);
+        assert!(!trim.due(start + MAPPED_PAGES_CHECK, 200 << 10));
+        assert!(!trim.due(start + MAPPED_PAGES_GAP - Duration::from_secs(1), 200 << 10));
+        assert!(trim.due(start + MAPPED_PAGES_GAP, 200 << 10));
+        // Below the floor it waits, however long it has been.
+        assert!(!trim.due(start + 10 * MAPPED_PAGES_GAP, 17 << 10));
+    }
+
+    #[test]
+    fn nfr1_the_log_says_what_the_give_backs_did_without_a_line_for_each() {
+        let start = Instant::now();
+        let mut trim = MappedPagesTrim::new();
+        let first = trim.gave_back(start, 478 << 10, 1 << 10).unwrap();
+        assert_eq!(
+            first,
+            "direct-mapped: gave back 477 MiB of the mapped disks' pages from the VM's working \
+             set in 1 pass (they stay in the host's file cache); it holds 1 MiB of them now"
+        );
+        assert_eq!(
+            trim.gave_back(start + MAPPED_PAGES_GAP, 40 << 10, 2 << 10),
+            None
+        );
+        assert_eq!(
+            trim.gave_back(start + 2 * MAPPED_PAGES_GAP, 50 << 10, 3 << 10),
+            None
+        );
+        let later = trim
+            .gave_back(start + MAPPED_PAGES_LOG_INTERVAL, 36 << 10, 4 << 10)
+            .unwrap();
+        assert_eq!(
+            later,
+            "direct-mapped: gave back 117 MiB of the mapped disks' pages from the VM's working \
+             set in 3 passes (they stay in the host's file cache); it holds 4 MiB of them now"
+        );
+    }
 
     fn disk() -> SystemDisk {
         SystemDisk {

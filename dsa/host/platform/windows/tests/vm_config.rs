@@ -741,3 +741,57 @@ fn nfr1_a_direct_mapped_vm_that_could_not_map_its_disks_is_refused() {
         .to_string();
     assert!(why.contains("x86_64"), "{why}");
 }
+
+#[test]
+fn nfr1_the_mapped_disks_views_are_named_as_windows_names_them() {
+    use dsa_host_windows::mapped_pages::{device_path, drive_of};
+    let volume = r"\Device\HarddiskVolume3";
+    assert_eq!(
+        device_path(r"C:\ProgramData\DSA\direct-mapped", volume).as_deref(),
+        Some(r"\Device\HarddiskVolume3\ProgramData\DSA\direct-mapped")
+    );
+    assert_eq!(
+        device_path(
+            r"\\?\C:\ProgramData\DSA\users\S-1-5-21-1\addons.vhd\",
+            volume
+        )
+        .as_deref(),
+        Some(r"\Device\HarddiskVolume3\ProgramData\DSA\users\S-1-5-21-1\addons.vhd")
+    );
+    assert_eq!(
+        device_path("C:/ProgramData/DSA", volume).as_deref(),
+        Some(r"\Device\HarddiskVolume3\ProgramData\DSA")
+    );
+    assert_eq!(device_path(r"\\server\share\x.vhd", volume), None);
+    assert_eq!(
+        drive_of(std::path::Path::new(r"c:\ProgramData\DSA")).as_deref(),
+        Some("C:")
+    );
+    assert_eq!(drive_of(std::path::Path::new(r"\\server\share")), None);
+}
+
+#[test]
+fn nfr1_only_the_views_of_the_mapped_disks_are_given_back() {
+    use dsa_host_windows::mapped_pages::is_within;
+    let folder = r"\Device\HarddiskVolume3\ProgramData\DSA\direct-mapped";
+    let addons = r"\Device\HarddiskVolume3\ProgramData\DSA\users\S-1-5-21-1\addons.vhd";
+    // As the VM's memory process names its view of the system disk.
+    let system =
+        r"\Device\HarddiskVolume3\ProgramData\DSA\direct-mapped\17.0.0-16373615-15-dev.14.vhd";
+    assert!(is_within(system, folder));
+    assert!(is_within(&system.to_ascii_uppercase(), folder));
+    assert!(is_within(addons, addons));
+    // A folder that starts with the same name, another user's disk, another volume.
+    assert!(!is_within(
+        r"\Device\HarddiskVolume3\ProgramData\DSA\direct-mapped-old\a.vhd",
+        folder
+    ));
+    assert!(!is_within(
+        r"\Device\HarddiskVolume3\ProgramData\DSA\users\S-1-5-21-2\addons.vhd",
+        addons
+    ));
+    assert!(!is_within(
+        r"\Device\HarddiskVolume4\ProgramData\DSA\direct-mapped\a.vhd",
+        folder
+    ));
+}
