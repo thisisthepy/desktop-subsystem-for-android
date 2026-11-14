@@ -26,6 +26,13 @@ make_image = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(make_image)
 
 
+def disabled_angle_features(props):
+    """The ANGLE features a build.prop turns off: its one override line, split at colons."""
+    prefix = "debug.angle.feature_overrides_disabled="
+    lines = [line[len(prefix):] for line in props.splitlines() if line.startswith(prefix)]
+    return lines[0].split(":") if lines else []
+
+
 class ImageLayoutTests(unittest.TestCase):
     def test_nfr2_the_cached_process_limit_applies_where_android_17_reads_it(self):
         # Android 17 takes the limit from the device configuration, which the agent sets, and
@@ -1070,8 +1077,7 @@ class ImageLayoutTests(unittest.TestCase):
         # finishes; ANGLE's own switches keep the buffers it can place elsewhere out of it.
         for vendor in (False, True):
             props = make_image.edit_props("ro.debuggable=1\n", vendor=vendor)
-            self.assertIn("debug.angle.feature_overrides_disabled=preferDeviceLocalMemoryHostVisible\n",
-                          props)
+            self.assertIn("preferDeviceLocalMemoryHostVisible", disabled_angle_features(props))
             self.assertIn(
                 "debug.angle.feature_overrides_enabled="
                 "preferCachedNoncoherentForDynamicStreamBufferUsage\n", props)
@@ -1079,6 +1085,15 @@ class ImageLayoutTests(unittest.TestCase):
             for line in props.splitlines():
                 if line.startswith("debug.angle.feature_overrides_"):
                     self.assertNotIn(" ", line)
+
+    def test_fr4_angle_offers_no_native_fence_sync_the_guest_driver_cannot_back(self):
+        # Issue #387: the guest Vulkan driver has no sync device, so a sync fd it exports is -1,
+        # and SurfaceFlinger logged "failed to dup EGL native fence sync: 0x3000" for every
+        # frame it composed. ANGLE does not offer EGL_ANDROID_native_fence_sync on it.
+        for vendor in (False, True):
+            props = make_image.edit_props("ro.debuggable=1\n", vendor=vendor)
+            self.assertIn("supportsAndroidNativeFenceSync", disabled_angle_features(props))
+            self.assertEqual(props.count("debug.angle.feature_overrides_disabled="), 1)
 
     def test_fr32_pr3_android_reports_opengles_3_2_to_app_stores(self):
         # v0.2.1 on a real PC: ro.opengles.version was empty and `pm list features` reported

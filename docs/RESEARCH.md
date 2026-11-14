@@ -3129,3 +3129,15 @@ HCS에는 바로 이 목적의 장치가 문서에 있다.
 - Play를 쓰는 동안 끊김이 늘지 않는지(1분마다의 소프트 폴트). 늘면 간격을 늘이거나 창이 보이는 동안 바닥을 높인다.
 - 서비스(SYSTEM)가 `PROCESS_VM_OPERATION`을 얻는지. 관리자는 얻었다. 못 얻으면 로그에 한 번 이유가 남는다.
 - Linux(crosvm)에서도 같은 일이 생기는지. 파일 페이지가 crosvm의 RSS에 남는 것은 같을 것이고, 지금은 보고만 나눠 보인다. 돌려주기(`process_madvise`의 `MADV_COLD`나 `MADV_PAGEOUT`)는 하지 않았다.
+
+## R44. 이슈 #387의 경고들: SurfaceFlinger의 네이티브 펜스, 렌더러의 DeviceOpTracker, `dumpsys SurfaceFlinger` (FR-4, PR-3)
+
+**본 것.** 2026-11-14, 소유자 PC(호스트 0.2.4-dev.15, 이미지 17.0.0-16373615-15-dev.14). 부팅 뒤 약 한 시간의 `logcat -b all`에 `SurfaceFlinger: failed to dup EGL native fence sync: 0x3000`이 3831줄 있다. 같은 종류의 다른 줄(`failed to create EGL native fence sync`, GLConsumer의 `error dup'ing native fence fd`)은 없다.
+
+**까닭.** 0x3000은 `EGL_SUCCESS`다. 줄을 내는 곳은 AOSP `libs/renderengine/skia/SkiaGLRenderEngine.cpp`의 `flushGL()`로, `eglDupNativeFenceFDANDROID`가 오류 없이 `EGL_NO_NATIVE_FENCE_FD_ANDROID`(-1)를 돌려준 경우다. ANGLE은 그 fd를 게스트 Vulkan 드라이버의 `vkGetFenceFdKHR`(SYNC_FD)에서 받는다. mesa gfxstream `ResourceTracker::on_vkGetFenceFdKHR`는 virtio-gpu 네이티브 동기화가 있으면 호스트 펜스를, 없으면 goldfish sync 장치로 fd를 만든다. DSA 게스트에는 둘 다 없다(패치 0008이 `hasVirtioGpuNativeSync`를 끄고, `/dev/goldfish_sync`가 없다). 그래서 함수는 `*pFd`를 건드리지 않고 `VK_SUCCESS`를 돌려주고, fd는 -1이다. `vkGetSemaphoreFdKHR`도 같다(`semInfo.syncFd`가 비어 `dup(-1)`).
+
+**해가 있는가.** 없다. `flushAndSubmit()`은 fd가 -1이면 `submit(GrSyncCpu::kYes)`로 GPU가 끝날 때까지 CPU에서 기다린 뒤 프레임을 넘긴다. 확장이 아예 없을 때와 같은 길이다. 손해는 로그(한 시간에 수천 줄)와, 확장을 믿고 -1을 오류로 보는 사용자(GLConsumer의 해제 펜스)다.
+
+**결정.** ANGLE의 `supportsAndroidNativeFenceSync`를 `debug.angle.feature_overrides_disabled`로 끈다. 그러면 ANGLE이 `EGL_ANDROID_native_fence_sync`를 내놓지 않고, RenderEngine은 `flushGL()` 앞에서 조용히 빈 fd를 돌려주며, `waitFence()`는 들어온 fd를 CPU에서 기다린다. 앱의 획득 펜스는 이미 -1이라(QSRI가 호스트에서 기다린 뒤 펜스 없이 답한다) 바뀌는 것이 없다. 업스트림 ANGLE도 Lavapipe에서 같은 까닭으로 끈다(`vk_renderer.cpp`). 진짜 sync fd(호스트가 신호하는 sync_file)는 게스트 커널 장치와 프로토콜이 있어야 하는 별개의 일이다.
+
+**확인하지 못한 것.** 다음 이미지에서 `logcat -d -b all | grep -c "failed to dup EGL native fence"`가 0인지, `dumpsys SurfaceFlinger`의 GLES 확장 줄에 `EGL_ANDROID_native_fence_sync`가 없는지, 앱을 열고 닫을 때 깜빡임이나 찢어짐이 늘지 않는지.
