@@ -3141,3 +3141,11 @@ HCS에는 바로 이 목적의 장치가 문서에 있다.
 **결정.** ANGLE의 `supportsAndroidNativeFenceSync`를 `debug.angle.feature_overrides_disabled`로 끈다. 그러면 ANGLE이 `EGL_ANDROID_native_fence_sync`를 내놓지 않고, RenderEngine은 `flushGL()` 앞에서 조용히 빈 fd를 돌려주며, `waitFence()`는 들어온 fd를 CPU에서 기다린다. 앱의 획득 펜스는 이미 -1이라(QSRI가 호스트에서 기다린 뒤 펜스 없이 답한다) 바뀌는 것이 없다. 업스트림 ANGLE도 Lavapipe에서 같은 까닭으로 끈다(`vk_renderer.cpp`). 진짜 sync fd(호스트가 신호하는 sync_file)는 게스트 커널 장치와 프로토콜이 있어야 하는 별개의 일이다.
 
 **확인하지 못한 것.** 다음 이미지에서 `logcat -d -b all | grep -c "failed to dup EGL native fence"`가 0인지, `dumpsys SurfaceFlinger`의 GLES 확장 줄에 `EGL_ANDROID_native_fence_sync`가 없는지, 앱을 열고 닫을 때 깜빡임이나 찢어짐이 늘지 않는지.
+
+### 렌더러의 `DeviceOpTracker.cpp:126 ... Leaking object.`
+
+소유자 PC의 `dsa-wm.log`(30만 줄, 0.1.9부터 0.2.4-dev.15까지)에서 버전별로 셌다. `had a waitable pending ... Leaking object.`는 0.1.9에서 10, 0.1.10에서 2, 0.2.0에서 2, 0.2.1에서 67, 0.2.2에서 33, 0.2.3에서 33줄이고, `leaking garbage objects on destruction`도 0.2.3까지 128줄이다. 0.2.4-dev.1부터 dev.15까지는 둘 다 0이고, 패치 0024가 바꾼 문구(`destroyed with the device`)도 0이다. 실제로 새던 것이 맞다. 게스트 장치의 펜스와 세마포어(작은 드라이버 객체)가 장치가 없어질 때까지, 기다리는 일이 끝나지 않은 채 남았다. 까닭은 게스트가 펜스를 폴링 전에 재설정해 일이 영원히 대기 중으로 보이는 것과, 제출되지 않은 펜스였다. 패치 0024(88ad97f8)가 `vkResetFences` 때 먼저 폴링하고, 장치를 없앨 때 유휴를 기다린 뒤 남은 것을 모두 없앤다. 그래서 새로 고칠 것은 없다.
+
+### `dumpsys SurfaceFlinger`의 FAILED_TRANSACTION
+
+shell(uid 2000)로는 dev.14에서 전체 덤프(약 42 KB)가 된다. 실패는 루트에서만 난다. 보고자의 진단 묶음(`diag.zip`, 0.2.3)의 logcat에 `avc: denied { use } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:dsa_su_root:s0 tclass=fd permissive=0`이 있다. dumpsys는 자기가 만든 파이프의 쓰는 쪽을 서비스에 넘긴다. 승인된 루트 명령의 도메인 `dsa_su_root`는 자기 행동에만 permissive이고, SurfaceFlinger는 enforcing이라 binder 드라이버가 fd 전달을 거부했고, 호출은 FAILED_TRANSACTION으로 끝났다. 루트 셸에서 `dumpsys`나 `cmd`(콜백을 넘긴다)로 부르는 모든 서비스가 같다. `--list`는 shell에서 돌린 것이었다. `su.cil`에 AOSP가 userdebug의 `su`에 주는 규칙(`private/domain.te`: 모든 도메인의 `fd use`, `fifo_file { write getattr }`, init을 뺀 도메인의 `binder { call transfer }`)을 `dsa_su_root`에 준다. 다음 이미지에서 루트 셸로 `dumpsys SurfaceFlinger | head`와 `cmd package list packages | head`가 되는지, `dmesg`에 `tcontext=u:r:dsa_su_root` 거부가 없는지 볼 것.
