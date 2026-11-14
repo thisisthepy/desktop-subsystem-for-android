@@ -650,6 +650,55 @@ fn say_booted(daemon: &mut dyn dsa_transport::Connection, agent_connected: bool)
         .unwrap();
 }
 
+#[test]
+fn fr14_a_refusal_of_the_image_from_before_an_update_reads_as_a_step_of_the_update() {
+    let store = fresh_store();
+    let (android, mut connector, secret) = undecided_android(&store);
+    android.start();
+
+    // The image from before the update boots against the updated host, which refuses its
+    // daemon for another protocol definition.
+    let deadline = Instant::now() + WAIT;
+    let boot_secret = loop {
+        if let Some(boot_secret) = secret.lock().unwrap().clone() {
+            break boot_secret;
+        }
+        assert!(Instant::now() < deadline, "the guest was never started");
+        thread::sleep(Duration::from_millis(5));
+    };
+    let mut daemon = connector.connect(WAIT).unwrap();
+    let mut hello = local_hello(Role::Guest, "dsa-channeld old");
+    hello.schema_hash = vec![0x5a; 32];
+    let _ = guest_connect(&mut *daemon, &hello, &boot_secret, WAIT);
+    assert!(android.session.wait_for(SessionState::Stopped, WAIT));
+
+    // With no newer image yet, it is a mismatch to act on, said in plain words.
+    let reason = android.last_reason().expect("a reason");
+    assert!(
+        reason.starts_with("Android's image was made for another release of DSA"),
+        "{reason}"
+    );
+    assert!(reason.contains("dsa update"), "{reason}");
+
+    // The updated image arrives: the refusal was a step of the update.
+    check(
+        &store,
+        &server(&[16], &[("16.0.2", 16, 2)], &key()),
+        "mem://list.json",
+        &trusted(),
+    )
+    .unwrap();
+    let reason = android.last_reason().expect("a reason");
+    let first = reason.lines().next().unwrap_or_default();
+    assert!(
+        first.starts_with("during the update, Android 16.0.1"),
+        "{reason}"
+    );
+    assert!(first.contains("is resolved"), "{reason}");
+    assert!(first.contains("starts from 16.0.2 next"), "{reason}");
+    assert!(!first.contains("control.proto"), "{reason}");
+}
+
 fn alert_keys(android: &UpdatingAndroid) -> Vec<String> {
     android
         .untold_update_alerts("alice")

@@ -38,6 +38,8 @@ struct State {
     /// The image the running Android booted from; `None` while it is stopped, or before it
     /// is known.
     booted: Option<String>,
+    /// The image the latest boot ran, kept after it stopped: what a stop is about.
+    last_booted: Option<String>,
     /// The question asked of the user about the image that waits, while it waits.
     asked: Option<UpdateAlert>,
     /// The news that a restart applied an image which had already passed its trial on
@@ -55,6 +57,7 @@ impl Default for ImageRestart {
             state: Mutex::new(State {
                 auto: true,
                 booted: None,
+                last_booted: None,
                 asked: None,
                 applied: None,
                 restart_now: None,
@@ -92,7 +95,16 @@ impl ImageRestart {
 
     /// The Android booted from `version`, or stopped (`None`).
     pub fn set_booted(&self, version: Option<String>) {
-        self.state().booted = version;
+        let mut state = self.state();
+        if version.is_some() {
+            state.last_booted.clone_from(&version);
+        }
+        state.booted = version;
+    }
+
+    /// The image the latest boot ran, also once it has stopped.
+    pub fn last_booted(&self) -> Option<String> {
+        self.state().last_booted.clone()
     }
 
     /// The Android runs, and it booted from `current` unless the image it booted from is
@@ -102,6 +114,7 @@ impl ImageRestart {
         let mut state = self.state();
         if state.booted.is_none() {
             state.booted = Some(current.to_string());
+            state.last_booted = Some(current.to_string());
         }
     }
 
