@@ -582,8 +582,21 @@ OPENGLES_VERSION = 0x30002
 #   ANGLE invalidates before the app reads it, instead of the twin.
 # Buffers the app streams to the device (DYNAMIC_DRAW, STREAM_DRAW) and glReadPixels' staging
 # still prefer coherence, and ANGLE has no switch for them.
+#
+# One more switch is not about memory: supportsAndroidNativeFenceSync off. Without a virtio-gpu
+# device or a goldfish sync device, the guest Vulkan driver has no way to make a sync fd the
+# host signals, so vkGetFenceFdKHR and vkGetSemaphoreFdKHR succeed and give back -1. ANGLE
+# offered EGL_ANDROID_native_fence_sync on top of that, and every eglDupNativeFenceFDANDROID
+# returned EGL_NO_NATIVE_FENCE_FD_ANDROID with no error: SurfaceFlinger logged "failed to dup
+# EGL native fence sync: 0x3000" for each frame it composed itself (thousands an hour), and
+# GLConsumer's release fence failed outright. With no fd, RenderEngine waits for the GPU on the
+# CPU before handing the frame on, which is what it does without the extension too, so turning
+# it off changes nothing but the noise; GLConsumer moves to EGL_KHR_fence_sync. Upstream ANGLE
+# turns it off on Lavapipe for the same reason.
 ANGLE_MEMORY_PROPS = {
-    "debug.angle.feature_overrides_disabled": "preferDeviceLocalMemoryHostVisible",
+    "debug.angle.feature_overrides_disabled": (
+        "preferDeviceLocalMemoryHostVisible:supportsAndroidNativeFenceSync"
+    ),
     "debug.angle.feature_overrides_enabled": "preferCachedNoncoherentForDynamicStreamBufferUsage",
 }
 
