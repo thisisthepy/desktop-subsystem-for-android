@@ -640,17 +640,19 @@ jobs:
           echo "DSA_CROSVM_TEST_KERNEL=$kernel" >> "$GITHUB_ENV"
           echo "DSA_CROSVM_TEST_INITRD=$RUNNER_TEMP/test-initrd.img" >> "$GITHUB_ENV"
 
+      # Images are published by the official repository only, so a fork tests with them too.
       - name: Download the newest published Android image
         env:
           GH_TOKEN: ${{ github.token }}
+          OFFICIAL_REPOSITORY: thisisthepy/desktop-subsystem-for-android
         run: |
-          tag="$(gh release list -R "${{ github.repository }}" -L 50 --json tagName -q '[.[] | select(.tagName | startswith("android-17") and (endswith("-arm64") | not))][0].tagName')"
+          tag="$(gh release list -R "$OFFICIAL_REPOSITORY" -L 50 --json tagName -q '[.[] | select(.tagName | startswith("android-17") and (endswith("-arm64") | not))][0].tagName')"
           test -n "$tag" || { echo "no published x86_64 Android 17 image release"; exit 1; }
           echo "image release: $tag"
           image="$RUNNER_TEMP/image"
           mkdir -p "$image"
           for file in image.json bzImage initrd.img system.vhdx data.vhdx; do
-            gh release download "$tag" -R "${{ github.repository }}" -p "$file" -D "$image"
+            gh release download "$tag" -R "$OFFICIAL_REPOSITORY" -p "$file" -D "$image"
           done
           ls -l "$image"
           echo "DSA_CROSVM_TEST_IMAGE=$image" >> "$GITHUB_ENV"

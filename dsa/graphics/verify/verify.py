@@ -68,7 +68,34 @@ DEQP_GONE_POLLS = 2
 
 # The test apps: Android's NDK samples (Apache-2.0), built by the "Graphics test" workflow.
 TEST_APPS_ARTIFACT = "graphics-test-apps"
-REPOSITORY = "thisisthepy/desktop-subsystem-for-android"
+# Where the runs are when neither --repo, $GITHUB_REPOSITORY nor the checkout's origin says.
+OFFICIAL_REPOSITORY = "thisisthepy/desktop-subsystem-for-android"
+GITHUB_REMOTE = re.compile(
+    r"^(?:https?://(?:[^@/]+@)?github\.com/|ssh://git@github\.com/|git@github\.com:)"
+    r"([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$")
+
+
+def github_repository(url):
+    """owner/name from a GitHub remote URL, or None."""
+    match = GITHUB_REMOTE.match(url.strip())
+    return f"{match[1]}/{match[2]}" if match else None
+
+
+def repository(given=None, environ=os.environ, origin_url=None):
+    """The repository whose 'Graphics test' runs the test apps come from: --repo, the run's own
+    repository in CI, the one this checkout's origin names (a fork's clone takes the fork's
+    builds), or the official one."""
+    if given:
+        return given
+    if environ.get("GITHUB_REPOSITORY"):
+        return environ["GITHUB_REPOSITORY"]
+    if origin_url is None:
+        try:
+            origin_url = subprocess.run(["git", "-C", str(Path(__file__).parent), "remote", "get-url", "origin"],
+                                        capture_output=True, text=True).stdout
+        except OSError:
+            origin_url = ""
+    return github_repository(origin_url) or OFFICIAL_REPOSITORY
 
 
 @dataclass(frozen=True)
@@ -417,24 +444,25 @@ def fetch_deqp():
     return target
 
 
-def fetch_apps(run_id=None):
+def fetch_apps(run_id=None, repo=None):
     apps = WORK / "apps"
     if all((apps / app.apk).exists() for app in APPS):
         return apps
     if not shutil.which("gh"):
         raise SystemExit(f"download the {TEST_APPS_ARTIFACT} artifact of a successful 'Graphics test' run "
                          f"into {apps}, or install the GitHub CLI (gh)")
+    repo = repository(repo)
     if run_id is None:
         out = subprocess.run(
-            ["gh", "run", "list", "--repo", REPOSITORY, "--workflow", "test-graphics.yml",
+            ["gh", "run", "list", "--repo", repo, "--workflow", "test-graphics.yml",
              "--status", "success", "--limit", "20", "--json", "databaseId"],
             check=True, capture_output=True, text=True).stdout
         runs = json.loads(out)
         if not runs:
-            raise SystemExit("no successful 'Graphics test' run to take the test apps from")
+            raise SystemExit(f"no successful 'Graphics test' run in {repo} to take the test apps from")
         run_id = runs[0]["databaseId"]
     apps.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["gh", "run", "download", str(run_id), "--repo", REPOSITORY,
+    subprocess.run(["gh", "run", "download", str(run_id), "--repo", repo,
                     "--name", TEST_APPS_ARTIFACT, "--dir", str(apps)], check=True)
     return apps
 
@@ -668,7 +696,7 @@ def launch(adb, app, apps_dir):
 
 def run_apps(args):
     adb = Adb(args.serial)
-    apps_dir = fetch_apps(args.run)
+    apps_dir = fetch_apps(args.run, args.repo)
     stack = graphics_stack(adb)
     problems = check_stack(stack)
     for app in APPS:
@@ -737,7 +765,7 @@ class Swiper:
 
 def run_measure(args):
     adb = Adb(args.serial)
-    apps_dir = fetch_apps(args.run)
+    apps_dir = fetch_apps(args.run, args.repo)
     environment = {
         "graphics": graphics_stack(adb),
         "guest_build": adb.shell("getprop ro.build.fingerprint").strip(),
@@ -780,6 +808,8 @@ def main(argv=None):
                                  "the dEQP log and the guest log")
     for command in (fetch, sub.choices["apps"], sub.choices["measure"]):
         command.add_argument("--run", type=int, help="the 'Graphics test' run to take the test apps from")
+        command.add_argument("--repo", help="owner/name of the repository that run is in (default: $GITHUB_REPOSITORY, "
+                             "else the one this checkout's origin names, so a fork takes its own builds)")
     sub.choices["apps"].add_argument("--yes", action="store_true", help="skip the questions about what each window shows")
     sub.choices["measure"].add_argument("--seconds", type=int, default=30)
     args = parser.parse_args(argv)
@@ -798,7 +828,7 @@ def main(argv=None):
     if args.command == "fetch":
         WORK.mkdir(parents=True, exist_ok=True)
         print(fetch_deqp())
-        print(fetch_apps(args.run))
+        print(fetch_apps(args.run, args.repo))
         return 0
     return {"cts": run_cts, "apps": run_apps, "measure": run_measure}[args.command](args)
 
