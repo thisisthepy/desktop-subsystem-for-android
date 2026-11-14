@@ -85,6 +85,14 @@ on:
         required: false
         default: "0.2.4"
 
+# A build in progress always finishes, and only the newest waiting one stays: GitHub keeps
+# one pending run per group, so a newer run replaces the one still waiting. The group is the
+# workflow and the branch, never the run. The Image release's jobs it calls keep their own
+# group (development-build), which is a different name, so the two never wait on each other.
+concurrency:
+  group: dev-build-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
