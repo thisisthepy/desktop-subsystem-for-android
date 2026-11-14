@@ -1,0 +1,168 @@
+# Runs the development tests in one run: the basic checks (test.yml) and each target's test
+# (test-<target>.yml), each as a job that calls that workflow. One run that checks as much as
+# possible replaces several runs started one by one, so fewer runs wait for runners at once.
+# The inputs choose which tests to include; by default every one runs.
+#
+# It runs only by hand, like the tests it calls:
+#
+#   gh workflow run checks.yml --ref develop
+#   gh workflow run checks.yml --ref develop -f installer=false -f android=all
+#
+# Each test still runs on its own by hand as before. A run of one called from here is part of
+# this run: its artifacts are this run's artifacts, under the names that test gives them.
+
+name: Checks
+
+on:
+  workflow_dispatch:
+    inputs:
+      test:
+        description: "The basic checks (Test): the repository rules, the Rust code, the hosts, the agent, the protocol"
+        type: boolean
+        required: false
+        default: true
+      graphics:
+        description: "Graphics test: the guest graphics transport and the host renderers"
+        type: boolean
+        required: false
+        default: true
+      image:
+        description: "Image test: make the guest image and boot it for the boot checks"
+        type: boolean
+        required: false
+        default: true
+      android:
+        description: "Image test: the Android release to make. Use all for the compatibility run."
+        type: choice
+        required: false
+        default: "17"
+        options:
+          - "17"
+          - "16"
+          - all
+      keep_disk:
+        description: "Image test: keep each generated image as an artifact for a local boot check"
+        type: boolean
+        required: false
+        default: false
+      kernel:
+        description: "Kernel test: build the guest kernel for x86_64 and arm64"
+        type: boolean
+        required: false
+        default: true
+      kernel_tag:
+        description: "Kernel test: a WSL kernel tag to build instead of the pinned one; empty for the pinned one"
+        required: false
+        default: ""
+      installer:
+        description: "Installer test: build, install and uninstall the Windows installer"
+        type: boolean
+        required: false
+        default: true
+      linux_package:
+        description: "Linux package test: build and check the .deb and .rpm packages"
+        type: boolean
+        required: false
+        default: true
+      macos_package:
+        description: "macOS package test: build and package the macOS host"
+        type: boolean
+        required: false
+        default: true
+
+# A run in progress always finishes, and only the newest waiting run stays: GitHub keeps one
+# pending run per group, so a newer run replaces the one still waiting. The group is the
+# workflow and the branch, never the run. Each called test has its own group, which carries
+# this workflow's name (github.workflow is the caller's), so it never waits on this group or
+# on a run of that test started on its own.
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+# A called workflow's jobs get no more than the calling job grants, so each job grants what
+# the jobs of its test ask for.
+jobs:
+  test:
+    name: Run the basic checks
+    if: inputs.test
+    permissions:
+      contents: read
+      actions: write
+      pull-requests: read
+    uses: ./.github/workflows/test.yml
+    secrets: inherit
+
+  graphics:
+    name: Run the graphics test
+    if: inputs.graphics
+    permissions:
+      contents: read
+      actions: write
+    uses: ./.github/workflows/test-graphics.yml
+    secrets: inherit
+
+  image:
+    name: Run the image test
+    if: inputs.image
+    permissions:
+      contents: read
+      actions: write
+    uses: ./.github/workflows/test-image.yml
+    secrets: inherit
+    with:
+      android: ${{ inputs.android }}
+      keep_disk: ${{ inputs.keep_disk }}
+
+  kernel:
+    name: Run the kernel test
+    if: inputs.kernel
+    permissions:
+      contents: read
+      actions: write
+    uses: ./.github/workflows/test-kernel.yml
+    secrets: inherit
+    with:
+      tag: ${{ inputs.kernel_tag }}
+
+  installer:
+    name: Run the installer test
+    if: inputs.installer
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/test-installer.yml
+    secrets: inherit
+
+  linux-package:
+    name: Run the Linux package test
+    if: inputs.linux_package
+    permissions:
+      contents: read
+    uses: ./.github/workflows/test-linux-package.yml
+    secrets: inherit
+
+  macos-package:
+    name: Run the macOS package test
+    if: inputs.macos_package
+    permissions:
+      contents: read
+    uses: ./.github/workflows/test-macos-package.yml
+    secrets: inherit
+
+  # One check that always reports: it fails when any test that ran failed or was cancelled.
+  result:
+    name: Report the checks result
+    if: always()
+    needs: [test, graphics, image, kernel, installer, linux-package, macos-package]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fail when a test failed
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "::error::a test failed or was cancelled"
+            exit 1
+          fi

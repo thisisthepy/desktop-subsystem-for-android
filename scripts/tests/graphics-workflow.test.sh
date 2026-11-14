@@ -4,7 +4,7 @@
 set -euo pipefail
 
 workflow="$(cd "$(dirname "$0")/../.." && pwd)/.github/workflows/test-graphics.yml"
-grep -Fq "cancel-in-progress: \${{ github.ref != 'refs/heads/develop' }}" "$workflow"
+grep -Fq 'cancel-in-progress: false' "$workflow"
 grep -Fq 'setup-ndk' "$workflow"
 grep -Fq 'dsa/graphics/fetch.sh' "$workflow"
 grep -Fq 'dsa/graphics/build.sh' "$workflow"

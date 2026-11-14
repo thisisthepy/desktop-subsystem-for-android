@@ -89,14 +89,35 @@ on:
         type: string
         required: false
         default: ""
+  # Checks (checks.yml) runs it as one of its jobs, with every other test, in one run. The
+  # same inputs; android is a string here, since a called workflow has no choice type.
+  workflow_call:
+    inputs:
+      keep_disk:
+        description: "Keep each generated image (its disks, initrd and image.json) as an artifact for a local boot check"
+        type: boolean
+        required: false
+        default: false
+      android:
+        description: "Android release to make: 17, 16, or all for the compatibility run"
+        type: string
+        required: false
+        default: "17"
+      graphics_run:
+        description: "Graphics test run that produced guest-gfxstream-hvsocket"
+        type: string
+        required: false
+        default: ""
 
 concurrency:
-  # On develop a run in progress finishes and only the newest waiting run stays: GitHub
-  # keeps one pending run per group, so a newer merge replaces the one still waiting.
-  # The newest run tests everything the dropped ones held. Anywhere else, such as a pull
-  # request, a newer run still replaces the older one.
-  group: test-image-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/develop' }}
+  # A run in progress always finishes, and only the newest waiting run stays: GitHub keeps
+  # one pending run per group, so a newer run replaces the one still waiting, and the newest
+  # tests everything the dropped ones held. The group is the workflow and the branch (or
+  # the pull request), never the run, so manual runs replace each other too. Called from
+  # Checks, github.workflow names Checks, so a Checks run neither waits on nor replaces a
+  # run started on its own.
+  group: test-image-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -205,11 +226,14 @@ jobs:
           test "$exports" = "HMI"
           grep -aFq 'hvsocket' "$target_vk"
 
+      # Named image-..., as is the test apps' artifact below: Checks runs this workflow and
+      # the Graphics test in one run, where an artifact's name must be unique, and the
+      # Graphics test keeps the unprefixed names that other runs download.
       - name: Keep the patched guest library
         if: ${{ !cancelled() && steps.graphics-verify.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
-          name: guest-gfxstream-hvsocket${{ matrix.arch == 'arm64' && '-arm64' || '' }}
+          name: image-guest-gfxstream-hvsocket${{ matrix.arch == 'arm64' && '-arm64' || '' }}
           path: |
             .scratch/build/libOpenglSystemCommon.so
             .scratch/build/vulkan.ranchu.so
@@ -640,7 +664,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: graphics-test-apps
+          name: image-graphics-test-apps
           path: |
             .scratch/graphics-test-apps/hello-gl2.apk
             .scratch/graphics-test-apps/hello-vulkan.apk
@@ -716,7 +740,7 @@ jobs:
         if: inputs.graphics_run == ''
         uses: actions/download-artifact@v4
         with:
-          name: guest-gfxstream-hvsocket${{ matrix.arch == 'arm64' && '-arm64' || '' }}
+          name: image-guest-gfxstream-hvsocket${{ matrix.arch == 'arm64' && '-arm64' || '' }}
           path: .scratch/guest-graphics
 
       - name: Verify graphics libraries ELF dependencies
@@ -1419,7 +1443,7 @@ jobs:
         if: matrix.test == 'graphics'
         uses: actions/download-artifact@v4
         with:
-          name: graphics-test-apps
+          name: image-graphics-test-apps
           path: .scratch/graphics-test-apps
 
       # verify.py fetches and runs the Vulkan CTS through uv.

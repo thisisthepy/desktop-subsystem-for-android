@@ -108,7 +108,10 @@ therefore never depend on those documents; a comment may name them only as being
 
 Workflow files and names, in `.github/workflows/`:
 
-- `test.yml`, "Test": the basic checks, on every push to `develop` and on the release pull request into `main`.
+- `test.yml`, "Test": the basic checks, by hand and on the release pull request into `main`.
+  Development tests run only when started by hand, never on a push.
+- `checks.yml`, "Checks": every development test in one run, each as a job calling its
+  workflow; its inputs choose which. Prefer it to starting several runs.
 - `release-sync.yml`, "Release sync": develop to main sync; its script is
   `.github/scripts/release/sync-release.sh`.
 - `test-<target>.yml`, "<Target> test": a special check for one target, such as
