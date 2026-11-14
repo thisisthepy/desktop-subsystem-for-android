@@ -237,5 +237,25 @@ class AdbTests(unittest.TestCase):
             self.assertEqual(verify.adb_program(), "adb")
 
 
+class RepositoryTests(unittest.TestCase):
+    def test_pr3_the_test_apps_come_from_the_repository_named_with_repo(self):
+        self.assertEqual(verify.repository("someone/dsa-fork", environ={}, origin_url=""), "someone/dsa-fork")
+
+    def test_pr3_in_ci_the_test_apps_come_from_the_runs_own_repository(self):
+        self.assertEqual(verify.repository(environ={"GITHUB_REPOSITORY": "someone/fork"}, origin_url=""), "someone/fork")
+
+    def test_pr3_a_forks_clone_takes_the_test_apps_from_the_fork(self):
+        for url in ("https://github.com/someone/desktop-subsystem-for-android.git",
+                    "git@github.com:someone/desktop-subsystem-for-android.git",
+                    "ssh://git@github.com/someone/desktop-subsystem-for-android",
+                    "https://github.com/someone/desktop-subsystem-for-android\n"):
+            self.assertEqual(verify.repository(environ={}, origin_url=url), "someone/desktop-subsystem-for-android", url)
+
+    def test_pr3_without_a_github_origin_the_official_repository_is_used(self):
+        self.assertEqual(verify.repository(environ={}, origin_url="https://example.com/x/y.git"),
+                         verify.OFFICIAL_REPOSITORY)
+        self.assertEqual(verify.repository(environ={}, origin_url=""), verify.OFFICIAL_REPOSITORY)
+
+
 if __name__ == "__main__":
     unittest.main()

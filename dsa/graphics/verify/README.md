@@ -51,7 +51,9 @@ uv run dsa/graphics/verify/verify.py measure --seconds 30
 
 - `fetch` downloads the Vulkan CTS APK (only that member of the pinned CTS archive, by range
   requests) and the test apps from the latest successful "Graphics test" run (needs `gh`).
-  Everything goes to `.scratch/graphics-verify/`.
+  The run is looked up in the repository this checkout's `origin` remote names, so a fork's
+  clone takes the fork's own builds; `--repo owner/name` names another one, and `--run` one
+  run. Everything goes to `.scratch/graphics-verify/`.
 - `fetch-cts` downloads only the Vulkan CTS APK and writes the expanded case list, for a
   machine that has the test apps already.
 - `cts` checks that the guest reports ANGLE and the remoting Vulkan driver, runs the subset,

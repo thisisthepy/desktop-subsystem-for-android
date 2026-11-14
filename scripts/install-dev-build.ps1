@@ -8,9 +8,10 @@ The "Development build" workflow (.github/workflows/dev-build.yml) builds DSA fo
 without testing or publishing it, and keeps what it made as workflow artifacts for three
 days. This script installs them here:
 
-  1. Finds the run: -Run, or the newest successful Development build on develop that still
-     has its artifacts. It checks that the run is this repository's Development build of
-     develop and that it passed.
+  1. Finds the run in the repository -Repo names (by default the one this checkout's origin
+     remote names, the official repository or a fork): -Run, or the newest successful
+     Development build on develop that still has its artifacts. It checks that the run is
+     that repository's own Development build of its develop and that it passed.
   2. Downloads its artifacts into .scratch\dev-build\<run>\ in this repository.
   3. Checks them before anything is installed. The setup file against SHA256SUMS.txt and
      against the signed program.json beside it, with the release keys the installed service
@@ -42,29 +43,87 @@ The run ID of a Development build (gh run list --workflow dev-build.yml). Withou
 newest successful one that still has its artifacts.
 
 .PARAMETER Repo
-The GitHub repository the run is in.
+The GitHub repository the run is in, as owner/name: the official repository or a fork of
+it. Without it, the repository the "origin" remote of this checkout names, so a clone of a
+fork installs that fork's Development builds. The run must belong to that repository.
+
+A Development build made in a fork is signed with that fork's secrets, and nothing here
+trusts it for being in a fork. The setup file must pass the installed service's own check
+against the signed program list from the same run, and the image's signed list the
+service's check, with the keys the installed DSA already trusts, exactly as for a build of
+the official repository. So a fork's build installs only when the fork signs with the
+official repository's keys; a fork with keys of its own is refused.
 
 .PARAMETER Release
-The release the "how to go back" lines name.
+The release the "how to go back" lines name. Releases come from the official repository
+only, whichever repository the Development build is in.
 
 .EXAMPLE
 pwsh scripts/install-dev-build.ps1
 
 .EXAMPLE
 pwsh scripts/install-dev-build.ps1 -Run 43120000000
+
+.EXAMPLE
+pwsh scripts/install-dev-build.ps1 -Repo someone/desktop-subsystem-for-android
 #>
 param(
     [long]$Run,
-    [string]$Repo = "thisisthepy/desktop-subsystem-for-android",
+    [string]$Repo,
     [string]$Release = "0.2.3",
     # Set when the script has started itself again as administrator: install only, from the
     # folder the first run downloaded and checked, and write what it prints to this file.
-    [string]$ElevatedLog
+    [string]$ElevatedLog,
+    # Defines the functions and stops, for scripts/tests/install-dev-build_test.ps1.
+    [switch]$FunctionsOnly
 )
 $ErrorActionPreference = "Stop"
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $artifacts = @("development-installer", "development-image", "development-image-list")
+# The repository that publishes DSA's releases, which the "how to go back" lines install.
+$officialRepo = "thisisthepy/desktop-subsystem-for-android"
+
+# owner/name from a GitHub remote URL (https://github.com/owner/name.git,
+# git@github.com:owner/name.git, ssh://git@github.com/owner/name), or $null for anything else.
+function Get-GitHubRepository([string]$url) {
+    if ($url -match '^(?:https?://(?:[^@/]+@)?github\.com/|ssh://git@github\.com/|git@github\.com:)([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$') {
+        return "$($Matches[1])/$($Matches[2])"
+    }
+    $null
+}
+
+# The repository to install from: -Repo as given, or the one this checkout's origin names.
+function Resolve-DevBuildRepo([string]$given, [string]$originUrl) {
+    if ($given) {
+        if ($given -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') { throw "-Repo is owner/name, not $given" }
+        return $given
+    }
+    $found = Get-GitHubRepository $originUrl
+    if (-not $found) {
+        throw "the origin remote of this checkout ($originUrl) is not a GitHub repository; name the repository with -Repo owner/name"
+    }
+    $found
+}
+
+# Why the run cannot be installed from $repo, or $null when it can: it must be that
+# repository's own Development build of its develop, and it must have passed.
+function Test-DevBuildRun($info, [string]$repo) {
+    if ($info.repository.full_name -ne $repo) { return "run $($info.id) is in $($info.repository.full_name), not $repo" }
+    if ($info.head_repository.full_name -ne $repo) { return "run $($info.id) built $($info.head_repository.full_name), not $repo" }
+    if ($info.path -notlike ".github/workflows/dev-build.yml*") { return "run $($info.id) is not a Development build (it is $($info.path))" }
+    if ($info.head_branch -ne "develop") { return "run $($info.id) was made from $($info.head_branch), not develop" }
+    if ($info.conclusion -ne "success") { return "run $($info.id) did not pass (it is $($info.status), $($info.conclusion))" }
+    $null
+}
+
+if ($FunctionsOnly) { return }
+
+$origin = ""
+if (-not $Repo) {
+    $origin = (& git -C $root remote get-url origin 2>$null) -join ""
+}
+$Repo = Resolve-DevBuildRepo $Repo $origin
 
 function Test-Administrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -152,7 +211,7 @@ To go back to the release v${Release}:
   1. Uninstall DSA. Each user's Android disk stays; the downloaded images and setup files go.
      $uninstall
   2. Install v$Release. Its service then downloads the newest released Android image.
-     gh release download v$Release --repo $Repo --pattern '$releaseSetup' --dir '$back'
+     gh release download v$Release --repo $officialRepo --pattern '$releaseSetup' --dir '$back'
      Start-Process -Wait '$(Join-Path $back $releaseSetup)' -ArgumentList '/quiet','/norestart'
   A development build is newer than v$Release, so v$Release's setup alone says a newer version
   is installed; the release after v$Release replaces a development build as an ordinary update.
@@ -174,10 +233,8 @@ if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { throw "the GitHub CLI
 
 if (-not $Run) { $Run = Find-Run }
 $info = Invoke-Gh api "repos/$Repo/actions/runs/$Run" | ConvertFrom-Json
-if ($info.path -notlike ".github/workflows/dev-build.yml*") { throw "run $Run is not a Development build (it is $($info.path))" }
-if ($info.head_branch -ne "develop") { throw "run $Run was made from $($info.head_branch), not develop" }
-if ($info.conclusion -ne "success") { throw "run $Run did not pass (it is $($info.status), $($info.conclusion))" }
-if ($info.repository.full_name -ne $Repo) { throw "run $Run is in $($info.repository.full_name), not $Repo" }
+$refused = Test-DevBuildRun $info $Repo
+if ($refused) { throw $refused }
 $present = Get-RunArtifacts $Run
 if ($present.Count -eq 0) { throw "run $Run has no artifacts left (they are kept for three days)" }
 if (($present -contains "development-image") -ne ($present -contains "development-image-list")) {
