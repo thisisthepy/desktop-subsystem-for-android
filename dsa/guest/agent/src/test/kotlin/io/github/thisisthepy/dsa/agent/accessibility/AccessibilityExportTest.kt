@@ -365,6 +365,65 @@ class AccessibilityExportTest {
     }
 
     @Test
+    fun fr18_a_busy_app_is_not_asked_again_and_again_and_gets_its_tree_once_it_has_time() {
+        // Each node read waits for the app's UI thread. Here the app is busy (its main thread
+        // blocked, as an app waiting on its video decoder is): a node takes 300 ms to answer.
+        var extra = 0L
+        var answerMillis = 300L
+        var asked = 0
+        val busyRoot = object : NodeHandle {
+            override val key: Any = "busy-root"
+
+            override fun info(): NodeInfo {
+                asked++
+                extra += answerMillis
+                return list.info
+            }
+
+            override fun children(): List<NodeHandle> = listOf(row)
+
+            override fun perform(action: NodeAction, text: String) = false
+        }
+        val busyService = object : AccessibilitySource {
+            var on = false
+
+            override fun enable(onChange: () -> Unit) {
+                on = true
+            }
+
+            override fun disable() {
+                on = false
+            }
+
+            override fun roots(taskId: Int): List<NodeHandle>? = if (on && taskId == 3) listOf(busyRoot) else null
+        }
+        locator.up = daemon
+        tasks.running = listOf(appTask(3, bounds = TaskBounds(30, 20, 430, 620)))
+        val agent = Agent(
+            AGENT, tasks, FakeActions(), locator, FakeWindowing(), FakeInjector(), scheduler, log,
+            accessibility = busyService,
+            clock = { scheduler.now + extra },
+        )
+        agent.start()
+        scheduler.runDue()
+        watch(3, true)
+        scheduler.advance(10)
+        // The first slow answer ends the read: nothing more is asked, and nothing half read is sent.
+        assertEquals(1, asked)
+        assertTrue(trees().isEmpty())
+        // The app is left alone for a while, however its tree changes meanwhile.
+        scheduler.advance(AccessibilityExport.BUSY_RETRY_MILLIS - 100)
+        assertEquals(1, asked)
+        // Once it answers at once again, its tree is read whole and sent.
+        answerMillis = 1
+        scheduler.advance(200)
+        assertEquals(2, asked)
+        val tree = trees().single()
+        assertTrue(tree.full)
+        assertEquals(3, tree.nodesCount)
+    }
+
+    @Test
     fun fr18_password_text_never_leaves_the_guest() {
         val node = AccessibilityExport.toNode(1, emptyList(), NodeInfo(text = "hunter2", password = true, editable = true), TaskBounds(0, 0, 0, 0))
         assertEquals(7, node.text.length)

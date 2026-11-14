@@ -44,6 +44,13 @@ struct Frame {
     std::string nv12;
     bool endOfStream = false;
 };
+// Whether `frame` says its packet gives no picture: the host did not decode it, since it came
+// after a flush or the stream's start and before a key frame (its picture would be green).
+// Such a frame has no size and no planes, and does not end the stream.
+inline bool carriesNoPicture(const Frame& frame) {
+    return !frame.endOfStream && frame.width == 0 && frame.height == 0 && frame.nv12.empty();
+}
+
 struct Flushed {};
 struct DecodeError {
     std::string error;

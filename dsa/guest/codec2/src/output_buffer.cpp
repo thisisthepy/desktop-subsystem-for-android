@@ -20,6 +20,10 @@ AllocateFailure classifyAllocateError(int32_t error) {
     }
 }
 
+bool peerIsGone(int32_t exceptionCode, int32_t status) {
+    return status == kStatusDeadObject && (exceptionCode == kExTransactionFailed || exceptionCode == 0);
+}
+
 PictureSize bufferSizeFor(uint32_t width, uint32_t height) {
     return PictureSize{width + (width & 1), height + (height & 1)};
 }

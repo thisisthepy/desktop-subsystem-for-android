@@ -45,6 +45,16 @@ enum class AllocateFailure {
 
 AllocateFailure classifyAllocateError(int32_t serviceSpecificError);
 
+// Binder's EX_TRANSACTION_FAILED and DEAD_OBJECT, as a failed call's status carries them.
+inline constexpr int32_t kExTransactionFailed = -129;
+inline constexpr int32_t kStatusDeadObject = -32;
+
+// Whether a binder call to the framework failed because its process is gone (the app died):
+// its exception code and its status (AStatus_getExceptionCode, AStatus_getStatus). Nothing
+// that process held will be called back again, so the component stops at once rather than
+// try every picture of the stream against it.
+bool peerIsGone(int32_t exceptionCode, int32_t status);
+
 struct PictureSize {
     uint32_t width = 0;
     uint32_t height = 0;

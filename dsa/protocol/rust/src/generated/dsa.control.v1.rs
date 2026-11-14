@@ -1862,6 +1862,10 @@ pub struct VideoPacket {
 /// plane then the interleaved chroma plane (NV12), each row `stride` bytes long. `width` and
 /// `height` are the visible size; the planes are `stride` by `height` and `stride` by
 /// `height / 2` (rounded up) bytes. A frame with `end_of_stream` set carries no picture.
+/// A frame with no size and no planes, and without `end_of_stream`, says the packet of
+/// `frame_index` gives no picture: the host did not decode it, since it refers to pictures
+/// the decoder does not have (it came after a flush or the stream's start and before a key
+/// frame).
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct VideoFrame {
     #[prost(uint64, tag = "1")]

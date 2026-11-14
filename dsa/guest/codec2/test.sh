@@ -29,7 +29,8 @@ mkdir -p "$out"
 "$cxx" "${flags[@]}" -I"$here/tests" -I"$here/../hwcomposer/tests" -I"$protocol/cpp/generated" "${protobuf[@]}" \
     "$here/src/video_messages.cpp" "$here/src/picture_copy.cpp" "$here/src/output_buffer.cpp" \
     "$here/src/config_rules.cpp" "$here/src/output_gate.cpp" "$here/src/send_queue.cpp" \
-    "$here/src/arrival_queue.cpp" "$here/src/picture_stats.cpp" \
+    "$here/src/arrival_queue.cpp" "$here/src/picture_stats.cpp" "$here/src/message_reader.cpp" \
+    "$here/src/bounded_thread.cpp" "$here/src/host_link.cpp" \
     "$here/tests/codec2_test.cpp" "$out/control.pb.o" \
     -lprotobuf-lite -pthread -o "$out/codec2_test"
 "$out/codec2_test" "$protocol"

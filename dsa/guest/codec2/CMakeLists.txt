@@ -95,6 +95,8 @@ add_executable(dsa-codec2
     src/output_buffer.cpp
     src/output_gate.cpp
     src/send_queue.cpp
+    src/message_reader.cpp
+    src/bounded_thread.cpp
     src/arrival_queue.cpp
     src/picture_stats.cpp
     src/config_rules.cpp

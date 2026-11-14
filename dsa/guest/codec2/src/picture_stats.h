@@ -23,6 +23,9 @@ enum class Drop {
     NoBuffer,
     // A buffer came, but the picture could not be written into it.
     NotWritten,
+    // The host did not decode its packet: it came after a flush or the stream's start and
+    // before a key frame, and its picture would have shown green.
+    BeforeKeyFrame,
 };
 
 // Where one picture's time went, from the moment it came from the host.
@@ -67,6 +70,7 @@ class PictureStats {
     uint32_t mFlushed = 0;
     uint32_t mNoBuffer = 0;
     uint32_t mNotWritten = 0;
+    uint32_t mBeforeKeyFrame = 0;
     PictureTimes mTotal;
 };
 

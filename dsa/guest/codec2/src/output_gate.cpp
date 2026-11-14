@@ -49,4 +49,20 @@ WaitResult waitReadable(int fd, std::chrono::steady_clock::time_point deadline, 
     }
 }
 
+WaitResult waitForBuffer(int fd, std::chrono::steady_clock::time_point deadline, const OutputGate& gate,
+                         uint64_t ticket, bool lastReady, std::chrono::milliseconds slice,
+                         std::chrono::milliseconds pause) {
+    if (lastReady) {
+        const auto until = std::min(deadline, std::chrono::steady_clock::now() + pause);
+        const WaitResult paused = waitReadable(-1, until, gate, ticket, slice);
+        if (paused == WaitResult::Closed) {
+            return WaitResult::Closed;
+        }
+        if (std::chrono::steady_clock::now() >= deadline) {
+            return WaitResult::TimedOut;
+        }
+    }
+    return waitReadable(fd, deadline, gate, ticket, slice);
+}
+
 }  // namespace dsa::codec2
