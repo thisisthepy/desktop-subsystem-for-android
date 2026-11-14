@@ -44,6 +44,7 @@
 //! - [`widgets`]: the widgets of the guest, which the host places on its desktop.
 //! - [`print`]: the documents apps in the guest print, which the host prints.
 //! - [`video`]: the guest's video, decoded on the host's hardware decoder.
+//! - [`video_keyframe`]: where a video stream may start decoding (its key frames).
 //! - [`sensors`]: the host's motion and light sensors, read by the guest's sensors HAL.
 //! - [`camera`]: the host's cameras, used by the apps in the guest.
 //! - [`ime`]: text input through the host's input method in a task's window.
@@ -148,6 +149,7 @@ pub mod touch_gestures;
 pub mod update;
 pub mod vhdx;
 pub mod video;
+pub mod video_keyframe;
 pub mod video_layout;
 pub mod widevine;
 pub mod widget_windows;

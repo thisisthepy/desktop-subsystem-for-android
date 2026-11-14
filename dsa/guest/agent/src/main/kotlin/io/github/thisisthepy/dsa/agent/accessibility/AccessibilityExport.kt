@@ -126,6 +126,14 @@ interface AccessibilitySource {
  * a read waits until [RESIZE_QUIET_MILLIS] have passed since the task's last new size or
  * density, and the screen reader hears of the new layout once, after it has been drawn.
  *
+ * Each of those calls waits for the app's UI thread, up to the framework's own timeout of
+ * five seconds, and a busy UI thread is one an app may not have to spare: Android declares it
+ * not responding when input waits five seconds there. A read that keeps asking a busy app
+ * queues one request after another behind the input. So a read stops as soon as one call
+ * takes [SLOW_CALL_MILLIS] or the read has taken [READ_BUDGET_MILLIS]: the app is busy, what
+ * was read is not sent (a tree cut short would tell the screen reader the rest is gone), and
+ * the task's tree is read again [BUSY_RETRY_MILLIS] later.
+ *
  * A watched task gets its tree however long Android takes to bind the service. The export
  * tries every [RETRY_MILLIS] for [MAX_RETRIES] tries, then every [SLOW_RETRY_MILLIS] for as long
  * as the task is watched, rather than waiting for an event from a service that may never have
@@ -175,6 +183,9 @@ class AccessibilityExport(
 
         /** Until when, on [clock], the task is being resized and its tree is not read. */
         var quietAt = Long.MIN_VALUE / 2
+
+        /** Whether the guest's log said that the task's app was too busy to read. */
+        var busyWarned = false
     }
 
     private val watched = HashMap<Int, TaskState>()
@@ -348,6 +359,18 @@ class AccessibilityExport(
             scheduler.post {
                 state.reading = false
                 if (watched[taskId] !== state) return@post
+                if (read?.busy != null) {
+                    // The app's UI thread is busy: it is left alone for a while, and read whole
+                    // once it has time again.
+                    if (!state.busyWarned) {
+                        state.busyWarned = true
+                        log.info("task $taskId's app is busy (${read.busy}); its accessibility tree is read again in $BUSY_RETRY_MILLIS ms")
+                    }
+                    state.changedWhileReading = false
+                    schedule(taskId, state, BUSY_RETRY_MILLIS)
+                    return@post
+                }
+                state.busyWarned = false
                 sendRead(taskId, state, read)
                 if (state.changedWhileReading) {
                     state.changedWhileReading = false
@@ -422,57 +445,87 @@ class AccessibilityExport(
     /** One node as [readNodes] read it: the node, what it said, and its children's places. */
     private class ReadNode(val handle: NodeHandle, val info: NodeInfo, val children: MutableList<Int> = mutableListOf())
 
-    /** The nodes of a task's windows, breadth first, and the places of the roots among them. */
-    private class ReadNodes(val nodes: List<ReadNode>, val roots: List<Int>, val truncated: Boolean)
+    /**
+     * The nodes of a task's windows, breadth first, and the places of the roots among them.
+     * [busy] says why the read stopped early, when the app was too busy to read.
+     */
+    private class ReadNodes(val nodes: List<ReadNode>, val roots: List<Int>, val truncated: Boolean, val busy: String? = null)
+
+    /** Thrown inside [readNodes] once the app shows it is busy; never leaves it. */
+    private class Busy(val why: String) : Exception(why)
+
+    /** Times each call a read makes into the app, and ends the read once the app is busy. */
+    private inner class Asker {
+        private val started = clock()
+
+        fun <T> ask(call: () -> T): T {
+            val before = clock()
+            val result = call()
+            val after = clock()
+            if (after - before >= SLOW_CALL_MILLIS) throw Busy("one of its nodes took ${after - before} ms to read")
+            if (after - started >= READ_BUDGET_MILLIS) throw Busy("its nodes took ${after - started} ms to read")
+            return result
+        }
+    }
 
     /**
      * Reads the task's nodes breadth first, so a cut tree keeps the nodes nearest the top. Runs
-     * on [reader]: it only asks the nodes, and touches none of the export's state.
+     * on [reader]: it only asks the nodes, and touches none of the export's state. Stops when
+     * the app is busy (see the class's description), and then reads nothing more.
      */
     private fun readNodes(roots: List<NodeHandle>, task: TaskBounds): ReadNodes {
+        val asker = Asker()
         val nodes = ArrayList<ReadNode>()
         val seen = HashSet<Any>()
         val rootPlaces = mutableListOf<Int>()
         var bytes = 0
         var truncated = false
-        for (root in roots) {
-            val info = root.info()
-            if (!info.visible) continue
-            if (!seen.add(root.key)) continue
-            if (seen.size > MAX_NODES) {
-                truncated = true
-                break
-            }
-            rootPlaces += nodes.size
-            nodes += ReadNode(root, info)
-        }
-        var next = 0
-        while (next < nodes.size) {
-            val place = next++
-            val node = nodes[place]
-            val children = try {
-                node.handle.children()
-            } catch (e: Exception) {
-                emptyList()
-            }
-            for (child in children) {
-                if (seen.size >= MAX_NODES || bytes >= MAX_TREE_BYTES) {
+        try {
+            for (root in roots) {
+                val info = asker.ask { root.info() }
+                if (!info.visible) continue
+                if (!seen.add(root.key)) continue
+                if (seen.size > MAX_NODES) {
                     truncated = true
                     break
                 }
-                val childInfo = try {
-                    child.info()
-                } catch (e: Exception) {
-                    continue
-                }
-                if (!childInfo.visible) continue
-                if (!seen.add(child.key)) continue
-                node.children += nodes.size
-                nodes += ReadNode(child, childInfo)
+                rootPlaces += nodes.size
+                nodes += ReadNode(root, info)
             }
-            // The size the node takes in a tree; its place stands in for its ID, which is about
-            // as long.
-            bytes += toNode(place + 1, node.children.map { it + 1 }, node.info, task).serializedSize
+            var next = 0
+            while (next < nodes.size) {
+                val place = next++
+                val node = nodes[place]
+                val children = try {
+                    asker.ask { node.handle.children() }
+                } catch (e: Busy) {
+                    throw e
+                } catch (e: Exception) {
+                    emptyList()
+                }
+                for (child in children) {
+                    if (seen.size >= MAX_NODES || bytes >= MAX_TREE_BYTES) {
+                        truncated = true
+                        break
+                    }
+                    val childInfo = try {
+                        asker.ask { child.info() }
+                    } catch (e: Busy) {
+                        throw e
+                    } catch (e: Exception) {
+                        continue
+                    }
+                    if (!childInfo.visible) continue
+                    if (!seen.add(child.key)) continue
+                    node.children += nodes.size
+                    nodes += ReadNode(child, childInfo)
+                }
+                // The size the node takes in a tree; its place stands in for its ID, which is about
+                // as long.
+                bytes += toNode(place + 1, node.children.map { it + 1 }, node.info, task).serializedSize
+            }
+        } catch (e: Busy) {
+            return ReadNodes(emptyList(), emptyList(), truncated = false, busy = e.why)
         }
         return ReadNodes(nodes, rootPlaces, truncated)
     }
@@ -535,6 +588,18 @@ class AccessibilityExport(
          * a screen reader hears of the new layout within a second of the resize.
          */
         const val RESIZE_QUIET_MILLIS = 500L
+
+        /**
+         * A call into the app that takes this long says its UI thread is busy: an app with time
+         * to spare answers one in a few milliseconds.
+         */
+        const val SLOW_CALL_MILLIS = 250L
+
+        /** The longest one read of a task's tree may keep asking its app. */
+        const val READ_BUDGET_MILLIS = 1_000L
+
+        /** How long a task whose app was busy is left alone before its tree is read again. */
+        const val BUSY_RETRY_MILLIS = 2_000L
 
         /** How long to wait for a service that is still starting, or a task not yet placed. */
         const val RETRY_MILLIS = 200L

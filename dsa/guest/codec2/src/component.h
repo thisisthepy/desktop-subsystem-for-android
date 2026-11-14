@@ -33,6 +33,7 @@
 #include <codec2/aidl/Configurable.h>
 
 #include "arrival_queue.h"
+#include "bounded_thread.h"
 #include "decoder_interface.h"
 #include "host_link.h"
 #include "output_buffer.h"
@@ -96,6 +97,14 @@ class Component : public c2aidl::BnComponent {
     // On the component's own thread: one message from the queue.
     void handle(Arrival& arrival);
     void picture(const Frame& frame, uint64_t ticket, std::chrono::steady_clock::time_point arrived);
+    // The host did not decode the packet of `frame` (it came before a key frame): its work
+    // finishes with no picture.
+    void noPicture(const Frame& frame, uint64_t ticket);
+    // The app's process is gone (a call to it failed with DEAD_OBJECT): nothing it held is
+    // called again, the stream stops, and the component waits for its last reference to go.
+    void peerGone(const char* what);
+    // The queue of the host's messages, read once: a stop and a start replace it.
+    std::shared_ptr<ArrivalQueue> arrivals() const;
     // Starts the thread that writes the host's pictures into the app's buffers, and stops it;
     // what still waits is dropped.
     void startWorker();
@@ -122,9 +131,11 @@ class Component : public c2aidl::BnComponent {
     std::shared_ptr<c2aidl::IComponentInterface> mInterface;
 
     std::mutex mLock;
+    // Signalled under mLock each time the host answers a flush.
     std::condition_variable mFlushed;
-    bool mFlushDone = false;
     std::unique_ptr<HostDecoder> mHost;
+    // Set once a call to the app failed because its process is gone.
+    std::atomic<bool> mPeerGone{false};
     // The works sent to the host whose pictures have not come yet, by frame index.
     std::map<uint64_t, c2aidl::Work> mPending;
     // The size last told to the framework.
@@ -141,9 +152,14 @@ class Component : public c2aidl::BnComponent {
     FailureThrottle mAllocateFailures;
     FailureThrottle mWriteFailures;
     // The host's messages waiting for the component's own thread (arrival_queue.h), shared
-    // with that thread, which may outlive the component by the message it is on.
+    // with that thread, which may outlive the component by the message it is on. Each start
+    // makes a new one, since the thread of a stop that did not wait for it may still hold the
+    // old one; read and replaced through std::atomic_load and std::atomic_store.
     std::shared_ptr<ArrivalQueue> mArrivals;
-    std::thread mWorker;
+    BoundedThread mWorker;
+    // Held while the component's own thread handles a message: a thread a stop let go and the
+    // thread of the next start never handle two at once.
+    std::mutex mHandling;
     PictureStats mStats;
     // The size of the last picture, for the log line. The component's own thread only.
     uint32_t mLastWidth = 0;

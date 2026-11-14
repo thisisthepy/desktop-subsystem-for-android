@@ -69,8 +69,17 @@ constexpr auto kAllocatePoll = std::chrono::milliseconds(50);
 // How long a buffer's release fence may take: past it the surface's consumer is still reading
 // the buffer, and a picture written into it would show while it is being written.
 constexpr auto kFenceWait = std::chrono::seconds(1);
-// How long a flush waits for the host's answer.
-constexpr auto kFlushWait = std::chrono::seconds(2);
+// How long a flush waits for the host's answer. It returns without one after this: the
+// output gate stays closed to the stream before the flush until the answer comes
+// (output_gate.h), and the packets still unsent were dropped, so the host answers as soon as
+// it has the flush. Every IComponent call returns well within a second, whatever the host
+// or the app's surface do: the app may be waiting for it on its UI thread.
+constexpr auto kFlushWait = std::chrono::milliseconds(250);
+// How long a stop waits for the thread that writes the pictures (bounded_thread.h).
+constexpr auto kStopWait = std::chrono::milliseconds(300);
+// How long queue() waits for room among the packets still unsent before it gives up: the
+// host has stopped reading.
+constexpr auto kQueueWait = std::chrono::milliseconds(500);
 // The host's pictures that may wait for the component's own thread: enough that the host
 // decodes on while one picture waits for a buffer of the app's surface, and few, since each
 // is a decoded frame in memory (345 KiB at 640x360; at 4096x2304, the byte bound lets two).
@@ -219,49 +228,56 @@ Component::Component(const DecoderInfo& info, const std::shared_ptr<C2ComponentI
       mParams(params),
       mListener(listener),
       mInterface(ndk::SharedRefBase::make<ComponentInterface>(intf)),
-      mArrivals(std::make_shared<ArrivalQueue>(kWaitingPictures, kWaitingBytes)) {}
+      mArrivals(std::make_shared<ArrivalQueue>(kWaitingPictures, kWaitingBytes)) {
+    // Closed until a start opens a queue of its own.
+    mArrivals->close();
+}
 
 Component::~Component() {
     {
         std::lock_guard<std::mutex> lock(mLock);
         mGate.stop();
     }
-    mArrivals->close();
+    arrivals()->close();
     closeHost();
     stopWorker();
 }
 
+std::shared_ptr<ArrivalQueue> Component::arrivals() const { return std::atomic_load(&mArrivals); }
+
 void Component::startWorker() {
-    if (mWorker.joinable()) {
+    if (mWorker.started()) {
         return;
     }
-    mArrivals->open();
+    // A new queue: a thread an earlier stop let go may still hold the old one.
+    std::shared_ptr<ArrivalQueue> queue = std::make_shared<ArrivalQueue>(kWaitingPictures, kWaitingBytes);
+    std::atomic_store(&mArrivals, queue);
     std::weak_ptr<Component> self = ref<Component>();
-    std::shared_ptr<ArrivalQueue> arrivals = mArrivals;
-    mWorker = std::thread([self, arrivals] {
+    mWorker.start([self, queue] {
         Arrival arrival;
-        while (arrivals->pop(&arrival)) {
+        while (queue->pop(&arrival)) {
             std::shared_ptr<Component> component = self.lock();
             if (!component) {
                 return;
             }
-            component->handle(arrival);
+            {
+                std::lock_guard<std::mutex> handling(component->mHandling);
+                component->handle(arrival);
+            }
+            // The component may go here, on this thread, when this was its last reference;
+            // its destructor then lets this thread go, which ends at the closed queue.
+            component.reset();
         }
     });
 }
 
 void Component::stopWorker() {
     // Wakes the thread whether it waits for a message or, through a closed gate, for a buffer.
-    mArrivals->close();
-    if (!mWorker.joinable()) {
-        return;
-    }
-    if (mWorker.get_id() == std::this_thread::get_id()) {
-        // The component's last reference went on its own thread, which ends once it finds
-        // the queue closed.
-        mWorker.detach();
-    } else {
-        mWorker.join();
+    arrivals()->close();
+    if (!mWorker.stop(kStopWait)) {
+        // Inside a call to the app (a buffer of its surface, a finished work) that has not
+        // come back. It finishes on its own; the closed gate drops what it then has.
+        CODEC_LOGW("%s: the picture being written is still waiting on the app; stopping without it", mInfo.name);
     }
 }
 
@@ -353,9 +369,22 @@ ndk::ScopedAStatus Component::queue(const WorkBundle& bundle) {
             return status(C2_BAD_STATE);
         }
         if (!data.empty() || eos) {
-            if (!host->send(encodePacket(frameIndex, input.ordinal.timestampUs, data.data(), data.size(), config,
-                                         eos))) {
-                CODEC_LOGE("%s: the host's decoder is gone", mInfo.name);
+            // A packet of a picture is worthless after a flush; codec configuration and the
+            // end of the stream are not.
+            const bool droppable = !config && !eos;
+            const PushResult sent = host->send(
+                encodePacket(frameIndex, input.ordinal.timestampUs, data.data(), data.size(), config, eos),
+                droppable, kQueueWait);
+            if (sent != PushResult::Queued) {
+                if (sent == PushResult::Full) {
+                    CODEC_LOGE("%s: the host's decoder has read nothing for too long; the stream stops", mInfo.name);
+                } else {
+                    CODEC_LOGE("%s: the host's decoder is gone", mInfo.name);
+                }
+                {
+                    std::lock_guard<std::mutex> lock(mLock);
+                    mPending.erase(frameIndex);
+                }
                 Status corrupted;
                 corrupted.status = C2_CORRUPTED;
                 mListener->onError(corrupted, C2_CORRUPTED);
@@ -380,6 +409,9 @@ ndk::ScopedAStatus Component::queue(const WorkBundle& bundle) {
 void Component::onHostMessage(HostMessage message) {
     const Clock::time_point now = Clock::now();
     const uint64_t ticket = mGate.ticket();
+    if (mPeerGone.load()) {
+        return;
+    }
     if (const auto* frame = std::get_if<Frame>(&message)) {
         if (!frame->endOfStream) {
             mStats.received(now);
@@ -391,34 +423,83 @@ void Component::onHostMessage(HostMessage message) {
             }
         }
     } else if (std::holds_alternative<Flushed>(message)) {
-        // Taken at once: the flush waits for it, and the pictures before it are dropped by
-        // the component's own thread as it comes to them, their tickets being stale.
+        // Taken at once. The gate opens once every flush has its answer; the pictures before
+        // it are dropped by the component's own thread as it comes to them, their tickets
+        // being stale.
         std::lock_guard<std::mutex> lock(mLock);
-        mFlushDone = true;
+        mGate.endFlush();
         mFlushed.notify_all();
         return;
-    } else if (!std::holds_alternative<DecodeError>(message)) {
+    } else if (std::holds_alternative<DecodeError>(message)) {
+        if (!mGate.open(ticket)) {
+            // An error of the stream before a flush: the work it would end went back with
+            // the flushed ones.
+            return;
+        }
+    } else {
         return;
     }
     // Waits while the queue is full, which holds the host back; a stop ends the wait.
-    mArrivals->push(Arrival{std::move(message), ticket, now});
+    arrivals()->push(Arrival{std::move(message), ticket, now});
 }
 
 void Component::handle(Arrival& arrival) {
     if (auto* frame = std::get_if<Frame>(&arrival.message)) {
         if (frame->endOfStream) {
             endOfStream(*frame);
+        } else if (carriesNoPicture(*frame)) {
+            noPicture(*frame, arrival.ticket);
         } else {
             picture(*frame, arrival.ticket, arrival.arrived);
         }
     } else if (const auto* error = std::get_if<DecodeError>(&arrival.message)) {
-        decodeError(error->error);
+        if (mGate.open(arrival.ticket)) {
+            decodeError(error->error);
+        }
     }
+}
+
+void Component::noPicture(const Frame& frame, uint64_t ticket) {
+    const Clock::time_point now = Clock::now();
+    std::optional<Work> work;
+    {
+        std::lock_guard<std::mutex> lock(mLock);
+        if (mGate.open(ticket)) {
+            auto pending = mPending.find(frame.frameIndex);
+            if (pending != mPending.end()) {
+                work = std::move(pending->second);
+                mPending.erase(pending);
+            }
+        }
+    }
+    if (work) {
+        finish(std::move(*work), nullptr, 0, 0, false);
+        mStats.dropped(now, Drop::BeforeKeyFrame);
+    } else {
+        mStats.dropped(now, Drop::Flushed);
+    }
+    logStats();
+}
+
+void Component::peerGone(const char* what) {
+    if (mPeerGone.exchange(true)) {
+        return;
+    }
+    CODEC_LOGW("%s: the app's process is gone (%s); the stream stops", mInfo.name, what);
+    {
+        std::lock_guard<std::mutex> lock(mLock);
+        mGate.stop();
+        mPending.clear();
+    }
+    // Ends the reader's wait for room; the reader and the writer end with the link, which
+    // the component's destructor or the app's last call closes. Nothing is waited for here:
+    // this runs on the component's own thread, inside a picture.
+    arrivals()->close();
 }
 
 void Component::logStats() {
     std::string line;
-    if (mStats.report(Clock::now(), mArrivals->size(), &line)) {
+    if (mStats.report(Clock::now(), arrivals()->size(), &line)) {
         CODEC_LOGI("%s %ux%u %s", mInfo.name, mLastWidth, mLastHeight, line.c_str());
     }
 }
@@ -427,7 +508,7 @@ void Component::discard(AHardwareBuffer* buffer, const std::shared_ptr<IGraphicB
     if (buffer == nullptr) {
         return;
     }
-    if (from) {
+    if (from && !mPeerGone.load()) {
         // The surface's allocator counts the buffer as the component's until it hears back, as
         // the platform's own pool tells it when a block it never queued goes away. Without
         // this, every buffer dropped here would be one fewer the surface ever hands out.
@@ -466,7 +547,11 @@ AHardwareBuffer* Component::allocate(uint32_t width, uint32_t height, uint64_t t
         desc.format = static_cast<int32_t>(kOutputFormat);
         desc.usage = static_cast<int64_t>(usage);
         const auto deadline = std::chrono::steady_clock::now() + kAllocateWait;
+        bool lastReady = false;
         while (true) {
+            if (mPeerGone.load()) {
+                return nullptr;
+            }
             IGraphicBufferAllocator::Allocation allocation;
             const ndk::ScopedAStatus result = igba->allocate(desc, &allocation);
             if (result.isOk()) {
@@ -495,6 +580,10 @@ AHardwareBuffer* Component::allocate(uint32_t width, uint32_t height, uint64_t t
                 *from = igba;
                 return buffer;
             }
+            if (peerIsGone(result.getExceptionCode(), result.getStatus())) {
+                peerGone("its surface gave no buffer");
+                return nullptr;
+            }
             const int32_t error = result.getServiceSpecificError();
             switch (classifyAllocateError(error)) {
                 case AllocateFailure::Wait:
@@ -514,10 +603,13 @@ AHardwareBuffer* Component::allocate(uint32_t width, uint32_t height, uint64_t t
             if (now >= deadline || !mGate.open(ticket)) {
                 break;
             }
-            const WaitResult waited = waitReadable(waitable, std::min(deadline, now + kAllocatePoll), mGate, ticket);
+            const WaitResult waited =
+                waitForBuffer(waitable, std::min(deadline, now + kAllocatePoll), mGate, ticket, lastReady);
             if (waited == WaitResult::Closed) {
                 break;
             }
+            // Readable, yet the next ask may still find no buffer: the one after waits first.
+            lastReady = waited == WaitResult::Ready;
             if (waited == WaitResult::Failed) {
                 // A waitable in error stays readable: ask again only once a poll has passed.
                 waitReadable(-1, std::min(deadline, now + kAllocatePoll), mGate, ticket);
@@ -743,8 +835,15 @@ void Component::finish(Work work, AHardwareBuffer* output, uint32_t width, uint3
     work.workletsProcessed = 1;
     work.result.status = Status::OK;
     bundle.works.push_back(std::move(work));
+    if (mPeerGone.load() || !mListener) {
+        return;
+    }
     const ndk::ScopedAStatus result = mListener->onWorkDone(bundle);
     if (!result.isOk()) {
+        if (peerIsGone(result.getExceptionCode(), result.getStatus())) {
+            peerGone("a finished work did not reach it");
+            return;
+        }
         CODEC_LOGW("%s: the framework did not take a finished work: %s", mInfo.name,
                    result.getDescription().c_str());
     }
@@ -759,19 +858,25 @@ ndk::ScopedAStatus Component::flush(WorkBundle* flushed) {
         // the answer behind them is not held up by the app's surface.
         mGate.beginFlush();
         host = mHost.get();
-        mFlushDone = false;
     }
-    if (host != nullptr && host->send(encodeFlush())) {
+    // The packets still unsent are of the stream before the flush: the flush goes in their
+    // place, so the host answers it without decoding them first.
+    if (host != nullptr && host->sendFlush(encodeFlush())) {
         std::unique_lock<std::mutex> lock(mLock);
-        if (!mFlushed.wait_for(lock, kFlushWait, [this] { return mFlushDone; })) {
-            CODEC_LOGW("%s: the host did not answer a flush", mInfo.name);
+        if (!mFlushed.wait_for(lock, kFlushWait, [this] { return !mGate.flushing(); })) {
+            // The gate stays closed to the stream before it until the answer comes.
+            CODEC_LOGI("%s: the host has not answered a flush yet; the flush returns without waiting longer",
+                       mInfo.name);
         }
+    } else {
+        // No answer will come.
+        std::lock_guard<std::mutex> lock(mLock);
+        mGate.endFlush();
     }
     std::map<uint64_t, Work> left;
     {
         std::lock_guard<std::mutex> lock(mLock);
         left.swap(mPending);
-        mGate.endFlush();
     }
     for (auto& [index, work] : left) {
         work.workletsProcessed = 0;
@@ -789,7 +894,8 @@ ndk::ScopedAStatus Component::drain(bool withEos) {
         std::lock_guard<std::mutex> lock(mLock);
         host = mHost.get();
     }
-    if (host == nullptr || !host->send(encodePacket(0, 0, nullptr, 0, false, true))) {
+    if (host == nullptr ||
+        host->send(encodePacket(0, 0, nullptr, 0, false, true), false, kQueueWait) != PushResult::Queued) {
         return status(C2_BAD_STATE);
     }
     return ndk::ScopedAStatus::ok();
@@ -808,8 +914,8 @@ ndk::ScopedAStatus Component::stop() {
         mGate.stop();
     }
     // Ends a reader's wait for room in the queue, then the reader, then the thread that
-    // writes the pictures.
-    mArrivals->close();
+    // writes the pictures, waiting for that one only a short while (bounded_thread.h).
+    arrivals()->close();
     closeHost();
     stopWorker();
     std::lock_guard<std::mutex> lock(mLock);
@@ -822,7 +928,7 @@ ndk::ScopedAStatus Component::reset() {
         std::lock_guard<std::mutex> lock(mLock);
         mGate.stop();
     }
-    mArrivals->close();
+    arrivals()->close();
     closeHost();
     stopWorker();
     std::lock_guard<std::mutex> lock(mLock);

@@ -5,20 +5,26 @@
 // they stay in step with the host's, and the copy of a decoded picture into a guest buffer's
 // planes. The protocol folder is the only argument.
 
+#include <sys/socket.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdio>
 #include <fstream>
+#include <memory>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include "arrival_queue.h"
+#include "bounded_thread.h"
 #include "config_rules.h"
+#include "host_link.h"
 #include "output_buffer.h"
 #include "output_gate.h"
 #include "picture_copy.h"
@@ -676,10 +682,233 @@ TEST(fr26_a_decoders_numbers_go_to_the_log_every_few_seconds) {
     EXPECT_TRUE(stats.report(start + seconds(5), 2, &line));
     EXPECT_EQ(line,
               std::string("over 5.0 s: 150 pictures from the host (30.0/s), 148 shown (29.6/s), 2 dropped (1 flushed, "
-                          "1 with no buffer, 0 not written); average ms: queued 2.00, buffer wait 12.00, write 1.00, "
-                          "hand-off 0.50; 2 waiting"));
+                          "1 with no buffer, 0 not written, 0 before a key frame); average ms: queued 2.00, buffer "
+                          "wait 12.00, write 1.00, hand-off 0.50; 2 waiting"));
     // A new count starts from the report.
     EXPECT_TRUE(!stats.report(start + seconds(6), 0, &line));
+}
+
+namespace {
+
+using std::chrono::milliseconds;
+using std::chrono::steady_clock;
+
+// Waits until `done` holds or `wait` passes; true when it held.
+template <typename Done>
+bool waitUntil(Done done, milliseconds wait = milliseconds(5000)) {
+    const auto deadline = steady_clock::now() + wait;
+    while (!done()) {
+        if (steady_clock::now() > deadline) {
+            return false;
+        }
+        std::this_thread::sleep_for(milliseconds(5));
+    }
+    return true;
+}
+
+// Writes one host frame with its length in front; false (and no SIGPIPE) once the other end
+// has closed.
+bool writeHostFrame(int fd, const std::vector<uint8_t>& frame) {
+    const std::vector<uint8_t> bytes = withLength(frame);
+    return send(fd, bytes.data(), bytes.size(), MSG_NOSIGNAL) == static_cast<ssize_t>(bytes.size());
+}
+
+}  // namespace
+
+TEST(fr26_a_frame_with_no_picture_says_its_packet_was_not_decoded) {
+    // The host's answer to a packet before a key frame: frame index 3 at 100000 us, nothing else.
+    const std::vector<uint8_t> none = {0xe2, 0x07, 0x06, 0x08, 0x03, 0x10, 0xa0, 0x8d, 0x06};
+    const HostMessage message = decodeHostFrame(none.data(), none.size());
+    const auto* frame = std::get_if<Frame>(&message);
+    EXPECT_TRUE(frame != nullptr);
+    if (frame) {
+        EXPECT_EQ(frame->frameIndex, 3u);
+        EXPECT_TRUE(carriesNoPicture(*frame));
+    }
+    // A picture, and the end of the stream, are not that.
+    const std::vector<uint8_t> picture = vector("video_frame");
+    const HostMessage decoded = decodeHostFrame(picture.data(), picture.size());
+    EXPECT_TRUE(!carriesNoPicture(std::get<Frame>(decoded)));
+    Frame end;
+    end.endOfStream = true;
+    EXPECT_TRUE(!carriesNoPicture(end));
+}
+
+TEST(fr26_a_flush_takes_the_place_of_the_packets_still_unsent) {
+    SendQueue queue(1 << 20);
+    EXPECT_TRUE(queue.pushFor({1}, false, milliseconds(10)) == PushResult::Queued);  // configuration
+    for (uint8_t i = 2; i <= 4; ++i) {
+        EXPECT_TRUE(queue.pushFor({i}, true, milliseconds(10)) == PushResult::Queued);  // pictures
+    }
+    // The host would decode the three before it read the flush, and the flush waited for them.
+    EXPECT_EQ(queue.pushReplacingDroppable({9}), 3);
+    std::vector<uint8_t> frame;
+    EXPECT_TRUE(queue.pop(&frame));
+    EXPECT_EQ(frame[0], 1);
+    EXPECT_TRUE(queue.pop(&frame));
+    EXPECT_EQ(frame[0], 9);
+    EXPECT_EQ(queue.queuedBytes(), 0u);
+    queue.close();
+    EXPECT_EQ(queue.pushReplacingDroppable({9}), -1);
+}
+
+TEST(fr26_queue_returns_when_the_host_has_stopped_reading) {
+    // Full, and nothing takes from it: before, queue() waited on the binder thread for as long
+    // as the host did not read, and the app with it.
+    SendQueue queue(100);
+    EXPECT_TRUE(queue.push(std::vector<uint8_t>(100, 0)));
+    const auto start = steady_clock::now();
+    EXPECT_TRUE(queue.pushFor(std::vector<uint8_t>(10, 1), true, milliseconds(150)) == PushResult::Full);
+    const auto took = steady_clock::now() - start;
+    EXPECT_TRUE(took >= milliseconds(140));
+    EXPECT_TRUE(took < milliseconds(1000));
+    queue.close();
+    EXPECT_TRUE(queue.pushFor({1}, true, milliseconds(150)) == PushResult::Closed);
+}
+
+TEST(fr26_a_flush_that_returned_before_its_answer_still_drops_the_stream_before_it) {
+    OutputGate gate;
+    gate.beginFlush();
+    gate.beginFlush();
+    EXPECT_TRUE(gate.flushing());
+    // One answer: the other flush is still on its way.
+    gate.endFlush();
+    EXPECT_TRUE(!gate.open(gate.ticket()));
+    gate.endFlush();
+    EXPECT_TRUE(gate.open(gate.ticket()));
+    // An answer too many changes nothing.
+    gate.endFlush();
+    EXPECT_TRUE(gate.open(gate.ticket()));
+    // A stop forgets the flushes no answer will come for, so the next start's pictures go out.
+    gate.beginFlush();
+    gate.stop();
+    EXPECT_TRUE(!gate.flushing());
+    EXPECT_TRUE(gate.open(gate.ticket()));
+}
+
+TEST(fr26_a_stop_does_not_wait_for_a_picture_stuck_in_a_call_to_the_app) {
+    // The thread that writes the pictures, inside a call to the app that takes 2 s to come back.
+    std::atomic<bool> finished{false};
+    BoundedThread worker;
+    worker.start([&finished] {
+        std::this_thread::sleep_for(milliseconds(1500));
+        finished = true;
+    });
+    EXPECT_TRUE(worker.started());
+    const auto start = steady_clock::now();
+    EXPECT_TRUE(!worker.stop(milliseconds(200)));
+    EXPECT_TRUE(steady_clock::now() - start < milliseconds(700));
+    EXPECT_TRUE(!worker.started());
+    // It finishes on its own; a thread that ends in time is waited for.
+    EXPECT_TRUE(waitUntil([&] { return finished.load(); }));
+    BoundedThread quick;
+    quick.start([] {});
+    EXPECT_TRUE(quick.stop(milliseconds(1000)));
+}
+
+TEST(fr26_asking_a_surface_whose_waitable_stays_readable_is_paced) {
+    // A waitable that is readable while the allocator still has no buffer (its surface being
+    // replaced): each ask after a readable one waits first.
+    int fds[2];
+    EXPECT_EQ(pipe(fds), 0);
+    const char signal = 1;
+    EXPECT_EQ(write(fds[1], &signal, 1), 1);
+    OutputGate gate;
+    const auto start = steady_clock::now();
+    bool lastReady = false;
+    for (int i = 0; i < 20; ++i) {
+        const WaitResult waited =
+            waitForBuffer(fds[0], steady_clock::now() + milliseconds(500), gate, gate.ticket(), lastReady);
+        EXPECT_TRUE(waited == WaitResult::Ready);
+        lastReady = waited == WaitResult::Ready;
+    }
+    // 19 pauses of 10 ms; without them the 20 asks took no time at all.
+    EXPECT_TRUE(steady_clock::now() - start >= milliseconds(150));
+    // A flush ends a pause at once.
+    const uint64_t ticket = gate.ticket();
+    gate.beginFlush();
+    EXPECT_TRUE(waitForBuffer(fds[0], steady_clock::now() + milliseconds(500), gate, ticket, true) ==
+                WaitResult::Closed);
+    close(fds[0]);
+    close(fds[1]);
+}
+
+TEST(fr26_a_client_that_dies_mid_stream_ends_the_link_from_its_reader_without_a_crash) {
+    // The app died: the component's last reference was the one its handler held, and the
+    // component, with its link, went away on the link's own reading thread, inside the
+    // handler. The reader then read freed memory and the HAL aborted (bad_function_call).
+    int fds[2];
+    EXPECT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
+    std::mutex lock;
+    std::unique_ptr<HostDecoder> link;
+    std::atomic<int> handled{0};
+    std::atomic<bool> gone{false};
+    {
+        std::lock_guard<std::mutex> guard(lock);
+        link = HostDecoder::adopt(fds[0], [&](HostMessage) {
+            ++handled;
+            std::unique_ptr<HostDecoder> last;
+            {
+                std::lock_guard<std::mutex> guard(lock);
+                last = std::move(link);
+            }
+            // The component's destructor, on this thread: it closes and frees the link.
+            last.reset();
+            gone = true;
+        });
+    }
+    EXPECT_TRUE(writeHostFrame(fds[1], vector("video_frame")));
+    EXPECT_TRUE(waitUntil([&] { return gone.load(); }));
+    // Nothing more reaches the handler: not the next picture, not the socket's end.
+    writeHostFrame(fds[1], vector("video_frame"));
+    std::this_thread::sleep_for(milliseconds(100));
+    close(fds[1]);
+    std::this_thread::sleep_for(milliseconds(100));
+    EXPECT_EQ(handled.load(), 1);
+}
+
+TEST(fr26_release_returns_while_pictures_are_queued_and_the_host_is_not_read) {
+    // The reader waits for room behind pictures nobody takes (the app's surface gives no buffer),
+    // and the writer waits on a host that reads no packet.
+    int fds[2];
+    EXPECT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, fds), 0);
+    auto arrivals = std::make_shared<ArrivalQueue>(1, 1 << 20);
+    std::atomic<int> handled{0};
+    std::unique_ptr<HostDecoder> link = HostDecoder::adopt(fds[0], [arrivals, &handled](HostMessage message) {
+        ++handled;
+        arrivals->push(Arrival{std::move(message), 0, steady_clock::now()});
+    });
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_TRUE(writeHostFrame(fds[1], vector("video_frame")));
+    }
+    EXPECT_TRUE(waitUntil([&] { return handled.load() >= 2; }));
+    // Packets until the socket and the queue are full: queue() comes back within its wait.
+    const std::vector<uint8_t> packet(256 * 1024, 7);
+    PushResult sent = PushResult::Queued;
+    const auto filling = steady_clock::now();
+    for (int i = 0; i < 400 && sent == PushResult::Queued; ++i) {
+        sent = link->send(packet, true, milliseconds(100));
+    }
+    EXPECT_TRUE(sent == PushResult::Full);
+    EXPECT_TRUE(steady_clock::now() - filling < milliseconds(5000));
+    // A release, in the component's order: the queue the reader waits on, then the link.
+    const auto start = steady_clock::now();
+    arrivals->close();
+    link->close();
+    link.reset();
+    EXPECT_TRUE(steady_clock::now() - start < milliseconds(1000));
+    const int after = handled.load();
+    writeHostFrame(fds[1], vector("video_frame"));
+    std::this_thread::sleep_for(milliseconds(100));
+    EXPECT_EQ(handled.load(), after);
+    close(fds[1]);
+}
+
+TEST(fr26_a_call_to_an_app_whose_process_is_gone_says_so) {
+    EXPECT_TRUE(peerIsGone(kExTransactionFailed, kStatusDeadObject));
+    EXPECT_TRUE(!peerIsGone(kExTransactionFailed, 0));
+    // A service specific error (a surface with no buffer) is not that.
+    EXPECT_TRUE(!peerIsGone(-8, kC2Blocking));
 }
 
 int main(int argc, char** argv) {

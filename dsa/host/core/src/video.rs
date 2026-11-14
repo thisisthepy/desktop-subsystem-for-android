@@ -13,6 +13,12 @@
 //! message is checked and nothing the peer sends can take the host down: a bad stream is an
 //! error on that connection only.
 //!
+//! After the decoder opens, after every flush and after a packet it failed on, it takes
+//! packets only from a key frame on ([`crate::video_keyframe`]): a packet before one refers to
+//! pictures the decoder does not hold, and its picture would be green. Such a packet gets a
+//! [`VideoFrame`] with no picture (no size, no planes, not the end of the stream), so its work
+//! in the guest ends at once.
+//!
 //! Nothing here names a host operating system API. The platform supplies the decoder through
 //! [`VideoDecoders`].
 
@@ -31,6 +37,8 @@ use dsa_protocol::control::{
 use dsa_protocol::handshake::{host_accept_open, local_hello};
 use dsa_protocol::{decode, encode};
 use dsa_transport::{Connection, FrameSender, Listener, TransportError};
+
+use crate::video_keyframe::{Admit, KeyframeGate, MAX_SKIPPED};
 
 /// The vsock port the guest's codec HAL connects to.
 pub const VIDEO_PORT: u32 = 5569;
@@ -284,6 +292,7 @@ pub struct StreamStats {
     sent: u32,
     flushed: u32,
     malformed: u32,
+    before_keyframe: u32,
     decode: Duration,
     readback: Duration,
     readbacks: u32,
@@ -343,6 +352,15 @@ impl StreamStats {
         }
     }
 
+    /// A packet was not decoded: it refers to pictures the decoder does not have, since it
+    /// came after a flush, the stream's start or a failed packet and before a key frame (see
+    /// [`crate::video_keyframe`]). Its picture would have been green.
+    pub fn before_keyframe(&mut self, now: Instant) {
+        self.begin(now);
+        self.packets += 1;
+        self.before_keyframe += 1;
+    }
+
     /// The log line for the numbers so far, once [`STATS_INTERVAL`] has passed since they
     /// began, and a new count from then. `None` before then, and while nothing has happened.
     pub fn report(&mut self, now: Instant, codec: Codec) -> Option<String> {
@@ -370,18 +388,19 @@ impl StreamStats {
             .unwrap_or_default();
         let line = format!(
             "video: {}{size} over {seconds:.1} s: {} packets, {} pictures decoded ({:.1}/s), {} \
-             handed on ({:.1}/s), {} dropped ({} flushed, {} malformed); average ms: decode \
-             {:.2} (copy out of the GPU {:.2}), waiting for the guest to take a picture {:.2}, \
-             send {:.2}{surface}",
+             handed on ({:.1}/s), {} dropped ({} flushed, {} malformed, {} before a key \
+             frame); average ms: decode {:.2} (copy out of the GPU {:.2}), waiting for the guest \
+             to take a picture {:.2}, send {:.2}{surface}",
             codec.name(),
             self.packets,
             self.decoded,
             f64::from(self.decoded) / seconds,
             self.handed_on,
             f64::from(self.handed_on) / seconds,
-            self.flushed + self.malformed,
+            self.flushed + self.malformed + self.before_keyframe,
             self.flushed,
             self.malformed,
+            self.before_keyframe,
             average(self.decode, self.packets),
             average(self.readback, self.readbacks),
             average(self.waited, self.handed_on),
@@ -613,6 +632,7 @@ fn run_stream(
     log: &dyn Fn(&str),
 ) -> VideoEnd {
     let mut pending = Pending::default();
+    let mut gate = KeyframeGate::new(codec);
     loop {
         let frame = match connection.recv(None) {
             Ok(frame) => frame,
@@ -631,7 +651,32 @@ fn run_stream(
                     ));
                 }
                 let mut result = Ok(());
-                if !packet.data.is_empty() {
+                let admit = if packet.data.is_empty() {
+                    Admit::Decode
+                } else if packet.codec_config {
+                    gate.configuration(&packet.data);
+                    Admit::Decode
+                } else {
+                    gate.admit(&packet.data)
+                };
+                if admit == Admit::GaveUp {
+                    log(&format!(
+                        "video: {} stream: no key frame came in {MAX_SKIPPED} packets; decoding \
+                         on without one",
+                        codec.name()
+                    ));
+                }
+                if admit == Admit::Skip {
+                    // The packet's work in the guest ends with no picture, rather than waiting
+                    // for one that never comes.
+                    outgoing.stats().before_keyframe(Instant::now());
+                    let none = VideoFrame {
+                        frame_index: packet.frame_index,
+                        timestamp_us: packet.timestamp_us,
+                        ..VideoFrame::default()
+                    };
+                    result = outgoing.send(connection, Body::VideoFrame(none)).map(drop);
+                } else if !packet.data.is_empty() {
                     let id = pending.add(packet.frame_index, packet.timestamp_us);
                     let started = Instant::now();
                     let decoded = decoder.decode(Packet {
@@ -649,12 +694,19 @@ fn run_stream(
                     }
                     result = match decoded {
                         Ok(pictures) => send_pictures(connection, outgoing, &mut pending, pictures),
-                        Err(why) => outgoing
-                            .send(connection, Body::VideoError(VideoError { error: why }))
-                            .map(drop),
+                        Err(why) => {
+                            // What the decoder failed on may be a picture the next ones refer
+                            // to: they would decode into garbage.
+                            gate.rearm();
+                            outgoing
+                                .send(connection, Body::VideoError(VideoError { error: why }))
+                                .map(drop)
+                        }
                     };
                 }
                 if result.is_ok() && packet.end_of_stream {
+                    // A drained decoder starts again from a key frame.
+                    gate.rearm();
                     result = match decoder.drain() {
                         Ok(pictures) => send_pictures(connection, outgoing, &mut pending, pictures),
                         Err(why) => outgoing
@@ -678,6 +730,7 @@ fn run_stream(
             Some(Body::VideoFlush(_)) => {
                 decoder.flush();
                 pending.clear();
+                gate.rearm();
                 outgoing
                     .send(connection, Body::VideoFlushed(VideoFlushed {}))
                     .map(drop)
