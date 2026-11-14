@@ -1,0 +1,137 @@
+Subject: Make a YUV ColorBuffer linear so no driver keeps its pictures compressed
+
+What a guest CPU writes into a YUV buffer (a video's pictures, a camera's frames) reaches its
+ColorBuffer through a copy into the ColorBuffer's image, and SurfaceFlinger samples it through
+an image of its own on the same memory, made on the guest's VkDevice. Both images were
+optimal. On the owner's PC (Intel Arc, 0.2.4-dev.15, with patches 0030 and 0031) a YouTube
+video still showed blocks of light purple and yellow-green in the flat areas near the top left
+of its picture, intermittently, while the detailed rest of the picture was right; the host's
+hardware decoder and the guest's software decoder gave the same blocks, and the decoder's
+planes were checked whole. Wrong chroma in blocks, only where the picture is flat, is what a
+compressed surface read as uncompressed looks like: flat blocks compress, detailed ones do not.
+0031 released the copied image to the external queue family, but the guest takes its image
+from there once, when SurfaceFlinger first imports the buffer (from VK_IMAGE_LAYOUT_UNDEFINED,
+as ANGLE does for an AHardwareBuffer), not after each copy, so the pair is never complete for
+the pictures that follow.
+
+Now a device-local ColorBuffer of VK_FORMAT_G8_B8R8_2PLANE_420_UNORM or
+VK_FORMAT_G8_B8_R8_3PLANE_420_UNORM is linear whenever the device samples it through the 4:2:0
+conversion (midpoint chroma), copies it both ways and exports it in linear tiling, and the image
+a guest makes to import such a buffer is made linear too, since an image that reads the
+ColorBuffer's memory must be made as the ColorBuffer's image was. A linear image is never
+compressed, so every reader sees the planes as they were written. A device that cannot keeps
+optimal ColorBuffers, and the renderer says so once per format; on one that can it says that
+YUV ColorBuffers are linear. RGB ColorBuffers, which the GPU draws, stay optimal.
+
+diff --git a/host/vulkan/VkCommonOperations.cpp b/host/vulkan/VkCommonOperations.cpp
+--- a/host/vulkan/VkCommonOperations.cpp
++++ b/host/vulkan/VkCommonOperations.cpp
+@@ -22,6 +22,7 @@
+ 
+ #include <chrono>
+ #include <iomanip>
++#include <mutex>
+ #include <ostream>
+ #include <sstream>
+ #include <thread>
+@@ -3278,7 +3279,7 @@
+ 
+     VkImageTiling tiling = (infoPtr->memoryProperty & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
+                                ? VK_IMAGE_TILING_LINEAR
+-                               : VK_IMAGE_TILING_OPTIMAL;
++                               : colorBufferTiling(vkFormat);
+     std::unique_ptr<VkImageCreateInfo> imageCi = generateColorBufferVkImageCreateInfoLocked(
+         vkFormat, infoPtr->width, infoPtr->height, tiling);
+     // pNext will be filled later.
+@@ -3539,6 +3540,59 @@
+         written = written || supportInfo.usageFlags == VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+     }
+     return sampled && written;
++}
++
++VkImageTiling VkEmulation::colorBufferTiling(VkFormat format) const {
++    // A YUV ColorBuffer holds what a guest CPU wrote (a video's pictures, a camera's
++    // frames): the host copies the planes in, and the guest samples them through an image of
++    // its own on the same memory, made on another VkDevice. A driver that compresses an
++    // optimal image (Intel Arc) left flat areas of the copied picture compressed, and the
++    // guest's image read the compressed blocks as they lie in memory: a YouTube video showed
++    // blocks of light purple and yellow-green in its flat areas, intermittently, with the
++    // host's hardware decoder and the guest's software decoder alike, while the detailed
++    // rest of the picture was right. Releasing the image to the external queue family did
++    // not stop it, since the guest takes the image from there once and never again. A linear
++    // image is never compressed, so every reader sees the planes as written.
++    if (format != VK_FORMAT_G8_B8R8_2PLANE_420_UNORM &&
++        format != VK_FORMAT_G8_B8_R8_3PLANE_420_UNORM) {
++        return VK_IMAGE_TILING_OPTIMAL;
++    }
++    // Sampled through the 4:2:0 conversion the ColorBuffer's view and the guest use, written
++    // and read back by copies, as a 2D linear image with the external memory every
++    // ColorBuffer is made with where the device exports memory.
++    constexpr VkFormatFeatureFlags kNeeded =
++        VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_MIDPOINT_CHROMA_SAMPLES_BIT |
++        VK_FORMAT_FEATURE_TRANSFER_SRC_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
++    bool sampled = false;
++    bool written = false;
++    bool read = false;
++    for (const auto& supportInfo : mImageSupportInfo) {
++        if (supportInfo.format != format || !supportInfo.supported ||
++            supportInfo.type != VK_IMAGE_TYPE_2D ||
++            supportInfo.tiling != VK_IMAGE_TILING_LINEAR ||
++            (supportInfo.formatProps2.formatProperties.linearTilingFeatures & kNeeded) !=
++                kNeeded ||
++            (mDeviceInfo.supportsExternalMemoryExport && !supportInfo.supportsExternalMemory)) {
++            continue;
++        }
++        sampled = sampled || supportInfo.usageFlags == VK_IMAGE_USAGE_SAMPLED_BIT;
++        written = written || supportInfo.usageFlags == VK_IMAGE_USAGE_TRANSFER_DST_BIT;
++        read = read || supportInfo.usageFlags == VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
++    }
++    const bool linear = sampled && written && read;
++    static std::once_flag sLogged[2];
++    std::call_once(sLogged[format == VK_FORMAT_G8_B8R8_2PLANE_420_UNORM ? 0 : 1], [&] {
++        if (linear) {
++            INFO("YUV ColorBuffers of %s are linear: no driver compresses what is copied in.",
++                 string_VkFormat(format));
++        } else {
++            WARN("YUV ColorBuffers of %s are optimal: this device cannot sample, copy and "
++                 "export them linear, so a driver that compresses them may show blocks in a "
++                 "video's flat areas.",
++                 string_VkFormat(format));
++        }
++    });
++    return linear ? VK_IMAGE_TILING_LINEAR : VK_IMAGE_TILING_OPTIMAL;
+ }
+ 
+ bool VkEmulation::isFormatSupported(GLenum format) {
+diff --git a/host/vulkan/VkCommonOperations.h b/host/vulkan/VkCommonOperations.h
+--- a/host/vulkan/VkCommonOperations.h
++++ b/host/vulkan/VkCommonOperations.h
+@@ -255,6 +255,11 @@
+     // host copies a guest's planes into. DSA's guest asks for one only when this holds for
+     // both layouts, since a ColorBuffer that cannot be made would end the renderer.
+     bool supportsYuvColorBuffer(FrameworkFormat frameworkFormat) const;
++    // The tiling of a device-local ColorBuffer of this format, and of every image a guest
++    // binds to its memory, which must be made the same way. Linear for an 8-bit 4:2:0 YUV
++    // format the device samples, copies and exports in linear tiling, so no driver keeps its
++    // pictures compressed; optimal otherwise.
++    VkImageTiling colorBufferTiling(VkFormat format) const;
+ 
+     bool createVkColorBuffer(uint32_t width, uint32_t height, GLenum format,
+                              FrameworkFormat frameworkFormat, uint32_t colorBufferHandle,
+diff --git a/host/vulkan/VkDecoderGlobalState.cpp b/host/vulkan/VkDecoderGlobalState.cpp
+--- a/host/vulkan/VkDecoderGlobalState.cpp
++++ b/host/vulkan/VkDecoderGlobalState.cpp
+@@ -8039,6 +8039,13 @@
+                 // For AHardwareBufferImage binding, we can't know which ColorBuffer this
+                 // to-be-created VkImage will bind to, so we try our best to infer the creation
+                 // parameters.
++                if (imageCreateInfo.tiling == VK_IMAGE_TILING_OPTIMAL) {
++                    // A device-local ColorBuffer of a YUV format may be linear, so that no
++                    // driver keeps what the host copies into it compressed; the image that
++                    // reads it must be made the same way, or it reads the planes in another
++                    // layout. A guest asks for optimal, which it cannot tell apart.
++                    imageCreateInfo.tiling = m_vkEmulation->colorBufferTiling(resolvedFormat);
++                }
+                 colorBufferVkImageCi = m_vkEmulation->generateColorBufferVkImageCreateInfo(
+                     resolvedFormat, imageCreateInfo.extent.width, imageCreateInfo.extent.height,
+                     imageCreateInfo.tiling);
