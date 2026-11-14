@@ -6997,7 +6997,8 @@ class FrameworkImageTests(unittest.TestCase):
             root = Path(tmp)
             payloads, description = make_image.checked_framework(self._framework(root), "16373615", 17, "x86_64")
             self.assertEqual(sorted(payloads), sorted(["SYSTEM/bin/surfaceflinger", "SYSTEM/lib64/libhwui.so",
-                                                       "SYSTEM/lib64/libEGL.so"]))
+                                                       "SYSTEM/lib64/libEGL.so",
+                                                       "SYSTEM/lib64/libandroid_runtime.so"]))
             modified = root / "modified.zip"
             make_image.modify(self._source(root), modified, framework=payloads)
             with zipfile.ZipFile(modified) as archive:
@@ -7024,7 +7025,8 @@ class FrameworkImageTests(unittest.TestCase):
             root = Path(tmp)
             payloads, _ = make_image.checked_framework(self._framework(root), "16373615", 17, "x86_64")
             source = self._source(root, names=["SYSTEM/bin/surfaceflinger"])
-            with self.assertRaisesRegex(ValueError, "libEGL.so, SYSTEM/lib64/libhwui.so, which the patched"):
+            with self.assertRaisesRegex(ValueError, "libEGL.so, SYSTEM/lib64/libandroid_runtime.so, "
+                                                    "SYSTEM/lib64/libhwui.so, which the patched"):
                 make_image.modify(source, root / "modified.zip", framework=payloads)
 
     def test_nfr5_a_framework_built_for_another_build_or_architecture_is_refused(self):
@@ -7731,6 +7733,87 @@ class HostDnsTests(unittest.TestCase):
         for text in expected:
             self.assertTrue(any(text in p for p in problems), (text, problems))
         self.assertEqual(len(problems), len(expected), problems)
+
+
+class HostMemoryImageTests(unittest.TestCase):
+    """Google Play sees the computer's memory as the device's: the daemon names the Play Store
+    and Play services, init hands them to the kernel, and the framework answers their
+    getMemoryInfo with the computer's memory. No app may name itself."""
+
+    HERE = Path(__file__).parent
+    MEMORY_POLICY = (Path(__file__).parent / "sepolicy" / "memory.cil").read_text()
+    CHANNELD_POLICY = (Path(__file__).parent / "sepolicy" / "channeld.cil").read_text()
+
+    def _modify(self, root):
+        source = root / "target-files.zip"
+        with zipfile.ZipFile(source, "w") as archive:
+            archive.writestr("SYSTEM/etc/selinux/plat_sepolicy.cil", "(type init)\n")
+            archive.writestr("SYSTEM/etc/selinux/plat_file_contexts", "/system/bin/sh u:object_r:shell_exec:s0\n")
+            archive.writestr("VENDOR/etc/selinux/vendor_file_contexts", "/vendor/bin/sh u:object_r:vendor_shell_exec:s0\n")
+            archive.writestr(make_image.VENDOR_PROPERTY_CONTEXTS, "")
+            archive.writestr("META/file_contexts.bin", b"\x8a\xff\x7c\xf9 compiled")
+            archive.writestr("META/filesystem_config.txt", "system/bin/sh 0 0 755 capabilities=0x0\n")
+            archive.writestr("META/vendor_filesystem_config.txt", "vendor/bin/sh 0 2000 755 capabilities=0x0\n")
+        daemon = root / "dsa-channeld"
+        daemon.write_bytes(b"daemon")
+        client = root / "su"
+        client.write_bytes(b"client")
+        modified = root / "modified.zip"
+        make_image.modify(source, modified, channeld=daemon, su_client=client)
+        return zipfile.ZipFile(modified)
+
+    def test_fr32_the_image_shows_google_play_the_computers_memory(self):
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
+            files = {name: archive.read(name) for name in archive.namelist()}
+        self.assertEqual(make_image.host_memory_problems({}, list(files), files.__getitem__), [])
+        rc = files[make_image.MEMORY_RC].decode().replace("\r\n", "\n")
+        self.assertIn("on property:vendor.dsa.host_memory.uids=*\n"
+                      "    write /sys/module/dsa_host_memory/parameters/uids ${vendor.dsa.host_memory.uids}", rc)
+
+    def test_fr32_no_app_may_name_itself_or_read_the_computers_memory(self):
+        writers = re.findall(r"\(allow\s+(\S+)\s+dsa_sysfs_host_memory\s+\(\s*file\s+\(([^)]*)\)",
+                             self.MEMORY_POLICY)
+        self.assertEqual({who for who, perms in writers if "write" in perms.split()}, {"vendor_init"})
+        self.assertEqual({who for who, perms in writers if "read" in perms.split()}, {"system_server"})
+        setters = re.findall(r"\(allow\s+(\S+)\s+dsa_host_memory_prop\s+\(\s*property_service\s+\(([^)]*)\)",
+                             self.MEMORY_POLICY + self.CHANNELD_POLICY)
+        self.assertEqual({who for who, perms in setters if "set" in perms.split()}, {"dsa_channeld"})
+        for policy in (self.MEMORY_POLICY, self.CHANNELD_POLICY):
+            self.assertNotRegex(policy, r"\(allow\s+(appdomain|untrusted_app\S*|priv_app|platform_app|system_app)"
+                                        r"\s+dsa_(sysfs_host_memory|host_memory_prop)\b")
+
+    def test_fr32_check_image_names_what_the_computers_memory_lacks(self):
+        with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp)) as archive:
+            files = {name: archive.read(name) for name in archive.namelist()}
+        files[make_image.MEMORY_RC] = b"on boot\n    write /proc/sys/vm/swappiness 100\n"
+        files[make_image.VENDOR_PROPERTY_CONTEXTS] = b""
+        files["SYSTEM/etc/selinux/plat_sepolicy.cil"] += (
+            b"\n(allow untrusted_app dsa_sysfs_host_memory (file (write open)))\n"
+            b"(allow untrusted_app dsa_host_memory_prop (property_service (set)))\n")
+        framework = {"framework": {"files": {"SYSTEM/lib64/libhwui.so": "0" * 64}}}
+        problems = make_image.host_memory_problems(framework, list(files), files.__getitem__)
+        expected = ["does not hand vendor.dsa.host_memory.uids to the kernel",
+                    "does not give vendor.dsa.host_memory.uids its type",
+                    "untrusted_app may write the kernel's list",
+                    "untrusted_app may name the apps",
+                    "has no SYSTEM/lib64/libandroid_runtime.so"]
+        for text in expected:
+            self.assertTrue(any(text in p for p in problems), (text, problems))
+        self.assertEqual(len(problems), len(expected), problems)
+
+    def test_fr32_the_framework_answers_google_plays_memory_info_with_the_computers(self):
+        # ActivityManager.getMemoryInfo is computed in system_server from
+        # Process.getTotalMemory; the patch answers a listed binder caller with total_kb.
+        framework = self.HERE.parent / "framework" / "patches" / "frameworks" / "base"
+        for android in ("android16", "android17"):
+            patch = (framework / android / "0002-show-google-play-the-computers-memory.patch").read_text()
+            self.assertIn("+++ b/core/jni/android_util_Process.cpp", patch)
+            self.assertIn("IPCThreadState::self()->getCallingUid()", patch)
+            self.assertIn("/sys/module/dsa_host_memory/parameters/", patch)
+            self.assertIn('std::string(kDir) + "uids"', patch)
+            self.assertIn('std::string(kDir) + "total_kb"', patch)
+            self.assertIn("caller % kPerUserRange", patch)
+        self.assertIn(make_image.HOST_MEMORY_FRAMEWORK_FILE, make_image.FRAMEWORK_FILES)
 
 
 class HostCertificatesImageTests(KeyMintKeyImageTests):
