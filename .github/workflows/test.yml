@@ -1,4 +1,5 @@
-# The fast quality gate. Runs on every push to develop, and on the release pull request into main.
+# The fast quality gate. Runs by hand (on its own or as a job of Checks), and on the release
+# pull request into main.
 #
 # The repository checks (the planning documents are present on develop, no em dashes,
 # README files do not link documents that main does not have, the release sync script
@@ -18,14 +19,18 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+  # Checks (checks.yml) runs it as one of its jobs, with every other test, in one run.
+  workflow_call:
 
 concurrency:
-  # On develop a run in progress finishes and only the newest waiting run stays: GitHub
-  # keeps one pending run per group, so a newer merge replaces the one still waiting.
-  # The newest run tests everything the dropped ones held. Anywhere else, such as a pull
-  # request, a newer run still replaces the older one.
-  group: test-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/develop' }}
+  # A run in progress always finishes, and only the newest waiting run stays: GitHub keeps
+  # one pending run per group, so a newer run replaces the one still waiting, and the newest
+  # tests everything the dropped ones held. The group is the workflow and the branch (or
+  # the pull request), never the run, so manual runs replace each other too. Called from
+  # Checks, github.workflow names Checks, so a Checks run neither waits on nor replaces a
+  # run started on its own.
+  group: test-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
