@@ -2996,3 +2996,104 @@ Android 16 서명 이미지의 두 APK에 수신기 빼기를 적용해 보니 �
 - `dsa memory`의 게스트 사용과 유휴 회수 뒤 값, vmmem 상주.
 - 설정 앱과 앱 하나를 쓸 때 끊김이 늘지 않는지(GC가 잦아진 몫).
 - CI: Image test의 boot check가 `pinner-first boot.txt`, `pinner-second boot.txt`를 남기고 고정된 파일이 있으면 실패한다. 메모리 측정은 `memory-pinner.txt`와 힙 설정 줄에 곱을 더한다.
+
+## R42. 호스트 가시 메모리를 복사하지 않고 게스트와 렌더러가 같은 페이지를 쓰는 길 (FR-4, PR-3, NFR-1, NFR-2)
+
+**질문.** Hyper-V에는 virtio-gpu의 blob도 goldfish의 직접 매핑도 없어서, gfxstream은 호스트 가시 메모리를 게스트 사본으로 흉내 내고 스트림으로 복사한다(patches/0003, guest/mesa 0005, 0007, 0010, 호스트 0020, R29, R31, R33). Microsoft의 닫힌 라이브러리(dxg 경로의 `libd3d12`, `libdxcore`) 없이, 호스트 렌더러와 게스트가 같은 물리 페이지를 보게 해서 이 복사를 없앨 수 있는가.
+
+**기준.** 문서와 소스만 읽었다. 이 PC에서 빌드하거나 VM을 띄우지 않았고, 설치된 DSA와 바탕 화면은 건드리지 않았다. 읽기만 한 명령 하나: `vulkaninfo`(소유자 PC, 창 없음).
+
+| 자료 | 판 |
+|---|---|
+| HCS 스키마 참조(`Devices`, `SharedMemoryConfiguration`, `SharedMemoryRegion`, `SharedMemoryRegionInfo`, `Properties`, `System_PropertyType`, `VirtualPMem*`, `VirtualSmb*`, `VirtualMachine_Memory`, 스키마 판과 Windows 판의 표) | learn.microsoft.com, 2026-11-13에 읽음 |
+| hcsshim `internal/hcs/schema2/shared_memory_region.go` | `main`, 2026-11-13 |
+| templarsco/LookingGlass PR #5, #6, #8(HCS 공유 메모리로 만든 IVSHMEM, 2026-09-29 실행, 10-05 병합) | GitHub, 2026-11-13 |
+| Win32 `VirtualAlloc`(`MEM_RESET`), `DiscardVirtualMemory`, `OfferVirtualMemory`, D3D12 `OpenExistingHeapFromFileMapping` | learn.microsoft.com |
+| gfxstream 호스트 `host/vulkan/VkDecoderGlobalState.cpp`, `host/features/include/gfxstream/host/Features.h` | `d047a572`(`dsa/graphics/fetch.sh`의 고정 리비전) |
+| mesa `src/gfxstream/guest/vulkan_enc/ResourceTracker.cpp`, `HostVisibleMemoryVirtualization.h` | `224e91e3`(같은 스크립트) |
+| crosvm `src/crosvm/cmdline.rs`, `vm_memory/src/guest_memory.rs`, `devices/src/virtio/vhost_user_frontend/` | `b1aa4d87`(`dsa/host/platform/linux/crosvm/versions.env`) |
+| WSL 커널 `arch/x86/configs/config-wsl` | `linux-msft-wsl-6.18.54.1` |
+| Apple `VZCustomVirtioDevice`, `VZVirtioSharedMemoryRegionConfiguration`, `VZVirtioSharedMemoryRegion.mapMemory` | developer.apple.com, macOS 27.0 |
+| 소유자 PC의 `vulkaninfo` | Windows 11 Pro 26300, Intel Arc 101.9150, NVIDIA RTX 4050 Laptop 610.91 |
+
+### 결론
+
+가능하다고 본다. 문서로 서는 길이 Windows, Linux, macOS(27부터) 모두에 하나씩 있고, 셋 다 같은 모양(VM을 만들 때 정한 고정 영역 하나, 그 안을 호스트가 나눠 주는 할당기, 게스트의 작은 커널 드라이버)으로 맞출 수 있다. 다만 Windows에서 가장 중요한 두 가지(DSA의 VM에서 그 영역이 실제로 보이는지, 해제한 페이지가 호스트 RAM으로 돌아가는지)는 문서로 서지 않으므로 프로토타입이 먼저다. 첫 단계는 아래 "프로토타입 1"이다.
+
+### 1. Windows: HCS가 VM에 붙이는 공유 메모리
+
+HCS에는 바로 이 목적의 장치가 문서에 있다.
+
+1. 스키마. `VirtualMachine.Devices.SharedMemory`는 `SharedMemoryConfiguration`(2.1)이고 `Regions`(배열, 2.1)를 가진다. `SharedMemoryRegion`은 `SectionName`(string), `StartOffset`(uint64), `Length`(uint64), `AllowGuestWrite`(bool), `HiddenFromGuest`(bool)이다(모두 2.0. hcsshim의 Go 정의는 `StartOffset`, `Length`를 int32로 둔다). 실행 중인 VM의 속성(`Properties`)에는 `SharedMemoryRegionInfo`(배열, 2.1: `SectionName`, `GuestPhysicalAddress`)가 있고, `System_PropertyType`에 `"SharedMemoryRegion"`(2.1)이 있어 속성 질의로 그 영역의 게스트 물리 주소를 얻는다. 스키마 2.0, 2.1은 Windows 10 1809 SDK부터이므로 DSA가 쓰는 2.3 문서(`vm.rs`)에 넣을 수 있다. 필드 설명은 문서에 비어 있다. 곧 "이름 있는 섹션 객체를 VM의 물리 주소 공간에 붙인다"는 것은 이름에서 읽은 것이고, 아래 3이 실험으로 보인 것이다.
+2. 섹션. `SectionName`은 이름 있는 섹션(`CreateFileMappingW(INVALID_HANDLE_VALUE, ..., PAGE_READWRITE | SEC_COMMIT, ..., L"Global\\...")`, 페이지 파일 기반)이다. 같은 섹션을 렌더러가 `MapViewOfFile`로 매핑하면 렌더러, VM 작업자, 게스트가 같은 물리 페이지를 본다. VM은 `dsa-hostd`(SYSTEM)가 만들고 렌더러 `dsa-gfx`는 사용자 세션에서 돌므로, 서비스가 섹션을 만들고 DACL을 SYSTEM과 그 사용자로 좁힌 뒤, 핸들을 렌더러에 `DuplicateHandle`로 넘기는 것이 맞다(이름으로 찾게 두지 않는다).
+3. 실제로 된 기록(DSA가 재지 않은 제3자 실험). LookingGlass PR #5, #6, #8은 Windows Server 2025와 Windows 11 Enterprise LTSC(둘 다 10.0.26100, 중첩 Hyper-V)에서 HCS가 만든 VM에 `SharedMemory` 영역을 붙였다. 결과: "the PC and the guest see each other's writes", 모든 페이지의 무늬를 게스트가 읽었고 양쪽 쓰기가 서로 보였다. 영역은 VM의 RAM 바로 뒤(두 게스트 모두 `0x108000000`, RAM 끝 `0x107ffffff`)에 놓였고 펌웨어는 그것을 RAM이 아닌 예약 메모리로 알렸다. 32 MiB와 128 MiB로 시험했다. HCS가 알린 주소 값은 "페이지 번호처럼 보이는 값"이었다. 막힌 것: 실행 중인 VM에는 영역을 더할 수 없었다(0x80070032), 물리로 받친 메모리(`AllowOvercommit: false`)로는 VM이 만들어지지 않았다(0x80070032), 게스트가 다시 시작하면 Dynamic Memory 컨트롤러가 리셋 뒤 실패했다(0x8007054F, `ResetFailed`). 게스트는 Windows였다. DSA는 이미 `AllowOvercommit: true`이고 `StopOnReset: true`이므로 뒤의 둘은 DSA에 걸리지 않을 것으로 본다. 첫째 때문에 영역 크기는 VM을 만들 때 정한다.
+4. 다른 HCS 장치는 맞지 않는다.
+   - `VirtualPMem`(PR #636). 장치는 `HostPath`의 VHD 파일을 매핑한다(`Vhdx`, `Vhd1`). 호스트가 같은 파일을 쓰기 가능하게 따로 매핑할 수 있는지, 그때 두 매핑이 같은 페이지인지는 문서에 없다. VHD 파일은 VM 작업자와 VHD 드라이버가 열어 쥐고, 페이지가 파일이므로 쓴 페이지는 디스크로 내려간다. GPU 메모리에 디스크 쓰기가 붙는 셈이라 버린다.
+   - `VirtualSmb.DirectFileMappingInMB`, `VirtualSmbShareOptions.VmSharedMemory`(2.1). 이름이 공유 메모리를 말하지만 VSMB 클라이언트는 Windows 게스트용이고 Linux 게스트에는 없다.
+   - `Plan9`(2.1)는 파일 프로토콜이고 매핑 창이 없다. WSL의 virtio-fs DAX는 WSL 커널에 `CONFIG_VIRTIO_FS=y`, `CONFIG_FUSE_DAX=y`가 있지만, 공개 스키마의 `Devices`에 virtio-fs 장치가 없다(필드: ComPorts, VirtioSerial, Scsi, VirtualPMem, NetworkAdapters, VideoMonitor, Keyboard, Mouse, HvSocket, EnhancedModeVideo, GuestCrashReporting, VirtualSmb, Plan9, Battery, FlexibleIov, SharedMemory, VirtualPci). 문서에 없는 장치는 쓰지 않는다.
+   - `MappedVirtualDisk`는 컨테이너용 게스트 에이전트(GCS)의 디스크 붙이기이고 메모리 공유가 아니다.
+   - VMBus GPADL. 게스트가 제 메모리를 호스트에 보이는 방식이지만 호스트 쪽은 커널 모드 VSP나 VM 작업자 안의 장치만 받는다. 제3자가 사용자 모드에서 채널을 내는 공개 API가 없다. 게스트 쪽 `CONFIG_UIO_HV_GENERIC=m`은 있어도 짝이 없다.
+5. 게스트 물리 주소를 게스트에 알리기. 주소는 VM을 만든 뒤 속성 질의로 나오므로 만들 때 정하는 커널 명령줄에는 넣을 수 없다. 게스트가 예약 범위를 스스로 찾거나(LookingGlass의 방법), 부팅 뒤 제어 채널로 받는다. DSA는 후자가 맞다: 이미 서비스와 `dsa-channeld`가 있고, 실행 중 메모리 늘리기(R12)가 RAM 끝 근처를 바꿀 수 있어 "RAM 바로 뒤"라는 가정에 기대지 않는 것이 낫다.
+
+### 2. 호스트: 그 영역을 Vulkan 메모리로 들이기
+
+1. 확장. `VK_EXT_external_memory_host`는 호스트 포인터를 `VkImportMemoryHostPointerInfoEXT`(`VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT`)로 `VkDeviceMemory`가 되게 한다. 포인터와 크기는 `minImportedHostPointerAlignment`의 배수여야 하고, 받을 수 있는 메모리 형식은 `vkGetMemoryHostPointerPropertiesEXT`가 그 포인터마다 알려 준다.
+2. 소유자 PC(`vulkaninfo`). Intel Arc(드라이버 101.9150)와 NVIDIA RTX 4050 Laptop(610.91) 모두 확장이 있고 `minImportedHostPointerAlignment = 0x1000`(4 KiB)이다. Arc는 힙 하나(17.96 GiB)에 형식 셋(`DEVICE_LOCAL`, `DEVICE_LOCAL|HOST_VISIBLE|HOST_COHERENT`, 그리고 `HOST_CACHED`까지)이다. NVIDIA는 VRAM 힙(5.78 GiB)과 시스템 힙(15.76 GiB)에 형식 다섯이고, 호스트 가시 형식은 시스템 힙의 `HOST_VISIBLE|HOST_COHERENT`, `HOST_VISIBLE|HOST_COHERENT|HOST_CACHED`와 VRAM 힙의 `DEVICE_LOCAL|HOST_VISIBLE|HOST_COHERENT`(BAR)다. 섹션 뷰 포인터에 대해 어느 형식 비트가 돌아오는지는 실행해야 안다.
+3. 다른 Windows 기기. gpuinfo.org의 Windows 보고에서 이 값은 4096이 973대, 65536이 29대, 16이 3대, 0이 2대다(제조사별로 나뉜 표는 얻지 못했다). AMD는 소유자 PC에 없어 확인하지 못했다. gfxstream 게스트는 큰 할당을 이미 `kLargestPageSize`(64 KiB)로 맞추므로 65536인 드라이버도 받는다.
+4. gfxstream에 이미 있는 것. 호스트의 `on_vkAllocateMemory`에는 내보내는 호스트 가시 할당을 위한 세 갈래가 있다. `SystemBlob`(shmem을 만들고 그 포인터를 호스트 포인터로 들임), `ExternalBlob`(드라이버 메모리를 Win32 핸들이나 fd로 내보냄), `VulkanAllocateHostMemory`("allocates host private memory and uses VK_EXT_external_memory_host": `minImportedHostPointerAlignment`로 맞춘 `PrivateMemory`를 들이고, `vkGetMemoryHostPointerPropertiesEXT`가 허락하지 않는 형식이면 허락하는 첫 형식으로 바꾼다). 마지막 기능은 `vkCreateBuffer`에 `VkExternalMemoryBufferCreateInfo(HOST_ALLOCATION)`도 붙인다(버퍼를 들인 메모리에 묶으려면 스펙이 요구한다). 곧 DSA가 할 일은 `PrivateMemory` 대신 공유 영역에서 잘라 낸 포인터를 쓰는 것이다. 이미지는 그 구조체를 받지 않으므로, 호스트 가시 메모리에 묶이는 선형 이미지는 아래 위험 4로 간다.
+5. 블롭 경로가 하는 것(비교). crosvm과 virtio-gpu에서는 게스트가 `vkGetMemoryHostAddressInfoGOOGLE`로 호스트 할당의 `hostmemId`를 받고, `VIRTGPU_BLOB_MEM_HOST3D`, `MAPPABLE`인 블롭을 그 id로 만든 뒤 DRM으로 매핑한다(`createCoherentMemory`). 호스트는 `vkGetBlobInternal`에서 그 할당의 호스트 주소를 `ExternalObjectManager::addMapping`에 올리고, VMM이 그 주소를 virtio-gpu의 공유 메모리 창에 그때그때 매핑한다. goldfish에서는 `vkMapMemoryIntoAddressSpaceGOOGLE`가 `mapUserBackedRam(gpa, hva, size)`로 호스트 주소를 게스트 물리 주소에 매핑한다. 두 경로 모두 "하이퍼바이저가 임의의 호스트 주소를 실행 중에 게스트에 매핑한다"에 기댄다. HCS에는 그것이 없다. 그래서 방향을 뒤집는다: 매핑은 처음 한 번 고정하고, 호스트가 그 안에서 할당한다. 이 방식이면 HOST_COHERENT는 호스트 형식의 것을 그대로 알린다(`usingDirectMapping()`이 참이 되어 0005, 0007, 0010의 사본, 다시 읽기, 해시가 모두 꺼진다). 게스트는 이미 할당을 16 MiB 덩어리(`kDefaultHostMemBlockSize`)로 받아 그 안을 나눠 쓰므로(`CoherentMemory::subAllocate`), 호스트가 들이는 단위는 덩어리 하나다.
+6. D3D12. `ID3D12Device3::OpenExistingHeapFromFileMapping`(Windows 10 20348부터)은 파일 매핑에서 시스템 메모리 힙을 만든다. 그러나 문서가 "special-purpose diagnostic heap"이라 하고, gfxstream은 호스트 Vulkan으로 그리며, 그 힙을 Vulkan에 넘기는 공유 핸들이 있는지 문서에 없다. Vulkan 드라이버가 섹션 뷰 포인터를 거절할 때의 마지막 후보로만 둔다.
+
+### 3. 게스트: 영역을 매핑하는 드라이버와 mesa의 변경
+
+1. 커널. 영역은 RAM이 아닌 예약 범위로 온다. DSA 커널(`config-wsl` 6.18.54.1)은 `CONFIG_DEVMEM=y`, `CONFIG_STRICT_DEVMEM=y`, `CONFIG_IO_STRICT_DEVMEM=y`다. 드라이버가 범위를 잡지 않은 동안 루트는 `/dev/mem`으로 RAM이 아닌 범위를 읽을 수 있으므로 프로토타입은 커널을 바꾸지 않고 시험할 수 있다. 제품에서는 `/dev/mem`을 쓰지 않는다(모든 앱의 GPU 메모리가 한 영역에 있다). 작은 misc 드라이버(`dsa_gpumem`, 대략 300줄)를 커널에 넣는다:
+   - 범위를 `request_mem_region`으로 잡고(그러면 `/dev/mem`도 막힌다) `memremap(..., MEMREMAP_WB)`으로 커널이 쓸 매핑을 둔다. struct page는 만들지 않는다(`VM_PFNMAP`, `remap_pfn_range`). ZONE_DEVICE로 만들면 1 GiB마다 16 MiB의 커널 메모리를 낸다.
+   - 앱 프로세스는 `/dev/dsa-gpumem`을 열고, 호스트가 준 허가(아래)를 `ioctl`로 내밀어 그 범위만 `mmap`한다. 드라이버는 허가 표를 읽어 범위, 크기, 열쇠를 맞춰 본다.
+   - 허가 표는 둘째 영역(`AllowGuestWrite: false`, 몇 페이지)에 호스트가 쓴다. 게스트는 읽기만 하므로 앱도 커널도 허가를 꾸밀 수 없다. 해제하면 호스트가 항목을 지우고, 드라이버는 그 범위의 모든 매핑을 `unmap_mapping_range`로 걷는다.
+   - 렌더러가 다시 시작하면(ServedVm, R37) 호스트의 할당이 모두 사라진다. 허가 표 머리의 세대 값을 바꾸고 드라이버가 모든 매핑을 걷는다. 게스트 프로세스는 이미 재연결한다(guest/gfxstream 0001).
+   - Android: `ueventd` 권한과 SELinux 레이블을 `/dev/dri`에 준하는 GPU 장치로 둔다. uio(`CONFIG_UIO=m`)는 이미지가 모듈을 싣지 않고, 프로세스마다 범위를 나눌 수 없어 쓰지 않는다.
+2. mesa(gfxstream 게스트).
+   - 호스트가 새 능력(예: RenderControl 확장 문자열 하나)을 알리면 `usingDirectMapping()`을 참으로 한다.
+   - `createCoherentMemory`에 셋째 갈래를 더한다: `vkGetMemoryHostAddressInfoGOOGLE`의 세 값(지금은 hva, 크기, hostmemId)을 DSA 호스트에서는 영역 안 위치, 크기, 허가 번호로 읽고, 드라이버로 매핑한 포인터를 `VirtGpuResourceMapping`을 흉내 낸 작은 클래스로 감싸 `CoherentMemory`에 준다. 프로토콜 정의와 생성된 인코더는 바뀌지 않는다.
+   - 사본 경로(0003, 0005, 0007, 0010)는 지우지 않는다. 영역이 없거나 차거나, 형식을 들일 수 없을 때 그 할당만 예전처럼 간다.
+3. 메모리 순서. 게스트의 쓰기와 GPU의 읽기 사이에는 제출 명령이 Hyper-V 소켓으로 가는 일이 있다. x86에서는 저장 순서가 지켜지고 호스트 가시 형식은 HOST_COHERENT(GPU가 CPU 캐시를 엿본다)이므로 플러시가 필요 없다. ARM64 게스트는 소켓에 쓰기 전에 장벽이 필요하고, HCS가 ARM64에서 이 영역을 붙이는지는 알려진 것이 없다(hcsshim은 ARM64에서 vPMEM도 끈다, PR #636).
+
+### 4. 메모리 셈과 반환 (NFR-2)
+
+1. 지금 내는 것. 호스트 가시 할당마다 호스트의 `VkDeviceMemory`(내장 GPU에서는 호스트 RAM)와 게스트의 사본(게스트 RAM)이 한 벌씩, 그리고 렌더러의 해시(4 KiB마다 16바이트)가 있다. 공유 영역에서는 한 벌이다. 곧 이 설계는 복사와 함께 게스트 사본 몫(앱마다 매핑한 양, 수 MiB에서 수십 MiB, R29)을 줄인다. 이것은 추정이고 재지 않았다.
+2. 고정 영역의 비용. `SEC_COMMIT` 섹션은 만들 때 크기 전체를 커밋으로 잡지만(페이지 파일 몫, RAM이 아니다) 물리 페이지는 처음 닿을 때 생긴다. 1 GiB 영역이면 시스템 커밋 한도에서 1 GiB가 빠진다. `SEC_RESERVE`로 만들고 쓸 때 커밋하면 이 몫이 없지만 HCS가 커밋되지 않은 섹션을 받는지는 알려지지 않았다(LookingGlass는 그런 섹션을 스스로 거절했다).
+3. 해제한 페이지 돌려주기. 리눅스의 빈 페이지 보고는 게스트 RAM에만 걸리고 이 영역은 게스트 RAM이 아니다. 대신 해제를 아는 쪽은 호스트다(게스트의 `vkFreeMemory`가 스트림으로 온다). 순서: 드라이버 메모리를 놓고(들인 페이지의 고정이 풀린다) 범위를 비운다. 문서로 선 것: `VirtualAlloc(MEM_RESET)`은 "A shared view is only acceptable if it is mapped to a paging file", 곧 페이지 파일 섹션의 공유 뷰에 쓸 수 있다. `DiscardVirtualMemory`는 커밋을 두고 내용을 버리며 "may give physical RAM back to the system"(조건은 `PAGE_READWRITE`). `OfferVirtualMemory`는 작업 집합에서 빼고 페이지 파일에 쓰지 않는다. 선 것이 아닌 것: 같은 페이지를 VM 작업자의 매핑과 하이퍼바이저의 SLAT가 함께 가리킬 때 이 호출들이 실제로 RAM을 놓는지. 렌더러의 뷰에서만 빠지고 vmmem 쪽에 남을 수 있다. 이것이 가장 큰 미지수이고 프로토타입 2가 잰다. 안 되면 대안은 영역을 여러 개(예: 64 MiB 여덟 개)로 나눠 VM을 만들 때 붙이고, 빈 영역은 섹션 전체를 비우는 것인데 실행 중 붙이기가 안 되므로(1의 3) 그 뒤에도 vmmem이 쥐는지 다시 재야 한다.
+4. 고정. 드라이버는 들인 호스트 포인터의 페이지를 할당이 사는 동안 고정한다. 지금의 호스트 할당도 그 동안 RAM을 쥐므로 더해지는 비용은 아니다. Doze 동안 앱이 쥔 할당도 지금과 같다. "쉬는 동안 게스트 메모리를 고정하지 않는다"는 제약은 게스트 RAM에 관한 것이고 이 영역은 게스트 RAM 밖이다.
+5. 셈. 영역의 닿은 페이지는 공유 페이지라 렌더러와 vmmem의 private 어디에도 온전히 들지 않는다. `dsa memory`와 렌더러 보고(R37)는 영역의 상주 페이지를 `QueryWorkingSetEx`로 따로 세어야 한다.
+
+### 5. Linux와 macOS
+
+1. Linux 호스트. DSA가 싣는 crosvm은 `gpu,gfxstream` 기능을 넣어 빌드하지만(`versions.env`의 `CROSVM_FEATURES`), `crosvm.rs`는 `--gpu`를 주지 않는다. 게스트의 그래픽 스트림은 vsock으로 `dsa-gfx`에 가고 Windows와 같은 사본 경로를 탄다. 곧 지금 Linux도 복사한다. 두 길이 있다.
+   - 같은 설계: crosvm `--file-backed-mapping addr=,size=,path=,rw`(게스트 물리 주소를 호스트가 정한다, 기본은 MMIO 범위)에 `dsa-gfx`가 만든 memfd를 준다. 렌더러는 같은 memfd를 `MAP_SHARED`로 매핑하고, Mesa 드라이버에는 udmabuf로 만든 dmabuf를, 그 밖에는 호스트 포인터를 들인다. 해제한 범위는 `fallocate(FALLOC_FL_PUNCH_HOLE)`로 두 매핑 모두에서 놓인다. Windows의 미지수 3이 Linux에는 없다. 주소를 호스트가 정하므로 커널 명령줄로 알릴 수 있다. crosvm은 `--pivot-root`로 가두므로 경로가 아니라 이어받은 fd(`/proc/self/fd/N`)로 넘겨야 하는지 확인이 필요하다.
+   - 표준 블롭 경로: crosvm의 vhost-user 프런트엔드는 백엔드의 `SHMEM_MAP` 요청으로 fd를 장치의 공유 메모리 창에 그때그때 매핑한다(`vhost_user_frontend/handler.rs`의 `shmem_map`). `dsa-gfx`가 virtio-gpu vhost-user 백엔드가 되면 upstream의 `HOST3D` 블롭이 그대로 된다. 그러나 virtio-gpu 장치 전체(컨텍스트, 펜스, 리소스)를 `dsa-gfx`가 구현해야 하고 세 호스트가 다른 길을 가게 된다. 첫째를 권한다.
+2. macOS. Virtualization.framework에 pmem이나 DAX 창이 없다(PR #636). macOS 27부터 `VZCustomVirtioDevice`가 있고, `VZVirtioSharedMemoryRegionConfiguration(regionID:size:)`로 virtio 공유 메모리 영역을 알리며, 실행 중에 `VZVirtioSharedMemoryRegion.mapMemory(_:atOffset:size:)`로 호스트 메모리를 그 영역의 위치에 매핑하고 `unmapMemory`로 걷는다. 이것은 goldfish와 같은 동적 매핑이다. 그 포인터는 VM을 가진 프로세스의 것이어야 하므로 `dsa-gfx`와 그 프로세스가 같은 공유 메모리(Mach 메모리 항목이나 `shm_open`)를 매핑해야 한다. 게스트에는 그 장치 ID의 작은 virtio 드라이버(`virtio_get_shm_region`)가 필요하고, `dsa_gpumem`의 둘째 입구로 둔다. MoltenVK의 `VK_EXT_external_memory_host` 지원과 정렬(Apple 실리콘의 16 KiB 페이지)은 확인하지 못했다. macOS 26 이하는 지금처럼 복사한다.
+
+### 프로토타입이 필요한 것 (차례대로)
+
+1. **프로토타입 1: DSA의 VM에서 영역이 보이고 맞는가.** 소유자 PC(26300)에서 dispatching session이 한다. 서비스의 숨은 설정으로 64 MiB `SEC_COMMIT` 섹션과 4 KiB 허가 섹션(`AllowGuestWrite: false`)을 만들어 `Devices.SharedMemory.Regions`에 넣고, 만든 뒤 `SharedMemoryRegion` 속성을 질의해 로그에 남긴다. 게스트에서 `adb root`로 `/proc/iomem`과 부팅 로그의 e820 표를 보고, `/dev/mem`으로 호스트가 쓴 무늬를 읽고 쓴다. 볼 것: `LinuxKernelDirect` 부팅에서 예약 범위로 오는가, 주소 값의 단위, 양방향 일관성, 읽기 전용 영역에 쓰면 어떻게 되는가, 게스트 `memcpy` 대역폭(가로채는 MMIO라면 수십 MB/s, SLAT 매핑이면 수 GB/s), 실행 중 메모리 늘리기(R12)와 함께 되는가.
+2. **프로토타입 2: 해제한 페이지가 돌아오는가.** 같은 VM에서 게스트가 256 MiB를 건드리고, 렌더러 쪽 뷰에 `MEM_RESET`, `DiscardVirtualMemory`, `OfferVirtualMemory`를 각각 건 뒤, vmmem과 렌더러의 `QueryWorkingSetEx`, 시스템 가용 메모리, RAMMap의 공유 페이지를 앞뒤로 잰다.
+3. **프로토타입 3: 드라이버가 섹션 뷰를 들이는가.** 작은 호스트 도구로 섹션 뷰의 16 MiB 조각마다 `vkGetMemoryHostPointerPropertiesEXT`를 부르고 Intel Arc와 NVIDIA에서 돌아오는 형식 비트를 적는다. 들인 버퍼로 `vkCmdCopyBuffer`와 셰이더 쓰기를 하고 게스트(`/dev/mem`)에서 결과를 읽는다. AMD는 CI나 다른 기계가 필요하다.
+4. **통합.** 호스트 패치(영역 할당기, `on_vkAllocateMemory`의 `VulkanAllocateHostMemory` 갈래를 영역으로, `vkGetMemoryHostAddressInfoGOOGLE`의 답, 허가 표, 해제와 비우기, 영역 할당에는 0020의 해시를 두지 않음), guest/mesa 패치(셋째 갈래), 커널 드라이버, SELinux, 서비스의 섹션과 핸들 넘기기, R29의 `readback_latency_test.cpp`와 같은 모형 시험(전송량 0을 확인), FR-4의 실기 측정(`app.summary waited=`).
+
+### 위험
+
+1. 영역이 DSA의 VM(`LinuxKernelDirect`, 스키마 2.3, Windows 11 클라이언트)에서 보이지 않을 수 있다. 공개된 성공은 Windows 게스트, 중첩 Hyper-V, 26100뿐이다.
+2. 해제한 페이지가 vmmem에 남으면 영역이 앱을 닫아도 줄지 않는다. 그러면 NFR-2와 맞지 않으므로 기본으로 켤 수 없다.
+3. 영역 크기는 VM을 만들 때 정한다. 크면 커밋 한도를, 작으면 사본 경로로 돌아가는 할당을 낳는다.
+4. 형식과 이미지. 드라이버가 섹션 뷰에 일부 형식만 허락하거나(특히 NVIDIA의 BAR 형식), 호스트 가시 메모리에 선형 이미지를 묶는 앱이 있으면 그 할당은 사본 경로로 가야 한다. 형식 하나를 덩어리 단위로 나눠 쓰므로, 같은 덩어리에 버퍼와 이미지가 섞이지 않게 게스트 할당기를 나눠야 할 수 있다.
+5. 보안. 한 영역을 모든 앱이 나눠 쓴다. 허가 표와 드라이버의 범위 검사, 해제 뒤 비우기(다음 할당에 앞 앱의 내용이 보이지 않게)가 빠지면 앱 사이에 GPU 메모리가 샌다.
+6. 렌더러 다시 시작과 GPU 리셋. 영역은 렌더러보다 오래 산다. 세대를 바꿔 매핑을 걷는 일이 늦으면 게스트가 놓인 범위에 쓴다(호스트에는 해가 없고 그 앱의 그림이 깨진다). 장치를 다시 만들 때(0021) 살아 있는 덩어리를 다시 들여야 한다. 내용은 영역에 남으므로 지금보다 낫다.
+7. ARM64 Windows. 이 장치가 되는지 알려진 것이 없다. 안 되면 ARM64는 사본 경로에 남는다.
+
+### 추정
+
+프로토타입 1-3은 3-5일(대부분 PC에서 재는 시간). 셋이 모두 되면 Windows 통합(호스트 패치, mesa 패치, 커널 드라이버, 서비스, 시험)이 2-3주, Linux(`--file-backed-mapping`과 memfd)가 1주, macOS 27이 1-2주다. 프로토타입 2가 실패하면 Windows는 고정 영역 하나로는 안 되고, 다른 반환 수단을 찾기 전에는 설정 뒤에 둔다.
+
+### 결정
+
+이 절은 조사다. 설계, 영역 크기, 기본값은 프로토타입 1-3의 결과를 보고 소유자가 정한다. SPEC과 INTENT는 바꾸지 않았다.
