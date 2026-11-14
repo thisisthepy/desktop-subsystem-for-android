@@ -178,6 +178,27 @@ final class PageViewModelTests: XCTestCase {
         XCTAssertEqual(widgets.offers.count, 1)
     }
 
+    func test_fr12_a_widget_without_a_preview_shows_its_apps_icon() async {
+        let cli = FakeCli()
+        let icon = Data([0x89, 0x50, 0x4E, 0x47])
+        let preview = Data([0x89, 0x50, 0x4E, 0x47, 0x01])
+        cli.answer("widgets list --json", """
+            {"providers":[\
+            {"provider":"org.example/.Clock","package":"org.example","label":"Clock","preview_png":"\(preview.base64EncodedString())","default_width_dp":180,"default_height_dp":110},\
+            {"provider":"org.notes/.Notes","package":"org.notes","label":"Notes","default_width_dp":110,"default_height_dp":40}\
+            ],"widgets":[]}
+            """)
+        cli.answer("apps list --json", #"{"apps":[{"package":"org.notes","label":"Notes","icon_png":"\#(icon.base64EncodedString())"}]}"#)
+        let widgets = WidgetsViewModel(service: DsaService(cli: cli), text: KeyText(), stream: cli)
+        await widgets.refresh()
+        // The widget's own preview first; its app's icon for one that has none.
+        XCTAssertEqual(widgets.offers.map(\.preview), [preview, icon])
+        XCTAssertEqual(widgets.offers.map(\.app), ["org.example", "org.notes"])
+        // The icons are read once, not on every refresh.
+        await widgets.refresh()
+        XCTAssertEqual(cli.calls.filter { $0.first == "apps" }.count, 1)
+    }
+
     func test_fr17_background_apps_show_what_they_play() async {
         let cli = FakeCli()
         cli.answer("settings --json", #"{"stop_without_asking":true}"#)

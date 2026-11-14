@@ -1,5 +1,6 @@
 //! What ties the windows to the DSA service: the user's tasks, their frames, the guest's
-//! input, the clipboard, notifications, controllers, launcher entries and dropped files.
+//! input, the clipboard, notifications, controllers, launcher entries, dropped files, and the
+//! widgets placed on the desktop.
 //!
 //! The windows and the window rules (`TaskWindows`) live on the main thread with the Wayland
 //! connection. Each connection to the service runs on a thread of its own and reconnects
@@ -29,6 +30,7 @@ use dsa_host_core::input::InputEvent;
 use dsa_host_core::native_abi::in_user_language;
 use dsa_host_core::notifications::{NotificationAction, NotificationEvent};
 use dsa_host_core::tasks::{AppInfo, PinShortcutRequest, TaskEvent, TaskRequest};
+use dsa_host_core::widget_windows::{WidgetWindows, WindowCommand, WindowReport};
 use dsa_host_unix::socket::UnixLocalConnector;
 use dsa_transport::Connector;
 
@@ -170,6 +172,71 @@ enum Message {
     },
     /// An accessibility client activated a title bar button.
     TitleBar(TitleCommand),
+    /// What the widgets' watch asks of the widget windows.
+    Widget(WindowCommand),
+    /// The desktop's dark theme and accent color, which the widget windows are drawn in.
+    WidgetLook {
+        dark: bool,
+        accent: u32,
+    },
+}
+
+/// What the widget windows' watch calls itself to the service.
+const WIDGETS_BUILD: &str = "dsa-compositor widgets";
+
+/// How long the desktop's theme is waited on before it is read again.
+const LOOK_EVERY: Duration = Duration::from_secs(60);
+
+/// The widget windows on the main thread, as the widgets' watch drives them: its commands go
+/// to the main thread, which hands the windows' reports back.
+struct MainWidgets {
+    to_main: ToMain,
+    reports: Receiver<WindowReport>,
+}
+
+impl WidgetWindows for MainWidgets {
+    fn command(&mut self, command: WindowCommand) {
+        self.to_main.send(Message::Widget(command));
+    }
+
+    fn reports(&mut self) -> Vec<WindowReport> {
+        self.reports.try_iter().collect()
+    }
+}
+
+/// Shows the widgets placed on the desktop: the watch runs on a thread of its own and
+/// reconnects when the service restarts, and the desktop's theme is followed on another, so
+/// the edit border and handles of a widget window match it.
+fn show_widgets(to_main: ToMain, reports: Receiver<WindowReport>) {
+    {
+        let to_main = to_main.clone();
+        std::thread::spawn(move || {
+            use dsa_host_core::system_settings::SystemSettingsSource as _;
+            let mut settings = crate::devices::settings::DesktopSettings::open();
+            loop {
+                let read = settings.read();
+                let look = Message::WidgetLook {
+                    dark: read.dark_mode,
+                    accent: read.accent_color,
+                };
+                if !to_main.send(look) {
+                    return;
+                }
+                settings.wait_for_change(LOOK_EVERY);
+            }
+        });
+    }
+    std::thread::spawn(move || {
+        let mut windows = MainWidgets { to_main, reports };
+        let stop = Arc::new(AtomicBool::new(false));
+        dsa_host_core::widget_windows::sync(
+            Box::new(connector()),
+            &mut windows,
+            stop,
+            WIDGETS_BUILD,
+            Arc::new(log),
+        );
+    });
 }
 
 /// What the main thread asks of the service.
@@ -734,6 +801,8 @@ struct Main {
     accessible: HashMap<i32, WindowFacts>,
     /// Where the apps' requests to pin a shortcut go to be asked about.
     pins: Option<Sender<PinShortcutRequest>>,
+    /// Where the widget windows' reports go, to the widgets' watch.
+    widget_reports: Sender<WindowReport>,
     /// The renderer process, whose word on its GPU device is followed.
     renderer: Arc<RendererClient>,
     /// The renderer's count of device changes last seen: a change is a GPU reset.
@@ -877,6 +946,8 @@ impl Main {
                 .desktop
                 .state
                 .title_bar_action(command.task_id, command.action),
+            Message::Widget(command) => self.desktop.state.widget_command(command),
+            Message::WidgetLook { dark, accent } => self.desktop.state.widget_look(dark, accent),
         }
     }
 
@@ -939,6 +1010,9 @@ impl Main {
                 self.desktop.state.pointer_input(task_id, input);
             }
             Event::X11Menu(input) => self.desktop.state.x11_menu_input(input),
+            Event::X11Widget { widget_id, input } => {
+                self.desktop.state.x11_widget_input(widget_id, input)
+            }
             Event::HostClipboard(text) => {
                 if self.guest_clipboard.as_deref() != Some(text.as_str()) {
                     let _ = self.clipboard.send(text);
@@ -1134,6 +1208,10 @@ impl Main {
         let requests = self.windows.reconfigures(now);
         self.requests(requests);
         self.desktop.tick(now);
+        // What the widget windows did since the last turn goes to the service.
+        for report in self.desktop.state.widget_reports() {
+            let _ = self.widget_reports.send(report);
+        }
         self.sync_accessibility();
     }
 
@@ -1200,6 +1278,8 @@ pub fn run() -> Result<(), String> {
         .then(|| Arc::new(Mutex::new(Vec::new())));
     let renderer = start_renderer(frames.clone(), images.clone(), waker);
     let accessibility = start_accessibility(to_main.clone());
+    let (widget_reports, widget_report_receiver) = mpsc::channel();
+    show_widgets(to_main.clone(), widget_report_receiver);
 
     let mut main = Main {
         desktop,
@@ -1219,6 +1299,7 @@ pub fn run() -> Result<(), String> {
         accessibility,
         accessible: HashMap::new(),
         pins,
+        widget_reports,
         device_changes: renderer.device_changes(),
         renderer,
         resets: GpuResetWindows::new(),

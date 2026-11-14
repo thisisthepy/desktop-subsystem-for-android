@@ -354,7 +354,9 @@ fn serve_requests(
         });
 }
 
-/// Runs the window manager until `stop` is set.
+/// Runs the window manager until `stop` is set, on the main thread: the widgets placed on the
+/// desktop are AppKit panels, which the main thread runs ([`super::widgets`]), and the rest
+/// runs on a thread of its own.
 pub fn run(places: Places, stop: Arc<AtomicBool>) -> Result<(), String> {
     // One window manager per user: a second one leaves the first in charge.
     if std::os::unix::net::UnixStream::connect(&places.window_manager).is_ok() {
@@ -369,7 +371,30 @@ pub fn run(places: Places, stop: Arc<AtomicBool>) -> Result<(), String> {
             std::env::set_var("VK_ICD_FILENAMES", driver);
         }
     }
+    let host_api = places.host_api.clone();
+    let done = Arc::new(AtomicBool::new(false));
+    let manager = {
+        let (stop, done) = (Arc::clone(&stop), Arc::clone(&done));
+        thread::Builder::new()
+            .name("dsa-wm-manager".into())
+            .spawn(move || {
+                let served = serve(places, stop);
+                done.store(true, Ordering::Relaxed);
+                served
+            })
+            .map_err(|e| format!("the window manager could not start: {e}"))?
+    };
+    // The widget panels run until the window manager stops or its manager ends.
+    if let Err(why) = super::widgets::run_main(host_api, Arc::clone(&stop), Arc::clone(&done)) {
+        log(&format!("the widgets are not shown on the desktop: {why}"));
+    }
+    manager
+        .join()
+        .map_err(|_| "the window manager's thread failed".to_string())?
+}
 
+/// The window manager but its widget panels, until `stop` is set.
+fn serve(places: Places, stop: Arc<AtomicBool>) -> Result<(), String> {
     let ports = match SurfacePorts::check_in(WM_LABEL) {
         Ok(ports) => Some(ports),
         Err(why) => {

@@ -12,6 +12,15 @@
 //! its keyboard move and size (`_NET_WM_MOVERESIZE`), and More window options for its own
 //! window menu (`_GTK_SHOW_WINDOW_MENU`), each only when the window manager lists it in
 //! `_NET_SUPPORTED`; one that does not is logged and nothing else happens.
+//!
+//! The same connection holds the widget windows on such a desktop
+//! (`crate::compositor::widget_windows`): each is an X11 window of the desktop type
+//! (`_NET_WM_WINDOW_TYPE_DESKTOP`, as the desktop icons' window is) with a 32-bit visual, so
+//! a widget's see-through corners stay see-through, kept below (`_NET_WM_STATE_BELOW`), on
+//! every workspace (`_NET_WM_STATE_STICKY`) and in neither the task bar nor the pager. Its
+//! input goes to the widget windows with the pointer's place on the screen, which a window
+//! being moved does not change under it. The widget's menu is the window menu's
+//! override-redirect window.
 
 use std::collections::HashMap;
 use std::os::fd::OwnedFd;
@@ -23,8 +32,9 @@ use x11rb::connection::Connection;
 use x11rb::protocol::dri3::ConnectionExt as _;
 use x11rb::protocol::render::{ConnectionExt as _, PictOp};
 use x11rb::protocol::xproto::{
-    AtomEnum, ClientMessageEvent, ConfigureWindowAux, ConnectionExt as _, CreateGCAux,
-    CreateWindowAux, EventMask, GrabMode, ImageFormat, KeyButMask, PropMode, WindowClass,
+    AtomEnum, ClientMessageEvent, ColormapAlloc, ConfigureWindowAux, ConnectionExt as _,
+    CreateGCAux, CreateWindowAux, EventMask, GrabMode, ImageFormat, InputFocus, KeyButMask,
+    PropMode, VisualClass, WindowClass,
 };
 use x11rb::protocol::Event as XEvent;
 use x11rb::rust_connection::RustConnection;
@@ -65,6 +75,59 @@ pub struct X11Pip {
     /// The window menu's window and its graphics context.
     menu: Option<(u32, u32)>,
     wm: WmAtoms,
+    /// Each widget's desktop window, and the widget of each window, which the event thread
+    /// reads.
+    widgets: HashMap<i32, WidgetWindow>,
+    widget_of: Arc<Mutex<HashMap<u32, i32>>>,
+    /// The screen's 32-bit visual and a colormap of it, for see-through widget windows.
+    argb: Option<(u32, u32)>,
+    desktop: DesktopAtoms,
+}
+
+/// A widget's desktop window, its graphics context and its size.
+struct WidgetWindow {
+    window: u32,
+    gc: u32,
+    depth: u8,
+    size: (u16, u16),
+}
+
+/// What a widget's window is told it is.
+struct DesktopAtoms {
+    /// `_NET_WM_WINDOW_TYPE` and `_NET_WM_WINDOW_TYPE_DESKTOP`.
+    window_type: Option<(u32, u32)>,
+    /// `_NET_WM_STATE`, and the states of a widget's window: below, sticky, in neither the
+    /// task bar nor the pager.
+    state: Option<u32>,
+    states: Vec<u32>,
+    /// `_MOTIF_WM_HINTS`, which asks for no frame.
+    motif: Option<u32>,
+}
+
+/// Input on a widget's desktop window: where the pointer is in the window and on the screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WidgetInput {
+    Entered {
+        local: (i32, i32),
+        root: (i32, i32),
+    },
+    Left,
+    Moved {
+        local: (i32, i32),
+        root: (i32, i32),
+    },
+    Button {
+        detail: u8,
+        down: bool,
+        local: (i32, i32),
+        root: (i32, i32),
+    },
+    /// A key went down, by its evdev code.
+    Key(u32),
+    /// The window took the keyboard, or lost it.
+    Focus(bool),
+    /// The window must be drawn again.
+    Exposed,
 }
 
 /// What the window manager is asked through, and what it says it supports.
@@ -118,6 +181,13 @@ impl X11Pip {
         let screen = &connection.setup().roots[screen];
         let (root, root_depth, root_visual) = (screen.root, screen.root_depth, screen.root_visual);
         let screen_size = (screen.width_in_pixels, screen.height_in_pixels);
+        let argb_visual = screen
+            .allowed_depths
+            .iter()
+            .filter(|depth| depth.depth == 32)
+            .flat_map(|depth| &depth.visuals)
+            .find(|visual| visual.class == VisualClass::TRUE_COLOR)
+            .map(|visual| visual.visual_id);
         let state = atom(&connection, b"_NET_WM_STATE")?;
         let above = atom(&connection, b"_NET_WM_STATE_ABOVE")?;
         let delete_window = atom(&connection, b"WM_DELETE_WINDOW")?;
@@ -155,20 +225,47 @@ impl X11Pip {
             .unwrap_or((None, None));
         let by_window = Arc::new(Mutex::new(HashMap::new()));
         let menu_window = Arc::new(Mutex::new(None));
+        let widget_of = Arc::new(Mutex::new(HashMap::new()));
         {
             let connection = connection.clone();
             let by_window = by_window.clone();
             let menu_window = menu_window.clone();
+            let widget_of = widget_of.clone();
             std::thread::spawn(move || {
                 read_events(
                     &connection,
                     &by_window,
                     &menu_window,
+                    &widget_of,
                     delete_window,
                     &events,
                 )
             });
         }
+        let argb = argb_visual.and_then(|visual| {
+            let colormap = connection.generate_id().ok()?;
+            connection
+                .create_colormap(ColormapAlloc::NONE, colormap, root, visual)
+                .ok()?;
+            Some((visual, colormap))
+        });
+        let window_type = atom(&connection, b"_NET_WM_WINDOW_TYPE")
+            .zip(atom(&connection, b"_NET_WM_WINDOW_TYPE_DESKTOP"));
+        let states = [
+            &b"_NET_WM_STATE_BELOW"[..],
+            b"_NET_WM_STATE_STICKY",
+            b"_NET_WM_STATE_SKIP_TASKBAR",
+            b"_NET_WM_STATE_SKIP_PAGER",
+        ]
+        .iter()
+        .filter_map(|name| atom(&connection, name))
+        .collect();
+        let desktop = DesktopAtoms {
+            window_type,
+            state: Some(state),
+            states,
+            motif: atom(&connection, b"_MOTIF_WM_HINTS"),
+        };
         let wm = WmAtoms {
             moveresize: atom(&connection, b"_NET_WM_MOVERESIZE"),
             show_menu: atom(&connection, b"_GTK_SHOW_WINDOW_MENU"),
@@ -203,7 +300,198 @@ impl X11Pip {
             menu_window,
             menu: None,
             wm,
+            widgets: HashMap::new(),
+            widget_of,
+            argb,
+            desktop,
         })
+    }
+
+    /// Opens widget `widget_id`'s desktop window at `origin` on the screen, `size` pixels,
+    /// below the other windows, named `title` for the window manager. Returns whether it
+    /// opened.
+    pub fn open_widget(
+        &mut self,
+        widget_id: i32,
+        origin: (i32, i32),
+        size: (i32, i32),
+        title: &str,
+    ) -> bool {
+        if self.widgets.contains_key(&widget_id) {
+            return true;
+        }
+        let c = &*self.connection;
+        let (Ok(window), Ok(gc)) = (c.generate_id(), c.generate_id()) else {
+            return false;
+        };
+        let width = size.0.clamp(1, i32::from(u16::MAX)) as u16;
+        let height = size.1.clamp(1, i32::from(u16::MAX)) as u16;
+        let mask = EventMask::BUTTON_PRESS
+            | EventMask::BUTTON_RELEASE
+            | EventMask::POINTER_MOTION
+            | EventMask::ENTER_WINDOW
+            | EventMask::LEAVE_WINDOW
+            | EventMask::KEY_PRESS
+            | EventMask::FOCUS_CHANGE
+            | EventMask::EXPOSURE;
+        // A 32-bit visual keeps the widget's see-through pixels see-through; without one the
+        // window is opaque where the widget is clear.
+        let (depth, visual, aux) = match self.argb {
+            Some((visual, colormap)) => (
+                32,
+                visual,
+                CreateWindowAux::new()
+                    .background_pixel(0)
+                    .border_pixel(0)
+                    .colormap(colormap)
+                    .event_mask(mask),
+            ),
+            None => (
+                self.root_depth,
+                self.root_visual,
+                CreateWindowAux::new().background_pixel(0).event_mask(mask),
+            ),
+        };
+        let x = origin.0.clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16;
+        let y = origin.1.clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16;
+        let created = c.create_window(
+            depth,
+            window,
+            self.root,
+            x,
+            y,
+            width,
+            height,
+            0,
+            WindowClass::INPUT_OUTPUT,
+            visual,
+            &aux,
+        );
+        if created.is_err() {
+            return false;
+        }
+        let _ = c.change_property8(
+            PropMode::REPLACE,
+            window,
+            AtomEnum::WM_NAME,
+            AtomEnum::STRING,
+            title.as_bytes(),
+        );
+        if let Some((window_type, desktop)) = self.desktop.window_type {
+            let _ = c.change_property32(
+                PropMode::REPLACE,
+                window,
+                window_type,
+                AtomEnum::ATOM,
+                &[desktop],
+            );
+        }
+        if let Some(state) = self.desktop.state {
+            let _ = c.change_property32(
+                PropMode::REPLACE,
+                window,
+                state,
+                AtomEnum::ATOM,
+                &self.desktop.states,
+            );
+        }
+        if let Some(motif) = self.desktop.motif {
+            // Decorations only (flag 2), and none of them.
+            let _ = c.change_property32(PropMode::REPLACE, window, motif, motif, &[2, 0, 0, 0, 0]);
+        }
+        let _ = c.create_gc(gc, window, &CreateGCAux::new());
+        let _ = c.map_window(window);
+        // Some window managers place a new window themselves; it goes where the widget is.
+        let _ = c.configure_window(
+            window,
+            &ConfigureWindowAux::new().x(i32::from(x)).y(i32::from(y)),
+        );
+        let _ = c.flush();
+        if let Ok(mut widget_of) = self.widget_of.lock() {
+            widget_of.insert(window, widget_id);
+        }
+        self.widgets.insert(
+            widget_id,
+            WidgetWindow {
+                window,
+                gc,
+                depth,
+                size: (width, height),
+            },
+        );
+        true
+    }
+
+    /// Moves and sizes widget `widget_id`'s window.
+    pub fn place_widget(&mut self, widget_id: i32, origin: (i32, i32), size: (i32, i32)) {
+        let Some(widget) = self.widgets.get_mut(&widget_id) else {
+            return;
+        };
+        let width = size.0.clamp(1, i32::from(u16::MAX)) as u16;
+        let height = size.1.clamp(1, i32::from(u16::MAX)) as u16;
+        widget.size = (width, height);
+        let _ = self.connection.configure_window(
+            widget.window,
+            &ConfigureWindowAux::new()
+                .x(origin.0)
+                .y(origin.1)
+                .width(u32::from(width))
+                .height(u32::from(height)),
+        );
+        let _ = self.connection.flush();
+    }
+
+    /// Shows `pixels` (premultiplied BGRA rows, `size`) in widget `widget_id`'s window.
+    pub fn show_widget(&self, widget_id: i32, size: (u32, u32), pixels: &[u8]) {
+        let Some(widget) = self.widgets.get(&widget_id) else {
+            return;
+        };
+        if pixels.len() < size.0 as usize * size.1 as usize * 4 {
+            return;
+        }
+        let _ = self.connection.put_image(
+            ImageFormat::Z_PIXMAP,
+            widget.window,
+            widget.gc,
+            size.0.min(u32::from(u16::MAX)) as u16,
+            size.1.min(u32::from(u16::MAX)) as u16,
+            0,
+            0,
+            0,
+            widget.depth,
+            pixels,
+        );
+        let _ = self.connection.flush();
+    }
+
+    /// Gives widget `widget_id`'s window the keyboard, while the widget is edited.
+    pub fn focus_widget(&self, widget_id: i32) {
+        let Some(widget) = self.widgets.get(&widget_id) else {
+            return;
+        };
+        let _ =
+            self.connection
+                .set_input_focus(InputFocus::PARENT, widget.window, x11rb::CURRENT_TIME);
+        let _ = self.connection.flush();
+    }
+
+    /// Closes widget `widget_id`'s window.
+    pub fn close_widget(&mut self, widget_id: i32) {
+        let Some(widget) = self.widgets.remove(&widget_id) else {
+            return;
+        };
+        if let Ok(mut widget_of) = self.widget_of.lock() {
+            widget_of.remove(&widget.window);
+        }
+        let c = &*self.connection;
+        let _ = c.free_gc(widget.gc);
+        let _ = c.destroy_window(widget.window);
+        let _ = c.flush();
+    }
+
+    /// The screen's size, in pixels.
+    pub fn screen_size(&self) -> (i32, i32) {
+        (i32::from(self.screen_size.0), i32::from(self.screen_size.1))
     }
 
     /// Opens the task's picture-in-picture window, `size` pixels, in the screen's bottom
@@ -626,15 +914,61 @@ fn event_window(event: &XEvent) -> Option<u32> {
     })
 }
 
+/// What an event on a widget's desktop window means for the widget; `None` for one it
+/// ignores.
+fn widget_input(event: &XEvent) -> Option<WidgetInput> {
+    let at = |x: i16, y: i16| (i32::from(x), i32::from(y));
+    Some(match event {
+        XEvent::EnterNotify(e) => WidgetInput::Entered {
+            local: at(e.event_x, e.event_y),
+            root: at(e.root_x, e.root_y),
+        },
+        XEvent::LeaveNotify(_) => WidgetInput::Left,
+        XEvent::MotionNotify(e) => WidgetInput::Moved {
+            local: at(e.event_x, e.event_y),
+            root: at(e.root_x, e.root_y),
+        },
+        XEvent::ButtonPress(e) | XEvent::ButtonRelease(e) => WidgetInput::Button {
+            detail: e.detail,
+            down: matches!(event, XEvent::ButtonPress(_)),
+            local: at(e.event_x, e.event_y),
+            root: at(e.root_x, e.root_y),
+        },
+        XEvent::KeyPress(e) => {
+            WidgetInput::Key(u32::from(e.detail.checked_sub(X11_KEYCODE_OFFSET)?))
+        }
+        XEvent::FocusIn(_) => WidgetInput::Focus(true),
+        XEvent::FocusOut(_) => WidgetInput::Focus(false),
+        XEvent::Expose(_) => WidgetInput::Exposed,
+        _ => return None,
+    })
+}
+
+/// The window an event on a widget's window happened on.
+fn widget_event_window(event: &XEvent) -> Option<u32> {
+    Some(match event {
+        XEvent::EnterNotify(e) | XEvent::LeaveNotify(e) => e.event,
+        XEvent::FocusIn(e) | XEvent::FocusOut(e) => e.event,
+        other => return event_window(other),
+    })
+}
+
 fn read_events(
     connection: &RustConnection,
     by_window: &Mutex<HashMap<u32, i32>>,
     menu_window: &Mutex<Option<u32>>,
+    widget_of: &Mutex<HashMap<u32, i32>>,
     delete_window: u32,
     events: &Events,
 ) {
     let task_of = |window: u32| {
         by_window
+            .lock()
+            .ok()
+            .and_then(|map| map.get(&window).copied())
+    };
+    let widget_of = |window: u32| {
+        widget_of
             .lock()
             .ok()
             .and_then(|map| map.get(&window).copied())
@@ -647,6 +981,12 @@ fn read_events(
         if menu.is_some() && event_window(&event) == menu {
             if let Some(input) = menu_input(&event) {
                 events.send(Event::X11Menu(input));
+            }
+            continue;
+        }
+        if let Some(widget_id) = widget_event_window(&event).and_then(widget_of) {
+            if let Some(input) = widget_input(&event) {
+                events.send(Event::X11Widget { widget_id, input });
             }
             continue;
         }

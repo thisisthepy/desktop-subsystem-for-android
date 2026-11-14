@@ -3,8 +3,10 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::time::Duration;
 
 use adw::prelude::*;
+use gtk::glib;
 
 use super::common::*;
 use crate::i18n::{tr, trf};
@@ -720,12 +722,30 @@ fn media_title(title: &str, artist: &str) -> String {
     }
 }
 
-/// The widgets on the desktop and the ones the apps offer.
+/// A widget's preview, else its app's icon (which the compositor keeps in the icon theme
+/// beside the app's launcher entry), else a generic one.
+fn offer_image(offer: &crate::model::WidgetOffer) -> gtk::Image {
+    if !offer.preview_png.is_empty() {
+        return png_image(&offer.preview_png, "view-grid-symbolic", 48);
+    }
+    let icon = crate::model::app_icon_name(&offer.package);
+    let themed = gtk::gdk::Display::default()
+        .is_some_and(|display| gtk::IconTheme::for_display(&display).has_icon(&icon));
+    png_image(&[], if themed { &icon } else { "view-grid-symbolic" }, 48)
+}
+
+/// How long the watch of the placed widgets waits before it starts again after it ended, as
+/// it does when Android stops.
+const WIDGETS_RETRY: Duration = Duration::from_secs(5);
+
+/// The widgets on the desktop and the ones the apps offer. While the page is shown it watches
+/// the placed widgets, so one placed, moved, resized or removed elsewhere (its own menu on the
+/// desktop, `dsa`) shows here at once.
 pub fn widgets(ctx: &Shared) -> gtk::Widget {
     let page = Rc::new(Page::new());
     let placed = group(
         &tr("On your desktop"),
-        Some(&tr("Place the widgets your Android apps offer on your desktop. Each widget gets a window of its own.\nDrag the band along its top to move it, and its edges to resize it.\nRight-click a widget to resize or remove it. Android starts when you open this page.")),
+        Some(&tr("Place the widgets your Android apps offer on your desktop. Each widget gets a window of its own, below your other windows.\nPress and hold a widget to edit it: drag it to move it, and drag its handles to resize it.\nRight-click a widget for its settings, its sizes and Remove. Android starts when you open this page.")),
     );
     let refresh = gtk::Button::from_icon_name("view-refresh-symbolic");
     refresh.set_tooltip_text(Some(&tr("Refresh")));
@@ -809,7 +829,7 @@ pub fn widgets(ctx: &Shared) -> gtk::Widget {
                             detail.push(tr("asks you to set it up"));
                         }
                         let row = action_row(&offer.label, &detail.join(" · "));
-                        row.add_prefix(&png_image(&offer.preview_png, "view-grid-symbolic", 48));
+                        row.add_prefix(&offer_image(offer));
                         let add = button(&tr("Add to desktop"));
                         row.add_suffix(&add);
                         let (ctx, provider) = (ctx2.clone(), offer.provider.clone());
@@ -835,5 +855,100 @@ pub fn widgets(ctx: &Shared) -> gtk::Widget {
         refresh.connect_clicked(move |_| again());
         reload_now();
     }
+    watch_widgets(&page.root, reload);
     page.root.clone().upcast()
+}
+
+/// The watch of the placed widgets while `root` is shown: each change reported reads the page
+/// again, and a watch that ends starts again after [`WIDGETS_RETRY`].
+fn watch_widgets(root: &gtk::Box, reload: Hook) {
+    type Watching = Option<(
+        std::process::Child,
+        std::sync::mpsc::Receiver<Result<String, crate::api::Failure>>,
+    )>;
+    let watching: Rc<RefCell<Watching>> = Rc::default();
+    let retry_at: Rc<Cell<Option<std::time::Instant>>> = Rc::default();
+    let start = {
+        let watching = watching.clone();
+        Rc::new(move || {
+            if watching.borrow().is_some() {
+                return;
+            }
+            let (sender, lines) = std::sync::mpsc::channel();
+            let args: Vec<String> = crate::model::WIDGETS_WATCH
+                .iter()
+                .map(|arg| arg.to_string())
+                .collect();
+            if let Ok(child) = crate::api::spawn_lines(&args, sender) {
+                *watching.borrow_mut() = Some((child, lines));
+            }
+        })
+    };
+    let stop = {
+        let watching = watching.clone();
+        Rc::new(move || {
+            if let Some((mut child, _)) = watching.borrow_mut().take() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        })
+    };
+    {
+        let start = start.clone();
+        root.connect_map(move |_| start());
+    }
+    {
+        let stop = stop.clone();
+        root.connect_unmap(move |_| stop());
+    }
+    let root_weak = root.downgrade();
+    glib::timeout_add_local(Duration::from_millis(500), move || {
+        let Some(root) = root_weak.upgrade() else {
+            stop();
+            return glib::ControlFlow::Break;
+        };
+        let mut changed = false;
+        let mut ended = false;
+        if let Some((_, lines)) = watching.borrow().as_ref() {
+            loop {
+                match lines.try_recv() {
+                    // The first line lists the widgets the page has just read.
+                    Ok(Ok(line)) => {
+                        changed |= matches!(
+                            crate::model::WidgetChange::read(&line),
+                            Some(
+                                crate::model::WidgetChange::Placed(_)
+                                    | crate::model::WidgetChange::Removed(_)
+                            )
+                        )
+                    }
+                    Ok(Err(_)) => {}
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        ended = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if ended {
+            stop();
+            retry_at.set(Some(std::time::Instant::now() + WIDGETS_RETRY));
+        }
+        if root.is_mapped() && watching.borrow().is_none() {
+            match retry_at.get() {
+                Some(at) if std::time::Instant::now() < at => {}
+                _ => {
+                    retry_at.set(None);
+                    start();
+                }
+            }
+        }
+        if changed {
+            if let Some(reload) = reload.borrow().clone() {
+                reload();
+            }
+        }
+        glib::ControlFlow::Continue
+    });
 }

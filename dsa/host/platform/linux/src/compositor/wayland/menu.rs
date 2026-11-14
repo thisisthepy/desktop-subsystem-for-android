@@ -264,6 +264,12 @@ impl State {
 
     /// Input on the X11 window menu, or Alt+Space in an X11 picture-in-picture window.
     pub fn x11_menu_input(&mut self, input: MenuInput) {
+        // The menu's X11 window shows a widget's menu too, on a desktop where widgets are
+        // X11 windows.
+        if self.widget_menu_is_x11() {
+            self.x11_widget_menu_input(input);
+            return;
+        }
         let serial = self.serial;
         match input {
             MenuInput::Open { task_id } => self.open_x11_menu(task_id),

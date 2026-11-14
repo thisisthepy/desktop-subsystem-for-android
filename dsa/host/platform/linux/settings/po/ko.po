@@ -507,8 +507,8 @@ msgstr "{0}을(를) 중지했습니다."
 msgid "On your desktop"
 msgstr "바탕 화면에 있는 위젯"
 
-msgid "Place the widgets your Android apps offer on your desktop. Each widget gets a window of its own.\nDrag the band along its top to move it, and its edges to resize it.\nRight-click a widget to resize or remove it. Android starts when you open this page."
-msgstr "Android 앱이 제공하는 위젯을 바탕 화면에 놓습니다. 위젯마다 자기 창이 생깁니다.\n위쪽 띠를 끌어 옮기고, 가장자리를 끌어 크기를 바꿉니다.\n위젯을 오른쪽 단추로 누르면 크기를 바꾸거나 제거합니다. 이 페이지를 열면 Android가 시작됩니다."
+msgid "Place the widgets your Android apps offer on your desktop. Each widget gets a window of its own, below your other windows.\nPress and hold a widget to edit it: drag it to move it, and drag its handles to resize it.\nRight-click a widget for its settings, its sizes and Remove. Android starts when you open this page."
+msgstr "Android 앱이 제공하는 위젯을 바탕 화면에 놓습니다. 위젯마다 다른 창 아래에 자기 창이 생깁니다.\n위젯을 길게 누르면 편집할 수 있습니다. 끌어서 옮기고, 손잡이를 끌어 크기를 바꿉니다.\n위젯을 마우스 오른쪽 단추로 누르면 위젯 설정, 크기, 제거가 나옵니다. 이 페이지를 열면 Android가 시작됩니다."
 
 msgid "Widgets your apps offer"
 msgstr "앱이 제공하는 위젯"

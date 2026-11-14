@@ -780,6 +780,8 @@ impl AppWindow {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WidgetOffer {
     pub provider: String,
+    /// The package of the app that offers it, whose icon stands in for a missing preview.
+    pub package: String,
     pub label: String,
     pub app: String,
     pub preview_png: Vec<u8>,
@@ -828,6 +830,18 @@ impl Widgets {
                 .iter()
                 .map(|p| WidgetOffer {
                     provider: text(p, "provider"),
+                    package: {
+                        let package = text(p, "package");
+                        if package.is_empty() {
+                            text(p, "provider")
+                                .split('/')
+                                .next()
+                                .unwrap_or_default()
+                                .to_string()
+                        } else {
+                            package
+                        }
+                    },
                     label: text(p, "label"),
                     app: text(p, "app"),
                     preview_png: base64_decode(p["preview_png"].as_str().unwrap_or_default()),
@@ -842,7 +856,65 @@ impl Widgets {
                 .collect(),
         }
     }
+
+    /// Applies a change `dsa widgets watch` reported to the placed widgets. The widgets on
+    /// offer stay as they were read.
+    pub fn apply(&mut self, change: WidgetChange) {
+        match change {
+            WidgetChange::All(placed) => self.placed = placed,
+            WidgetChange::Placed(widget) => {
+                match self.placed.iter_mut().find(|w| w.id == widget.id) {
+                    Some(shown) => *shown = widget,
+                    None => {
+                        self.placed.push(widget);
+                        self.placed.sort_by_key(|w| w.id);
+                    }
+                }
+            }
+            WidgetChange::Removed(id) => self.placed.retain(|w| w.id != id),
+        }
+    }
 }
+
+/// A change to the placed widgets, as `dsa widgets watch --json` reports it: from this page,
+/// a widget's own menu on the desktop, or `dsa`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WidgetChange {
+    /// The widgets placed now, all of them.
+    All(Vec<PlacedWidget>),
+    /// A widget was placed, or described again (moved or resized).
+    Placed(PlacedWidget),
+    Removed(i64),
+}
+
+impl WidgetChange {
+    /// The change one line of `dsa widgets watch --json` reports; `None` for any other line.
+    pub fn read(line: &str) -> Option<WidgetChange> {
+        let json: Value = serde_json::from_str(line).ok()?;
+        match json["event"].as_str()? {
+            "widgets" => Some(WidgetChange::All(
+                items(&json, "widgets")
+                    .iter()
+                    .map(PlacedWidget::read)
+                    .collect(),
+            )),
+            "placed" if json["widget"].is_object() => {
+                Some(WidgetChange::Placed(PlacedWidget::read(&json["widget"])))
+            }
+            "removed" => Some(WidgetChange::Removed(signed(&json, "id"))),
+            _ => None,
+        }
+    }
+}
+
+/// The name an app's icon has in the desktop's icon theme, where the compositor keeps it
+/// beside the app's launcher entry: `dsa-` and its package.
+pub fn app_icon_name(package: &str) -> String {
+    format!("dsa-{package}")
+}
+
+/// The arguments of the watch of the placed widgets.
+pub const WIDGETS_WATCH: [&str; 3] = ["widgets", "watch", "--json"];
 
 /// An app that keeps running in the background, with the notification it keeps shown.
 #[derive(Debug, Clone, PartialEq, Eq)]
