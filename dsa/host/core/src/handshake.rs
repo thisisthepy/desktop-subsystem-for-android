@@ -41,6 +41,11 @@ impl Handshake for ControlHandshake {
                     ..
                 }
                 | HandshakeError::Transport(_) => Refusal::NotTheGuest(error.to_string()),
+                HandshakeError::Rejected {
+                    reason:
+                        RejectReason::ProtocolVersionMismatch | RejectReason::SchemaHashMismatch,
+                    ..
+                } => Refusal::OtherRelease(error.to_string()),
                 HandshakeError::Rejected { .. } | HandshakeError::Malformed(_) => {
                     Refusal::Incompatible(error.to_string())
                 }
