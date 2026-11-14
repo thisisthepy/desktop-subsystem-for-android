@@ -33,6 +33,11 @@ pub struct ProcessInfo {
     pub account: String,
     pub working_set_kb: u64,
     pub private_kb: u64,
+    /// Of `working_set_kb`, the pages other processes may share: the working set less the
+    /// private working set (what Task Manager's "Memory" column shows). A VM's memory process
+    /// keeps the guest's memory as private pages and maps no file but the disks it maps
+    /// directly (virtual persistent memory), so for it these are those disks' file pages.
+    pub shared_working_set_kb: u64,
 }
 
 fn file_name(image: &str) -> &str {
@@ -84,11 +89,13 @@ pub fn select(
     let mut found: Vec<HostProcessMemory> = processes
         .iter()
         .filter_map(|p| {
+            let role = role_of(p, user_sid, vm_id)?;
             Some(HostProcessMemory {
-                role: role_of(p, user_sid, vm_id)?,
+                role,
                 pid: p.pid,
                 working_set_kb: p.working_set_kb,
                 private_kb: p.private_kb,
+                mapped_kb: mapped_kb(role, p),
             })
         })
         .collect();
@@ -96,14 +103,37 @@ pub fn select(
     found
 }
 
+/// The pages of the disk files a process of `role` maps directly, in KiB: the shared part of
+/// a VM's working set ([`ProcessInfo::shared_working_set_kb`]), and 0 for the window
+/// processes, whose shared pages are program files and memory shared with other processes,
+/// part of what they cost.
+pub fn mapped_kb(role: HostRole, process: &ProcessInfo) -> u64 {
+    match role {
+        HostRole::Vm => process.shared_working_set_kb.min(process.working_set_kb),
+        _ => 0,
+    }
+}
+
 /// The IDs of the processes of the VM `vm_id` (its `vmmem` process), from the system's
 /// process list.
 #[cfg(windows)]
 pub fn vm_processes(vm_id: &str) -> std::io::Result<Vec<u32>> {
+    Ok(vm_memory(vm_id)?.iter().map(|p| p.pid).collect())
+}
+
+/// The working set of the process `pid` and its shared part ([`mapped_kb`] for a VM's memory
+/// process), in KiB; `None` when it cannot be read.
+#[cfg(windows)]
+pub fn shared_working_set(pid: u32) -> Option<(u64, u64)> {
+    system::shared_working_set(pid)
+}
+
+/// The processes of the VM `vm_id` (its `vmmem` process), measured.
+#[cfg(windows)]
+pub fn vm_memory(vm_id: &str) -> std::io::Result<Vec<ProcessInfo>> {
     Ok(system::processes()?
-        .iter()
+        .into_iter()
         .filter(|p| role_of(p, "", Some(vm_id)) == Some(HostRole::Vm))
-        .map(|p| p.pid)
         .collect())
 }
 
@@ -138,6 +168,7 @@ mod system {
     };
     use windows_sys::Win32::System::ProcessStatus::{
         K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS, PROCESS_MEMORY_COUNTERS_EX,
+        PROCESS_MEMORY_COUNTERS_EX2,
     };
     use windows_sys::Win32::System::Threading::{
         OpenProcess, OpenProcessToken, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
@@ -250,6 +281,34 @@ mod system {
         } else {
             String::new()
         };
+        let (working_set, private, private_working_set) = counters(&process)?;
+        Some(ProcessInfo {
+            pid,
+            image,
+            account,
+            working_set_kb: working_set / 1024,
+            private_kb: private / 1024,
+            shared_working_set_kb: private_working_set
+                .map_or(0, |own| working_set.saturating_sub(own) / 1024),
+        })
+    }
+
+    /// The working set, the private commit and, where Windows counts it (Windows 10 1809
+    /// and later), the private working set of the process, in bytes.
+    fn counters(process: &OwnedHandle) -> Option<(u64, u64, Option<u64>)> {
+        let mut counters = PROCESS_MEMORY_COUNTERS_EX2 {
+            cb: std::mem::size_of::<PROCESS_MEMORY_COUNTERS_EX2>() as u32,
+            ..Default::default()
+        };
+        let counters_ptr = std::ptr::addr_of_mut!(counters).cast::<PROCESS_MEMORY_COUNTERS>();
+        // SAFETY: the counters' size is passed with them.
+        if unsafe { K32GetProcessMemoryInfo(process.0, counters_ptr, counters.cb) } != 0 {
+            return Some((
+                counters.WorkingSetSize as u64,
+                counters.PrivateUsage as u64,
+                Some(counters.PrivateWorkingSetSize as u64),
+            ));
+        }
         // SAFETY: plain counters, zero until filled.
         let mut counters: PROCESS_MEMORY_COUNTERS_EX = unsafe { std::mem::zeroed() };
         counters.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS_EX>() as u32;
@@ -258,13 +317,27 @@ mod system {
         if unsafe { K32GetProcessMemoryInfo(process.0, counters_ptr, counters.cb) } == 0 {
             return None;
         }
-        Some(ProcessInfo {
-            pid,
-            image,
-            account,
-            working_set_kb: counters.WorkingSetSize as u64 / 1024,
-            private_kb: counters.PrivateUsage as u64 / 1024,
-        })
+        Some((
+            counters.WorkingSetSize as u64,
+            counters.PrivateUsage as u64,
+            None,
+        ))
+    }
+
+    /// The working set and its shared part of the process `pid`, in KiB.
+    pub fn shared_working_set(pid: u32) -> Option<(u64, u64)> {
+        // SAFETY: opening a process by ID for queries only; closed by OwnedHandle.
+        let mut handle: HANDLE = unsafe { OpenProcess(ACCESS, 0, pid) };
+        if handle.is_null() {
+            // SAFETY: as above.
+            handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+        }
+        if handle.is_null() {
+            return None;
+        }
+        let process = OwnedHandle(handle);
+        let (working_set, _, own) = counters(&process)?;
+        Some((working_set / 1024, working_set.saturating_sub(own?) / 1024))
     }
 
     /// Every process that may be one of a user's Android, measured.

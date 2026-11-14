@@ -19,7 +19,36 @@ fn process(pid: u32, image: &str, account: &str, mib: u64) -> ProcessInfo {
         account: account.into(),
         working_set_kb: mib * 1024,
         private_kb: mib * 512,
+        shared_working_set_kb: 0,
     }
+}
+
+#[test]
+fn nfr1_the_vms_mapped_disk_pages_are_its_shared_working_set() {
+    // As measured on a direct-mapped VM: 1336 MiB resident, 478 of them pages of the disks.
+    let mut vmmem = process(4, "vmmemDSA", &format!("NT VIRTUAL MACHINE\\{VM}"), 1336);
+    vmmem.shared_working_set_kb = 478 * 1024;
+    let mut wm = process(20, WINDOW_MANAGER, USER, 60);
+    wm.shared_working_set_kb = 30 * 1024;
+    let found = select(&[vmmem, wm], USER, Some(VM));
+    assert_eq!(found[0].role, HostRole::Vm);
+    assert_eq!(found[0].mapped_kb, 478 * 1024);
+    assert_eq!(found[0].own_kb(), (1336 - 478) * 1024);
+    // A window process's shared pages are its program files and shared memory, which it
+    // costs: none of them is a mapped disk.
+    assert_eq!(found[1].role, HostRole::WindowManager);
+    assert_eq!(found[1].mapped_kb, 0);
+}
+
+#[test]
+fn nfr1_the_mapped_disk_pages_never_exceed_the_working_set() {
+    // Two counters read at once may disagree for a moment.
+    let mut vmmem = process(4, "vmmemDSA", &format!("NT VIRTUAL MACHINE\\{VM}"), 100);
+    vmmem.shared_working_set_kb = 200 * 1024;
+    assert_eq!(
+        dsa_host_windows::host_memory::mapped_kb(HostRole::Vm, &vmmem),
+        100 * 1024
+    );
 }
 
 #[test]

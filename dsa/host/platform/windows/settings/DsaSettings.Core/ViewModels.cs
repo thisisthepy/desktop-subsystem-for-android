@@ -703,7 +703,23 @@ public sealed partial class MemoryViewModel : ObservableObject
     public MemoryReport? Report => _report;
     public string Error => _error ?? "";
     public bool HasError => _error is not null;
-    public string HostTotal => Format.Size(_report?.HostTotalKb ?? 0);
+    /// <summary>What the user's Android holds on the host for itself: the processes' working sets
+    /// without the pages of the disk files the VM maps directly, which Windows drops without
+    /// writing anything.</summary>
+    public string HostTotal => Format.Size(HostOwnKb);
+
+    private ulong HostOwnKb
+    {
+        get
+        {
+            if (_report is not { } report)
+            {
+                return 0;
+            }
+            var mapped = report.Host.Aggregate(0UL, (sum, p) => sum + Math.Min(p.MappedKb, p.WorkingSetKb));
+            return report.HostTotalKb - Math.Min(mapped, report.HostTotalKb);
+        }
+    }
     public bool HostRunning => _report is { Host.Count: > 0 };
     /// <summary>Whether the report says no host process of the user's Android runs.</summary>
     public bool HostNotRunning => _report is not null && !HostRunning;
@@ -725,7 +741,7 @@ public sealed partial class MemoryViewModel : ObservableObject
         .Select(p => new MemoryRow(
             _text.Get($"Role_{p.Role}"),
             string.Format(CultureInfo.CurrentCulture, _text.Get("Memory_ProcessDetail"), p.Pid, Format.Size(p.PrivateKb)),
-            Format.Size(p.WorkingSetKb)))
+            Format.Size(p.OwnKb)))
         .ToList();
 
     /// <summary>Android's breakdown: the apps and the system, the caches, the kernel's

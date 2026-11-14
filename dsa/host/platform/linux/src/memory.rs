@@ -68,12 +68,37 @@ pub fn process(pid: u32, role: HostRole) -> Option<HostProcessMemory> {
             .and_then(|text| private_kb(&text))
             .unwrap_or(working_set_kb)
     };
+    // A crosvm started with `--pmem` maps the direct-mapped disks' files; the guest's memory
+    // is a memory file, counted as shared memory, not as a file's.
+    let with_disks = role == HostRole::Vm
+        && std::fs::read(format!("{dir}/cmdline")).is_ok_and(|line| maps_disks(&line));
+    let mapped_kb = if with_disks {
+        mapped_file_kb(&status).min(working_set_kb)
+    } else {
+        0
+    };
     Some(HostProcessMemory {
         role,
         pid,
         working_set_kb,
         private_kb: private,
+        mapped_kb,
     })
+}
+
+/// The resident pages a process maps from files (`RssFile` of a `/proc/<pid>/status`), in
+/// KiB: for a crosvm process that maps the direct-mapped disks, their pages, and its own
+/// program files, a few MiB.
+pub fn mapped_file_kb(status: &str) -> u64 {
+    kb_field(status, "RssFile:").unwrap_or(0)
+}
+
+/// Whether a crosvm command line (`/proc/<pid>/cmdline`, its words NUL-separated) attaches a
+/// disk as persistent memory.
+pub fn maps_disks(cmdline: &[u8]) -> bool {
+    cmdline
+        .split(|&b| b == 0)
+        .any(|word| word == b"--pmem" || word.starts_with(b"--pmem="))
 }
 
 /// [`HostMemory`] from `/proc`.
@@ -136,6 +161,20 @@ mod tests {
         assert_eq!(window_role("dsa-compositor"), Some(HostRole::WindowManager));
         assert_eq!(window_role("dsa-gfx"), Some(HostRole::Renderer));
         assert_eq!(window_role("bash"), None);
+    }
+
+    #[test]
+    fn nfr1_the_pages_of_the_disks_crosvm_maps_are_told_apart() {
+        let status = "VmRSS:\t  900000 kB\nRssAnon:\t 1000 kB\nRssFile:\t  450000 kB\n\
+                      RssShmem:\t  449000 kB\n";
+        assert_eq!(mapped_file_kb(status), 450_000);
+        assert_eq!(mapped_file_kb("VmRSS:\t 5 kB\n"), 0);
+        let mapped = b"crosvm\0run\0--pmem\0path=/var/lib/dsa/direct-mapped/a.img,ro=true\0";
+        assert!(maps_disks(mapped));
+        assert!(maps_disks(b"crosvm\0run\0--pmem=path=/x.img\0"));
+        assert!(!maps_disks(b"crosvm\0run\0--block\0path=/x.img,ro=true\0"));
+        // A path that merely names it is not the option.
+        assert!(!maps_disks(b"crosvm\0run\0--block\0path=/--pmem.img\0"));
     }
 
     #[test]

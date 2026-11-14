@@ -131,6 +131,23 @@ public class CliParityTests
     }
 
     [Fact]
+    public async Task Nfr1_memory_page_leaves_out_the_disk_pages_the_vm_maps()
+    {
+        // 1336 MiB resident, 478 MiB of them pages of the directly mapped disks.
+        var cli = new FakeCli().Answer("memory --json",
+            "{\"host\":[{\"role\":\"vm\",\"pid\":10,\"working_set_kb\":1368064,\"private_kb\":1000000," +
+            "\"mapped_kb\":489472},{\"role\":\"window manager\",\"pid\":20,\"working_set_kb\":40960," +
+            "\"private_kb\":30000}],\"host_total_kb\":1409024,\"host_mapped_kb\":489472," +
+            "\"guest\":{\"mem_total_kb\":2097152,\"top_processes\":[]}}");
+        var vm = new MemoryViewModel(new DsaService(cli), new KeyText());
+        await vm.RefreshAsync();
+        Assert.Equal("858.0 MB", vm.VmSize);
+        Assert.Equal("898.0 MB", vm.HostTotal);
+        Assert.Equal("858.0 MB", vm.HostRows[0].Size);
+        Assert.Equal("40.0 MB", vm.HostRows[1].Size);
+    }
+
+    [Fact]
     public async Task Fr17_memory_page_without_a_kernel_report_shows_no_kernel_rows()
     {
         var cli = new FakeCli().Answer("memory --json",

@@ -92,9 +92,14 @@ function Get-CorePercent([double]$CpuSecondsBefore, [double]$CpuSecondsAfter, [d
 # figures. `$ServiceKb` is $null when the service could not be read.
 function Get-IdleMemorySummary($Memory, $ServiceKb) {
     $roles = @{}
+    $mappedKb = 0
     foreach ($p in @($Memory.host)) {
         if (-not $roles.ContainsKey($p.role)) { $roles[$p.role] = 0 }
         $roles[$p.role] += [double]$p.working_set_kb
+        # Pages of the disk files the VM maps directly, part of its working set; absent from a
+        # service that does not count them.
+        $mapped = $p.PSObject.Properties['mapped_kb']
+        if ($null -ne $mapped -and $null -ne $mapped.Value) { $mappedKb += [double]$mapped.Value }
     }
     $vmKb = if ($roles.ContainsKey('vm')) { $roles['vm'] } else { $null }
     $windowsKb = 0
@@ -105,6 +110,7 @@ function Get-IdleMemorySummary($Memory, $ServiceKb) {
     [ordered]@{
         guest_total_pss_mib = if ($null -ne $guestPssKb) { ConvertTo-Mib $guestPssKb } else { $null }
         vm_working_set_mib = if ($null -ne $vmKb) { ConvertTo-Mib $vmKb } else { $null }
+        vm_mapped_disk_pages_mib = ConvertTo-Mib $mappedKb
         window_processes_mib = ConvertTo-Mib $windowsKb
         service_working_set_mib = if ($null -ne $ServiceKb) { ConvertTo-Mib $ServiceKb } else { $null }
         total_mb = [math]::Round($totalKb * 1024 / 1e6, 1)

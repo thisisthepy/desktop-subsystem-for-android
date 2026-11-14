@@ -3242,8 +3242,11 @@ pub fn memory_json(memory: &MemorySnapshot) -> Value {
             "pid": p.pid,
             "working_set_kb": p.working_set_kb,
             "private_kb": p.private_kb,
+            "mapped_kb": p.mapped_kb,
         })).collect::<Vec<_>>(),
         "host_total_kb": memory.host_total_kb(),
+        "host_mapped_kb": memory.host_mapped_kb(),
+        "host_own_kb": memory.host_own_kb(),
         "vm_beyond_guest_kb": memory.vm_beyond_guest_kb(),
     })
 }

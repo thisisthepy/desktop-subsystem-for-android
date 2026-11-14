@@ -138,9 +138,20 @@ pub fn host_rows(memory: &Memory) -> Vec<MemoryRow> {
                 "Process {0}, {1} private",
                 &[&p.pid.to_string(), &size_kb(p.private_kb)],
             );
-            row(label, detail, p.working_set_kb)
+            row(label, detail, p.own_kb())
         })
         .collect()
+}
+
+/// What the user's Android holds on the host for itself: every process's working set without
+/// the pages of the disk files the VM maps directly, which the host drops without writing.
+pub fn host_own_kb(memory: &Memory) -> u64 {
+    let mapped: u64 = memory
+        .host
+        .iter()
+        .map(|p| p.mapped_kb.min(p.working_set_kb))
+        .sum();
+    memory.host_total_kb.saturating_sub(mapped)
 }
 
 /// Android's breakdown: the apps and the system, the caches, the kernel's reclaimable caches,
@@ -258,14 +269,15 @@ pub fn process_rows(guest: &GuestMemory) -> Vec<MemoryRow> {
         .collect()
 }
 
-/// What the VM holds on the host now, or `None` without a VM.
+/// What the VM holds on the host now for itself (without the pages of the disk files it maps
+/// directly), or `None` without a VM.
 pub fn vm_size_kb(memory: &Memory) -> Option<u64> {
     let vm: Vec<_> = memory
         .host
         .iter()
         .filter(|p| p.role == HostRole::Vm)
         .collect();
-    (!vm.is_empty()).then(|| vm.iter().map(|p| p.working_set_kb).sum())
+    (!vm.is_empty()).then(|| vm.iter().map(|p| p.own_kb()).sum())
 }
 
 /// How full the guest's memory is, from 0 to 1.
