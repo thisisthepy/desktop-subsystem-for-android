@@ -13,8 +13,15 @@
 # takes (framework_lock.py outputs).
 #
 # It runs by hand, and when the lock or the patches change on develop. Each build's compiler
-# cache is kept between runs, also when a run fails or times out, so a run that stops partway
-# makes the next one shorter.
+# cache is kept between runs as an artifact of the run (ccache-artifact.sh in
+# .github/scripts/framework says why not in the Actions cache), also when a run fails or times
+# out, so a run that stops partway makes the next one shorter. With its cache a build takes
+# about 20 minutes; without it, up to two and a half hours.
+#
+# The Development build needs only the newest Android's x86_64 files, and takes them as soon as
+# that job has passed, while the others still run (release-image.yml). So the newest Android
+# comes first in the matrix, and x86_64 before arm64, which starts that job first when runners
+# are short.
 
 name: Framework build
 
@@ -62,7 +69,8 @@ jobs:
           ONLY_ANDROID: ${{ inputs.android }}
           ONLY_ARCH: ${{ inputs.arch }}
         run: |
-          all="$(uv run dsa/guest/framework/framework_lock.py versions)"
+          # The newest Android first, so its jobs start first.
+          all="$(uv run dsa/guest/framework/framework_lock.py versions | jq -c 'sort_by(ltrimstr("android") | tonumber) | reverse')"
           if [[ -n "$ONLY_ANDROID" ]]; then
             echo "$all" | jq -e --arg v "$ONLY_ANDROID" 'index($v) != null' >/dev/null \
               || { echo "::error::the lock has no $ONLY_ANDROID; it has $all"; exit 1; }
@@ -100,7 +108,7 @@ jobs:
     timeout-minutes: 355
     permissions:
       contents: read
-      # Deletes the compiler caches the new one replaces.
+      # Reads the compiler caches earlier runs kept, and deletes the ones the new one replaces.
       actions: write
     strategy:
       fail-fast: false
@@ -132,13 +140,25 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "the framework $version for ${{ matrix.arch }}"
 
+      # The newest one this branch or develop kept, whatever lock it was built from: ccache
+      # knows each object by its own source and flags, so after a lock or patch change it still
+      # hits on everything else (95 % after the lock change of 2026-11-13).
       - name: Restore the compiler cache
+        id: ccache
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          .github/scripts/framework/ccache-artifact.sh restore "framework-ccache-${{ matrix.android }}-${{ matrix.arch }}" \
+            "$CCACHE_DIR" "$DSA_TRANSLATOR_WORK/ccache-download"
+
+      # Runs before the artifacts kept their caches in the Actions cache; one may still be there.
+      - name: Restore the compiler cache from the Actions cache
+        if: steps.ccache.outputs.found != 'true'
         uses: actions/cache/restore@v4
         with:
           path: /tmp/dsa-ccache
           key: framework-ccache-${{ matrix.android }}-${{ matrix.arch }}-${{ hashFiles('dsa/guest/framework/framework-lock.json') }}-${{ github.run_id }}
           restore-keys: |
-            framework-ccache-${{ matrix.android }}-${{ matrix.arch }}-${{ hashFiles('dsa/guest/framework/framework-lock.json') }}-
             framework-ccache-${{ matrix.android }}-${{ matrix.arch }}-
 
       - name: Fetch the pinned source
@@ -161,22 +181,37 @@ jobs:
           du -sh "$DSA_TRANSLATOR_WORK/aosp/out"
           df -h / /mnt
 
-      - name: Keep the compiler cache
-        if: always() && steps.pins.outcome == 'success'
-        uses: actions/cache/save@v4
-        with:
-          path: /tmp/dsa-ccache
-          key: framework-ccache-${{ matrix.android }}-${{ matrix.arch }}-${{ hashFiles('dsa/guest/framework/framework-lock.json') }}-${{ github.run_id }}
+      # Kept whenever the build ran, also when it failed, timed out or was cancelled, as what it
+      # compiled is still good. Not when it never ran: the cache would hold nothing new, and an
+      # empty one would replace a full one.
+      - name: Pack the compiler cache
+        id: pack
+        if: always() && contains(fromJSON('["success", "failure", "cancelled"]'), steps.build.outcome)
+        run: .github/scripts/framework/ccache-artifact.sh pack "$CCACHE_DIR" "$DSA_TRANSLATOR_WORK/ccache-upload/ccache.tar"
 
-      # The entry just saved holds the one it was restored from and what this run added, so
-      # the older entries of this version and architecture are never restored again. Left in
-      # place they push the repository past its cache limit, and GitHub then evicts the
-      # caches read least recently, these among them.
+      - name: Keep the compiler cache
+        id: keep-ccache
+        if: always() && steps.pack.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: framework-ccache-${{ matrix.android }}-${{ matrix.arch }}
+          path: ${{ env.DSA_TRANSLATOR_WORK }}/ccache-upload/ccache.tar
+          if-no-files-found: error
+          # ccache compresses every entry itself.
+          compression-level: 0
+          # A re-run of the job replaces what its first attempt kept.
+          overwrite: true
+          # Develop's is replaced by the next run's (the step after this one); a branch's lasts
+          # a week.
+          retention-days: ${{ github.ref == 'refs/heads/develop' && 90 || 7 }}
+
+      # The artifact just kept holds the one it was restored from and what this run added, so
+      # the older ones of this version and architecture are never restored again.
       - name: Delete the compiler caches it replaces
-        if: always() && steps.pins.outcome == 'success' && github.ref == 'refs/heads/develop'
+        if: always() && steps.keep-ccache.outcome == 'success' && github.ref == 'refs/heads/develop'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: .github/scripts/cache/prune.sh superseded "framework-ccache-${{ matrix.android }}-${{ matrix.arch }}-" "framework-ccache-${{ matrix.android }}-${{ matrix.arch }}-${{ hashFiles('dsa/guest/framework/framework-lock.json') }}-${{ github.run_id }}"
+        run: .github/scripts/framework/ccache-artifact.sh prune "framework-ccache-${{ matrix.android }}-${{ matrix.arch }}" "${{ steps.keep-ccache.outputs.artifact-id }}"
 
       - name: Collect the files the image takes
         id: collect
