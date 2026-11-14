@@ -42,11 +42,12 @@ class SystemBarAppearancesTest {
     }
 
     @Test
-    fun fr22_an_app_that_never_asked_for_light_has_expressed_nothing() {
-        // An app that never calls setSystemBarsAppearance has the flag clear too, so the host
-        // reads the tone from its pixels.
+    fun fr22_an_app_that_leaves_light_clear_gets_light_glyphs_as_on_a_phone() {
+        // FLO's player screen draws its own icons white and never sets the flag: a phone's
+        // status bar draws light icons over it, so the caption's glyphs are light too.
         appearances.report(dark())
-        assertEquals(StatusBarAppearance.UNKNOWN, appearanceOf(1))
+        assertEquals(StatusBarAppearance.DARK, appearanceOf(1))
+        // A task the window manager has not reported yet is still read from its pixels.
         assertEquals(StatusBarAppearance.UNKNOWN, appearanceOf(2))
     }
 

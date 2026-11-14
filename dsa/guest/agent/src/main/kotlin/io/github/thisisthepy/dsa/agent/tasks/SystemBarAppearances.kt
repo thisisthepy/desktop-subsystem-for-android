@@ -39,10 +39,11 @@ data class AppearanceArea(val appearance: Int, val bounds: TaskBounds)
  *
  * A task's appearance is light while the app asks for dark icons on its status bar
  * (APPEARANCE_LIGHT_STATUS_BARS) or caption bar (APPEARANCE_LIGHT_CAPTION_BARS, which an app
- * on a desktop window may set apart; either one set makes the bar light). Once a task has
- * asked for light, clearing it asks for dark. A task that never asked for light has expressed
- * nothing, since an app that never calls setSystemBarsAppearance has the flag clear as well,
- * and stays unknown: the host then reads the tone from the app's pixels.
+ * on a desktop window may set apart; either one set makes the bar light). A task the window
+ * manager reported with both clear is dark, whether or not it ever asked for light: on a phone
+ * the status bar then draws light icons, which is what an app that leaves the flag clear is
+ * designed for (FLO's player screen draws its own icons white and never sets the flag). Only a
+ * task with no report yet is unknown, and the host then reads the tone from its pixels.
  *
  * Thread safe: the window manager reports on a binder thread, and the agent reads the tasks
  * on its own.
@@ -50,19 +51,13 @@ data class AppearanceArea(val appearance: Int, val bounds: TaskBounds)
 class SystemBarAppearances {
     private class Seen {
         var light = false
-        var everLight = false
 
         fun take(light: Boolean) {
             this.light = light
-            if (light) everLight = true
         }
 
         val appearance: StatusBarAppearance
-            get() = when {
-                light -> StatusBarAppearance.LIGHT
-                everLight -> StatusBarAppearance.DARK
-                else -> StatusBarAppearance.UNKNOWN
-            }
+            get() = if (light) StatusBarAppearance.LIGHT else StatusBarAppearance.DARK
     }
 
     private val pending = ArrayDeque<BarsReport>()
