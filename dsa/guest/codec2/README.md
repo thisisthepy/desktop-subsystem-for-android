@@ -37,8 +37,24 @@ Packets go to the host through a queue that a thread of the link's own writes
 decodes on one thread and reads no packet while the guest has not taken its last picture, and
 the app gives the surface's buffers back from the thread that calls `queue()`: when
 `queue()` wrote to the socket itself, each picture waited its full 2 s for a buffer and
-`queue()` took 8 s. A flush drops every picture that arrives before the host's answer without
-waiting for a buffer (`src/output_gate.h`), so the flush returns as soon as the host answers.
+`queue()` took 8 s. When the host reads nothing for a long while, `queue()` waits at most
+0.5 s for room before it reports the stream as failed. A flush takes the place of the packets
+still unsent, so the host answers it without decoding them first, and drops every picture
+that arrives before the host's answer without waiting for a buffer (`src/output_gate.h`). It
+waits 0.25 s at most for that answer; the gate stays closed to the stream before the flush
+until the answer comes. A stop waits 0.3 s at most for a picture that is inside a call to the
+app (`src/bounded_thread.h`). Every call the framework makes returns well within a second, so
+an app that waits for one on its UI thread is never held past Android's input timeout.
+
+The host decodes a stream only from a key frame on, after it opens, after a flush and after a
+size change; it answers each packet before that with a frame that carries no picture, and the
+component finishes that packet's work with no output (counted as "before a key frame").
+
+The thread that reads the host's messages keeps what it uses in a state of its own
+(`src/message_reader.h`). When the app dies, the component's last reference can be the one its
+handler holds, and the component then goes away on that thread, inside the handler; the reader
+used to read its link's freed memory after that, and the HAL aborted. A call to the app that
+fails with `DEAD_OBJECT` stops the stream at once.
 
 The host's pictures wait for a thread of the component's own in a short queue
 (`src/arrival_queue.h`: four pictures, 32 MiB at most). The thread that reads the socket only
@@ -50,7 +66,7 @@ dropped as the thread comes to them.
 
 Every 5 s while a video plays, each decoder logs its numbers (`src/picture_stats.h`): the
 pictures from the host and those shown, each a second; the pictures dropped and why (flushed,
-no buffer came back, not written); and the average time a picture spent queued, waiting for a
+no buffer came back, not written, before a key frame); and the average time a picture spent queued, waiting for a
 buffer and its release fence, being written, and being handed to the framework. The host logs
 its side the same way (`video: AV1 640x360 over 5.0 s: ...` in the window manager's log): the
 packets decoded, the copy out of its GPU, the wait for the guest to take a picture, the send,
@@ -90,8 +106,9 @@ and to surfaces on screen that change partway, as a player and a feed of short v
 - `test.sh` builds and runs the rules on the build machine: the video port's messages against
   the protocol vectors, the copy of a picture into a buffer's planes, the output buffers'
   format, size, crop and allocation failures, the pictures that never go out, the waits a
-  flush ends, the queue of packets to the host, the queue of pictures from it, and the numbers
-  the log reports.
+  flush ends, the queue of packets to the host, the queue of pictures from it, the numbers
+  the log reports, and the link to the host closed from its own reader or while nothing is
+  read.
 
 `make-image.py --codec2 <out>/dsa-codec2` installs it with its init script, VINTF fragment,
 label (`mediacodec`), service label, `media_codecs_c2.xml` and `sepolicy/codec2.cil`.

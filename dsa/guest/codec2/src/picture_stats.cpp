@@ -43,6 +43,9 @@ void PictureStats::dropped(Clock::time_point now, Drop why) {
         case Drop::NotWritten:
             ++mNotWritten;
             break;
+        case Drop::BeforeKeyFrame:
+            ++mBeforeKeyFrame;
+            break;
     }
 }
 
@@ -58,11 +61,12 @@ bool PictureStats::report(Clock::time_point now, size_t waiting, std::string* li
     char text[512];
     const int length = std::snprintf(text, sizeof(text),
                   "over %.1f s: %u pictures from the host (%.1f/s), %u shown (%.1f/s), %u dropped (%u flushed, %u "
-                  "with no buffer, %u not written); average ms: queued %.2f, buffer wait %.2f, write %.2f, hand-off "
-                  "%.2f; %zu waiting",
-                  seconds, mReceived, mReceived / seconds, mShown, mShown / seconds, mFlushed + mNoBuffer + mNotWritten,
-                  mFlushed, mNoBuffer, mNotWritten, average(mTotal.queued), average(mTotal.buffer),
-                  average(mTotal.write), average(mTotal.handOff), waiting);
+                  "with no buffer, %u not written, %u before a key frame); average ms: queued %.2f, buffer wait "
+                  "%.2f, write %.2f, hand-off %.2f; %zu waiting",
+                  seconds, mReceived, mReceived / seconds, mShown, mShown / seconds,
+                  mFlushed + mNoBuffer + mNotWritten + mBeforeKeyFrame, mFlushed, mNoBuffer, mNotWritten,
+                  mBeforeKeyFrame, average(mTotal.queued), average(mTotal.buffer), average(mTotal.write),
+                  average(mTotal.handOff), waiting);
     if (length < 0) {
         return false;
     }
@@ -73,6 +77,7 @@ bool PictureStats::report(Clock::time_point now, size_t waiting, std::string* li
     mFlushed = 0;
     mNoBuffer = 0;
     mNotWritten = 0;
+    mBeforeKeyFrame = 0;
     mTotal = PictureTimes{};
     return true;
 }
