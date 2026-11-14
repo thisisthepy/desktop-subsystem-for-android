@@ -775,13 +775,41 @@ fn fr2_an_agent_from_a_different_protocol_definition_is_refused_and_the_guest_st
         ]
     );
     match &seen[2].reason {
-        Some(StopReason::HandshakeRejected(why)) => {
+        Some(StopReason::GuestFromOtherRelease(why)) => {
             assert!(why.contains("different protocol definition"), "{why}")
         }
-        other => panic!("expected HandshakeRejected, got {other:?}"),
+        other => panic!("expected GuestFromOtherRelease, got {other:?}"),
     }
     assert_eq!(launcher.processes(), 0);
     assert_eq!(agent.recv(Some(WAIT)), Err(TransportError::Closed));
+}
+
+#[test]
+fn fr2_an_agent_from_another_release_is_told_as_an_image_to_update() {
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.start();
+    let mut agent = connector.connect(WAIT).expect("the agent connects");
+    let mut hello = local_hello(Role::Guest, "dsa-channeld old");
+    hello.schema_hash = vec![0x5a; 32];
+    let _ = guest_connect(agent.as_mut(), &hello, &launcher.secret(), WAIT);
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+
+    let reason = session.last_reason().expect("a reason").to_string();
+    let mut lines = reason.lines();
+    let first = lines.next().unwrap_or_default();
+    assert!(
+        first.starts_with("Android's image was made for another release of DSA"),
+        "{reason}"
+    );
+    assert!(first.contains("`dsa update`"), "{reason}");
+    assert!(!first.contains("control.proto"), "{reason}");
+    let details = lines.next().unwrap_or_default();
+    assert!(details.starts_with("details: "), "{reason}");
+    assert!(
+        details.contains("different protocol definition"),
+        "{reason}"
+    );
 }
 
 #[test]
@@ -797,7 +825,7 @@ fn fr2_a_newer_boot_that_is_up_forgets_why_the_one_before_it_stopped() {
     assert!(session.wait_for(SessionState::Stopped, WAIT));
     assert!(matches!(
         session.last_reason(),
-        Some(StopReason::HandshakeRejected(_))
+        Some(StopReason::GuestFromOtherRelease(_))
     ));
 
     // ...and the updated guest boots and connects. Its status shows no stop that is over.

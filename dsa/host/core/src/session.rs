@@ -219,6 +219,11 @@ pub enum StopReason {
     },
     /// The agent connected but the handshake refused it.
     HandshakeRejected(String),
+    /// The agent connected, but it belongs to another DSA release: it speaks another version
+    /// of the control protocol, or one built from another definition. `why` is the
+    /// handshake's account of it. Its image does not fit this host, which is what happens to
+    /// the boot that still runs the image from before an update.
+    GuestFromOtherRelease(String),
     /// The host could not listen for the agent.
     ListenerFailed(String),
     /// The control channel was lost while the session was active.
@@ -254,6 +259,11 @@ impl fmt::Display for StopReason {
             StopReason::HandshakeRejected(why) => {
                 write!(f, "the agent's connection was refused: {why}")
             }
+            StopReason::GuestFromOtherRelease(why) => write!(
+                f,
+                "Android's image was made for another release of DSA, so DSA could not talk                  to it; get the image that matches with `dsa update`
+details: {why}"
+            ),
             StopReason::ListenerFailed(why) => {
                 write!(f, "could not listen for the agent: {why}")
             }
@@ -459,6 +469,10 @@ pub enum Refusal {
     /// The guest's daemon cannot work with this host, for example because it was built
     /// from a different protocol definition. Waiting longer cannot help, so the start fails.
     Incompatible(String),
+    /// The guest's daemon belongs to another DSA release: another protocol version, or a
+    /// protocol built from another definition. Its image does not fit this host, so the
+    /// start fails, as for [`Refusal::Incompatible`].
+    OtherRelease(String),
     /// The connection is not the guest's daemon: it did not prove it knows this boot's
     /// secret, or it broke off. Any app in the guest can open such a connection, so it is
     /// closed and the session goes on waiting for the daemon.
@@ -468,7 +482,9 @@ pub enum Refusal {
 impl fmt::Display for Refusal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Refusal::Incompatible(why) | Refusal::NotTheGuest(why) => f.write_str(why),
+            Refusal::Incompatible(why) | Refusal::OtherRelease(why) | Refusal::NotTheGuest(why) => {
+                f.write_str(why)
+            }
         }
     }
 }
@@ -6162,6 +6178,11 @@ impl Worker {
                         Err(Refusal::Incompatible(why)) => {
                             connection.close();
                             self.stop(StopReason::HandshakeRejected(why));
+                            return;
+                        }
+                        Err(Refusal::OtherRelease(why)) => {
+                            connection.close();
+                            self.stop(StopReason::GuestFromOtherRelease(why));
                             return;
                         }
                     }

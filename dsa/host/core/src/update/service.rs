@@ -29,7 +29,7 @@ use crate::keys::KeyEvent;
 use crate::memory::GuestMemoryReport;
 use crate::print::{PrintEvent, PrintOutcome};
 use crate::session::BackgroundRequest;
-use crate::session::{BootProblem, Session, SessionState};
+use crate::session::{BootProblem, Session, SessionState, StopReason};
 use crate::tasks::{AppSettingsPage, TaskRequest, TaskRequestError, TaskWatch};
 use crate::widgets::{WidgetError, WidgetProvider, WidgetSize};
 use std::sync::mpsc::Receiver;
@@ -758,6 +758,22 @@ impl UserAndroid for UpdatingAndroid {
     fn last_reason(&self) -> Option<String> {
         if self.no_image_yet() {
             return Some(NO_IMAGE_YET.into());
+        }
+        if let Some(StopReason::GuestFromOtherRelease(why)) = self.session.last_reason() {
+            // The boot that still ran the image from before an update cannot talk to the
+            // updated host. Once a newer image is in place, that was a step of the update,
+            // not a fault to act on.
+            let refused = self.image_restart.last_booted();
+            let current = self.store.state().ok().map(|state| state.current.version);
+            if let (Some(refused), Some(current)) = (refused, current) {
+                if refused != current {
+                    return Some(format!(
+                        "during the update, Android {refused} from before it could not talk to \
+                         this DSA, which is expected; this is resolved, and Android starts \
+                         from {current} next\ndetails: {why}"
+                    ));
+                }
+            }
         }
         UserAndroid::last_reason(&*self.session)
     }
