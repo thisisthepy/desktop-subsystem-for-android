@@ -26,6 +26,9 @@ concurrency:
 jobs:
   sync:
     name: Rebuild the release branch and open the pull request
+    # Only the official repository turns develop into its published branch
+    # (.github/scripts/release/official-repository.sh); a fork keeps its develop as it is.
+    if: github.repository == 'thisisthepy/desktop-subsystem-for-android'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

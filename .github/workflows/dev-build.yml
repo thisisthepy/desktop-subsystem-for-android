@@ -29,6 +29,35 @@
 #   gh workflow run dev-build.yml --ref develop
 #   pwsh scripts/install-dev-build.ps1            (the newest successful run)
 #   pwsh scripts/install-dev-build.ps1 -Run <id>
+#
+# In a fork
+#
+# A fork of the repository makes Development builds on its own runners, from its own develop.
+# It finds the runs it builds on (Graphics test, Framework build, Translator build, earlier
+# Development builds) in itself, so each of those has to have passed on the fork's develop
+# once; run them by hand there first (gh workflow run <file> --repo <fork> --ref develop).
+# It still reads what only the official repository publishes: the image releases (an image
+# revision newer than every published one), and the signed image list, which the installer
+# reads and trusts like any installed DSA, so the computer takes the next release as an
+# ordinary update. Nothing a fork runs publishes anything: the Image release, the Site
+# release and the Release sync run in the official repository only
+# (.github/scripts/release/official-repository.sh).
+#
+# It signs with the fork's own repository secrets, under Settings > Secrets and variables >
+# Actions, which must be the official repository's:
+#   DSA_ANDROID_KEYS_1, _2 (and _3 if pack-keys.sh made it)   for the image
+#   DSA_RELEASE_SIGNING_KEY                                  for the image and the installer
+# A missing one fails the run before anything is built, naming it
+# (.github/scripts/release/check-signing-secrets.sh). A different DSA_RELEASE_SIGNING_KEY
+# fails it too: the official image list would not verify with it, and an installed DSA would
+# take neither the image nor the installer.
+#
+# A fork's build installs from a clone of that fork, or with -Repo naming it:
+#   gh workflow run dev-build.yml --repo <owner>/<fork> --ref develop
+#   pwsh scripts/install-dev-build.ps1 -Repo <owner>/<fork>
+# The script checks that the run is that repository's own Development build of its develop,
+# and the installed service then checks the setup file and the image against the keys it
+# already trusts, as for a build of the official repository. Being in a fork earns no trust.
 
 name: Development build
 

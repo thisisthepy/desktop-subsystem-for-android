@@ -824,14 +824,15 @@ jobs:
 
       # The default ARM translator a released x86_64 Android 17 image carries, from the newest
       # release that has one, so the image booted below lays it over its system as a release
-      # does and the overlay check has it to look at.
+      # does and the overlay check has it to look at. Releases are published by the official
+      # repository only, so a fork takes it from there too.
       - name: Download the default ARM translator
         id: translator
         if: matrix.android == '17' && matrix.arch == 'x86_64'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          repo="${{ github.repository }}"
+          repo=thisisthepy/desktop-subsystem-for-android
           for tag in $(gh release list -R "$repo" -L 50 --json tagName -q '.[] | select(.tagName | startswith("android-17") and (endswith("-arm64") | not)) | .tagName'); do
             if gh release view "$tag" -R "$repo" --json assets -q '.assets[].name' | grep -qx 'arm-translation.zip'; then
               echo "default ARM translator from: $tag"
