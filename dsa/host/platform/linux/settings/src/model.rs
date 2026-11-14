@@ -452,6 +452,16 @@ pub struct HostProcess {
     pub pid: u64,
     pub working_set_kb: u64,
     pub private_kb: u64,
+    /// Of `working_set_kb`, the pages of the disk files the VM maps directly: clean file pages
+    /// the host drops without writing anything. 0 from a service that does not count them.
+    pub mapped_kb: u64,
+}
+
+impl HostProcess {
+    /// What the process holds for itself: its working set without `mapped_kb`.
+    pub fn own_kb(&self) -> u64 {
+        self.working_set_kb.saturating_sub(self.mapped_kb)
+    }
 }
 
 /// What some of Android's processes cost, in KiB: their pages in memory, and their share of
@@ -554,6 +564,7 @@ impl Memory {
                     pid: number(p, "pid"),
                     working_set_kb: number(p, "working_set_kb"),
                     private_kb: number(p, "private_kb"),
+                    mapped_kb: number(p, "mapped_kb"),
                 })
             })
             .collect();

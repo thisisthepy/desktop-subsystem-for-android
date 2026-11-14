@@ -246,7 +246,7 @@ pub fn memory(ctx: &Shared) -> gtk::Widget {
                     kernel_rows.clear();
                     process_rows.clear();
                     let Ok(memory) = r else { return };
-                    total_label.set_label(&view::size_kb(memory.host_total_kb));
+                    total_label.set_label(&view::size_kb(view::host_own_kb(&memory)));
                     vm_label.set_label(
                         &match (view::vm_size_kb(&memory), memory.vm_beyond_guest_kb) {
                             (Some(vm), Some(beyond)) => trf(

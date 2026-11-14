@@ -120,6 +120,9 @@ impl HostMemory for MacHostMemory {
                 pid: pid as u32,
                 working_set_kb: resident,
                 private_kb: footprint,
+                // The VM maps no disk directly here: Virtualization.framework has no
+                // persistent memory device.
+                mapped_kb: 0,
             })
         };
         let mut found: Vec<HostProcessMemory> = self

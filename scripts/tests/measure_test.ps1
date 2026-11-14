@@ -36,6 +36,15 @@ Check 'nfr1_under_800_mb_is_within_the_target' $summary.within_target $true
 Check 'nfr1_with_the_service_read_the_figure_is_complete' $summary.complete $true
 Check 'nfr1_the_guest_pss_is_reported' $summary.guest_total_pss_mib 500
 
+Check 'nfr1_a_service_that_does_not_count_mapped_disk_pages_shows_none' $summary.vm_mapped_disk_pages_mib 0
+
+$mapped = [pscustomobject]@{
+    guest = $null
+    host = @([pscustomobject]@{ role = 'vm'; pid = 10; working_set_kb = 1368064; mapped_kb = 489472 })
+    host_total_kb = 1368064
+}
+Check 'nfr1_the_vms_mapped_disk_pages_are_counted_apart' (Get-IdleMemorySummary $mapped 0).vm_mapped_disk_pages_mib 478
+
 $unread = Get-IdleMemorySummary $memory $null
 Check 'nfr1_an_unread_service_makes_the_figure_incomplete' $unread.complete $false
 Check 'nfr1_an_unread_service_is_not_guessed' $unread.service_working_set_mib $null

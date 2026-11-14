@@ -396,7 +396,8 @@ public sealed partial class DsaService
             {
                 if (ParseRole(OptionalString(p, "role")) is { } role)
                 {
-                    host.Add(new HostProcess(role, (uint)Number(p, "pid"), Number(p, "working_set_kb"), Number(p, "private_kb")));
+                    host.Add(new HostProcess(role, (uint)Number(p, "pid"), Number(p, "working_set_kb"), Number(p, "private_kb"),
+                        Number(p, "mapped_kb")));
                 }
             }
         }

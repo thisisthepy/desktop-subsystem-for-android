@@ -1759,6 +1759,7 @@ fn fr17_dsa_memory_json_carries_the_guest_breakdown_and_the_host_processes() {
             pid: 10,
             working_set_kb: 900_000,
             private_kb: 880_000,
+            mapped_kb: 300_000,
         }],
     });
     assert_eq!(json["guest"]["mem_total_kb"], 4 * 1024 * 1024);
@@ -1767,6 +1768,10 @@ fn fr17_dsa_memory_json_carries_the_guest_breakdown_and_the_host_processes() {
     assert_eq!(json["guest"]["top_processes"][0]["name"], "system_server");
     assert_eq!(json["host"][0]["role"], "vm");
     assert_eq!(json["host_total_kb"], 900_000);
+    // The pages of the disks the VM maps directly, apart from what it holds for itself.
+    assert_eq!(json["host"][0]["mapped_kb"], 300_000);
+    assert_eq!(json["host_mapped_kb"], 300_000);
+    assert_eq!(json["host_own_kb"], 600_000);
 }
 
 #[test]

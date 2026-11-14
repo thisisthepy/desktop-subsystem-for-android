@@ -6,13 +6,15 @@ namespace Dsa.Settings.Core;
 /// holds for itself.</summary>
 public sealed partial class MemoryViewModel
 {
-    /// <summary>What the VM holds on the host now (its working set), or empty without a VM.</summary>
+    /// <summary>What the VM holds on the host now for itself (its working set without the pages
+    /// of the disk files it maps directly, which Windows drops without writing), or empty
+    /// without a VM.</summary>
     public string VmSize
     {
         get
         {
             var vm = (_report?.Host ?? Array.Empty<HostProcess>()).Where(p => p.Role == HostRole.Vm).ToList();
-            return vm.Count == 0 ? "" : Format.Size((ulong)vm.Sum(p => (long)p.WorkingSetKb));
+            return vm.Count == 0 ? "" : Format.Size((ulong)vm.Sum(p => (long)p.OwnKb));
         }
     }
 
