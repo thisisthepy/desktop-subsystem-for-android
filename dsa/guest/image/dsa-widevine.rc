@@ -5,29 +5,16 @@
 # erofs image holding the APEX as its one file. The host adds androidboot.dsa.widevine=on to the
 # boot's bootconfig only while that image is on the disk it attaches, with
 # androidboot.dsa.widevine_image saying where to mount it from: "disk" for the file on the disk,
-# which dsa-addons.rc mounts at /mnt/dsa-addons, or "dax" in the host's direct-mapped mode, where
-# the partition table names the image's own bytes (dsa_widevine) on persistent memory.
+# or "dax" in the host's direct-mapped mode, where the partition table names the image's own
+# bytes (dsa_widevine) on persistent memory.
 #
-# apexd activates every APEX it finds in /vendor/apex when init starts it at post-fs-data, once,
-# and checks each one's signature against the key it carries, as for the vendor's own. So the
-# image is laid over /vendor/apex here, at post-fs: after dsa-addons.rc has mounted the disk
-# (init runs the actions of one trigger in the order it read the scripts, which is the order of
-# their names) and before apexd looks. The overlay keeps the vendor's own APEXes beneath it. The
-# APEX's files are labelled as the vendor's APEXes are (context=), its superblock gets a type of
-# its own (fscontext=, sepolicy/widevine.cil), and apexd mounts the APEX's payload with the labels
-# Google's build gave its files, whose types the vendor policy declares (or
-# sepolicy/widevine-hal.cil, where it does not): the module's service runs in hal_drm_widevine
-# and keeps its device certificates in /data/vendor/mediadrm.
-on post-fs && property:ro.boot.dsa.widevine=on && property:ro.boot.dsa.widevine_image=disk
-    mkdir /mnt/dsa-widevine 0755 root root
-    mount erofs /mnt/dsa-addons/widevine.img /mnt/dsa-widevine ro nodev nosuid noexec directio,fscontext=u:object_r:dsa_widevine_fs:s0,context=u:object_r:vendor_apex_file:s0
-
-on post-fs && property:ro.boot.dsa.widevine=on && property:ro.boot.dsa.widevine_image=dax
-    mkdir /mnt/dsa-widevine 0755 root root
-    mount erofs /dev/block/by-name/dsa_widevine /mnt/dsa-widevine ro nodev nosuid noexec dax=always,fscontext=u:object_r:dsa_widevine_fs:s0,context=u:object_r:vendor_apex_file:s0
-
-on post-fs && property:ro.boot.dsa.widevine=on
-    mount overlay overlay /vendor/apex ro nodev noexec lowerdir=/mnt/dsa-widevine:/vendor/apex
+# dsa-widevine-early.rc mounts the image and lays it over /vendor/apex at early-init, before
+# apexd-bootstrap activates the APEXes there: make-image.py splices it into the system's init.rc,
+# the one script read before this one. apexd checks the APEX's signature against the key it
+# carries, as for the vendor's own, and mounts its payload with the labels Google's build gave
+# its files, whose types the vendor policy declares (or sepolicy/widevine-hal.cil, where it does
+# not): the module's service runs in hal_drm_widevine and keeps its device certificates in
+# /data/vendor/mediadrm. This script keeps what happens once /data is there.
 
 # The folder the module keeps its device certificates in, which Android's provisioning fills the
 # first time an app uses Widevine.

@@ -290,16 +290,18 @@ class AndroidKernelConfigTests(unittest.TestCase):
             "dsa-arm-translation.rc": ["/mnt/dsa-addons/arm-translation.img",
                                        "/data/vendor/dsa/arm-translation/system.img",
                                        "/system/etc/dsa/arm-translation/default.img"],
-            "dsa-widevine.rc": ["/mnt/dsa-addons/widevine.img"],
+            # Widevine mounts the add-on disk itself, at a point of its own, before apexd-bootstrap.
+            "dsa-widevine-early.rc": ["/mnt/dsa-widevine-disk/widevine.img"],
         }
         # In the host's direct-mapped mode each add-on image is mounted from its own partition on
         # the persistent memory the add-on disk is then, with DAX, so it is not read into a cache.
         partitions = {"dsa-gapps.rc": "/dev/block/by-name/dsa_gapps",
                       "dsa-arm-translation.rc": "/dev/block/by-name/dsa_arm_translation",
-                      "dsa-widevine.rc": "/dev/block/by-name/dsa_widevine"}
+                      "dsa-widevine-early.rc": "/dev/block/by-name/dsa_widevine"}
         for name, files in images.items():
             mounts = [line.split() for line in (image / name).read_text().splitlines()
-                      if line.strip().startswith("mount erofs ")]
+                      if line.strip().startswith("mount erofs ")
+                      and line.split()[2] != "/dev/block/by-name/dsa_addons"]
             mapped = [words for words in mounts if words[2] == partitions[name]]
             self.assertEqual(len(mapped), 1, name)
             self.assertIn("dax=always", mapped[0][-1].split(","), name)

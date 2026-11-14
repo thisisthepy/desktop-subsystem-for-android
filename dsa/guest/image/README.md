@@ -295,11 +295,16 @@ aapt2 from the Android SDK's build-tools for the system screen overlays.
   `com.google.android.widevine` APEX, unchanged, out of Google's emulator system image of this
   Android version and architecture, and puts it on the add-on disk as `widevine.img`, an erofs
   image whose one file is the APEX. DSA ships none of it. While it is there the host puts
-  `androidboot.dsa.widevine=on` in the bootconfig, and `dsa-widevine.rc` lays the image over
-  `/vendor/apex` at `post-fs`, so `apexd` activates it at `post-fs-data` as a vendor APEX and
-  checks its signature against Google's key. After the user removes it the host says
-  `androidboot.dsa.widevine=off`, and the script removes the device certificates the module kept
-  in `/data/vendor/mediadrm`. `sepolicy/widevine.cil` lets init mount and lay the image over;
+  `androidboot.dsa.widevine=on` in the bootconfig, and the actions of `dsa-widevine-early.rc`
+  mount the image and lay it over `/vendor/apex` at `early-init`, right before
+  `apexd-bootstrap`, which activates it as a vendor APEX and checks its signature against
+  Google's key. On Android 17 that run activates every pre-installed APEX and `apexd` at
+  `post-fs-data` only takes over its mounts, so an APEX laid over later is listed but never
+  activated. Only the system's `init.rc` runs before it, so `make-image.py` splices the actions
+  into `init.rc`'s `early-init` there. The image always labels the module's service
+  (`android.hardware.drm.IDrmFactory/widevine`) in `vendor_service_contexts`. After the user
+  removes it the host says `androidboot.dsa.widevine=off`, and `dsa-widevine.rc` removes the
+  device certificates the module kept in `/data/vendor/mediadrm`. `sepolicy/widevine.cil` lets init mount and lay the image over;
   where the vendor policy does not declare the module's own types (`hal_drm_widevine`,
   `mediadrm_vendor_data_file`), `sepolicy/widevine-hal.cil` declares them, so the image carries
   the policy before anything is installed. `check-image.py` checks both.
