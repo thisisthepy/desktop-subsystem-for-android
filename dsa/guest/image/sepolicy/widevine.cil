@@ -1,9 +1,9 @@
 ; Desktop Subsystem for Android (DSA)
-; Widevine, when the user installed it (dsa-widevine.rc). The image is widevine.img on the user's
-; add-on disk: an erofs image whose one file is Google's com.google.android.widevine APEX,
-; unchanged. init mounts it with its files labelled as the vendor's APEXes are and lays it over
-; /vendor/apex, where apexd finds it at post-fs-data and activates it as a vendor APEX, checking
-; its signature as for the vendor's own. The module's service then runs in hal_drm_widevine and
+; Widevine, when the user installed it (dsa-widevine-early.rc, dsa-widevine.rc). The image is
+; widevine.img on the user's add-on disk: an erofs image whose one file is Google's
+; com.google.android.widevine APEX, unchanged. init mounts it at early-init with its files
+; labelled as the vendor's APEXes are and lays it over /vendor/apex, where apexd-bootstrap finds
+; it and activates it as a vendor APEX, checking its signature as for the vendor's own. The module's service then runs in hal_drm_widevine and
 ; keeps its device certificates in /data/vendor/mediadrm (mediadrm_vendor_data_file): the vendor
 ; policy's types, or widevine-hal.cil's where the vendor policy has none.
 
