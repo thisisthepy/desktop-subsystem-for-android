@@ -84,6 +84,9 @@ git -C $GfxstreamDir clean -fdx
 # Without 0031 that upload never releases the image to the guest, which reads it through an image
 # of its own: on a GPU that compresses what a copy writes (Intel Arc) a video's pictures show
 # rows of green, purple and yellow blocks where they are flat.
+# Without 0032 a YUV ColorBuffer is optimal, and so is the guest's image of it: such a driver may
+# keep the copied planes compressed, and the guest's image still shows blocks of light purple and
+# yellow-green in a video's flat areas.
 # A patch that does not apply stops the fetch.
 $PatchDir = Join-Path $RepoRoot "dsa/graphics/patches"
 $Patches = @(Get-ChildItem -Path $PatchDir -Filter "0001-*.patch") +
@@ -113,7 +116,8 @@ $Patches = @(Get-ChildItem -Path $PatchDir -Filter "0001-*.patch") +
     @(Get-ChildItem -Path $PatchDir -Filter "0028-*.patch") +
     @(Get-ChildItem -Path $PatchDir -Filter "0029-*.patch") +
     @(Get-ChildItem -Path $PatchDir -Filter "0030-*.patch") +
-    @(Get-ChildItem -Path $PatchDir -Filter "0031-*.patch")
+    @(Get-ChildItem -Path $PatchDir -Filter "0031-*.patch") +
+    @(Get-ChildItem -Path $PatchDir -Filter "0032-*.patch")
 foreach ($Patch in $Patches) {
     Write-Host "Applying patch: $($Patch.Name)"
     git -C $GfxstreamDir apply --recount $Patch.FullName

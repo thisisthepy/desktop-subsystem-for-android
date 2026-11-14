@@ -22,6 +22,7 @@ uv run dsa/graphics/test_free_retired_patch.py
 uv run dsa/graphics/test_lazy_staging_patch.py
 uv run dsa/graphics/test_upload_order_patch.py
 uv run dsa/graphics/test_guest_release_patch.py
+uv run dsa/graphics/test_linear_yuv_patch.py
 uv run dsa/graphics/test_stream_buffers_patch.py
 uv run dsa/graphics/test_spare_pages_patch.py
 uv run dsa/graphics/test_color_buffer_refs_patch.py
