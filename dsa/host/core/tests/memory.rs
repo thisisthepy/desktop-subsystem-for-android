@@ -559,7 +559,7 @@ fn nfr1_the_log_line_sums_the_host_and_says_where_the_guests_memory_goes() {
     };
     assert_eq!(
         no_guest.summary_line(),
-        "memory: host 600 MiB (vm 600, window manager 0, graphics renderer 0, 0 app windows 0); \
+        "memory: host 600 MiB (vm 600, window manager 0, graphics renderer 0, 0 app windows 0, settings app 0, service 0); \
          guest has not reported"
     );
 }
