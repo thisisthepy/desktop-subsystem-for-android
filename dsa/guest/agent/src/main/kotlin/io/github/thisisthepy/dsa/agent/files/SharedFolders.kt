@@ -22,7 +22,7 @@ fun interface MediaScan {
  * pictures without the user opening the folder first. A folder that does not show at once is
  * looked for again a few times, since the mount follows the message by a moment.
  *
- * Every method runs on the agent's scheduler thread.
+ * The listing of a folder runs on a thread of its own; everything else runs on the agent's scheduler thread.
  */
 class SharedFolders(
     private val storage: File,
@@ -31,6 +31,13 @@ class SharedFolders(
     private val log: Log,
     private val retryMillis: Long = RETRY_MILLIS,
     private val tries: Int = TRIES,
+    /**
+     * Runs [work] off the agent's thread. Listing a shared folder asks the host's computer,
+     * which answers when it allows the access: a computer that asks its user first holds the
+     * listing as long as the user takes, and the agent's thread, which every request from the
+     * host waits for, must not wait with it.
+     */
+    private val background: (() -> Unit) -> Unit = ::onThreadOfItsOwn,
 ) {
     /** Bumped by each FileSharing, so the looks of an older one stop. */
     private var generation = 0
@@ -53,7 +60,18 @@ class SharedFolders(
 
     private fun look(mine: Int, folder: File, left: Int) {
         if (mine != generation) return
-        val there = folder.isDirectory && (folder.list()?.isNotEmpty() == true)
+        background {
+            val there = try {
+                folder.isDirectory && (folder.list()?.isNotEmpty() == true)
+            } catch (e: Exception) {
+                false
+            }
+            scheduler.post { looked(mine, folder, left, there) }
+        }
+    }
+
+    private fun looked(mine: Int, folder: File, left: Int, there: Boolean) {
+        if (mine != generation) return
         if (there || left <= 1) {
             try {
                 scanner.scan(folder)
@@ -67,6 +85,10 @@ class SharedFolders(
     }
 
     companion object {
+        private fun onThreadOfItsOwn(work: () -> Unit) {
+            Thread(work, "dsa-shared-folder-look").apply { isDaemon = true }.start()
+        }
+
         const val RETRY_MILLIS = 2_000L
         const val TRIES = 15
 
