@@ -548,7 +548,7 @@ fn nfr1_the_log_line_sums_the_host_and_says_where_the_guests_memory_goes() {
     assert_eq!(
         snapshot().summary_line(),
         "memory: host 900 MiB (vm 600, window manager 120, graphics renderer 80, 2 app windows \
-         100); guest 2048/4096 MiB used, cache 910, apps 700, swap 100 (zram 30), processes 440 \
+         100, settings app 0, service 0); guest 2048/4096 MiB used, cache 910, apps 700, swap 100 (zram 30), processes 440 \
          MiB (350 resident, 90 compressed in zram), Google Play services 51 MiB (15 resident, 36 \
          compressed in zram), 42 s ago; free 2048 MiB, 2000 back on the host, 9000 reported since \
          boot"
@@ -953,7 +953,7 @@ fn nfr1_the_log_line_tells_the_mapped_disk_pages_from_what_the_vm_holds() {
     assert!(
         line.starts_with(
             "memory: host 900 MiB (vm 600, window manager 120, graphics renderer 80, 2 app \
-             windows 100); 450 MiB of the vm's are pages of the disk files it maps, which the \
+             windows 100, settings app 0, service 0); 450 MiB of the vm's are pages of the disk files it maps, which the \
              host drops without writing: 450 MiB without them; guest 2048/4096 MiB used"
         ),
         "{line}"
@@ -966,7 +966,7 @@ fn nfr1_dsa_memory_shows_the_mapped_disk_pages_apart_from_private_memory() {
     for part in [
         "Host: 900 MiB in all",
         "450 MiB without the 450 MiB of the disk files the VM maps",
-        "600 MiB resident,    300 MiB private, 450 MiB of it mapped from the disk files",
+        "600 MiB resident,      ? MiB private working set,    300 MiB committed, 450 MiB of it disk file pages",
     ] {
         assert!(text.contains(part), "{part:?} missing from:\n{text}");
     }
