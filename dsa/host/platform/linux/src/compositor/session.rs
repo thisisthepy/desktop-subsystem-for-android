@@ -1410,8 +1410,6 @@ pub fn one_shot(action: &str, package: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn fr25_the_run_as_arm_notices_follow_the_sessions_language() {
         use crate::interface_language::ui_language_in;

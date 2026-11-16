@@ -134,10 +134,13 @@ pub struct PackIcd {
 impl PackIcd {
     /// The manifest's file name, which the loader's driver filters match.
     pub fn file_name(&self) -> String {
-        self.manifest
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
+        // Split on both separators: the manifest path is a Windows path, whichever system
+        // reads it (a host that is not Windows only runs the tests).
+        let path = self.manifest.to_string_lossy();
+        path.rsplit(['\\', '/'])
+            .next()
             .unwrap_or_default()
+            .to_string()
     }
 }
 

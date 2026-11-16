@@ -162,6 +162,7 @@ fn fr7_a_renamed_app_has_its_shortcut_renamed() {
     let pinned = shortcut(&setup, "Clock.lnk");
     let pin = setup.pins[0].join("Clock.lnk");
     let implicit = setup.pins[1].join("abc123").join("Clock.lnk");
+    std::fs::create_dir_all(pin.parent().unwrap()).unwrap();
     std::fs::create_dir_all(implicit.parent().unwrap()).unwrap();
     ShellLinks.write(&pin, &pinned).unwrap();
     ShellLinks.write(&implicit, &pinned).unwrap();

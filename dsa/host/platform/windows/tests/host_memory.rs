@@ -221,10 +221,11 @@ fn nfr1_each_process_reports_its_private_working_set() {
 #[test]
 fn nfr1_the_vms_shared_pages_split_into_sections_and_disk_files() {
     // As in the audit: 2278 MiB resident, of which 115 MiB disk file pages; the sections
-    // have 256 MiB committed and the VM holds 200 MiB of them.
+    // have 200 MiB committed, all of it in the VM's shared working set. The shared pages
+    // beyond what the sections committed are the disk files'.
     let mut vmmem = process(4, "vmmemDSA", &format!("NT VIRTUAL MACHINE\\{VM}"), 2278);
     vmmem.shared_working_set_kb = (115 + 200) * 1024;
-    let found = select(&[vmmem.clone()], USER, Some(VM), 256 * 1024);
+    let found = select(&[vmmem.clone()], USER, Some(VM), 200 * 1024);
     assert_eq!(found[0].section_kb, 200 * 1024);
     assert_eq!(found[0].mapped_kb, 115 * 1024);
     assert_eq!(found[0].own_kb(), (2278 - 315) * 1024);
