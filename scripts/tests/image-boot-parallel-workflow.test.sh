@@ -26,7 +26,7 @@ check media 18 root-certificate-check-logs "Trust a root certificate the host ad
 grep -Fq 'filter: fr28_' <<<"$boot" || { echo "the root certificate check does not run alone"; exit 1; }
 check overlays 18 overlay-check-logs "Lay the ARM translator and Google Play over the booted system"
 check overlays 25 idle-reclaim-measurement "Measure the idle reclaim with Google Play on the booted image"
-check overlays 25 memory-measurement "Measure the memory with Google Play and one app window on the booted image"
+check overlays 34 memory-measurement "Measure the memory with Google Play and one app window on the booted image"
 check dns 14 dns-check-logs "Resolve a name only the host knows on the booted image"
 check graphics 28 graphics-check-results "Run the Vulkan CTS subset and the graphics test apps on the booted image"
 # A real app's window resized while an accessibility client watches it, on its own runner.

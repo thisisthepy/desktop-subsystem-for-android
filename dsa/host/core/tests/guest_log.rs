@@ -724,7 +724,17 @@ fn fr21_the_local_api_saves_the_diagnostics_as_one_zip() {
     let archive = saving.join().unwrap();
     let files = unzip(&archive);
     let names: Vec<_> = files.iter().map(|(n, _)| n.as_str()).collect();
-    assert_eq!(names, ["android/logcat.txt", "summary.txt"]);
+    assert_eq!(
+        names,
+        [
+            "android/logcat.txt",
+            "host/memory.json",
+            "host/memory.txt",
+            "host/memory-lines.txt",
+            "host/channeld-kernel-log.txt",
+            "summary.txt"
+        ]
+    );
     stop.store(true, Ordering::Relaxed);
 }
 
