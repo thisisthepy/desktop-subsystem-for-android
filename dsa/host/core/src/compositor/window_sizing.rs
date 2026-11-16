@@ -468,6 +468,39 @@ impl MoveLoop {
     }
 }
 
+/// How the desktop's move or size loop of a window started. Windows runs both loops from one
+/// `WM_SYSCOMMAND` (`SC_SIZE` for an edge, `SC_MOVE` for the title bar, from the pointer or the
+/// keyboard) and sends `WM_SIZING` in either: inside a move loop it changes the size itself
+/// (restoring a snapped window as the drag starts, a snap preview, the drop on a snap zone).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LoopKind {
+    /// No loop is running.
+    #[default]
+    None,
+    /// The window is moved: every size Windows proposes is its own choice.
+    Move,
+    /// The user drags an edge.
+    Size,
+}
+
+impl LoopKind {
+    /// The loop a `WM_SYSCOMMAND` starts, from whether its command is the size command and
+    /// whether it is the move command; `None` for any other command (the loop kind stays).
+    pub fn started_by(size_command: bool, move_command: bool) -> Option<LoopKind> {
+        match (size_command, move_command) {
+            (true, _) => Some(LoopKind::Size),
+            (_, true) => Some(LoopKind::Move),
+            _ => None,
+        }
+    }
+}
+
+/// Whether a `WM_SIZING` is the user dragging an edge: only inside a size loop. In a move loop
+/// the sizes Windows proposes are taken as they are.
+pub fn is_edge_drag(kind: LoopKind, wm_sizing: bool) -> bool {
+    wm_sizing && kind == LoopKind::Size
+}
+
 /// What a window does when its maximise button is clicked or its title bar double clicked:
 /// both are the same command, so both take the same path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2014,6 +2047,41 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn fr4_a_move_loop_is_never_an_edge_drag_even_when_windows_sends_wm_sizing() {
+        // The trace: the title bar is dragged to the top right snap zone, and Windows sends
+        // WM_SIZING for the zone's 1462x863 inside the move loop.
+        assert!(!is_edge_drag(LoopKind::Move, true));
+        assert!(!is_edge_drag(LoopKind::None, true));
+        let rect = frame_rect(FrameRectRequest {
+            requested: (1429, 0, 1462, 863),
+            frame_outer: Some((914, 1252)),
+            edge_drag: is_edge_drag(LoopKind::Move, true),
+            moves: (true, true),
+        });
+        assert_eq!(rect, (1429, 0, 1462, 863));
+    }
+
+    #[test]
+    fn fr4_a_size_loop_still_keeps_the_frames_size_with_the_undragged_edges_fixed() {
+        assert!(is_edge_drag(LoopKind::Size, true));
+        assert!(!is_edge_drag(LoopKind::Size, false));
+        let rect = frame_rect(FrameRectRequest {
+            requested: (100, 50, 900, 700),
+            frame_outer: Some((800, 600)),
+            edge_drag: is_edge_drag(LoopKind::Size, true),
+            moves: (true, true),
+        });
+        assert_eq!(rect, (200, 150, 800, 600));
+    }
+
+    #[test]
+    fn fr4_the_loop_kind_comes_from_the_command_that_starts_it() {
+        assert_eq!(LoopKind::started_by(true, false), Some(LoopKind::Size));
+        assert_eq!(LoopKind::started_by(false, true), Some(LoopKind::Move));
+        assert_eq!(LoopKind::started_by(false, false), None);
     }
 
     #[test]

@@ -59,9 +59,9 @@ use dsa_host_core::compositor::window_mode::{
     caption_revealed, picture_in_picture_place, ModeState, WindowMode,
 };
 use dsa_host_core::compositor::window_sizing::{
-    frame_rect, kept_frame_action, maximized_outer, maximized_position, min_client_size,
-    rescaled_rect, size_is_held, to_task_position, to_task_size, to_window_position,
-    FrameRectRequest, KeptFrame, MoveLoop, SizeProposal,
+    frame_rect, is_edge_drag, kept_frame_action, maximized_outer, maximized_position,
+    min_client_size, rescaled_rect, size_is_held, to_task_position, to_task_size,
+    to_window_position, FrameRectRequest, KeptFrame, LoopKind, MoveLoop, SizeProposal,
 };
 use dsa_host_core::compositor::window_tasks::WindowTasks;
 use dsa_host_core::ime::ImeCursor;
@@ -95,9 +95,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     GetClientRect, GetWindowPlacement, SetWindowPlacement, GWL_STYLE, HTBORDER, HTBOTTOMRIGHT,
-    HTLEFT, HWND_NOTOPMOST, HWND_TOP, HWND_TOPMOST, SC_MAXIMIZE, SC_SIZE, SWP_FRAMECHANGED,
-    SWP_NOOWNERZORDER, SW_RESTORE, WINDOWPLACEMENT, WM_COMMAND, WM_KEYDOWN, WM_KEYUP, WM_NCHITTEST,
-    WM_SYSCOMMAND, WM_SYSKEYDOWN, WM_SYSKEYUP, WS_POPUP,
+    HTLEFT, HWND_NOTOPMOST, HWND_TOP, HWND_TOPMOST, SC_MAXIMIZE, SC_MOVE, SC_SIZE,
+    SWP_FRAMECHANGED, SWP_NOOWNERZORDER, SW_RESTORE, WINDOWPLACEMENT, WM_COMMAND, WM_KEYDOWN,
+    WM_KEYUP, WM_NCHITTEST, WM_SYSCOMMAND, WM_SYSKEYDOWN, WM_SYSKEYUP, WS_POPUP,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     GetCursorPos, HTCAPTION, HTNOWHERE, SC_RESTORE, WM_MOUSEMOVE, WM_NCCALCSIZE, WM_NCMOUSELEAVE,
@@ -349,6 +349,8 @@ struct WindowData {
     /// Whether the window is in its move or size loop, for the resize trace: plain moves
     /// there are logged a few a second (`win.move_loop`), not each.
     in_move_loop: Cell<bool>,
+    /// How the running move or size loop started (`WM_SYSCOMMAND`).
+    loop_kind: Cell<LoopKind>,
     /// The window size the trace last logged, so a drag logs a change of size.
     traced_size: Cell<(u32, u32)>,
     /// Whether the user is dragging one of the window's edges now.
@@ -682,6 +684,12 @@ unsafe extern "system" fn task_window_proc(
         }
         // The Android items of the system menu; Windows' own commands go on below.
         if message == WM_SYSCOMMAND {
+            // How the move or size loop that may follow starts: an edge drag is the size
+            // command only, whatever WM_SIZING Windows sends inside a title bar move.
+            let command = (wparam & 0xfff0) as u32;
+            if let Some(kind) = LoopKind::started_by(command == SC_SIZE, command == SC_MOVE) {
+                data.loop_kind.set(kind);
+            }
             if let Some(item) = system_menu::chosen(wparam) {
                 menu_chosen(hwnd, data, item);
                 return 0;
@@ -814,6 +822,9 @@ unsafe extern "system" fn task_window_proc(
                 }
                 // WM_SIZING says when the drag is of an edge.
                 data.sizing.set(false);
+                if message == WM_EXITSIZEMOVE {
+                    data.loop_kind.set(LoopKind::None);
+                }
                 // A click on the title bar enters the loop whether or not it moves the window,
                 // as the first click of a double click does: the drag is reported only once
                 // the window moves (WM_MOVING) or an edge is dragged (WM_SIZING).
@@ -841,6 +852,12 @@ unsafe extern "system" fn task_window_proc(
                         dragging,
                     });
                 }
+                // The drop may have snapped the window: it keeps that rectangle (held), and the
+                // guest is asked for its client size, instead of the window taking the size of
+                // the frame it still shows.
+                if !entered {
+                    take_kept_frame(hwnd, data);
+                }
             }
             0
         }
@@ -858,12 +875,17 @@ unsafe extern "system" fn task_window_proc(
             // Which edge the user drags, for when the window later takes the size of a frame.
             if let Some(data) = window_data(hwnd) {
                 let edge = wparam as u32;
-                data.sizing.set(true);
                 report_drag_started(data);
-                data.drag_edges.set((
-                    matches!(edge, WMSZ_LEFT | WMSZ_TOPLEFT | WMSZ_BOTTOMLEFT),
-                    matches!(edge, WMSZ_TOP | WMSZ_TOPLEFT | WMSZ_TOPRIGHT),
-                ));
+                // Inside a title bar move loop Windows sends WM_SIZING when it changes the
+                // size itself (the restore as the drag starts, a snap preview, the drop on a
+                // snap zone): those sizes are taken as they are.
+                if is_edge_drag(data.loop_kind.get(), true) {
+                    data.sizing.set(true);
+                    data.drag_edges.set((
+                        matches!(edge, WMSZ_LEFT | WMSZ_TOPLEFT | WMSZ_BOTTOMLEFT),
+                        matches!(edge, WMSZ_TOP | WMSZ_TOPLEFT | WMSZ_TOPRIGHT),
+                    ));
+                }
             }
             DefWindowProcW(hwnd, message, wparam, lparam)
         }
@@ -1433,6 +1455,11 @@ unsafe fn place_ime_cursor(hwnd: HWND, data: &WindowData) {
 unsafe fn take_kept_frame(hwnd: HWND, data: &WindowData) {
     // A window that holds the size the desktop gave it shows every frame in it instead.
     if IsIconic(hwnd) != 0 || data.held.get() {
+        return;
+    }
+    // The window the user moves by its title bar keeps the size Windows gives it until the
+    // drop; the frame is taken once the loop ends (WM_EXITSIZEMOVE).
+    if data.in_move_loop.get() && data.loop_kind.get() != LoopKind::Size {
         return;
     }
     let Some(presenter) = data.presenter.borrow().clone() else {
@@ -2483,6 +2510,7 @@ impl Ui {
             drag_edges: Cell::new((false, false)),
             move_loop: Cell::new(MoveLoop::default()),
             in_move_loop: Cell::new(false),
+            loop_kind: Cell::new(LoopKind::None),
             traced_size: Cell::new((0, 0)),
             sizing: Cell::new(false),
             held: Cell::new(false),
