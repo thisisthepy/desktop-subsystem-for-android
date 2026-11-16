@@ -29,7 +29,24 @@ class SlowWork(
         unlogged = 0
     }
 
+    private var stuckSince = Long.MIN_VALUE
+
+    /**
+     * A piece of work that began at [startMillis] has not ended at [nowMillis]. Said once for
+     * that piece, with where the thread is ([stack], read only when it is said), because work
+     * that never ends is never reported by [ran], and a thread that no longer answers the host
+     * would otherwise leave nothing in the log.
+     */
+    fun stuck(work: Any, startMillis: Long, nowMillis: Long, stack: () -> List<String>) {
+        if (nowMillis - startMillis < STUCK_MILLIS || stuckSince == startMillis) return
+        stuckSince = startMillis
+        val took = nowMillis - startMillis
+        log.warn("the $thread thread has been in one piece of work for $took ms and is still in it (${work.javaClass.name}), at: ${stack().take(STACK_LINES).joinToString(" <- ")}")
+    }
+
     companion object {
+        const val STUCK_MILLIS = 3_000L
+        const val STACK_LINES = 12
         const val SLOW_MILLIS = 250L
         const val QUIET_MILLIS = 10_000L
     }

@@ -27,6 +27,7 @@ use super::launch::{installed_window_host, AppLauncher};
 use super::log;
 use super::manager::{Manager, ManagerEvent, Platform, Route};
 use super::present::Presenter;
+use super::resize_queue::ResizeQueue;
 use crate::compositor::surface_port::SurfacePorts;
 use crate::compositor::window_host::{support_folder, window_manager_socket};
 use crate::gfx::client::RendererClient;
@@ -329,24 +330,43 @@ fn serve_requests(
         .name("dsa-wm-requests".into())
         .spawn(move || {
             let mut client: Option<HostApiClient> = None;
-            for request in requests {
-                if client.is_none() {
-                    client = connect(&host_api)
-                        .map_err(|why| log(&format!("cannot reach the DSA service: {why}")))
-                        .ok();
+            let mut queue = ResizeQueue::new();
+            loop {
+                // Sizes held for a frame are looked at again every few milliseconds; with
+                // none held, the next request is waited for.
+                let mut incoming = Vec::new();
+                if queue.waiting() {
+                    match requests.recv_timeout(Duration::from_millis(4)) {
+                        Ok(next) => incoming.push(next),
+                        Err(RecvTimeoutError::Timeout) => {}
+                        Err(RecvTimeoutError::Disconnected) => break,
+                    }
+                } else {
+                    match requests.recv() {
+                        Ok(next) => incoming.push(next),
+                        Err(_) => break,
+                    }
                 }
-                let result = match client.as_mut() {
-                    Some(open) => open.request(&request).map_err(|e| e.to_string()),
-                    None => Err("the DSA service is not reachable".to_string()),
-                };
-                if let Err(why) = result {
-                    log(&format!(
-                        "{} did not reach Android: {why}",
-                        request.describe()
-                    ));
-                    client = None;
-                    if let TaskRequest::Close { task_id } = request {
-                        let _ = events.send(ManagerEvent::CloseFailed(task_id));
+                incoming.extend(requests.try_iter());
+                for request in queue.step(incoming, Instant::now()) {
+                    if client.is_none() {
+                        client = connect(&host_api)
+                            .map_err(|why| log(&format!("cannot reach the DSA service: {why}")))
+                            .ok();
+                    }
+                    let result = match client.as_mut() {
+                        Some(open) => open.request(&request).map_err(|e| e.to_string()),
+                        None => Err("the DSA service is not reachable".to_string()),
+                    };
+                    if let Err(why) = result {
+                        log(&format!(
+                            "{} did not reach Android: {why}",
+                            request.describe()
+                        ));
+                        client = None;
+                        if let TaskRequest::Close { task_id } = request {
+                            let _ = events.send(ManagerEvent::CloseFailed(task_id));
+                        }
                     }
                 }
             }

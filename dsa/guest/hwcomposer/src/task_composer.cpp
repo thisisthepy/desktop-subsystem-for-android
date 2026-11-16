@@ -208,7 +208,11 @@ uint32_t TaskComposer::sharedHandleLocked(const BufferRef& buffer) {
     if (it != mShared.end()) {
         return it->second;
     }
+    const double openStart = traceMonoMs();
     const uint32_t handle = mHost.openSharedColorBuffer(buffer);
+    // The buffer belongs to a layer, not yet to a task here: the line says -1.
+    logTrace(mTrace.colorBuffer(-1, buffer.width, buffer.height, "open",
+                                traceMonoMs() - openStart, traceMonoMs(), traceWallMs()));
     if (handle != 0) {
         mShared.emplace(buffer.id, handle);
     }
@@ -321,6 +325,11 @@ void TaskComposer::compose(Frame& frame, double presentedMs) {
                     fill.cropHeight = layer.crop.bottom - layer.crop.top;
                 }
                 fills.push_back(fill);
+                if (device && !layer.client) {
+                    logTrace(mTrace.appBuffer(task.task, width, height, layer.buffer.width,
+                                              layer.buffer.height, traceMonoMs(),
+                                              traceWallMs()));
+                }
             }
             // A task whose app shows nothing any more is ending: its window keeps its last
             // frame and closes with it, rather than emptying first.
@@ -457,8 +466,12 @@ void TaskComposer::compose(Frame& frame, double presentedMs) {
 
             uint32_t& target = output.targets[output.next];
             if (target == 0) {
+                const double createStart = traceMonoMs();
                 target = mHost.createColorBuffer(static_cast<uint32_t>(output.buffers.width),
                                                  static_cast<uint32_t>(output.buffers.height));
+                logTrace(mTrace.colorBuffer(task.task, output.buffers.width, output.buffers.height,
+                                            "create", traceMonoMs() - createStart, traceMonoMs(),
+                                            traceWallMs()));
             }
             if (target == 0) {
                 continue;

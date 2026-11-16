@@ -1,0 +1,57 @@
+Subject: Drop the shared ColorBuffers when no guest process is left
+
+The guest numbers its gralloc buffers from 1 each time Android starts, and every process
+derives the ColorBuffer handle from that number. The renderer outlives the guest (it belongs to
+the window manager), and the buffers the last Android left behind stayed: a process that opened
+the new buffer 21 found the old buffer 21, at the old window's size, and kept it. SurfaceFlinger
+then made an image of the new size on it, the host refused ("attempted to create a VkImage with
+width:900 by importing ColorBuffer which only has width:640"), and the window stayed black.
+
+dropSharedColorBuffers erases every ColorBuffer whose handle has the top bit set, whatever its
+reference count. The renderer calls it when the last guest process pipe ends, which only
+happens when the guest is gone.
+
+Applies after 0043 on gfxstream d047a57228332d995d36600792fa9ccc26cf8ae6.
+---
+diff --git a/host/FrameBuffer.cpp b/host/FrameBuffer.cpp
+--- a/host/FrameBuffer.cpp
++++ b/host/FrameBuffer.cpp
+@@ -1446,6 +1446,22 @@
+     AutoLock colorBufferMapLock(m_colorBufferMapLock);
+     const size_t after = m_colorbuffers.size();
+     return after < before ? static_cast<int>(before - after) : 0;
++}
++
++int FrameBuffer::dropSharedColorBuffers() {
++    AutoLock mutex(m_lock);
++    AutoLock colorBufferMapLock(m_colorBufferMapLock);
++    int dropped = 0;
++    for (auto it = m_colorbuffers.begin(); it != m_colorbuffers.end();) {
++        if (it->first & 0x80000000u) {
++            eraseDelayedCloseColorBufferLocked(it->first, it->second.closedTs);
++            it = m_colorbuffers.erase(it);
++            dropped++;
++        } else {
++            ++it;
++        }
++    }
++    return dropped;
+ }
+ 
+ std::vector<FrameBuffer::ColorBufferDescription> FrameBuffer::describeColorBuffers() {
+diff --git a/host/FrameBuffer.h b/host/FrameBuffer.h
+--- a/host/FrameBuffer.h
++++ b/host/FrameBuffer.h
+@@ -242,6 +242,12 @@
+     // otherwise stayed until another buffer was closed. Returns how many were destroyed. An
+     // embedder calls it now and then.
+     int closeDelayedColorBuffers();
++
++    // Erases every ColorBuffer a guest process shares (its handle has the top bit set), whatever
++    // its reference count. For the moment no guest process is left: the guest's buffer numbers
++    // start again from 1 when Android starts again, and a buffer the last Android left behind
++    // would be opened under a new buffer's number at the old one's size. Returns how many.
++    int dropSharedColorBuffers();
+ 
+     // One live ColorBuffer as a memory report lists it: its size and format, the bytes of its
+     // Vulkan memory, which guest process made it and when, the guest processes that hold it

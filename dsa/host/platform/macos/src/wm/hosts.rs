@@ -51,6 +51,23 @@ impl HostLink {
         self.process_id
     }
 
+    /// A link that sends nowhere but succeeds, for tests of what depends on one.
+    #[cfg(test)]
+    pub fn silent(id: HostId, process_id: u32) -> HostLink {
+        struct Silent;
+        impl FrameSender for Silent {
+            fn send(&mut self, _frame: &[u8]) -> Result<(), TransportError> {
+                Ok(())
+            }
+        }
+        HostLink {
+            id,
+            process_id,
+            sender: Mutex::new(Some(Box::new(Silent))),
+            closed: AtomicBool::new(false),
+        }
+    }
+
     /// Sends `body` to the window host. False when the connection is gone.
     pub fn send(&self, body: Body) -> bool {
         let frame = encode_body(body);

@@ -109,8 +109,22 @@ impl Presenter {
     /// CPU. Null drops the frame. The surface stays valid until the display gets another or is
     /// no longer shown.
     pub fn target_for(&self, display_id: u32, width: u32, height: u32, exact: bool) -> *mut c_void {
+        self.target_with_serial(display_id, width, height, exact).0
+    }
+
+    /// As [`Presenter::target_for`], with the serial of the surface that was given: no two
+    /// surfaces made by this presenter have the same one, which an address or a system surface
+    /// ID, both reused after a surface is freed, cannot promise.
+    pub fn target_with_serial(
+        &self,
+        display_id: u32,
+        width: u32,
+        height: u32,
+        exact: bool,
+    ) -> (*mut c_void, u64) {
+        let none = (std::ptr::null_mut(), 0);
         if !valid_size(width, height) {
-            return std::ptr::null_mut();
+            return none;
         }
         let mut guard = self.lock();
         let State {
@@ -118,18 +132,18 @@ impl Presenter {
             next_texture,
         } = &mut *guard;
         let Some(shown) = displays.get_mut(&display_id) else {
-            return std::ptr::null_mut();
+            return none;
         };
         let slot = shown.slots.begin();
         match self.surface(next_texture, shown, slot, (width, height), exact) {
             Some(target) => {
-                let raw = target.surface.as_raw();
+                let given = (target.surface.as_raw(), target.texture_id);
                 shown.copying = Some(slot);
-                raw
+                given
             }
             None => {
                 shown.slots.abandon();
-                std::ptr::null_mut()
+                none
             }
         }
     }
@@ -370,8 +384,45 @@ impl FrameSink for Presenter {
             return;
         };
         self.frames_shown.fetch_add(1, Ordering::Relaxed);
+        super::resize_queue::frame_drawn(shown.task_id, (width, height));
         if let Some(announce) = shown.slots.written(slot, (width, height), Instant::now()) {
             announce_frame(shown, announce);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dsa_host_core::compositor::window_hosts::HostId;
+
+    #[test]
+    fn pr3_a_surface_made_again_in_the_place_of_an_old_one_is_a_new_texture() {
+        let host = HostId(1);
+        let links: Links = Arc::new(Mutex::new(HashMap::new()));
+        links
+            .lock()
+            .unwrap()
+            .insert(host, Arc::new(HostLink::silent(host, 1)));
+        let presenter = Presenter::new(links, None);
+        presenter.set_routes(&[Route {
+            display_id: 1,
+            task_id: 7,
+            host,
+        }]);
+        let mut serials = Vec::new();
+        // A resize makes a surface where the old one was, 64 times over; each is a texture
+        // the renderer does not hold, however the system reuses addresses and IDs.
+        for step in 0..64u32 {
+            let (raw, serial) = presenter.target_with_serial(1, 100 + step, 80, true);
+            assert!(!raw.is_null());
+            serials.push(serial);
+            presenter.copied(1, 100 + step, 80);
+            presenter.presented(host, 7, u64::from(step) + 1, Instant::now());
+        }
+        let mut sorted = serials.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), serials.len());
     }
 }

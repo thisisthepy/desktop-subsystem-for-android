@@ -510,7 +510,11 @@ fn handle(message: ToHost) {
             }
         }),
         // macOS draws the title bar and its buttons in the system's own colors.
-        ToHost::CaptionTone { .. } => {}
+        ToHost::CaptionTone { task_id, tone } => STATE.with(|state| {
+            if let Some(window) = state.borrow().windows.get(&task_id) {
+                window.set_caption_tone(tone);
+            }
+        }),
         ToHost::Mode {
             task_id,
             mode,
@@ -540,16 +544,16 @@ fn handle(message: ToHost) {
                 window.place_overlay((left, top), display, touchable);
             }
         }),
-        // An app that starts below the title bar is never app drawn, and a standard window
-        // already has its content under the title bar, so `below` needs nothing more here.
+        // An app that starts below the title bar gets the standard one; every other window
+        // has the unified title bar, whose name is hidden while the app draws its own.
         ToHost::CaptionMode {
             task_id,
             app_drawn,
             interactive,
-            below: _,
+            below,
         } => STATE.with(|state| {
             if let Some(window) = state.borrow_mut().windows.get_mut(&task_id) {
-                window.set_app_drawn(app_drawn, interactive);
+                window.set_title_bar(app_drawn, below, interactive);
             }
         }),
         ToHost::CaptionBack { task_id, back } => STATE.with(|state| {

@@ -46,6 +46,17 @@ class ResizeTrace {
     // A frame of the task was posted at `width` x `height`; `late` when the hold ran out.
     std::vector<std::string> posted(int32_t task, int64_t width, int64_t height, bool late,
                                     double monoMs, int64_t wallMs);
+    // A buffer the app queued for the task, `bufferWidth` x `bufferHeight`, while the task's
+    // bounds are `width` x `height`. The first one of the new size is the app having drawn at
+    // it; a buffer of another size is the old picture. Detail only.
+    std::vector<std::string> appBuffer(int32_t task, int64_t width, int64_t height,
+                                       int64_t bufferWidth, int64_t bufferHeight, double monoMs,
+                                       int64_t wallMs);
+    // The host made (`kind` "create") or opened (`kind` "open") a ColorBuffer of this size for
+    // the task, and it took `tookMs` to answer. Each one is a line. Detail only.
+    std::vector<std::string> colorBuffer(int32_t task, int64_t width, int64_t height,
+                                         const char* kind, double tookMs, double monoMs,
+                                         int64_t wallMs);
     void forget(int32_t task);
 
     // `wallMs` since the Unix epoch as 2026-10-26T06:23:03.123Z.

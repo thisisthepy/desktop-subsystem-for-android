@@ -1,0 +1,49 @@
+Subject: Import a ColorBuffer's Metal heap without a dedicated image on MoltenVK
+
+On macOS the renderer imports the Metal heap of a ColorBuffer into the memory of every buffer a
+guest process makes an image of. The guest driver passes no dedicated allocation to the host
+when it picks a host-visible memory type, which is the type it picks on Apple silicon, so the
+renderer made one up: a dedicated allocation of the ColorBuffer's own image. MoltenVK then
+refused to bind the guest's image to that memory ("Could not bind VkImage to a VkDeviceMemory
+dedicated to resource ... A dedicated allocation may only be used with the resource it was
+dedicated to", VK_ERROR_OUT_OF_DEVICE_MEMORY). ANGLE turned the failed bind into
+EGL_BAD_PARAMETER, so every buffer SurfaceFlinger imported failed with "Could not create EGL
+image, err = (0x300c)" and every app window stayed black.
+
+An import that names no image is now made without a dedicated allocation. An import that names
+the guest's image keeps it.
+
+Applies after 0042 on gfxstream d047a57228332d995d36600792fa9ccc26cf8ae6.
+---
+diff --git a/host/vulkan/VkDecoderGlobalState.cpp b/host/vulkan/VkDecoderGlobalState.cpp
+--- a/host/vulkan/VkDecoderGlobalState.cpp
++++ b/host/vulkan/VkDecoderGlobalState.cpp
+@@ -5359,18 +5359,16 @@
+                 // Use metal object extension on MoltenVK mode for color buffer import,
+                 // non-moltenVK path on MacOS will use FD handles
+                 if (m_vkEmulation->supportsMoltenVk()) {
+-                    if (dedicatedAllocInfoPtr == nullptr || localDedicatedAllocInfo.image == VK_NULL_HANDLE) {
+-                        // TODO(b/351765838): This should not happen, but somehow the guest
+-                        // is not providing us the necessary information for video rendering.
+-                        localDedicatedAllocInfo = {
+-                            .sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO,
+-                            .pNext = nullptr,
+-                            .image =
+-                                m_vkEmulation->getColorBufferVkImage(importCbInfoPtr->colorBuffer),
+-                            .buffer = VK_NULL_HANDLE,
+-                        };
+-
+-                        shouldUseDedicatedAllocInfo = true;
++                    if (dedicatedAllocInfoPtr == nullptr ||
++                        localDedicatedAllocInfo.image == VK_NULL_HANDLE) {
++                        // The guest names no image when it allocates the memory of a host-visible
++                        // type, so the import has none to be dedicated to. It was dedicated to
++                        // the ColorBuffer's own image, and then MoltenVK refused to bind the
++                        // guest's image to it ("A dedicated allocation may only be used with the
++                        // resource it was dedicated to"), which failed every import of a buffer
++                        // the guest made an image of. The heap is imported without a dedicated
++                        // image, and any image of the right size binds to it.
++                        shouldUseDedicatedAllocInfo = false;
+                     }
+ 
+                     MTLResource_id cbExtMemoryHandle =

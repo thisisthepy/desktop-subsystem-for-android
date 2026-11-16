@@ -14,7 +14,9 @@
 //! its ends ([`caption_band`]), so the app keeps its own controls clear of them. In the band,
 //! the app's controls take the pointer and the rest drags the window ([`band_hit`]).
 
-use dsa_host_core::compositor::caption::CaptionBand;
+use dsa_host_core::compositor::caption::{
+    band_points, band_sample, shown_tone, BandSample, CaptionBand, CaptionTone,
+};
 use dsa_host_core::keys::{keycode, KeyAction, KeyEvent};
 use dsa_host_core::tasks::Bounds;
 use dsa_host_core::ui_language::UiLanguage;
@@ -93,6 +95,174 @@ pub fn band_hit(point: (f64, f64), band_height: u32, controls: &[Bounds]) -> Ban
     }
 }
 
+/// How a task window's title bar is drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Chrome {
+    /// The unified title bar: transparent, with the app drawn up to the window's top and the
+    /// app's name in the band. The window buttons and the back button stand over it.
+    Unified,
+    /// The app draws its own title bar: as [`Chrome::Unified`], without the name.
+    AppDrawn,
+    /// AppKit's opaque title bar above the app: the app starts below it.
+    Standard,
+}
+
+impl Chrome {
+    /// The chrome of a window whose app draws its own title bar (`app_drawn`) or was set to
+    /// start below the title bar (`below`, which wins).
+    pub fn of(app_drawn: bool, below: bool) -> Chrome {
+        if below {
+            Chrome::Standard
+        } else if app_drawn {
+            Chrome::AppDrawn
+        } else {
+            Chrome::Unified
+        }
+    }
+
+    /// Whether the app's frames run under the title bar.
+    pub fn full_size_content(self) -> bool {
+        self != Chrome::Standard
+    }
+
+    /// Whether the title bar shows the window's name.
+    pub fn shows_title(self) -> bool {
+        self != Chrome::AppDrawn
+    }
+}
+
+/// The `NSAppearance` name a title bar over glyphs of `tone` takes: the title's text follows
+/// the window's appearance, dark text for dark glyphs.
+pub fn appearance_name(tone: CaptionTone) -> &'static str {
+    match tone {
+        CaptionTone::DarkGlyphs => "NSAppearanceNameAqua",
+        CaptionTone::LightGlyphs => "NSAppearanceNameDarkAqua",
+    }
+}
+
+/// What the title bar looks like over its frames: the tone of its text and a colour for a band
+/// the app leaves empty.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Look {
+    pub tone: CaptionTone,
+    /// 0xAARRGGBB, opaque; the colour to fill the band with. `None` leaves the band as the
+    /// app drew it.
+    pub fill: Option<u32>,
+}
+
+/// What decides the tone and the fill of a window's title bar: the tone the app asked for,
+/// what the window read from the frame's band, and whether the app draws the band itself.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BandTone {
+    reported: Option<CaptionTone>,
+    sample: BandSample,
+    app_drawn: bool,
+    shown: Option<CaptionTone>,
+    told: Option<Look>,
+}
+
+impl BandTone {
+    fn look(&mut self) -> Option<Look> {
+        self.shown = shown_tone(self.reported, self.sample, self.app_drawn, self.shown);
+        let look = Look {
+            tone: self.shown.unwrap_or_default(),
+            fill: self.sample.fill.filter(|_| !self.app_drawn),
+        };
+        (self.told != Some(look)).then(|| {
+            self.told = Some(look);
+            look
+        })
+    }
+
+    /// The tone the app asked for changed. Returns the new look, if it changed.
+    pub fn set_reported(&mut self, reported: Option<CaptionTone>) -> Option<Look> {
+        self.reported = reported;
+        self.look()
+    }
+
+    /// The window read `sample` from its newest frame. Returns the new look, if it changed.
+    pub fn set_sample(&mut self, sample: BandSample) -> Option<Look> {
+        self.sample = sample;
+        self.look()
+    }
+
+    /// Whether the app draws its own band changed. Returns the new look, if it changed.
+    pub fn set_app_drawn(&mut self, app_drawn: bool) -> Option<Look> {
+        self.app_drawn = app_drawn;
+        self.look()
+    }
+}
+
+/// What a window reads under a band `band` pixels high from `pixels`, a frame `width` by
+/// `height` pixels of BGRA rows `stride` bytes apart, top row first.
+pub fn sample_bgra(pixels: &[u8], stride: usize, width: u32, height: u32, band: u32) -> BandSample {
+    let Some(points) = band_points((width, height), band) else {
+        return BandSample::default();
+    };
+    let last = points.below as usize * stride + (width as usize) * 4;
+    if pixels.len() < last {
+        return BandSample::default();
+    }
+    let row = |y: u32| -> Vec<u32> {
+        points
+            .columns
+            .iter()
+            .map(|&x| {
+                let at = y as usize * stride + x as usize * 4;
+                u32::from_be_bytes([pixels[at + 3], pixels[at + 2], pixels[at + 1], pixels[at]])
+            })
+            .collect()
+    };
+    band_sample(&row(points.inside), &row(points.below))
+}
+
+/// The gap between the zoom button and the window's name, in points.
+pub const NAME_GAP: f64 = 14.0;
+/// The back button's size and its distance from the title bar's right end, in points.
+pub const BACK_SIZE: (f64, f64) = (28.0, 22.0);
+pub const BACK_MARGIN: f64 = 8.0;
+
+/// Where the title bar's own parts stand, in the title bar's coordinates (points; `y` is the
+/// bottom of the part in AppKit's coordinates, so only the centre line matters).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TitleLayout {
+    /// The window's name: left edge, bottom edge and width. It is as high as the text.
+    pub name: (f64, f64, f64),
+    /// The back button: left edge, bottom edge, width and height; `None` while it is hidden.
+    pub back: Option<(f64, f64, f64, f64)>,
+}
+
+/// Lays out the name and the back button in a title bar `bar_width` wide. The name starts
+/// [`NAME_GAP`] after the zoom button (`buttons_right`) whether or not the back button shows,
+/// and ends before the back button, which stands at the right end. Both are centred on the
+/// window buttons' centre line (`centre_y`), so the name has the same space above and below it
+/// as they do. `text` is the name's size at its natural width.
+pub fn title_layout(
+    bar_width: f64,
+    centre_y: f64,
+    buttons_right: f64,
+    text: (f64, f64),
+    back: bool,
+) -> TitleLayout {
+    let name_left = buttons_right + NAME_GAP;
+    let back_left = bar_width - BACK_MARGIN - BACK_SIZE.0;
+    let end = if back {
+        back_left - NAME_GAP
+    } else {
+        bar_width - BACK_MARGIN
+    };
+    let width = text.0.min((end - name_left).max(0.0)).max(0.0);
+    TitleLayout {
+        name: (name_left, centre_y - text.1 / 2.0, width),
+        back: back.then_some((
+            back_left,
+            centre_y - BACK_SIZE.1 / 2.0,
+            BACK_SIZE.0,
+            BACK_SIZE.1,
+        )),
+    }
+}
+
 /// What a double click on a title bar does, as the user chose in System Settings (Desktop &
 /// Dock, "Double-click a window's title bar to").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -154,6 +324,136 @@ pub fn back_label(lang: UiLanguage) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn frame(width: u32, height: u32, band: u32, band_bgra: [u8; 4], app_bgra: [u8; 4]) -> Vec<u8> {
+        let mut pixels = Vec::new();
+        for y in 0..height {
+            let color = if y < band { band_bgra } else { app_bgra };
+            for _ in 0..width {
+                pixels.extend_from_slice(&color);
+            }
+        }
+        pixels
+    }
+
+    const WHITE: [u8; 4] = [255, 255, 255, 255];
+    const BLACK: [u8; 4] = [0, 0, 0, 255];
+
+    #[test]
+    fn fr22_every_task_window_has_the_unified_title_bar_unless_the_app_starts_below_it() {
+        assert_eq!(Chrome::of(false, false), Chrome::Unified);
+        assert!(Chrome::Unified.full_size_content() && Chrome::Unified.shows_title());
+        assert_eq!(Chrome::of(true, false), Chrome::AppDrawn);
+        assert!(Chrome::AppDrawn.full_size_content() && !Chrome::AppDrawn.shows_title());
+        assert_eq!(Chrome::of(false, true), Chrome::Standard);
+        assert_eq!(Chrome::of(true, true), Chrome::Standard);
+        assert!(!Chrome::Standard.full_size_content() && Chrome::Standard.shows_title());
+    }
+
+    #[test]
+    fn fr22_dark_glyphs_take_the_light_appearance_and_light_glyphs_the_dark_one() {
+        assert_eq!(
+            appearance_name(CaptionTone::DarkGlyphs),
+            "NSAppearanceNameAqua"
+        );
+        assert_eq!(
+            appearance_name(CaptionTone::LightGlyphs),
+            "NSAppearanceNameDarkAqua"
+        );
+    }
+
+    #[test]
+    fn fr22_the_apps_tone_is_where_the_band_starts() {
+        let mut tone = BandTone::default();
+        let look = tone.set_reported(Some(CaptionTone::LightGlyphs)).unwrap();
+        assert_eq!((look.tone, look.fill), (CaptionTone::LightGlyphs, None));
+        // The same look again is not news.
+        assert_eq!(tone.set_reported(Some(CaptionTone::LightGlyphs)), None);
+    }
+
+    #[test]
+    fn fr22_light_glyphs_an_app_asked_for_turn_dark_over_a_bar_light_from_end_to_end() {
+        let mut tone = BandTone::default();
+        tone.set_reported(Some(CaptionTone::LightGlyphs));
+        let pixels = frame(80, 80, 24, WHITE, WHITE);
+        let sample = sample_bgra(&pixels, 80 * 4, 80, 80, 24);
+        let look = tone.set_sample(sample).unwrap();
+        assert_eq!(look.tone, CaptionTone::DarkGlyphs);
+    }
+
+    #[test]
+    fn fr22_dark_glyphs_an_app_asked_for_turn_light_over_a_bar_dark_from_end_to_end() {
+        let mut tone = BandTone::default();
+        tone.set_reported(Some(CaptionTone::DarkGlyphs));
+        let pixels = frame(80, 80, 24, BLACK, BLACK);
+        let sample = sample_bgra(&pixels, 80 * 4, 80, 80, 24);
+        let look = tone.set_sample(sample).unwrap();
+        assert_eq!(look.tone, CaptionTone::LightGlyphs);
+    }
+
+    #[test]
+    fn fr22_an_app_that_leaves_the_band_empty_gets_its_top_colour_there() {
+        let mut tone = BandTone::default();
+        // A black band over a white app: filled white, and the title over it is dark.
+        let pixels = frame(80, 80, 24, BLACK, WHITE);
+        let sample = sample_bgra(&pixels, 80 * 4, 80, 80, 24);
+        let look = tone.set_sample(sample).unwrap();
+        assert_eq!(look.fill, Some(0xFFFFFFFF));
+        assert_eq!(look.tone, CaptionTone::DarkGlyphs);
+        // An app that draws its own band is never filled over.
+        let mut drawn = BandTone::default();
+        drawn.set_app_drawn(true);
+        assert_eq!(drawn.set_sample(sample).map(|look| look.fill), Some(None));
+    }
+
+    #[test]
+    fn fr22_a_frame_too_small_for_its_band_reads_as_nothing() {
+        let pixels = frame(80, 20, 24, WHITE, WHITE);
+        assert_eq!(
+            sample_bgra(&pixels, 80 * 4, 80, 20, 24),
+            BandSample::default()
+        );
+        assert_eq!(
+            sample_bgra(&pixels[..10], 80 * 4, 80, 80, 24),
+            BandSample::default()
+        );
+    }
+
+    #[test]
+    fn fr22_macos_the_title_is_centred_on_the_traffic_lights() {
+        // Window buttons centred 16 points from the bar's bottom; a 16 point high name.
+        let layout = title_layout(600.0, 16.0, 70.0, (80.0, 16.0), false);
+        let (_, bottom, _) = layout.name;
+        assert_eq!(bottom + 8.0, 16.0);
+        let with_back = title_layout(600.0, 16.0, 70.0, (80.0, 16.0), true);
+        assert_eq!(with_back.name.1, layout.name.1);
+    }
+
+    #[test]
+    fn fr22_macos_the_back_button_stands_at_the_right_end_of_the_title_bar() {
+        let layout = title_layout(600.0, 16.0, 70.0, (80.0, 16.0), true);
+        let (left, bottom, width, height) = layout.back.unwrap();
+        assert_eq!(left + width + BACK_MARGIN, 600.0);
+        assert_eq!(bottom + height / 2.0, 16.0);
+        // The name starts after the window buttons, back button or not.
+        assert_eq!(layout.name.0, 70.0 + NAME_GAP);
+        assert_eq!(
+            title_layout(600.0, 16.0, 70.0, (80.0, 16.0), false).back,
+            None
+        );
+    }
+
+    #[test]
+    fn fr22_macos_a_long_name_ends_before_the_back_button() {
+        let layout = title_layout(300.0, 16.0, 70.0, (900.0, 16.0), true);
+        let (left, ..) = layout.back.unwrap();
+        assert_eq!(layout.name.0 + layout.name.2 + NAME_GAP, left);
+        // A window too narrow for any name leaves it no width.
+        assert_eq!(
+            title_layout(100.0, 16.0, 70.0, (50.0, 16.0), true).name.2,
+            0.0
+        );
+    }
 
     #[test]
     fn fr22_the_band_reaches_past_the_window_buttons_from_the_left() {
