@@ -29,6 +29,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use dsa_host_core::background::MediaCommand;
+use dsa_host_core::compositor::blank_windows::BlankWatch;
 use dsa_host_core::compositor::early_frames::EarlyFrames;
 use dsa_host_core::compositor::frame_buffers::texture_fits;
 use dsa_host_core::compositor::frame_stall::{FrameStall, Stall};
@@ -914,6 +915,8 @@ struct Manager {
     crashes: CrashRestarts,
     /// Whether the guest draws again after a GPU reset.
     stall: FrameStall,
+    /// The windows that outlived a window manager restart and show nothing.
+    blank: BlankWatch,
     /// The generations of the window manager's Direct3D device and of the renderer's Vulkan
     /// device last seen: a change is a GPU reset.
     gpu_generation: u64,
@@ -945,6 +948,7 @@ pub fn manage(setup: ManagerSetup) {
         resets: GpuResetWindows::new(),
         crashes: CrashRestarts::new(),
         stall: FrameStall::new(),
+        blank: BlankWatch::new(Instant::now()),
         gpu_generation,
         renderer_generation,
         hosts: WindowHosts::new(),
@@ -1382,9 +1386,29 @@ impl Manager {
         }
     }
 
+    /// Closes the windows that outlived a window manager restart and still show one colour:
+    /// the graphics stream of their app ended with the old renderer, and the window would stay
+    /// black for good while its task runs. Opening the app again gives it a new stream.
+    fn follow_blank_windows(&mut self, now: Instant) {
+        self.blank.inherit(&self.windows.windows(), now);
+        for (task_id, blank) in super::surfaces::blank_frames() {
+            self.blank.frame(task_id, blank, now);
+        }
+        for task_id in self.blank.due(now) {
+            self.log(&format!(
+                "task {task_id}'s window has shown one colour since the window manager started: \
+                 its app lost its graphics stream with the old renderer and did not draw again, \
+                 so the window closes"
+            ));
+            self.user_closed(task_id, now);
+        }
+        super::surfaces::watch_blank_frames(&self.blank.watched(now));
+    }
+
     fn tick(&mut self) {
         self.follow_gpu_resets(Instant::now());
         self.follow_frame_stall(Instant::now());
+        self.follow_blank_windows(Instant::now());
         // A window kept through a GPU reset whose app did not come back closes.
         let late = self.resets.tick(Instant::now());
         if !late.is_empty() {
@@ -1444,6 +1468,7 @@ impl Manager {
     }
 
     fn drop_remote(&mut self, task_id: i32) {
+        self.blank.forget(task_id);
         if let Some(remote) = self.remotes.remove(&task_id) {
             remote.close();
         }

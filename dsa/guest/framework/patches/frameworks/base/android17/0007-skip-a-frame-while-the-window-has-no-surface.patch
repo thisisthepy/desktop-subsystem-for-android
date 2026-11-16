@@ -1,0 +1,41 @@
+Subject: HWUI: skip a frame while the window has no surface instead of aborting
+
+FLO (a music app) aborted in its RenderThread with "drawRenderNode called on a context with no
+surface!" after the host's graphics renderer restarted. The recovery from a lost GPU device
+destroys every window's surface and builds them again once the host GPU answers, and a frame
+that came in between reached SkiaOpenGLPipeline::getFrame() (SkiaVulkanPipeline::getFrame() for
+Vulkan), which aborts when the pipeline has no surface.
+
+CanvasContext::draw() now skips such a frame, as it skips a frame while the device is lost, and
+asks for the surface to be made again and the window to be drawn in full (onDeviceReset()). A
+window that draws into a hardware buffer has no surface and is not skipped.
+
+Applies on top of 0001 to frameworks/base (Android 17).
+---
+diff --git a/libs/hwui/renderthread/CanvasContext.cpp b/libs/hwui/renderthread/CanvasContext.cpp
+--- a/libs/hwui/renderthread/CanvasContext.cpp
++++ b/libs/hwui/renderthread/CanvasContext.cpp
+@@ -702,6 +702,12 @@
+             return SkippedFrameReason::ContextIsStopped;
+         }
+ 
++        if (!mHardwareBuffer && !mRenderPipeline->isSurfaceReady()) {
++            // The surface went with the lost device and is not made again yet: getFrame() aborts
++            // without one. The frame is skipped, and the surface and the window are made again.
++            return SkippedFrameReason::NoOutputTarget;
++        }
++
+         if (!Properties::isDrawingEnabled() || !mDrawingEnabled) {
+             return SkippedFrameReason::DrawingOff;
+         }
+@@ -714,6 +720,10 @@
+     }();
+     if (skippedFrameReason) {
+         mCurrentFrameInfo->setSkippedFrameReason(*skippedFrameReason);
++        if (*skippedFrameReason == SkippedFrameReason::NoOutputTarget) {
++            // Asks for the surface on the next frame callback and for a full redraw.
++            onDeviceReset();
++        }
+ 
+ #ifdef __ANDROID__
+         if (auto grContext = getGrContext()) {

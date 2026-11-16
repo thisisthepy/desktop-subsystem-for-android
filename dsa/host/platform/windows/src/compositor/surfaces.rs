@@ -30,8 +30,8 @@ use dsa_host_core::compositor::caption::{
     band_points, band_reading_owed, band_sample, describe_band_sample, BandSample, BAND_SAMPLES,
 };
 use dsa_host_core::compositor::frame_buffers::{
-    image_bytes, sample_points, swapchain_change, uniform_colour, upload_problem, SwapchainChange,
-    SAMPLE_GRID,
+    copy_extent, image_bytes, sample_points, swapchain_change, uniform_colour, upload_problem,
+    SwapchainChange, SAMPLE_GRID,
 };
 use dsa_host_core::compositor::splash;
 use dsa_host_core::compositor::surface_calls::{
@@ -73,6 +73,53 @@ use super::present::{Devices, Gpu, SharedTexture};
 /// for the task now: the renderer made a new texture meanwhile (it restarted, or a GPU reset).
 /// The window host shows nothing for that frame and does not log it.
 pub const STALE_FRAME: &str = "the frame is in a texture that has been replaced";
+
+/// What the window manager's blank watch shares with the window hosts' threads: the tasks
+/// whose frames are looked at, and whether the newest frame of each was one colour.
+struct BlankFrames {
+    watched: std::collections::BTreeSet<i32>,
+    blank: std::collections::BTreeMap<i32, bool>,
+}
+
+static BLANK_FRAMES: std::sync::Mutex<BlankFrames> = std::sync::Mutex::new(BlankFrames {
+    watched: std::collections::BTreeSet::new(),
+    blank: std::collections::BTreeMap::new(),
+});
+
+/// Sets the tasks whose frames are looked at as they are shown (the others cost nothing).
+pub fn watch_blank_frames(tasks: &[i32]) {
+    let mut frames = BLANK_FRAMES.lock().unwrap_or_else(|e| e.into_inner());
+    frames.watched = tasks.iter().copied().collect();
+    let watched = frames.watched.clone();
+    frames.blank.retain(|task_id, _| watched.contains(task_id));
+}
+
+/// Whether the newest frame shown of each watched task was one colour, for the tasks that
+/// have had one.
+pub fn blank_frames() -> Vec<(i32, bool)> {
+    let frames = BLANK_FRAMES.lock().unwrap_or_else(|e| e.into_inner());
+    frames
+        .blank
+        .iter()
+        .map(|(task, blank)| (*task, *blank))
+        .collect()
+}
+
+fn blank_frame_watched(task_id: i32) -> bool {
+    BLANK_FRAMES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .watched
+        .contains(&task_id)
+}
+
+fn note_blank_frame(task_id: i32, blank: bool) {
+    BLANK_FRAMES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .blank
+        .insert(task_id, blank);
+}
 
 /// How long a present waits for the GPU to finish reading the shared texture.
 const COPY_WAIT: Duration = Duration::from_millis(500);
@@ -182,10 +229,6 @@ unsafe fn upload(
     if let Some(why) = upload_problem(chain.size, size, pixels.len()) {
         return Err(why);
     }
-    let back: ID3D11Texture2D = chain
-        .swapchain
-        .GetBuffer(0)
-        .map_err(|e| failed("reaching a task window's back buffer", e))?;
     let place = D3D11_BOX {
         left: 0,
         top: 0,
@@ -194,17 +237,21 @@ unsafe fn upload(
         bottom: size.1,
         back: 1,
     };
-    {
-        let context = devices.context.lock().unwrap_or_else(|e| e.into_inner());
-        context.UpdateSubresource(
-            &back,
-            0,
-            Some(&place as *const D3D11_BOX),
-            pixels.as_ptr() as *const c_void,
-            size.0 * 4,
-            0,
-        );
-    }
+    // The swapchain's calls use the immediate context as the copies do, so every one of them
+    // is made under its lock, never beside another thread's copy or trim.
+    let context = devices.context.lock().unwrap_or_else(|e| e.into_inner());
+    let back: ID3D11Texture2D = chain
+        .swapchain
+        .GetBuffer(0)
+        .map_err(|e| failed("reaching a task window's back buffer", e))?;
+    context.UpdateSubresource(
+        &back,
+        0,
+        Some(&place as *const D3D11_BOX),
+        pixels.as_ptr() as *const c_void,
+        size.0 * 4,
+        0,
+    );
     drop(back);
     chain
         .swapchain
@@ -535,6 +582,7 @@ impl WindowSurfaces {
             if chain.size == size {
                 return Ok(false);
             }
+            let _context = devices.context.lock().unwrap_or_else(|e| e.into_inner());
             chain
                 .swapchain
                 .ResizeBuffers(
@@ -576,16 +624,10 @@ impl WindowSurfaces {
     ) -> Result<(), String> {
         let devices = Arc::clone(&self.devices);
         let texture_size = texture.size();
-        // A frame that says no size fills the whole texture.
-        let (width, height) = if call.width == 0 || call.height == 0 {
-            texture_size
-        } else {
-            (
-                call.width.min(texture_size.0),
-                call.height.min(texture_size.1),
-            )
-        };
-        let region = (width, height);
+        // A frame that says no size fills the whole texture; one that says more than the
+        // texture holds is cut to it.
+        let region = copy_extent((call.width, call.height), texture_size, texture_size)
+            .ok_or("the frame has no pixels")?;
         self.newest = Some((Arc::clone(texture), region));
         self.last_frame_at = Some(Instant::now());
         self.band = call.band;
@@ -618,6 +660,12 @@ impl WindowSurfaces {
             }
             SwapchainChange::Resize(size) => {
                 if let Some(chain) = self.frame.as_mut() {
+                    // ResizeBuffers flushes the immediate context: it runs under the lock, with
+                    // no copy, trim or present of another window in progress, and with the
+                    // context holding nothing of the old buffers.
+                    let context = devices.context.lock().unwrap_or_else(|e| e.into_inner());
+                    context.ClearState();
+                    context.Flush();
                     chain
                         .swapchain
                         .ResizeBuffers(
@@ -641,12 +689,19 @@ impl WindowSurfaces {
             self.shown = (0, 0);
         }
         let chain = self.frame.as_ref().ok_or("no frame swapchain")?;
-        let back: ID3D11Texture2D = chain
-            .swapchain
-            .GetBuffer(0)
-            .map_err(|e| failed("reaching a task window's back buffer", e))?;
         {
             let context = devices.context.lock().unwrap_or_else(|e| e.into_inner());
+            let back: ID3D11Texture2D = chain
+                .swapchain
+                .GetBuffer(0)
+                .map_err(|e| failed("reaching a task window's back buffer", e))?;
+            // The back buffer's own size, not the one this window believes it has: a copy
+            // past either resource ends the process inside the driver.
+            let mut back_desc = D3D11_TEXTURE2D_DESC::default();
+            back.GetDesc(&mut back_desc);
+            let (width, height) =
+                copy_extent(region, texture_size, (back_desc.Width, back_desc.Height))
+                    .ok_or("the window's back buffer is empty")?;
             let from = D3D11_BOX {
                 left: 0,
                 top: 0,
@@ -665,13 +720,19 @@ impl WindowSurfaces {
                 0,
                 Some(&from as *const _),
             );
+            drop(back);
         }
-        drop(back);
         if !call.keep {
             self.present_back_buffer(region, answer)?;
         }
         self.wait_for_copy();
         self.trace_frame_colour(texture.texture(), region);
+        if blank_frame_watched(self.task_id) && !call.keep {
+            // A failed read says nothing about the frame: the last answer stands.
+            if let Ok(colour) = self.frame_colour(texture.texture(), region) {
+                note_blank_frame(self.task_id, colour.is_some());
+            }
+        }
         if call.probe_band {
             if let Some(sample) = self.probe_band(texture.texture(), region, true) {
                 band_to_answer(sample, answer);
@@ -713,18 +774,18 @@ impl WindowSurfaces {
             size.0.min(chain.size.0).max(1),
             size.1.min(chain.size.1).max(1),
         );
-        if self.shown != size {
-            chain
-                .swapchain
-                .SetSourceSize(size.0, size.1)
-                .map_err(|e| failed("setting the size a task window shows", e))?;
-        }
         {
             let _context = self
                 .devices
                 .context
                 .lock()
                 .unwrap_or_else(|e| e.into_inner());
+            if self.shown != size {
+                chain
+                    .swapchain
+                    .SetSourceSize(size.0, size.1)
+                    .map_err(|e| failed("setting the size a task window shows", e))?;
+            }
             // Sync interval 0: the present is queued without waiting for a vertical blank.
             chain
                 .swapchain

@@ -13,7 +13,7 @@ use windows::Win32::Graphics::Direct3D::{
     D3D_DRIVER_TYPE, D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_UNKNOWN, D3D_DRIVER_TYPE_WARP,
 };
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
+    D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Multithread, ID3D11Texture2D,
     D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
     D3D11_RESOURCE_MISC_SHARED, D3D11_RESOURCE_MISC_SHARED_NTHANDLE, D3D11_SDK_VERSION,
     D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT,
@@ -167,6 +167,13 @@ impl Devices {
                         let (Some(device), Some(context)) = (device, context) else {
                             continue;
                         };
+                        // The swapchains' calls and the copies of every task window run on
+                        // the threads of their window hosts. The runtime serialises each call
+                        // of the device and its context; the lock around the context orders
+                        // the sequences of calls that must not interleave.
+                        if let Ok(multithread) = context.cast::<ID3D11Multithread>() {
+                            let _ = multithread.SetMultithreadProtected(true);
+                        }
                         return Ok(Devices {
                             device,
                             context: Mutex::new(context),

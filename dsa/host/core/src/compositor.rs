@@ -18,6 +18,7 @@
 //! [`window_mode`] says whether a window fills its monitor or floats as picture-in-picture;
 //! the platform only carries it out.
 
+pub mod blank_windows;
 pub mod caption;
 pub mod caption_icon;
 pub mod early_frames;
