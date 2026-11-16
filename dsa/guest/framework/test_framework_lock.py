@@ -1297,11 +1297,12 @@ class WorkflowTests(unittest.TestCase):
     def test_nfr5_a_development_build_waits_only_for_the_job_it_takes_files_from(self):
         find = self._step(self.release, "Find the Framework build run with the pinned files")
         dev = find[find.index('if [[ "$DEV_BUILD" == true ]]'):find.index("wanted=()")]
-        # The newest supported Android's x86_64 files, from the job framework.yml names so.
+        # The newest supported Android's files of the architecture asked for, from the job
+        # framework.yml names so.
         self.assertIn('android="android$(jq \'.supported_majors | max\' dsa/android-versions.json)"', dev)
-        self.assertIn('name="framework-$android-x86_64-', dev)
+        self.assertIn('name="framework-$android-$DEV_ARCH-', dev)
         # The job that keeps the artifact once services.jar has joined the native files.
-        self.assertIn('job="Pack the framework files (ubuntu-24.04, $android, x86_64)"', dev)
+        self.assertIn('job="Pack the framework files (ubuntu-24.04, $android, $DEV_ARCH)"', dev)
         pack = self.framework[self.framework.index("  framework:\n"):]
         self.assertIn("name: Pack the framework files (ubuntu-24.04, ${{ matrix.android }}, ${{ matrix.arch }})",
                       pack)

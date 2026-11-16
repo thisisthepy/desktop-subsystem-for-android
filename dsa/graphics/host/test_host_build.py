@@ -154,7 +154,10 @@ class HostGraphicsBuildTests(unittest.TestCase):
         backend = (HERE / "dsa_gfx_backend.cpp").read_text(encoding="utf-8")
         self.assertIn("dsa_gfx_memory_install();", backend)
         self.assertIn("dsa_gfx_memory_uninstall();", backend)
-        self.assertEqual(backend.count("dsa_gfx_memory_process_ended();"), 2)
+        # A process is counted once its ID has gone out and uncounted when its pipe closes; a
+        # process whose ID never went out was never counted, so that path has no end to count.
+        self.assertEqual(backend.count("dsa_gfx_memory_process_started();"), 1)
+        self.assertEqual(backend.count("dsa_gfx_memory_process_ended();"), 1)
         self.assertIn("dsa_gfx_memory.cpp", CMAKE_FILE.read_text(encoding="utf-8"))
 
     def test_nfr1_the_renderer_says_whose_its_vulkan_memory_is(self):

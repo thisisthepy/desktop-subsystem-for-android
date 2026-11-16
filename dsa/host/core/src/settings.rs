@@ -755,6 +755,7 @@ impl SettingsStore for FileSettings {
             vulkan_driver,
             adb_port: normalise_adb_port(settings.adb_port),
             shared_folders,
+            app_full_screen: settings.app_full_screen.resolved(),
             ..settings.clone()
         })
     }
@@ -946,6 +947,7 @@ impl SettingsStore for MemorySettings {
             vulkan_driver,
             adb_port: normalise_adb_port(settings.adb_port),
             shared_folders,
+            app_full_screen: settings.app_full_screen.resolved(),
             ..settings.clone()
         })
     }

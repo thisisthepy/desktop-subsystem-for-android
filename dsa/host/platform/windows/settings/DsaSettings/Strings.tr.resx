@@ -1781,8 +1781,7 @@ Henüz kullanılamıyor: bu derlemede olmayan bir Android çerçeve değişikli�
     <value>Uygulama tam ekranı</value>
   </data>
   <data name="AppFullScreenCard.Description" xml:space="preserve">
-    <value>Uygulamanın tam ekran isteğinin (ör.
-videonun tam ekran düğmesi) nerede görüneceği.
+    <value>Uygulamanın tam ekran isteğinin (ör. videonun tam ekran düğmesi) nerede görüneceği.
 Tüm ekranda başlık çubuğu üst kenarda belirir.
 Uygulamalar sayfasındaki uygulama seçimi önceliklidir.</value>
   </data>

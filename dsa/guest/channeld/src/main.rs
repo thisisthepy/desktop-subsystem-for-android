@@ -626,6 +626,7 @@ mod daemon {
     /// Asks init for a second zram device when the guest has more memory than zram0 was sized
     /// for at boot, and for none when it is back (see `zram_grow`). zram0 not yet on asks
     /// nothing.
+    #[cfg(target_os = "android")]
     fn ask_for_zram_extra(memory: &dsa_guest_channeld::reclaim::MemInfo, asked: &mut Option<u64>) {
         use dsa_guest_channeld::zram_grow::{extra_mib, ZRAM_EXTRA_PROPERTY};
         let zram0 = std::fs::read_to_string("/sys/devices/virtual/block/zram0/disksize")

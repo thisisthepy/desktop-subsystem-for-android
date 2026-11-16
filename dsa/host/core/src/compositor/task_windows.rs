@@ -2202,16 +2202,15 @@ mod tests {
                 }]
             )
         );
-        assert_eq!(
-            windows.window_dpi(1, 96),
-            (
-                vec![],
-                vec![TaskRequest::SetDensity {
-                    task_id: 1,
-                    density_dpi: 130
-                }]
-            )
-        );
+        // A later report is a move: nothing is asked while it lasts, and once it has ended the
+        // task is asked for the density of the monitor it is on.
+        assert_eq!(windows.window_dpi(1, 96), (vec![], vec![]));
+        assert!(windows
+            .reconfigures(Instant::now())
+            .contains(&TaskRequest::SetDensity {
+                task_id: 1,
+                density_dpi: 130
+            }));
     }
 
     /// A task window on a 100% monitor whose task draws at 130 dpi, as Android starts on a
@@ -2608,8 +2607,8 @@ mod tests {
         let now = Instant::now();
         let (_, requests) = windows.window_dpi(1, 192);
         assert!(!asks_for_density(&requests), "not before the move ends");
-        // The desktop doubles the window; the task, still at 130 dpi, is shown scaled into it.
-        assert_eq!(windows.window_resized(1, (800, 600), now), vec![]);
+        // The desktop doubles the window (400x300 at the scale 262 over 130 is 806x605); the task, still at 130 dpi, is shown scaled into it.
+        assert_eq!(windows.window_resized(1, (806, 605), now), vec![]);
         // The move has ended: the monitor's density, and the window's size 1:1.
         let requests = windows.reconfigures(now);
         assert!(requests.contains(&TaskRequest::SetDensity {
@@ -2618,15 +2617,15 @@ mod tests {
         }));
         assert!(requests.contains(&TaskRequest::Resize {
             task_id: 1,
-            width: 800,
-            height: 600,
+            width: 806,
+            height: 605,
             live: true,
         }));
         // Another activity on top that does not say so: the task keeps the density it has
         // from now on, and a later move scales the window instead.
         notes.density_dpi = 262;
-        notes.bounds.right = notes.bounds.left + 800;
-        notes.bounds.bottom = notes.bounds.top + 600;
+        notes.bounds.right = notes.bounds.left + 806;
+        notes.bounds.bottom = notes.bounds.top + 605;
         notes.handles_density_change = false;
         windows.apply(&TaskEvent::Updated(notes));
         assert_eq!(windows.scale(1), (1, 1));

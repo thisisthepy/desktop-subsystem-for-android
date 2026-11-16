@@ -85,6 +85,23 @@ class ImageLayoutTests(unittest.TestCase):
         "/proc/{pid}/status": [("appdomain", "file")],
         "/proc/{}/oom_score_adj": [("appdomain", "file")],
         "/proc/{}/maps": [("appdomain", "file")],
+        # zram's size and statistics, which the reclaim and the writeback read, and the free page
+        # reporting numbers the reclaim logs, which have a type of their own.
+        "/sys/devices/virtual/block/zram0": [("sysfs_zram", "dir"), ("sysfs_zram", "file")],
+        "/sys/devices/virtual/block/zram0/disksize": [("sysfs_zram", "dir"), ("sysfs_zram", "file")],
+        "/sys/module/page_reporting/parameters/reported_kb": [
+            ("sysfs", "dir"),
+            ("dsa_sysfs_page_reporting_stats", "file"),
+        ],
+        # The second zram device's helper: what is swapped, zram-control's hot_add, and zram1's
+        # own size and reset.
+        "/proc/swaps": [("proc_swaps", "file")],
+        "/sys/class/zram-control/hot_add": [("sysfs", "dir"), ("sysfs", "file")],
+        "/sys/devices/virtual/block/zram1": [
+            ("sysfs_zram", "dir"),
+            ("sysfs_zram", "file"),
+            ("sysfs_zram", "file", "write"),
+        ],
         # The kernel's su guard on securityfs, which only the elevation helper writes.
         "/sys/kernel/security/dsa_su/control": [
             ("securityfs", "dir"),
@@ -97,8 +114,25 @@ class ImageLayoutTests(unittest.TestCase):
     # of its own: on the guest the daemon hands each config to the elevation helper
     # (HelperGuard), because the guard refuses the daemon, which runs as system.
     CHANNELD_KERNEL_NAMED_NOT_OPENED = {("su_relay.rs", "/sys/kernel/security/dsa_su/control")}
+    # What a source's mode needs from a path where it is not what the daemon needs: the memory
+    # report lists the processes through /proc with the permission every domain has on it.
+    CHANNELD_SOURCE_PATHS = {
+        "memory_report.rs": {
+            "/proc": [("proc", "dir")],
+            "/proc/slabinfo": [("proc_slabinfo", "file")],
+            "/proc/vmallocinfo": [("proc_vmallocinfo", "file")],
+            "/sys/fs/cgroup/cgroup.stat": [("cgroup_v2", "dir"), ("cgroup_v2", "file")],
+            "/sys/module/dm_bufio/parameters/current_allocated_bytes": [
+                ("sysfs", "dir"),
+                ("sysfs", "file"),
+            ],
+        },
+    }
     # The modes init runs the same binary in, each in a domain of its own.
     CHANNELD_SOURCE_DOMAINS = {
+        "memory_report.rs": ("dsa_memory_report", "channeld.cil"),
+        # The second zram device's helper (dsa-channeld --zram-extra).
+        "zram_grow.rs": ("dsa_zram_extra", "memory.cil"),
         "share_mount.rs": ("dsa_sharemount", "files.cil"),
         "android_files.rs": ("dsa_files", "files.cil"),
         "webdav.rs": ("dsa_files", "files.cil"),
@@ -112,7 +146,7 @@ class ImageLayoutTests(unittest.TestCase):
     }
     # The policy files the image installs together with the daemon, so a rule for one of its
     # domains may live in any of them (the daemon's root elevation rules are in su.cil).
-    CHANNELD_POLICY_FILES = ("channeld.cil", "files.cil", "su.cil")
+    CHANNELD_POLICY_FILES = ("channeld.cil", "files.cil", "su.cil", "memory.cil")
 
     @classmethod
     def _daemon_policy(cls, here):
@@ -140,14 +174,15 @@ class ImageLayoutTests(unittest.TestCase):
                     if (source.name, path) in self.CHANNELD_KERNEL_NAMED_NOT_OPENED:
                         continue
                     where = f"{source.name}:{number} opens {path}"
+                    paths = {**self.CHANNELD_KERNEL_PATHS, **self.CHANNELD_SOURCE_PATHS.get(source.name, {})}
                     self.assertIn(
                         path,
-                        self.CHANNELD_KERNEL_PATHS,
+                        paths,
                         f"{where}, which this test does not know: add its SELinux type here "
                         f"and an allow rule for {domain} to sepolicy/{policy_file}",
                     )
                     found += 1
-                    for target, cls, *asked in self.CHANNELD_KERNEL_PATHS[path]:
+                    for target, cls, *asked in paths[path]:
                         perm = asked[0] if asked else "search" if cls == "dir" else "read"
                         self.assertRegex(
                             policy,
@@ -2713,8 +2748,8 @@ class GuestMemoryTests(unittest.TestCase):
             self.assertIn("(allow vendor_init dsa_sysfs_page_reporting (file (write open getattr)))", policy)
 
     def test_nfr2_the_agent_may_read_what_free_page_reporting_gave_back(self):
-        # The agent's memory report carries the kernel's counts; only it may read them, and
-        # nothing may write them.
+        # The agent's memory report carries the kernel's counts, and channeld's reclaim reads
+        # how much the last one gave back; only they may read them, and nothing may write them.
         with tempfile.TemporaryDirectory() as tmp, self._modify(Path(tmp), channeld=True) as archive:
             policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
             for name in ["reported_kb", "reported_total_kb", "refaulted_total_kb"]:
@@ -2724,7 +2759,8 @@ class GuestMemoryTests(unittest.TestCase):
                     policy,
                 )
             readers = re.findall(r"\(allow (\S+) dsa_sysfs_page_reporting_stats \(file \(([^)]*)\)\)\)", policy)
-            self.assertEqual(sorted(readers), [("platform_app", "read open getattr"),
+            self.assertEqual(sorted(readers), [("dsa_channeld", "read open getattr"),
+                                               ("platform_app", "read open getattr"),
                                                ("system_app", "read open getattr")])
 
     def test_nfr2_the_reclaims_compact_only_where_the_host_takes_back_whole_blocks(self):

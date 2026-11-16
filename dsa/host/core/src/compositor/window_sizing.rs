@@ -1991,8 +1991,10 @@ mod tests {
             sizing.view_resized((806, 605), Instant::now()),
             live_resize(806, 605)
         );
-        // A later report is a move.
-        assert_eq!(sizing.dpi_reported(96), (None, density(130)));
+        // A later report is a move: nothing is asked while it lasts, and once it has ended
+        // the task is asked for the density of the monitor it is on.
+        assert_eq!(sizing.dpi_reported(96), (None, None));
+        assert_eq!(sizing.settle(Instant::now()).first(), density(130).as_ref());
         let mut at_100 = WindowSizing::new(&task(400, 300, 130));
         assert_eq!(at_100.dpi_reported(96), (None, None));
         assert_eq!(at_100.task_size(), ((400, 300), Some((1920, 1080)), None));
