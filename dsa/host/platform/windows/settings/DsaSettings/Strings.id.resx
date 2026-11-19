@@ -747,7 +747,10 @@ Instal Google Play lagi.</value>
     <value>Android ID: {0}</value>
   </data>
   <data name="Gapps_NoDeviceId" xml:space="preserve">
-    <value>Android ID muncul di sini setelah Google Play diinstal dan Android dimulai dengannya.</value>
+    <value>Android ID belum tersedia. Layanan Google Play membuatnya saat perangkat ini pertama kali check-in ke Google.
+Untuk itu Google Play harus terpasang, Android dimulai bersamanya, dan ada koneksi jaringan.
+Jika tetap kosong beberapa menit kemudian, mulai ulang Android.
+ID ini berupa angka desimal, format yang diterima halaman pendaftaran Google.</value>
   </data>
   <data name="DeveloperHeader.Text" xml:space="preserve">
     <value>Pengembang</value>

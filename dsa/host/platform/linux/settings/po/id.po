@@ -1251,8 +1251,8 @@ msgstr "Mengunduh dan menginstal Google Play. Ini dapat memakan waktu beberapa m
 msgid "Enter this number on Google's registration page."
 msgstr "Masukkan nomor ini di halaman pendaftaran Google."
 
-msgid "It shows here once Google Play is installed and Android has started."
-msgstr "Nomor ini muncul di sini setelah Google Play terinstal dan Android dimulai."
+msgid "The Android ID is not available yet. Google Play services make it when this device first checks in with Google.\nThat needs Google Play installed, Android started with it and a network connection.\nIf this stays empty a few minutes later, restart Android.\nThe ID is a decimal number, the form Google's registration page takes."
+msgstr "Android ID belum tersedia. Layanan Google Play membuatnya saat perangkat ini pertama kali check-in ke Google.\nUntuk itu Google Play harus terpasang, Android dimulai bersamanya, dan ada koneksi jaringan.\nJika tetap kosong beberapa menit kemudian, mulai ulang Android.\nID ini berupa angka desimal, format yang diterima halaman pendaftaran Google."
 
 msgid "Android started before this change. Stop and start Android for Google Play to follow it."
 msgstr "Android dimulai sebelum perubahan ini. Hentikan lalu mulai Android agar Google Play mengikutinya."

@@ -58,24 +58,38 @@ class ImageLayoutTests(unittest.TestCase):
         self.assertRegex(cil, r"\(allow dsa_channeld self \(capability \([^)]*\bsys_nice\b[^)]*\bsys_ptrace\b")
         rc = (here / "dsa-channeld.rc").read_text()
         service = rc[rc.index("service dsa_channeld"):rc.index("on property:sys.boot_completed=1")]
-        self.assertIn("capabilities SYS_NICE SYS_PTRACE DAC_READ_SEARCH", service)
+        self.assertIn("capabilities SYS_NICE SYS_PTRACE\n", service)
 
-    def test_fr32_channeld_may_read_the_android_id_google_play_services_keep(self):
-        # Google Play services refuse their gservices provider to the agent, so the daemon reads
-        # the ID from their check-in preferences: the DAC override for a file of another app
-        # user, and the SELinux walk to it. Nothing may write there.
+    def test_fr32_a_root_helper_reads_the_android_id_google_play_services_keep(self):
+        # Google Play services refuse their gservices provider to the agent and keep the ID in a
+        # file of their app user. The platform's neverallow rules forbid dac_read_search and
+        # opening privapp_data_file to the daemon and to any domain declared for the job, so the
+        # image must not carry such a rule: the helper init runs as root is permissive instead,
+        # as the approved root command's domain is, and has the one capability the file needs.
         here = Path(__file__).parent
-        cil = (here / "sepolicy" / "channeld.cil").read_text()
-        self.assertIn("(allow dsa_channeld self (capability (dac_read_search)))", cil)
-        self.assertIn("(allow dsa_channeld privapp_data_file (file (read open getattr)))", cil)
-        self.assertRegex(cil, r"\(allow dsa_channeld system_data_file \(dir \([^)]*\bsearch\b")
-        self.assertRegex(cil, r"\(allow dsa_channeld privapp_data_file \(dir \([^)]*\bsearch\b")
-        for line in cil.splitlines():
-            if line.startswith("(allow dsa_channeld privapp_data_file"):
-                self.assertNotRegex(line, r"\b(write|append|create|unlink|setattr|rename)\b")
+        rules = [line for sd in (here / "sepolicy").glob("*.cil")
+                 for line in sd.read_text().splitlines() if not line.lstrip().startswith(";")]
+        for line in rules:
+            if line.startswith("(allow"):
+                self.assertNotIn("dac_read_search", line, line)
+                self.assertNotIn("privapp_data_file", line, line)
+        policy = "\n".join(rules)
+        self.assertIn("(typepermissive dsa_google_id)", policy)
+        setters = re.findall(r"\(allow\s+(\S+)\s+dsa_google_id_prop\s+\(\s*property_service\s+\(([^)]*)\)", policy)
+        self.assertEqual({who for who, perms in setters if "set" in perms.split()},
+                         {"dsa_channeld", "dsa_google_id"})
         rc = (here / "dsa-channeld.rc").read_text()
-        service = rc[rc.index("service dsa_channeld"):rc.index("on property:sys.boot_completed=1")]
-        self.assertIn("DAC_READ_SEARCH", service)
+        block = [line.strip() for line in rc[rc.index("service dsa_google_id"):].split("\n\n")[0].splitlines()]
+        for option in ["service dsa_google_id /vendor/bin/dsa-channeld --google-device-id", "user root",
+                       "capabilities DAC_READ_SEARCH", "seclabel u:r:dsa_google_id:s0", "oneshot", "disabled"]:
+            self.assertIn(option, block)
+        self.assertIn("on property:vendor.dsa.google_device_id=request\n    start dsa_google_id", rc)
+        self.assertEqual(make_image.GOOGLE_DEVICE_ID_PROPERTY_CONTEXT,
+                         "vendor.dsa.google_device_id u:object_r:dsa_google_id_prop:s0 exact string")
+        self.assertIn(make_image.GOOGLE_DEVICE_ID_PROPERTY_CONTEXT,
+                      make_image.update_vendor_property_contexts("").splitlines())
+        # The daemon reads the answer, and nothing it may reach is anything of the services'.
+        self.assertRegex(policy, r"\(allow\s+dsa_channeld\s+dsa_google_id_prop\s+\(\s*file\s+\(\s*read\b")
 
     def test_fr21_channeld_may_clear_the_pstore_records_the_host_collected(self):
         # init leaves /sys/fs/pstore read only to system; the daemon makes it writable to
@@ -160,7 +174,12 @@ class ImageLayoutTests(unittest.TestCase):
         "keymint_key.rs": ("dsa_keymint_key", "channeld.cil"),
         # The packet filter rules that send DNS queries to the stub (dsa-channeld --dns-redirect).
         "dns_redirect.rs": ("dsa_dns_redirect", "channeld.cil"),
+        # The Google device ID helper (dsa-channeld --google-device-id). Its domain is
+        # permissive, because the platform's neverallow rules forbid any rule for the file it
+        # reads, so the scans below leave its source out (see the FR-32 test on the policy).
+        "google_id_reader.rs": ("dsa_google_id", "channeld.cil"),
     }
+    CHANNELD_PERMISSIVE_DOMAINS = {"dsa_google_id"}
     # The policy files the image installs together with the daemon, so a rule for one of its
     # domains may live in any of them (the daemon's root elevation rules are in su.cil).
     CHANNELD_POLICY_FILES = ("channeld.cil", "files.cil", "su.cil", "memory.cil")
@@ -180,6 +199,8 @@ class ImageLayoutTests(unittest.TestCase):
             domain, policy_file = self.CHANNELD_SOURCE_DOMAINS.get(
                 source.name, ("dsa_channeld", "channeld.cil")
             )
+            if domain in self.CHANNELD_PERMISSIVE_DOMAINS:
+                continue
             policy = self._daemon_policy(here)
             for number, line in enumerate(source.read_text().splitlines(), 1):
                 if line.strip().startswith("//"):
@@ -218,13 +239,6 @@ class ImageLayoutTests(unittest.TestCase):
         "/data/vendor/dsa/gapps": ["system_data_root_file", "vendor_data_file"],
         # The package manager's list, where root elevation finds each named app's uid.
         "/data/system/packages.list": ["system_data_root_file", "system_data_file"],
-        # Google Play services' check-in preferences, which hold the Android ID. /data/data is
-        # system_data_file; the services' own folders are privapp_data_file.
-        "/data/data/com.google.android.gms": [
-            "system_data_root_file",
-            "system_data_file",
-            "privapp_data_file",
-        ],
     }
     # Paths the daemon names but never opens, so no folder on their way needs a rule. The
     # Google apps mount point is only compared with the mount points /proc/self/mounts lists.
@@ -296,6 +310,8 @@ class ImageLayoutTests(unittest.TestCase):
             domain, policy_file = self.CHANNELD_SOURCE_DOMAINS.get(
                 source.name, ("dsa_channeld", "channeld.cil")
             )
+            if domain in self.CHANNELD_PERMISSIVE_DOMAINS:
+                continue
             policy = self._daemon_policy(here)
             for number, line in self._production_lines(source):
                 for path in literal.findall(line):
@@ -3311,6 +3327,7 @@ class GuestMemoryTests(unittest.TestCase):
             + make_image.FILES_PROPERTY_CONTEXT + "\n"
             + make_image.ROOT_ELEVATION_PROPERTY_CONTEXT + "\n"
             + make_image.DNS_PROPERTY_CONTEXT + "\n"
+            + make_image.GOOGLE_DEVICE_ID_PROPERTY_CONTEXT + "\n"
             + make_image.HOST_MEMORY_PROPERTY_CONTEXT + "\n"
             + make_image.VIDEO_PICTURES_PROPERTY_CONTEXT + "\n"
             + make_image.GRAPHICS_MEMORY_PROPERTY_CONTEXT + "\n"

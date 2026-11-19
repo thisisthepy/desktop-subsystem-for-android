@@ -747,7 +747,10 @@ Google Play'i yeniden yükleyin.</value>
     <value>Android kimliği: {0}</value>
   </data>
   <data name="Gapps_NoDeviceId" xml:space="preserve">
-    <value>Android kimliği, Google Play yüklendikten ve Android onunla başladıktan sonra burada görünür.</value>
+    <value>Android kimliği henüz kullanılamıyor. Google Play Hizmetleri, bu cihaz Google'a ilk kez giriş yaptığında (check-in) kimliği oluşturur.
+Bunun için Google Play'in yüklü, Android'in onunla başlatılmış ve bir ağ bağlantısının olması gerekir.
+Birkaç dakika sonra hâlâ boşsa Android'i yeniden başlatın.
+Kimlik, Google'ın kayıt sayfasının kabul ettiği biçimde, ondalık bir sayıdır.</value>
   </data>
   <data name="DeveloperHeader.Text" xml:space="preserve">
     <value>Geliştirici</value>

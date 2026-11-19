@@ -1251,8 +1251,8 @@ msgstr "Google Play indiriliyor ve yükleniyor. Bu işlem birkaç dakika sürebi
 msgid "Enter this number on Google's registration page."
 msgstr "Bu numarayı Google'ın kayıt sayfasına girin."
 
-msgid "It shows here once Google Play is installed and Android has started."
-msgstr "Google Play yüklenip Android başladığında burada görünür."
+msgid "The Android ID is not available yet. Google Play services make it when this device first checks in with Google.\nThat needs Google Play installed, Android started with it and a network connection.\nIf this stays empty a few minutes later, restart Android.\nThe ID is a decimal number, the form Google's registration page takes."
+msgstr "Android kimliği henüz kullanılamıyor. Google Play Hizmetleri, bu cihaz Google'a ilk kez giriş yaptığında (check-in) kimliği oluşturur.\nBunun için Google Play'in yüklü, Android'in onunla başlatılmış ve bir ağ bağlantısının olması gerekir.\nBirkaç dakika sonra hâlâ boşsa Android'i yeniden başlatın.\nKimlik, Google'ın kayıt sayfasının kabul ettiği biçimde, ondalık bir sayıdır."
 
 msgid "Android started before this change. Stop and start Android for Google Play to follow it."
 msgstr "Android bu değişiklikten önce başladı. Google Play'in buna uyması için Android'i durdurup yeniden başlatın."

@@ -4982,6 +4982,11 @@ ROOT_ELEVATION_PROPERTY_CONTEXT = f"{ROOT_ELEVATION_PROPERTY} u:object_r:dsa_roo
 # query to the daemon's stub, or stop doing so, to match (channeld.cil).
 DNS_PROPERTY = "vendor.dsa.dns"
 DNS_PROPERTY_CONTEXT = f"{DNS_PROPERTY} u:object_r:dsa_dns_prop:s0 exact enum on off"
+# dsa-channeld sets this to "request" when the agent has no Google Services Framework Android ID
+# to give; dsa-channeld.rc has dsa-channeld --google-device-id read it from Google Play services'
+# files as root and set it to the ID or to "none" (channeld.cil).
+GOOGLE_DEVICE_ID_PROPERTY = "vendor.dsa.google_device_id"
+GOOGLE_DEVICE_ID_PROPERTY_CONTEXT = f"{GOOGLE_DEVICE_ID_PROPERTY} u:object_r:dsa_google_id_prop:s0 exact string"
 # dsa-channeld names the apps that see the computer's memory as the device's (Google Play) in
 # this, from the package manager's list, and dsa-memory.rc hands it to the kernel (memory.cil).
 HOST_MEMORY_PROPERTY = "vendor.dsa.host_memory.uids"
@@ -5777,6 +5782,8 @@ def update_vendor_property_contexts(text):
         lines.append(ROOT_ELEVATION_PROPERTY_CONTEXT)
     if not any(line.split()[:1] == [DNS_PROPERTY] for line in lines):
         lines.append(DNS_PROPERTY_CONTEXT)
+    if not any(line.split()[:1] == [GOOGLE_DEVICE_ID_PROPERTY] for line in lines):
+        lines.append(GOOGLE_DEVICE_ID_PROPERTY_CONTEXT)
     if not any(line.split()[:1] == [HOST_MEMORY_PROPERTY] for line in lines):
         lines.append(HOST_MEMORY_PROPERTY_CONTEXT)
     if not any(line.split()[:1] == [VIDEO_PICTURES_PROPERTY] for line in lines):

@@ -20302,85 +20302,85 @@
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Die Android-ID erscheint hier, sobald Google Play installiert ist und Android damit gestartet wurde."
+            "value": "Die Android-ID ist noch nicht verfügbar. Die Google Play-Dienste erzeugen sie, wenn sich dieses Gerät zum ersten Mal bei Google meldet.\nDafür braucht es installiertes Google Play, ein damit gestartetes Android und eine Netzwerkverbindung.\nBleibt sie Minuten später leer, starten Sie Android neu.\nDie ID ist eine Dezimalzahl, so wie die Registrierungsseite von Google sie verlangt."
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The Android ID shows here once Google Play is installed and Android has started with it."
+            "value": "The Android ID is not available yet. Google Play services make it when this device first checks in with Google.\nThat needs Google Play installed, Android started with it and a network connection.\nIf this stays empty a few minutes later, restart Android.\nThe ID is a decimal number, the form Google's registration page takes."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "El ID de Android aparece aquí cuando Google Play está instalado y Android se ha iniciado con él."
+            "value": "El ID de Android aún no está disponible. Google Play Services lo crea cuando este dispositivo se registra en Google por primera vez.\nPara ello hacen falta Google Play instalado, Android iniciado con él y una conexión de red.\nSi sigue vacío unos minutos después, reinicia Android.\nEl ID es un número decimal, el formato que acepta la página de registro de Google."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "L'Android ID s'affiche ici une fois Google Play installé et Android démarré avec lui."
+            "value": "L'Android ID n'est pas encore disponible. Les services Google Play le créent quand cet appareil se connecte à Google pour la première fois.\nIl faut pour cela Google Play installé, Android démarré avec lui et une connexion réseau.\nS'il reste vide quelques minutes plus tard, redémarrez Android.\nL'ID est un nombre décimal, le format qu'accepte la page d'enregistrement de Google."
           }
         },
         "id": {
           "stringUnit": {
             "state": "translated",
-            "value": "Android ID muncul di sini setelah Google Play diinstal dan Android sudah dimulai dengannya."
+            "value": "Android ID belum tersedia. Layanan Google Play membuatnya saat perangkat ini pertama kali check-in ke Google.\nUntuk itu Google Play harus terpasang, Android dimulai bersamanya, dan ada koneksi jaringan.\nJika tetap kosong beberapa menit kemudian, mulai ulang Android.\nID ini berupa angka desimal, format yang diterima halaman pendaftaran Google."
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "L'ID Android compare qui quando Google Play è installato e Android si è avviato con esso."
+            "value": "L'Android ID non è ancora disponibile. I servizi di Google Play lo creano al primo accesso di questo dispositivo a Google.\nServono Google Play installato, Android avviato con esso e una connessione di rete.\nSe resta vuoto dopo qualche minuto, riavvia Android.\nL'ID è un numero decimale, il formato che accetta la pagina di registrazione di Google."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "Google Play をインストールし、それを含めて Android が起動すると、ここに Android ID が表示されます。"
+            "value": "Android ID はまだ利用できません。Google Play 開発者サービスは、この端末が初めて Google にチェックインするときに ID を作成します。\nそのためには、Google Play がインストールされ、Android がそれとともに起動し、ネットワークに接続している必要があります。\n数分たっても空のままの場合は Android を再起動してください。\nID は 10 進数で、Google の登録ページが受け付ける形式です。"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "Google Play를 설치하고 Android가 그것과 함께 시작되면 여기에 Android ID가 나타납니다."
+            "value": "Android ID를 아직 알 수 없습니다. Google Play 서비스는 이 기기가 처음 Google에 체크인할 때 ID를 만듭니다.\n그러려면 Google Play가 설치되어 있고, Android가 Google Play와 함께 시작되었으며, 네트워크에 연결되어 있어야 합니다.\n몇 분이 지나도 비어 있으면 Android를 다시 시작하세요.\nID는 십진수이며, Google 등록 페이지가 받는 형식입니다."
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "O Android ID aparece aqui quando o Google Play estiver instalado e o Android tiver iniciado com ele."
+            "value": "O Android ID ainda não está disponível. Os serviços do Google Play o criam quando este dispositivo faz o primeiro check-in no Google.\nPara isso, é preciso ter o Google Play instalado, o Android iniciado com ele e uma conexão de rede.\nSe continuar vazio alguns minutos depois, reinicie o Android.\nO ID é um número decimal, o formato que a página de registro do Google aceita."
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Android ID появится здесь, когда Google Play будет установлен и Android запустится с ним."
+            "value": "Android ID пока недоступен. Сервисы Google Play создают его, когда это устройство впервые регистрируется в Google.\nДля этого нужны установленный Google Play, Android, запущенный вместе с ним, и подключение к сети.\nЕсли через несколько минут ID всё ещё пуст, перезапустите Android.\nID это десятичное число, формат, который принимает страница регистрации Google."
           }
         },
         "tr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Google Play yüklendikten ve Android onunla başladıktan sonra Android ID burada görünür."
+            "value": "Android kimliği henüz kullanılamıyor. Google Play Hizmetleri, bu cihaz Google'a ilk kez giriş yaptığında (check-in) kimliği oluşturur.\nBunun için Google Play'in yüklü, Android'in onunla başlatılmış ve bir ağ bağlantısının olması gerekir.\nBirkaç dakika sonra hâlâ boşsa Android'i yeniden başlatın.\nKimlik, Google'ın kayıt sayfasının kabul ettiği biçimde, ondalık bir sayıdır."
           }
         },
         "vi": {
           "stringUnit": {
             "state": "translated",
-            "value": "Android ID hiện ở đây khi Google Play đã được cài và Android đã khởi động cùng nó."
+            "value": "Android ID chưa có. Dịch vụ Google Play tạo ID này khi thiết bị lần đầu check-in với Google.\nViệc đó cần Google Play đã cài, Android khởi động cùng nó và có kết nối mạng.\nNếu vài phút sau vẫn trống, hãy khởi động lại Android.\nID là một số thập phân, định dạng mà trang đăng ký của Google chấp nhận."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "安装 Google Play 并且 Android 随之启动后，Android ID 会显示在这里。"
+            "value": "Android ID 暂时不可用。Google Play 服务会在此设备首次向 Google 签到时生成它。\n这需要已安装 Google Play、Android 带着它启动，并且网络已连接。\n如果几分钟后仍为空，请重新启动 Android。\n该 ID 是十进制数字，是 Google 注册页面接受的格式。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "安裝 Google Play 且 Android 搭配它啟動後，Android ID 就會顯示在這裡。"
+            "value": "Android ID 目前無法使用。Google Play 服務會在此裝置首次向 Google 簽到時產生它。\n這需要已安裝 Google Play、Android 以它啟動，且已連上網路。\n若幾分鐘後仍為空，請重新啟動 Android。\n此 ID 是十進位數字，是 Google 註冊頁面接受的格式。"
           }
         }
       }

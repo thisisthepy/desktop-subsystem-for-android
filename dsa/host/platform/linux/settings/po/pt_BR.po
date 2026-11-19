@@ -1251,8 +1251,8 @@ msgstr "Baixando e instalando o Google Play. Isso pode levar vários minutos."
 msgid "Enter this number on Google's registration page."
 msgstr "Insira este número na página de registro do Google."
 
-msgid "It shows here once Google Play is installed and Android has started."
-msgstr "Ele aparece aqui quando o Google Play estiver instalado e o Android tiver iniciado."
+msgid "The Android ID is not available yet. Google Play services make it when this device first checks in with Google.\nThat needs Google Play installed, Android started with it and a network connection.\nIf this stays empty a few minutes later, restart Android.\nThe ID is a decimal number, the form Google's registration page takes."
+msgstr "O Android ID ainda não está disponível. Os serviços do Google Play o criam quando este dispositivo faz o primeiro check-in no Google.\nPara isso, é preciso ter o Google Play instalado, o Android iniciado com ele e uma conexão de rede.\nSe continuar vazio alguns minutos depois, reinicie o Android.\nO ID é um número decimal, o formato que a página de registro do Google aceita."
 
 msgid "Android started before this change. Stop and start Android for Google Play to follow it."
 msgstr "O Android iniciou antes desta alteração. Pare e inicie o Android para que o Google Play a siga."

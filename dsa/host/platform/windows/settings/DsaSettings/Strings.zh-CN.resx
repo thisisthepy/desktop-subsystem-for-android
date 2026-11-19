@@ -747,7 +747,10 @@ DSA 不分发它们。只有在你要求时，DSA 才会下载公开的 LiteGapp
     <value>Android ID：{0}</value>
   </data>
   <data name="Gapps_NoDeviceId" xml:space="preserve">
-    <value>安装 Google Play 并且 Android 带着它启动后，Android ID 会显示在这里。</value>
+    <value>Android ID 暂时不可用。Google Play 服务会在此设备首次向 Google 签到时生成它。
+这需要已安装 Google Play、Android 带着它启动，并且网络已连接。
+如果几分钟后仍为空，请重新启动 Android。
+该 ID 是十进制数字，是 Google 注册页面接受的格式。</value>
   </data>
   <data name="DeveloperHeader.Text" xml:space="preserve">
     <value>开发者</value>

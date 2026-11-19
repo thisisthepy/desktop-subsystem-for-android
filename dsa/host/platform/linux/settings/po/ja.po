@@ -1251,8 +1251,8 @@ msgstr "Google Play をダウンロードしてインストールしています
 msgid "Enter this number on Google's registration page."
 msgstr "この番号を Google の登録ページに入力してください。"
 
-msgid "It shows here once Google Play is installed and Android has started."
-msgstr "Google Play をインストールして Android を起動すると、ここに表示されます。"
+msgid "The Android ID is not available yet. Google Play services make it when this device first checks in with Google.\nThat needs Google Play installed, Android started with it and a network connection.\nIf this stays empty a few minutes later, restart Android.\nThe ID is a decimal number, the form Google's registration page takes."
+msgstr "Android ID はまだ利用できません。Google Play 開発者サービスは、この端末が初めて Google にチェックインするときに ID を作成します。\nそのためには、Google Play がインストールされ、Android がそれとともに起動し、ネットワークに接続している必要があります。\n数分たっても空のままの場合は Android を再起動してください。\nID は 10 進数で、Google の登録ページが受け付ける形式です。"
 
 msgid "Android started before this change. Stop and start Android for Google Play to follow it."
 msgstr "Android はこの変更の前に起動しました。Google Play に反映するには、Android を停止してから起動してください。"

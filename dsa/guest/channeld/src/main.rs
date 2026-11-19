@@ -229,6 +229,35 @@ mod daemon {
         }
     }
 
+    /// Off Android there are no properties to set.
+    #[cfg(not(target_os = "android"))]
+    fn set_property(name: &str, _value: &str) -> Result<(), String> {
+        Err(format!("there is no property {name} off Android"))
+    }
+
+    /// The daemon's side of the Google device ID exchange: the property the root helper
+    /// answers through (`dsa-channeld.rc` runs it when the daemon sets the request).
+    fn google_device_id_source() -> dsa_guest_channeld::google_device_id::DeviceIdSource {
+        use dsa_guest_channeld::google_device_id::{DeviceIdSource, PROPERTY};
+        DeviceIdSource::new(
+            || read_property(PROPERTY),
+            |value| {
+                if let Err(why) = set_property(PROPERTY, value) {
+                    say!("could not ask for the Google device ID: {why}");
+                }
+            },
+        )
+    }
+
+    /// `--google-device-id`: says the Google Services Framework Android ID, which init runs as
+    /// root in a domain of its own because the services' files are no one else's to read.
+    fn google_device_id() -> i32 {
+        dsa_guest_channeld::google_id_reader::run(
+            std::path::Path::new(dsa_guest_channeld::google_id_reader::CHECKIN_PREFERENCES),
+            &set_property,
+        )
+    }
+
     /// Tells the router once Android has finished booting. Init sets the property the daemon
     /// may read when `sys.boot_completed` is set (`dsa-channeld.rc`). The property lasts for
     /// the boot, and the daemon restarts within it, so a late look still sees it.
@@ -1053,6 +1082,9 @@ mod daemon {
         if std::env::args().nth(1).as_deref() == Some("--keymint-key") {
             return keymint_key();
         }
+        if std::env::args().nth(1).as_deref() == Some("--google-device-id") {
+            return google_device_id();
+        }
         if std::env::args().nth(1).as_deref() == Some("--dns-redirect") {
             return dns_redirect();
         }
@@ -1143,7 +1175,10 @@ mod daemon {
                     gapps::DIR,
                     GuestFacts::of_system(read_property),
                 )))
-                .on_google_device_id(dsa_guest_channeld::google_device_id::read)
+                .on_google_device_id({
+                    let source = google_device_id_source();
+                    move || source.read()
+                })
                 .on_gamepads(gamepads)
                 .on_root_elevation(Arc::clone(&su_relay), move |config| {
                     su_config.apply(config);

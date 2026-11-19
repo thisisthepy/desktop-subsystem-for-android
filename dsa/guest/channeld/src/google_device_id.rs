@@ -1,112 +1,128 @@
-//! The Google Services Framework Android ID, read from where Google Play services keep it.
+//! The Google Services Framework Android ID, as the daemon gets it from Google Play services.
 //!
 //! Google's page for uncertified devices asks for this ID before it lets the user sign in. The
 //! agent asks Google's gservices provider for it first, but current Google Play services refuse
 //! every caller that is not on their own list, the agent included, so the answer is often empty.
 //! The services also write the ID, in decimal, into their own preferences file after the
-//! device's first check-in with Google. The daemon may read that file, so the agent's empty
-//! answer is filled in from here on its way to the host.
+//! device's first check-in with Google. That file belongs to the services' app user, and the
+//! platform's policy forbids every domain but a few of its own to read an app's data, the daemon's
+//! included. So the daemon does not read it: it asks a helper init runs as root in a domain of its
+//! own ([`crate::google_id_reader`]), through the property [`PROPERTY`]. The daemon sets the
+//! property to [`REQUEST`]; init starts the helper; the helper sets it to the ID in decimal, or to
+//! [`NONE`] while the services have not made one.
 //!
-//! The ID is kept in decimal there and shown in decimal: that is the form Google's page takes.
-//! Other tools print it in hexadecimal, which that page does not accept.
+//! The ID is kept and shown in decimal: that is the form Google's page takes. Other tools print
+//! it in hexadecimal, which that page does not accept.
+//!
+//! The agent's empty answer is filled in from the property on its way to the host. Asking never
+//! waits: when there is no ID yet the answer stays empty, a request goes out, and the host's next
+//! look finds the ID.
 
-use std::path::Path;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
-/// Where Google Play services keep their check-in preferences.
-pub const CHECKIN_PREFERENCES: &str = "/data/data/com.google.android.gms/shared_prefs/Checkin.xml";
+/// The property the request and the answer go through.
+pub const PROPERTY: &str = "vendor.dsa.google_device_id";
+/// What the daemon sets the property to when it wants the ID read.
+pub const REQUEST: &str = "request";
+/// What the helper sets the property to when there is no ID to read.
+pub const NONE: &str = "none";
 
-/// The most of the preferences file that is read. The file is about a kilobyte; anything much
-/// larger is not the file this expects.
-const MAX_FILE_BYTES: u64 = 1 << 20;
+/// How long the daemon waits before it asks the helper again, so a host that keeps asking while
+/// the services have no ID yet does not start a process each time.
+pub const ASK_AGAIN: Duration = Duration::from_secs(30);
 
-/// The Android ID in `xml`, the text of a Google Play services `Checkin.xml`: the element
-/// `<string name="android_id">4562097385933913176</string>`. `None` when there is none, or it is
-/// not a decimal number, so nothing else is ever passed on as an ID.
-pub fn parse_checkin(xml: &str) -> Option<String> {
-    let mut rest = xml;
-    while let Some(start) = rest.find("<string") {
-        rest = &rest[start + "<string".len()..];
-        let tag_end = rest.find('>')?;
-        let (attributes, after) = rest.split_at(tag_end);
-        if attributes.ends_with('/') {
-            continue;
+/// Whether `value` is an Android ID: a decimal number.
+pub fn is_id(value: &str) -> bool {
+    !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// The daemon's side of the exchange: reads the answer, and asks for one when there is none.
+pub struct DeviceIdSource {
+    get: Box<dyn Fn() -> String + Send + Sync>,
+    set: Box<dyn Fn(&str) + Send + Sync>,
+    asked: Mutex<Option<Instant>>,
+}
+
+impl DeviceIdSource {
+    /// A source over the property: `get` reads it, `set` sets it.
+    pub fn new(
+        get: impl Fn() -> String + Send + Sync + 'static,
+        set: impl Fn(&str) + Send + Sync + 'static,
+    ) -> DeviceIdSource {
+        DeviceIdSource {
+            get: Box::new(get),
+            set: Box::new(set),
+            asked: Mutex::new(None),
         }
-        let named_android_id =
-            attributes.contains("name=\"android_id\"") || attributes.contains("name='android_id'");
-        let after = &after[1..];
-        let close = after.find("</string>")?;
-        if named_android_id {
-            let id = after[..close].trim();
-            return (!id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()))
-                .then(|| id.to_string());
-        }
-        rest = &after[close..];
     }
-    None
-}
 
-/// The Android ID in the preferences file at `path`, or `None` while there is no such file or
-/// it has no ID yet (the device has not checked in with Google).
-pub fn read_from(path: &Path) -> Option<String> {
-    use std::io::Read;
-    let file = std::fs::File::open(path).ok()?;
-    let mut text = String::new();
-    file.take(MAX_FILE_BYTES).read_to_string(&mut text).ok()?;
-    parse_checkin(&text)
-}
-
-/// The Android ID Google Play services keep on this device, if they have made one.
-pub fn read() -> Option<String> {
-    read_from(Path::new(CHECKIN_PREFERENCES))
+    /// The ID the helper has found, if it has. When there is none, asks the helper to look
+    /// (at most once every [`ASK_AGAIN`]) and says so with `None`.
+    pub fn read(&self) -> Option<String> {
+        let value = (self.get)();
+        let value = value.trim();
+        if is_id(value) {
+            return Some(value.to_string());
+        }
+        let mut asked = self.asked.lock().unwrap_or_else(|e| e.into_inner());
+        if asked.is_none_or(|at| at.elapsed() >= ASK_AGAIN) {
+            *asked = Some(Instant::now());
+            (self.set)(REQUEST);
+        }
+        None
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
 
-    const CHECKIN: &str = "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>\n<map>\n\
-        <long name=\"CheckinInterval_FlexSec\" value=\"10800\" />\n\
-        <string name=\"android_id\">4562097385933913176</string>\n\
-        <string name=\"CheckinService_deviceDataVersionInfo\">ABF</string>\n</map>\n";
-
-    #[test]
-    fn fr32_the_android_id_is_the_decimal_string_in_the_checkin_preferences() {
-        assert_eq!(
-            parse_checkin(CHECKIN).as_deref(),
-            Some("4562097385933913176")
+    fn source(value: &str) -> (DeviceIdSource, Arc<Mutex<Vec<String>>>) {
+        let property = Arc::new(Mutex::new(value.to_string()));
+        let sets = Arc::new(Mutex::new(Vec::new()));
+        let (read, written) = (Arc::clone(&property), Arc::clone(&property));
+        let log = Arc::clone(&sets);
+        let source = DeviceIdSource::new(
+            move || read.lock().unwrap().clone(),
+            move |v| {
+                *written.lock().unwrap() = v.to_string();
+                log.lock().unwrap().push(v.to_string());
+            },
         );
+        (source, sets)
     }
 
     #[test]
-    fn fr32_a_checkin_file_without_an_id_gives_none() {
-        let before_checkin = "<map><long name=\"CheckinTask_bookmark\" value=\"0\" /></map>";
-        assert_eq!(parse_checkin(before_checkin), None);
-        assert_eq!(parse_checkin(""), None);
-        let empty = "<map><string name=\"android_id\"></string></map>";
-        assert_eq!(parse_checkin(empty), None);
+    fn fr32_the_id_the_helper_left_in_the_property_is_the_answer() {
+        let (source, sets) = source("4562097385933913176");
+        assert_eq!(source.read().as_deref(), Some("4562097385933913176"));
+        assert!(sets.lock().unwrap().is_empty(), "nothing is asked for");
     }
 
     #[test]
-    fn fr32_a_value_that_is_not_decimal_is_never_passed_on_as_an_id() {
-        let hex = "<map><string name=\"android_id\">3f2a9c0d11e4b7a8</string></map>";
-        assert_eq!(parse_checkin(hex), None);
+    fn fr32_without_an_id_the_helper_is_asked_once_and_the_answer_is_empty() {
+        let (source, sets) = source("");
+        assert_eq!(source.read(), None);
+        assert_eq!(source.read(), None);
+        assert_eq!(*sets.lock().unwrap(), vec![REQUEST.to_string()]);
     }
 
     #[test]
-    fn fr32_the_id_is_found_after_empty_and_other_string_elements() {
-        let xml = "<map><string name=\"empty\" /><string name=\"other\">12</string>\
-                   <string name=\"android_id\">987</string></map>";
-        assert_eq!(parse_checkin(xml).as_deref(), Some("987"));
+    fn fr32_a_none_from_the_helper_is_not_an_id_and_is_asked_again_later() {
+        let (source, sets) = source(NONE);
+        assert_eq!(source.read(), None);
+        *source.asked.lock().unwrap() = Some(Instant::now() - ASK_AGAIN);
+        assert_eq!(source.read(), None);
+        assert_eq!(sets.lock().unwrap().len(), 2);
     }
 
     #[test]
-    fn fr32_the_id_is_read_from_the_file_where_google_keeps_it() {
-        let dir = std::env::temp_dir().join(format!("dsa-channeld-gid-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("Checkin.xml");
-        assert_eq!(read_from(&path), None);
-        std::fs::write(&path, CHECKIN).unwrap();
-        assert_eq!(read_from(&path).as_deref(), Some("4562097385933913176"));
-        let _ = std::fs::remove_dir_all(&dir);
+    fn fr32_only_a_decimal_number_is_an_id() {
+        assert!(is_id("987"));
+        assert!(!is_id(""));
+        assert!(!is_id(REQUEST));
+        assert!(!is_id("3f2a9c0d11e4b7a8"));
     }
 }

@@ -747,7 +747,10 @@ Hãy cài đặt lại Google Play.</value>
     <value>Android ID: {0}</value>
   </data>
   <data name="Gapps_NoDeviceId" xml:space="preserve">
-    <value>Android ID hiện ở đây khi Google Play đã được cài đặt và Android đã khởi động cùng nó.</value>
+    <value>Android ID chưa có. Dịch vụ Google Play tạo ID này khi thiết bị lần đầu check-in với Google.
+Việc đó cần Google Play đã cài, Android khởi động cùng nó và có kết nối mạng.
+Nếu vài phút sau vẫn trống, hãy khởi động lại Android.
+ID là một số thập phân, định dạng mà trang đăng ký của Google chấp nhận.</value>
   </data>
   <data name="DeveloperHeader.Text" xml:space="preserve">
     <value>Nhà phát triển</value>

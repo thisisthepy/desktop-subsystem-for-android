@@ -747,7 +747,10 @@ Vuelva a instalar Google Play.</value>
     <value>ID de Android: {0}</value>
   </data>
   <data name="Gapps_NoDeviceId" xml:space="preserve">
-    <value>El ID de Android aparece aquí cuando Google Play esté instalado y Android se haya iniciado con él.</value>
+    <value>El ID de Android aún no está disponible. Google Play Services lo crea cuando este dispositivo se registra en Google por primera vez.
+Para ello hacen falta Google Play instalado, Android iniciado con él y una conexión de red.
+Si sigue vacío unos minutos después, reinicia Android.
+El ID es un número decimal, el formato que acepta la página de registro de Google.</value>
   </data>
   <data name="DeveloperHeader.Text" xml:space="preserve">
     <value>Desarrollador</value>

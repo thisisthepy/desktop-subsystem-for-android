@@ -983,7 +983,7 @@ pub fn gapps_busy_text() -> String {
 pub fn gapps_device_id(gapps: &Gapps) -> String {
     match &gapps.device_id {
         Some(_) => tr("Enter this number on Google's registration page."),
-        None => tr("It shows here once Google Play is installed and Android has started."),
+        None => tr("The Android ID is not available yet. Google Play services make it when this device first checks in with Google.\nThat needs Google Play installed, Android started with it and a network connection.\nIf this stays empty a few minutes later, restart Android.\nThe ID is a decimal number, the form Google's registration page takes."),
     }
 }
 

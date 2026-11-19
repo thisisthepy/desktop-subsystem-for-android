@@ -10,11 +10,8 @@ service dsa_channeld /vendor/bin/dsa-channeld
     # SYS_NICE and SYS_PTRACE: after something wakes an app that no window shows, the daemon
     # pages its anonymous memory back to zram (process_madvise with MADV_PAGEOUT). The kernel
     # asks SYS_NICE of a caller that advises another process, and SYS_PTRACE to read the
-    # address space of another user's process. DAC_READ_SEARCH: Google Play services' check-in
-    # preferences belong to their app user and to no group of the daemon, and hold the Android
-    # ID that Google's page for uncertified devices asks for; the policy lets the daemon read
-    # those files and nothing else of an app's data.
-    capabilities SYS_NICE SYS_PTRACE DAC_READ_SEARCH
+    # address space of another user's process.
+    capabilities SYS_NICE SYS_PTRACE
     stdio_to_kmsg
     # Every pointer event passes through here on its way to the agent; it must not wait
     # behind apps. Only the framework's display and input threads go ahead of it.
@@ -207,6 +204,25 @@ service dsa_dns_redirect /vendor/bin/dsa-channeld --dns-redirect
 
 on property:vendor.dsa.dns=*
     start dsa_dns_redirect
+
+# The Google Services Framework Android ID, which Google's page for uncertified devices asks
+# for. Google Play services keep it in a file of their own app user that no other domain may
+# read, and refuse it to the agent, so the daemon asks for it: it sets
+# vendor.dsa.google_device_id to "request" when the agent has none, and init runs
+# dsa-channeld --google-device-id as root in a domain of its own (channeld.cil). The helper
+# reads the one file and sets the property to the ID in decimal, or to "none", and ends.
+# DAC_READ_SEARCH is the only capability it has: root does not own the file.
+service dsa_google_id /vendor/bin/dsa-channeld --google-device-id
+    user root
+    group root
+    capabilities DAC_READ_SEARCH
+    seclabel u:r:dsa_google_id:s0
+    oneshot
+    disabled
+    stdio_to_kmsg
+
+on property:vendor.dsa.google_device_id=request
+    start dsa_google_id
 
 # KeyMint's root key, which the host keeps sealed by the user's credential store and gives
 # once each boot. dsa-channeld --keymint-key asks for it on the host's KeyMint port and writes

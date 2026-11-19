@@ -747,7 +747,10 @@ Google Play をもう一度インストールしてください。</value>
     <value>Android ID: {0}</value>
   </data>
   <data name="Gapps_NoDeviceId" xml:space="preserve">
-    <value>Google Play をインストールし、それを含めて Android が開始すると、ここに Android ID が表示されます。</value>
+    <value>Android ID はまだ利用できません。Google Play 開発者サービスは、この端末が初めて Google にチェックインするときに ID を作成します。
+そのためには、Google Play がインストールされ、Android がそれとともに起動し、ネットワークに接続している必要があります。
+数分たっても空のままの場合は Android を再起動してください。
+ID は 10 進数で、Google の登録ページが受け付ける形式です。</value>
   </data>
   <data name="DeveloperHeader.Text" xml:space="preserve">
     <value>開発者</value>

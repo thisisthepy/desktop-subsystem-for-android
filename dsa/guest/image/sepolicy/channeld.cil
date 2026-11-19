@@ -154,18 +154,6 @@
 ; a process of another user. init gives the daemon both (dsa-channeld.rc).
 (allow dsa_channeld self (capability (sys_nice sys_ptrace)))
 
-; The Google Services Framework Android ID, which Google's page for uncertified devices asks for.
-; Google Play services refuse their provider to the agent, so the daemon reads the ID from the
-; check-in preferences the services keep (/data/data/com.google.android.gms/shared_prefs/
-; Checkin.xml, google_device_id.rs) and adds it to the agent's empty answer. The file belongs
-; to the services' app user and to no group of the daemon, so init also gives the daemon
-; CAP_DAC_READ_SEARCH (dsa-channeld.rc), which lets it read and never write. SELinux limits
-; the reading to the data of privileged apps, where Google Play services live, reached by
-; walking /data/data.
-(allow dsa_channeld self (capability (dac_read_search)))
-(allow dsa_channeld system_data_file (dir (search getattr)))
-(allow dsa_channeld privapp_data_file (dir (search getattr)))
-(allow dsa_channeld privapp_data_file (file (read open getattr)))
 (dontaudit dsa_channeld domain (dir (search getattr)))
 (dontaudit dsa_channeld domain (file (read open getattr)))
 
@@ -307,6 +295,42 @@
 (allow dsa_memory_report cgroup_v2 (file (read open getattr)))
 (allow dsa_memory_report sysfs (dir (search)))
 (allow dsa_memory_report sysfs (file (read open getattr)))
+
+; The Google Services Framework Android ID, which Google's page for uncertified devices asks for.
+; Google Play services refuse their provider to the agent, and keep the ID in their check-in
+; preferences (/data/data/com.google.android.gms/shared_prefs/Checkin.xml), a file of their app
+; user. The platform's policy forbids every domain but a few of its own (neverallow on
+; privapp_data_file: open for all but appdomain, artd, installd, rs) to open an app's data, and
+; forbids dac_read_search to all but its own list, so no rule here could let the daemon, or a
+; domain declared for the job, read it. The helper therefore runs permissive, as the approved
+; root command's domain does (su.cil), and nothing is allowed to it beyond what starting needs.
+; What it does is fixed by the binary init runs in it: dsa-channeld --google-device-id, which
+; reads that one file and sets one property. The helper's capability is a single one,
+; dac_read_search, which init gives it (dsa-channeld.rc); it cannot write.
+;
+; vendor.dsa.google_device_id (vendor_property_contexts): the daemon sets it to "request" when
+; the agent has no ID to give; init then starts the helper, which sets it to the ID, in decimal,
+; or to "none". The daemon reads it and fills in the agent's empty answer. Nothing else sets it.
+(type dsa_google_id_prop)
+(roletype object_r dsa_google_id_prop)
+(typeattributeset property_type (dsa_google_id_prop))
+(typeattributeset vendor_property_type (dsa_google_id_prop))
+(allow dsa_channeld dsa_google_id_prop (property_service (set)))
+(allow dsa_channeld dsa_google_id_prop (file (read open getattr map)))
+(allow vendor_init dsa_google_id_prop (file (read open getattr map)))
+
+(type dsa_google_id)
+(roletype object_r dsa_google_id)
+(typeattributeset domain (dsa_google_id))
+(typepermissive dsa_google_id)
+(allow init dsa_google_id (process (transition siginh rlimitinh)))
+(dontaudit init dsa_google_id (process (noatsecure)))
+(allow dsa_google_id dsa_channeld_exec (file (entrypoint read getattr map execute open)))
+(allow dsa_google_id init (fd (use)))
+(allow dsa_google_id kmsg_device (chr_file (write append getattr)))
+(allow dsa_google_id kmsg_debug_device (chr_file (write append getattr)))
+(allow dsa_google_id dsa_google_id_prop (property_service (set)))
+(allow dsa_google_id dsa_google_id_prop (file (read open getattr map)))
 
 ; The second zram device's helper (dsa_zram_extra, memory.cil) runs the daemon's binary, so its
 ; entrypoint rule is here, with the type: an image without the daemon has neither.

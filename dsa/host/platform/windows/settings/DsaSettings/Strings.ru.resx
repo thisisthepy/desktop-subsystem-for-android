@@ -747,7 +747,10 @@ DSA не распространяет их. Публичный пакет LiteGa
     <value>Android ID: {0}</value>
   </data>
   <data name="Gapps_NoDeviceId" xml:space="preserve">
-    <value>Android ID появится здесь, когда Google Play будет установлен и Android запустится с ним.</value>
+    <value>Android ID пока недоступен. Сервисы Google Play создают его, когда это устройство впервые регистрируется в Google.
+Для этого нужны установленный Google Play, Android, запущенный вместе с ним, и подключение к сети.
+Если через несколько минут ID всё ещё пуст, перезапустите Android.
+ID это десятичное число, формат, который принимает страница регистрации Google.</value>
   </data>
   <data name="DeveloperHeader.Text" xml:space="preserve">
     <value>Для разработчиков</value>

@@ -1251,8 +1251,8 @@ msgstr "Đang tải và cài Google Play. Việc này có thể mất vài phút
 msgid "Enter this number on Google's registration page."
 msgstr "Nhập số này vào trang đăng ký của Google."
 
-msgid "It shows here once Google Play is installed and Android has started."
-msgstr "Số này hiện ở đây khi Google Play đã được cài và Android đã khởi động."
+msgid "The Android ID is not available yet. Google Play services make it when this device first checks in with Google.\nThat needs Google Play installed, Android started with it and a network connection.\nIf this stays empty a few minutes later, restart Android.\nThe ID is a decimal number, the form Google's registration page takes."
+msgstr "Android ID chưa có. Dịch vụ Google Play tạo ID này khi thiết bị lần đầu check-in với Google.\nViệc đó cần Google Play đã cài, Android khởi động cùng nó và có kết nối mạng.\nNếu vài phút sau vẫn trống, hãy khởi động lại Android.\nID là một số thập phân, định dạng mà trang đăng ký của Google chấp nhận."
 
 msgid "Android started before this change. Stop and start Android for Google Play to follow it."
 msgstr "Android đã khởi động trước thay đổi này. Hãy dừng rồi khởi động Android để Google Play áp dụng nó."

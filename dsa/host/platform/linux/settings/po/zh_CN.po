@@ -1251,8 +1251,8 @@ msgstr "正在下载并安装 Google Play。这可能需要几分钟。"
 msgid "Enter this number on Google's registration page."
 msgstr "请在 Google 的注册页面上输入此号码。"
 
-msgid "It shows here once Google Play is installed and Android has started."
-msgstr "安装 Google Play 且 Android 启动后，它会显示在这里。"
+msgid "The Android ID is not available yet. Google Play services make it when this device first checks in with Google.\nThat needs Google Play installed, Android started with it and a network connection.\nIf this stays empty a few minutes later, restart Android.\nThe ID is a decimal number, the form Google's registration page takes."
+msgstr "Android ID 暂时不可用。Google Play 服务会在此设备首次向 Google 签到时生成它。\n这需要已安装 Google Play、Android 带着它启动，并且网络已连接。\n如果几分钟后仍为空，请重新启动 Android。\n该 ID 是十进制数字，是 Google 注册页面接受的格式。"
 
 msgid "Android started before this change. Stop and start Android for Google Play to follow it."
 msgstr "Android 在此更改之前已启动。停止并重新启动 Android，Google Play 才会遵循此更改。"
