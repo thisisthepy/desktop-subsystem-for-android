@@ -495,7 +495,9 @@ pub fn create_user_android(
                 + &dsa_host_core::widevine::bootconfig_for(&*store, &user, &attached)
                 // The computer's physical memory, read at each start, which Google Play sees
                 // as the device's memory.
-                + &dsa_host_core::host_memory::bootconfig(host_total_kb())
+                // Linux has no figure for the installed modules that a user can read without
+                // root, so the total memory stands for it (the guest rounds it to whole GiB).
+                + &dsa_host_core::host_memory::bootconfig(host_total_kb(), host_total_kb())
         })
     })
     .with_boot_properties({

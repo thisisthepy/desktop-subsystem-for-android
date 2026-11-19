@@ -311,7 +311,9 @@ impl Planner {
                 + &dsa_host_core::widevine::bootconfig_for(&*self.settings, &self.name, &attached)
                 // The Mac's physical memory, read at each start, which Google Play sees as the
                 // device's memory.
-                + &dsa_host_core::host_memory::bootconfig(total_memory_kb()),
+                // hw.memsize is the memory the Mac is sold with, so it is also the installed
+                // figure.
+                + &dsa_host_core::host_memory::bootconfig(total_memory_kb(), total_memory_kb()),
         })
     }
 }

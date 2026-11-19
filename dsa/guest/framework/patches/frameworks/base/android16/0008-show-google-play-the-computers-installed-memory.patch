@@ -1,0 +1,104 @@
+Subject: Process: give the apps the guest names the computer's memory as advertisedMem
+
+The framework's earlier patch gives the Play Store and Play services the computer's memory as
+ActivityManager.MemoryInfo.totalMem. advertisedMem, which Google Play uploads next to it, still
+came from Process.getAdvertisedMem: ro.boot.ddr_size when set, else the total memory rounded up
+to the next power of two in decimal units. A 32 GB computer (33.8 GB of memory) was advertised as
+64 GB.
+
+getAdvertisedMem now returns, for the same binder callers (the uids in
+/sys/module/dsa_host_memory/parameters/uids), the memory the computer is sold with: the host
+passes the memory the computer is installed with in ro.boot.dsa.host_installed_kb (its total
+memory where it cannot read that), and the patch rounds it to whole GiB and counts it in decimal
+units, as ro.boot.ddr_size is counted, so a 32 GiB computer advertises 32,000,000,000. Every
+other caller keeps the VM's own value.
+
+Applies to frameworks/base at 45034f0663f960d9ee5fb0a101a4732b71f6e2f4 (Android 16), after 0002.
+---
+diff --git a/core/java/android/os/Process.java b/core/java/android/os/Process.java
+--- a/core/java/android/os/Process.java
++++ b/core/java/android/os/Process.java
+@@ -1536,6 +1536,12 @@
+      * @hide
+      */
+     public static final long getAdvertisedMem() {
++        // DSA: the apps that see the computer's memory see what it is sold with.
++        final long host = getHostAdvertisedMem();
++        if (host > 0) {
++            return host;
++        }
++
+         String formatSize = MemoryProperties.memory_ddr_size().orElse("0KB");
+         long memSize = FileUtils.parseSize(formatSize);
+ 
+@@ -1546,6 +1552,14 @@
+         return memSize;
+     }
+ 
++    /**
++     * DSA: the memory the computer is sold with, for the app the binder call serves when
++     * it sees the computer's memory, else 0.
++     *
++     * @hide
++     */
++    public static final native long getHostAdvertisedMem();
++
+     /** @hide */
+     public static final native long getMemAvailable();
+ 
+diff --git a/core/jni/android_util_Process.cpp b/core/jni/android_util_Process.cpp
+--- a/core/jni/android_util_Process.cpp
++++ b/core/jni/android_util_Process.cpp
+@@ -31,6 +31,7 @@
+ #include <android-base/file.h>
+ #include <android-base/logging.h>
+ #include <android-base/parseint.h>
++#include <android-base/properties.h>
+ #include <android-base/strings.h>
+ #include <android-base/unique_fd.h>
+ #include <cutils/misc.h>
+@@ -699,6 +700,36 @@
+     return 0;
+ }
+ 
++// DSA: the memory the computer is sold with, in bytes, as a user reads it ("32 GB"), for the
++// same binder callers, else 0. ActivityManager.MemoryInfo.advertisedMem is that figure on a
++// device; Android takes it from ro.boot.ddr_size, or else rounds the total memory up to the next
++// power of two in decimal units, which turned the computer's 33.8 GB into 64 GB. The host passes
++// the memory the computer is installed with in ro.boot.dsa.host_installed_kb (the total memory
++// when it cannot read that), which is rounded to whole GiB, the way memory is sold, and counted
++// in decimal units, as Android counts ro.boot.ddr_size: 32 GiB gives 32,000,000,000.
++static jlong dsaHostAdvertisedMemForCaller()
++{
++    static constexpr uint64_t kGiBInKb = 1024 * 1024;
++    const jlong total = dsaHostMemoryForCaller();
++    if (total == 0) {
++        return 0;
++    }
++    uint64_t kb = 0;
++    if (!android::base::ParseUint(
++                android::base::Trim(android::base::GetProperty("ro.boot.dsa.host_installed_kb", "")),
++                &kb) ||
++        kb == 0) {
++        kb = static_cast<uint64_t>(total) / 1024;
++    }
++    const uint64_t gib = (kb + kGiBInKb / 2) / kGiBInKb;
++    return static_cast<jlong>(gib > 0 ? gib : 1) * 1000000000;
++}
++
++static jlong android_os_Process_getHostAdvertisedMem(JNIEnv* env, jobject clazz)
++{
++    return dsaHostAdvertisedMemForCaller();
++}
++
+ static jlong android_os_Process_getTotalMemory(JNIEnv* env, jobject clazz)
+ {
+     struct sysinfo si;
+@@ -1431,6 +1462,7 @@
+         {"getMemAvailable", "()J", (void*)android_os_Process_getAvailableMemory},
+         {"getMemFree", "()J", (void*)android_os_Process_getFreeMemory},
+         {"getTotalMemory", "()J", (void*)android_os_Process_getTotalMemory},
++        {"getHostAdvertisedMem", "()J", (void*)android_os_Process_getHostAdvertisedMem},
+         {"readProcLines", "(Ljava/lang/String;[Ljava/lang/String;[J)V",
+          (void*)android_os_Process_readProcLines},
+         {"getPids", "(Ljava/lang/String;[I)[I", (void*)android_os_Process_getPids},

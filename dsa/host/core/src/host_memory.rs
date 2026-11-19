@@ -14,14 +14,25 @@
 /// `kernel.` reach the kernel as command line parameters.
 pub const BOOTCONFIG_KEY: &str = "kernel.dsa_host_memory.total_kb";
 
-/// The bootconfig line that tells the guest the computer's physical memory, `total_kb` KiB.
-/// Nothing when the host could not read it (`None`) or read nothing (0): the guest then shows
-/// every app its own size, as before.
-pub fn bootconfig(total_kb: Option<u64>) -> String {
-    match total_kb {
-        Some(kb) if kb > 0 => format!("{BOOTCONFIG_KEY} = \"{kb}\"\n"),
+/// The bootconfig key that carries the memory the computer is installed with, in KiB. Android
+/// turns an `androidboot.` key into the read-only property `ro.boot.dsa.host_installed_kb`,
+/// which the framework reads to answer `advertisedMem`, the figure a user knows the computer by
+/// ("32 GB"). The total memory the operating system can use is a little less than that (the
+/// firmware and the graphics hardware keep some), and rounding it up the way Android does for a
+/// phone turned a 32 GB computer into 64 GB.
+pub const INSTALLED_BOOTCONFIG_KEY: &str = "androidboot.dsa.host_installed_kb";
+
+/// The bootconfig lines that tell the guest the computer's memory: its physical memory
+/// (`total_kb` KiB, which the guest kernel shows) and the memory it is installed with
+/// (`installed_kb` KiB, which `advertisedMem` is made from). Nothing for a figure the host could
+/// not read (`None`) or read as nothing (0): without the total the guest shows every app its own
+/// size, as before, and without the installed figure the framework uses the total.
+pub fn bootconfig(total_kb: Option<u64>, installed_kb: Option<u64>) -> String {
+    let line = |key: &str, kb: Option<u64>| match kb {
+        Some(kb) if kb > 0 => format!("{key} = \"{kb}\"\n"),
         _ => String::new(),
-    }
+    };
+    line(BOOTCONFIG_KEY, total_kb) + &line(INSTALLED_BOOTCONFIG_KEY, installed_kb)
 }
 
 #[cfg(test)]
@@ -32,22 +43,36 @@ mod tests {
     fn fr32_the_bootconfig_tells_the_guest_the_computers_memory() {
         // A 16 GiB computer.
         assert_eq!(
-            bootconfig(Some(16 * 1024 * 1024)),
+            bootconfig(Some(16 * 1024 * 1024), None),
             "kernel.dsa_host_memory.total_kb = \"16777216\"\n"
         );
     }
 
     #[test]
+    fn fr32_the_bootconfig_tells_the_guest_the_memory_the_computer_is_installed_with() {
+        // A 32 GiB computer that Windows reports 31.5 GiB of: Play is told 32 GiB installed.
+        assert_eq!(
+            bootconfig(Some(33_043_084), Some(32 * 1024 * 1024)),
+            "kernel.dsa_host_memory.total_kb = \"33043084\"\n\
+             androidboot.dsa.host_installed_kb = \"33554432\"\n"
+        );
+        assert_eq!(
+            bootconfig(None, Some(1024)),
+            "androidboot.dsa.host_installed_kb = \"1024\"\n"
+        );
+    }
+
+    #[test]
     fn fr32_a_host_that_cannot_read_its_memory_tells_the_guest_nothing() {
-        assert_eq!(bootconfig(None), "");
-        assert_eq!(bootconfig(Some(0)), "");
+        assert_eq!(bootconfig(None, None), "");
+        assert_eq!(bootconfig(Some(0), Some(0)), "");
     }
 
     #[test]
     fn fr32_the_line_is_one_the_guest_kernel_takes_as_a_parameter() {
         // The kernel turns the keys under "kernel." into command line parameters; anything
         // else is left to user space.
-        let line = bootconfig(Some(1));
+        let line = bootconfig(Some(1), None);
         let (key, value) = line.trim_end().split_once(" = ").unwrap();
         assert_eq!(
             key.strip_prefix("kernel."),
