@@ -153,6 +153,19 @@
 ; asks for: sys_nice for advising another process, sys_ptrace for reading the address space of
 ; a process of another user. init gives the daemon both (dsa-channeld.rc).
 (allow dsa_channeld self (capability (sys_nice sys_ptrace)))
+
+; The Google Services Framework Android ID, which Google's page for uncertified devices asks for.
+; Google Play services refuse their provider to the agent, so the daemon reads the ID from the
+; check-in preferences the services keep (/data/data/com.google.android.gms/shared_prefs/
+; Checkin.xml, google_device_id.rs) and adds it to the agent's empty answer. The file belongs
+; to the services' app user and to no group of the daemon, so init also gives the daemon
+; CAP_DAC_READ_SEARCH (dsa-channeld.rc), which lets it read and never write. SELinux limits
+; the reading to the data of privileged apps, where Google Play services live, reached by
+; walking /data/data.
+(allow dsa_channeld self (capability (dac_read_search)))
+(allow dsa_channeld system_data_file (dir (search getattr)))
+(allow dsa_channeld privapp_data_file (dir (search getattr)))
+(allow dsa_channeld privapp_data_file (file (read open getattr)))
 (dontaudit dsa_channeld domain (dir (search getattr)))
 (dontaudit dsa_channeld domain (file (read open getattr)))
 

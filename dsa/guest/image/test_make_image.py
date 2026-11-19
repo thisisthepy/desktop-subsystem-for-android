@@ -58,7 +58,24 @@ class ImageLayoutTests(unittest.TestCase):
         self.assertRegex(cil, r"\(allow dsa_channeld self \(capability \([^)]*\bsys_nice\b[^)]*\bsys_ptrace\b")
         rc = (here / "dsa-channeld.rc").read_text()
         service = rc[rc.index("service dsa_channeld"):rc.index("on property:sys.boot_completed=1")]
-        self.assertIn("capabilities SYS_NICE SYS_PTRACE", service)
+        self.assertIn("capabilities SYS_NICE SYS_PTRACE DAC_READ_SEARCH", service)
+
+    def test_fr32_channeld_may_read_the_android_id_google_play_services_keep(self):
+        # Google Play services refuse their gservices provider to the agent, so the daemon reads
+        # the ID from their check-in preferences: the DAC override for a file of another app
+        # user, and the SELinux walk to it. Nothing may write there.
+        here = Path(__file__).parent
+        cil = (here / "sepolicy" / "channeld.cil").read_text()
+        self.assertIn("(allow dsa_channeld self (capability (dac_read_search)))", cil)
+        self.assertIn("(allow dsa_channeld privapp_data_file (file (read open getattr)))", cil)
+        self.assertRegex(cil, r"\(allow dsa_channeld system_data_file \(dir \([^)]*\bsearch\b")
+        self.assertRegex(cil, r"\(allow dsa_channeld privapp_data_file \(dir \([^)]*\bsearch\b")
+        for line in cil.splitlines():
+            if line.startswith("(allow dsa_channeld privapp_data_file"):
+                self.assertNotRegex(line, r"\b(write|append|create|unlink|setattr|rename)\b")
+        rc = (here / "dsa-channeld.rc").read_text()
+        service = rc[rc.index("service dsa_channeld"):rc.index("on property:sys.boot_completed=1")]
+        self.assertIn("DAC_READ_SEARCH", service)
 
     def test_fr21_channeld_may_clear_the_pstore_records_the_host_collected(self):
         # init leaves /sys/fs/pstore read only to system; the daemon makes it writable to
@@ -201,6 +218,13 @@ class ImageLayoutTests(unittest.TestCase):
         "/data/vendor/dsa/gapps": ["system_data_root_file", "vendor_data_file"],
         # The package manager's list, where root elevation finds each named app's uid.
         "/data/system/packages.list": ["system_data_root_file", "system_data_file"],
+        # Google Play services' check-in preferences, which hold the Android ID. /data/data is
+        # system_data_file; the services' own folders are privapp_data_file.
+        "/data/data/com.google.android.gms": [
+            "system_data_root_file",
+            "system_data_file",
+            "privapp_data_file",
+        ],
     }
     # Paths the daemon names but never opens, so no folder on their way needs a rule. The
     # Google apps mount point is only compared with the mount points /proc/self/mounts lists.

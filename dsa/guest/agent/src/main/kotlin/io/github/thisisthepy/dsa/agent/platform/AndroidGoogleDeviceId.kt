@@ -7,7 +7,11 @@ import io.github.thisisthepy.dsa.agent.install.GoogleDeviceIdPort
 /**
  * The Google Services Framework's own record of the device's Android ID, from its gservices
  * provider: the row named `android_id`, whose value is the ID in decimal. The provider is
- * there only while Google Play is installed; without it the query returns null.
+ * there only while Google Play is installed; without it the query returns null. Current Google
+ * Play services also refuse every caller that is not on their own list ("is not approved to
+ * access the device ID"), and the query then returns null as well. The agent says so with an
+ * empty answer, and dsa-channeld fills the ID in from the services' own check-in preferences on
+ * the way to the host.
  */
 class AndroidGoogleDeviceId(private val context: Context) : GoogleDeviceIdPort {
     override fun read(): String? {

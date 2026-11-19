@@ -41,6 +41,7 @@ pub mod dns_redirect;
 pub mod dns_stub;
 pub mod gamepad;
 pub mod gapps;
+pub mod google_device_id;
 pub mod host_memory;
 pub mod image_store;
 pub mod keymint_key;

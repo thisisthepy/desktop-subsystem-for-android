@@ -10,8 +10,11 @@ service dsa_channeld /vendor/bin/dsa-channeld
     # SYS_NICE and SYS_PTRACE: after something wakes an app that no window shows, the daemon
     # pages its anonymous memory back to zram (process_madvise with MADV_PAGEOUT). The kernel
     # asks SYS_NICE of a caller that advises another process, and SYS_PTRACE to read the
-    # address space of another user's process.
-    capabilities SYS_NICE SYS_PTRACE
+    # address space of another user's process. DAC_READ_SEARCH: Google Play services' check-in
+    # preferences belong to their app user and to no group of the daemon, and hold the Android
+    # ID that Google's page for uncertified devices asks for; the policy lets the daemon read
+    # those files and nothing else of an app's data.
+    capabilities SYS_NICE SYS_PTRACE DAC_READ_SEARCH
     stdio_to_kmsg
     # Every pointer event passes through here on its way to the agent; it must not wait
     # behind apps. Only the framework's display and input threads go ahead of it.

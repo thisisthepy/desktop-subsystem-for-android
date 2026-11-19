@@ -1143,6 +1143,7 @@ mod daemon {
                     gapps::DIR,
                     GuestFacts::of_system(read_property),
                 )))
+                .on_google_device_id(dsa_guest_channeld::google_device_id::read)
                 .on_gamepads(gamepads)
                 .on_root_elevation(Arc::clone(&su_relay), move |config| {
                     su_config.apply(config);
