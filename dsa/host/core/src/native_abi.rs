@@ -879,9 +879,9 @@ fn notice_words(lang: UiLanguage) -> NoticeWords {
             ),
             needs_64_bit: (
                 "{label} cannot run in DSA",
-                "This build of it runs as 32-bit code, and DSA's Android runs 64-bit code only. \
-                 Uninstall it and install its x86_64 build instead (or its arm64-v8a build, \
-                 with ARM translation on).",
+                "This build runs 32-bit code, which DSA does not run. Uninstall it, then install \
+                 its x86_64 build with DSA's APK install. For Chrome: TrichromeLibrary first, \
+                 then Chrome, with a version code ending in 38.",
             ),
         },
         UiLanguage::Korean => NoticeWords {
@@ -903,9 +903,9 @@ fn notice_words(lang: UiLanguage) -> NoticeWords {
             ),
             needs_64_bit: (
                 "{label}을(를) DSA에서 실행할 수 없습니다",
-                "이 빌드는 32비트 코드로 실행되는데, DSA의 Android는 64비트 코드만 \
-                 실행합니다. 이 앱을 지우고 x86_64판을 대신 설치하십시오(ARM 번역이 켜져 \
-                 있으면 arm64-v8a판도 됩니다).",
+                "이 빌드는 32비트 코드를 쓰는데, DSA는 이를 실행하지 않습니다. 앱을 지우고 \
+                 DSA의 APK 설치로 x86_64판을 설치하십시오. Chrome은 TrichromeLibrary를 먼저, \
+                 그다음 Chrome을 설치하며, 버전 코드가 38로 끝나야 합니다.",
             ),
         },
         UiLanguage::Japanese => NoticeWords {
@@ -930,10 +930,10 @@ fn notice_words(lang: UiLanguage) -> NoticeWords {
             ),
             needs_64_bit: (
                 "{label} は DSA で実行できません",
-                "このビルドは 32 ビット コードで実行されますが、DSA の Android は 64 ビット \
-                 コードしか実行しません。このアプリをアンインストールし、代わりに x86_64 \
-                 ビルド (ARM 変換がオンの場合は arm64-v8a ビルドでも可) をインストールして\
-                 ください。",
+                "このビルドは DSA が実行しない 32 ビット コードを使っています。アプリを\
+                 アンインストールし、DSA の APK インストールで x86_64 ビルドをインストール\
+                 してください。Chrome は TrichromeLibrary、次に Chrome の順で、バージョン \
+                 コードが 38 で終わるものです。",
             ),
         },
         UiLanguage::ChineseSimplified => NoticeWords {
@@ -954,8 +954,8 @@ fn notice_words(lang: UiLanguage) -> NoticeWords {
             ),
             needs_64_bit: (
                 "{label} 无法在 DSA 中运行",
-                "此版本以 32 位代码运行，而 DSA 的 Android 仅运行 64 位代码。请卸载它，改为\
-                 安装其 x86_64 版本（如果已打开 ARM 转译，也可以安装 arm64-v8a 版本）。",
+                "此版本使用 DSA 不运行的 32 位代码。请卸载它，再用 DSA 的 APK 安装功能安装其 \
+                 x86_64 版本。Chrome 请先安装 TrichromeLibrary，再安装 Chrome，版本代码以 38 结尾。",
             ),
         },
         UiLanguage::ChineseTraditional => NoticeWords {
@@ -977,9 +977,9 @@ fn notice_words(lang: UiLanguage) -> NoticeWords {
             ),
             needs_64_bit: (
                 "{label} 無法在 DSA 中執行",
-                "此組建以 32 位元程式碼執行，而 DSA 的 Android 只執行 64 位元程式碼。請解除\
-                 安裝它，改為安裝其 x86_64 組建（若已開啟 ARM 轉譯，也可以安裝 arm64-v8a \
-                 組建）。",
+                "此組建使用 DSA 不執行的 32 位元程式碼。請解除安裝它，再用 DSA 的 APK 安裝功能\
+                 安裝其 x86_64 組建。Chrome 請先安裝 TrichromeLibrary，再安裝 Chrome，版本代碼\
+                 以 38 結尾。",
             ),
         },
         UiLanguage::Spanish => NoticeWords {
@@ -1005,9 +1005,10 @@ fn notice_words(lang: UiLanguage) -> NoticeWords {
             ),
             needs_64_bit: (
                 "{label} no se puede ejecutar en DSA",
-                "Esta compilación se ejecuta como código de 32 bits, y el Android de DSA solo \
-                 ejecuta código de 64 bits. Desinstálela e instale en su lugar la compilación \
-                 x86_64 (o la compilación arm64-v8a, con la traducción ARM activada).",
+                "Esta compilación usa código de 32 bits, que DSA no ejecuta. Desinstálela e \
+                 instale su compilación x86_64 con la instalación de APK de DSA. En Chrome: \
+                 primero TrichromeLibrary y luego Chrome, con un código de versión que termine \
+                 en 38.",
             ),
         },
         UiLanguage::French => NoticeWords {
@@ -1034,9 +1035,10 @@ fn notice_words(lang: UiLanguage) -> NoticeWords {
             ),
             needs_64_bit: (
                 "{label} ne peut pas s'exécuter dans DSA",
-                "Cette version s'exécute en code 32 bits, et l'Android de DSA n'exécute que du \
-                 code 64 bits. Désinstallez-la et installez plutôt sa version x86_64 (ou sa \
-                 version arm64-v8a, avec la traduction ARM activée).",
+                "Cette version utilise du code 32 bits, que DSA n'exécute pas. Désinstallez-la, \
+                 puis installez sa version x86_64 avec l'installation d'APK de DSA. Pour \
+                 Chrome : TrichromeLibrary d'abord, puis Chrome, avec un code de version qui \
+                 finit par 38.",
             ),
         },
         UiLanguage::German => NoticeWords {
@@ -1063,10 +1065,10 @@ fn notice_words(lang: UiLanguage) -> NoticeWords {
             ),
             needs_64_bit: (
                 "{label} kann in DSA nicht ausgeführt werden",
-                "Dieser Build läuft als 32-Bit-Code, und das Android von DSA führt nur \
-                 64-Bit-Code aus. Deinstallieren Sie die App und installieren Sie stattdessen \
-                 ihren x86_64-Build (oder bei aktivierter ARM-Übersetzung ihren \
-                 arm64-v8a-Build).",
+                "Dieser Build nutzt 32-Bit-Code, den DSA nicht ausführt. Deinstallieren Sie die \
+                 App und installieren Sie ihren x86_64-Build mit der APK-Installation von DSA. \
+                 Bei Chrome zuerst TrichromeLibrary, dann Chrome, mit einem Versionscode, der \
+                 auf 38 endet.",
             ),
         },
         UiLanguage::PortugueseBrazil => NoticeWords {
@@ -1089,9 +1091,10 @@ fn notice_words(lang: UiLanguage) -> NoticeWords {
             ),
             needs_64_bit: (
                 "{label} não pode ser executado no DSA",
-                "Esta versão é executada como código de 32 bits, e o Android do DSA executa \
-                 somente código de 64 bits. Desinstale o app e instale a versão x86_64 dele no \
-                 lugar (ou a versão arm64-v8a, com a tradução ARM ativada).",
+                "Esta versão usa código de 32 bits, que o DSA não executa. Desinstale o app e \
+                 instale a versão x86_64 dele com a instalação de APK do DSA. No Chrome: \
+                 primeiro o TrichromeLibrary e depois o Chrome, com código de versão \
+                 terminado em 38.",
             ),
         },
         UiLanguage::Russian => NoticeWords {
@@ -1117,9 +1120,10 @@ fn notice_words(lang: UiLanguage) -> NoticeWords {
             ),
             needs_64_bit: (
                 "Приложение {label} нельзя запустить в DSA",
-                "Эта сборка работает как 32-разрядный код, а Android в DSA выполняет только \
-                 64-разрядный код. Удалите приложение и установите вместо него сборку x86_64 \
-                 (или сборку arm64-v8a, если включена трансляция ARM).",
+                "Эта сборка использует 32-разрядный код, который DSA не выполняет. Удалите \
+                 приложение и установите его сборку x86_64 через установку APK в DSA. Для \
+                 Chrome: сначала TrichromeLibrary, затем Chrome, код версии должен \
+                 заканчиваться на 38.",
             ),
         },
         UiLanguage::Italian => NoticeWords {
@@ -1145,9 +1149,10 @@ fn notice_words(lang: UiLanguage) -> NoticeWords {
             ),
             needs_64_bit: (
                 "Impossibile eseguire {label} in DSA",
-                "Questa build viene eseguita come codice a 32 bit, mentre l'Android di DSA \
-                 esegue solo codice a 64 bit. Disinstalla l'app e installa invece la sua build \
-                 x86_64 (o la build arm64-v8a, con la traduzione ARM attiva).",
+                "Questa build usa codice a 32 bit, che DSA non esegue. Disinstalla l'app e \
+                 installa la sua build x86_64 con l'installazione APK di DSA. Per Chrome: \
+                 prima TrichromeLibrary, poi Chrome, con un codice di versione che termina \
+                 con 38.",
             ),
         },
         UiLanguage::Vietnamese => NoticeWords {
@@ -1170,9 +1175,9 @@ fn notice_words(lang: UiLanguage) -> NoticeWords {
             ),
             needs_64_bit: (
                 "Không thể chạy {label} trong DSA",
-                "Bản dựng này chạy dưới dạng mã 32 bit, còn Android của DSA chỉ chạy mã 64 bit. \
-                 Hãy gỡ cài đặt ứng dụng và cài đặt bản dựng x86_64 thay thế (hoặc bản dựng \
-                 arm64-v8a, khi đã bật dịch ARM).",
+                "Bản dựng này dùng mã 32 bit, mà DSA không chạy. Hãy gỡ cài đặt ứng dụng rồi \
+                 cài bản dựng x86_64 của nó bằng tính năng cài APK của DSA. Với Chrome: cài \
+                 TrichromeLibrary trước, rồi đến Chrome, mã phiên bản kết thúc bằng 38.",
             ),
         },
         UiLanguage::Indonesian => NoticeWords {
@@ -1195,9 +1200,9 @@ fn notice_words(lang: UiLanguage) -> NoticeWords {
             ),
             needs_64_bit: (
                 "{label} tidak dapat berjalan di DSA",
-                "Build ini berjalan sebagai kode 32-bit, sedangkan Android di DSA hanya \
-                 menjalankan kode 64-bit. Copot pemasangannya dan instal build x86_64-nya \
-                 sebagai gantinya (atau build arm64-v8a-nya, dengan terjemahan ARM aktif).",
+                "Build ini memakai kode 32-bit, yang tidak dijalankan DSA. Copot pemasangannya \
+                 lalu instal build x86_64-nya dengan instalasi APK DSA. Untuk Chrome: \
+                 TrichromeLibrary dahulu, lalu Chrome, dengan kode versi berakhiran 38.",
             ),
         },
         UiLanguage::Turkish => NoticeWords {
@@ -1220,9 +1225,9 @@ fn notice_words(lang: UiLanguage) -> NoticeWords {
             ),
             needs_64_bit: (
                 "{label} DSA'da çalıştırılamıyor",
-                "Bu derleme 32 bit kod olarak çalışıyor ve DSA'nın Android'i yalnızca 64 bit \
-                 kod çalıştırıyor. Uygulamayı kaldırın ve bunun yerine x86_64 derlemesini \
-                 (veya ARM çevirisi açıkken arm64-v8a derlemesini) yükleyin.",
+                "Bu derleme, DSA'nın çalıştırmadığı 32 bit kod kullanıyor. Uygulamayı kaldırın, \
+                 sonra x86_64 derlemesini DSA'nın APK yüklemesiyle yükleyin. Chrome için önce \
+                 TrichromeLibrary, sonra Chrome; sürüm kodu 38 ile bitmelidir.",
             ),
         },
     }

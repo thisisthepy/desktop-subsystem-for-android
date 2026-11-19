@@ -4432,6 +4432,103 @@ fn fr25_a_32_bit_build_that_ends_at_start_is_told_to_get_its_64_bit_build() {
     );
 }
 
+/// Puts Chrome's 32-bit build in the host's list, as the agent reports it.
+fn install_chrome_32_bit(session: &Session, agent: &mut Box<dyn Connection>) {
+    let tasks = session.watch_tasks();
+    send_body(
+        agent,
+        Body::InstalledApp(dsa_protocol::control::InstalledApp {
+            package_name: "com.android.chrome".into(),
+            label: "Chrome".into(),
+            primary_abi: "x86_64".into(),
+            version_code: 495106126,
+            native_libraries: vec![
+                game_libraries("x86", &["libmonochrome.so"]),
+                game_libraries("x86_64", &["libmonochrome.so"]),
+            ],
+            ..Default::default()
+        }),
+    );
+    send_body(
+        agent,
+        Body::InstalledApps(dsa_protocol::control::InstalledApps {
+            package_names: vec!["com.android.chrome".into()],
+        }),
+    );
+    loop {
+        if let TaskEvent::Installed(apps) = tasks.events.recv_timeout(WAIT).expect("the apps") {
+            if apps
+                .iter()
+                .any(|app| app.package_name == "com.android.chrome")
+            {
+                return;
+            }
+        }
+    }
+}
+
+fn chrome_crash() -> Body {
+    Body::NativeLibraryCrash(dsa_protocol::control::NativeLibraryCrash {
+        package_name: "com.android.chrome".into(),
+        detail: "Starting in 64-bit mode requires the 64-bit native library.".into(),
+        arm64_supported: true,
+    })
+}
+
+#[test]
+fn fr25_an_app_that_fails_at_every_start_is_reported_once_for_the_burst() {
+    let (session, mut agent, _launcher) = active_session();
+    let watch = session.watch_notifications();
+    install_chrome_32_bit(&session, &mut agent);
+    send_body(&mut agent, chrome_crash());
+    assert!(matches!(
+        watch.recv_timeout(WAIT).unwrap(),
+        NotificationEvent::Posted(_)
+    ));
+    send_body(&mut agent, chrome_crash());
+    send_body(&mut agent, chrome_crash());
+    nothing_for_the_watcher(&watch);
+}
+
+#[test]
+fn fr25_a_notice_left_from_before_is_withdrawn_and_shown_again_so_it_pops_up() {
+    use dsa_host_core::native_abi::Notice;
+    let launcher = FakeLauncher::default();
+    let (listener, mut connector) = memory::pair();
+    let session = Session::new(
+        launcher.clone(),
+        Box::new(listener),
+        ControlHandshake::new("dsa-host test", WAIT),
+        SessionConfig {
+            connect_timeout: WAIT,
+            stop_timeout: WAIT,
+            notice_burst: Duration::ZERO,
+            ..SessionConfig::default()
+        },
+    );
+    session.start();
+    let mut agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    let watch = session.watch_notifications();
+    install_chrome_32_bit(&session, &mut agent);
+    send_body(&mut agent, chrome_crash());
+    let key = Notice::Needs64Bit.key("com.android.chrome");
+    assert!(matches!(
+        watch.recv_timeout(WAIT).unwrap(),
+        NotificationEvent::Posted(ref n) if n.key == key
+    ));
+    // The user left it in the notification centre; the app fails again later.
+    send_body(&mut agent, chrome_crash());
+    assert_eq!(
+        watch.recv_timeout(WAIT).unwrap(),
+        NotificationEvent::Removed { key: key.clone() }
+    );
+    assert!(matches!(
+        watch.recv_timeout(WAIT).unwrap(),
+        NotificationEvent::Posted(ref n) if n.key == key
+    ));
+}
+
 #[test]
 fn fr23_installed_apps_carry_their_version_dates_sizes_and_kind() {
     let (session, mut agent, _launcher) = active_session();

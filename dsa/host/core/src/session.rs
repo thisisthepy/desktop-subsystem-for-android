@@ -522,6 +522,9 @@ pub struct SessionConfig {
     /// freezes it on its own: a frozen guest gets no notifications, alarms or widget
     /// updates.
     pub freeze_after: Option<Duration>,
+    /// How long the same notice about one app is held back after it was shown, so an app that
+    /// fails at every start is reported once for the burst.
+    pub notice_burst: Duration,
 }
 
 /// The default of [`SessionConfig::doze_delay`].
@@ -546,6 +549,7 @@ impl Default for SessionConfig {
             stop_timeout: Duration::from_secs(30),
             doze_delay: DEFAULT_DOZE_DELAY,
             freeze_after: None,
+            notice_burst: Duration::from_secs(20),
         }
     }
 }
@@ -1598,6 +1602,7 @@ impl Session {
             clipboard_last: None,
             notifications: HashMap::new(),
             notification_limit: RateLimit::new(Instant::now()),
+            notice_posted: HashMap::new(),
             dismissals: Vec::new(),
             offered_reinstalls: HashMap::new(),
             host_asleep: None,
@@ -4455,6 +4460,8 @@ struct Worker {
     clipboard_last: Option<String>,
     /// The guest's notifications the watchers were given, by key.
     notifications: HashMap<String, Notification>,
+    /// When each of the host's own notices was last shown, by key.
+    notice_posted: HashMap<String, Instant>,
     /// How many notifications reach the watchers.
     notification_limit: RateLimit,
     /// Dismissals for a frozen guest, sent once it is thawed.
@@ -4864,7 +4871,29 @@ impl Worker {
     }
 
     /// Shows one of the host's own notifications, replacing the one with its key.
+    ///
+    /// A notice about the same app within `SessionConfig::notice_burst` of the last one is the
+    /// same news told again (an app that fails at each start), and is not shown twice. A notice the watchers
+    /// still hold from before is withdrawn first: Windows updates the toast of a tag it has
+    /// without popping it up, so a notice the user left in the notification centre would
+    /// otherwise never be seen again.
     fn post_notice(&mut self, notification: Notification) {
+        let now = Instant::now();
+        if let Some(last) = self.notice_posted.get(&notification.key) {
+            if now.duration_since(*last) < self.config.notice_burst {
+                eprintln!(
+                    "notices: {} was told a moment ago; not shown again",
+                    notification.key
+                );
+                return;
+            }
+        }
+        self.notice_posted.insert(notification.key.clone(), now);
+        if self.notifications.contains_key(&notification.key) {
+            let key = notification.key.clone();
+            self.remove_notice(&key);
+        }
+        eprintln!("notices: showing {}", notification.key);
         self.deliver_notification(notification);
     }
 
@@ -5110,6 +5139,7 @@ impl Worker {
     /// Removes every notification the watchers have, as when the guest stops.
     fn clear_notifications(&mut self) {
         self.notification_limit.clear();
+        self.notice_posted.clear();
         self.dismissals.clear();
         self.offered_reinstalls.clear();
         let keys: Vec<String> = self.notifications.drain().map(|(key, _)| key).collect();
