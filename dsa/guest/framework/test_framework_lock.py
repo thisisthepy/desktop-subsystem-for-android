@@ -223,6 +223,27 @@ class LockTests(unittest.TestCase):
                         self.assertTrue(any(path.startswith(c + "/") for c in cone),
                                         f"{version['android']} {project}: {path} is outside {cone}")
 
+    def test_nfr5_frameworks_base_patches_change_only_sources_of_files_the_image_takes(self):
+        # The image takes a few of the framework build's files and keeps the published build's
+        # copy of every other one. A patch to frameworks/base outside the folders those files
+        # are built from changes nothing the image ships, or worse ships half of a change:
+        # libandroid_runtime once registered a native for a Process method that the published
+        # framework.jar does not declare, and zygote aborted at every start.
+        taken = set(framework_lock.OUTPUTS) | set(framework_lock.JAVA_OUTPUTS)
+        self.assertTrue(set(framework_lock.FRAMEWORKS_BASE_SOURCES) <= taken,
+                        set(framework_lock.FRAMEWORKS_BASE_SOURCES) - taken)
+        folders = [folder for sources in framework_lock.FRAMEWORKS_BASE_SOURCES.values()
+                   for folder in sources]
+        for android in ("android16", "android17"):
+            found = [patch for project, patch in framework_lock.patch_files(android)
+                     if project == "frameworks/base"]
+            self.assertTrue(found, android)
+            for patch in found:
+                for path in framework_lock.patch_paths(patch):
+                    self.assertTrue(any(path.startswith(folder + "/") for folder in folders),
+                                    f"{android} {patch.name} changes {path}, which no file the "
+                                    f"image takes is built from (only {folders} are)")
+
     def test_nfr5_both_versions_patch_renderengine_surfaceflinger_libegl_and_hwui(self):
         for android in ("android16", "android17"):
             changed = {(project, "/".join(path.split("/")[:2]))
@@ -734,8 +755,9 @@ def removed_lines(patch):
 
 class ServicesTests(unittest.TestCase):
     """services.jar, built from the published build's source with DSA's patches to the window
-    manager (a dialog gets no caption bar inset), the package manager, the WebView service and
-    the display manager (Google Play is shown a phone's density)."""
+    manager (a dialog gets no caption bar inset), the package manager, the WebView service, the
+    display manager (Google Play is shown a phone's density) and the activity manager (Google
+    Play is given the computer's installed memory as advertisedMem)."""
 
     def test_fr32_google_play_is_shown_a_phones_density_by_the_display_manager(self):
         for android in ("android16", "android17"):
@@ -790,7 +812,7 @@ class ServicesTests(unittest.TestCase):
     def test_fr22_the_native_build_leaves_the_java_patches_to_the_services_build(self):
         for android in ("android16", "android17"):
             java = [p for _, p in framework_lock.patch_files(android) if framework_lock.java_only(p)]
-            self.assertEqual(len(java), 4, android)
+            self.assertEqual(len(java), 5, android)
             native = [p for _, p in framework_lock.patch_files(android) if not framework_lock.java_only(p)]
             self.assertTrue(native, android)
         with tempfile.TemporaryDirectory() as tmp:
