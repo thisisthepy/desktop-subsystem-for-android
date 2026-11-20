@@ -3736,7 +3736,13 @@ pub fn describe(status: &Status) -> String {
     if let Some(reason) = &status.last_reason {
         let mut lines = reason.lines();
         let first = lines.next().unwrap_or_default();
-        match plain_start_failure(first) {
+        let host = dsa_host_core::start_failure::host_problem_reason(first).map(|why| {
+            dsa_host_core::start_failure::host_problem_text(
+                dsa_host_core::ui_language::UiLanguage::English,
+                plain_start_failure(why).unwrap_or(why),
+            )
+        });
+        match host.as_deref().or_else(|| plain_start_failure(first)) {
             Some(sentence) => {
                 let _ = write!(line, " (last stopped: {sentence})\ndetails: {first}");
             }

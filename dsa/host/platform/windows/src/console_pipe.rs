@@ -298,6 +298,14 @@ impl ConsoleCapture {
             .to_path_buf()
     }
 
+    /// Whether the guest has printed anything on this boot's console: its kernel ran.
+    pub fn guest_printed(&self) -> bool {
+        self.log
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .guest_printed()
+    }
+
     /// What this boot's console has shown about why it is late.
     pub fn signs(&self) -> BootSigns {
         self.log.lock().unwrap_or_else(|e| e.into_inner()).signs()

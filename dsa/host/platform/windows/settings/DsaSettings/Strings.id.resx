@@ -88,6 +88,9 @@
   <data name="LastReason_General" xml:space="preserve">
     <value>Android tidak dapat dimulai. Coba lagi, dan periksa detailnya jika terus gagal.</value>
   </data>
+  <data name="LastReason_Host" xml:space="preserve">
+    <value>Komputer ini tidak dapat menjalankan Android. Ini masalah komputer, bukan Android; versi Android yang digunakan tetap dipertahankan. Lihat alasannya di detail.</value>
+  </data>
   <data name="LastReasonDetails.Header" xml:space="preserve">
     <value>Detail</value>
   </data>

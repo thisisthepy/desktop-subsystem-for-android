@@ -207,6 +207,13 @@ pub enum StopReason {
     Requested,
     /// The launcher could not start the guest.
     GuestFailedToStart(String),
+    /// The host did not run the guest: it refused to create or start it, or the guest's
+    /// process ended before the guest printed anything ([`GuestLauncher::failure_side`]). The
+    /// image is not to blame. `diagnostics` is what the launcher could tell about the boot.
+    HostFailed {
+        why: String,
+        diagnostics: Option<String>,
+    },
     /// The agent did not connect within the configured time. `diagnostics` is what the
     /// launcher could tell about the guest's boot, such as the end of its console output.
     AgentDidNotConnect {
@@ -243,6 +250,10 @@ impl fmt::Display for StopReason {
         match self {
             StopReason::Requested => write!(f, "stopped on request"),
             StopReason::GuestFailedToStart(why) => write!(f, "the guest did not start: {why}"),
+            StopReason::HostFailed { why, diagnostics } => {
+                f.write_str(&crate::start_failure::host_problem(why))?;
+                write_diagnostics(f, diagnostics)
+            }
             StopReason::AgentDidNotConnect {
                 waited,
                 diagnostics,
@@ -387,6 +398,14 @@ pub trait GuestLauncher: Send + 'static {
     /// the guest has been stopped and puts the answer in the reason it reports.
     fn diagnostics(&mut self) -> Option<String> {
         None
+    }
+
+    /// Which side the start that just failed failed on: the host, when it never ran the
+    /// guest, or the guest. The session asks right after a start failed or the guest ended
+    /// during boot, before it stops the guest. Only a guest-side failure counts against the
+    /// image. The default, for a launcher that cannot tell, is the guest.
+    fn failure_side(&mut self) -> crate::start_failure::FailureSide {
+        crate::start_failure::FailureSide::Guest
     }
 
     /// The runtime ID of the guest, if running (such as the VM GUID on Windows).
@@ -6429,12 +6448,17 @@ impl Worker {
             .unwrap_or_else(|e| e.into_inner()) = Some(secret.clone());
         self.secret = Some(secret);
         if let Err(why) = started {
+            let side = self.launcher.failure_side();
             // The launcher may have got part of the way; make sure nothing is left behind.
             let _ = self.launcher.stop(self.config.stop_timeout);
-            self.shared.set(
-                SessionState::Stopped,
-                Some(StopReason::GuestFailedToStart(why)),
-            );
+            let reason = match side {
+                crate::start_failure::FailureSide::Host => StopReason::HostFailed {
+                    why,
+                    diagnostics: None,
+                },
+                crate::start_failure::FailureSide::Guest => StopReason::GuestFailedToStart(why),
+            };
+            self.shared.set(SessionState::Stopped, Some(reason));
             return;
         }
         // The guest renders while it boots, before the agent connects, and the compositor
@@ -6477,7 +6501,7 @@ impl Worker {
                 }
             }
             if let Some(why) = self.launcher.exited() {
-                self.stop_failed_start(|diagnostics| StopReason::GuestExited { why, diagnostics });
+                self.stop_exited_during_boot(why);
                 return;
             }
             let now = Instant::now();
@@ -6688,10 +6712,9 @@ impl Worker {
                 Err(error) => {
                     // A guest that dies while it boots has its console to show for it.
                     if matches!(self.state(), SessionState::Starting | SessionState::Stalled) {
-                        self.stop_failed_start(|diagnostics| StopReason::GuestExited {
-                            why: format!("the control channel was lost during boot: {error}"),
-                            diagnostics,
-                        });
+                        self.stop_exited_during_boot(format!(
+                            "the control channel was lost during boot: {error}"
+                        ));
                     } else {
                         self.stop(StopReason::ChannelLost(error.to_string()));
                     }
@@ -7302,6 +7325,19 @@ impl Worker {
     /// Stops a guest whose start failed, and reports `reason` with the launcher's
     /// diagnostics. They are asked for once the guest is gone, so they cover all of its
     /// output.
+    /// Stops a guest that ended during boot, as a host-side failure when the launcher says the
+    /// guest never ran.
+    fn stop_exited_during_boot(&mut self, why: String) {
+        match self.launcher.failure_side() {
+            crate::start_failure::FailureSide::Host => {
+                self.stop_failed_start(|diagnostics| StopReason::HostFailed { why, diagnostics })
+            }
+            crate::start_failure::FailureSide::Guest => {
+                self.stop_failed_start(|diagnostics| StopReason::GuestExited { why, diagnostics })
+            }
+        }
+    }
+
     fn stop_failed_start(&mut self, reason: impl FnOnce(Option<String>) -> StopReason) {
         self.stop_with(|launcher| reason(launcher.diagnostics()));
     }

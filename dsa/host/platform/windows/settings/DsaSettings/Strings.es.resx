@@ -88,6 +88,9 @@
   <data name="LastReason_General" xml:space="preserve">
     <value>No se pudo iniciar Android. Inténtelo de nuevo y, si sigue fallando, revise los detalles.</value>
   </data>
+  <data name="LastReason_Host" xml:space="preserve">
+    <value>Este equipo no pudo ejecutar Android. Es un problema del equipo, no de Android; se conserva la versión de Android en uso. Consulta los detalles para ver el motivo.</value>
+  </data>
   <data name="LastReasonDetails.Header" xml:space="preserve">
     <value>Detalles</value>
   </data>

@@ -330,12 +330,13 @@ pub fn next_image_check(
 pub struct SessionBoot(pub Arc<Session>);
 
 impl Boot for SessionBoot {
-    /// A disk made under other signing keys stops the agent whichever image runs on it.
+    /// A disk made under other signing keys stops the agent whichever image runs on it, and a
+    /// start the host refused never ran the image at all.
     fn image_to_blame(&self) -> bool {
         !matches!(
             self.0.problem(),
             Some(BootProblem::DiskFromOtherKeys { .. })
-        )
+        ) && !matches!(self.0.last_reason(), Some(StopReason::HostFailed { .. }))
     }
 
     fn boot(

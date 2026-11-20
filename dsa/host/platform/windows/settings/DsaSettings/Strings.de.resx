@@ -88,6 +88,9 @@
   <data name="LastReason_General" xml:space="preserve">
     <value>Android konnte nicht starten. Versuchen Sie es erneut, und sehen Sie sich die Details an, wenn es weiter fehlschlägt.</value>
   </data>
+  <data name="LastReason_Host" xml:space="preserve">
+    <value>Dieser Computer konnte Android nicht ausführen. Das Problem liegt am Computer, nicht an Android; die verwendete Android-Version bleibt erhalten. Den Grund finden Sie in den Details.</value>
+  </data>
   <data name="LastReasonDetails.Header" xml:space="preserve">
     <value>Details</value>
   </data>

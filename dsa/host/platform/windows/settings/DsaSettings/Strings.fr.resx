@@ -88,6 +88,9 @@
   <data name="LastReason_General" xml:space="preserve">
     <value>Android n'a pas pu démarrer. Réessayez, et consultez les détails si le problème persiste.</value>
   </data>
+  <data name="LastReason_Host" xml:space="preserve">
+    <value>Cet ordinateur n'a pas pu exécuter Android. Le problème vient de l'ordinateur, pas d'Android ; la version d'Android utilisée est conservée. Consultez les détails pour la raison.</value>
+  </data>
   <data name="LastReasonDetails.Header" xml:space="preserve">
     <value>Détails</value>
   </data>

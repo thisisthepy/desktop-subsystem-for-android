@@ -88,6 +88,9 @@
   <data name="LastReason_General" xml:space="preserve">
     <value>Android başlatılamadı. Yeniden deneyin, sorun sürerse ayrıntılara bakın.</value>
   </data>
+  <data name="LastReason_Host" xml:space="preserve">
+    <value>Bu bilgisayar Android'i çalıştıramadı. Sorun Android'de değil bilgisayardadır; kullanılan Android sürümü korunur. Nedeni ayrıntılarda görebilirsiniz.</value>
+  </data>
   <data name="LastReasonDetails.Header" xml:space="preserve">
     <value>Ayrıntılar</value>
   </data>

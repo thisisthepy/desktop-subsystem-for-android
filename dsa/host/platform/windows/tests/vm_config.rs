@@ -5,7 +5,8 @@ use std::path::PathBuf;
 use dsa_host_windows::guid::Guid;
 use dsa_host_windows::vm::{
     fine_grained_memory_supported, hosting_process_name_suffix_supported, memory_resize_request,
-    runtime_id_from_properties, AndroidVmConfig, GuestArch, HOSTING_PROCESS_NAME_SUFFIX,
+    runtime_id_from_properties, shared_memory_regions_supported, sparse_files_setting_supported,
+    AndroidVmConfig, GuestArch, HOSTING_PROCESS_NAME_SUFFIX,
 };
 
 #[test]
@@ -69,6 +70,7 @@ fn config() -> AndroidVmConfig {
         image_version: Some("17.0.0-1".into()),
         hosting_process_name_suffix: None,
         fine_grained_memory: false,
+        always_allow_sparse_files: true,
         network_adapter: None,
         direct_mapped: None,
         picture_region: None,
@@ -965,6 +967,27 @@ fn nfr1_only_the_views_of_the_mapped_disks_are_given_back() {
 }
 
 #[test]
+fn fr2_a_windows_10_host_gets_a_document_with_schema_2_3_settings_only() {
+    let mut config = config();
+    config.picture_region =
+        dsa_host_windows::picture_region::picture_region(Some("S-1-5-21-1-2-3-1001"), None);
+    config.graphics_region =
+        dsa_host_windows::graphics_region::graphics_region(Some("S-1-5-21-1-2-3-1001"), None);
+    for (build, ubr) in [(19041, 1), (19044, 6456), (19045, 3392)] {
+        let mut fitted = config.clone();
+        assert!(fitted.fit_to_build(build, ubr));
+        let doc = document(&fitted);
+        let vm = &doc["VirtualMachine"];
+        let disks = &vm["Devices"]["Scsi"]["0"]["Attachments"];
+        assert!(disks["1"].get("AlwaysAllowSparseFiles").is_none());
+        assert!(vm["Devices"].get("SharedMemory").is_none());
+        let memory = &vm["ComputeTopology"]["Memory"];
+        assert!(memory.get("BackingPageSize").is_none());
+        assert!(memory.get("HostingProcessNameSuffix").is_none());
+    }
+}
+
+#[test]
 fn pr3_without_gpu_paravirtualization_the_vm_has_no_gpu_settings() {
     for (arch, config) in [
         (GuestArch::X86_64, config()),
@@ -980,6 +1003,25 @@ fn pr3_without_gpu_paravirtualization_the_vm_has_no_gpu_settings() {
         assert!(!cmdline.contains("androidboot.dsa.gpu"), "{cmdline}");
         assert!(!cmdline.contains("androidboot.dsa.vulkan"), "{cmdline}");
     }
+}
+
+#[test]
+fn fr2_a_newer_host_keeps_sparse_disks_and_shared_memory() {
+    let mut config = config();
+    config.graphics_region =
+        dsa_host_windows::graphics_region::graphics_region(Some("S-1-5-21-1-2-3-1001"), None);
+    assert!(!config.fit_to_build(26100, 1));
+    let doc = document(&config);
+    let vm = &doc["VirtualMachine"];
+    assert_eq!(
+        vm["Devices"]["Scsi"]["0"]["Attachments"]["1"]["AlwaysAllowSparseFiles"],
+        true
+    );
+    assert!(vm["Devices"].get("SharedMemory").is_some());
+    assert_eq!(
+        vm["ComputeTopology"]["Memory"]["HostingProcessNameSuffix"],
+        HOSTING_PROCESS_NAME_SUFFIX
+    );
 }
 
 #[test]
@@ -1037,6 +1079,17 @@ fn pr3_a_vulkan_driver_named_in_the_configured_command_line_wins_over_dxg() {
         cmdline.ends_with("androidboot.dsa.vulkan=ranchu"),
         "{cmdline}"
     );
+}
+
+#[test]
+fn fr2_the_sparse_disk_setting_and_shared_memory_follow_the_build() {
+    assert!(!sparse_files_setting_supported(19045));
+    assert!(!sparse_files_setting_supported(20348));
+    assert!(sparse_files_setting_supported(22000));
+    assert!(!shared_memory_regions_supported(19044));
+    assert!(!shared_memory_regions_supported(19045));
+    assert!(shared_memory_regions_supported(20348));
+    assert!(shared_memory_regions_supported(26100));
 }
 
 #[test]

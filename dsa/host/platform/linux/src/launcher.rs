@@ -28,6 +28,7 @@ use dsa_host_core::direct_mapped_disk::DirectMappedImages;
 use dsa_host_core::host_api::NetworkStatus;
 use dsa_host_core::memory::growth_failed_line;
 use dsa_host_core::session::{GuestLauncher, GuestStall};
+use dsa_host_core::start_failure::FailureSide;
 use dsa_protocol::auth::{bootconfig_entry, BootSecret};
 
 use crate::console::{boot_header, capture, Tail};
@@ -428,6 +429,9 @@ impl LinuxVmLauncher {
     }
 
     fn start_vm(&mut self, secret: &BootSecret) -> Result<(), String> {
+        // A start that fails before crosvm runs has no console of its own; the last boot's
+        // must not make it look as if the guest ran.
+        self.tail = Tail::default();
         let plan = (self.plan)()?;
         self.account.make_dir(&self.run_dir)?;
         if let Some(logs) = self.console_log.parent() {
@@ -675,6 +679,13 @@ impl GuestLauncher for LinuxVmLauncher {
         let vm = self.vm.as_mut()?;
         let status = vm.child.try_wait().ok().flatten()?;
         Some(format!("the Android VM exited by itself (crosvm {status})"))
+    }
+
+    /// The guest ran once its kernel printed on the console. A start that failed before that
+    /// (crosvm could not be spawned, or exited or hung before the kernel printed) and a VM
+    /// that ended during boot without a line from the guest failed on the host.
+    fn failure_side(&mut self) -> FailureSide {
+        FailureSide::from_guest_output(!self.tail.text().is_empty())
     }
 
     fn diagnostics(&mut self) -> Option<String> {

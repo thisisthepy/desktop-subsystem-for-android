@@ -88,6 +88,9 @@
   <data name="LastReason_General" xml:space="preserve">
     <value>Не удалось запустить Android. Повторите попытку, а если ошибка повторится, посмотрите подробности.</value>
   </data>
+  <data name="LastReason_Host" xml:space="preserve">
+    <value>Этому компьютеру не удалось запустить Android. Проблема в компьютере, а не в Android; используемая версия Android сохраняется. Причина указана в подробностях.</value>
+  </data>
   <data name="LastReasonDetails.Header" xml:space="preserve">
     <value>Подробности</value>
   </data>

@@ -1734,3 +1734,16 @@ impl ProgramUpdateFollower {
         }
     }
 }
+
+/// What the status page shows for the service's last reason, in `lang`: a start the host
+/// refused reads as a problem with this computer, in core's words, with its reason; any other
+/// reason as the service gave it.
+pub fn last_reason_text(reason: &str, lang: dsa_host_core::ui_language::UiLanguage) -> String {
+    dsa_host_core::start_failure::localized_host_problem(lang, reason)
+        .unwrap_or_else(|| reason.to_string())
+}
+
+/// The language this app's session shows messages in, as gettext picks it.
+pub fn session_language() -> dsa_host_core::ui_language::UiLanguage {
+    dsa_host_core::ui_language::UiLanguage::from_posix_env(|name| std::env::var(name).ok())
+}

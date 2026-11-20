@@ -88,7 +88,11 @@ pub fn general(ctx: &Shared) -> gtk::Widget {
                 (
                     &reason_row,
                     &reason_label,
-                    status.and_then(|s| s.last_reason.clone()),
+                    status.and_then(|s| {
+                        s.last_reason
+                            .as_deref()
+                            .map(|reason| view::last_reason_text(reason, view::session_language()))
+                    }),
                 ),
                 (
                     &notice_row,

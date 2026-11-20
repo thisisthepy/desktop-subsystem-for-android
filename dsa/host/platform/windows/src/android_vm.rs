@@ -25,11 +25,9 @@ use crate::console_log::{boot_header, ConsoleLog, BOOT_WORDS};
 use crate::console_pipe::ConsoleCapture;
 use crate::guid::Guid;
 use crate::hcs::{grant_vm_access, ComputeSystem};
-use crate::vm::{
-    fine_grained_memory_supported, gpu_assignment_request, hosting_process_name_suffix_supported,
-    AndroidVmConfig, GuestArch, HOSTING_PROCESS_NAME_SUFFIX,
-};
+use crate::vm::{gpu_assignment_request, AndroidVmConfig, GuestArch};
 use crate::vm_listener::VmIdSlot;
+use dsa_host_core::start_failure::FailureSide;
 
 /// How long a single HCS call (create, start, terminate) may take.
 const CALL_TIMEOUT: Duration = Duration::from_secs(60);
@@ -601,6 +599,15 @@ impl AndroidVmLauncher {
     }
 
     /// Creates and starts the VM `config` describes, booting from `boot`.
+    /// Gives the next attempt a new network endpoint. A VM whose worker process ended while it
+    /// started can leave its endpoint attached, and HCN then refuses the next VM that names it
+    /// (HRESULT 0x803B0014, `HCN_E_ENDPOINT_ALREADY_ATTACHED`).
+    fn renew_network(&mut self, config: &mut AndroidVmConfig) {
+        if let Some(networking) = &mut self.networking {
+            config.network_adapter = networking.attach(&self.id);
+        }
+    }
+
     fn create_and_start(
         &mut self,
         config: &AndroidVmConfig,
@@ -730,8 +737,19 @@ impl GuestLauncher for AndroidVmLauncher {
         config.kernel_cmdline = format!("{} {}", config.kernel_cmdline, bootconfig::CMDLINE_FLAG);
         // Before the console's header, which records the kernel command line: fine-grained
         // memory tells the guest's kernel the host's fault cluster.
-        config.fine_grained_memory =
-            windows_build().is_some_and(|(build, ubr)| fine_grained_memory_supported(build, ubr));
+        // What this build's HCS does not know, or what ends its VM worker, is left out of the
+        // document from the start, so the first attempt is one the host accepts. A build that
+        // cannot be read keeps the shared memory, and the attempts below drop it if refused.
+        config.fine_grained_memory = false;
+        if let Some((build, ubr)) = windows_build() {
+            if config.fit_to_build(build, ubr) {
+                eprintln!(
+                    "{}: Windows build {build} cannot share memory with a VM; Android starts \
+                     without memory shared for graphics and decoded video pictures",
+                    self.id
+                );
+            }
+        }
         // The console is kept from here, so a boot whose files cannot be prepared is still
         // in the log with its reason.
         config.console_pipe = self.begin_console(&config);
@@ -744,11 +762,6 @@ impl GuestLauncher for AndroidVmLauncher {
             &self.boot_dir,
             &crate::paths::unique_name(&self.id, ""),
         )?;
-        if windows_build()
-            .is_some_and(|(build, ubr)| hosting_process_name_suffix_supported(build, ubr))
-        {
-            config.hosting_process_name_suffix = Some(HOSTING_PROCESS_NAME_SUFFIX.into());
-        }
         // The guest kernel's last log of the boot before is on this disk; one that is missing
         // or damaged is made again, empty, and Android starts either way.
         if let Some(pstore) = &config.pstore_disk {
@@ -779,6 +792,7 @@ impl GuestLauncher for AndroidVmLauncher {
             );
             config.graphics_region = None;
             self.graphics_sections = None;
+            self.renew_network(&mut config);
             started = self.create_and_start(&config, &boot);
         }
         let refused = started
@@ -794,7 +808,13 @@ impl GuestLauncher for AndroidVmLauncher {
             );
             config.picture_region = None;
             self.picture_section = None;
+            self.renew_network(&mut config);
             started = self.create_and_start(&config, &boot);
+        }
+        // The last attempt's reason is the one the session reports, and it is logged here too
+        // so every attempt's reason is in the log.
+        if let Err(why) = &started {
+            eprintln!("{}: Android did not start ({why})", self.id);
         }
         // A VM that did not come up leaves no network behind, whether or not the session
         // stops it afterwards.
@@ -854,6 +874,20 @@ impl GuestLauncher for AndroidVmLauncher {
         system
             .wait_exited(Duration::ZERO)
             .then(|| "the Android VM exited by itself".to_string())
+    }
+
+    /// A start that returned an error never ran the guest: HCS or HCN refused the VM, or its
+    /// files could not be prepared. A VM that ended during boot failed on the host when its
+    /// kernel printed nothing on the console, as when the VM worker process dies at start.
+    fn failure_side(&mut self) -> FailureSide {
+        if self.system.is_none() {
+            return FailureSide::Host;
+        }
+        FailureSide::from_guest_output(
+            self.console
+                .as_ref()
+                .is_none_or(crate::console_pipe::ConsoleCapture::guest_printed),
+        )
     }
 
     fn diagnostics(&mut self) -> Option<String> {

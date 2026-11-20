@@ -88,6 +88,9 @@
   <data name="LastReason_General" xml:space="preserve">
     <value>Không thể khởi động Android. Hãy thử lại, và xem chi tiết nếu vẫn không thành công.</value>
   </data>
+  <data name="LastReason_Host" xml:space="preserve">
+    <value>Máy tính này không chạy được Android. Đây là sự cố của máy tính, không phải của Android; phiên bản Android đang dùng được giữ nguyên. Xem lý do trong phần chi tiết.</value>
+  </data>
   <data name="LastReasonDetails.Header" xml:space="preserve">
     <value>Chi tiết</value>
   </data>

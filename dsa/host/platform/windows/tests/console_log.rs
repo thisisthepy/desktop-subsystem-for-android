@@ -304,3 +304,13 @@ fn fr21_signs_from_the_guest_log_add_to_the_consoles() {
     console.merge(&log);
     assert!(console.agent_refused_for_keys());
 }
+
+#[test]
+fn fr14_a_console_with_only_the_boot_header_shows_the_guest_never_ran() {
+    let dir = scratch("guest-printed");
+    let mut log = ConsoleLog::begin_boot(&dir.join("android.log"), "boot header");
+    log.note("the Android VM never opened its console");
+    assert!(!log.guest_printed(), "a header and notes are the host's");
+    log.record(b"Linux version 6.12\n");
+    assert!(log.guest_printed());
+}

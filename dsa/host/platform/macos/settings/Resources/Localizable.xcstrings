@@ -61413,6 +61413,96 @@
           }
         }
       }
+    },
+    "LastReason_Host": {
+      "comment": "The General page's last reason when this computer, not Android's image, kept Android from starting: {0} is the reason the host gave.",
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dieser Computer konnte Android nicht ausführen. Das Problem liegt am Computer, nicht an Android; die verwendete Android-Version bleibt erhalten. Grund: {0}"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This computer could not run Android. This is a problem with the computer, not with Android; the Android version in use is kept. Reason: {0}"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Este equipo no pudo ejecutar Android. Es un problema del equipo, no de Android; se conserva la versión de Android en uso. Motivo: {0}"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cet ordinateur n'a pas pu exécuter Android. Le problème vient de l'ordinateur, pas d'Android ; la version d'Android utilisée est conservée. Raison : {0}"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Komputer ini tidak dapat menjalankan Android. Ini masalah komputer, bukan Android; versi Android yang digunakan tetap dipertahankan. Alasan: {0}"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Questo computer non è riuscito a eseguire Android. Il problema è del computer, non di Android; la versione di Android in uso viene mantenuta. Motivo: {0}"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このコンピューターで Android を実行できませんでした。Android ではなくコンピューター側の問題で、使用中の Android のバージョンはそのまま保たれます。理由: {0}"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 컴퓨터에서 Android를 실행하지 못했습니다. Android가 아닌 컴퓨터 쪽 문제이며, 쓰던 Android 버전은 그대로 유지됩니다. 이유: {0}"
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Este computador não conseguiu executar o Android. O problema é do computador, não do Android; a versão do Android em uso é mantida. Motivo: {0}"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Этому компьютеру не удалось запустить Android. Проблема в компьютере, а не в Android; используемая версия Android сохраняется. Причина: {0}"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bu bilgisayar Android'i çalıştıramadı. Sorun Android'de değil bilgisayardadır; kullanılan Android sürümü korunur. Neden: {0}"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Máy tính này không chạy được Android. Đây là sự cố của máy tính, không phải của Android; phiên bản Android đang dùng được giữ nguyên. Lý do: {0}"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此电脑无法运行 Android。这是电脑的问题，不是 Android 的问题，正在使用的 Android 版本会保留。原因：{0}"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "這台電腦無法執行 Android。這是電腦的問題，不是 Android 的問題，正在使用的 Android 版本會保留。原因：{0}"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

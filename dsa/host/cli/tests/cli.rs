@@ -282,6 +282,26 @@ fn pr5_a_wrong_command_line_is_a_usage_error() {
 }
 
 #[test]
+fn fr14_dsa_status_says_a_start_the_host_refused_is_a_host_problem() {
+    use dsa_host_core::host_api::Status;
+    let reason = dsa_host_core::start_failure::host_problem(
+        "HcsCreateComputeSystem failed (HRESULT 0x803b0014)",
+    );
+    let line = dsa_cli::describe(&Status {
+        state: SessionState::Stopped,
+        last_reason: Some(reason.clone()),
+        update_notice: None,
+        problem: None,
+        program_update: None,
+    });
+    assert!(
+        line.contains("This computer could not run Android. This is a problem with the computer"),
+        "{line}"
+    );
+    assert!(line.ends_with(&format!("details: {reason}")), "{line}");
+}
+
+#[test]
 fn fr14_dsa_shows_news_about_an_update_on_its_own_line() {
     use dsa_host_core::host_api::Status;
     let line = dsa_cli::describe(&Status {

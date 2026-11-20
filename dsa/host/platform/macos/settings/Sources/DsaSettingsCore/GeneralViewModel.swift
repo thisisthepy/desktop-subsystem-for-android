@@ -18,7 +18,21 @@ public final class GeneralViewModel: ObservableObject {
 
     public var state: SessionState { status?.state ?? .unknown }
     public var stateText: String { text.get("State_\(state.rawValue)") }
-    public var lastReason: String { status?.lastReason ?? "" }
+    /// The service's last reason. A start this computer refused reads as a host problem in
+    /// the user's language, with the reason the host gave; the image is not to blame for it.
+    public var lastReason: String {
+        let reason = status?.lastReason ?? ""
+        let first = reason.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+            .first.map(String.init) ?? ""
+        if first.hasPrefix(GeneralViewModel.hostProblemPrefix) {
+            return text.format("LastReason_Host", String(first.dropFirst(GeneralViewModel.hostProblemPrefix.count)))
+        }
+        return reason
+    }
+
+    /// What the service's account of a start the host refused starts with.
+    public static let hostProblemPrefix =
+        "this computer could not run Android (a problem with the host, not with Android's image): "
     public var hasLastReason: Bool { !(status?.lastReason ?? "").isEmpty }
     public var problem: String { status?.problem ?? "" }
     public var hasProblem: Bool { !(status?.problem ?? "").isEmpty }

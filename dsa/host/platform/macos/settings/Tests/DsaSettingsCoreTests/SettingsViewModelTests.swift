@@ -24,6 +24,15 @@ final class SettingsViewModelTests: XCTestCase {
         XCTAssertNil(general.error)
     }
 
+    func test_fr14_a_start_the_host_refused_reads_as_a_host_problem() async throws {
+        let (cli, service) = make()
+        cli.answer("status --json", #"{"state":"Stopped","last_reason":"this computer could not run Android (a problem with the host, not with Android's image): HcsCreateComputeSystem failed (HRESULT 0x803b0014)\nconsole tail"}"#)
+        let general = GeneralViewModel(service: service, text: try LanguageText("ko"))
+        await general.refresh()
+        XCTAssertTrue(general.lastReason.hasPrefix("이 컴퓨터에서 Android를 실행하지 못했습니다"), general.lastReason)
+        XCTAssertTrue(general.lastReason.hasSuffix("HcsCreateComputeSystem failed (HRESULT 0x803b0014)"), general.lastReason)
+    }
+
     func test_fr17_start_and_stop_wait_for_the_service() async {
         let (cli, service) = make()
         cli.answer("start --wait --timeout 360 --json", #"{"state":"Active"}"#)

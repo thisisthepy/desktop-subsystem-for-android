@@ -17,11 +17,16 @@ public static partial class StopReasonText
     public const string TimedOut = "LastReason_TimedOut";
     public const string Lost = "LastReason_Lost";
     public const string General = "LastReason_General";
+    public const string Host = "LastReason_Host";
+
+    /// <summary>What the service's account of a start the host refused starts with. The image
+    /// is not to blame for it and is kept.</summary>
+    public const string HostPrefix = "this computer could not run Android (a problem with the host, not with Android's image): ";
 
     /// <summary>Every sentence a reason can map to.</summary>
     public static readonly IReadOnlyList<string> AllKeys = new[]
     {
-        Requested, Updating, Virtualization, InvalidConfiguration, OutOfMemory, Disk, TimedOut, Lost, General,
+        Requested, Updating, Virtualization, InvalidConfiguration, OutOfMemory, Disk, TimedOut, Lost, General, Host,
     };
 
     // Single phrases only. The HCS document names "Memory" and "Disk" as settings, so those
@@ -72,7 +77,7 @@ public static partial class StopReasonText
                 return key;
             }
         }
-        return General;
+        return firstLine.StartsWith(HostPrefix, StringComparison.Ordinal) ? Host : General;
     }
 
     private static string? KeyForCode(uint code) => code switch

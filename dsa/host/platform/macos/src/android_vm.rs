@@ -9,6 +9,7 @@
 //! Stopping asks the guest to shut down and stops the VM outright if it has not within the
 //! stop timeout. Memory grows and shrinks through the balloon; freezing pauses the VM.
 
+use dsa_host_core::start_failure::FailureSide;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -301,6 +302,20 @@ impl GuestLauncher for MacVmLauncher {
         let vm = self.slot.get()?;
         let ended = vm.ended()?;
         Some(format!("Android's VM ended by itself ({ended})"))
+    }
+
+    /// A start that returned an error never ran the guest: the Virtualization framework
+    /// refused to create or start the VM. A VM that ended during boot failed on the host when
+    /// the guest printed nothing on its console.
+    fn failure_side(&mut self) -> FailureSide {
+        if self.slot.get().is_none() {
+            return FailureSide::Host;
+        }
+        FailureSide::from_guest_output(
+            self.console_log
+                .as_ref()
+                .is_none_or(|log| std::fs::metadata(log).is_ok_and(|meta| meta.len() > 0)),
+        )
     }
 
     fn diagnostics(&mut self) -> Option<String> {

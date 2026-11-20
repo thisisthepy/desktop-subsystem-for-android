@@ -36,6 +36,30 @@ pub enum UiLanguage {
 }
 
 impl UiLanguage {
+    /// The language a POSIX session whose environment `var` reads shows messages in, as gettext
+    /// picks it: the first of `LC_ALL`, `LC_MESSAGES` and `LANG` that is set names the locale; when
+    /// it names a language (not `C` or `POSIX`), `LANGUAGE`, a colon list by preference, comes
+    /// first. Anything DSA has no translation for is English.
+    pub fn from_posix_env(var: impl Fn(&str) -> Option<String>) -> UiLanguage {
+        let Some(locale) = posix_messages_locale(&var) else {
+            return UiLanguage::English;
+        };
+        if is_posix_c_locale(&locale) {
+            return UiLanguage::English;
+        }
+        if let Some(list) = var("LANGUAGE") {
+            let languages: Vec<&str> = list
+                .split(':')
+                .map(str::trim)
+                .filter(|language| !language.is_empty())
+                .collect();
+            if !languages.is_empty() {
+                return UiLanguage::first_supported(languages);
+            }
+        }
+        UiLanguage::from_tag_or_english(&locale)
+    }
+
     /// Every language, English first, in the order the README lists its translations.
     pub const ALL: [UiLanguage; 14] = [
         UiLanguage::English,
@@ -161,6 +185,21 @@ pub fn placeholders(text: &str) -> Vec<String> {
     }
     found.sort();
     found
+}
+
+/// The locale gettext would read messages in, from `LC_ALL`, `LC_MESSAGES` or `LANG`, the
+/// first that is set and not empty, as `var` reads them.
+fn posix_messages_locale(var: &impl Fn(&str) -> Option<String>) -> Option<String> {
+    ["LC_ALL", "LC_MESSAGES", "LANG"]
+        .into_iter()
+        .find_map(|name| var(name).filter(|value| !value.trim().is_empty()))
+}
+
+/// Whether `locale` is the C locale (`C`, `POSIX`, `C.UTF-8`), which names no language and
+/// under which gettext ignores `LANGUAGE`.
+fn is_posix_c_locale(locale: &str) -> bool {
+    let name = locale.trim().split(['.', '@']).next().unwrap_or_default();
+    name == "C" || name == "POSIX"
 }
 
 #[cfg(test)]

@@ -220,6 +220,11 @@ impl ConsoleLog {
         }
     }
 
+    /// Whether the guest has printed anything on this boot's console: its kernel ran.
+    pub fn guest_printed(&self) -> bool {
+        self.written > 0
+    }
+
     /// Records the next piece of console output.
     pub fn record(&mut self, bytes: &[u8]) {
         self.tail.push(bytes);

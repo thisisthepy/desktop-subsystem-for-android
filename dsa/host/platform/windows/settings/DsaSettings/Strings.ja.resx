@@ -88,6 +88,9 @@
   <data name="LastReason_General" xml:space="preserve">
     <value>Android を開始できませんでした。もう一度お試しください。失敗が続く場合は詳細を確認してください。</value>
   </data>
+  <data name="LastReason_Host" xml:space="preserve">
+    <value>このコンピューターで Android を実行できませんでした。Android ではなくコンピューター側の問題で、使用中の Android のバージョンはそのまま保たれます。理由は詳細を確認してください。</value>
+  </data>
   <data name="LastReasonDetails.Header" xml:space="preserve">
     <value>詳細</value>
   </data>
