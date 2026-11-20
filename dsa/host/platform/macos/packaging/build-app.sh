@@ -226,10 +226,19 @@ fi
 # The component package (DSA.app and its postinstall) goes inside a product archive that
 # carries the installer's design: the artwork, the welcome and conclusion pages in every
 # language the Windows installer speaks, and the licence. Only the product archive is signed.
+# The component always replaces /Applications/DSA.app, also over a higher version (a
+# development build over a release, or an older Android preset), and never goes into a copy
+# of DSA.app found elsewhere on the disk.
 work="$out/pkg"
 rm -rf "$work"
-mkdir -p "$work"
-pkgbuild --component "$app" --install-location /Applications \
+mkdir -p "$work/root"
+cp -R "$app" "$work/root/"
+pkgbuild --analyze --root "$work/root" "$work/component.plist"
+plutil -replace 0.BundleIsVersionChecked -bool NO "$work/component.plist"
+plutil -replace 0.BundleIsRelocatable -bool NO "$work/component.plist"
+plutil -replace 0.BundleOverwriteAction -string upgrade "$work/component.plist"
+pkgbuild --root "$work/root" --component-plist "$work/component.plist" \
+    --install-location /Applications \
     --scripts "$here/scripts" \
     --identifier org.thisisthepy.dsa --version "$version" "$work/DSA-component.pkg"
 cp -R "$here/installer/resources" "$work/resources"

@@ -174,3 +174,37 @@ fn fr2_every_agent_is_shown_as_dsa_in_the_login_items() {
     }
     assert_eq!(APP_BUNDLE_ID, "org.thisisthepy.dsa");
 }
+
+#[test]
+fn fr2_an_agent_reinstalled_while_launchd_still_unloads_the_old_one_is_loaded() {
+    use dsa_host_macos::launchd::retry_bootstrap;
+    // launchd answers "Input/output error" until the booted-out copy is gone.
+    let mut calls = 0;
+    let mut pauses = 0;
+    let result = retry_bootstrap(
+        10,
+        || pauses += 1,
+        || {
+            calls += 1;
+            if calls < 3 {
+                Err("Bootstrap failed: 5: Input/output error".into())
+            } else {
+                Ok(())
+            }
+        },
+    );
+    assert_eq!(result, Ok(()));
+    assert_eq!((calls, pauses), (3, 2));
+
+    let mut calls = 0;
+    let result = retry_bootstrap(
+        4,
+        || {},
+        || {
+            calls += 1;
+            Err("Bootstrap failed: 5: Input/output error".into())
+        },
+    );
+    assert!(result.is_err());
+    assert_eq!(calls, 4);
+}

@@ -180,6 +180,32 @@ pub fn install_commands(uid: u32, plist: &Path) -> Vec<Vec<String>> {
     ]
 }
 
+/// How many times a bootstrap is tried, and how long to wait between tries, after the earlier
+/// copy was booted out. `launchctl bootout` returns before launchd has let go of the service,
+/// so a bootstrap right after it fails with "Input/output error" until it has.
+pub const BOOTSTRAP_TRIES: u32 = 40;
+pub const BOOTSTRAP_PAUSE: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// Runs `attempt` until it succeeds or has failed `tries` times, sleeping through `pause`
+/// between tries, and returns the last error.
+pub fn retry_bootstrap(
+    tries: u32,
+    mut pause: impl FnMut(),
+    mut attempt: impl FnMut() -> Result<(), String>,
+) -> Result<(), String> {
+    let mut last = Err("launchctl bootstrap was never tried".to_string());
+    for n in 0..tries.max(1) {
+        if n > 0 {
+            pause();
+        }
+        last = attempt();
+        if last.is_ok() {
+            break;
+        }
+    }
+    last
+}
+
 /// The `launchctl` invocation that stops and unloads the agent.
 pub fn uninstall_commands(uid: u32) -> Vec<Vec<String>> {
     vec![vec!["bootout".into(), service_target(uid)]]
@@ -208,6 +234,16 @@ pub fn launchctl(arguments: &[String]) -> Result<(), String> {
     }
 }
 
+/// Runs the `bootstrap` in `command`, waiting for launchd to finish unloading an earlier copy.
+#[cfg(target_os = "macos")]
+fn reload(command: &[String]) -> Result<(), String> {
+    retry_bootstrap(
+        BOOTSTRAP_TRIES,
+        || std::thread::sleep(BOOTSTRAP_PAUSE),
+        || launchctl(command),
+    )
+}
+
 /// Writes the agent's property list for the user whose home is `home` and loads it. A window
 /// manager installed beside `program` gets its own agent too.
 #[cfg(target_os = "macos")]
@@ -229,7 +265,7 @@ pub fn install(
     let commands = install_commands(uid, &path);
     // There may be no earlier copy to unload.
     let _ = launchctl(&commands[0]);
-    launchctl(&commands[1])?;
+    reload(&commands[1])?;
     if let Some(window_manager) = window_manager_beside(program) {
         install_window_manager(home, uid, &window_manager)?;
     }
@@ -255,7 +291,7 @@ pub fn install_devices(home: &Path, uid: u32, program: &Path) -> Result<PathBuf,
     // There may be no earlier copy to unload.
     let _ = launchctl(&["bootout".to_string(), devices_service_target(uid)]);
     let plist = path.to_string_lossy().into_owned();
-    launchctl(&["bootstrap".to_string(), domain(uid), plist])?;
+    reload(&["bootstrap".to_string(), domain(uid), plist])?;
     Ok(path)
 }
 
@@ -275,7 +311,7 @@ pub fn install_window_manager(home: &Path, uid: u32, program: &Path) -> Result<P
     // There may be no earlier copy to unload.
     let _ = launchctl(&["bootout".to_string(), wm_service_target(uid)]);
     let plist = path.to_string_lossy().into_owned();
-    launchctl(&["bootstrap".to_string(), domain(uid), plist])?;
+    reload(&["bootstrap".to_string(), domain(uid), plist])?;
     Ok(path)
 }
 
