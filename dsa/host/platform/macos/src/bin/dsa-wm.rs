@@ -53,6 +53,18 @@ fn main() -> std::process::ExitCode {
         // A window host that goes away mid-write must not end the window manager.
         libc::signal(libc::SIGPIPE, libc::SIG_IGN);
     }
+    // AppKit first, before anything else touches it: an accessory, with no Dock icon and no
+    // menu bar. dsa-wm lives in DSA.app, so as a regular app macOS would take it for DSA
+    // itself, and opening DSA from Finder or Launchpad would bring dsa-wm forward instead of
+    // starting the settings app.
+    unsafe {
+        use objc2::msg_send;
+        use objc2::runtime::AnyObject;
+        if let Ok(app_class) = dsa_host_macos::objc::class(c"NSApplication") {
+            let app: *mut AnyObject = msg_send![app_class, sharedApplication];
+            let _: bool = msg_send![app, setActivationPolicy: 1isize];
+        }
+    }
     match run(Places::for_home(&home), stop) {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(why) => {
