@@ -171,11 +171,22 @@ jobs:
         working-directory: .scratch/macos-package
         run: |
           pkgutil --check-signature DSA-0.1.0.pkg || true
-          pkgutil --payload-files DSA-0.1.0.pkg | grep -Fq './DSA.app/Contents/Helpers/DSA App Window.app/Contents/MacOS/dsa-app-window'
-          pkgutil --payload-files DSA-0.1.0.pkg | grep -Fq './DSA.app/Contents/Info.plist'
-          pkgutil --payload-files DSA-0.1.0.pkg | grep -Fq './DSA.app/Contents/MacOS/dsa-devices'
-          pkgutil --payload-files DSA-0.1.0.pkg | grep -Fq './DSA.app/Contents/MacOS/dsa-settings'
-          pkgutil --payload-files DSA-0.1.0.pkg | grep -Fq './DSA.app/Contents/Resources/DSA.icns'
+          # A product archive: DSA.app sits in the component package inside it, and the
+          # installer's pages and artwork sit beside that.
+          rm -rf expanded
+          pkgutil --expand-full DSA-0.1.0.pkg expanded
+          payload=expanded/DSA-component.pkg/Payload
+          test -x "$payload/DSA.app/Contents/Helpers/DSA App Window.app/Contents/MacOS/dsa-app-window"
+          test -f "$payload/DSA.app/Contents/Info.plist"
+          test -x "$payload/DSA.app/Contents/MacOS/dsa-devices"
+          test -x "$payload/DSA.app/Contents/MacOS/dsa-settings"
+          test -f "$payload/DSA.app/Contents/Resources/DSA.icns"
+          test -x expanded/DSA-component.pkg/Scripts/postinstall
+          grep -Fq 'welcome file="welcome.html"' expanded/Distribution
+          test -f expanded/Resources/background.png
+          test -f expanded/Resources/en.lproj/welcome.html
+          test -f expanded/Resources/LICENSE.txt
+          rm -rf expanded
 
       - name: Check the disk image holds DSA.app
         working-directory: .scratch/macos-package
