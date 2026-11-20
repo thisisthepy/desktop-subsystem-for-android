@@ -17,32 +17,27 @@
 //! [`RENDER_DPI`], each fitted to the printer's printable area and turned to the paper's
 //! orientation, and sent to the printer the dialog returned.
 
-use std::collections::HashMap;
-use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use dsa_host_core::host_api::HostApiClient;
-use dsa_host_core::print::{PrintEvent, PrintJob, PrintOutcome};
+use dsa_host_core::host_paths::unique_name;
+use dsa_host_core::print::{print_spooled, PrintJob, PrintOutcome};
+use dsa_host_core::print_follower::{follow_print_jobs, PrintFollowing, PrintLog, PrintRun};
 use dsa_transport::Connector;
 
 use crate::compositor::log::{note, CompositorLogger};
 
-/// What the window manager calls itself to the service.
-const BUILD: &str = "dsa-wm print";
-
-/// How long a request to the service is waited for.
-const ANSWER: Duration = Duration::from_secs(5);
-
-/// How long to wait before connecting again after the service could not be reached.
-const RETRY: Duration = Duration::from_secs(1);
-
-/// How long the watch waits for the service before it looks for finished jobs again.
-const POLL: Duration = Duration::from_millis(100);
+/// How the follower talks to the service.
+const FOLLOWING: PrintFollowing = PrintFollowing {
+    build: "dsa-wm print",
+    answer: Duration::from_secs(5),
+    retry: Duration::from_secs(1),
+    poll: Duration::from_millis(100),
+    thread_name: "dsa-wm-print",
+};
 
 /// The highest resolution a page is drawn at, in dots per inch. Text and photos print sharp at
 /// it, and a page of A4 or Letter takes about 35 MB while it is drawn.
@@ -78,119 +73,17 @@ pub fn serve(
             note(logger.as_deref(), &format!("print spool: {problem}"));
         }
     }
-    let (done_tx, done) = mpsc::channel();
-    let mut printing: HashMap<u32, Arc<AtomicBool>> = HashMap::new();
-    let mut last_error = String::new();
-    while !stop.load(Ordering::Relaxed) {
-        let stream = HostApiClient::connect(&mut *connector, BUILD, ANSWER)
-            .and_then(|client| client.watch_print_jobs());
-        let mut stream = match stream {
-            Ok(stream) => stream,
-            Err(error) => {
-                let error = error.to_string();
-                if error != last_error {
-                    note(
-                        logger.as_deref(),
-                        &format!("printing cannot reach the service: {error}"),
-                    );
-                    last_error = error;
-                }
-                report(&mut *connector, &done, &mut printing, logger.as_deref());
-                thread::sleep(RETRY);
-                continue;
-            }
-        };
-        last_error.clear();
-        while !stop.load(Ordering::Relaxed) {
-            report(&mut *connector, &done, &mut printing, logger.as_deref());
-            match stream.next(POLL) {
-                Ok(Some(PrintEvent::Job(job))) => {
-                    let withdrawn = Arc::new(AtomicBool::new(false));
-                    printing.insert(job.job_id, Arc::clone(&withdrawn));
-                    start_job(
-                        job,
-                        Arc::clone(&printer),
-                        spool.clone(),
-                        withdrawn,
-                        done_tx.clone(),
-                        logger.clone(),
-                    );
-                }
-                Ok(Some(PrintEvent::Withdrawn { job_id })) => {
-                    if let Some(withdrawn) = printing.get(&job_id) {
-                        withdrawn.store(true, Ordering::Relaxed);
-                    }
-                }
-                Ok(None) => {}
-                Err(error) => {
-                    note(
-                        logger.as_deref(),
-                        &format!("the print jobs' connection to the service ended: {error}"),
-                    );
-                    break;
-                }
-            }
-        }
-    }
-    // Jobs still printing are told they are not wanted; their dialogs stay until the user
-    // closes them.
-    for withdrawn in printing.values() {
-        withdrawn.store(true, Ordering::Relaxed);
-    }
-}
-
-/// Passes what became of each finished job to the service.
-fn report(
-    connector: &mut dyn Connector,
-    done: &Receiver<(u32, PrintOutcome)>,
-    printing: &mut HashMap<u32, Arc<AtomicBool>>,
-    logger: Option<&CompositorLogger>,
-) {
-    while let Ok((job_id, outcome)) = done.try_recv() {
-        printing.remove(&job_id);
-        let result = HostApiClient::connect(connector, BUILD, ANSWER)
-            .and_then(|mut client| client.report_print_job(job_id, &outcome));
-        if let Err(error) = result {
-            note(
-                logger,
-                &format!("what became of print job {job_id} did not reach Android: {error}"),
-            );
-        }
-    }
-}
-
-/// Prints one job on a thread of its own, and sends what became of it on `done`.
-fn start_job(
-    job: PrintJob,
-    printer: Arc<dyn Printer>,
-    spool: Option<PathBuf>,
-    withdrawn: Arc<AtomicBool>,
-    done: Sender<(u32, PrintOutcome)>,
-    logger: Option<Arc<CompositorLogger>>,
-) {
-    let job_id = job.job_id;
-    let failed = done.clone();
-    let spawned = thread::Builder::new()
-        .name("dsa-wm-print".into())
-        .spawn(move || {
-            let outcome = print_one(&job, &*printer, spool.as_deref(), &withdrawn);
-            match &outcome {
-                PrintOutcome::Failed(why) => note(
-                    logger.as_deref(),
-                    &format!("{} was not printed: {why}", job.title()),
-                ),
-                PrintOutcome::Canceled => note(
-                    logger.as_deref(),
-                    &format!("printing {} was canceled", job.title()),
-                ),
-                PrintOutcome::Printed => {}
-            }
-            let _ = done.send((job.job_id, outcome));
-        });
-    if let Err(error) = spawned {
-        let why = format!("the window manager could not start printing: {error}");
-        let _ = failed.send((job_id, PrintOutcome::Failed(why)));
-    }
+    let run: PrintRun =
+        Arc::new(move |job, withdrawn| print_one(&job, &*printer, spool.as_deref(), withdrawn));
+    let log: PrintLog = Arc::new(move |line| note(logger.as_deref(), line));
+    follow_print_jobs(
+        &mut *connector,
+        &FOLLOWING,
+        &run,
+        &stop,
+        &thread::sleep,
+        &log,
+    );
 }
 
 /// Writes the job's document to the spool folder, prints it, and removes it.
@@ -203,23 +96,14 @@ pub fn print_one(
     let Some(spool) = spool else {
         return PrintOutcome::Failed("this user has no folder to keep the document in".into());
     };
-    if let Err(error) = std::fs::create_dir_all(spool) {
-        return PrintOutcome::Failed(format!("creating {}: {error}", spool.display()));
-    }
-    let document = spool.join(crate::paths::unique_name("print", ".pdf"));
-    if let Err(error) = std::fs::write(&document, job.pdf.as_slice()) {
-        let _ = std::fs::remove_file(&document);
-        return PrintOutcome::Failed(format!("writing {}: {error}", document.display()));
-    }
-    let outcome = if withdrawn.load(Ordering::Relaxed) {
-        PrintOutcome::Canceled
-    } else {
-        let print = || printer.print(job, &document, withdrawn);
-        let printed = catch_unwind(AssertUnwindSafe(print));
-        printed.unwrap_or_else(|_| PrintOutcome::Failed("the printing code failed".into()))
-    };
-    let _ = std::fs::remove_file(&document);
-    outcome
+    print_spooled(
+        job,
+        spool,
+        |dir| std::fs::create_dir_all(dir),
+        &unique_name("print", ".pdf"),
+        withdrawn,
+        |document| printer.print(job, document, withdrawn),
+    )
 }
 
 /// Where a page goes on the paper: the rectangle, in printer pixels, and whether the page is

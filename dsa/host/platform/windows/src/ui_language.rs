@@ -109,35 +109,7 @@ fn preferred_names() -> Vec<String> {
         .collect()
 }
 
-/// `template` with each `{name}` placeholder of `values` replaced by its value, in one pass, so
-/// a value that itself holds a placeholder's name stays as it is.
-pub fn fill(template: &str, values: &[(&str, &str)]) -> String {
-    let mut out = String::with_capacity(template.len());
-    let mut rest = template;
-    while let Some(open) = rest.find('{') {
-        out.push_str(&rest[..open]);
-        let after = &rest[open + 1..];
-        let found = after.find('}').and_then(|close| {
-            let name = &after[..close];
-            values
-                .iter()
-                .find(|(key, _)| *key == name)
-                .map(|(_, value)| (close, *value))
-        });
-        match found {
-            Some((close, value)) => {
-                out.push_str(value);
-                rest = &after[close + 1..];
-            }
-            None => {
-                out.push('{');
-                rest = after;
-            }
-        }
-    }
-    out.push_str(rest);
-    out
-}
+pub use dsa_host_core::ui_text::fill;
 
 /// What is wrong with `text`, the `language` translation of `english` named `what`: empty,
 /// an em dash, or other `{}` placeholders than the English one. For the tests of every text.
@@ -203,18 +175,6 @@ mod tests {
         for (langid, language) in cases {
             assert_eq!(from_langid(langid), language, "{langid:#06x}");
         }
-    }
-
-    #[test]
-    fn fr17_placeholders_are_filled_once() {
-        assert_eq!(
-            fill(
-                "{who} runs {command}",
-                &[("who", "{command}"), ("command", "id")]
-            ),
-            "{command} runs id"
-        );
-        assert_eq!(fill("{other} {x", &[("x", "1")]), "{other} {x");
     }
 
     #[test]

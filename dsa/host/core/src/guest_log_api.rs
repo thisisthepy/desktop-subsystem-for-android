@@ -150,7 +150,10 @@ pub fn serve_watch_log(
     if !answer(&mut *connection, id, response::Body::Done(types::Done {})) {
         return;
     }
-    if !send_entries(&mut *connection, &log.history, false, None) {
+    // A guest that cannot talk to this host sends no log; the reader says why instead of
+    // waiting in silence.
+    let problem = android.log_problem();
+    if !send_entries(&mut *connection, &log.history, false, problem.as_deref()) {
         return;
     }
     loop {

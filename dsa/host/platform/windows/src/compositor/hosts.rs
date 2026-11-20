@@ -35,6 +35,7 @@ use dsa_host_core::compositor::frame_buffers::texture_fits;
 use dsa_host_core::compositor::frame_stall::{FrameStall, Stall};
 use dsa_host_core::compositor::gpu_reset::{GpuResetWindows, Report};
 use dsa_host_core::compositor::program_exit::{describe_exit, ended_by_crash, CrashRestarts};
+use dsa_host_core::compositor::resize_queue::DrawnFrames;
 use dsa_host_core::compositor::shown_windows::{CoverWatch, ShownWindows};
 use dsa_host_core::compositor::task_windows::{TaskWindows, WindowChange};
 use dsa_host_core::compositor::window_hosts::{
@@ -81,27 +82,13 @@ pub fn pipe_name(session: u32) -> String {
     format!("dsa-wm-{session}")
 }
 
-/// The arguments that open DSA's settings on the Apps page with `package`'s row in view.
-pub fn app_page_arguments(package: &str) -> [String; 4] {
-    [
-        "--page".into(),
-        "apps".into(),
-        "--app".into(),
-        package.into(),
-    ]
-}
-
 /// Opens DSA's settings (the settings app installed beside this window manager) on the Apps
 /// page at `package`, as the system menu's App info does. The settings app runs on its own;
 /// nothing waits for it.
 fn open_app_page(package: &str) -> Result<(), String> {
     let program =
         crate::start_menu::default_uninstaller().ok_or("the settings app's place is not known")?;
-    std::process::Command::new(&program)
-        .args(app_page_arguments(package))
-        .spawn()
-        .map(drop)
-        .map_err(|e| format!("could not start {}: {e}", program.display()))
+    dsa_host_core::links::open_app_page_with(&program, package)
 }
 
 /// What the other threads tell the manager.
@@ -371,6 +358,8 @@ pub struct RemoteWindow {
     /// The guest task that draws into the window: its own, or the one that took it over
     /// after a GPU reset.
     drawing: std::sync::atomic::AtomicI32,
+    /// Told of each frame the app draws, so a size of a drag held back for it may go.
+    drawn: DrawnFrames,
     gpu: Arc<Gpu>,
     state: Mutex<RemoteState>,
     logger: Option<Arc<CompositorLogger>>,
@@ -382,18 +371,27 @@ impl RemoteWindow {
         task_id: i32,
         link: Arc<HostLink>,
         gpu: Arc<Gpu>,
+        drawn: DrawnFrames,
         logger: Option<Arc<CompositorLogger>>,
     ) -> Arc<RemoteWindow> {
-        Self::make(task_id, Some(link), EarlyFrames::linked(), gpu, logger)
+        Self::make(
+            task_id,
+            Some(link),
+            EarlyFrames::linked(),
+            gpu,
+            drawn,
+            logger,
+        )
     }
 
     /// The frame target of a task whose window host has not connected yet.
     pub fn waiting(
         task_id: i32,
         gpu: Arc<Gpu>,
+        drawn: DrawnFrames,
         logger: Option<Arc<CompositorLogger>>,
     ) -> Arc<RemoteWindow> {
-        Self::make(task_id, None, EarlyFrames::waiting(), gpu, logger)
+        Self::make(task_id, None, EarlyFrames::waiting(), gpu, drawn, logger)
     }
 
     fn make(
@@ -401,11 +399,13 @@ impl RemoteWindow {
         link: Option<Arc<HostLink>>,
         early: EarlyFrames,
         gpu: Arc<Gpu>,
+        drawn: DrawnFrames,
         logger: Option<Arc<CompositorLogger>>,
     ) -> Arc<RemoteWindow> {
         Arc::new(RemoteWindow {
             task_id,
             drawing: std::sync::atomic::AtomicI32::new(task_id),
+            drawn,
             gpu,
             state: Mutex::new(RemoteState {
                 link,
@@ -641,7 +641,8 @@ impl FrameTarget for RemoteWindow {
             (link, state.sequence)
         };
         // The app has drawn this size: the next size of a drag may go to it.
-        super::tasks::frame_drawn(self.drawing.load(Ordering::Relaxed), (width, height));
+        self.drawn
+            .frame_drawn(self.drawing.load(Ordering::Relaxed), (width, height));
         let started = Instant::now();
         let sent = link.send(Body::Frame(Frame {
             task_id: self.task_id,
@@ -905,6 +906,8 @@ pub struct ManagerSetup {
     /// had windows: it tells the user, and restarts Android when the stall says to. None when
     /// nothing is done about it.
     pub recover: Option<Recovery>,
+    /// The frames the apps drew, shared with the thread that sends the requests to the guest.
+    pub drawn: DrawnFrames,
 }
 
 struct Manager {
@@ -1503,6 +1506,7 @@ impl Manager {
                                         *task_id,
                                         Arc::clone(&link),
                                         Arc::clone(gpu),
+                                        self.setup.drawn.clone(),
                                         self.setup.logger.clone(),
                                     );
                                     if let Some(old) = self.remotes.insert(*task_id, remote) {
@@ -1595,9 +1599,10 @@ impl Manager {
         // host has connected: the first ones are often its splash screen, drawn once.
         if let Some(gpu) = &self.setup.gpu {
             let logger = self.setup.logger.clone();
+            let drawn = self.setup.drawn.clone();
             for (_, task_id) in &routed {
                 self.remotes.entry(*task_id).or_insert_with(|| {
-                    RemoteWindow::waiting(*task_id, Arc::clone(gpu), logger.clone())
+                    RemoteWindow::waiting(*task_id, Arc::clone(gpu), drawn.clone(), logger.clone())
                 });
             }
         }
@@ -1625,12 +1630,10 @@ impl Manager {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn fr22_app_info_opens_the_apps_page_at_the_app() {
         assert_eq!(
-            app_page_arguments("com.example.clock"),
+            dsa_host_core::links::app_page_arguments("com.example.clock"),
             ["--page", "apps", "--app", "com.example.clock"].map(String::from)
         );
     }

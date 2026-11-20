@@ -78,6 +78,7 @@ use std::time::{Duration, Instant};
 use dsa_host_core::app_audio::{self, AppStream, AppVolumes};
 use dsa_host_core::audio::{serve_port as serve_audio_port, AudioDevice, AUDIO_PORT};
 use dsa_host_core::compositor::frame_stall::{restart_in_background, SharedConnector, Stall};
+use dsa_host_core::compositor::resize_queue::DrawnFrames;
 use dsa_host_core::compositor::{
     GraphicsRenderer, GraphicsStreamKind, StreamTracker, GRAPHICS_COMMAND_PORT,
     GRAPHICS_PROCESS_PIPE_PORT,
@@ -1437,6 +1438,7 @@ impl Compositor {
                 .ok()
         });
         let fronts = gestures_thread.as_ref().map(|_| fronts_tx);
+        let drawn = DrawnFrames::new();
         let idle = Arc::new(Mutex::new(IdleTrim::new(IDLE_TRIM_DELAY, Instant::now())));
         let trim_gpu = gpu.clone();
         let gpu_for_hosts = gpu.clone();
@@ -1458,6 +1460,7 @@ impl Compositor {
             }),
             media_pressed: Some(self.media_windows.pressed_tx.clone()),
             recover: Some(self.recovery()),
+            drawn: drawn.clone(),
         };
         // The media sessions the tray follows reach the windows through the manager.
         *self
@@ -1598,6 +1601,7 @@ impl Compositor {
                     request_connector,
                     requests_rx,
                     |event| request_events.send(event).is_ok(),
+                    drawn,
                     request_logger,
                 )
             })

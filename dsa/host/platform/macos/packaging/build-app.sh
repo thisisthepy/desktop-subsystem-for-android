@@ -84,6 +84,17 @@ if [[ -n "$renderer" ]]; then
         install_name_tool -change "$dependency" "@loader_path/$name" \
             "$frameworks/libgfxstream_backend.dylib"
     done < <(otool -L "$renderer" | tail -n +2 | awk '{print $1}')
+    # The renderer opens the Vulkan loader by name when it runs, so nothing above listed it.
+    loader="${DSA_VULKAN_LOADER:-}"
+    if [[ -z "$loader" ]] && command -v brew >/dev/null; then
+        loader="$(brew --prefix vulkan-loader 2>/dev/null)/lib/libvulkan.dylib"
+    fi
+    if [[ -n "$loader" && -f "$loader" ]]; then
+        bash "$here/bundle-vulkan-loader.sh" "$loader" "$frameworks"
+    else
+        echo "the Vulkan loader was not found (set DSA_VULKAN_LOADER); the renderer needs it" >&2
+        exit 1
+    fi
     # MoltenVK is the Vulkan driver the loader opens; its description sits in Resources,
     # where the window manager points the loader (VK_ICD_FILENAMES).
     moltenvk="${DSA_MOLTENVK:-}"

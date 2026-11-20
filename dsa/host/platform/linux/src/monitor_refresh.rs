@@ -36,11 +36,11 @@ pub fn read_record(tmp: &Path) -> Option<u32> {
 
 /// Writes the record whole, so the service never reads half of one.
 pub fn write_record(tmp: &Path, hz: u32) -> std::io::Result<()> {
-    std::fs::create_dir_all(tmp)?;
-    let path = record_path(tmp);
-    let partial = path.with_extension("txt.new");
-    std::fs::write(&partial, guest_refresh::record_text(hz))?;
-    std::fs::rename(&partial, &path)
+    dsa_host_core::file_write::replace_in_new_folder(
+        &record_path(tmp),
+        guest_refresh::record_text(hz).as_bytes(),
+        "txt.new",
+    )
 }
 
 /// A Wayland output mode's refresh rate, which `wl_output` gives in millihertz, in whole

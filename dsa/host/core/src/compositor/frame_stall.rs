@@ -758,7 +758,6 @@ mod tests {
             "{}",
             third.reason()
         );
-        drop(stall);
         // An hour after the first restarts, Android is restarted again.
         watch.gpu_reset(after(start, 3700), 0);
         assert!(watch.tick(after(start, 3740), &[1], 0).unwrap().restart);

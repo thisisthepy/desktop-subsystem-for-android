@@ -3,11 +3,13 @@
 //! compositor writes the shortcut's desktop entry ([`super::desktop_entry::place_pinned_in`]);
 //! a question nobody answers is declined after [`ASK_FOR`], so the app is not left waiting.
 
-use std::collections::BTreeMap;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
+use dsa_host_core::pin_questions::{answer, OpenQuestions};
 use dsa_host_core::tasks::PinShortcutRequest;
 use dsa_host_core::ui_language::UiLanguage;
+use dsa_host_core::ui_text::fill;
+use dsa_host_core::ui_text::pin_shortcut::pin_question_text;
 
 use super::desktop_entry::app_id;
 use super::notifications::{body_text, Notify};
@@ -18,151 +20,14 @@ pub const ADD: &str = "dsa-pin-add";
 /// The action of [Cancel].
 pub const CANCEL: &str = "dsa-pin-cancel";
 
-/// How long a question waits for the user before it is declined.
-pub const ASK_FOR: Duration = Duration::from_secs(180);
-
-/// The question's words in one language: its summary (with `{name}`, the shortcut's name),
-/// its body (with `{app}`, the app's), and the two buttons.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct QuestionText {
-    pub summary: &'static str,
-    pub body: &'static str,
-    pub add: &'static str,
-    pub cancel: &'static str,
-}
-
-/// The question's words in `language`.
-pub fn question_text(language: UiLanguage) -> QuestionText {
-    let words = |summary, body, add, cancel| QuestionText {
-        summary,
-        body,
-        add,
-        cancel,
-    };
-    match language {
-        UiLanguage::English => words(
-            "Add \u{201c}{name}\u{201d} to the desktop?",
-            "{app} wants to put this shortcut on your desktop.",
-            "Add to desktop",
-            "Cancel",
-        ),
-        UiLanguage::Korean => words(
-            "\u{201c}{name}\u{201d}을(를) 바탕 화면에 추가할까요?",
-            "{app}에서 이 바로 가기를 바탕 화면에 두려고 합니다.",
-            "바탕 화면에 추가",
-            "취소",
-        ),
-        UiLanguage::Japanese => words(
-            "「{name}」をデスクトップに追加しますか？",
-            "{app} がこのショートカットをデスクトップに置こうとしています。",
-            "デスクトップに追加",
-            "キャンセル",
-        ),
-        UiLanguage::ChineseSimplified => words(
-            "要将\u{201c}{name}\u{201d}添加到桌面吗？",
-            "{app} 想将此快捷方式放到你的桌面上。",
-            "添加到桌面",
-            "取消",
-        ),
-        UiLanguage::ChineseTraditional => words(
-            "要將「{name}」新增到桌面嗎？",
-            "{app} 想將這個捷徑放到你的桌面上。",
-            "新增到桌面",
-            "取消",
-        ),
-        UiLanguage::Spanish => words(
-            "¿Desea añadir \u{ab}{name}\u{bb} al escritorio?",
-            "{app} quiere poner este acceso directo en su escritorio.",
-            "Añadir al escritorio",
-            "Cancelar",
-        ),
-        UiLanguage::French => words(
-            "Ajouter \u{ab}\u{a0}{name}\u{a0}\u{bb} au bureau\u{a0}?",
-            "{app} souhaite placer ce raccourci sur votre bureau.",
-            "Ajouter au bureau",
-            "Annuler",
-        ),
-        UiLanguage::German => words(
-            "\u{201e}{name}\u{201c} zum Desktop hinzufügen?",
-            "{app} möchte diese Verknüpfung auf Ihrem Desktop ablegen.",
-            "Zum Desktop hinzufügen",
-            "Abbrechen",
-        ),
-        UiLanguage::PortugueseBrazil => words(
-            "Adicionar \u{201c}{name}\u{201d} à área de trabalho?",
-            "{app} quer colocar este atalho na sua área de trabalho.",
-            "Adicionar à área de trabalho",
-            "Cancelar",
-        ),
-        UiLanguage::Russian => words(
-            "Добавить \u{ab}{name}\u{bb} на рабочий стол?",
-            "{app} хочет поместить этот ярлык на ваш рабочий стол.",
-            "Добавить на рабочий стол",
-            "Отмена",
-        ),
-        UiLanguage::Italian => words(
-            "Aggiungere \u{201c}{name}\u{201d} al desktop?",
-            "{app} vuole aggiungere questa scorciatoia al desktop.",
-            "Aggiungi al desktop",
-            "Annulla",
-        ),
-        UiLanguage::Vietnamese => words(
-            "Thêm \u{201c}{name}\u{201d} vào màn hình nền?",
-            "{app} muốn đặt lối tắt này trên màn hình nền của bạn.",
-            "Thêm vào màn hình nền",
-            "Hủy",
-        ),
-        UiLanguage::Indonesian => words(
-            "Tambahkan \u{201c}{name}\u{201d} ke desktop?",
-            "{app} ingin menaruh pintasan ini di desktop Anda.",
-            "Tambahkan ke desktop",
-            "Batal",
-        ),
-        UiLanguage::Turkish => words(
-            "\u{201c}{name}\u{201d} masaüstüne eklensin mi?",
-            "{app}, bu kısayolu masaüstünüze koymak istiyor.",
-            "Masaüstüne ekle",
-            "İptal",
-        ),
-    }
-}
-
-/// `template` with its `{key}` placeholders replaced by their values, in one pass, so a value
-/// that itself holds braces is left as it is.
-fn fill(template: &str, values: &[(&str, &str)]) -> String {
-    let mut out = String::with_capacity(template.len());
-    let mut rest = template;
-    while let Some(open) = rest.find('{') {
-        out.push_str(&rest[..open]);
-        let after = &rest[open..];
-        match values
-            .iter()
-            .find(|(key, _)| after.starts_with(&format!("{{{key}}}")))
-        {
-            Some((key, value)) => {
-                out.push_str(value);
-                rest = &after[key.len() + 2..];
-            }
-            None => {
-                out.push('{');
-                rest = &after[1..];
-            }
-        }
-    }
-    out.push_str(rest);
-    out
-}
+pub use dsa_host_core::pin_questions::ASK_FOR;
 
 /// The `Notify` call that asks the user about `request`, in `language`.
 pub fn question(request: &PinShortcutRequest, language: UiLanguage) -> Notify {
-    let app = if request.app_label.trim().is_empty() {
-        request.package_name.as_str()
-    } else {
-        request.app_label.as_str()
-    };
+    let app = request.app_name();
     let name = request.shortcut.label();
-    let text = question_text(language);
-    let summary = fill(text.summary, &[("name", name)]);
+    let text = pin_question_text(language);
+    let summary = fill(text.heading, &[("name", name)]);
     let body = fill(text.body, &[("app", app)]);
     let (add, cancel) = (text.add, text.cancel);
     Notify {
@@ -181,7 +46,7 @@ pub fn question(request: &PinShortcutRequest, language: UiLanguage) -> Notify {
 /// The questions on screen, by the number the notification service gave each.
 #[derive(Debug, Default)]
 pub struct Questions {
-    pending: BTreeMap<u32, (PinShortcutRequest, Instant)>,
+    open: OpenQuestions<u32>,
 }
 
 impl Questions {
@@ -191,38 +56,24 @@ impl Questions {
 
     /// The question about `request` is shown as `id`, from `now`.
     pub fn asked(&mut self, id: u32, request: PinShortcutRequest, now: Instant) {
-        self.pending.insert(id, (request, now));
+        self.open.asked(id, request, now);
     }
 
     /// `ActionInvoked` on `id`: the request and the user's answer, when `id` is one of ours.
     /// A click on the notification itself is no answer.
     pub fn action(&mut self, id: u32, action: &str) -> Option<(PinShortcutRequest, bool)> {
-        let accepted = match action {
-            ADD => true,
-            CANCEL => false,
-            _ => return None,
-        };
-        self.pending
-            .remove(&id)
-            .map(|(request, _)| (request, accepted))
+        let accepted = answer(action, ADD, CANCEL, false)?;
+        self.open.take(id).map(|request| (request, accepted))
     }
 
     /// `NotificationClosed` on `id`: a question dismissed unanswered is declined.
     pub fn closed(&mut self, id: u32) -> Option<PinShortcutRequest> {
-        self.pending.remove(&id).map(|(request, _)| request)
+        self.open.take(id)
     }
 
     /// The questions older than [`ASK_FOR`] at `now`, which are declined and closed.
     pub fn expired(&mut self, now: Instant) -> Vec<(u32, PinShortcutRequest)> {
-        let old: Vec<u32> = self
-            .pending
-            .iter()
-            .filter(|(_, (_, asked))| now.duration_since(*asked) >= ASK_FOR)
-            .map(|(id, _)| *id)
-            .collect();
-        old.into_iter()
-            .filter_map(|id| self.pending.remove(&id).map(|(request, _)| (id, request)))
-            .collect()
+        self.open.expired(now)
     }
 }
 
@@ -260,17 +111,17 @@ mod tests {
     #[test]
     fn fr17_a_pin_request_asks_in_every_interface_language() {
         use dsa_host_core::ui_language::placeholders;
-        let english = question_text(UiLanguage::English);
+        let english = pin_question_text(UiLanguage::English);
         for language in UiLanguage::ALL {
-            let text = question_text(language);
-            for words in [text.summary, text.body, text.add, text.cancel] {
+            let text = pin_question_text(language);
+            for words in [text.heading, text.body, text.add, text.cancel] {
                 assert!(!words.trim().is_empty(), "{language:?}");
                 assert!(
                     !words.contains(char::from_u32(0x2014).unwrap()),
                     "{language:?}: {words}"
                 );
             }
-            assert_eq!(placeholders(text.summary), placeholders(english.summary));
+            assert_eq!(placeholders(text.heading), placeholders(english.heading));
             assert_eq!(placeholders(text.body), placeholders(english.body));
             assert!(placeholders(text.add).is_empty() && placeholders(text.cancel).is_empty());
             if language != UiLanguage::English {

@@ -5,8 +5,9 @@
 //! writes its console, an oops's report and Android's last log lines (pmsg) to this disk
 //! instead, and shows them in `/sys/fs/pstore` at the next boot.
 //!
-//! The disk is a fixed VHD: the disk's bytes followed by a 512-byte footer, so it never grows
-//! and this module writes it as a plain file, with no Windows API. It holds one GPT partition
+//! On Windows the disk is a fixed VHD: the disk's bytes followed by a 512-byte footer, so it
+//! never grows and this module writes it as a plain file, with no Windows API. The other hosts
+//! attach the disk's bytes alone, as a raw file ([`raw_image`], [`ensure_raw`]). It holds one GPT partition
 //! with a fixed partition UUID, [`PARTITION_UUID`], which the kernel command line names
 //! ([`KERNEL_CMDLINE`]). Finding the partition by its UUID does not depend on the order the
 //! guest names its disks in.
@@ -17,7 +18,8 @@
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::Path;
 
-use crate::gpt::{crc32, SECTOR};
+use super::gpt::{crc32, SECTOR};
+use crate::vhdx::guid_bytes;
 
 /// The size of the disk the guest sees: 4 MiB.
 pub const DISK_BYTES: u64 = 4 << 20;
@@ -51,20 +53,6 @@ pub const PARTITION_LAST_SECTOR: u64 = LAST_USABLE;
 pub const KERNEL_CMDLINE: &str = "pstore_blk.blkdev=PARTUUID=5f8b3c2e-9a41-4d6e-b07c-1e2d3f4a5b6c \
      pstore_blk.best_effort=y pstore_blk.kmsg_size=64 pstore_blk.console_size=256 \
      pstore_blk.pmsg_size=256";
-
-/// A GUID's 16 bytes as GPT stores them: the first three fields little endian.
-fn guid_bytes(text: &str) -> [u8; 16] {
-    let hex: String = text.chars().filter(|c| *c != '-').collect();
-    let mut raw = [0u8; 16];
-    for (i, byte) in raw.iter_mut().enumerate() {
-        *byte = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).expect("a constant GUID");
-    }
-    let mut out = raw;
-    out[0..4].copy_from_slice(&[raw[3], raw[2], raw[1], raw[0]]);
-    out[4..6].copy_from_slice(&[raw[5], raw[4]]);
-    out[6..8].copy_from_slice(&[raw[7], raw[6]]);
-    out
-}
 
 fn gpt_header(current: u64, backup: u64, entries_lba: u64, entries_crc: u32) -> [u8; 512] {
     let mut h = [0u8; 512];
@@ -177,29 +165,45 @@ pub fn image() -> Vec<u8> {
     disk
 }
 
-/// Whether the file at `path` is a pstore disk this module made: the right size, its footer,
-/// and its partition table, whatever the partition holds.
-fn is_pstore_disk(path: &Path) -> io::Result<bool> {
+/// The whole file of a new, empty raw pstore disk: [`image`] without the VHD footer.
+pub fn raw_image() -> Vec<u8> {
+    let mut disk = image();
+    disk.truncate(DISK_BYTES as usize);
+    disk
+}
+
+/// Whether the file at `path` is a pstore disk this module made, as `fresh` is: the right
+/// size, its footer when it has one, and its partition table, whatever the partition holds.
+fn is_pstore_disk(path: &Path, fresh: &[u8]) -> io::Result<bool> {
     let mut file = std::fs::File::open(path)?;
-    if file.metadata()?.len() != FILE_BYTES {
+    if file.metadata()?.len() != fresh.len() as u64 {
         return Ok(false);
     }
     let mut start = vec![0u8; (FIRST_USABLE * SECTOR) as usize];
     file.read_exact(&mut start)?;
-    let fresh = image();
     if start[..] != fresh[..start.len()] {
         return Ok(false);
     }
-    let mut footer = [0u8; 512];
+    let mut footer = vec![0u8; fresh.len() - DISK_BYTES as usize];
     file.seek(SeekFrom::Start(DISK_BYTES))?;
     file.read_exact(&mut footer)?;
     Ok(footer[..] == fresh[DISK_BYTES as usize..])
 }
 
-/// Makes sure the pstore disk at `path` exists. One this module made is kept as it is, with
-/// the records in it; anything else at `path` is replaced by an empty disk.
+/// Makes sure the pstore disk at `path` exists, as a fixed VHD. One this module made is kept
+/// as it is, with the records in it; anything else at `path` is replaced by an empty disk.
 pub fn ensure(path: &Path) -> Result<(), String> {
-    match is_pstore_disk(path) {
+    ensure_image(path, image())
+}
+
+/// Makes sure the raw pstore disk at `path` exists, the same disk as [`ensure`] makes without
+/// the VHD footer, for the hosts whose VMM attaches raw disks.
+pub fn ensure_raw(path: &Path) -> Result<(), String> {
+    ensure_image(path, raw_image())
+}
+
+fn ensure_image(path: &Path, fresh: Vec<u8>) -> Result<(), String> {
+    match is_pstore_disk(path, &fresh) {
         Ok(true) => return Ok(()),
         Ok(false) => {}
         Err(e) if e.kind() == io::ErrorKind::NotFound => {}
@@ -208,7 +212,7 @@ pub fn ensure(path: &Path) -> Result<(), String> {
             return Err(format!("the pstore disk {path} could not be read: {e}"));
         }
     }
-    std::fs::write(path, image()).map_err(|e| {
+    std::fs::write(path, fresh).map_err(|e| {
         let path = path.display();
         format!("the pstore disk {path} could not be written: {e}")
     })

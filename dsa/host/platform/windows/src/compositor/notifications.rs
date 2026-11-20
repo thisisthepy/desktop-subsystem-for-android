@@ -146,23 +146,6 @@ fn percent_encode(text: &str) -> String {
     out
 }
 
-fn percent_decode(text: &str) -> Option<String> {
-    let bytes = text.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' {
-            let hex = text.get(i + 1..i + 3)?;
-            out.push(u8::from_str_radix(hex, 16).ok()?);
-            i += 3;
-        } else {
-            out.push(bytes[i]);
-            i += 1;
-        }
-    }
-    String::from_utf8(out).ok()
-}
-
 /// The URI a click on the toast of the notification with `key` launches.
 pub fn activation_uri(key: &str) -> String {
     format!("{PROTOCOL}:open?key={}", percent_encode(key))
@@ -219,7 +202,7 @@ fn launched(uri: &str) -> Option<Launched> {
         query
             .split('&')
             .find_map(|pair| pair.strip_prefix(name)?.strip_prefix('='))
-            .map(percent_decode)
+            .map(dsa_host_core::percent::decode_text)
     };
     let key = value("key")??;
     if !dsa_host_core::notifications::valid_key(&key) {

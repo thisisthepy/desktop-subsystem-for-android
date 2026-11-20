@@ -8,10 +8,10 @@
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-use dsa_host_windows::gpt::{partitions, SECTOR};
+use dsa_host_core::disk::gpt::{partitions, SECTOR};
+use dsa_host_core::disk::{disk_image_version, record_disk_image_version};
 use dsa_host_windows::user_disk::{
-    bring_disk_to, disk_image_version, prepare_user_data_disk, record_disk_image_version,
-    AttachedDisk,
+    bring_disk_to, prepare_user_data_disk, AttachedDisk, VhdxBackend,
 };
 
 const LAYOUT: [(&str, u64); 5] = [
@@ -184,7 +184,7 @@ fn fr14_an_unused_disk_of_an_older_layout_becomes_the_new_template() {
         &LAYOUT,
         |name| if name == "userdata" { 0 } else { 0x11 },
     );
-    record_disk_image_version(&unused, "v1").unwrap();
+    record_disk_image_version(&VhdxBackend, &unused, "v1").unwrap();
     bring_disk_to(&unused, &template, "v2").unwrap();
     assert_eq!(disk_image_version(&unused).as_deref(), Some("v2"));
     assert!(read_partition(&unused, "boot_a").iter().all(|&b| b == 0x22));
@@ -192,7 +192,7 @@ fn fr14_an_unused_disk_of_an_older_layout_becomes_the_new_template() {
     // The same layout with Android data in it is left alone, with the reason.
     let used = dir.join("used").join("android.vhdx");
     make_disk_with(&used, &LAYOUT, |_| 0x11);
-    record_disk_image_version(&used, "v1").unwrap();
+    record_disk_image_version(&VhdxBackend, &used, "v1").unwrap();
     let why = bring_disk_to(&used, &template, "v2").unwrap_err();
     assert!(why.contains("holds Android data"), "{why}");
     assert!(read_partition(&used, "userdata").iter().all(|&b| b == 0x11));
@@ -242,7 +242,7 @@ fn fr14_a_disk_from_a_one_disk_image_loses_androids_partitions_and_keeps_its_dat
         "metadata" => 0x6d,
         _ => 0x11,
     });
-    record_disk_image_version(&user, "v1").unwrap();
+    record_disk_image_version(&VhdxBackend, &user, "v1").unwrap();
     // The new image keeps Android on a disk of its own; its data template has only these.
     let template = dir.join("v2").join("data.vhdx");
     make_disk_with(&template, &[("metadata", 2048), ("userdata", 8192)], |_| 0);
@@ -287,7 +287,7 @@ fn fr14_a_disk_already_recorded_at_the_two_disk_image_still_loses_androids_parti
         &LAYOUT,
         |name| if name == "userdata" { 0x77 } else { 0x11 },
     );
-    record_disk_image_version(&user, "v2").unwrap();
+    record_disk_image_version(&VhdxBackend, &user, "v2").unwrap();
     let template = dir.join("v2").join("data.vhdx");
     make_disk_with(&template, &[("metadata", 2048), ("userdata", 8192)], |_| 0);
 
@@ -319,7 +319,7 @@ fn fr14_an_unused_data_disk_without_a_partition_the_template_has_becomes_the_tem
     // A data disk from an image whose template had no misc, never booted into.
     let user = dir.join("S-1-5-21-1-2-3-1001").join("data.vhdx");
     make_disk_with(&user, &data_layout[1..], |_| 0);
-    record_disk_image_version(&user, "v1").unwrap();
+    record_disk_image_version(&VhdxBackend, &user, "v1").unwrap();
     let template = dir.join("v2").join("data.vhdx");
     make_disk_with(&template, &data_layout, |_| 0);
 
@@ -355,7 +355,7 @@ fn fr14_a_used_data_disk_without_a_partition_the_template_has_is_left_as_it_is()
             0
         }
     });
-    record_disk_image_version(&user, "v1").unwrap();
+    record_disk_image_version(&VhdxBackend, &user, "v1").unwrap();
     let template = dir.join("v2").join("data.vhdx");
     make_disk_with(
         &template,

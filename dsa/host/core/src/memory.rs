@@ -15,6 +15,7 @@
 
 use std::collections::BTreeSet;
 use std::fmt;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use dsa_protocol::control;
@@ -1116,6 +1117,29 @@ pub fn summary_lines(androids: &dyn UserAndroids, host: &dyn HostMemory) -> Vec<
         .collect()
 }
 
+/// Logs the memory of every running user's Android every [`LOG_INTERVAL`] until `stop` is set:
+/// on the host, the VM and window processes, and in the guest, what it last reported
+/// ([`summary_lines`]). Each line is written to the service's log (standard error) after
+/// `build`. It runs on a thread of its own; it looks at `stop` every second.
+pub fn log_memory(
+    androids: &dyn UserAndroids,
+    host: &dyn HostMemory,
+    build: &str,
+    stop: &AtomicBool,
+) {
+    let mut next = Instant::now() + LOG_INTERVAL;
+    while !stop.load(Ordering::Relaxed) {
+        std::thread::sleep(Duration::from_secs(1));
+        if Instant::now() < next {
+            continue;
+        }
+        next = Instant::now() + LOG_INTERVAL;
+        for line in summary_lines(androids, host) {
+            eprintln!("{build}: {line}");
+        }
+    }
+}
+
 /// Kernel command line settings that keep what the guest kernel sets aside at boot small, the
 /// same on every host. Each is memory the guest never gets back while it runs.
 /// - `swiotlb=2048`: the bounce buffer for devices that cannot reach all of memory, 4 MiB
@@ -1228,6 +1252,102 @@ pub fn half_host_vm_memory_mb(host_total_mb: u64, limit_mb: u32) -> u64 {
     } else {
         (host_total_mb / 2).max(VM_MEMORY_MIN_MB)
     }
+}
+
+/// How far a VM may grow, for a user without a limit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GrowthCeiling {
+    /// The computer's memory less what the host keeps ([`automatic_vm_memory_mb`]).
+    HostLessReserve,
+    /// Half the computer's memory ([`half_host_vm_memory_mb`]), for a host whose memory the
+    /// GPU shares.
+    HalfHost,
+}
+
+/// The memory a VM starts with and may grow to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MemoryPlan {
+    /// The size the VM starts with, in MiB.
+    pub start_mb: u32,
+    /// How far it may grow, in MiB; `None` when it keeps its start size.
+    pub max_mb: Option<u64>,
+}
+
+/// The memory a VM starts with for a user whose limit is `limit_mb` (0 for automatic):
+/// [`DEFAULT_MEMORY_MB`](crate::host_config::DEFAULT_MEMORY_MB), or the user's limit when it
+/// is smaller.
+///
+/// The VM starts small because the guest kernel keeps its page records for all the memory
+/// it has resident, about 1.6% of it, used or not: a VM made at the computer's size from the
+/// start would cost some 460 MiB on a 32 GiB computer while idle. It grows from there while
+/// the guest needs more (see [`growth_max_mb`]).
+pub fn start_mb(limit_mb: u32) -> u32 {
+    let default = crate::host_config::DEFAULT_MEMORY_MB;
+    match limit_mb {
+        0 => default,
+        limit => limit.clamp(VM_MEMORY_MIN_MB as u32, default),
+    }
+}
+
+/// How far a VM may grow while it runs, in MiB, for a user whose limit is `limit_mb` on a
+/// computer with `total_mb` of memory: their limit, never more than the computer has, or with
+/// no limit what `ceiling` says. `None` when the computer's memory cannot be read.
+pub fn growth_max_mb(limit_mb: u32, total_mb: Option<u64>, ceiling: GrowthCeiling) -> Option<u64> {
+    total_mb.map(|total_mb| match ceiling {
+        GrowthCeiling::HostLessReserve => vm_memory_mb(total_mb, limit_mb),
+        GrowthCeiling::HalfHost => half_host_vm_memory_mb(total_mb, limit_mb),
+    })
+}
+
+/// How a user's VM is sized at one start: the configuration's `fixed_mb` when it names one,
+/// which never grows; else a small start that grows as [`growth_max_mb`] says. A maximum that
+/// is not above the start is no growth.
+pub fn memory_plan(
+    fixed_mb: Option<u32>,
+    limit_mb: u32,
+    total_mb: Option<u64>,
+    ceiling: GrowthCeiling,
+) -> MemoryPlan {
+    if let Some(fixed) = fixed_mb {
+        return MemoryPlan {
+            start_mb: fixed,
+            max_mb: None,
+        };
+    }
+    let start_mb = start_mb(limit_mb);
+    let max_mb =
+        growth_max_mb(limit_mb, total_mb, ceiling).filter(|max| *max > u64::from(start_mb));
+    MemoryPlan { start_mb, max_mb }
+}
+
+impl MemoryPlan {
+    /// The line the host logs when it sizes a VM for `user`, whose limit is `limit_mb`.
+    pub fn describe(&self, user: &str, limit_mb: u32) -> String {
+        format!(
+            "memory: {user}'s Android starts with {} MiB and may grow to {} ({})",
+            self.start_mb,
+            self.max_mb
+                .map_or("its start".to_string(), |mb| format!("{mb} MiB")),
+            if limit_mb > 0 {
+                format!("their limit {limit_mb} MiB")
+            } else {
+                "automatic".to_string()
+            }
+        )
+    }
+}
+
+/// What the host logs when growing a VM's memory did not work, for the reason `why`, with the
+/// size the VM started at when that is known. The VM keeps that size for the rest of its run.
+/// The next start tries to grow again: the reason may be gone by then (a host short of memory
+/// for a while), and a start that never grew would stay short of memory until the service
+/// restarted.
+pub fn growth_failed_line(why: &str, start_mb: Option<u64>) -> String {
+    let kept = match start_mb {
+        Some(mb) => format!("the {mb} MiB it started with"),
+        None => "the memory it started with".to_string(),
+    };
+    format!("memory: the Android VM cannot grow on this computer ({why}); it keeps {kept}")
 }
 
 /// How much the guest has and how hard it works to find memory, as its control daemon reports

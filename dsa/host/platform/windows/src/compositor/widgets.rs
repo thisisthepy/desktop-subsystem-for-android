@@ -2480,16 +2480,7 @@ pub(crate) mod png {
         result
     }
 
-    /// The width and height a PNG says it has, from its header chunk.
-    pub(crate) fn size(png: &[u8]) -> Option<(u32, u32)> {
-        const SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
-        if png.len() < 24 || &png[..8] != SIGNATURE || &png[12..16] != b"IHDR" {
-            return None;
-        }
-        let width = u32::from_be_bytes(png[16..20].try_into().ok()?);
-        let height = u32::from_be_bytes(png[20..24].try_into().ok()?);
-        (width > 0 && height > 0).then_some((width, height))
-    }
+    pub(crate) use dsa_host_core::png::size;
 
     impl Decoder {
         pub(crate) fn new() -> Result<Decoder, String> {

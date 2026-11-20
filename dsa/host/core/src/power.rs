@@ -94,6 +94,28 @@ impl MemoryPressure {
     pub fn low(&self) -> bool {
         self.low
     }
+
+    /// Takes in the host's memory now (both in KiB), logs when the host turns short of it or
+    /// stops being short, and hands the answer to `hub`.
+    pub fn observe(&mut self, hub: &PowerHub, total_kb: u64, available_kb: u64) -> bool {
+        let was_low = self.low;
+        let low = self.update(total_kb, available_kb);
+        if low != was_low {
+            eprintln!("{}", Self::change_line(total_kb, available_kb, low));
+        }
+        hub.update_memory(low);
+        low
+    }
+
+    /// The log line for the host turning short of memory (`low`) or no longer short.
+    pub fn change_line(total_kb: u64, available_kb: u64, low: bool) -> String {
+        format!(
+            "host memory: {} MiB of {} MiB available, {}",
+            available_kb / 1024,
+            total_kb / 1024,
+            if low { "short" } else { "no longer short" }
+        )
+    }
 }
 
 /// What the host's platform says about its sleep, from its suspend and resume notification.
@@ -256,5 +278,32 @@ impl PowerHub {
     /// The latest state recorded.
     pub fn latest(&self) -> Option<PowerState> {
         self.inner.lock().unwrap_or_else(|e| e.into_inner()).latest
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn host_memory_turns_short_below_ten_percent_and_clears_at_twenty() {
+        let hub = PowerHub::new();
+        let mut pressure = MemoryPressure::new();
+        assert!(!pressure.observe(&hub, 1000, 500));
+        assert!(pressure.observe(&hub, 1000, 99));
+        assert!(pressure.observe(&hub, 1000, 199));
+        assert!(!pressure.observe(&hub, 1000, 200));
+    }
+
+    #[test]
+    fn host_memory_change_line_names_the_sizes_in_mib() {
+        assert_eq!(
+            MemoryPressure::change_line(8 * 1024 * 1024, 512 * 1024, true),
+            "host memory: 512 MiB of 8192 MiB available, short"
+        );
+        assert_eq!(
+            MemoryPressure::change_line(2048, 1024, false),
+            "host memory: 1 MiB of 2 MiB available, no longer short"
+        );
     }
 }

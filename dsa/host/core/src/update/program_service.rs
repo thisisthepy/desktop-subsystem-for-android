@@ -1250,6 +1250,9 @@ impl UserAndroid for WithProgramStatus {
     fn watch_log(&self, filter: crate::guest_log::LogFilter) -> Option<crate::guest_log::LogWatch> {
         self.android.watch_log(filter)
     }
+    fn log_problem(&self) -> Option<String> {
+        self.android.log_problem()
+    }
     fn dump_log(
         &self,
         filter: crate::guest_log::LogFilter,

@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use dsa_host_macos::host_config::{memory_range_mb, MacHostConfig};
+use dsa_host_macos::host_config::MacHostConfig;
 use dsa_host_macos::launchd::{
     domain, install_commands, plist, plist_path, service_target, start_command, wm_plist,
     wm_plist_path, wm_service_target, LABEL, WM_LABEL,
@@ -31,23 +31,6 @@ fn pr5_the_users_files_and_socket_are_in_their_own_folder() {
     assert_eq!(user.disk(), root.join("android.img"));
     assert!(user.console_log().starts_with(root.join("logs")));
     assert_eq!(config.settings_dir(&user), root.join("settings"));
-}
-
-#[test]
-fn nfr2_memory_starts_small_and_grows_to_what_the_mac_can_spare() {
-    // No limit: the default start, growing to half the Mac's memory, with no fixed cap.
-    assert_eq!(memory_range_mb(0, Some(16384)), (2048, 8192));
-    assert_eq!(memory_range_mb(0, Some(65536)), (2048, 32768));
-    assert_eq!(memory_range_mb(0, Some(8192)), (2048, 4096));
-    // A limit is how far it grows; a low one is also where it starts.
-    assert_eq!(memory_range_mb(6144, Some(32768)), (2048, 6144));
-    // A limit above half the Mac is honoured, within what the Mac has.
-    assert_eq!(memory_range_mb(24576, Some(32768)), (2048, 24576));
-    assert_eq!(memory_range_mb(2048, Some(32768)), (2048, 2048));
-    // Unknown memory: the start, fixed.
-    assert_eq!(memory_range_mb(0, None), (2048, 2048));
-    let fixed = MacHostConfig::parse(r#"{"image_dir": "/i", "memory_mb": 4096}"#).unwrap();
-    assert_eq!(fixed.memory_mb(0, Some(65536)), (4096, 4096));
 }
 
 #[test]
@@ -161,4 +144,33 @@ fn fr26_every_device_port_of_the_guest_is_relayed_to_the_users_own_folder() {
         Path::new("/Users/ann/Library/Application Support/DSA/vsock/5572.sock")
     );
     assert_ne!(relay_socket(&ann, camera), relay_socket(&bob, camera));
+}
+
+#[test]
+fn fr2_every_agent_is_shown_as_dsa_in_the_login_items() {
+    use dsa_host_macos::launchd::{devices_plist, APP_BUNDLE_ID};
+    let log = Path::new("/Users/ann/Library/Logs/dsa.log");
+    for text in [
+        plist(
+            Path::new("/Applications/DSA.app/Contents/MacOS/dsa-hostd"),
+            None,
+            log,
+        ),
+        wm_plist(
+            Path::new("/Applications/DSA.app/Contents/MacOS/dsa-wm"),
+            log,
+        ),
+        devices_plist(
+            Path::new("/Applications/DSA.app/Contents/MacOS/dsa-devices"),
+            log,
+        ),
+    ] {
+        assert!(
+            text.contains(&format!(
+                "<key>AssociatedBundleIdentifiers</key>\n\t<array>\n\t\t<string>{APP_BUNDLE_ID}</string>"
+            )),
+            "{text}"
+        );
+    }
+    assert_eq!(APP_BUNDLE_ID, "org.thisisthepy.dsa");
 }

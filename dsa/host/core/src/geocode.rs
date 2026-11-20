@@ -574,6 +574,38 @@ const POLL: Duration = Duration::from_millis(200);
 /// How long the watcher waits before it connects again.
 const RETRY: Duration = Duration::from_secs(2);
 
+/// What the device lenders of the Linux and macOS hosts call their address follower to the
+/// service.
+const DEVICES_BUILD: &str = "dsa-devices geocode";
+
+/// The address follower of a device lender: [`serve_boundaries`] under the name the lenders
+/// give it, for the thread the lender starts it on.
+pub fn serve_follower(
+    mut connector: Box<dyn Connector>,
+    stop: std::sync::Arc<AtomicBool>,
+    log: crate::follower::Log,
+) {
+    serve_boundaries(&mut *connector, DEVICES_BUILD, &stop, &|line| log(line));
+}
+
+/// Answers the lookups of the caller's Android from the administrative boundaries installed
+/// beside this program ([`BoundaryGeocoder::for_this_program`]) until `stop` is set, saying
+/// where they are read from first. Nothing is sent over the network, so the position stays on
+/// the computer.
+pub fn serve_boundaries(
+    connector: &mut dyn Connector,
+    build: &str,
+    stop: &AtomicBool,
+    log: &dyn Fn(&str),
+) {
+    let mut geocoder = BoundaryGeocoder::for_this_program();
+    log(&format!(
+        "geocoding: answering from {}",
+        geocoder.path().display()
+    ));
+    serve(connector, build, &mut geocoder, stop, log);
+}
+
 /// Answers the lookups of the caller's Android with `geocoder` until `stop` is set, one at a
 /// time, connecting to the service again whenever the connection ends.
 pub fn serve(

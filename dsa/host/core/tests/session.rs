@@ -974,6 +974,37 @@ fn nfr5_a_guest_that_dies_leaves_the_host_alive_and_can_start_again() {
     assert_eq!(launcher.processes(), 3);
 }
 
+/// A VM can end while the host's end of its control channel stays open (the Virtualization
+/// framework does not close it), so the channel alone never says the guest is gone.
+#[test]
+fn nfr5_a_guest_that_ends_while_its_channel_stays_open_is_reported_stopped() {
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.start();
+    let _agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    {
+        let mut guest = launcher.0.lock().unwrap();
+        guest.exited = Some("Android's VM ended (the VM stopped with an error)".into());
+        guest.diagnostics = Some("last line: Out of memory".into());
+    }
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    assert_eq!(
+        session.last_reason(),
+        Some(StopReason::GuestExited {
+            why: "Android's VM ended (the VM stopped with an error)".into(),
+            diagnostics: Some("last line: Out of memory".into()),
+        })
+    );
+    assert_eq!(launcher.processes(), 0);
+
+    // The host stays up and Android starts again.
+    launcher.0.lock().unwrap().exited = None;
+    session.start();
+    let _second_agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+}
+
 #[test]
 fn fr2_dropping_an_active_session_stops_the_guest() {
     let launcher = FakeLauncher::default();
@@ -2555,6 +2586,52 @@ fn nfr2_a_host_short_of_memory_tells_the_guest_when_it_changes_and_when_the_agen
     assert!(!hub.memory_low());
     hub.update_memory(true);
     assert_eq!(next_body(&mut agent), host_memory(true));
+}
+
+/// The host-memory words the guest is sent within `within`, skipping everything else.
+fn host_memory_words(agent: &mut Box<dyn Connection>, within: Duration) -> Vec<Body> {
+    let deadline = std::time::Instant::now() + within;
+    let mut words = Vec::new();
+    loop {
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() {
+            return words;
+        }
+        let Ok(frame) = agent.recv(Some(left)) else {
+            return words;
+        };
+        if let Some(body @ Body::HostMemory(_)) = dsa_protocol::decode(&frame).unwrap().body {
+            words.push(body);
+        }
+    }
+}
+
+#[test]
+fn nfr2_a_host_short_of_memory_asks_nothing_while_the_agent_is_gone_and_tells_it_when_it_comes_back(
+) {
+    let hub = PowerHub::new();
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    let session = Arc::new(session);
+    hub.attach(&session);
+    session.start();
+    let mut daemon = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    // The agent goes, as when Android's framework restarts or the guest is dying.
+    report_boot(&mut daemon, true, false);
+    thread::sleep(Duration::from_millis(200));
+    hub.update_memory(true);
+    assert_eq!(
+        host_memory_words(&mut daemon, Duration::from_millis(500)),
+        Vec::<Body>::new(),
+        "nobody is asked to give memory back"
+    );
+    // The agent that comes back hears the host is still short.
+    report_boot(&mut daemon, true, true);
+    assert_eq!(
+        host_memory_words(&mut daemon, Duration::from_secs(1)),
+        [host_memory(true)]
+    );
 }
 
 fn tasks_shown(task_ids: &[i32]) -> Body {

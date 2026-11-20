@@ -4338,6 +4338,149 @@ def keymint_library_problems(binary, vendor_names):
             for lib in needed if lib not in LLNDK_LIBRARIES and f"VENDOR/lib64/{lib}" not in vendor_names]
 
 
+# The dxg graphics path, an experiment that is off unless both ends ask for it: Mesa's drivers
+# over Direct3D 12 (Dozen for Vulkan, the d3d12 Gallium driver for OpenGL ES), which reach the
+# host GPU through the guest kernel's /dev/dxg (Hyper-V GPU paravirtualization) instead of
+# through the host renderer. With --dxg-drivers the image carries them beside the host
+# renderer's drivers, and the boot picks one: the host puts androidboot.dsa.vulkan=dxg on the
+# command line when its gpu_paravirtualization setting is on, and androidboot.dsa.egl=dxg, which
+# nothing passes by default, swaps ANGLE for d3d12's OpenGL ES. Without the option the image is
+# what it was, and so is any boot that names neither.
+#
+# The folder holds the four drivers below under these names, and in lib/ any other library they
+# need that neither the vendor partition nor the LLNDK gives them. Mesa loads the Direct3D 12
+# runtime (libd3d12.so) and DXCore (libdxcore.so) at run time; those are Microsoft's closed
+# binaries, built for glibc, so the image never carries them, nor the GPU vendors' user-mode
+# drivers from a Windows driver package (DXG_FORBIDDEN).
+DXG_DRIVER_FILES = {
+    "vulkan.dxg.so": "VENDOR/lib64/hw/vulkan.dxg.so",
+    "libEGL_dxg.so": "VENDOR/lib64/egl/libEGL_dxg.so",
+    "libGLESv1_CM_dxg.so": "VENDOR/lib64/egl/libGLESv1_CM_dxg.so",
+    "libGLESv2_dxg.so": "VENDOR/lib64/egl/libGLESv2_dxg.so",
+}
+DXG_LIBRARY_DIR = "lib"
+# The properties each boot argument selects: the product build.prop imports the file the
+# argument names, last but for the Google Play and ARM translation imports, so it wins over
+# GRAPHICS_PROPS. The default files say what GRAPHICS_PROPS says.
+DXG_PROPS = {
+    "SYSTEM/etc/dsa/vulkan-dxg.prop": HERE / "vulkan-dxg.prop",
+    "SYSTEM/etc/dsa/vulkan-ranchu.prop": HERE / "vulkan-ranchu.prop",
+    "SYSTEM/etc/dsa/egl-dxg.prop": HERE / "egl-dxg.prop",
+    "SYSTEM/etc/dsa/egl-angle.prop": HERE / "egl-angle.prop",
+}
+DXG_IMPORTS = [
+    "import /system/etc/dsa/vulkan-${ro.boot.dsa.vulkan:-ranchu}.prop",
+    "import /system/etc/dsa/egl-${ro.boot.dsa.egl:-angle}.prop",
+]
+DXG_FS_CONFIG = [f"system/{name[len('SYSTEM/'):]} 0 0 644 capabilities=0x0" for name in DXG_PROPS]
+# The device every graphics client opens, with the label apps may use for a GPU, and ueventd's
+# rule that lets them open it. ueventd makes the node as soon as the kernel's driver starts,
+# GPU or not; it has nothing to drive until the host assigns the VM a GPU.
+DXG_DEVICE_CONTEXT = "/dev/dxg u:object_r:gpu_device:s0"
+DXG_UEVENTD = "VENDOR/etc/ueventd.rc"
+DXG_UEVENTD_RULE = "/dev/dxg 0666 system graphics"
+DXG_UEVENTD_FS_CONFIG = "vendor/etc/ueventd.rc 0 0 644 capabilities=0x0"
+# What image.json says of an image with the dxg drivers: the value of each boot argument
+# (androidboot.dsa.vulkan, androidboot.dsa.egl) that selects them.
+DXG_MANIFEST = {"vulkan": "dxg", "egl": "dxg"}
+# What an image must never carry: Microsoft's closed Direct3D 12 runtime and DXCore for Linux
+# (WSL's lib folder), and the user-mode drivers GPU vendors put in their Windows driver packages
+# for WSL (NVIDIA's, Intel's, AMD's). None of them is open source.
+DXG_FORBIDDEN = re.compile(r"^(libd3d12(core)?\.so|libdxcore\.so|libnvwgf2umx\.so|libigd12um\w*\.so"
+                           r"|libamdxc\w*\.so|libnvdxdlkernels\.so|libcuda\w*\.so[.\d]*)$")
+# The libraries a glibc build needs. Android's linker cannot load a library built against glibc.
+GLIBC_LIBRARIES = {
+    "libc.so.6", "libm.so.6", "libdl.so.2", "libpthread.so.0", "librt.so.1", "libstdc++.so.6",
+    "libgcc_s.so.1", "ld-linux-x86-64.so.2", "ld-linux-aarch64.so.1",
+}
+
+
+def checked_dxg_drivers(folder, arch):
+    """The target_files names and bytes of the dxg drivers in `folder` for an image of `arch`.
+    Raises ValueError with every problem: a driver missing, a file that is not a 64-bit library
+    for `arch`, a library built against glibc, or one of the closed binaries (DXG_FORBIDDEN)."""
+    folder = Path(folder)
+    machine = ARCHES[arch]["elf_machine"]
+    problems = []
+    payloads = {}
+    sources = {name: folder / name for name in DXG_DRIVER_FILES}
+    libraries = folder / DXG_LIBRARY_DIR
+    extra = sorted(libraries.iterdir()) if libraries.is_dir() else []
+    for path in sorted(folder.rglob("*")):
+        if path.is_file() and DXG_FORBIDDEN.match(path.name):
+            problems.append(f"{path.relative_to(folder).as_posix()} is a closed Microsoft or GPU vendor "
+                            "binary, which a DSA image never carries")
+    for name, path in sources.items():
+        if not path.is_file():
+            problems.append(f"{name} is missing from {folder}")
+            continue
+        payloads[DXG_DRIVER_FILES[name]] = path.read_bytes()
+    for path in extra:
+        if not path.is_file() or DXG_FORBIDDEN.match(path.name):
+            continue
+        if not path.name.endswith(".so"):
+            problems.append(f"{DXG_LIBRARY_DIR}/{path.name} is not a shared library")
+            continue
+        payloads[f"VENDOR/lib64/{path.name}"] = path.read_bytes()
+    for name, data in payloads.items():
+        found = elf_machine(data[:64])
+        if found != machine:
+            problems.append(f"{name} is built for ELF machine {found}, not {arch} ({machine})")
+            continue
+        glibc = sorted(set(elf_needed(data) or []) & GLIBC_LIBRARIES)
+        if glibc:
+            problems.append(f"{name} needs {', '.join(glibc)}: it is built against glibc, which "
+                            "Android's linker cannot load")
+    if problems:
+        raise ValueError("; ".join(problems))
+    return payloads
+
+
+def dxg_library_problems(payloads, vendor_names):
+    """The libraries the dxg drivers need that neither the vendor partition (by the target_files
+    names in `vendor_names`), the drivers' own folder, nor the LLNDK gives them."""
+    have = set(vendor_names) | set(payloads)
+    problems = []
+    for name, data in sorted(payloads.items()):
+        for lib in elf_needed(data) or []:
+            if lib not in LLNDK_LIBRARIES and f"VENDOR/lib64/{lib}" not in have:
+                problems.append(f"{name} needs {lib}, which the vendor partition does not carry")
+    return problems
+
+
+def dxg_vendor_file_contexts(payloads):
+    """The vendor_file_contexts entries the dxg drivers need: same-process HAL libraries, which
+    every app process may load, and the device."""
+    entries = []
+    for name in sorted(payloads):
+        pattern = re.escape(vendor_path(name))
+        entries.append((pattern, f"{pattern} u:object_r:same_process_hal_file:s0"))
+    return entries + [("/dev/dxg ", DXG_DEVICE_CONTEXT)]
+
+
+def vendor_path(name):
+    """The device path of a vendor target_files name: VENDOR/lib64/x.so is /vendor/lib64/x.so."""
+    return "/vendor/" + name[len("VENDOR/"):]
+
+
+def dxg_vendor_fs_config(payloads):
+    """The vendor filesystem configuration of the dxg drivers."""
+    return [f"{vendor_path(name)[1:]} 0 0 644 capabilities=0x0" for name in sorted(payloads)]
+
+
+def add_dxg_imports(text):
+    """Returns the product build.prop ending with the dxg imports. add_gapps_import and
+    add_arm_translation_import put theirs after it."""
+    lines = [line for line in text.splitlines() if line.strip() not in DXG_IMPORTS]
+    return "\n".join(lines + DXG_IMPORTS) + "\n"
+
+
+def add_dxg_ueventd_rule(text):
+    """Returns ueventd.rc with the rule that lets graphics clients open /dev/dxg."""
+    lines = [line for line in text.splitlines() if line.split()[:1] != ["/dev/dxg"]]
+    return "\n".join(lines + [DXG_UEVENTD_RULE]) + "\n"
+
+
 def selected_vendor_apexes(cmdline):
     """The vendor APEX each module's bootconfig selection names, by module."""
     selected = {}
@@ -5688,9 +5831,10 @@ AGENT_FS_CONFIG = [
 
 def update_vendor_file_contexts(fc_text, channeld=False, hwcomposer=False, power=False, codec2=False,
                                 audio=False, gnss=False, sensors=False,
-                                camera=False, keymint=False):
+                                camera=False, keymint=False, dxg=None):
     """Adds same_process_hal_file contexts for guest graphics libraries if not present, and
-    opens the DRM cards to every graphics client.
+    opens the DRM cards to every graphics client. With `dxg`, the dxg drivers' target_files
+    names, it labels them and /dev/dxg too.
 
     Cuttlefish keeps its cards (graphics_device) to the composer and has clients map
     buffers through virtio-gpu's render node. Under Hyper-V, minigbm's mapper, which runs
@@ -5735,6 +5879,8 @@ def update_vendor_file_contexts(fc_text, channeld=False, hwcomposer=False, power
     entries.append((r"/dev/dsa_video_pictures", VIDEO_PICTURES_DEVICE_CONTEXT))
     # The kernel's shared graphics memory: every GPU user may open it.
     entries.append((r"/dev/dsa_graphics_memory", GRAPHICS_MEMORY_DEVICE_CONTEXT))
+    if dxg:
+        entries += dxg_vendor_file_contexts(dxg)
     # Usually there already, as /(vendor|system/vendor)/overlay(/.*)?.
     entries.append(("overlay(/.*)?", VENDOR_OVERLAY_CONTEXT))
     for pattern, rule in entries:
@@ -6420,7 +6566,7 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
            agent=None, hwcomposer=None, framework_overlay=None, settings_overlay=None, power_hal=None,
            codec2=None, audio=None, gnss_hal=None,
            sensors=None, camera=None, arm_translation=None, framework=None, overlays=None, su_client=None,
-           arch=None, uncompressed_erofs=False):
+           arch=None, uncompressed_erofs=False, dxg_drivers=None):
     """Copies target_files, removing the shell apps and the published kernel modules,
     switching to a user build and adding the Hyper-V mount table, the control channel
     daemon when `channeld` names one, the agent when `agent` names its APK, DSA's
@@ -6441,9 +6587,11 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
     folders the Google apps are laid over that the build lacks. Every image gets the mount table
     of the host's direct-mapped mode beside fstab.dsa (DIRECT_MAPPED_FSTAB); with
     `uncompressed_erofs` the read-only partitions are built uncompressed, so that mode maps
-    every file (UNCOMPRESSED_EROFS_PROPS)."""
+    every file (UNCOMPRESSED_EROFS_PROPS). With `dxg_drivers`, the folder of the dxg graphics
+    drivers (DXG_DRIVER_FILES), the image carries them for a boot that asks for them."""
     fstab = (HERE / "fstab.dsa").read_bytes()
     mapped_fstab = direct_mapped_fstab(fstab.decode()).encode()
+    dxg_payloads = checked_dxg_drivers(dxg_drivers, arch or DEFAULT_ARCH) if dxg_drivers else None
     default_translator = (Path(arm_translation) / ARM_TRANSLATION_IMAGE).read_bytes() if arm_translation else None
     graphics_payload = Path(graphics_library).read_bytes() if graphics_library else None
     vulkan_payload = Path(vulkan_driver).read_bytes() if vulkan_driver else None
@@ -6507,6 +6655,7 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
         *(power_payloads or {}).values(), *(codec2_payloads or {}).values(),
         audio_payload, *(gnss_payloads or {}).values(), *(sensors_payloads or {}).values(),
         *(camera_payloads or {}).values(), *(framework or {}).values(),
+        *(dxg_payloads or {}).values(),
     ])
     replaced_framework = set()
     replaced_graphics_payload = False
@@ -6528,6 +6677,12 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
     if has_keymint:
         with zipfile.ZipFile(source) as z:
             problems = keymint_library_problems(framework[KEYMINT_BINARY], set(z.namelist()) | set(framework))
+        if problems:
+            raise ValueError("; ".join(problems))
+
+    if dxg_payloads is not None:
+        with zipfile.ZipFile(source) as z:
+            problems = dxg_library_problems(dxg_payloads, z.namelist())
         if problems:
             raise ValueError("; ".join(problems))
 
@@ -6658,7 +6813,8 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                 text = update_plat_file_contexts(text)
             if name == "VENDOR/etc/selinux/vendor_file_contexts":
                 text = update_vendor_file_contexts(text, channeld_payload is not None, has_hwcomposer,
-                                                   has_power, codec2=has_codec2, audio=has_audio, gnss=has_gnss, sensors=has_sensors, camera=has_camera, keymint=has_keymint)
+                                                   has_power, codec2=has_codec2, audio=has_audio, gnss=has_gnss, sensors=has_sensors, camera=has_camera, keymint=has_keymint,
+                                                   dxg=dxg_payloads)
             file_contexts.append(text if text.endswith("\n") or not text else text + "\n")
         compiled_file_contexts = compile_file_contexts(otatools, "".join(file_contexts))
 
@@ -6676,6 +6832,9 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
         for info in zin.infolist():
             name = info.filename
             if name == SU_CLIENT_BINARY and su_payload is not None:
+                continue
+            if dxg_payloads is not None and name in dxg_payloads:
+                # A library the drivers bring in place of the build's own; written below.
                 continue
             if name == AOSP_XBIN_SU_BINARY and channeld_payload is not None:
                 continue
@@ -6726,7 +6885,10 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                                       product=name == PRODUCT_PROP_FILE,
                                       network=name == NETWORK_PROPS_FILE).encode()
                     if name == ARM_TRANSLATION_PRODUCT_PROPS:
-                        data = add_arm_translation_import(add_gapps_import(data.decode())).encode()
+                        product = data.decode()
+                        if dxg_payloads is not None:
+                            product = add_dxg_imports(product)
+                        data = add_arm_translation_import(add_gapps_import(product)).encode()
                 elif name in IDENTITY_PROP_FILES:
                     data = edit_identity(data.decode(), build_tag=build_tag).encode()
                 elif name.rsplit("/", 1)[-1].startswith("fstab.") and kernel_disk_names(data.decode(errors="replace")):
@@ -6738,6 +6900,8 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                     data = edit_preloaded_classes(stock).encode()
                     print(f"{name}: the zygote preloads {preload_count(data.decode())} of the build's "
                           f"{preload_count(stock)} classes", flush=True)
+                elif name == DXG_UEVENTD and dxg_payloads is not None:
+                    data = add_dxg_ueventd_rule(data.decode()).encode()
                 elif name.endswith(SETTINGS_APK):
                     data = edit_settings_apk(data, name)
                 elif name.endswith(tuple(BOOT_RECEIVER_FREE_APKS)):
@@ -6783,6 +6947,7 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                                                     if default_translator is not None else [])
                                                  + GAPPS_FS_CONFIG + ADDONS_FS_CONFIG + WIDEVINE_FS_CONFIG
                                                  + APP_MEMORY_FS_CONFIG
+                                                 + (DXG_FS_CONFIG if dxg_payloads is not None else [])
                                                  + (["system/etc/init/dsa-su-guard.rc 0 0 644 capabilities=0x0",
                                                      "system/etc/init/dsa-keymint-key.rc 0 0 644 capabilities=0x0",
                                                      "system/etc/init/dsa-cacerts.rc 0 0 644 capabilities=0x0",
@@ -6817,6 +6982,9 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                             text = add_filesystem_config(text, SETTINGS_OVERLAY_FS_CONFIG)
                         for overlay_name in design_payloads:
                             text = add_filesystem_config(text, overlay_fs_config(overlay_name))
+                        if dxg_payloads is not None:
+                            text = add_filesystem_config(text, dxg_vendor_fs_config(dxg_payloads)
+                                                         + [DXG_UEVENTD_FS_CONFIG])
                     data = text.encode()
                 elif name == MISC_INFO and uncompressed_erofs:
                     data = uncompressed_erofs_misc_info(data.decode()).encode()
@@ -6828,7 +6996,8 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                 elif name in ("VENDOR/etc/selinux/vendor_file_contexts", "META/vendor_file_contexts"):
                     data = update_vendor_file_contexts(data.decode(), channeld_payload is not None,
                                                        has_hwcomposer, has_power, codec2=has_codec2,
-                                                       audio=has_audio, gnss=has_gnss, sensors=has_sensors, camera=has_camera, keymint=has_keymint).encode()
+                                                       audio=has_audio, gnss=has_gnss, sensors=has_sensors, camera=has_camera, keymint=has_keymint,
+                                                       dxg=dxg_payloads).encode()
                     if widevine_hal:
                         data = with_widevine_file_contexts(data.decode()).encode()
                 elif name == VENDOR_SERVICE_CONTEXTS:
@@ -6916,6 +7085,13 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
         if has_camera:
             for name, payload in camera_payloads.items():
                 zout.writestr(name, payload)
+        if dxg_payloads is not None:
+            for name, payload in dxg_payloads.items():
+                zout.writestr(name, payload)
+            for target, source_file in DXG_PROPS.items():
+                zout.writestr(target, source_file.read_bytes())
+            if DXG_UEVENTD not in names:
+                zout.writestr(DXG_UEVENTD, add_dxg_ueventd_rule(""))
         if has_keymint:
             # The files the build has under the same name (libssl, should a build carry it) were
             # replaced above; the rest are added.
@@ -6945,7 +7121,8 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
             replaced_vulkan_payload = True
         if "VENDOR/etc/selinux/vendor_file_contexts" not in names:
             contexts = update_vendor_file_contexts("", channeld_payload is not None, has_hwcomposer, has_power,
-                                                   codec2=has_codec2, audio=has_audio, gnss=has_gnss, sensors=has_sensors, camera=has_camera, keymint=has_keymint)
+                                                   codec2=has_codec2, audio=has_audio, gnss=has_gnss, sensors=has_sensors, camera=has_camera, keymint=has_keymint,
+                                                   dxg=dxg_payloads)
             if widevine_hal:
                 contexts = with_widevine_file_contexts(contexts)
             zout.writestr("VENDOR/etc/selinux/vendor_file_contexts", contexts.encode())
@@ -8136,6 +8313,11 @@ def main():
                              "host's direct-mapped mode maps every file of them from persistent memory "
                              "instead of the guest caching it; the system disk grows by the compression "
                              "it loses")
+    parser.add_argument("--dxg-drivers", type=Path,
+                        help="an experiment, off by default: a folder of Mesa's Dozen (Vulkan) and d3d12 "
+                             "(OpenGL ES) drivers built for the guest (DXG_DRIVER_FILES), which talk to the "
+                             "host GPU through /dev/dxg when the host gives the VM a paravirtualized GPU; "
+                             "a boot uses them only when the host asks (androidboot.dsa.vulkan=dxg)")
     args = parser.parse_args()
     if args.arm_translation:
         checked_arm_translation(args.arm_translation, args.arch)
@@ -8207,7 +8389,8 @@ def main():
            codec2=args.codec2, audio=args.audio, gnss_hal=args.gnss_hal,
            sensors=args.sensors, camera=args.camera, arm_translation=args.arm_translation,
            framework=framework_payloads, overlays=design_overlays, su_client=args.su_client,
-           arch=args.arch, uncompressed_erofs=args.uncompressed_erofs)
+           arch=args.arch, uncompressed_erofs=args.uncompressed_erofs,
+           dxg_drivers=args.dxg_drivers)
 
     signed = work / "signed.zip"
     # It runs where AOSP's certificates sit at the paths apkcerts.txt names, so every path
@@ -8289,6 +8472,9 @@ def main():
         manifest["arm_translation"] = default_arm_translation(args.arm_translation, args.arch, out)
     if framework_description is not None:
         manifest["framework"] = framework_entry(framework_description, framework_payloads)
+    if args.dxg_drivers:
+        # The boot arguments the image answers, for a host deciding whether to ask.
+        manifest["dxg"] = DXG_MANIFEST
     (out / "image.json").write_text(json.dumps(manifest, indent=2) + "\n")
     shutil.copy(signed, out / "signed-target_files.zip")
     shutil.rmtree(work)

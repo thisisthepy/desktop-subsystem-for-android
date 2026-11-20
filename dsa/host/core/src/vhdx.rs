@@ -298,6 +298,13 @@ impl<F: Read + Seek> ReadAt for RawDisk<F> {
     }
 }
 
+/// Whether the file at `path` is a VHDX: it starts with the file identifier.
+pub fn is_vhdx(path: &std::path::Path) -> io::Result<bool> {
+    let mut signature = [0u8; 8];
+    let mut file = std::fs::File::open(path)?;
+    Ok(file.read_exact(&mut signature).is_ok() && &signature == FILE_SIGNATURE)
+}
+
 /// Opens a disk file as the disk it holds: a VHDX's virtual disk, or a raw image as it is.
 pub fn open_disk(path: &std::path::Path) -> io::Result<Box<dyn ReadAt + Send>> {
     let mut file = std::fs::File::open(path)?;

@@ -41,6 +41,7 @@
 //! read icons again. A window's own icon, which Alt+Tab shows, is read from the program when it
 //! starts.
 
+use dsa_host_core::hex::encode as hex;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -351,10 +352,6 @@ fn template_stamp(template: &Path) -> io::Result<String> {
         .map(|d| d.as_nanos())
         .unwrap_or(0);
     Ok(format!("{}-{modified}", meta.len()))
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// The name a copy carries: the app's own, else its package.

@@ -15,17 +15,16 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::os::fd::AsFd;
-use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use dsa_host_core::host_api::HostApiClient;
-use dsa_host_core::print::{PrintEvent, PrintJob, PrintOutcome, PrintSettings};
+use dsa_host_core::host_paths::unique_name;
+use dsa_host_core::print::{print_spooled, PrintJob, PrintOutcome, PrintSettings};
+use dsa_host_core::print_follower::{follow_print_jobs, PrintFollowing, PrintRun};
 use dsa_transport::Connector;
 use zbus::blocking::Connection;
 use zbus::zvariant::{Fd, OwnedObjectPath, OwnedValue, Value};
@@ -33,17 +32,14 @@ use zbus::zvariant::{Fd, OwnedObjectPath, OwnedValue, Value};
 use super::dbus::proxy;
 use super::Log;
 
-/// What the follower calls itself to the service.
-const BUILD: &str = "dsa-devices print";
-
-/// How long a request to the service is waited for.
-const ANSWER: Duration = Duration::from_secs(5);
-
-/// How long to wait before connecting again after the service could not be reached.
-const RETRY: Duration = Duration::from_secs(1);
-
-/// How long the watch waits for the service before it looks for finished jobs again.
-const POLL: Duration = Duration::from_millis(100);
+/// How the follower talks to the service.
+const FOLLOWING: PrintFollowing = PrintFollowing {
+    build: "dsa-devices print",
+    answer: Duration::from_secs(5),
+    retry: Duration::from_secs(1),
+    poll: Duration::from_millis(100),
+    thread_name: "dsa-print-job",
+};
 
 const PORTAL: &str = "org.freedesktop.portal.Desktop";
 const PORTAL_PATH: &str = "/org/freedesktop/portal/desktop";
@@ -75,117 +71,16 @@ pub fn serve(
     stop: Arc<AtomicBool>,
     log: Log,
 ) {
-    let (done_tx, done) = mpsc::channel();
-    let mut printing: HashMap<u32, Arc<AtomicBool>> = HashMap::new();
-    let mut last_error = String::new();
-    while !stop.load(Ordering::Relaxed) {
-        let stream = HostApiClient::connect(&mut *connector, BUILD, ANSWER)
-            .and_then(|client| client.watch_print_jobs());
-        let mut stream = match stream {
-            Ok(stream) => stream,
-            Err(error) => {
-                let error = error.to_string();
-                if error != last_error {
-                    log(&format!("printing cannot reach the service: {error}"));
-                    last_error = error;
-                }
-                report(&mut *connector, &done, &mut printing, &log);
-                thread::sleep(RETRY);
-                continue;
-            }
-        };
-        last_error.clear();
-        while !stop.load(Ordering::Relaxed) {
-            report(&mut *connector, &done, &mut printing, &log);
-            match stream.next(POLL) {
-                Ok(Some(PrintEvent::Job(job))) => {
-                    let withdrawn = Arc::new(AtomicBool::new(false));
-                    printing.insert(job.job_id, Arc::clone(&withdrawn));
-                    start_job(
-                        job,
-                        Arc::clone(&printer),
-                        spool.clone(),
-                        withdrawn,
-                        done_tx.clone(),
-                        Arc::clone(&log),
-                    );
-                }
-                Ok(Some(PrintEvent::Withdrawn { job_id })) => {
-                    if let Some(withdrawn) = printing.get(&job_id) {
-                        withdrawn.store(true, Ordering::Relaxed);
-                    }
-                }
-                Ok(None) => {}
-                Err(error) => {
-                    log(&format!(
-                        "the print jobs' connection to the service ended: {error}"
-                    ));
-                    break;
-                }
-            }
-        }
-    }
-    for withdrawn in printing.values() {
-        withdrawn.store(true, Ordering::Relaxed);
-    }
-}
-
-/// Passes what became of each finished job to the service.
-fn report(
-    connector: &mut dyn Connector,
-    done: &Receiver<(u32, PrintOutcome)>,
-    printing: &mut HashMap<u32, Arc<AtomicBool>>,
-    log: &Log,
-) {
-    while let Ok((job_id, outcome)) = done.try_recv() {
-        printing.remove(&job_id);
-        let result = HostApiClient::connect(connector, BUILD, ANSWER)
-            .and_then(|mut client| client.report_print_job(job_id, &outcome));
-        if let Err(error) = result {
-            log(&format!(
-                "what became of print job {job_id} did not reach Android: {error}"
-            ));
-        }
-    }
-}
-
-fn start_job(
-    job: PrintJob,
-    printer: Arc<dyn Printer>,
-    spool: Option<PathBuf>,
-    withdrawn: Arc<AtomicBool>,
-    done: Sender<(u32, PrintOutcome)>,
-    log: Log,
-) {
-    let job_id = job.job_id;
-    let failed = done.clone();
-    let spawned = thread::Builder::new()
-        .name("dsa-print-job".into())
-        .spawn(move || {
-            let outcome = print_one(&job, &*printer, spool.as_deref(), &withdrawn);
-            match &outcome {
-                PrintOutcome::Failed(why) => {
-                    log(&format!("{} was not printed: {why}", job.title()))
-                }
-                PrintOutcome::Canceled => log(&format!("printing {} was canceled", job.title())),
-                PrintOutcome::Printed => {}
-            }
-            let _ = done.send((job.job_id, outcome));
-        });
-    if let Err(error) = spawned {
-        let why = format!("printing could not start: {error}");
-        let _ = failed.send((job_id, PrintOutcome::Failed(why)));
-    }
-}
-
-/// A name for a spooled document that no other job has.
-fn unique_name() -> String {
-    static NEXT: AtomicU32 = AtomicU32::new(0);
-    format!(
-        "print-{}-{}.pdf",
-        std::process::id(),
-        NEXT.fetch_add(1, Ordering::Relaxed)
-    )
+    let run: PrintRun =
+        Arc::new(move |job, withdrawn| print_one(&job, &*printer, spool.as_deref(), withdrawn));
+    follow_print_jobs(
+        &mut *connector,
+        &FOLLOWING,
+        &run,
+        &stop,
+        &thread::sleep,
+        &log,
+    );
 }
 
 /// Writes the job's document to the spool folder, prints it, and removes it.
@@ -198,23 +93,14 @@ pub fn print_one(
     let spool = spool
         .map(Path::to_path_buf)
         .unwrap_or_else(|| std::env::temp_dir().join("dsa-print"));
-    if let Err(error) = create_private_dir(&spool) {
-        return PrintOutcome::Failed(format!("creating {}: {error}", spool.display()));
-    }
-    let document = spool.join(unique_name());
-    if let Err(error) = std::fs::write(&document, job.pdf.as_slice()) {
-        let _ = std::fs::remove_file(&document);
-        return PrintOutcome::Failed(format!("writing {}: {error}", document.display()));
-    }
-    let outcome = if withdrawn.load(Ordering::Relaxed) {
-        PrintOutcome::Canceled
-    } else {
-        let print = || printer.print(job, &document, withdrawn);
-        catch_unwind(AssertUnwindSafe(print))
-            .unwrap_or_else(|_| PrintOutcome::Failed("the printing code failed".into()))
-    };
-    let _ = std::fs::remove_file(&document);
-    outcome
+    print_spooled(
+        job,
+        &spool,
+        create_private_dir,
+        &unique_name("print", ".pdf"),
+        withdrawn,
+        |document| printer.print(job, document, withdrawn),
+    )
 }
 
 fn create_private_dir(dir: &Path) -> std::io::Result<()> {

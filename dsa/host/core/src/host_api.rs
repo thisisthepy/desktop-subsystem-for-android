@@ -752,6 +752,12 @@ pub trait UserAndroid: Send + Sync {
         let _ = filter;
         None
     }
+    /// Why this Android's log is not coming, when it is known: Android was stopped because
+    /// its image speaks another protocol than this host. A reader of the log is told, since
+    /// otherwise it waits for records that cannot come.
+    fn log_problem(&self) -> Option<String> {
+        None
+    }
     /// Asks this Android for everything its log holds now that passes `filter`.
     fn dump_log(&self, filter: LogFilter) -> Result<Receiver<LogDumpEvent>, TaskRequestError> {
         let _ = filter;
@@ -891,6 +897,9 @@ impl UserAndroid for Session {
     }
     fn watch_log(&self, filter: LogFilter) -> Option<LogWatch> {
         Some(Session::watch_log(self, filter))
+    }
+    fn log_problem(&self) -> Option<String> {
+        Session::log_problem(self)
     }
     fn dump_log(&self, filter: LogFilter) -> Result<Receiver<LogDumpEvent>, TaskRequestError> {
         Session::dump_log(self, filter).map_err(request_error)

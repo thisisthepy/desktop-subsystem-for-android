@@ -50,7 +50,6 @@
 //! [`UserRoot::old_pstore_disk`] are where they were.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use dsa_host_core::host_paths::HostPaths;
 
@@ -379,15 +378,7 @@ pub fn start_menu_programs_in_profile(profile: &Path) -> PathBuf {
     )
 }
 
-/// A file name no other process and no other call in this one uses: `<prefix>-<pid>-<n><suffix>`.
-pub fn unique_name(prefix: &str, suffix: &str) -> String {
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    format!(
-        "{prefix}-{}-{}{suffix}",
-        std::process::id(),
-        NEXT.fetch_add(1, Ordering::Relaxed)
-    )
-}
+pub use dsa_host_core::host_paths::unique_name;
 
 /// Removes everything in the `tmp` folder `dir` that earlier runs left: all but this process's
 /// own files ([`unique_name`] puts its ID in their names). Returns what could not be removed,

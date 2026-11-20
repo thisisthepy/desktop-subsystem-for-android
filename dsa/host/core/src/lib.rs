@@ -13,6 +13,8 @@
 //! - [`audio`]: the guest's sound, played on the host's default output device, and
 //!   [`app_audio`], each app's sound under its own name and volume in the host's mixer.
 //! - [`bootconfig`]: the kernel bootconfig that carries each boot's secret to the guest.
+//! - [`disk`]: each user's Android disk (GUID partition tables, bringing the disk to an image
+//!   version) and the pstore disk, on the disks a platform opens for it.
 //! - [`handshake`]: the control channel's handshake as a session uses it.
 //! - [`host_api`]: the local API service, which acts on each caller's own Android, and its
 //!   client.
@@ -72,6 +74,7 @@
 //!   and the root key of the guest's KeyMint.
 //! - [`ui_language`]: the fourteen languages DSA's own user interface is shown in, and how the
 //!   system's display language picks one.
+//! - [`ui_text`]: the words the host shows itself, kept with the policy they belong to.
 
 pub mod accessibility;
 pub mod adb_bridge;
@@ -87,24 +90,31 @@ pub mod arm_translation;
 pub mod audio;
 pub mod background;
 pub mod backup;
+pub mod boot;
+pub mod boot_signs;
 pub mod bootconfig;
 pub mod boundaries;
 pub mod camera;
 pub mod clipboard;
 pub mod clock_trace;
+pub mod color;
 pub mod compositor;
 pub mod computer_identity;
+pub mod console_log;
 pub mod data_reset;
 pub mod device_identity;
 pub mod diagnostics;
 pub mod direct_mapped;
 pub mod direct_mapped_disk;
+pub mod disk;
 pub mod dns;
 pub mod drag;
 pub mod erofs;
 pub mod file_share;
+pub mod file_write;
 pub mod files;
 pub mod files_door;
+pub mod follower;
 pub mod gamepads;
 pub mod gapps;
 pub mod geocode;
@@ -115,16 +125,20 @@ pub mod guest_log;
 pub mod guest_log_api;
 pub mod guest_refresh;
 pub mod handshake;
+pub mod hex;
 pub mod host_api;
 #[cfg(feature = "conformance")]
 pub mod host_api_conformance;
 pub mod host_certificates;
 pub mod host_config;
+pub mod host_facts;
 pub mod host_keys;
 pub mod host_memory;
 pub mod host_paths;
+pub mod image_files;
 pub mod ime;
 pub mod input;
+pub mod input_relay;
 pub mod input_trace;
 pub mod keymint_root;
 pub mod keys;
@@ -135,23 +149,30 @@ pub mod memory;
 pub mod native_abi;
 pub mod notifications;
 pub mod passkeys;
+pub mod percent;
+pub mod pin_questions;
 pub mod png;
 pub mod power;
 pub mod power_hints;
 pub mod print;
+pub mod print_follower;
+pub mod render_gpu;
 pub mod renderer;
 pub mod resize_trace;
 pub mod root_approval;
 pub mod root_elevation;
 pub mod root_requester;
+pub mod screenshot;
 pub mod sensors;
 pub mod session;
 pub mod settings;
 pub mod share;
 pub mod system_settings;
 pub mod tasks;
+pub mod text_edit;
 pub mod touch_gestures;
 pub mod ui_language;
+pub mod ui_text;
 pub mod update;
 pub mod vhdx;
 pub mod video;

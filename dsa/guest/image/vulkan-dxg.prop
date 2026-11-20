@@ -1,0 +1,3 @@
+# The boot asked for the dxg Vulkan driver (androidboot.dsa.vulkan=dxg): Mesa's Dozen, which
+# talks to the host GPU through /dev/dxg. Only an image made with --dxg-drivers has this file.
+ro.hardware.vulkan=dxg

@@ -22,9 +22,10 @@ use dsa_host_core::compositor::window_mode::WindowMode;
 use dsa_host_core::compositor::window_tasks::WindowTasks;
 use dsa_host_core::drag::{DragOffer, DragOut};
 use dsa_host_core::files::{FileAction, FileTransfer};
-use dsa_host_core::host_api::{HostApiClient, InputStream};
+use dsa_host_core::host_api::HostApiClient;
 use dsa_host_core::ime::ImeCursor;
 use dsa_host_core::input::InputEvent;
+use dsa_host_core::input_relay::InputRelay;
 use dsa_host_unix::socket::UnixLocalConnector;
 use dsa_protocol::window_host::types::{envelope::Body, Attach, FramePresented};
 use dsa_protocol::window_host::{decode, encode_body};
@@ -67,8 +68,8 @@ pub fn support_folder() -> Option<PathBuf> {
 /// The package this program shows: the `--package` argument, else the `DSAPackage` key of
 /// the bundle it runs from.
 pub fn package_of(args: &[String]) -> Option<String> {
-    if let Some(at) = args.iter().position(|a| a == "--package") {
-        return args.get(at + 1).cloned();
+    if let Some(named) = dsa_host_core::compositor::window_hosts::package_argument(args) {
+        return named;
     }
     unsafe {
         let bundle: *mut AnyObject = msg_send![class(c"NSBundle").ok()?, mainBundle];
@@ -133,36 +134,16 @@ fn report(reports: &Reports, message: FromHost) {
 /// window it was made in, and goes to the task that window shows now, as `tasks` says: another
 /// task once one took the window over after a GPU reset.
 fn serve_input(mut connector: impl Connector, events: Receiver<InputEvent>, tasks: WindowTasks) {
-    let mut stream: Option<InputStream> = None;
-    let mut retry_at: Option<Instant> = None;
+    let mut relay = InputRelay::new(INPUT_RETRY);
     while let Ok(event) = events.recv() {
         let event = tasks.input(event);
-        for _ in 0..2 {
-            if stream.is_none() {
-                if retry_at.is_some_and(|at| Instant::now() < at) {
-                    break;
-                }
-                match HostApiClient::connect(&mut connector, BUILD, CONNECT_TIMEOUT)
-                    .and_then(|client| client.stream_input())
-                {
-                    Ok(connected) => {
-                        stream = Some(connected);
-                        retry_at = None;
-                    }
-                    Err(error) => {
-                        eprintln!("dsa-app-window: input cannot reach Android: {error}");
-                        retry_at = Some(Instant::now() + INPUT_RETRY);
-                        break;
-                    }
-                }
-            }
-            let Some(connected) = stream.as_mut() else {
-                break;
-            };
-            match connected.send_input(&event) {
-                Ok(()) => break,
-                Err(_) => stream = None,
-            }
+        let connect = || {
+            HostApiClient::connect(&mut connector, BUILD, CONNECT_TIMEOUT)
+                .and_then(|client| client.stream_input())
+                .map_err(|error| error.to_string())
+        };
+        if let Some(error) = relay.send(&event, Instant::now(), connect) {
+            eprintln!("dsa-app-window: input cannot reach Android: {error}");
         }
     }
 }

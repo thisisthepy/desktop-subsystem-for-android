@@ -160,22 +160,14 @@ pub fn unit_after(text: &str, offset: i32, unit: Unit) -> (String, i32, i32) {
 /// the characters put in, after the start and end both texts share. `None` when they are the
 /// same.
 pub fn difference(old: &str, new: &str) -> Option<(i32, String, String)> {
-    if old == new {
-        return None;
-    }
     let a: Vec<char> = old.chars().collect();
     let b: Vec<char> = new.chars().collect();
-    let prefix = a.iter().zip(&b).take_while(|(x, y)| x == y).count();
-    let suffix = a[prefix..]
-        .iter()
-        .rev()
-        .zip(b[prefix..].iter().rev())
-        .take_while(|(x, y)| x == y)
-        .count();
+    let (prefix, old_end, new_end) =
+        dsa_host_core::text_edit::difference(&a, &b, |_| false, |_| false)?;
     Some((
         prefix as i32,
-        a[prefix..a.len() - suffix].iter().collect(),
-        b[prefix..b.len() - suffix].iter().collect(),
+        a[prefix..old_end].iter().collect(),
+        b[prefix..new_end].iter().collect(),
     ))
 }
 

@@ -43,11 +43,11 @@ pub fn read_record(tmp: &Path) -> Option<u32> {
 
 /// Writes the record whole, so the service never reads half of one.
 pub fn write_record(tmp: &Path, dpi: u32) -> std::io::Result<()> {
-    std::fs::create_dir_all(tmp)?;
-    let path = record_path(tmp);
-    let partial = path.with_extension("txt.new");
-    std::fs::write(&partial, density_record_text(dpi))?;
-    std::fs::rename(&partial, &path)
+    dsa_host_core::file_write::replace_in_new_folder(
+        &record_path(tmp),
+        density_record_text(dpi).as_bytes(),
+        "txt.new",
+    )
 }
 
 /// The density Android starts at for the main monitor recorded in `tmp`: that monitor's, or a

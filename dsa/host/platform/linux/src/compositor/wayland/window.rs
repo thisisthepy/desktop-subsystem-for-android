@@ -7,6 +7,7 @@ use dsa_host_core::compositor::caption::{
     scaled, shown_tone, BandSample, CaptionButton, CaptionLayout, CaptionState, CaptionTone,
     TITLE_TEXT_AT_100,
 };
+use dsa_host_core::compositor::caption_icon::caption_icon_source;
 use dsa_host_core::compositor::task_windows::WindowChange;
 use dsa_host_core::compositor::window_hosts::FromHost;
 use dsa_host_core::compositor::window_mode::{picture_in_picture_place, WindowMode};
@@ -26,10 +27,7 @@ use super::shm::ShmBuffer;
 use super::State;
 use crate::compositor::frames::Frame;
 use crate::compositor::text::Text;
-use crate::compositor::title_bar::{
-    caption_icon_is_logo, caption_icon_png, frame_band_sample, place_text, BandArt, CaptionIcon,
-    TitleBar,
-};
+use crate::compositor::title_bar::{frame_band_sample, place_text, BandArt, CaptionIcon, TitleBar};
 use crate::compositor::toplevel::{Reported, States, Toplevel};
 use crate::input::text_input::TextInputV3;
 use crate::shell::desktop_entry::app_id;
@@ -125,9 +123,13 @@ pub struct AppLook {
 
 impl AppLook {
     pub fn of(app: &AppInfo) -> AppLook {
+        let icon = caption_icon_source(app.icon_png.clone(), app.caption_icon_png.clone());
         AppLook {
-            caption_icon_png: caption_icon_png(app).to_vec(),
-            caption_icon_logo: caption_icon_is_logo(app),
+            caption_icon_png: icon
+                .as_ref()
+                .map(|icon| icon.caption_png().to_vec())
+                .unwrap_or_default(),
+            caption_icon_logo: icon.as_ref().is_some_and(|icon| icon.is_logo()),
             multiple_windows: app.multiple_windows,
         }
     }

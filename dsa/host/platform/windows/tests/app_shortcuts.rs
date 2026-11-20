@@ -316,7 +316,7 @@ fn fr17_the_pin_question_and_the_jump_list_speak_every_language() {
     let what = ["the heading", "the request", "Add to desktop", "Cancel"];
     for language in UiLanguage::ALL {
         let words = PinTexts::of(language).templates();
-        for ((what, en), text) in what.iter().zip(english).zip(words) {
+        for ((what, en), text) in what.iter().zip(&english).zip(&words) {
             assert_translation(language, what, en, text);
         }
         assert_translation(

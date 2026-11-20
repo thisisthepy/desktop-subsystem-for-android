@@ -99,6 +99,28 @@ impl Drop for AdbBridge {
     }
 }
 
+/// Whether adb in Android could be reached, so an outage is logged once and not for every
+/// connection adb makes while it lasts. adb and its auto-connect dial several times a second
+/// while Android is not running, which once filled the log with hundreds of thousands of the
+/// same line.
+#[derive(Debug, Default)]
+pub struct GuestReach {
+    unreachable: AtomicBool,
+}
+
+impl GuestReach {
+    /// A connection could not reach adb in Android. True when this starts an outage, which is
+    /// the one time to say so.
+    pub fn failed(&self) -> bool {
+        !self.unreachable.swap(true, Ordering::Relaxed)
+    }
+
+    /// A connection reached adb in Android. True when this ends an outage.
+    pub fn reached(&self) -> bool {
+        self.unreachable.swap(false, Ordering::Relaxed)
+    }
+}
+
 fn accept(
     listener: TcpListener,
     guest: GuestAdb,
@@ -106,6 +128,7 @@ fn accept(
     connections: Arc<Mutex<HashMap<u64, TcpStream>>>,
 ) {
     let next_id = AtomicU64::new(0);
+    let reach = Arc::new(GuestReach::default());
     for incoming in listener.incoming() {
         if stop.load(Ordering::SeqCst) {
             return;
@@ -125,21 +148,30 @@ fn accept(
                 .unwrap_or_else(|e| e.into_inner())
                 .insert(id, kept);
         }
-        let (guest, connections) = (Arc::clone(&guest), Arc::clone(&connections));
+        let (guest, connections, reach) = (
+            Arc::clone(&guest),
+            Arc::clone(&connections),
+            Arc::clone(&reach),
+        );
         let spawned = thread::Builder::new()
             .name("dsa-adb-connection".into())
             .spawn(move || {
                 match guest() {
                     Ok(stream) => {
+                        if reach.reached() {
+                            eprintln!("adb bridge: adb in Android answers again");
+                        }
                         if let Err(error) = splice(Box::new(client), stream) {
                             eprintln!("adb bridge: a connection ended: {error}");
                         }
                     }
                     Err(error) => {
-                        eprintln!(
-                            "adb bridge: cannot reach adb in Android ({error}); is Android \
-                             running?"
-                        );
+                        if reach.failed() {
+                            eprintln!(
+                                "adb bridge: cannot reach adb in Android ({error}); is Android \
+                                 running? Said once until it answers again"
+                            );
+                        }
                         let _ = client.shutdown(Shutdown::Both);
                     }
                 }
@@ -262,6 +294,18 @@ mod tests {
         let mut buf = [0u8; 1];
         assert!(matches!(adb.read(&mut buf), Ok(0) | Err(_)));
         assert!(TcpStream::connect(bridge.address()).is_ok());
+    }
+
+    #[test]
+    fn fr20_an_unreachable_guest_is_logged_once_per_outage() {
+        let reach = GuestReach::default();
+        assert!(!reach.reached(), "reaching it at first ends no outage");
+        assert!(reach.failed(), "the first failure starts an outage");
+        assert!(!reach.failed(), "later failures in it are not said again");
+        assert!(!reach.failed());
+        assert!(reach.reached(), "the first success ends it");
+        assert!(!reach.reached());
+        assert!(reach.failed(), "a new outage is said again");
     }
 
     #[test]

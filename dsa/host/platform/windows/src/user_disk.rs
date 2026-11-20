@@ -10,6 +10,8 @@
 use std::io;
 use std::path::Path;
 
+use dsa_host_core::disk::DiskBackend;
+
 use windows_sys::Win32::Foundation::{LocalFree, ERROR_SUCCESS, HANDLE, HLOCAL};
 use windows_sys::Win32::Security::Authorization::{
     ConvertSecurityDescriptorToStringSecurityDescriptorW,
@@ -54,19 +56,6 @@ fn win32(code: u32, what: &str) -> Result<(), String> {
 pub fn prepare_user_data_disk(disk: &Path, size_gb: u32) -> Result<(), String> {
     prepare_user_disk(disk, size_gb, None)
 }
-
-/// The partitions of a user's Android disk that hold Android itself. They come from the
-/// image; every other partition holds the user's data.
-pub const ANDROID_PARTITIONS: [&str; 8] = [
-    "super",
-    "vbmeta_a",
-    "vbmeta_system_a",
-    "vbmeta_system_dlkm_a",
-    "vbmeta_vendor_dlkm_a",
-    "boot_a",
-    "init_boot_a",
-    "vendor_boot_a",
-];
 
 /// Makes sure the user's disk exists. A new disk is a copy of `template` (an image's `disk.vhdx`, holding Android and empty data
 /// partitions) or, without one, an empty dynamic VHDX that may grow to `size_gb`.
@@ -135,166 +124,72 @@ pub fn prepare_user_disk_folder(disk: &Path, protect: bool) -> Result<(), String
     Ok(())
 }
 
-/// The image version a user's disk holds Android from, recorded beside it.
-fn version_file(disk: &Path) -> std::path::PathBuf {
-    disk.with_extension("image-version")
-}
-
-/// The image version the user's disk holds Android from, if known.
-pub fn disk_image_version(disk: &Path) -> Option<String> {
-    std::fs::read_to_string(version_file(disk))
-        .ok()
-        .map(|v| v.trim().to_string())
-}
-
-pub fn record_disk_image_version(disk: &Path, version: &str) -> Result<(), String> {
-    std::fs::write(version_file(disk), version)
-        .map_err(|e| format!("recording the image version of {}: {e}", disk.display()))
-}
-
-/// Brings the user's disk to `version`: a new disk is copied from `template`; a disk that
-/// holds Android from another version gets the template's Android partitions, and keeps
-/// its misc, metadata and userdata partitions, which hold the user's data. A disk that was
-/// never given Android and was never written to holds nothing, and is replaced by a copy.
+/// Brings the user's disk to `version`, from the image's disk `template`: the rules are the
+/// host core's ([`dsa_host_core::disk::bring_disk_to`]), run on attached VHDX disks.
 pub fn bring_disk_to(disk: &Path, template: &Path, version: &str) -> Result<(), String> {
-    let held = disk_image_version(disk);
-    if disk.exists() && held.is_none() && is_blank_disk(disk)? {
-        std::fs::remove_file(disk)
-            .map_err(|e| format!("replacing the empty {}: {e}", disk.display()))?;
-    }
-    if !disk.exists() {
-        prepare_user_disk(disk, 0, Some(template))?;
-        return record_disk_image_version(disk, version);
-    }
-    if template.file_name().and_then(|n| n.to_str()) == Some("data.vhdx") {
-        // Even at the version it holds: a disk brought to a two-disk image before stale
-        // partitions were removed is recorded at that image already.
-        fit_to_data_template(disk, template, version)?;
-        if held.as_deref() == Some(version) {
-            return Ok(());
-        }
-        return record_disk_image_version(disk, version);
-    }
-    if held.as_deref() == Some(version) {
-        return Ok(());
-    }
-    let from = AttachedDisk::attach(template, true)?;
-    let to = AttachedDisk::attach(disk, false)?;
-    let mut source = from.open(false)?;
-    let mut target = to.open(true)?;
-    let names: Vec<&str> = {
-        let have = crate::gpt::partitions(&mut source)
-            .map_err(|e| format!("reading {}: {e}", template.display()))?;
-        ANDROID_PARTITIONS
-            .iter()
-            .copied()
-            .filter(|n| have.iter().any(|p| p.name == *n))
-            .collect()
-    };
-    let fits = crate::gpt::fits(&mut source, &mut target, &names)
-        .map_err(|e| format!("reading {}: {e}", disk.display()))?;
-    if !fits {
-        // The image's disk has a partition this one lacks (a newer layout). A disk Android
-        // never booted from holds no data, so it becomes a copy of the new template; one
-        // with data cannot be relaid without losing it.
-        let unused = crate::gpt::partition_is_blank(&mut target, "userdata")
-            .map_err(|e| format!("reading {}: {e}", disk.display()))?;
-        if !unused {
-            return Err(format!(
-                "Android {version} needs a disk layout that {} does not have, and the disk \
-                 holds Android data, so it is left as it is",
-                disk.display()
-            ));
-        }
-        drop(target);
-        drop(source);
-        drop(to);
-        drop(from);
-        std::fs::remove_file(disk)
-            .map_err(|e| format!("replacing the unused {}: {e}", disk.display()))?;
-        prepare_user_disk(disk, 0, Some(template))?;
-        return record_disk_image_version(disk, version);
-    }
-    crate::gpt::copy_partitions(&mut source, &mut target, &names)
-        .map_err(|e| format!("writing Android {version} into {}: {e}", disk.display()))?;
-    drop(target);
-    drop(source);
-    drop(to);
-    drop(from);
-    record_disk_image_version(disk, version)
-}
-
-/// Gives the user's disk the partitions of the image's data template, and only those.
-///
-/// A disk made for an image that kept Android on it still holds Android's partitions, and
-/// Android, which finds partitions by name, would boot from those instead of the image's
-/// own disk: they are taken out, and the data partitions stay where they are, with the
-/// user's data. A disk that lacks a partition the template has (made from an older
-/// template) becomes a copy of the template if Android never wrote to it; one with data
-/// cannot be relaid without losing it, and is left as it is.
-fn fit_to_data_template(disk: &Path, template: &Path, version: &str) -> Result<(), String> {
-    if !is_vhdx(disk)? || !is_vhdx(template)? {
-        return Ok(());
-    }
-    let wanted: Vec<String> = {
-        let from = AttachedDisk::attach(template, true)?;
-        let mut source = from.open(false)?;
-        crate::gpt::partitions(&mut source)
-            .map_err(|e| format!("reading {}: {e}", template.display()))?
-            .into_iter()
-            .map(|p| p.name)
-            .collect()
-    };
-    let to = AttachedDisk::attach(disk, false)?;
-    let mut target = to.open(true)?;
-    let have = crate::gpt::partitions(&mut target)
-        .map_err(|e| format!("reading {}: {e}", disk.display()))?;
-    let missing: Vec<&str> = wanted
-        .iter()
-        .filter(|name| !have.iter().any(|p| &p.name == *name))
-        .map(String::as_str)
-        .collect();
-    if !missing.is_empty() {
-        let unused = crate::gpt::partition_is_blank(&mut target, "userdata")
-            .map_err(|e| format!("reading {}: {e}", disk.display()))?;
-        if !unused {
-            return Err(format!(
-                "Android {version} needs a disk with a {} partition, which {} does not                  have, and the disk holds Android data, so it is left as it is",
-                missing.join(", "),
-                disk.display()
-            ));
-        }
-        drop(target);
-        drop(to);
-        std::fs::remove_file(disk)
-            .map_err(|e| format!("replacing the unused {}: {e}", disk.display()))?;
-        return prepare_user_disk(disk, 0, Some(template));
-    }
-    if have.iter().all(|p| wanted.contains(&p.name)) {
-        return Ok(());
-    }
-    let keep: Vec<&str> = wanted.iter().map(String::as_str).collect();
-    crate::gpt::keep_only(&mut target, &keep).map_err(|e| {
-        format!(
-            "removing the old Android partitions from {}: {e}",
-            disk.display()
-        )
-    })?;
-    Ok(())
+    dsa_host_core::disk::bring_disk_to(&VhdxBackend, disk, template, version)
 }
 
 /// Whether `path` is a VHDX file, which starts with its signature.
 fn is_vhdx(path: &Path) -> Result<bool, String> {
-    let mut signature = [0u8; 8];
-    let mut file =
-        std::fs::File::open(path).map_err(|e| format!("opening {}: {e}", path.display()))?;
-    Ok(io::Read::read_exact(&mut file, &mut signature).is_ok() && &signature == b"vhdxfile")
+    dsa_host_core::vhdx::is_vhdx(path).map_err(|e| format!("opening {}: {e}", path.display()))
 }
 
-fn is_blank_disk(disk: &Path) -> Result<bool, String> {
-    let attached = AttachedDisk::attach(disk, true)?;
-    let mut device = attached.open(false)?;
-    crate::gpt::is_blank(&mut device).map_err(|e| format!("reading {}: {e}", disk.display()))
+/// The user's disks as attached VHDX files: the disk core's backend on Windows.
+pub struct VhdxBackend;
+
+/// An attached disk's raw device, which detaches the disk when it is dropped.
+pub struct AttachedDevice {
+    // Dropped first: the device is closed before the disk is detached.
+    file: std::fs::File,
+    _attached: AttachedDisk,
+}
+
+impl io::Read for AttachedDevice {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.file.read(buf)
+    }
+}
+
+impl io::Write for AttachedDevice {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.file.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.file.flush()
+    }
+}
+
+impl io::Seek for AttachedDevice {
+    fn seek(&mut self, to: io::SeekFrom) -> io::Result<u64> {
+        self.file.seek(to)
+    }
+}
+
+impl DiskBackend for VhdxBackend {
+    type Device = AttachedDevice;
+
+    fn open(&self, disk: &Path, write: bool) -> Result<AttachedDevice, String> {
+        let attached = AttachedDisk::attach(disk, !write)?;
+        let file = attached.open(write)?;
+        Ok(AttachedDevice {
+            file,
+            _attached: attached,
+        })
+    }
+
+    fn create(&self, disk: &Path, template: Option<&Path>, size_gb: u32) -> Result<(), String> {
+        prepare_user_disk(disk, size_gb, template)
+    }
+
+    fn write_beside(&self, path: &Path, bytes: &[u8]) -> Result<(), String> {
+        std::fs::write(path, bytes).map_err(|e| e.to_string())
+    }
+
+    fn has_partitions(&self, path: &Path) -> Result<bool, String> {
+        is_vhdx(path)
+    }
 }
 
 /// A VHDX attached to the host as a disk without a drive letter, detached on drop.

@@ -53,6 +53,13 @@ pub struct BackgroundApp {
     pub actions: Vec<String>,
 }
 
+impl BackgroundApp {
+    /// The name the app goes by: its label, or its package when it has none.
+    pub fn display_name(&self) -> &str {
+        crate::tasks::app_name(&self.app_label, &self.package_name)
+    }
+}
+
 /// Where a media session's playback is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Playback {

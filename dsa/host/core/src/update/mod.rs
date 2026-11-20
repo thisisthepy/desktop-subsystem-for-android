@@ -13,6 +13,7 @@
 //! - [`trial`]: boots a newly staged image and, when it does not finish booting in time,
 //!   goes back to the previous image and starts that instead.
 //!
+//! - [`current`]: which image the next boot starts from.
 //! - [`versions`]: the supported Android versions and the one a computer follows.
 //! - [`service`]: the periodic check and a user's Android that boots a new image on trial.
 //! - [`local`]: installing an image from a folder on this computer through the same checks,
@@ -34,6 +35,7 @@
 //! Downloading is behind [`store::Fetch`]; the platform crates supply HTTPS.
 
 pub mod alerts;
+pub mod current;
 pub mod local;
 pub mod manifest;
 pub mod policy;

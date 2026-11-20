@@ -748,3 +748,15 @@ fn fr17_the_image_build_comes_from_image_json() {
         None
     );
 }
+
+#[test]
+fn fr17_a_boot_without_a_readable_image_folder_has_no_build_to_name() {
+    let store = Arc::new(MemoryDeviceIdentities::default());
+    let read = Arc::new(galaxy_book);
+    let boot = BootIdentity::new(store, "me", read);
+    let none = boot.boot_properties_of_initrd(None);
+    assert_eq!(none, boot.boot_properties(None));
+    // An initrd whose folder has no image.json is the same.
+    let unreadable = std::path::Path::new("/dsa-test/no-such-image/initrd.img");
+    assert_eq!(boot.boot_properties_of_initrd(Some(unreadable)), none);
+}

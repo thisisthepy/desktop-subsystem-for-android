@@ -2,7 +2,7 @@
 
 use std::io::{Cursor, Seek, SeekFrom, Write};
 
-use dsa_host_windows::gpt::{
+use dsa_host_core::disk::gpt::{
     copy_partitions, fits, is_blank, keep_only, partition_is_blank, partitions, SECTOR,
 };
 

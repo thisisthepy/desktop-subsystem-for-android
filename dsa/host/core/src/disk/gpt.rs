@@ -5,8 +5,8 @@
 //! image changes, the partitions that hold Android itself (`super` and the verified boot
 //! data) are copied from the new template into the user's disk, and the ones that hold the
 //! user's data (`misc`, `metadata`, `userdata`) stay. This module does that on anything that
-//! reads and writes like a disk, so it is tested on files; the Windows service runs it on
-//! attached VHDX disks.
+//! reads and writes like a disk, so it is tested on files; the hosts run it on the disks they
+//! open (attached VHDX disks on Windows, raw files elsewhere).
 
 use std::io::{self, Read, Seek, SeekFrom, Write};
 

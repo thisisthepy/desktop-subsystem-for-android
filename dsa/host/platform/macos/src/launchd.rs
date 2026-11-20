@@ -29,6 +29,11 @@ pub const WM_LABEL: &str = "io.github.thisisthepy.dsa.wm";
 /// The device lender agent's launchd label.
 pub const DEVICES_LABEL: &str = "io.github.thisisthepy.dsa.devices";
 
+/// The bundle identifier of DSA.app. Each agent names it, so macOS shows the agents as DSA,
+/// with its icon, in the notice of new login items and in Login Items settings, rather than
+/// by their programs' file names.
+pub const APP_BUNDLE_ID: &str = "org.thisisthepy.dsa";
+
 /// The device lender's program in an installation: `dsa-devices` beside `dsa-hostd`.
 pub fn devices_beside(hostd: &Path) -> Option<PathBuf> {
     let program = hostd.parent()?.join("dsa-devices");
@@ -136,6 +141,10 @@ fn agent_plist(label: &str, arguments: &[String], mach: Option<&str>, log: &Path
          <dict>\n\
          \t<key>Label</key>\n\
          \t<string>{label}</string>\n\
+         \t<key>AssociatedBundleIdentifiers</key>\n\
+         \t<array>\n\
+         \t\t<string>{APP_BUNDLE_ID}</string>\n\
+         \t</array>\n\
          \t<key>ProgramArguments</key>\n\
          \t<array>\n\
          {arguments}\

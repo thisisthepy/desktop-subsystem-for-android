@@ -14,39 +14,8 @@
 
 use std::path::{Path, PathBuf};
 
-/// The architecture of the guest, which is the Mac's: the framework runs guests of its own
-/// architecture only.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GuestArch {
-    Arm64,
-    X86_64,
-}
-
-impl GuestArch {
-    /// The architecture this host was built for.
-    pub const HOST: GuestArch = if cfg!(target_arch = "aarch64") {
-        GuestArch::Arm64
-    } else {
-        GuestArch::X86_64
-    };
-
-    /// The name of the kernel an image ships for this architecture.
-    pub fn kernel_name(self) -> &'static str {
-        match self {
-            GuestArch::Arm64 => "Image",
-            GuestArch::X86_64 => "bzImage",
-        }
-    }
-
-    /// The architecture an image's `image.json` names.
-    pub fn of_manifest(arch: &str) -> Option<GuestArch> {
-        match arch {
-            "arm64" | "aarch64" => Some(GuestArch::Arm64),
-            "x86_64" => Some(GuestArch::X86_64),
-            _ => None,
-        }
-    }
-}
+pub use dsa_host_core::image_files::GuestArch;
+use dsa_host_core::image_files::{ImageFiles, ImageRulesOwned};
 
 /// Whether `kernel` starts like a kernel the framework boots on `arch`: an arm64 `Image`
 /// (its magic `ARM\x64` at offset 56; a compressed kernel has none) or an x86 `bzImage`
@@ -165,67 +134,39 @@ pub fn mac_address_for(seed: &str) -> String {
     )
 }
 
-/// What a VM boots from one image folder.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ImageFiles {
-    pub kernel: PathBuf,
-    pub initrd: PathBuf,
-    /// The image's own kernel command line, written for Hyper-V (see `cmdline`).
-    pub kernel_cmdline: String,
-    /// The shared system disk of an image of two disks.
-    pub system_disk: Option<PathBuf>,
-    /// The template of a user's disk: `data` of an image of two disks, `disk` of one.
-    pub disk_template: PathBuf,
+/// The rules this host reads an image by for a guest of `arch`: the kernel its framework
+/// boots, and the raw disks a folder has, else the VHDX disks, which the host converts.
+pub fn image_rules(arch: GuestArch) -> ImageRulesOwned {
+    ImageRulesOwned {
+        kernel_names: vec![arch.kernel_name().into()],
+        disk_extensions: vec!["img".into(), "vhdx".into()],
+        arch: Some(arch),
+        fallback_kernel: None,
+        extra_cmdline: String::new(),
+    }
 }
 
-/// The first of `names` in `dir` that exists, else the last name: the VHDX disk the image
-/// lists, which the host converts once it is there.
-fn first_present(dir: &Path, names: &[&str]) -> PathBuf {
-    names
-        .iter()
-        .map(|name| dir.join(name))
-        .find(|path| path.exists())
-        .unwrap_or_else(|| dir.join(names[names.len() - 1]))
+/// Refuses an image of `files`, read from `dir`, that is not of the published form: the
+/// framework boots an image with an `initrd.img` and a disk to make the user's from.
+pub fn check_published(dir: &Path, files: &ImageFiles) -> Result<(), String> {
+    if files.initrd.is_none() {
+        return Err(format!("the image in {} has no initrd.img", dir.display()));
+    }
+    if files.disk_template.is_none() {
+        return Err(format!(
+            "the image in {} has no disk to make the user's from",
+            dir.display()
+        ));
+    }
+    Ok(())
 }
 
 /// Reads the image in `dir` for a guest of `arch`. Raw disks (`system.img`, `data.img`,
 /// `disk.img`) are used when the folder has them; otherwise its VHDX disks, which the host
-/// converts.
+/// converts. The framework boots an image of the published form only, so one without an
+/// `initrd.img` or a disk to make the user's from is refused.
 pub fn image_files(dir: &Path, arch: GuestArch) -> Result<ImageFiles, String> {
-    let text = std::fs::read_to_string(dir.join("image.json"))
-        .map_err(|e| format!("reading the image's image.json in {}: {e}", dir.display()))?;
-    let manifest: serde_json::Value =
-        serde_json::from_str(&text).map_err(|e| format!("the image's image.json: {e}"))?;
-    if let Some(image_arch) = manifest["arch"].as_str() {
-        if GuestArch::of_manifest(image_arch) != Some(arch) {
-            return Err(format!(
-                "the image in {} is for {image_arch}, and this Mac runs {} guests only",
-                dir.display(),
-                match arch {
-                    GuestArch::Arm64 => "arm64",
-                    GuestArch::X86_64 => "x86_64",
-                }
-            ));
-        }
-    }
-    let listed = |name: &str| manifest["files"].get(name).is_some() || dir.join(name).exists();
-    let two_disks = listed("system.vhdx") || listed("system.img");
-    let (system_disk, disk_template) = if two_disks {
-        (
-            Some(first_present(dir, &["system.img", "system.vhdx"])),
-            first_present(dir, &["data.img", "data.vhdx"]),
-        )
-    } else {
-        (None, first_present(dir, &["disk.img", "disk.vhdx"]))
-    };
-    Ok(ImageFiles {
-        kernel: dir.join(arch.kernel_name()),
-        initrd: dir.join("initrd.img"),
-        kernel_cmdline: manifest["kernel_cmdline"]
-            .as_str()
-            .unwrap_or_default()
-            .to_string(),
-        system_disk,
-        disk_template,
-    })
+    let files = image_rules(arch).read(dir)?;
+    check_published(dir, &files)?;
+    Ok(files)
 }

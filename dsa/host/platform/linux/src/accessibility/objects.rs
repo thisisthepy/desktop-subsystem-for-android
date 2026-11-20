@@ -25,7 +25,7 @@ use dsa_host_core::accessibility::{
     chars_to_utf16, from_screen, to_screen, utf16_to_chars, ActionRequest, Changes, ClientPresence,
     Node, NodeAction, NodeRange, Tree, TreeError, TreeUpdate,
 };
-use dsa_host_core::compositor::caption::CaptionButton;
+use dsa_host_core::compositor::caption::{CaptionButton, CaptionKind};
 use dsa_host_core::input::WindowGeometry;
 use dsa_host_core::tasks::Bounds;
 
@@ -33,8 +33,8 @@ use super::atspi::{self, coord, role, state, StateSet};
 use super::text;
 use crate::compositor::title_bar::TitleBar;
 use crate::compositor::toplevel::Toplevel;
-use crate::compositor::window_menu::menu_text;
 use dsa_host_core::ui_language::UiLanguage;
+use dsa_host_core::ui_text::caption::caption_name;
 
 /// The AT-SPI interfaces the objects implement.
 pub mod interface {
@@ -333,37 +333,16 @@ pub fn node_actions(node: &Node, language: UiLanguage) -> Vec<Action> {
         .collect()
 }
 
-/// The back button's name in `language`.
-pub fn back_name(language: UiLanguage) -> &'static str {
-    match language {
-        UiLanguage::English => "Back",
-        UiLanguage::Korean => "뒤로",
-        UiLanguage::Japanese => "戻る",
-        UiLanguage::ChineseSimplified => "返回",
-        UiLanguage::ChineseTraditional => "返回",
-        UiLanguage::Spanish => "Atrás",
-        UiLanguage::French => "Retour",
-        UiLanguage::German => "Zurück",
-        UiLanguage::PortugueseBrazil => "Voltar",
-        UiLanguage::Russian => "Назад",
-        UiLanguage::Italian => "Indietro",
-        UiLanguage::Vietnamese => "Quay lại",
-        UiLanguage::Indonesian => "Kembali",
-        UiLanguage::Turkish => "Geri",
-    }
-}
-
-/// A title bar button's name in `language`: the window menu's words for the caption
-/// buttons, and Restore for the maximize button of a maximized window.
+/// A title bar button's name in `language`: the caption button names every host shares, and
+/// Restore for the maximize button of a maximized window.
 pub fn button_name(button: TitleButton, maximized: bool, language: UiLanguage) -> &'static str {
-    let words = menu_text(language);
-    match button {
-        TitleButton::Back => back_name(language),
-        TitleButton::Minimize => words.minimize,
-        TitleButton::Maximize if maximized => words.restore,
-        TitleButton::Maximize => words.maximize,
-        TitleButton::Close => words.close,
-    }
+    let kind = match button {
+        TitleButton::Back => CaptionKind::Back,
+        TitleButton::Minimize => CaptionKind::Minimize,
+        TitleButton::Maximize => CaptionKind::Maximize,
+        TitleButton::Close => CaptionKind::Close,
+    };
+    caption_name(kind, maximized, language)
 }
 
 /// What a click on a title bar button does.

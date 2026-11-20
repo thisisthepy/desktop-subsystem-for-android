@@ -176,6 +176,21 @@ pub struct KeyEvent {
     pub canceled: bool,
 }
 
+/// The key events a click on a title bar's back arrow sends the task: Back pressed and
+/// released, at `time_ms` of the host's clock.
+pub fn back_keys(task_id: i32, time_ms: u32) -> [KeyEvent; 2] {
+    let key = |action| KeyEvent {
+        task_id,
+        action,
+        key_code: keycode::BACK,
+        repeat_count: 0,
+        meta_state: 0,
+        event_time_ms: time_ms,
+        canceled: false,
+    };
+    [key(KeyAction::Down), key(KeyAction::Up)]
+}
+
 impl KeyEvent {
     /// The event as the control channel carries it to the guest.
     pub fn to_control(&self) -> control::KeyEvent {
@@ -336,6 +351,19 @@ impl KeyMapper {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fr22_the_back_arrow_sends_back_pressed_then_released() {
+        let [down, up] = back_keys(7, 1234);
+        assert_eq!((down.action, up.action), (KeyAction::Down, KeyAction::Up));
+        for key in [down, up] {
+            assert_eq!(
+                (key.task_id, key.key_code, key.event_time_ms),
+                (7, keycode::BACK, 1234)
+            );
+            assert!(!key.canceled && key.repeat_count == 0 && key.meta_state == 0);
+        }
+    }
 
     fn press(mapper: &mut KeyMapper, key_code: u32, down: bool) -> Option<KeyEvent> {
         mapper.handle(KeyInput {

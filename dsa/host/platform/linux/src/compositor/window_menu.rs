@@ -28,8 +28,10 @@
 
 use dsa_host_core::compositor::caption::scaled;
 use dsa_host_core::compositor::window_hosts::{MenuAction, MenuWork};
+use dsa_host_core::compositor::window_menu::{android_items, AndroidItem};
 use dsa_host_core::tasks::{AppSettingsPage, TaskRequest};
 use dsa_host_core::ui_language::UiLanguage;
+use dsa_host_core::ui_text::window_menu::{dsa_menu_text, DsaMenuText};
 
 use super::title_bar::Coverage;
 
@@ -74,19 +76,43 @@ pub fn items(maximized: bool, resizable: bool, new_window: bool) -> Vec<MenuItem
     if !maximized {
         items.push(MenuItem::Maximize);
     }
-    items.extend([MenuItem::Close, MenuItem::Separator, MenuItem::FullScreen]);
-    if new_window {
-        items.push(MenuItem::NewWindow);
-    }
-    items.extend([
-        MenuItem::Screenshot,
-        MenuItem::AspectRatio,
-        MenuItem::OpenByDefault,
-        MenuItem::AppInfo,
-        MenuItem::Separator,
-        MenuItem::MoreOptions,
-    ]);
+    items.extend([MenuItem::Close, MenuItem::Separator]);
+    items.extend(
+        android_items(true, new_window)
+            .into_iter()
+            .map(MenuItem::from),
+    );
+    items.extend([MenuItem::Separator, MenuItem::MoreOptions]);
     items
+}
+
+impl From<AndroidItem> for MenuItem {
+    fn from(item: AndroidItem) -> MenuItem {
+        match item {
+            AndroidItem::FullScreen => MenuItem::FullScreen,
+            AndroidItem::NewWindow => MenuItem::NewWindow,
+            AndroidItem::Screenshot => MenuItem::Screenshot,
+            AndroidItem::AspectRatio => MenuItem::AspectRatio,
+            AndroidItem::OpenByDefault => MenuItem::OpenByDefault,
+            AndroidItem::AppInfo => MenuItem::AppInfo,
+        }
+    }
+}
+
+impl MenuItem {
+    /// The Android item this entry is; `None` for the window's own items, the separator and
+    /// More window options.
+    pub fn android(self) -> Option<AndroidItem> {
+        match self {
+            MenuItem::FullScreen => Some(AndroidItem::FullScreen),
+            MenuItem::NewWindow => Some(AndroidItem::NewWindow),
+            MenuItem::Screenshot => Some(AndroidItem::Screenshot),
+            MenuItem::AspectRatio => Some(AndroidItem::AspectRatio),
+            MenuItem::OpenByDefault => Some(AndroidItem::OpenByDefault),
+            MenuItem::AppInfo => Some(AndroidItem::AppInfo),
+            _ => None,
+        }
+    }
 }
 
 /// Moving or sizing a window, from the window menu.
@@ -246,13 +272,7 @@ pub fn desktop_menu_point(place: MenuPlace) -> (i32, i32) {
 /// What the window rules do for an entry; `None` for the window's own items, the separator
 /// and Screenshot, which the window carries out itself.
 pub fn action(item: MenuItem) -> Option<MenuAction> {
-    match item {
-        MenuItem::NewWindow => Some(MenuAction::NewWindow),
-        MenuItem::AspectRatio => Some(MenuAction::AspectRatio),
-        MenuItem::OpenByDefault => Some(MenuAction::OpenByDefault),
-        MenuItem::AppInfo => Some(MenuAction::AppInfo),
-        _ => None,
-    }
+    item.android().and_then(AndroidItem::action)
 }
 
 /// What the window manager does for `action`, chosen in a window of the app `package`; `None`
@@ -278,16 +298,6 @@ pub fn menu_work(action: MenuAction, package: &str, multiple_windows: bool) -> O
     })
 }
 
-/// The arguments that open DSA Settings on the Apps page with `package`'s row open.
-pub fn app_page_arguments(package: &str) -> [String; 4] {
-    [
-        "--page".into(),
-        "apps".into(),
-        "--app".into(),
-        package.into(),
-    ]
-}
-
 /// The menu's words in one language.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MenuText {
@@ -297,15 +307,8 @@ pub struct MenuText {
     pub move_window: &'static str,
     pub size: &'static str,
     pub close: &'static str,
-    pub full_screen: &'static str,
-    pub new_window: &'static str,
-    pub screenshot: &'static str,
-    pub aspect_ratio: &'static str,
-    pub open_by_default: &'static str,
-    pub app_info: &'static str,
-    pub more_options: &'static str,
-    /// What a screenshot's file name starts with.
-    pub screenshot_file: &'static str,
+    /// DSA's own items, whose words every host shares.
+    pub dsa: DsaMenuText,
 }
 
 /// The menu's words in `language`, with the desktop's own words for the window's items.
@@ -318,14 +321,7 @@ pub fn menu_text(language: UiLanguage) -> MenuText {
             move_window: "Move",
             size: "Size",
             close: "Close",
-            full_screen: "Full screen",
-            new_window: "New window",
-            screenshot: "Screenshot",
-            aspect_ratio: "Aspect ratio",
-            open_by_default: "Open by default",
-            app_info: "App info",
-            more_options: "More window options",
-            screenshot_file: "Screenshot",
+            dsa: dsa_menu_text(language),
         },
         UiLanguage::Korean => MenuText {
             minimize: "최소화",
@@ -334,14 +330,7 @@ pub fn menu_text(language: UiLanguage) -> MenuText {
             move_window: "이동",
             size: "크기 조정",
             close: "닫기",
-            full_screen: "전체 화면",
-            new_window: "새 창",
-            screenshot: "스크린샷",
-            aspect_ratio: "화면 비율",
-            open_by_default: "링크 열기 설정",
-            app_info: "앱 정보",
-            more_options: "창 메뉴 더 보기",
-            screenshot_file: "스크린샷",
+            dsa: dsa_menu_text(language),
         },
         UiLanguage::Japanese => MenuText {
             minimize: "最小化",
@@ -350,14 +339,7 @@ pub fn menu_text(language: UiLanguage) -> MenuText {
             move_window: "移動",
             size: "サイズ変更",
             close: "閉じる",
-            full_screen: "全画面表示",
-            new_window: "新しいウィンドウ",
-            screenshot: "スクリーンショット",
-            aspect_ratio: "アスペクト比",
-            open_by_default: "デフォルトで開く",
-            app_info: "アプリ情報",
-            more_options: "その他のウィンドウ オプション",
-            screenshot_file: "スクリーンショット",
+            dsa: dsa_menu_text(language),
         },
         UiLanguage::ChineseSimplified => MenuText {
             minimize: "最小化",
@@ -366,14 +348,7 @@ pub fn menu_text(language: UiLanguage) -> MenuText {
             move_window: "移动",
             size: "大小",
             close: "关闭",
-            full_screen: "全屏",
-            new_window: "新建窗口",
-            screenshot: "屏幕截图",
-            aspect_ratio: "宽高比",
-            open_by_default: "默认打开",
-            app_info: "应用信息",
-            more_options: "更多窗口选项",
-            screenshot_file: "屏幕截图",
+            dsa: dsa_menu_text(language),
         },
         UiLanguage::ChineseTraditional => MenuText {
             minimize: "最小化",
@@ -382,14 +357,7 @@ pub fn menu_text(language: UiLanguage) -> MenuText {
             move_window: "移動",
             size: "大小",
             close: "關閉",
-            full_screen: "全螢幕",
-            new_window: "新增視窗",
-            screenshot: "螢幕截圖",
-            aspect_ratio: "長寬比",
-            open_by_default: "預設開啟",
-            app_info: "應用程式資訊",
-            more_options: "更多視窗選項",
-            screenshot_file: "螢幕截圖",
+            dsa: dsa_menu_text(language),
         },
         UiLanguage::Spanish => MenuText {
             minimize: "Minimizar",
@@ -398,14 +366,7 @@ pub fn menu_text(language: UiLanguage) -> MenuText {
             move_window: "Mover",
             size: "Tamaño",
             close: "Cerrar",
-            full_screen: "Pantalla completa",
-            new_window: "Nueva ventana",
-            screenshot: "Captura de pantalla",
-            aspect_ratio: "Relación de aspecto",
-            open_by_default: "Abrir de forma predeterminada",
-            app_info: "Información de la aplicación",
-            more_options: "Más opciones de ventana",
-            screenshot_file: "Captura de pantalla",
+            dsa: dsa_menu_text(language),
         },
         UiLanguage::French => MenuText {
             minimize: "Réduire",
@@ -414,14 +375,7 @@ pub fn menu_text(language: UiLanguage) -> MenuText {
             move_window: "Déplacer",
             size: "Taille",
             close: "Fermer",
-            full_screen: "Plein écran",
-            new_window: "Nouvelle fenêtre",
-            screenshot: "Capture d'écran",
-            aspect_ratio: "Format d'image",
-            open_by_default: "Ouvrir par défaut",
-            app_info: "Infos sur l'application",
-            more_options: "Plus d'options de fenêtre",
-            screenshot_file: "Capture d'écran",
+            dsa: dsa_menu_text(language),
         },
         UiLanguage::German => MenuText {
             minimize: "Minimieren",
@@ -430,14 +384,7 @@ pub fn menu_text(language: UiLanguage) -> MenuText {
             move_window: "Verschieben",
             size: "Größe ändern",
             close: "Schließen",
-            full_screen: "Vollbild",
-            new_window: "Neues Fenster",
-            screenshot: "Bildschirmfoto",
-            aspect_ratio: "Seitenverhältnis",
-            open_by_default: "Standardmäßig öffnen",
-            app_info: "App-Info",
-            more_options: "Weitere Fensteroptionen",
-            screenshot_file: "Bildschirmfoto",
+            dsa: dsa_menu_text(language),
         },
         UiLanguage::PortugueseBrazil => MenuText {
             minimize: "Minimizar",
@@ -446,14 +393,7 @@ pub fn menu_text(language: UiLanguage) -> MenuText {
             move_window: "Mover",
             size: "Tamanho",
             close: "Fechar",
-            full_screen: "Tela inteira",
-            new_window: "Nova janela",
-            screenshot: "Captura de tela",
-            aspect_ratio: "Proporção",
-            open_by_default: "Abrir por padrão",
-            app_info: "Informações do app",
-            more_options: "Mais opções de janela",
-            screenshot_file: "Captura de tela",
+            dsa: dsa_menu_text(language),
         },
         UiLanguage::Russian => MenuText {
             minimize: "Свернуть",
@@ -462,14 +402,7 @@ pub fn menu_text(language: UiLanguage) -> MenuText {
             move_window: "Переместить",
             size: "Размер",
             close: "Закрыть",
-            full_screen: "Во весь экран",
-            new_window: "Новое окно",
-            screenshot: "Снимок экрана",
-            aspect_ratio: "Соотношение сторон",
-            open_by_default: "Открывать по умолчанию",
-            app_info: "О приложении",
-            more_options: "Другие параметры окна",
-            screenshot_file: "Снимок экрана",
+            dsa: dsa_menu_text(language),
         },
         UiLanguage::Italian => MenuText {
             minimize: "Riduci a icona",
@@ -478,14 +411,7 @@ pub fn menu_text(language: UiLanguage) -> MenuText {
             move_window: "Sposta",
             size: "Ridimensiona",
             close: "Chiudi",
-            full_screen: "Schermo intero",
-            new_window: "Nuova finestra",
-            screenshot: "Screenshot",
-            aspect_ratio: "Proporzioni",
-            open_by_default: "Apri per impostazione predefinita",
-            app_info: "Informazioni app",
-            more_options: "Altre opzioni finestra",
-            screenshot_file: "Screenshot",
+            dsa: dsa_menu_text(language),
         },
         UiLanguage::Vietnamese => MenuText {
             minimize: "Thu nhỏ",
@@ -494,14 +420,7 @@ pub fn menu_text(language: UiLanguage) -> MenuText {
             move_window: "Di chuyển",
             size: "Kích thước",
             close: "Đóng",
-            full_screen: "Toàn màn hình",
-            new_window: "Cửa sổ mới",
-            screenshot: "Ảnh chụp màn hình",
-            aspect_ratio: "Tỷ lệ khung hình",
-            open_by_default: "Mở theo mặc định",
-            app_info: "Thông tin ứng dụng",
-            more_options: "Tùy chọn cửa sổ khác",
-            screenshot_file: "Ảnh chụp màn hình",
+            dsa: dsa_menu_text(language),
         },
         UiLanguage::Indonesian => MenuText {
             minimize: "Minimalkan",
@@ -510,14 +429,7 @@ pub fn menu_text(language: UiLanguage) -> MenuText {
             move_window: "Pindahkan",
             size: "Ubah ukuran",
             close: "Tutup",
-            full_screen: "Layar penuh",
-            new_window: "Jendela baru",
-            screenshot: "Screenshot",
-            aspect_ratio: "Rasio aspek",
-            open_by_default: "Buka secara default",
-            app_info: "Info aplikasi",
-            more_options: "Opsi jendela lainnya",
-            screenshot_file: "Screenshot",
+            dsa: dsa_menu_text(language),
         },
         UiLanguage::Turkish => MenuText {
             minimize: "Simge durumuna küçült",
@@ -526,14 +438,7 @@ pub fn menu_text(language: UiLanguage) -> MenuText {
             move_window: "Taşı",
             size: "Boyutlandır",
             close: "Kapat",
-            full_screen: "Tam ekran",
-            new_window: "Yeni pencere",
-            screenshot: "Ekran görüntüsü",
-            aspect_ratio: "En boy oranı",
-            open_by_default: "Varsayılan olarak aç",
-            app_info: "Uygulama bilgileri",
-            more_options: "Diğer pencere seçenekleri",
-            screenshot_file: "Ekran görüntüsü",
+            dsa: dsa_menu_text(language),
         },
     }
 }
@@ -548,13 +453,13 @@ pub fn label(text: &MenuText, item: MenuItem) -> Option<&'static str> {
         MenuItem::Move => text.move_window,
         MenuItem::Size => text.size,
         MenuItem::Close => text.close,
-        MenuItem::FullScreen => text.full_screen,
-        MenuItem::NewWindow => text.new_window,
-        MenuItem::Screenshot => text.screenshot,
-        MenuItem::AspectRatio => text.aspect_ratio,
-        MenuItem::OpenByDefault => text.open_by_default,
-        MenuItem::AppInfo => text.app_info,
-        MenuItem::MoreOptions => text.more_options,
+        MenuItem::MoreOptions => text.dsa.more_options,
+        MenuItem::FullScreen
+        | MenuItem::NewWindow
+        | MenuItem::Screenshot
+        | MenuItem::AspectRatio
+        | MenuItem::OpenByDefault
+        | MenuItem::AppInfo => return item.android().map(|android| android.label(&text.dsa)),
     })
 }
 
@@ -661,13 +566,7 @@ impl MenuLayout {
 }
 
 pub(crate) fn premultiplied(color: u32, coverage: f64) -> [f64; 4] {
-    let alpha = f64::from(color >> 24) / 255.0 * coverage;
-    [
-        f64::from(color & 0xff) / 255.0 * alpha,
-        f64::from((color >> 8) & 0xff) / 255.0 * alpha,
-        f64::from((color >> 16) & 0xff) / 255.0 * alpha,
-        alpha,
-    ]
+    dsa_host_core::color::premultiplied(color, coverage).map(|value| value / 255.0)
 }
 
 /// `top` over the premultiplied BGRA pixel `pixel`.
@@ -752,6 +651,7 @@ pub fn paint_menu(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dsa_host_core::links::app_page_arguments;
 
     #[test]
     fn fr22_the_window_menu_carries_the_android_window_menu() {
@@ -962,17 +862,20 @@ mod tests {
                 );
                 assert!(!words.contains('{'), "{language:?} {item:?}");
             }
-            assert!(!text.screenshot_file.trim().is_empty(), "{language:?}");
+            assert!(!text.dsa.screenshot_file.trim().is_empty(), "{language:?}");
             // A screenshot's file name is a name, with no folder in it.
-            assert!(!text.screenshot_file.contains('/'), "{language:?}");
+            assert!(!text.dsa.screenshot_file.contains('/'), "{language:?}");
             if language != UiLanguage::English {
-                assert_ne!(text.app_info, english.app_info, "{language:?}");
-                assert_ne!(text.more_options, english.more_options, "{language:?}");
+                assert_ne!(text.dsa.app_info, english.dsa.app_info, "{language:?}");
+                assert_ne!(
+                    text.dsa.more_options, english.dsa.more_options,
+                    "{language:?}"
+                );
             }
         }
         assert_eq!(menu_text(UiLanguage::Japanese).close, "閉じる");
         assert_eq!(
-            menu_text(UiLanguage::ChineseTraditional).full_screen,
+            menu_text(UiLanguage::ChineseTraditional).dsa.full_screen,
             "全螢幕"
         );
         assert_eq!(menu_text(UiLanguage::German).close, "Schließen");
@@ -983,13 +886,13 @@ mod tests {
     fn fr22_the_window_menu_speaks_korean_and_english() {
         let english = menu_text(UiLanguage::English);
         let korean = menu_text(UiLanguage::Korean);
-        assert_eq!(english.new_window, "New window");
-        assert_eq!(korean.app_info, "앱 정보");
-        assert_eq!(english.more_options, "More window options");
-        assert_eq!(korean.more_options, "창 메뉴 더 보기");
+        assert_eq!(english.dsa.new_window, "New window");
+        assert_eq!(korean.dsa.app_info, "앱 정보");
+        assert_eq!(english.dsa.more_options, "More window options");
+        assert_eq!(korean.dsa.more_options, "창 메뉴 더 보기");
         assert_eq!(korean.move_window, "이동");
         assert_eq!(korean.size, "크기 조정");
-        assert_eq!(korean.screenshot_file, "스크린샷");
+        assert_eq!(korean.dsa.screenshot_file, "스크린샷");
     }
 
     #[test]

@@ -214,6 +214,26 @@ pub struct RendererProcessMemory {
 }
 
 impl RendererProcessMemory {
+    /// What this renderer process holds, as the operating system counts it (`working_set_kb`
+    /// resident, `private_kb` committed to it alone; `None` for what could not be read), and
+    /// the renderer's own count of its GPU allocations when it gives one.
+    pub fn of_this_process(
+        working_set_kb: Option<u64>,
+        private_kb: Option<u64>,
+        counted: Option<RendererMemory>,
+    ) -> RendererProcessMemory {
+        RendererProcessMemory {
+            process_id: std::process::id(),
+            held: HeldMemory {
+                working_set_kb,
+                private_kb,
+                gpu_local_kb: None,
+                gpu_non_local_kb: None,
+            },
+            counted,
+        }
+    }
+
     /// The memory a renderer's report gives.
     pub fn from_report(report: &MemoryReport) -> RendererProcessMemory {
         let known = |kb: u64| (kb > 0).then_some(kb);
@@ -1223,6 +1243,16 @@ pub fn gpu_request_of(start: &Start) -> (i32, Option<[u8; 8]>, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nfr1_a_renderer_reports_its_own_process_and_what_the_system_counts_for_it() {
+        let own = RendererProcessMemory::of_this_process(Some(10), None, None);
+        assert_eq!(own.process_id, std::process::id());
+        assert_eq!(own.held.working_set_kb, Some(10));
+        assert_eq!(own.held.private_kb, None);
+        assert_eq!(own.held.gpu_local_kb, None);
+        assert_eq!(own.counted, None);
+    }
 
     #[test]
     fn nfr5_restarts_come_at_once_then_wait_longer_up_to_a_limit() {

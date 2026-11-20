@@ -155,12 +155,15 @@ mod macos {
             })
             .collect();
         disks.push(Disk {
-            path: files.disk_template.clone(),
+            path: files
+                .disk_template
+                .clone()
+                .ok_or("the image has no disk to make the user's from")?,
             read_only: true,
         });
         let vm = MacVmConfig {
             kernel: files.kernel.clone(),
-            initrd: files.initrd.clone(),
+            initrd: files.initrd.clone().ok_or("the image has no initrd.img")?,
             cmdline: dsa_host_macos::cmdline::for_virtualization_framework(
                 &files.kernel_cmdline,
                 &config.kernel_cmdline,

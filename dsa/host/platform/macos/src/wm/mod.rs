@@ -32,7 +32,6 @@ pub mod hosts;
 pub mod notifications;
 #[cfg(target_os = "macos")]
 pub mod present;
-pub mod resize_queue;
 #[cfg(target_os = "macos")]
 pub mod run;
 #[cfg(target_os = "macos")]

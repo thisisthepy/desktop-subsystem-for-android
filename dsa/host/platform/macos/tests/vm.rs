@@ -131,13 +131,13 @@ fn fr14_an_image_of_two_disks_shares_its_system_disk_and_templates_the_users() {
         "two",
         r#"{"version": "16.0.0-1", "arch": "arm64", "kernel_cmdline": "init=/init",
             "files": {"system.vhdx": {}, "data.vhdx": {}}}"#,
-        &[],
+        &["Image"],
     );
     let files = image_files(&dir, GuestArch::Arm64).unwrap();
     assert_eq!(files.kernel, dir.join("Image"));
-    assert_eq!(files.initrd, dir.join("initrd.img"));
+    assert_eq!(files.initrd, Some(dir.join("initrd.img")));
     assert_eq!(files.system_disk, Some(dir.join("system.vhdx")));
-    assert_eq!(files.disk_template, dir.join("data.vhdx"));
+    assert_eq!(files.disk_template, Some(dir.join("data.vhdx")));
     assert_eq!(files.kernel_cmdline, "init=/init");
     // An image for the other architecture is refused with the reason.
     assert!(image_files(&dir, GuestArch::X86_64)
@@ -150,12 +150,12 @@ fn fr14_raw_disks_in_the_image_are_used_as_they_are() {
     let dir = image_dir(
         "raw",
         r#"{"version": "16.0.0-1", "arch": "x86_64", "files": {"disk.vhdx": {}}}"#,
-        &["disk.img"],
+        &["bzImage", "disk.img"],
     );
     let files = image_files(&dir, GuestArch::X86_64).unwrap();
     assert_eq!(files.kernel, dir.join("bzImage"));
     assert_eq!(files.system_disk, None);
-    assert_eq!(files.disk_template, dir.join("disk.img"));
+    assert_eq!(files.disk_template, Some(dir.join("disk.img")));
 }
 
 fn config() -> MacVmConfig {

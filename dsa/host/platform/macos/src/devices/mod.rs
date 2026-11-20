@@ -21,7 +21,7 @@
 //! speech             AVSpeechSynthesizer and          [`language`]
 //!                    SFSpeechRecognizer
 //! spelling           NSSpellChecker                   [`language`]
-//! address lookups    the boundaries in the bundle     [`geocode`]
+//! address lookups    the boundaries in the bundle     [`dsa_host_core::geocode::serve_boundaries`]
 //! sharing            NSSharingServicePicker           [`share`]
 //! ```
 //!
@@ -38,7 +38,6 @@
 pub mod camera;
 pub mod front;
 pub mod gamepads;
-pub mod geocode;
 pub mod language;
 pub mod links;
 pub mod location;
@@ -59,15 +58,11 @@ pub mod passkeys;
 #[cfg(target_os = "macos")]
 pub mod print;
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::thread::{self, JoinHandle};
-use std::time::Duration;
 
 use dsa_transport::Connector;
 
-/// Where a device writes what it has to say: one line each.
-pub type Log = Arc<dyn Fn(&str) + Send + Sync>;
+pub use dsa_host_core::follower::{spawn, wait, Log};
 
 /// Makes a new connection to the local API for each follower.
 pub type ConnectorFactory = Arc<dyn Fn() -> Box<dyn Connector> + Send + Sync>;
@@ -75,27 +70,6 @@ pub type ConnectorFactory = Arc<dyn Fn() -> Box<dyn Connector> + Send + Sync>;
 /// The build each device names itself by.
 pub fn build(device: &str) -> String {
     format!("dsa-devices {} {device}", crate::VERSION)
-}
-
-/// Waits `time`, or less when `stop` is set.
-pub(crate) fn wait(stop: &AtomicBool, time: Duration) {
-    let step = Duration::from_millis(50);
-    let mut waited = Duration::ZERO;
-    while waited < time && !stop.load(Ordering::Relaxed) {
-        thread::sleep(step);
-        waited += step;
-    }
-}
-
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-fn spawn(name: &str, log: &Log, run: impl FnOnce() + Send + 'static) -> Option<JoinHandle<()>> {
-    match thread::Builder::new().name(name.into()).spawn(run) {
-        Ok(handle) => Some(handle),
-        Err(error) => {
-            log(&format!("could not start {name}: {error}"));
-            None
-        }
-    }
 }
 
 /// Which of the lender's parts to run.
@@ -297,7 +271,7 @@ mod lender {
         if which.geocoding {
             let (connector, stop, log) = (connect(), Arc::clone(stop), Arc::clone(log));
             threads.extend(spawn("dsa-geocode", &Arc::clone(&log), move || {
-                super::geocode::serve(connector, stop, log)
+                dsa_host_core::geocode::serve_follower(connector, stop, log)
             }));
         }
         if which.share {

@@ -4,6 +4,9 @@
 //! reads each client's user ID from the kernel (`SO_PEERCRED` on Linux, `getpeereid` on
 //! macOS), so it never trusts a user named in a message.
 //!
+//! [`raw_disk`] is the user's Android disk as a raw file, the host core's disk backend for
+//! those hosts.
+//!
 //! [`vhdx`] reads the image's VHDX disks into raw disk images, for the VMMs that attach
 //! only raw disks.
 //!
@@ -13,6 +16,8 @@
 //! [`fd_frames`] is the connection between the window manager and its graphics renderer
 //! process, whose frames can carry file descriptors, and [`renderer_launch`] starts that
 //! process.
+//!
+//! [`fetch`] downloads the image updates through `curl`.
 //!
 //! [`https_get`] is the HTTPS fetch, through `curl`, that the passkey check reads a website's
 //! Digital Asset Links with: certificate checked, no redirect followed. [`backup_folder`]
@@ -28,8 +33,12 @@ pub mod device_socket;
 pub mod dns_resolver;
 #[cfg(unix)]
 pub mod fd_frames;
+pub mod fetch;
 pub mod https_get;
 pub mod paths;
+#[cfg(unix)]
+pub mod process;
+pub mod raw_disk;
 #[cfg(unix)]
 pub mod renderer_launch;
 #[cfg(unix)]

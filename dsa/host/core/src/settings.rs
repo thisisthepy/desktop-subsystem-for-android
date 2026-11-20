@@ -534,6 +534,35 @@ pub struct FileSettings {
     lock: Mutex<()>,
 }
 
+/// The settings of a service, in its own folder `dir`: with `first_channel`, the channel of
+/// the installer that put DSA on the computer, for a computer whose settings record none yet,
+/// and `previous_render_gpu`, how a user who has never saved settings finds the render GPU
+/// they chose before settings existed. Each is left out with `None`.
+pub fn service_settings(
+    dir: PathBuf,
+    first_channel: Option<ReleaseChannel>,
+    previous_render_gpu: Option<PreviousRenderGpu>,
+) -> FileSettings {
+    let mut store = FileSettings::new(dir);
+    if let Some(previous) = previous_render_gpu {
+        store = store.with_previous_render_gpu(previous);
+    }
+    if let Some(channel) = first_channel {
+        store = store.with_first_channel(channel);
+    }
+    store
+}
+
+/// Records the release channel in `store` when it records none yet
+/// ([`FileSettings::keep_first_channel`]) and writes what happened to the service's log, so
+/// that every later upgrade keeps the channel and the log says which one it is.
+pub fn keep_first_channel_logged(store: &FileSettings, build: &str) {
+    match store.keep_first_channel() {
+        Ok(channel) => eprintln!("{build}: DSA follows the {channel} release channel"),
+        Err(why) => eprintln!("{build}: recording the release channel failed: {why}"),
+    }
+}
+
 /// The key of [`MachineSettings::prerelease_updates`] in `machine.json`.
 const PRERELEASE_KEY: &str = "prerelease_updates";
 
@@ -1946,6 +1975,43 @@ mod tests {
         let text = std::fs::read_to_string(dir.join("machine.json")).unwrap();
         assert!(text.contains("\"prerelease_updates\": true"), "{text}");
         assert!(!store.machine().program_updates, "the other settings stay");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn d9_first_channel_is_recorded_once() {
+        let dir = scratch("service-first-channel");
+        let store = service_settings(dir.clone(), Some(ReleaseChannel::Prerelease), None);
+        keep_first_channel_logged(&store, "test");
+        let text = std::fs::read_to_string(dir.join("machine.json")).unwrap();
+        assert!(text.contains("\"prerelease_updates\": true"), "{text}");
+        // A later start from a stable installer finds the channel recorded and leaves it.
+        let again = service_settings(dir.clone(), Some(ReleaseChannel::Stable), None);
+        keep_first_channel_logged(&again, "test");
+        assert!(again.machine().prerelease_updates);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn d9_service_settings_without_a_first_channel_start_stable() {
+        let dir = scratch("service-no-channel");
+        let store = service_settings(dir.clone(), None, None);
+        assert!(!store.machine().prerelease_updates);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn d9_service_settings_start_a_new_user_from_the_previous_render_gpu() {
+        let dir = scratch("service-previous-gpu");
+        let store = service_settings(
+            dir.clone(),
+            None,
+            Some(Box::new(|user: &str| {
+                (user == "uid:1000").then(|| "RTX".to_string())
+            })),
+        );
+        assert_eq!(store.get("uid:1000").unwrap().render_gpu, "RTX");
+        assert_eq!(store.get("uid:1001").unwrap().render_gpu, "display");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

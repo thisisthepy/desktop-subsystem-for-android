@@ -63,6 +63,33 @@ pub fn read() -> Option<PowerState> {
     ))
 }
 
+/// What this computer says about itself, as Windows reports it.
+pub struct ComputerFacts;
+
+impl dsa_host_core::host_facts::HostFacts for ComputerFacts {
+    fn physical_memory_kb(&self) -> Option<u64> {
+        #[cfg(windows)]
+        {
+            read_memory().map(|(total_kb, _)| total_kb)
+        }
+        #[cfg(not(windows))]
+        {
+            None
+        }
+    }
+
+    fn installed_memory_kb(&self) -> Option<u64> {
+        #[cfg(windows)]
+        {
+            read_installed_memory_kb()
+        }
+        #[cfg(not(windows))]
+        {
+            None
+        }
+    }
+}
+
 /// The computer's physical memory, total and available, in KiB, or `None` when Windows
 /// cannot say.
 #[cfg(windows)]
@@ -111,17 +138,7 @@ pub fn follow(
     let mut pressure = dsa_host_core::power::MemoryPressure::new();
     while !stop.load(Ordering::Relaxed) {
         if let Some((total_kb, available_kb)) = read_memory() {
-            let was_low = pressure.low();
-            let low = pressure.update(total_kb, available_kb);
-            if low != was_low {
-                eprintln!(
-                    "host memory: {} MiB of {} MiB available, {}",
-                    available_kb / 1024,
-                    total_kb / 1024,
-                    if low { "short" } else { "no longer short" }
-                );
-            }
-            hub.update_memory(low);
+            pressure.observe(&hub, total_kb, available_kb);
         }
         let mut waited = std::time::Duration::ZERO;
         while waited < POLL && !stop.load(Ordering::Relaxed) {

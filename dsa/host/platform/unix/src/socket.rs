@@ -36,6 +36,9 @@ impl StreamSocket for Socket {
     fn shutdown(&mut self) {
         let _ = self.0.shutdown(std::net::Shutdown::Both);
     }
+    fn try_clone(&self) -> io::Result<Self> {
+        self.0.try_clone().map(Socket)
+    }
 }
 
 /// The user ID of the process on the other end of `stream`, as the kernel reports it.

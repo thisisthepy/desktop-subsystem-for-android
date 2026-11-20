@@ -404,12 +404,17 @@ struct IdentityFieldRow: View {
         let problem = vm.problem(field)
         VStack(alignment: .leading, spacing: 4) {
             LabeledContent {
-                TextField(field.placeholder, text: Binding(get: { vm.field(key).value }, set: { vm.edit(key, $0) }))
+                // Android's own value is the box's prompt, shown inside it while it is empty. A
+                // title would be drawn beside the box as a label, because the box is in a Form.
+                TextField("", text: Binding(get: { vm.field(key).value }, set: { vm.edit(key, $0) }),
+                          prompt: Text(field.placeholder))
+                    .labelsHidden()
+                    // The placeholder is Android's own value, not the box's name.
+                    .accessibilityLabel(vm.label(field))
+                    .multilineTextAlignment(.leading)
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 320)
                     .disabled(vm.isBusy)
-                    // The placeholder is Android's own value, not the box's name.
-                    .accessibilityLabel(vm.label(field))
             } label: {
                 RowLabel(title: vm.label(field), detail: vm.detail(field))
             }
@@ -799,6 +804,17 @@ struct LogsPage: View {
     }
 
     var body: some View {
+        // The page takes the size it is given and never offers one of its own. Every other
+        // page is a Form, which scrolls; this one is a stack with a list that fills it, and
+        // as the detail of the split view it made the split view taller than the window
+        // (1247 pt in a 656 pt window), so opening it scrolled the sidebar away and cut
+        // the page's top off.
+        GeometryReader { box in
+            page.frame(width: box.size.width, height: box.size.height)
+        }
+    }
+
+    private var page: some View {
         VStack(alignment: .leading, spacing: 10) {
             Note(text: T("LogsNote.Text"))
             if let error = vm.error {

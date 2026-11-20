@@ -177,16 +177,7 @@ fn save_color_buffers(adapter: &GfxstreamAdapter) -> Result<(), String> {
 
 fn memory(adapter: &GfxstreamAdapter) -> RendererProcessMemory {
     let (working_set_kb, private_kb) = own_memory_kb();
-    RendererProcessMemory {
-        process_id: std::process::id(),
-        held: dsa_host_core::memory::HeldMemory {
-            working_set_kb,
-            private_kb,
-            gpu_local_kb: None,
-            gpu_non_local_kb: None,
-        },
-        counted: adapter.counted_memory(),
-    }
+    RendererProcessMemory::of_this_process(working_set_kb, private_kb, adapter.counted_memory())
 }
 
 /// No task window is shown: gives back the memory the renderer is not using. The guest's

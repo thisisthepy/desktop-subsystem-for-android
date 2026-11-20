@@ -6,7 +6,8 @@
 //! which window each display's frames go to, [`window_hosts`] which app window host
 //! shows each window, [`window_sizing`] how a window's size and scale reach its task,
 //! [`frame_follow`] keeps a window at the size of the frame it shows, [`resize_pacing`]
-//! sends a drag's sizes no faster than the app draws them,
+//! sends a drag's sizes no faster than the app draws them, [`resize_queue`] holds and folds
+//! the sizes that wait for it,
 //! [`resize_latency`] measures how long a resized window waits for a frame of its new
 //! size, [`frame_buffers`] keeps a window's buffers at one size while it is resized,
 //! [`shown_windows`] says whether any window is shown, which lets the guest sleep, and
@@ -31,12 +32,15 @@ pub mod present_watch;
 pub mod program_exit;
 pub mod resize_latency;
 pub mod resize_pacing;
+pub mod resize_queue;
 pub mod shown_windows;
 pub mod splash;
 pub mod surface_calls;
+pub mod task_watch;
 pub mod task_windows;
 pub mod visible_change;
 pub mod window_hosts;
+pub mod window_menu;
 pub mod window_mode;
 pub mod window_reconnect;
 pub mod window_sizing;

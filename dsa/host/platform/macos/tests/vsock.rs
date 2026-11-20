@@ -53,6 +53,45 @@ fn pr1_each_port_has_one_channel_across_boots() {
     assert!(!Arc::ptr_eq(&first, &channels.receiver(5001)));
 }
 
+/// A boot drains the connections an earlier VM left, while the readers of every port keep
+/// waiting for the next one: each takes its port's lock for a whole wait and takes it again
+/// at once. The drain must not wait for a turn that the macOS mutex never gives it, or the
+/// VM is never started and Android stays in "Starting".
+#[test]
+fn fr1_draining_the_ports_for_a_boot_is_not_held_up_by_readers_waiting_on_them() {
+    let channels = Arc::new(PortChannels::default());
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let readers: Vec<_> = (5566..5570)
+        .map(|port| {
+            let incoming = channels.receiver(port);
+            let stop = Arc::clone(&stop);
+            std::thread::spawn(move || {
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    let rx = incoming.lock().unwrap_or_else(|e| e.into_inner());
+                    let _ = rx.recv_timeout(Duration::from_millis(500));
+                }
+            })
+        })
+        .collect();
+    // Let every reader settle into its wait.
+    std::thread::sleep(Duration::from_millis(200));
+    let (done_tx, done_rx) = mpsc::channel();
+    let drainer = Arc::clone(&channels);
+    std::thread::spawn(move || {
+        drainer.drain();
+        let _ = done_tx.send(());
+    });
+    let drained = done_rx.recv_timeout(Duration::from_secs(5)).is_ok();
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    for reader in readers {
+        let _ = reader.join();
+    }
+    assert!(
+        drained,
+        "drain did not return while readers waited on the ports"
+    );
+}
+
 #[test]
 fn fr29_the_file_server_port_carries_a_plain_byte_stream() {
     let (tx, rx) = mpsc::channel();

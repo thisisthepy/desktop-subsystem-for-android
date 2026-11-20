@@ -181,12 +181,7 @@ pub const DEFAULT_ACCENT: u32 = 0xFF35_84E4;
 
 /// The widget windows' look on a dark or light desktop with `accent` (0 for none).
 pub fn look(dark: bool, accent: u32) -> Look {
-    let accent = if accent >> 24 == 0 {
-        DEFAULT_ACCENT
-    } else {
-        accent
-    };
-    Look::new(dark, accent)
+    Look::with_default_accent(dark, accent, DEFAULT_ACCENT)
 }
 
 /// What the cursor shows over a part of a widget window, by its `cursor-shape-v1` name: the

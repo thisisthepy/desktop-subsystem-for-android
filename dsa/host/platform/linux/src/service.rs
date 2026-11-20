@@ -14,81 +14,55 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use dsa_host_core::boot::{BootPlanner, MemoryInputs};
+use dsa_host_core::boot_signs::{watch_boot_signs, BootSigns};
 use dsa_host_core::clock_trace::{ClockTrace, HostClock};
 use dsa_host_core::data_reset::TemplateDataDisk;
 use dsa_host_core::device_identity::{BootIdentity, FileDeviceIdentities, ImageBuild};
 use dsa_host_core::diagnostics::HostFile;
 use dsa_host_core::direct_mapped_disk::{DirectMappedImages, Store};
-use dsa_host_core::guest_log::{LogFilter, LogWatch, DEFAULT_BUFFERS, WARN};
 use dsa_host_core::handshake::ControlHandshake;
 use dsa_host_core::host_api::{
     HostApiService, NetworkStatus, PerUser, ServiceFacts, UserAndroid, UserAndroids,
 };
-use dsa_host_core::host_config::DEFAULT_MEMORY_MB;
+use dsa_host_core::host_config::{service_file_settings, updates_config, HostConfigFile};
+use dsa_host_core::host_facts::HostFacts;
 use dsa_host_core::host_paths::HostPaths;
-use dsa_host_core::memory::{summary_lines, HostMemory, LOG_INTERVAL};
+use dsa_host_core::input_trace::guest_traces_input;
+use dsa_host_core::memory::GrowthCeiling;
+use dsa_host_core::memory::{log_memory, HostMemory};
 use dsa_host_core::power::PowerHub;
 use dsa_host_core::root_approval::RootApproval;
-use dsa_host_core::session::{Session, SessionState};
-use dsa_host_core::settings::{FileSettings, SettingsStore};
+use dsa_host_core::session::Session;
+use dsa_host_core::settings::SettingsStore;
+use dsa_host_core::update::current::{current_image, CurrentImage};
 use dsa_host_core::update::service::{
-    check_alerting, follow_waiting_image, next_image_check, CheckNow, Download, StoreVersions,
-    UpdateNotices, UpdatingAndroid, WAITING_IMAGE_CHECK,
+    follow_waiting_image, open_updates_or_disable, run_update_checks, StoreVersions, UpdateCheck,
+    Updates, UpdatingAndroid, WAITING_IMAGE_CHECK,
 };
-use dsa_host_core::update::store::{ImageStore, Recovery};
 use dsa_host_core::window_manager::WindowManagerKeeper;
 use dsa_host_unix::paths::{Layout, UnixHostPaths};
 use dsa_host_unix::socket::UnixLocalListener;
 
 use crate::config::HostConfig;
 use crate::crosvm::guest_cid;
-use crate::image::{bring_disk_to, image_files, make_disk, ImageFiles};
+use crate::image::{ImageFiles, UserDisks};
 use crate::launcher::{BootPlan, LauncherSetup, LinuxVmLauncher, SharedNetworkStatus};
-use crate::signs::BootSigns;
 use crate::users::{uid_of, Account};
 use crate::vsock::{connect_stream, VsockHub};
 
-/// The boot property that makes the guest trace input, which the clock lines pair with.
-pub const GUEST_INPUT_TRACE: &str = "androidboot.hardware.dsa_input_trace=1";
+/// What this computer says about itself, from `/proc`.
+pub struct ProcFacts;
 
-/// How soon the service tries again while it has no image to boot.
-const FIRST_IMAGE_RETRY: Duration = Duration::from_secs(300);
-/// How soon an update check that the settings turned off looks at them again.
-const SETTINGS_RECHECK: Duration = Duration::from_secs(60);
-
-/// Whether the guest booted with `cmdline` traces input.
-pub fn guest_traces_input(cmdline: &str) -> bool {
-    cmdline.split_whitespace().any(|w| w == GUEST_INPUT_TRACE)
-}
-
-/// The memory a user's VM starts with and may grow to, in MiB, for a user whose limit is
-/// `limit_mb` (0 for automatic) on a computer with `total_mb`: a small start, as the guest
-/// kernel keeps page records for all the memory it has, and growth to their limit or to the
-/// computer's memory less what the host keeps.
-pub fn memory_sizing(limit_mb: u32, total_mb: Option<u64>) -> (u32, Option<u32>) {
-    let start = match limit_mb {
-        0 => DEFAULT_MEMORY_MB,
-        limit => limit.clamp(2048, DEFAULT_MEMORY_MB),
-    };
-    let max = total_mb
-        .map(|total| dsa_host_core::memory::vm_memory_mb(total, limit_mb))
-        .map(|max| u32::try_from(max).unwrap_or(u32::MAX))
-        .filter(|max| *max > start);
-    (start, max)
-}
-
-fn host_total_mb() -> Option<u64> {
-    host_total_kb().map(|total_kb| total_kb / 1024)
-}
-
-/// The computer's physical memory, in KiB.
-fn host_total_kb() -> Option<u64> {
-    let text = std::fs::read_to_string("/proc/meminfo").ok()?;
-    crate::devices::power::parse_meminfo(&text).map(|(total_kb, _)| total_kb)
+impl HostFacts for ProcFacts {
+    fn physical_memory_kb(&self) -> Option<u64> {
+        let text = std::fs::read_to_string("/proc/meminfo").ok()?;
+        crate::devices::power::parse_meminfo(&text).map(|(total_kb, _)| total_kb)
+    }
 }
 
 /// The host's monotonic clock, for the clock lines.
@@ -102,17 +76,6 @@ impl HostClock for MonotonicClock {
         unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts) };
         Duration::new(ts.tv_sec as u64, ts.tv_nsec as u32)
     }
-}
-
-/// What the service shares between users when it updates the image.
-#[derive(Clone)]
-pub struct Updates {
-    pub store: Arc<ImageStore>,
-    pub notices: Arc<UpdateNotices>,
-    pub boot_timeout: Duration,
-    pub trial_running: Arc<AtomicBool>,
-    /// Set when a user chose another Android version, so the image is checked for at once.
-    pub check_now: Arc<CheckNow>,
 }
 
 /// Where each user's files are.
@@ -160,7 +123,7 @@ impl UserFiles {
 }
 
 fn settings_store(config: &HostConfig) -> Arc<dyn SettingsStore> {
-    Arc::new(FileSettings::new(config.settings_dir()))
+    dsa_host_core::host_config::settings_store(config.settings_dir(), None, None)
 }
 
 /// The service's settings: a computer whose settings record no release channel yet starts on
@@ -174,11 +137,7 @@ fn service_settings_store(config: &HostConfig, build: &str) -> Arc<dyn SettingsS
     let first = entries
         .channel()
         .unwrap_or_else(|| ReleaseChannel::of_version(crate::VERSION));
-    let files = FileSettings::new(config.settings_dir()).with_first_channel(first);
-    match files.keep_first_channel() {
-        Ok(channel) => eprintln!("{build}: DSA follows the {channel} release channel"),
-        Err(why) => eprintln!("{build}: recording the release channel failed: {why}"),
-    }
+    let files = service_file_settings(config.settings_dir(), first, None, build);
     let store = ChannelFollowingSettings::new(Arc::new(files), entries);
     match store.bring_entries_in_line() {
         Ok(changed) => {
@@ -222,7 +181,11 @@ fn start_direct_mapped(
     Some(DirectMappedImages::start(
         Store::raw(folder),
         Box::new(move || {
-            let (dir, version) = current_image(&config, updates.as_ref()).ok()?;
+            let CurrentImage { dir, version, .. } = current_image(
+                updates.as_ref().map(|u| u.store.as_ref()),
+                config.image_dir.as_deref(),
+            )
+            .ok()?;
             let version = version
                 .or_else(|| dsa_host_core::direct_mapped_disk::worker::image_version(&dir))?;
             Some((version, dir))
@@ -244,22 +207,18 @@ fn check_raw_system_disk(config: &HostConfig, updates: Option<&Updates>, build: 
             if let Err(why) = lower_this_thread() {
                 eprintln!("{build}: checking the raw system disk at normal priority: {why}");
             }
-            let Ok((dir, _)) = current_image(&config, updates.as_ref()) else {
+            let Ok(CurrentImage { dir, .. }) = current_image(
+                updates.as_ref().map(|u| u.store.as_ref()),
+                config.image_dir.as_deref(),
+            ) else {
                 return;
             };
-            let had_copy = dir.join("system.img").exists();
-            match crate::image::verify_raw_disk(&dir) {
-                Ok(true) => eprintln!(
-                    "{build}: the raw copy of {}'s system disk matches its record",
-                    dir.display()
-                ),
-                Ok(false) if had_copy => eprintln!(
-                    "{build}: the raw copy of {}'s system disk did not match the image; it was removed, and the next boot makes it again",
-                    dir.display()
-                ),
-                Ok(false) => {}
-                Err(why) => eprintln!("{build}: checking the raw system disk: {why}"),
-            }
+            dsa_host_core::disk::raw_copy::verify_raw_copy_logged(
+                &dir.join("system.img"),
+                &dir.join("system.vhdx"),
+                &dir,
+                &build,
+            );
         });
     if let Err(why) = spawned {
         eprintln!("{label}: the raw system disk is not checked: {why}");
@@ -281,70 +240,6 @@ fn lower_this_thread() -> Result<(), String> {
         }
     }
     Ok(())
-}
-
-/// The image folder the next boot starts from, and its version.
-fn current_image(
-    config: &HostConfig,
-    updates: Option<&Updates>,
-) -> Result<(PathBuf, Option<String>), String> {
-    match (updates, &config.image_dir) {
-        (Some(updates), _) => {
-            let current = updates.store.state().map_err(|e| e.to_string())?.current;
-            Ok((
-                updates.store.image_dir(&current.version),
-                Some(current.version),
-            ))
-        }
-        (None, Some(dir)) => {
-            let version = std::fs::read_to_string(dir.join("image.json"))
-                .ok()
-                .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
-                .and_then(|m| m["version"].as_str().map(str::to_string));
-            Ok((dir.clone(), version))
-        }
-        (None, None) => Err("the configuration names no Android image".into()),
-    }
-}
-
-/// Reads Android's log while it boots, for what explains a boot that stalls.
-fn watch_boot_signs(session: Weak<Session>, signs: Arc<Mutex<BootSigns>>) {
-    let Some(events) = session.upgrade().map(|s| s.events()) else {
-        return;
-    };
-    let mut watch: Option<LogWatch> = None;
-    loop {
-        let Some(running) = session.upgrade() else {
-            return;
-        };
-        let booting = matches!(
-            running.state(),
-            SessionState::Starting | SessionState::Stalled
-        );
-        if booting && watch.is_none() {
-            watch = Some(running.watch_log(LogFilter {
-                buffers: DEFAULT_BUFFERS,
-                tags: vec![("*".into(), WARN)],
-            }));
-        } else if !booting {
-            watch = None;
-        }
-        drop(running);
-        match &watch {
-            Some(log) => {
-                if let Ok(entry) = log.entries.recv_timeout(Duration::from_millis(500)) {
-                    let mut signs = signs.lock().unwrap_or_else(|e| e.into_inner());
-                    for entry in std::iter::once(entry).chain(log.entries.try_iter()) {
-                        signs.read_line(&format!("{}: {}", entry.tag, entry.message));
-                    }
-                }
-            }
-            None => match events.recv_timeout(Duration::from_secs(1)) {
-                Ok(_) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
-            },
-        }
-    }
 }
 
 fn vm_cid(vm_id: &str) -> std::io::Result<u32> {
@@ -377,79 +272,46 @@ pub fn create_user_android(
     let store = settings_store(config);
     let trace_on = Arc::new(AtomicBool::new(false));
     let plan = {
-        let (config, updates, account, store) = (
-            config.clone(),
-            updates.cloned(),
-            account.clone(),
-            Arc::clone(&store),
-        );
-        let (disk, run_dir, traced, user) = (
+        let (disk, run_dir, traced) = (
             files.data_disk.clone(),
             files.run_dir.clone(),
             Arc::clone(&trace_on),
-            user.to_string(),
         );
+        let planner = BootPlanner {
+            store: updates.map(|u| Arc::clone(&u.store)),
+            configured_dir: config.image_dir.clone(),
+            rules: crate::image::image_rules(config.kernel.as_deref(), &config.kernel_cmdline),
+            check: None,
+            data_disk: files.data_disk.clone(),
+            data_disk_size_gb: config.data_disk_size_gb,
+            image_cache: None,
+            backend: UserDisks(account.clone()),
+            memory: MemoryInputs {
+                fixed_mb: config.memory_mb,
+                settings: Arc::clone(&store),
+                user: user.to_string(),
+                ceiling: GrowthCeiling::HostLessReserve,
+                facts: Arc::new(ProcFacts),
+                hypervisor_max_mb: None,
+            },
+        };
         Box::new(move || -> Result<BootPlan, String> {
-            let (dir, version) = current_image(&config, updates.as_ref())?;
-            let mut image = image_files(&dir, config.kernel.as_deref(), &config.kernel_cmdline)?;
+            crate::image::adopt_legacy_version_record(&disk);
+            let boot = planner.plan()?;
+            let mut image = boot.files;
             // Every app starts at the density of the user's main monitor, which their window
             // manager records, so the windows that open there ask for no other.
             image.kernel_cmdline =
                 crate::monitor_density::with_boot_density(&image.kernel_cmdline, &run_dir);
-            // crosvm attaches raw disks, so a VHDX system disk is read into one once.
-            image.system_image = image
-                .system_image
-                .as_deref()
-                .map(crate::image::raw_disk)
-                .transpose()?;
-            // A disk holding a newer Android's data than this image, after the user chose an
-            // older version and agreed to erase it, starts afresh.
-            if let Some(updates) = &updates {
-                let major = updates
-                    .store
-                    .state()
-                    .map_err(|e| e.to_string())?
-                    .current
-                    .android_major;
-                dsa_host_core::data_reset::erase_if_newer(
-                    &disk,
-                    &crate::image::version_file(&disk),
-                    major,
-                )?;
-            }
-            match (&image.disk_template, &version) {
-                (Some(template), Some(version)) => bring_disk_to(
-                    &account,
-                    &disk,
-                    template,
-                    image.system_image.is_some(),
-                    version,
-                )?,
-                (template, _) if !disk.exists() => make_disk(
-                    &account,
-                    &disk,
-                    template.as_deref(),
-                    config.data_disk_size_gb,
-                )?,
-                _ => {}
-            }
-            let (memory_mb, memory_max_mb) = match config.memory_mb {
-                Some(fixed) => (fixed, None),
-                None => {
-                    let limit = store.get(&user).map(|s| s.memory_limit_mb).unwrap_or(0);
-                    memory_sizing(limit, host_total_mb())
-                }
-            };
-            eprintln!(
-                "{user}: memory: Android starts with {memory_mb} MiB and may grow to {}",
-                memory_max_mb.map_or("its start".to_string(), |mb| format!("{mb} MiB"))
-            );
             traced.store(guest_traces_input(&image.kernel_cmdline), Ordering::Relaxed);
             Ok(BootPlan {
                 files: image,
-                image_version: version,
-                memory_mb,
-                memory_max_mb,
+                image_version: boot.image_version,
+                memory_mb: boot.memory.start_mb,
+                memory_max_mb: boot
+                    .memory
+                    .max_mb
+                    .map(|mb| u32::try_from(mb).unwrap_or(u32::MAX)),
             })
         })
     };
@@ -486,18 +348,16 @@ pub fn create_user_android(
         let (store, user) = (Arc::clone(&store), user.to_string());
         let addons = files.addon_disk.clone();
         Box::new(move |image: &ImageFiles| {
-            use dsa_host_core::addon_disk::{self, AddonDisk, Format};
+            use dsa_host_core::addon_disk::{AddonDisk, Format};
             let dir = image.initrd.as_deref().and_then(Path::parent);
             let attached = AddonDisk::new(&addons, Format::Raw).attached();
-            addon_disk::bootconfig(&attached).to_string()
-                + &dsa_host_core::arm_translation::bootconfig_for(&*store, &user, dir, &attached)
-                + &dsa_host_core::gapps::bootconfig_for(&*store, &user, &attached)
-                + &dsa_host_core::widevine::bootconfig_for(&*store, &user, &attached)
-                // The computer's physical memory, read at each start, which Google Play sees
-                // as the device's memory.
-                // Linux has no figure for the installed modules that a user can read without
-                // root, so the total memory stands for it (the guest rounds it to whole GiB).
-                + &dsa_host_core::host_memory::bootconfig(host_total_kb(), host_total_kb())
+            dsa_host_core::bootconfig::for_boot(
+                &*store,
+                &user,
+                dir,
+                &attached,
+                &ProcFacts,
+            )
         })
     })
     .with_boot_properties({
@@ -505,12 +365,7 @@ pub fn create_user_android(
         // boots. The computer is read again at each start, so a renamed one is followed.
         let identity = Arc::clone(&boot_identity);
         Box::new(move |image: &ImageFiles| {
-            let built = image
-                .initrd
-                .as_deref()
-                .and_then(Path::parent)
-                .and_then(ImageBuild::from_image_dir);
-            Some(identity.boot_properties(built.as_ref()))
+            Some(identity.boot_properties_of_initrd(image.initrd.as_deref()))
         })
     })
     .with_direct_mapped(direct_mapped.cloned());
@@ -688,181 +543,19 @@ pub fn create_user_android(
     })
 }
 
-/// Opens the update store when the configuration names one.
-fn open_updates(config: &HostConfig, build: &str) -> Result<Option<Updates>, String> {
-    let (Some(root), Some(first)) = (&config.images_dir, &config.first_image) else {
-        return Ok(None);
-    };
-    let store = ImageStore::open_as(root, first, build).map_err(|e| e.to_string())?;
-    match store.recover(first) {
-        Ok(Recovery::Usable) => {}
-        Ok(Recovery::Moved { broken, current }) => eprintln!(
-            "{build}: the image {} has missing or broken files; using {} instead",
-            broken.version, current.version
-        ),
-        Ok(Recovery::NothingBetter { broken }) => {
-            if store.has_image(&broken.version) {
-                eprintln!(
-                    "{build}: the image {} has missing or broken files and no other image is \
-                     installed",
-                    broken.version
-                );
-            }
-        }
-        Err(why) => eprintln!("{build}: checking the current image: {why}"),
-    }
-    let boot_timeout = config
-        .update
-        .as_ref()
-        .map(|u| u.boot_timeout_secs)
-        .unwrap_or(300);
-    Ok(Some(Updates {
-        store: Arc::new(store),
-        notices: Arc::new(UpdateNotices::default()),
-        boot_timeout: Duration::from_secs(boot_timeout),
-        trial_running: Arc::new(AtomicBool::new(false)),
-        check_now: Arc::new(CheckNow::default()),
-    }))
-}
-
-/// Checks the release list a minute after the service starts and then every
-/// `check_interval_hours`, until `stop` is set. Without an image to boot it checks at once and
-/// again every few minutes until one is in place.
-fn check_for_updates(
-    config: HostConfig,
-    updates: Updates,
-    build: String,
-    stop: Arc<AtomicBool>,
-    store: Arc<dyn SettingsStore>,
-    direct_mapped: Option<&DirectMappedImages>,
-) {
-    let Some(settings) = config.update.clone() else {
-        return;
-    };
-    let keys = match settings.keys() {
-        Ok(keys) => keys,
-        Err(error) => return eprintln!("{build}: not checking for updates: {error}"),
-    };
-    let interval = Duration::from_secs(settings.check_interval_hours.max(1) * 3600);
-    let no_image = || {
-        updates
-            .store
-            .state()
-            .map(|state| !updates.store.has_image(&state.current.version))
-            .unwrap_or(false)
-    };
-    let mut next = if no_image() {
-        Instant::now()
-    } else {
-        Instant::now() + Duration::from_secs(60)
-    };
-    let fetch = crate::fetch::CurlFetch;
-    while !stop.load(Ordering::Relaxed) {
-        next = next_image_check(next, Instant::now(), !no_image(), FIRST_IMAGE_RETRY);
-        // A user who chose another Android version waits for it now, not at the next turn.
-        if updates.check_now.take() {
-            next = Instant::now();
-        }
-        if Instant::now() < next {
-            thread::sleep(Duration::from_secs(1));
-            continue;
-        }
-        let waiting_for_first = no_image();
-        if !waiting_for_first && !updates.store.switch_pending() && !store.machine().image_updates {
-            next = Instant::now() + SETTINGS_RECHECK;
-            continue;
-        }
-        let mut shown = None;
-        let mut announce = |download: &Download| {
-            let percent = (download.done as u128 * 100)
-                .checked_div(download.total as u128)
-                .unwrap_or(100);
-            if shown == Some(percent) {
-                return;
-            }
-            shown = Some(percent);
-            let notice = download.notice();
-            if download.done == 0 {
-                eprintln!("{build}: {notice}");
-            }
-            updates.notices.set(notice);
-        };
-        // The computer's release channel picks the image list (on the pre-release channel
-        // the pre-release list beside the stable one) and the images it may take: a computer
-        // on the stable channel never moves to a pre-release image.
-        match check_alerting(
-            &updates.store,
-            &fetch,
-            &settings.list_url,
-            &keys,
-            store.machine().release_channel(),
-            &updates.notices,
-            &mut announce,
-        ) {
-            Ok(Some(notice)) => {
-                eprintln!("{build}: {notice}");
-                updates.notices.set(notice);
-                // A new image was downloaded and checked: its direct-mapped system disk is
-                // made now, in the background, before the next start of Android needs it.
-                if let Some(images) = direct_mapped {
-                    images.kick();
-                }
-            }
-            Ok(None) => {}
-            Err(error) => {
-                eprintln!("{build}: checking for updates: {error}");
-                if waiting_for_first {
-                    updates.notices.set(format!(
-                        "the Android image could not be downloaded yet ({error}); the service \
-                         tries again in {} minutes",
-                        FIRST_IMAGE_RETRY.as_secs() / 60
-                    ));
-                }
-            }
-        }
-        next = Instant::now()
-            + if no_image() {
-                FIRST_IMAGE_RETRY
-            } else {
-                interval
-            };
-    }
-}
-
 /// The host's logs that go in a user's diagnostics: the console of their Android.
 pub fn host_logs_of(user: &str) -> Vec<HostFile> {
     let Ok(files) = UserFiles::of(&host_paths(), user) else {
         return Vec::new();
     };
-    let mut old = files.console_log.as_os_str().to_owned();
-    old.push(".old");
-    vec![
-        HostFile {
-            name: "host/android-console.log".into(),
-            path: files.console_log,
+    dsa_host_core::console_log::diagnostic_files(&files.console_log)
+        .into_iter()
+        .map(|(name, path)| HostFile {
+            name: name.into(),
+            path,
             only_user: None,
-        },
-        HostFile {
-            name: "host/android-console.1.log".into(),
-            path: PathBuf::from(old),
-            only_user: None,
-        },
-    ]
-}
-
-/// Logs the memory of every running user's Android every few minutes until `stop` is set.
-fn log_memory(androids: &dyn UserAndroids, host: &dyn HostMemory, build: &str, stop: &AtomicBool) {
-    let mut next = Instant::now() + LOG_INTERVAL;
-    while !stop.load(Ordering::Relaxed) {
-        thread::sleep(Duration::from_secs(1));
-        if Instant::now() < next {
-            continue;
-        }
-        next = Instant::now() + LOG_INTERVAL;
-        for line in summary_lines(androids, host) {
-            eprintln!("{build}: {line}");
-        }
-    }
+        })
+        .collect()
 }
 
 /// The network status of each user's running VM.
@@ -899,29 +592,31 @@ pub fn serve(config: HostConfig, build: &str, stop: Arc<AtomicBool>) -> Result<(
     }
     let grace = Duration::from_secs(config.stop_timeout_secs + 15);
     let store = service_settings_store(&config, build);
-    let updates = match open_updates(&config, build) {
-        Ok(updates) => updates,
-        Err(error) => {
-            eprintln!("{build}: image updates disabled: {error}");
-            None
-        }
+    // A store that cannot be opened turns image updates off; Android still starts from the
+    // image it has, and the reason is shown with the Android version.
+    let (updates, updates_disabled) = match open_updates_or_disable(updates_config(&config), build)
+    {
+        Ok(updates) => (updates, None),
+        Err(disabled) => (None, Some(disabled)),
     };
     let direct_mapped = start_direct_mapped(&config, updates.as_ref(), build);
     check_raw_system_disk(&config, updates.as_ref(), build);
-    if let Some(updates) = &updates {
-        let (config, updates, worker_build, stop, store, made) = (
-            config.clone(),
-            updates.clone(),
-            build.to_string(),
-            Arc::clone(&stop),
-            Arc::clone(&store),
-            direct_mapped.clone(),
-        );
+    if let (Some(updates), Some(settings)) = (&updates, config.update.clone()) {
+        let check = UpdateCheck {
+            settings,
+            updates: updates.clone(),
+            store: Arc::clone(&store),
+            build: build.to_string(),
+            // A new image was downloaded and checked: its direct-mapped system disk is made
+            // now, in the background, before the next start of Android needs it.
+            on_new_image: direct_mapped
+                .clone()
+                .map(|images| Box::new(move || images.kick()) as Box<dyn Fn() + Send>),
+        };
+        let stop = Arc::clone(&stop);
         if let Err(error) = thread::Builder::new()
             .name("dsa-updates".into())
-            .spawn(move || {
-                check_for_updates(config, updates, worker_build, stop, store, made.as_deref())
-            })
+            .spawn(move || run_update_checks(check, &crate::fetch::CurlFetch, stop))
         {
             eprintln!("{build}: starting the update check failed: {error}");
         }
@@ -1033,22 +728,20 @@ pub fn serve(config: HostConfig, build: &str, stop: Arc<AtomicBool>) -> Result<(
                 .map_err(|e| format!("reading {}: {e}", folder.display()))?
                 .uid();
             let account = Account::of_uid(owner)?;
-            let (dir, version) = current_image(&reset_config, reset_updates.as_ref())?;
-            let image = image_files(&dir, reset_config.kernel.as_deref(), "")?;
-            make_disk(
-                &account,
+            dsa_host_core::boot::make_fresh_disk(
+                &UserDisks(account),
+                &crate::image::image_rules(reset_config.kernel.as_deref(), ""),
+                (
+                    reset_updates.as_ref().map(|u| u.store.as_ref()),
+                    reset_config.image_dir.as_deref(),
+                ),
+                None,
                 disk,
-                image.disk_template.as_deref(),
                 reset_config.data_disk_size_gb,
-            )?;
-            match version {
-                Some(version) => {
-                    account.write_private(&crate::image::version_file(disk), version.as_bytes())
-                }
-                None => Ok(()),
-            }
+            )
         }),
     )
+    .with_beside("image-version")
     .with_beside("version");
     let identity_config = config.clone();
     let translator_config = config.clone();
@@ -1076,7 +769,11 @@ pub fn serve(config: HostConfig, build: &str, stop: Arc<AtomicBool>) -> Result<(
         .with_device_identities(
             Arc::new(FileDeviceIdentities::new(config.settings_dir())),
             Arc::new(move |_: &str| {
-                let (dir, _) = current_image(&identity_config, identity_updates.as_ref()).ok()?;
+                let CurrentImage { dir, .. } = current_image(
+                    identity_updates.as_ref().map(|u| u.store.as_ref()),
+                    identity_config.image_dir.as_deref(),
+                )
+                .ok()?;
                 ImageBuild::from_image_dir(&dir)
             }),
         )
@@ -1085,7 +782,11 @@ pub fn serve(config: HostConfig, build: &str, stop: Arc<AtomicBool>) -> Result<(
         // The default ARM translator of the image the next start boots: only an x86_64 image
         // has one.
         .with_default_arm_translation(Arc::new(move |_: &str| {
-            let (dir, _) = current_image(&translator_config, translator_updates.as_ref()).ok()?;
+            let CurrentImage { dir, .. } = current_image(
+                translator_updates.as_ref().map(|u| u.store.as_ref()),
+                translator_config.image_dir.as_deref(),
+            )
+            .ok()?;
             dsa_host_core::arm_translation::default_package(&dir)
         }));
     if let Some(source) = android_version {
@@ -1117,6 +818,8 @@ pub fn serve(config: HostConfig, build: &str, stop: Arc<AtomicBool>) -> Result<(
             check_now: Arc::clone(&updates.check_now),
             shared_by_users: true,
         }));
+    } else if let Some(disabled) = updates_disabled {
+        service = service.with_android_versions(Arc::new(disabled));
     }
     {
         let androids = androids.clone();
@@ -1151,22 +854,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn nfr2_the_vm_starts_small_and_may_grow_to_the_computer_less_the_hosts_share() {
-        let (start, max) = memory_sizing(0, Some(32 * 1024));
-        assert_eq!(start, DEFAULT_MEMORY_MB);
-        let max = max.unwrap();
-        assert!(max > start && max < 32 * 1024);
-        // A user's limit caps both.
-        assert_eq!(memory_sizing(2048, Some(32 * 1024)), (2048, None));
-        assert_eq!(
-            memory_sizing(8192, Some(32 * 1024)),
-            (DEFAULT_MEMORY_MB, Some(8192))
-        );
-        // Without the computer's size the VM keeps its start.
-        assert_eq!(memory_sizing(0, None), (DEFAULT_MEMORY_MB, None));
-    }
-
-    #[test]
     fn fr19_each_users_android_files_are_in_their_own_data_folder() {
         let paths = UnixHostPaths::new(
             Layout::Linux,
@@ -1193,16 +880,6 @@ mod tests {
             files.run_dir,
             PathBuf::from("/home/ana/.local/share/dsa/tmp")
         );
-    }
-
-    #[test]
-    fn fr5_the_clock_is_paired_only_for_a_guest_booted_with_the_input_trace() {
-        assert!(guest_traces_input(
-            "androidboot.hardware.dsa_input_trace=1 a=b"
-        ));
-        assert!(!guest_traces_input(
-            "androidboot.hardware.dsa_input_trace=0"
-        ));
     }
 
     #[test]

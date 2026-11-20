@@ -13,8 +13,12 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use dsa_host_core::boot_signs::{
+    explain_unfinished_boot, explain_unreachable_agent, BootSigns, BootWords,
+};
 use dsa_host_core::bootconfig;
 use dsa_host_core::device_identity::{append_overlay, ramdisk_overlay};
+use dsa_host_core::memory::growth_failed_line;
 use dsa_host_core::session::{GuestLauncher, GuestStall};
 use dsa_protocol::auth::{bootconfig_entry, BootSecret};
 
@@ -70,6 +74,14 @@ impl Drop for TransientFile {
     }
 }
 
+/// What this host tells the user about a late boot that no other host would.
+const BOOT_WORDS: BootWords<'static> = BootWords {
+    renderer_note:
+        "The renderer (dsa-gfx) is started by DSA's window manager (dsa-wm), which must \
+                    run in your login session; its log is in DSA's logs folder.",
+    start_over: "run `dsa stop` and move",
+};
+
 /// How many lines of the console a failed start reports.
 const CONSOLE_LINES: usize = 30;
 
@@ -79,12 +91,15 @@ pub struct MacVmLauncher {
     slot: VmSlot,
     boot_dir: PathBuf,
     console_log: Option<PathBuf>,
+    /// What Android's log showed while it booted, which whoever reads that log fills in. Each
+    /// boot starts it afresh.
+    log_signs: Arc<Mutex<BootSigns>>,
+    /// The writable disk of the last boot, which is Android's data.
+    data_disk: Option<PathBuf>,
     prerequisite: Option<Prerequisite>,
     /// The memory the running VM started with and may grow to, in MiB.
     memory: Option<(u64, u64)>,
     boots: u64,
-    /// Whether growing memory failed, so later boots start at a fixed size.
-    fixed_memory: bool,
     /// The framework's process that runs the VM, for the memory report.
     process: VmProcess,
 }
@@ -102,10 +117,11 @@ impl MacVmLauncher {
             slot: VmSlot::default(),
             boot_dir,
             console_log,
+            log_signs: Arc::default(),
+            data_disk: None,
             prerequisite: None,
             memory: None,
             boots: 0,
-            fixed_memory: false,
             process: VmProcess::default(),
         }
     }
@@ -113,6 +129,25 @@ impl MacVmLauncher {
     pub fn with_prerequisite(mut self, prerequisite: Prerequisite) -> MacVmLauncher {
         self.prerequisite = Some(prerequisite);
         self
+    }
+
+    /// Reads the signs of a late boot from `signs` as well as from the console: whoever reads
+    /// Android's log while it boots fills it in.
+    pub fn with_log_signs(mut self, signs: Arc<Mutex<BootSigns>>) -> MacVmLauncher {
+        self.log_signs = signs;
+        self
+    }
+
+    /// What this boot's console and Android's log have shown about why it is late.
+    fn signs(&self) -> BootSigns {
+        let mut signs = self
+            .console_log
+            .as_ref()
+            .and_then(|log| std::fs::read(log).ok())
+            .map(|bytes| BootSigns::from_console(&String::from_utf8_lossy(&bytes)))
+            .unwrap_or_default();
+        signs.merge(&self.log_signs.lock().unwrap_or_else(|e| e.into_inner()));
+        signs
     }
 
     /// Records the running VM's process in `process`.
@@ -201,9 +236,6 @@ impl GuestLauncher for MacVmLauncher {
             );
         }
         let mut plan = (self.source)()?;
-        if self.fixed_memory {
-            plan.vm.memory_max_mb = plan.vm.memory_start_mb;
-        }
         self.boots += 1;
         let initrd = self.write_initrd(
             &plan.vm.initrd,
@@ -214,6 +246,13 @@ impl GuestLauncher for MacVmLauncher {
         plan.vm.initrd = initrd.0.clone();
         plan.vm.console_log = self.console_log.clone();
         self.rotate_console();
+        *self.log_signs.lock().unwrap_or_else(|e| e.into_inner()) = BootSigns::default();
+        self.data_disk = plan
+            .vm
+            .disks
+            .iter()
+            .find(|disk| !disk.read_only)
+            .map(|disk| disk.path.clone());
         self.channels.drain();
         let before = vm_processes();
         let vm = Arc::new(VirtualMachine::create(&plan.vm, &self.channels)?);
@@ -261,7 +300,7 @@ impl GuestLauncher for MacVmLauncher {
     fn exited(&mut self) -> Option<String> {
         let vm = self.slot.get()?;
         let ended = vm.ended()?;
-        Some(format!("Android's VM ended during boot ({ended})"))
+        Some(format!("Android's VM ended by itself ({ended})"))
     }
 
     fn diagnostics(&mut self) -> Option<String> {
@@ -279,8 +318,18 @@ impl GuestLauncher for MacVmLauncher {
     }
 
     fn explain_stall(&mut self, stall: GuestStall) -> Option<String> {
-        let _ = stall;
-        self.console_tail()
+        let log = self.console_log.clone()?;
+        let signs = self.signs();
+        Some(match stall {
+            GuestStall::BootUnfinished => explain_unfinished_boot(&signs, &log, &BOOT_WORDS),
+            GuestStall::AgentUnreachable => {
+                explain_unreachable_agent(&signs, &log, self.data_disk.as_deref(), &BOOT_WORDS)
+            }
+        })
+    }
+
+    fn agent_refused_for_keys(&mut self) -> bool {
+        self.signs().agent_refused_for_keys()
     }
 
     fn freeze(&mut self) -> Result<(), String> {
@@ -309,7 +358,9 @@ impl GuestLauncher for MacVmLauncher {
     }
 
     fn memory_growth_failed(&mut self, why: &str) {
-        eprintln!("memory: growing Android's VM failed ({why}); later boots keep their start size");
-        self.fixed_memory = true;
+        eprintln!(
+            "{}",
+            growth_failed_line(why, self.memory.map(|(start, _)| start))
+        );
     }
 }

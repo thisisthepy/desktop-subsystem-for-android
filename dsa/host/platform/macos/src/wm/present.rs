@@ -21,6 +21,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use dsa_host_core::compositor::resize_queue::DrawnFrames;
 use dsa_host_core::compositor::window_hosts::HostId;
 use dsa_protocol::window_host::types::envelope::Body;
 use dsa_protocol::window_host::types::{Frame, FrameTexture};
@@ -71,10 +72,12 @@ pub struct Presenter {
     /// How many frames reached a routed display: after a GPU reset, a guest that draws none
     /// has a compositor that did not recover.
     frames_shown: AtomicU64,
+    /// Told of each frame an app drew, so a size of a drag held back for it may go.
+    drawn: DrawnFrames,
 }
 
 impl Presenter {
-    pub fn new(links: Links, ports: Option<Arc<SurfacePorts>>) -> Presenter {
+    pub fn new(links: Links, ports: Option<Arc<SurfacePorts>>, drawn: DrawnFrames) -> Presenter {
         Presenter {
             state: Mutex::new(State {
                 displays: HashMap::new(),
@@ -84,6 +87,7 @@ impl Presenter {
             ports,
             forget: Mutex::new(None),
             frames_shown: AtomicU64::new(0),
+            drawn,
         }
     }
 
@@ -384,7 +388,7 @@ impl FrameSink for Presenter {
             return;
         };
         self.frames_shown.fetch_add(1, Ordering::Relaxed);
-        super::resize_queue::frame_drawn(shown.task_id, (width, height));
+        self.drawn.frame_drawn(shown.task_id, (width, height));
         if let Some(announce) = shown.slots.written(slot, (width, height), Instant::now()) {
             announce_frame(shown, announce);
         }
@@ -404,7 +408,7 @@ mod tests {
             .lock()
             .unwrap()
             .insert(host, Arc::new(HostLink::silent(host, 1)));
-        let presenter = Presenter::new(links, None);
+        let presenter = Presenter::new(links, None, DrawnFrames::new());
         presenter.set_routes(&[Route {
             display_id: 1,
             task_id: 7,

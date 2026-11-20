@@ -62,17 +62,6 @@ pub use dsa_host_unix::vhdx;
 pub mod vm_config;
 pub mod wm;
 
-/// GUID partition tables, shared with the Windows host: the same disks, read the same way.
-#[allow(dead_code)]
-#[path = "../../windows/src/gpt.rs"]
-pub(crate) mod gpt;
-
-/// The pstore disk, shared with the Windows host. macOS attaches its disk part, without the
-/// VHD footer.
-#[allow(dead_code)]
-#[path = "../../windows/src/pstore_disk.rs"]
-pub(crate) mod pstore_disk;
-
 #[cfg(target_os = "macos")]
 pub mod adb_discovery;
 #[cfg(target_os = "macos")]

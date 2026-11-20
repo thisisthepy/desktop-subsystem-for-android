@@ -142,14 +142,7 @@ pub const DEFAULT_ACCENT: u32 = 0xFF00_7AFF;
 
 /// The widget panels' look on a dark or light appearance with `accent` (0 for none).
 pub fn look(dark: bool, accent: u32) -> Look {
-    Look::new(
-        dark,
-        if accent >> 24 == 0 {
-            DEFAULT_ACCENT
-        } else {
-            accent
-        },
-    )
+    Look::with_default_accent(dark, accent, DEFAULT_ACCENT)
 }
 
 /// The color of three components from 0 to 1 as `0xFFRRGGBB`.

@@ -288,6 +288,41 @@ impl Assembler {
     }
 }
 
+/// Prints `job` from a file in `spool`, as every host does it: the document is written under
+/// `document_name` (made unique by the caller), `print` is called with its path unless the job
+/// was withdrawn already, and the file is removed afterwards, whatever came of it.
+///
+/// `make_dir` makes the spool folder (a host decides who may read it). A failure of any step is
+/// the job's [`PrintOutcome::Failed`] with the reason, and a panic in `print` is too: nothing a
+/// printer does ends the follower.
+pub fn print_spooled(
+    job: &PrintJob,
+    spool: &std::path::Path,
+    make_dir: impl FnOnce(&std::path::Path) -> std::io::Result<()>,
+    document_name: &str,
+    withdrawn: &std::sync::atomic::AtomicBool,
+    print: impl FnOnce(&std::path::Path) -> PrintOutcome,
+) -> PrintOutcome {
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+    use std::sync::atomic::Ordering;
+    if let Err(error) = make_dir(spool) {
+        return PrintOutcome::Failed(format!("creating {}: {error}", spool.display()));
+    }
+    let document = spool.join(document_name);
+    if let Err(error) = std::fs::write(&document, job.pdf.as_slice()) {
+        let _ = std::fs::remove_file(&document);
+        return PrintOutcome::Failed(format!("writing {}: {error}", document.display()));
+    }
+    let outcome = if withdrawn.load(Ordering::Relaxed) {
+        PrintOutcome::Canceled
+    } else {
+        catch_unwind(AssertUnwindSafe(|| print(&document)))
+            .unwrap_or_else(|_| PrintOutcome::Failed("the printing code failed".into()))
+    };
+    let _ = std::fs::remove_file(&document);
+    outcome
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -420,5 +455,95 @@ mod tests {
         let failed = PrintOutcome::Failed("out of paper".into()).to_control(3);
         assert_eq!(failed.outcome, control::PrintOutcome::Failed as i32);
         assert_eq!(failed.message, "out of paper");
+    }
+
+    fn spooled_job() -> PrintJob {
+        PrintJob {
+            job_id: 1,
+            package_name: "com.example.docs".into(),
+            app_label: "Docs".into(),
+            document_name: "Report".into(),
+            settings: PrintSettings::default(),
+            pdf: Arc::new(b"%PDF-1.7".to_vec()),
+        }
+    }
+
+    fn spool_folder(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("dsa-spool-{name}-{}", std::process::id()))
+    }
+
+    #[test]
+    fn fr26_a_spooled_document_is_printed_from_a_file_that_is_removed_after() {
+        let spool = spool_folder("printed");
+        let withdrawn = std::sync::atomic::AtomicBool::new(false);
+        let mut seen = None;
+        let outcome = print_spooled(
+            &spooled_job(),
+            &spool,
+            |dir| std::fs::create_dir_all(dir),
+            "print-1.pdf",
+            &withdrawn,
+            |path| {
+                seen = Some((path.to_path_buf(), std::fs::read(path).unwrap()));
+                PrintOutcome::Printed
+            },
+        );
+        assert_eq!(outcome, PrintOutcome::Printed);
+        let (path, bytes) = seen.unwrap();
+        assert_eq!(bytes, b"%PDF-1.7");
+        assert!(!path.exists());
+        let _ = std::fs::remove_dir_all(&spool);
+    }
+
+    #[test]
+    fn fr26_a_withdrawn_spooled_job_is_canceled_without_printing() {
+        let spool = spool_folder("withdrawn");
+        let withdrawn = std::sync::atomic::AtomicBool::new(true);
+        let outcome = print_spooled(
+            &spooled_job(),
+            &spool,
+            |dir| std::fs::create_dir_all(dir),
+            "print-2.pdf",
+            &withdrawn,
+            |_| panic!("a withdrawn job is not printed"),
+        );
+        assert_eq!(outcome, PrintOutcome::Canceled);
+        let _ = std::fs::remove_dir_all(&spool);
+    }
+
+    #[test]
+    fn fr26_a_printer_that_panics_fails_the_job_instead_of_the_follower() {
+        let spool = spool_folder("panics");
+        let withdrawn = std::sync::atomic::AtomicBool::new(false);
+        let outcome = print_spooled(
+            &spooled_job(),
+            &spool,
+            |dir| std::fs::create_dir_all(dir),
+            "print-3.pdf",
+            &withdrawn,
+            |_| panic!("printer bug"),
+        );
+        assert_eq!(
+            outcome,
+            PrintOutcome::Failed("the printing code failed".into())
+        );
+        let _ = std::fs::remove_dir_all(&spool);
+    }
+
+    #[test]
+    fn fr26_a_spool_folder_that_cannot_be_made_fails_the_job_with_the_reason() {
+        let withdrawn = std::sync::atomic::AtomicBool::new(false);
+        let outcome = print_spooled(
+            &spooled_job(),
+            std::path::Path::new("spool"),
+            |_| Err(std::io::Error::other("denied")),
+            "print-4.pdf",
+            &withdrawn,
+            |_| PrintOutcome::Printed,
+        );
+        assert_eq!(
+            outcome,
+            PrintOutcome::Failed("creating spool: denied".into())
+        );
     }
 }

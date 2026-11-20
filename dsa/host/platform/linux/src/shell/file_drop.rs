@@ -27,7 +27,7 @@ fn local_path(uri: &str) -> Option<PathBuf> {
     } else {
         rest.strip_prefix("localhost")?
     };
-    let bytes = percent_decode(path)?;
+    let bytes = dsa_host_core::percent::decode(path)?;
     #[cfg(unix)]
     {
         use std::os::unix::ffi::OsStringExt;
@@ -43,23 +43,6 @@ fn local_path(uri: &str) -> Option<PathBuf> {
         };
         Some(PathBuf::from(path.replace('/', "\\")))
     }
-}
-
-fn percent_decode(text: &str) -> Option<Vec<u8>> {
-    let bytes = text.as_bytes();
-    let mut decoded = Vec::with_capacity(bytes.len());
-    let mut at = 0;
-    while at < bytes.len() {
-        if bytes[at] == b'%' {
-            let hex = text.get(at + 1..at + 3)?;
-            decoded.push(u8::from_str_radix(hex, 16).ok()?);
-            at += 3;
-        } else {
-            decoded.push(bytes[at]);
-            at += 1;
-        }
-    }
-    Some(decoded)
 }
 
 #[cfg(test)]

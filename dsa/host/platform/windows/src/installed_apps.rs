@@ -90,12 +90,7 @@ pub fn uninstall_command(uninstaller: &Path, package: &str) -> String {
 /// The key of `app`, whose window program (and so its icon) is at `program`, uninstalled with
 /// the settings app at `uninstaller`.
 pub fn entry(app: &AppInfo, program: &Path, uninstaller: &Path) -> Entry {
-    let label = app.label.trim();
-    let name = if label.is_empty() {
-        app.package_name.as_str()
-    } else {
-        label
-    };
+    let name = app.display_name();
     let mut values = vec![
         ("DisplayName", Value::Text(name.to_string())),
         (

@@ -38,7 +38,6 @@ pub mod audio;
 pub mod camera;
 pub mod dbus;
 pub mod file_share;
-pub mod geocode;
 pub mod language;
 pub mod links;
 pub mod location;
@@ -54,13 +53,11 @@ pub mod v4l2;
 
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use std::thread::{self, JoinHandle};
+use std::thread::JoinHandle;
 
 use dsa_transport::{Connector, Listener};
 
-/// Where a device writes what it has to say: one line each.
-pub type Log = Arc<dyn Fn(&str) + Send + Sync>;
-
+pub use dsa_host_core::follower::{spawn, Log};
 /// Makes a new connection to the local API for each follower.
 pub type ConnectorFactory = Arc<dyn Fn() -> Box<dyn Connector> + Send + Sync>;
 
@@ -88,16 +85,6 @@ fn listen(port: u32, what: &str, log: &Log) -> Option<Box<dyn Listener>> {
                 "{what} is not lent to Android: {} cannot be opened ({error})",
                 path.display()
             ));
-            None
-        }
-    }
-}
-
-fn spawn(name: &str, log: &Log, run: impl FnOnce() + Send + 'static) -> Option<JoinHandle<()>> {
-    match thread::Builder::new().name(name.into()).spawn(run) {
-        Ok(handle) => Some(handle),
-        Err(error) => {
-            log(&format!("could not start {name}: {error}"));
             None
         }
     }
@@ -249,7 +236,7 @@ pub fn start_followers(
     if which.geocoding {
         let (connector, stop, log) = (connect(), Arc::clone(stop), Arc::clone(log));
         threads.extend(spawn("dsa-geocode", &Arc::clone(&log), move || {
-            geocode::serve(connector, stop, log)
+            dsa_host_core::geocode::serve_follower(connector, stop, log)
         }));
     }
     if which.share {

@@ -20,25 +20,9 @@ use dsa_host_core::compositor::caption::{
     title_bar_hit, BackButton, BandSample, CaptionLayout, CaptionPalette, CaptionState,
     CaptionTone, TitleBarContent, TitleBarHit, TitleBarMode,
 };
-use dsa_host_core::tasks::{AppInfo, Bounds, StatusBarAppearance};
+use dsa_host_core::tasks::{Bounds, StatusBarAppearance};
 
 use crate::shell::png::{self, Rgba};
-
-/// The PNG the title bar of `app`'s windows shows: the adaptive icon's foreground layer when
-/// the guest gave one, else the whole launcher icon.
-pub fn caption_icon_png(app: &AppInfo) -> &[u8] {
-    if app.caption_icon_png.is_empty() {
-        &app.icon_png
-    } else {
-        &app.caption_icon_png
-    }
-}
-
-/// Whether the title bar of `app`'s windows shows an adaptive icon's foreground alone, with
-/// no plate behind it ([`caption_icon_png`]).
-pub fn caption_icon_is_logo(app: &AppInfo) -> bool {
-    !app.caption_icon_png.is_empty()
-}
 
 /// An app's title bar icon, decoded once and kept at the side the window draws it.
 #[derive(Debug, Clone, Default)]
@@ -378,6 +362,8 @@ mod tests {
         rows_band_sample(inside, below, width).fill
     }
     use dsa_host_core::compositor::caption::{CaptionButton, CaptionHit};
+    use dsa_host_core::compositor::caption_icon::{caption_icon_source, CaptionIconSource};
+    use dsa_host_core::tasks::AppInfo;
 
     fn app(icon: &[u8], caption_icon: &[u8]) -> AppInfo {
         AppInfo {
@@ -386,6 +372,10 @@ mod tests {
             caption_icon_png: caption_icon.to_vec(),
             ..AppInfo::default()
         }
+    }
+
+    fn source(app: &AppInfo) -> CaptionIconSource {
+        caption_icon_source(app.icon_png.clone(), app.caption_icon_png.clone()).unwrap()
     }
 
     fn solid_png(width: u32, height: u32, rgba: [u8; 4]) -> Vec<u8> {
@@ -405,12 +395,12 @@ mod tests {
         let foreground = solid_png(4, 4, [0xff, 0, 0, 0xff]);
         // An adaptive icon: the title bar takes its foreground layer alone.
         let adaptive = app(&full, &foreground);
-        assert_eq!(caption_icon_png(&adaptive), foreground.as_slice());
+        assert_eq!(source(&adaptive).caption_png(), foreground.as_slice());
         // No adaptive icon: the whole icon.
         let plain = app(&full, &[]);
-        assert_eq!(caption_icon_png(&plain), full.as_slice());
+        assert_eq!(source(&plain).caption_png(), full.as_slice());
         // The foreground is what is drawn, red, in premultiplied BGRA.
-        let mut icon = CaptionIcon::new(caption_icon_png(&adaptive));
+        let mut icon = CaptionIcon::new(source(&adaptive).caption_png());
         let pixels = icon.at(2).unwrap().to_vec();
         assert_eq!(pixels, [0, 0, 0xff, 0xff].repeat(4));
         // Drawn in the band, at the icon's place.
@@ -453,8 +443,8 @@ mod tests {
             true,
         );
         let adaptive = app(&solid_png(4, 4, [0, 0, 0xff, 0xff]), &foreground);
-        assert!(caption_icon_is_logo(&adaptive));
-        assert!(!caption_icon_is_logo(&app(&foreground, &[])));
+        assert!(source(&adaptive).is_logo());
+        assert!(!source(&app(&foreground, &[])).is_logo());
         let opaque_columns = |icon: &[u8], side: u32| {
             let row = side / 2;
             (0..side)

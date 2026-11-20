@@ -13,6 +13,60 @@
 //! hysteresis so a band near the limit does not make the plate flicker.
 
 use super::caption::{fit_square, relative_luminance, BandSample, CaptionTone};
+use crate::png;
+
+/// The largest image a title bar icon is decoded from, in pixels on a side, so a broken
+/// message cannot take much memory.
+pub const MAX_ICON_SOURCE: u32 = 2048;
+
+/// The app's icon and its title bar's icon, as PNG images.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CaptionIconSource {
+    pub icon_png: Vec<u8>,
+    /// An adaptive icon's foreground layer alone; empty when the icon is not adaptive.
+    pub caption_icon_png: Vec<u8>,
+}
+
+impl CaptionIconSource {
+    /// The image the title bar draws: the foreground layer when there is one.
+    pub fn caption_png(&self) -> &[u8] {
+        if self.caption_icon_png.is_empty() {
+            &self.icon_png
+        } else {
+            &self.caption_icon_png
+        }
+    }
+
+    /// Whether the title bar draws an adaptive icon's foreground alone, with no plate behind
+    /// it ([`CaptionIconSource::caption_png`]).
+    pub fn is_logo(&self) -> bool {
+        !self.caption_icon_png.is_empty()
+    }
+}
+
+/// The icon a title bar takes from `icon_png` and `caption_icon_png`, or `None` when `icon_png`
+/// is not a PNG of a sensible size, so the icon a window has is kept. A foreground layer that
+/// is not one is left out, and the title bar draws the whole icon.
+pub fn caption_icon_source(
+    icon_png: Vec<u8>,
+    caption_icon_png: Vec<u8>,
+) -> Option<CaptionIconSource> {
+    let readable = |png: &[u8]| {
+        png::size(png).is_some_and(|(w, h)| w <= MAX_ICON_SOURCE && h <= MAX_ICON_SOURCE)
+    };
+    if !readable(&icon_png) {
+        return None;
+    }
+    let caption_icon_png = if readable(&caption_icon_png) {
+        caption_icon_png
+    } else {
+        Vec::new()
+    };
+    Some(CaptionIconSource {
+        icon_png,
+        caption_icon_png,
+    })
+}
 
 /// How the title bar draws the app's icon.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -214,6 +268,56 @@ pub fn choose(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A PNG signature and header chunk of `width` x `height`; enough for `png::size`.
+    fn header(width: u32, height: u32) -> Vec<u8> {
+        let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+        png.extend_from_slice(&13u32.to_be_bytes());
+        png.extend_from_slice(b"IHDR");
+        png.extend_from_slice(&width.to_be_bytes());
+        png.extend_from_slice(&height.to_be_bytes());
+        png.extend_from_slice(&[8, 6, 0, 0, 0]);
+        png
+    }
+
+    #[test]
+    fn fr22_caption_uses_the_foreground_layer_when_given() {
+        let adaptive = caption_icon_source(header(108, 108), header(64, 64)).unwrap();
+        assert_eq!(adaptive.caption_png(), header(64, 64).as_slice());
+        assert!(adaptive.is_logo());
+        let plain = caption_icon_source(header(108, 108), Vec::new()).unwrap();
+        assert_eq!(plain.caption_png(), header(108, 108).as_slice());
+        assert!(!plain.is_logo());
+    }
+
+    #[test]
+    fn fr22_oversized_icon_is_refused() {
+        assert_eq!(
+            caption_icon_source(header(MAX_ICON_SOURCE + 1, 16), Vec::new()),
+            None
+        );
+        assert_eq!(
+            caption_icon_source(header(16, MAX_ICON_SOURCE + 1), Vec::new()),
+            None
+        );
+        assert!(
+            caption_icon_source(header(MAX_ICON_SOURCE, MAX_ICON_SOURCE), Vec::new()).is_some()
+        );
+        // Bytes that are no PNG never replace the icon either.
+        assert_eq!(caption_icon_source(vec![1, 2, 3], Vec::new()), None);
+        assert_eq!(caption_icon_source(Vec::new(), header(16, 16)), None);
+    }
+
+    #[test]
+    fn fr22_unreadable_foreground_falls_back_to_the_whole_icon() {
+        let whole = header(108, 108);
+        for foreground in [vec![9, 9], header(MAX_ICON_SOURCE + 1, 8)] {
+            let source = caption_icon_source(whole.clone(), foreground).unwrap();
+            assert!(source.caption_icon_png.is_empty());
+            assert_eq!(source.caption_png(), whole.as_slice());
+            assert!(!source.is_logo());
+        }
+    }
 
     /// A `side` square icon: a disc of `colour` (0xAARRGGBB, opaque) of `fraction` of the side
     /// across, on transparency, as premultiplied BGRA.

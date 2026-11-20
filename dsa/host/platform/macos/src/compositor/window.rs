@@ -21,6 +21,7 @@ use std::sync::OnceLock;
 use dsa_host_core::compositor::caption::{BandSample, CaptionBand, CaptionTone};
 use dsa_host_core::compositor::window_sizing::to_task_size;
 use dsa_host_core::tasks::Bounds;
+use dsa_host_core::ui_text::caption::back_name;
 use objc2::msg_send;
 use objc2::rc::{Allocated, Retained};
 use objc2::runtime::{AnyClass, AnyObject, Bool, ClassBuilder, Sel};
@@ -29,7 +30,7 @@ use objc2::sel;
 use super::metal::{FrameRef, Presenter};
 use super::sizing::{picture_in_picture, task_pixels, window_points, Rect, MIN_CONTENT_POINTS};
 use super::title_bar::{
-    appearance_name, back_label, caption_band, sample_bgra, title_layout, BandTone, Chrome, Look,
+    appearance_name, sample_bgra, title_layout, BandTone, Chrome, Look, ITEM_GAP_POINTS,
 };
 use crate::input::view::{self, InputSink};
 use crate::objc::{class, ns_string, CGPoint, CGRect, CGSize};
@@ -202,7 +203,7 @@ unsafe fn band_of(window: *mut AnyObject) -> CaptionBand {
         items.push(x_range(button));
     }
     let scale: f64 = msg_send![window, backingScaleFactor];
-    caption_band(bounds.size.width, height, &items, scale)
+    CaptionBand::from_items(bounds.size.width, height, &items, scale, ITEM_GAP_POINTS)
 }
 
 /// The size of the title bar over `window`'s content, in points: the window's width and the
@@ -365,7 +366,7 @@ unsafe fn add_back_button(
 ) -> Result<(Retained<AnyObject>, Retained<AnyObject>), String> {
     let target: Option<Retained<AnyObject>> = msg_send![back_target_class()?, new];
     let target = target.ok_or("no target for the back button could be made")?;
-    let label = ns_string(back_label(crate::ui_language::current()));
+    let label = ns_string(back_name(crate::ui_language::current()));
     let image: *mut AnyObject = msg_send![
         class(c"NSImage")?,
         imageWithSystemSymbolName: &*ns_string("chevron.backward"),

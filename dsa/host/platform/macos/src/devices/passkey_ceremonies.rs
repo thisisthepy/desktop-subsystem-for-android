@@ -15,33 +15,26 @@
 //! ([`result_of`]): a signature over other client data would fail at the relying party, and
 //! is never handed back as a success.
 
-use std::collections::HashMap;
-use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use std::thread;
 use std::time::Duration;
 
-use dsa_host_core::host_api::HostApiClient;
 use dsa_host_core::passkeys::encoding::from_base64url;
-use dsa_host_core::passkeys::{Ceremony, CeremonyResult, PasskeyEvent};
+use dsa_host_core::passkeys::follower::{follow_passkeys, PasskeyFollowing, PasskeyRun};
+use dsa_host_core::passkeys::{Ceremony, CeremonyResult};
 use dsa_transport::Connector;
 use serde_json::Value;
 
 use super::Log;
 
-/// What the follower calls itself to the service.
-const BUILD: &str = "dsa-devices passkeys";
-
-/// How long a request to the service is waited for.
-const ANSWER: Duration = Duration::from_secs(5);
-
-/// How long to wait before connecting again after the service could not be reached.
-const RETRY: Duration = Duration::from_secs(1);
-
-/// How long the watch waits for the service before it looks for finished ceremonies again.
-const POLL: Duration = Duration::from_millis(100);
+/// How the follower talks to the service.
+const FOLLOWING: PasskeyFollowing = PasskeyFollowing {
+    build: "dsa-devices passkeys",
+    answer: Duration::from_secs(5),
+    retry: Duration::from_secs(1),
+    poll: Duration::from_millis(100),
+    thread_name: "dsa-passkey",
+};
 
 /// The error domain of AuthenticationServices' authorization errors.
 pub const AUTHORIZATION_ERROR_DOMAIN: &str = "com.apple.AuthenticationServices.AuthorizationError";
@@ -234,123 +227,19 @@ pub fn result_of(ceremony: &Ceremony, outcome: MacOutcome) -> CeremonyResult {
     }
 }
 
-/// Performs `ceremony` with `perform` unless it was withdrawn first. A panic in the passkey
-/// code is a failed ceremony, never the end of the follower.
-pub fn perform_one(
-    id: u64,
-    ceremony: Ceremony,
-    perform: &Perform,
-    withdrawn: &Arc<AtomicBool>,
-) -> CeremonyResult {
-    if withdrawn.load(Ordering::Relaxed) {
-        return CeremonyResult::Canceled("Android withdrew the request".into());
-    }
-    catch_unwind(AssertUnwindSafe(|| {
-        perform(id, ceremony, Arc::clone(withdrawn))
-    }))
-    .unwrap_or_else(|_| CeremonyResult::Failed("the passkey code failed".into()))
-}
-
 /// Performs the passkey ceremonies of the user's Android until `stop`, reconnecting to the
 /// service whenever the connection ends. Each ceremony runs on a thread of its own.
 pub fn serve(mut connector: Box<dyn Connector>, perform: Perform, stop: Arc<AtomicBool>, log: Log) {
-    let (done_tx, done) = mpsc::channel();
-    let mut running: HashMap<u64, Arc<AtomicBool>> = HashMap::new();
-    let mut last_error = String::new();
-    while !stop.load(Ordering::Relaxed) {
-        let watch = HostApiClient::connect(&mut *connector, BUILD, ANSWER)
-            .and_then(|client| client.watch_passkeys());
-        let mut watch = match watch {
-            Ok(watch) => watch,
-            Err(error) => {
-                let error = error.to_string();
-                if error != last_error {
-                    log(&format!("passkeys cannot reach the service: {error}"));
-                    last_error = error;
-                }
-                report(&mut *connector, &done, &mut running, &log);
-                super::wait(&stop, RETRY);
-                continue;
-            }
-        };
-        last_error.clear();
-        while !stop.load(Ordering::Relaxed) {
-            report(&mut *connector, &done, &mut running, &log);
-            match watch.next(POLL) {
-                Ok(Some(PasskeyEvent::Ceremony { id, ceremony })) => {
-                    let withdrawn = Arc::new(AtomicBool::new(false));
-                    running.insert(id, Arc::clone(&withdrawn));
-                    start(
-                        id,
-                        *ceremony,
-                        Arc::clone(&perform),
-                        withdrawn,
-                        done_tx.clone(),
-                        Arc::clone(&log),
-                    );
-                }
-                Ok(Some(PasskeyEvent::Withdrawn { id })) => {
-                    if let Some(withdrawn) = running.get(&id) {
-                        withdrawn.store(true, Ordering::Relaxed);
-                    }
-                }
-                Ok(None) => {}
-                Err(error) => {
-                    log(&format!(
-                        "the passkey ceremonies' connection to the service ended: {error}"
-                    ));
-                    break;
-                }
-            }
-        }
-    }
-    for withdrawn in running.values() {
-        withdrawn.store(true, Ordering::Relaxed);
-    }
-}
-
-fn start(
-    id: u64,
-    ceremony: Ceremony,
-    perform: Perform,
-    withdrawn: Arc<AtomicBool>,
-    done: Sender<(u64, CeremonyResult)>,
-    log: Log,
-) {
-    let failed = done.clone();
-    let spawned = thread::Builder::new()
-        .name("dsa-passkey".into())
-        .spawn(move || {
-            let result = perform_one(id, ceremony, &perform, &withdrawn);
-            let _ = done.send((id, result));
-        });
-    if let Err(error) = spawned {
-        log(&format!("passkey ceremony {id} cannot start: {error}"));
-        let _ = failed.send((
-            id,
-            CeremonyResult::Failed(format!("the ceremony could not start: {error}")),
-        ));
-    }
-}
-
-/// Passes what became of each finished ceremony to the service.
-fn report(
-    connector: &mut dyn Connector,
-    done: &Receiver<(u64, CeremonyResult)>,
-    running: &mut HashMap<u64, Arc<AtomicBool>>,
-    log: &Log,
-) {
-    while let Ok((id, result)) = done.try_recv() {
-        running.remove(&id);
-        let reported = HostApiClient::connect(connector, BUILD, ANSWER)
-            .and_then(|mut client| client.report_passkey_ceremony(id, &result));
-        if let Err(error) = reported {
-            // The service may have restarted; its Android no longer waits for this one.
-            log(&format!(
-                "passkey ceremony {id}: the result did not reach the service: {error}"
-            ));
-        }
-    }
+    let run: PasskeyRun =
+        Arc::new(move |id, ceremony, cancel| perform(id, ceremony.clone(), cancel.flag()));
+    follow_passkeys(
+        &mut *connector,
+        &FOLLOWING,
+        &run,
+        &stop,
+        &|time| super::wait(&stop, time),
+        &log,
+    );
 }
 
 #[cfg(test)]
@@ -502,22 +391,6 @@ mod tests {
         assert!(matches!(
             error_result("NSCocoaErrorDomain", 4, "Something"),
             CeremonyResult::Failed(_)
-        ));
-    }
-
-    #[test]
-    fn fr36_a_withdrawn_or_failing_ceremony_ends_without_the_follower() {
-        let perform: Perform = Arc::new(|_, _, _| panic!("the passkey code broke"));
-        let withdrawn = Arc::new(AtomicBool::new(false));
-        assert!(matches!(
-            perform_one(1, mac_ceremony(false), &perform, &withdrawn),
-            CeremonyResult::Failed(_)
-        ));
-        withdrawn.store(true, Ordering::Relaxed);
-        let never: Perform = Arc::new(|_, _, _| unreachable!("a withdrawn ceremony never runs"));
-        assert!(matches!(
-            perform_one(2, mac_ceremony(false), &never, &withdrawn),
-            CeremonyResult::Canceled(_)
         ));
     }
 }

@@ -47,6 +47,7 @@ fn missing_files() -> AndroidVmConfig {
         direct_mapped: None,
         picture_region: None,
         graphics_region: None,
+        gpu_paravirtualization: false,
     }
 }
 

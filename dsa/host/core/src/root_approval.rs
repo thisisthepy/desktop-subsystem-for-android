@@ -53,6 +53,7 @@ use crate::root_requester::{
 use crate::settings::SettingsStore;
 use crate::tasks::AppInfo;
 use crate::ui_language::UiLanguage;
+use crate::ui_text::fill;
 
 /// The file in a [`FolderApprover`]'s folder where each asked request is appended as one JSON
 /// line.
@@ -434,36 +435,6 @@ impl ApprovalRequest {
         };
         fill(sentence, &[("who", &who), ("what", &what)])
     }
-}
-
-/// `template` with each `{name}` among `values` replaced by its value, in one pass, so a value
-/// that holds braces itself (a command such as `echo {who}`) is shown as it is.
-fn fill(template: &str, values: &[(&str, &str)]) -> String {
-    let mut out = String::with_capacity(template.len());
-    let mut rest = template;
-    while let Some(open) = rest.find('{') {
-        out.push_str(&rest[..open]);
-        let after = &rest[open + 1..];
-        let value = after.find('}').and_then(|close| {
-            let name = &after[..close];
-            values
-                .iter()
-                .find(|(key, _)| *key == name)
-                .map(|(_, value)| (*value, close))
-        });
-        match value {
-            Some((value, close)) => {
-                out.push_str(value);
-                rest = &after[close + 1..];
-            }
-            None => {
-                out.push('{');
-                rest = after;
-            }
-        }
-    }
-    out.push_str(rest);
-    out
 }
 
 /// The words of the administrator prompt in one language. `{who}` is who asks, `{names}` the

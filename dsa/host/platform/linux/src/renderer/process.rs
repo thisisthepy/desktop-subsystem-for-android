@@ -10,11 +10,12 @@ use std::io::Write;
 use std::os::fd::{AsFd, FromRawFd, OwnedFd, RawFd};
 use std::sync::Arc;
 
-use dsa_host_core::memory::{HeldMemory, HostRole};
+use dsa_host_core::memory::HostRole;
 use dsa_host_core::renderer::{
     address_from, follow_device_state, open_renderer, RendererProcessMemory, WindowManagerLink,
 };
 use dsa_host_unix::fd_frames::{stream_at, FdConnection, FdSender};
+use dsa_host_unix::process::end_now;
 use dsa_protocol::renderer::encode_body;
 use dsa_protocol::renderer::types::{
     envelope::Body, FramePath as WireFramePath, GpuFrame as WireGpuFrame, GpuImage as WireGpuImage,
@@ -29,13 +30,6 @@ use crate::compositor::gfxstream::{self, FramePath, Listen, Renderer, RendererFr
 /// What the renderer calls itself in its handshake.
 pub fn build() -> String {
     format!("dsa-gfx {}", crate::VERSION)
-}
-
-/// Ends this process at once, without the libraries' teardown: a driver that hangs in it must
-/// not keep a renderer whose compositor is gone.
-fn end_now(code: i32) -> ! {
-    // SAFETY: ends this process.
-    unsafe { libc::_exit(code) }
 }
 
 /// The frames' way to the compositor.
@@ -104,16 +98,11 @@ impl RendererFrames for RemoteFrames {
 /// What this process holds, with gfxstream's own count.
 fn memory(renderer: Option<&Renderer>) -> RendererProcessMemory {
     let own = crate::memory::process(std::process::id(), HostRole::Renderer);
-    RendererProcessMemory {
-        process_id: std::process::id(),
-        held: HeldMemory {
-            working_set_kb: own.as_ref().map(|p| p.working_set_kb),
-            private_kb: own.as_ref().map(|p| p.private_kb),
-            gpu_local_kb: None,
-            gpu_non_local_kb: None,
-        },
-        counted: renderer.and_then(Renderer::memory),
-    }
+    RendererProcessMemory::of_this_process(
+        own.as_ref().map(|p| p.working_set_kb),
+        own.as_ref().map(|p| p.private_kb),
+        renderer.and_then(Renderer::memory),
+    )
 }
 
 /// Runs the renderer for the compositor `args` names. Never returns: the process ends with

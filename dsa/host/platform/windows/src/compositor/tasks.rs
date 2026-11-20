@@ -5,16 +5,18 @@
 //! None of these parts names a window, so all run against the in-memory transport in tests.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, RecvTimeoutError};
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc::Receiver;
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use dsa_host_core::compositor::resize_pacing::ResizePacer;
+use dsa_host_core::compositor::resize_queue::{DrawnFrames, ResizeQueue};
+use dsa_host_core::compositor::task_watch::{follow_tasks, next_batch, send_request, TaskFeed};
 use dsa_host_core::compositor::window_tasks::WindowTasks;
-use dsa_host_core::host_api::{HostApiClient, InputStream};
+use dsa_host_core::host_api::HostApiClient;
 use dsa_host_core::input::InputEvent;
-use dsa_host_core::tasks::{coalesce, TaskRequest};
+use dsa_host_core::input_relay::InputRelay;
+use dsa_host_core::tasks::TaskRequest;
 use dsa_transport::Connector;
 
 use super::hosts::ManagerEvent;
@@ -48,118 +50,50 @@ pub fn watch(
     stop: Arc<AtomicBool>,
     logger: Option<Arc<CompositorLogger>>,
 ) {
-    let mut watching = false;
-    let mut last_error = String::new();
-    while !stop.load(Ordering::Relaxed) {
-        let stream = HostApiClient::connect(&mut *connector, BUILD, ANSWER)
-            .and_then(|client| client.watch_tasks());
-        let mut stream = match stream {
-            Ok(stream) => stream,
-            Err(error) => {
-                let error = error.to_string();
-                if error != last_error {
-                    note(
-                        logger.as_deref(),
-                        &format!("cannot watch Android's tasks: {error}"),
-                    );
-                    last_error = error;
-                }
-                if watching {
-                    watching = false;
-                    if !deliver(ManagerEvent::Lost) {
-                        return;
-                    }
-                }
-                thread::sleep(RETRY);
-                continue;
-            }
-        };
-        last_error.clear();
-        watching = true;
-        if !deliver(ManagerEvent::Sync(stream.current().events())) {
-            return;
-        }
-        while !stop.load(Ordering::Relaxed) {
-            match stream.next(POLL) {
-                Ok(Some(event)) => {
-                    if !deliver(ManagerEvent::Task(Box::new(event))) {
-                        return;
-                    }
-                }
-                Ok(None) => {}
-                Err(error) => {
-                    // Reconnect. The windows stay until the next watch says which tasks are
-                    // left, or the service cannot be reached at all.
-                    note(
-                        logger.as_deref(),
-                        &format!("the watch of Android's tasks ended: {error}"),
-                    );
-                    break;
-                }
-            }
-        }
-    }
-}
-
-/// The size of the latest frame each task drew since the request thread last looked.
-static DRAWN: Mutex<Vec<(i32, (u32, u32))>> = Mutex::new(Vec::new());
-
-/// How often the request thread looks for drawn frames while a size of a drag is held back.
-const PACE_TICK: Duration = Duration::from_millis(4);
-
-/// The app of `task_id` drew a frame of `size`: a size of a drag held back for it may go.
-pub fn frame_drawn(task_id: i32, size: (u32, u32)) {
-    let mut drawn = DRAWN.lock().unwrap_or_else(|e| e.into_inner());
-    match drawn.iter_mut().find(|(id, _)| *id == task_id) {
-        Some(entry) => entry.1 = size,
-        None => drawn.push((task_id, size)),
-    }
-}
-
-fn take_drawn(pacer: &mut ResizePacer) {
-    let drawn = std::mem::take(&mut *DRAWN.lock().unwrap_or_else(|e| e.into_inner()));
-    for (task_id, size) in drawn {
-        pacer.frame_drawn(task_id, size);
-    }
+    follow_tasks(
+        || {
+            HostApiClient::connect(&mut *connector, BUILD, ANSWER)
+                .and_then(|client| client.watch_tasks())
+                .map_err(|error| error.to_string())
+        },
+        |feed| {
+            deliver(match feed {
+                TaskFeed::Sync(tasks) => ManagerEvent::Sync(tasks),
+                TaskFeed::Task(event) => ManagerEvent::Task(event),
+                TaskFeed::Lost => ManagerEvent::Lost,
+            })
+        },
+        &stop,
+        RETRY,
+        POLL,
+        &|line| note(logger.as_deref(), line),
+    );
 }
 
 /// Sends each request to the guest until `requests` closes. A close that does not reach
 /// the guest is handed to `deliver` as [`ManagerEvent::CloseFailed`], so its window opens again.
 ///
 /// Requests that queued up while the last one was on its way are folded together first
-/// ([`coalesce`]): during a live resize only each task's latest size is sent, never the
+/// ([`ResizeQueue`]): during a live resize only each task's latest size is sent, never the
 /// sizes it passed through. A size of a drag also waits until the app has drawn the size sent
-/// before it (`ResizePacer`), so an app slower than the drag is never handed a new size before
+/// before it (`ResizeQueue`), so an app slower than the drag is never handed a new size before
 /// it has drawn the last; the size that ends the drag is never held back.
 pub fn serve_requests(
     mut connector: Box<dyn Connector>,
     requests: Receiver<TaskRequest>,
     mut deliver: impl FnMut(ManagerEvent) -> bool,
+    drawn: DrawnFrames,
     logger: Option<Arc<CompositorLogger>>,
 ) {
     let mut client: Option<HostApiClient> = None;
-    let mut pacer = ResizePacer::new();
-    let mut held: Vec<TaskRequest> = Vec::new();
+    let mut queue = ResizeQueue::new(drawn);
     loop {
-        // Held sizes go first, so a newer size of the same task replaces them.
-        let before = std::mem::take(&mut held);
-        let mut waiting = before.clone();
-        if waiting.is_empty() {
-            match requests.recv() {
-                Ok(first) => waiting.push(first),
-                Err(_) => break,
-            }
-        } else {
-            match requests.recv_timeout(PACE_TICK) {
-                Ok(next) => waiting.push(next),
-                Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => break,
-            }
-        }
-        waiting.extend(requests.try_iter());
-        take_drawn(&mut pacer);
-        let (go, still_held) = pacer.pace(coalesce(waiting), Instant::now());
-        for request in &still_held {
+        let before = queue.held().to_vec();
+        let Some(incoming) = next_batch(&requests, !before.is_empty()) else {
+            break;
+        };
+        let go = queue.step(incoming, Instant::now());
+        for request in queue.held() {
             if let TaskRequest::Resize {
                 task_id,
                 width,
@@ -179,28 +113,12 @@ pub fn serve_requests(
                 }
             }
         }
-        held = still_held;
         for request in go {
             let started = Instant::now();
-            let mut outcome = Err(String::new());
-            // A connection the service dropped is made again, once.
-            for _ in 0..2 {
-                let connected = match client.as_mut() {
-                    Some(client) => Ok(client),
-                    None => HostApiClient::connect(&mut *connector, BUILD, ANSWER)
-                        .map(|connected| client.insert(connected)),
-                };
-                outcome = match connected {
-                    Ok(connected) => connected
-                        .request(&request)
-                        .map_err(|error| error.to_string()),
-                    Err(error) => Err(error.to_string()),
-                };
-                if outcome.is_ok() {
-                    break;
-                }
-                client = None;
-            }
+            let outcome = send_request(&mut client, &request, || {
+                HostApiClient::connect(&mut *connector, BUILD, ANSWER)
+                    .map_err(|error| error.to_string())
+            });
             if let TaskRequest::Resize {
                 task_id,
                 width,
@@ -259,45 +177,19 @@ pub fn serve_window_input(
     logger: Option<Arc<CompositorLogger>>,
 ) {
     crate::scheduling::raise_this_thread();
-    let mut stream: Option<InputStream> = None;
-    let mut retry_at: Option<Instant> = None;
-    let mut last_error = String::new();
+    let mut relay = InputRelay::new(INPUT_RETRY);
     while let Ok(event) = events.recv() {
         let event = tasks.input(event);
-        for _ in 0..2 {
-            if stream.is_none() {
-                if retry_at.is_some_and(|at| Instant::now() < at) {
-                    break;
-                }
-                match HostApiClient::connect(&mut *connector, BUILD, ANSWER)
-                    .and_then(|client| client.stream_input())
-                {
-                    Ok(connected) => {
-                        stream = Some(connected);
-                        retry_at = None;
-                        last_error.clear();
-                    }
-                    Err(error) => {
-                        let error = error.to_string();
-                        if error != last_error {
-                            note(
-                                logger.as_deref(),
-                                &format!("input cannot reach Android: {error}"),
-                            );
-                            last_error = error;
-                        }
-                        retry_at = Some(Instant::now() + INPUT_RETRY);
-                        break;
-                    }
-                }
-            }
-            let Some(connected) = stream.as_mut() else {
-                break;
-            };
-            match connected.send_input(&event) {
-                Ok(()) => break,
-                Err(_) => stream = None,
-            }
+        let connect = || {
+            HostApiClient::connect(&mut *connector, BUILD, ANSWER)
+                .and_then(|client| client.stream_input())
+                .map_err(|error| error.to_string())
+        };
+        if let Some(error) = relay.send(&event, Instant::now(), connect) {
+            note(
+                logger.as_deref(),
+                &format!("input cannot reach Android: {error}"),
+            );
         }
     }
 }

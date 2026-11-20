@@ -719,6 +719,18 @@ impl BootIdentity {
         })
     }
 
+    /// The property file for a boot of the image whose `initrd` is given (the image's folder is
+    /// the initrd's, which names the build the identity is made for), as [`boot_properties`]
+    /// makes it.
+    ///
+    /// [`boot_properties`]: BootIdentity::boot_properties
+    pub fn boot_properties_of_initrd(&self, initrd: Option<&Path>) -> String {
+        let build = initrd
+            .and_then(Path::parent)
+            .and_then(ImageBuild::from_image_dir);
+        self.boot_properties(build.as_ref())
+    }
+
     /// Reads the computer and the user's choices now, and gives the property file for this
     /// boot. A store that cannot be read leaves the computer's values standing.
     pub fn boot_properties(&self, build: Option<&ImageBuild>) -> String {

@@ -26,7 +26,6 @@ use std::time::Duration;
 
 use dsa_host_core::root_approval::{ApprovalPrompt, ApprovalRequest, PromptAnswer, Purpose};
 use dsa_host_core::root_requester::Requester;
-use dsa_host_core::ui_language::UiLanguage;
 
 use crate::shell::desktop_entry;
 
@@ -56,9 +55,11 @@ pub const CANCELLED_ERROR: &str = "org.freedesktop.PolicyKit1.Error.Cancelled";
 /// beside it, `adb shell` as the developer shell, Android's own services in words.
 pub fn details(request: &ApprovalRequest, icon_name: &str) -> Vec<(String, String)> {
     let language = request.language();
+    // With no command named, the words say what is asked instead (any command, a shell), as
+    // every host's prompt does, set in parentheses.
     let command = match request.purpose {
         Purpose::Run if !request.command.is_empty() => request.command_line(),
-        purpose => no_command_text(purpose, language).to_string(),
+        _ => format!("({})", request.command_text_in(language)),
     };
     vec![
         ("polkit.message".into(), request.message_in(language)),
@@ -68,63 +69,6 @@ pub fn details(request: &ApprovalRequest, icon_name: &str) -> Vec<(String, Strin
         ("detail".into(), request.detail_in(language)),
         ("command".into(), command),
     ]
-}
-
-/// What the `command` detail says in `language` when no command is named: keeping root
-/// means any command without asking each time, and running with no command is a root shell.
-pub fn no_command_text(purpose: Purpose, language: UiLanguage) -> &'static str {
-    let keep = purpose == Purpose::KeepRoot;
-    let (keep_root, shell) = match language {
-        UiLanguage::English => (
-            "(any command, without asking each time)",
-            "(an interactive root shell)",
-        ),
-        UiLanguage::Korean => ("(묻지 않고 모든 명령)", "(대화형 루트 셸)"),
-        UiLanguage::Japanese => ("(毎回確認せずに任意のコマンド)", "(対話型の root シェル)"),
-        UiLanguage::ChineseSimplified => ("(任意命令，无需每次询问)", "(交互式 root shell)"),
-        UiLanguage::ChineseTraditional => ("(任何指令，不必每次詢問)", "(互動式 root shell)"),
-        UiLanguage::Spanish => (
-            "(cualquier comando, sin preguntar cada vez)",
-            "(un shell de root interactivo)",
-        ),
-        UiLanguage::French => (
-            "(n'importe quelle commande, sans demander à chaque fois)",
-            "(un shell root interactif)",
-        ),
-        UiLanguage::German => (
-            "(beliebige Befehle, ohne jedes Mal zu fragen)",
-            "(eine interaktive Root-Shell)",
-        ),
-        UiLanguage::PortugueseBrazil => (
-            "(qualquer comando, sem perguntar toda vez)",
-            "(um shell root interativo)",
-        ),
-        UiLanguage::Russian => (
-            "(любые команды без запроса каждый раз)",
-            "(интерактивная оболочка root)",
-        ),
-        UiLanguage::Italian => (
-            "(qualsiasi comando, senza chiedere ogni volta)",
-            "(una shell root interattiva)",
-        ),
-        UiLanguage::Vietnamese => (
-            "(mọi lệnh, không cần hỏi mỗi lần)",
-            "(một shell root tương tác)",
-        ),
-        UiLanguage::Indonesian => (
-            "(perintah apa pun, tanpa bertanya setiap kali)",
-            "(shell root interaktif)",
-        ),
-        UiLanguage::Turkish => (
-            "(her komut, her seferinde sormadan)",
-            "(etkileşimli bir root kabuğu)",
-        ),
-    };
-    if keep {
-        keep_root
-    } else {
-        shell
-    }
 }
 
 /// The icon theme name the prompt shows for who asks: the app's own icon (the first app's that
@@ -444,6 +388,7 @@ mod system_bus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dsa_host_core::ui_language::UiLanguage;
     use std::sync::Mutex;
 
     /// One check: the session, the details and the cancellation ID.
@@ -668,31 +613,14 @@ mod tests {
         let details = details(&keep, ICON_NAME);
         assert_eq!(
             detail(&details, "command"),
-            "(any command, without asking each time)"
+            "(any command, from now on without asking each time)"
         );
         assert!(detail(&details, "polkit.message").contains("without asking each time"));
     }
 
     #[test]
     fn fr17_the_polkit_prompt_speaks_every_interface_language() {
-        let english_keep = no_command_text(Purpose::KeepRoot, UiLanguage::English);
-        let english_shell = no_command_text(Purpose::Run, UiLanguage::English);
         for language in UiLanguage::ALL {
-            let keep = no_command_text(Purpose::KeepRoot, language);
-            let shell = no_command_text(Purpose::Run, language);
-            for words in [keep, shell] {
-                assert!(words.starts_with('(') && words.ends_with(')'), "{words}");
-                assert!(words.len() > 2, "{language:?}");
-                assert!(
-                    !words.contains(char::from_u32(0x2014).unwrap()),
-                    "{language:?}: {words}"
-                );
-            }
-            assert_ne!(keep, shell, "{language:?}");
-            if language != UiLanguage::English {
-                assert_ne!(keep, english_keep, "{language:?}");
-                assert_ne!(shell, english_shell, "{language:?}");
-            }
             // Every detail is filled in the language the request asks in, and a named command
             // stays as it is.
             let asked = request().with_language(language.tag());
@@ -706,10 +634,16 @@ mod tests {
             }
             assert_eq!(detail(&details, "command"), "id");
             let kept = ApprovalRequest::keep_root(request().app).with_language(language.tag());
-            assert_eq!(detail(&details_of(&kept), "command"), keep);
+            assert_eq!(
+                detail(&details_of(&kept), "command"),
+                format!("({})", kept.command_text_in(language))
+            );
             let mut shell_request = request().with_language(language.tag());
             shell_request.command.clear();
-            assert_eq!(detail(&details_of(&shell_request), "command"), shell);
+            assert_eq!(
+                detail(&details_of(&shell_request), "command"),
+                format!("({})", shell_request.command_text_in(language))
+            );
         }
     }
 

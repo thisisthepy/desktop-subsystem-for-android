@@ -323,7 +323,30 @@ pub struct PinShortcutRequest {
     pub shortcut: AppShortcut,
 }
 
+/// The name an app goes by: its label without the spaces around it, or its package when it has
+/// none.
+pub fn app_name<'a>(label: &'a str, package: &'a str) -> &'a str {
+    let label = label.trim();
+    if label.is_empty() {
+        package
+    } else {
+        label
+    }
+}
+
+impl PinShortcutRequest {
+    /// The app's name for the question: its label, or its package when it has none.
+    pub fn app_name(&self) -> &str {
+        app_name(&self.app_label, &self.package_name)
+    }
+}
+
 impl AppInfo {
+    /// The name the app goes by: its label, or its package when it has none.
+    pub fn display_name(&self) -> &str {
+        app_name(&self.label, &self.package_name)
+    }
+
     /// The storage the app takes in all, in bytes.
     pub fn total_bytes(&self) -> u64 {
         self.app_bytes
@@ -963,7 +986,28 @@ impl TaskTable {
 
 #[cfg(test)]
 mod tests {
+    use super::PinShortcutRequest;
+
+    #[test]
+    fn fr7_the_pin_question_names_the_app_by_its_trimmed_label_else_its_package() {
+        let request = |label: &str| PinShortcutRequest {
+            package_name: "com.example.chat".into(),
+            app_label: label.into(),
+            ..PinShortcutRequest::default()
+        };
+        assert_eq!(request("  Chat ").app_name(), "Chat");
+        assert_eq!(request("   ").app_name(), "com.example.chat");
+        assert_eq!(request("").app_name(), "com.example.chat");
+    }
+
     use super::*;
+
+    #[test]
+    fn an_app_without_a_label_goes_by_its_package() {
+        assert_eq!(app_name(" Chat ", "com.example.chat"), "Chat");
+        assert_eq!(app_name("", "com.example.chat"), "com.example.chat");
+        assert_eq!(app_name("  ", "com.example.chat"), "com.example.chat");
+    }
 
     fn task(task_id: i32, label: &str) -> Task {
         Task {

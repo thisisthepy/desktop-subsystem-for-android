@@ -64,14 +64,12 @@ pub fn current_image(
     configured: Option<std::path::PathBuf>,
 ) -> CurrentImage {
     Box::new(move || {
-        let dir = match &store {
-            Some(store) => {
-                let state = store.state().ok()?;
-                store.image_dir(&state.current.version)
-            }
-            None => configured.as_ref()?.parent()?.to_path_buf(),
-        };
-        Some((image_version(&dir)?, dir))
+        let current = dsa_host_core::update::current::current_image(
+            store.as_deref(),
+            configured.as_deref().and_then(std::path::Path::parent),
+        )
+        .ok()?;
+        Some((image_version(&current.dir)?, current.dir))
     })
 }
 

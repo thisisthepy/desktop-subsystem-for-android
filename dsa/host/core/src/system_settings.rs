@@ -69,6 +69,23 @@ pub fn is_language_tag(tag: &str) -> bool {
         })
 }
 
+/// Whether a time format pattern (an `NSDateFormatter` hour format, or Windows'
+/// `LOCALE_SSHORTTIME` such as "HH:mm" or "h:mm tt") shows a 24-hour clock. The letters outside
+/// quotes decide, the first hour letter first: `H` and `k` are a 24-hour clock, `h` and `K` a
+/// 12-hour one. Quoted text is literal, not a pattern.
+pub fn is_24_hour_pattern(pattern: &str) -> bool {
+    let mut quoted = false;
+    for c in pattern.chars() {
+        match c {
+            '\'' => quoted = !quoted,
+            'H' | 'k' if !quoted => return true,
+            'h' | 'K' if !quoted => return false,
+            _ => {}
+        }
+    }
+    false
+}
+
 /// Whether `name` reads as an IANA time zone name: letters, digits and `/_+-`, such as
 /// `America/Argentina/Buenos_Aires` or `Etc/GMT+9`.
 pub fn is_time_zone(name: &str) -> bool {
@@ -266,6 +283,19 @@ fn sleep_unless(stop: &AtomicBool, wait: Duration) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fr30_the_clock_follows_the_hour_letter_of_the_time_pattern() {
+        assert!(is_24_hour_pattern("HH"));
+        assert!(is_24_hour_pattern("HH:mm"));
+        assert!(!is_24_hour_pattern("h a"));
+        assert!(!is_24_hour_pattern("h:mm tt"));
+        assert!(!is_24_hour_pattern("'H' h a"));
+        assert!(!is_24_hour_pattern("h 'H' mm"));
+        assert!(is_24_hour_pattern("k"));
+        assert!(!is_24_hour_pattern("K"));
+        assert!(!is_24_hour_pattern(""));
+    }
 
     fn seoul() -> SystemSettings {
         SystemSettings {

@@ -371,14 +371,7 @@ impl Canvas<'_> {
 
 /// `color` at `coverage` of its alpha, as premultiplied BGRA bytes.
 pub fn premultiplied(color: Argb, coverage: f32) -> [u8; 4] {
-    let alpha = ((color >> 24) & 0xff) as f32 / 255.0 * coverage.clamp(0.0, 1.0);
-    let channel = |shift: u32| (((color >> shift) & 0xff) as f32 * alpha).round() as u8;
-    [
-        channel(0),
-        channel(8),
-        channel(16),
-        (alpha * 255.0).round() as u8,
-    ]
+    dsa_host_core::color::premultiplied(color, f64::from(coverage)).map(|value| value.round() as u8)
 }
 
 /// Reads the user's theme now.

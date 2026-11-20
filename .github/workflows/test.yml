@@ -138,7 +138,7 @@ jobs:
           }
           part 'dsa/(Cargo\.(toml|lock)|deny\.toml|protocol/|host/|guest/(transport|channeld)/)' rust
           part 'dsa/(Cargo\.(toml|lock)|protocol/|host/(core|platform/unix|platform/linux|cli)/)' unix
-          part 'dsa/(Cargo\.(toml|lock)|protocol/|host/(core|platform/(unix|macos)|cli)/|host/platform/windows/src/(gpt|pstore_disk)\.rs|kernel/)' macos
+          part 'dsa/(Cargo\.(toml|lock)|protocol/|host/(core|platform/(unix|macos)|cli)/|kernel/)' macos
           part 'dsa/(Cargo\.(toml|lock)|protocol/|host/(core|platform/unix|platform/linux)/)' linux
           part 'dsa/(guest/agent|protocol)/' agent
           part 'dsa/(Cargo\.(toml|lock)|host/(core|cli)/)|\.github/scripts/apk/' apk

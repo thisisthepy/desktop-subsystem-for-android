@@ -100,7 +100,7 @@ fn fr2_crosvm_starts_resizes_freezes_and_stops_the_vm() {
         kernel,
         initrd: Some(initrd),
         kernel_cmdline: "androidboot.boot_devices=vmbus".into(),
-        system_image: None,
+        system_disk: None,
         disk_template: None,
     };
     let mut launcher = launcher(&dir, crosvm, test_cid(0), files, (512, 1024));
@@ -152,8 +152,8 @@ fn fr2_the_published_image_boots_under_crosvm_until_its_daemon_connects() {
     let dir = scratch("image");
     let account = Account::current().unwrap();
     let mut files = image_files(&image, None, "").unwrap();
-    files.system_image = files
-        .system_image
+    files.system_disk = files
+        .system_disk
         .as_deref()
         .map(raw_disk)
         .transpose()

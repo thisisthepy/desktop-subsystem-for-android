@@ -103,3 +103,24 @@ fn pr5_the_socket_file_is_removed_when_the_listener_goes() {
     drop(UnixLocalListener::bind(&path, 0o600).unwrap());
     assert!(!path.exists());
 }
+
+#[test]
+fn fr4_a_unix_connection_hands_out_a_second_sender_for_another_thread() {
+    // The window manager sends from one thread and reads on another, so each connection
+    // must give a sender of its own; without one an app's window host could not attach.
+    let (mut listener, mut connector) = unix_pair();
+    let mut client = connector.connect(Duration::from_secs(1)).unwrap();
+    let mut server = listener.accept(Duration::from_secs(1)).unwrap();
+    let mut sender = server
+        .try_clone_sender()
+        .expect("a Unix connection gives a second sender");
+    sender.send(b"from the second handle").unwrap();
+    assert_eq!(
+        client.recv(Some(Duration::from_secs(1))).unwrap(),
+        b"from the second handle"
+    );
+    drop(sender);
+    // The reader still works after the sender is dropped.
+    client.send(b"back").unwrap();
+    assert_eq!(server.recv(Some(Duration::from_secs(1))).unwrap(), b"back");
+}

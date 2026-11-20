@@ -86,7 +86,8 @@ use dsa_host_core::compositor::caption_icon::{self, IconLook};
 use dsa_host_core::compositor::window_hosts::FromHost;
 use dsa_host_core::compositor::window_sizing::{maximize_command, MaximizeCommand};
 use dsa_host_core::input::InputEvent;
-use dsa_host_core::keys::{keycode, KeyAction, KeyEvent as GuestKey};
+#[cfg(test)]
+use dsa_host_core::keys::KeyAction;
 use dsa_host_core::tasks::Bounds;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Dwm::{
@@ -286,20 +287,7 @@ fn withdraw_from_proxies(states: &mut [u32; 6]) {
     }
 }
 
-/// The key events a click on the back arrow sends the task: Back pressed and released, at
-/// `time_ms` of the host's clock.
-pub fn back_keys(task_id: i32, time_ms: u32) -> [GuestKey; 2] {
-    let key = |action| GuestKey {
-        task_id,
-        action,
-        key_code: keycode::BACK,
-        repeat_count: 0,
-        meta_state: 0,
-        event_time_ms: time_ms,
-        canceled: false,
-    };
-    [key(KeyAction::Down), key(KeyAction::Up)]
-}
+pub use dsa_host_core::keys::back_keys;
 
 /// How long after a Back the arrow sends no other, unless the task's state is told again
 /// first, in milliseconds. Android tells the new state once the screen has gone, which takes

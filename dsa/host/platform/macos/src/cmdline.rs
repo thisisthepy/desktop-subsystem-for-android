@@ -60,7 +60,7 @@ pub fn for_virtualization_framework(image: &str, extra: &str, pstore: bool) -> S
     );
     if pstore {
         words.extend(
-            crate::pstore_disk::KERNEL_CMDLINE
+            dsa_host_core::disk::pstore::KERNEL_CMDLINE
                 .split_whitespace()
                 .map(str::to_string),
         );

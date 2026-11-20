@@ -610,7 +610,7 @@ impl State {
             png: OnceLock::new(),
         });
         self.set_clipboard_shot(Arc::clone(&shot), serial);
-        let prefix = menu_text(self.language).screenshot_file;
+        let prefix = menu_text(self.language).dsa.screenshot_file;
         let spawned = std::thread::Builder::new()
             .name("dsa-screenshot".into())
             .spawn(move || match screenshot::save(shot.png(), prefix) {
