@@ -1321,6 +1321,12 @@ pub fn memory_plan(
 }
 
 impl MemoryPlan {
+    /// The most the VM may grow to, in MiB: its maximum, or its start size when it does not
+    /// grow. Apps are shown this as the device's memory.
+    pub fn grows_to_mb(&self) -> u64 {
+        self.max_mb.unwrap_or(u64::from(self.start_mb))
+    }
+
     /// The line the host logs when it sizes a VM for `user`, whose limit is `limit_mb`.
     pub fn describe(&self, user: &str, limit_mb: u32) -> String {
         format!(

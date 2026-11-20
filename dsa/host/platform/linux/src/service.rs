@@ -271,7 +271,12 @@ pub fn create_user_android(
     };
     let store = settings_store(config);
     let trace_on = Arc::new(AtomicBool::new(false));
+    // The most this start's VM may grow to, in MiB, which the boot tells the guest so that apps
+    // see it as the device's memory. Set by each start's plan, read by its bootconfig.
+    let apps_memory_mb: Arc<Mutex<Option<u64>>> = Arc::default();
     let plan = {
+        let apps_memory = Arc::clone(&apps_memory_mb);
+        let grow_memory = config.grow_memory;
         let (disk, run_dir, traced) = (
             files.data_disk.clone(),
             files.run_dir.clone(),
@@ -304,6 +309,12 @@ pub fn create_user_android(
             image.kernel_cmdline =
                 crate::monitor_density::with_boot_density(&image.kernel_cmdline, &run_dir);
             traced.store(guest_traces_input(&image.kernel_cmdline), Ordering::Relaxed);
+            let grows_to = if grow_memory {
+                boot.memory.grows_to_mb()
+            } else {
+                u64::from(boot.memory.start_mb)
+            };
+            *apps_memory.lock().unwrap_or_else(|e| e.into_inner()) = Some(grows_to);
             Ok(BootPlan {
                 files: image,
                 image_version: boot.image_version,
@@ -347,11 +358,21 @@ pub fn create_user_android(
         // the launcher has readied by now.
         let (store, user) = (Arc::clone(&store), user.to_string());
         let addons = files.addon_disk.clone();
+        let apps_memory = Arc::clone(&apps_memory_mb);
         Box::new(move |image: &ImageFiles| {
             use dsa_host_core::addon_disk::{AddonDisk, Format};
             let dir = image.initrd.as_deref().and_then(Path::parent);
             let attached = AddonDisk::new(&addons, Format::Raw).attached();
-            dsa_host_core::bootconfig::for_boot(&*store, &user, dir, &attached, &ProcFacts)
+            // The memory the VM may grow to, which apps see as the device's memory; set by
+            // this start's plan.
+            dsa_host_core::bootconfig::for_boot(
+                &*store,
+                &user,
+                dir,
+                &attached,
+                &ProcFacts,
+                *apps_memory.lock().unwrap_or_else(|e| e.into_inner()),
+            )
         })
     })
     .with_boot_properties({

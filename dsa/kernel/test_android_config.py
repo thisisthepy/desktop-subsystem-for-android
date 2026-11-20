@@ -58,9 +58,10 @@ class AndroidKernelConfigTests(unittest.TestCase):
         for option in ["CONFIG_IP_NF_NAT=y", "CONFIG_IP6_NF_NAT=y", "CONFIG_NETFILTER_XT_TARGET_REDIRECT=y"]:
             self.assertIn(option, config)
 
-    def test_fr32_listed_apps_see_the_computers_memory_in_meminfo_and_sysinfo(self):
-        # Google Play reads the device's memory from /proc/meminfo and sysinfo(); the apps the
-        # guest lists see the computer's memory there, every other process the VM's own.
+    def test_fr32_apps_see_the_memory_the_guest_may_grow_to_in_meminfo_and_sysinfo(self):
+        # Apps read the device's memory from /proc/meminfo and sysinfo() and refuse to run on a
+        # VM that has not grown yet. Every app process sees the memory the guest may grow to,
+        # the app store the computer's, and system processes the VM's own.
         self.assertIn("CONFIG_DSA_HOST_MEMORY=y", CONFIG.read_text())
         patch = (PATCHES / "dsa-host-memory.patch").read_text()
         self.assertIn("+++ b/fs/proc/dsa_host_memory.c", patch)
@@ -68,17 +69,33 @@ class AndroidKernelConfigTests(unittest.TestCase):
         for path in ("fs/proc/meminfo.c", "kernel/sys.c"):
             hunk = patch[patch.index(f"+++ b/{path}"):]
             hunk = hunk[:hunk.find("diff --git", 1)] if "diff --git" in hunk[1:] else hunk
-            self.assertIn("+\tdsa_host_memory_adjust(", hunk, path)
+            self.assertRegex(hunk, r"\n\+\t(dsa_headroom = )?dsa_host_memory_adjust\(", path)
+        # MemAvailable gains what the guest may still grow, as free memory does.
+        self.assertIn("+\tavailable = si_mem_available() + dsa_headroom;", patch)
+        self.assertIn("+\tinfo->freeram += headroom;", patch)
         # Keyed on the calling process's own uid, never on anything a binder peer says.
-        self.assertIn("dsa_app_listed(current_uid())", patch)
+        self.assertIn("from_kuid(&init_user_ns, current_uid())", patch)
         self.assertNotIn("drivers/android/binder.c", patch)
-        # Only the total changes, and only upwards; free and available memory stay the VM's.
-        self.assertIn("+\tif (pages > info->totalram)\n+\t\tinfo->totalram = pages;", patch)
-        self.assertNotIn("freeram =", patch)
-        # Parameters the bootconfig's kernel.dsa_host_memory.* reach.
+
+    def test_fr32_only_app_uids_see_the_grown_size(self):
+        # App IDs from 10000 are installed apps; root, system_server, lmkd and the other system
+        # uids keep the VM's real size, so memory management in the guest is unchanged.
+        patch = (PATCHES / "dsa-host-memory.patch").read_text()
+        self.assertIn("+#define DSA_ANDROID_FIRST_APPLICATION_UID 10000", patch)
+        self.assertIn("+\tif (app < DSA_ANDROID_FIRST_APPLICATION_UID || "
+                      "dsa_app_listed(&dsa_real_uids, app))\n+\t\treturn 0;", patch)
+        # The total only grows, never shrinks below what the VM has.
+        self.assertIn("+\tif (pages > own) {", patch)
+        self.assertIn("+\t\tif (pages > shown)\n+\t\t\tshown = pages;", patch)
+
+    def test_fr32_the_parameters_are_the_ones_the_host_and_init_write(self):
+        # Parameters the bootconfig's kernel.dsa_host_memory.* reach, and the lists init writes.
+        patch = (PATCHES / "dsa-host-memory.patch").read_text()
         self.assertIn('+#define MODULE_PARAM_PREFIX "dsa_host_memory."', patch)
         self.assertIn("+module_param_named(total_kb, dsa_total_kb, ulong, 0444);", patch)
-        self.assertIn("+module_param_cb(uids, &dsa_uids_ops, NULL, 0644);", patch)
+        self.assertIn("+module_param_named(store_total_kb, dsa_store_total_kb, ulong, 0444);", patch)
+        self.assertIn("+module_param_cb(uids, &dsa_uids_ops, &dsa_store_uids, 0644);", patch)
+        self.assertIn("+module_param_cb(real_uids, &dsa_uids_ops, &dsa_real_uids, 0644);", patch)
 
     def test_pr7_the_codec_hal_maps_the_hosts_picture_memory_read_only(self):
         # The host writes decoded pictures into memory it shares with the VM; the driver maps

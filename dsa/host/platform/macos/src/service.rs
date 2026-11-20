@@ -227,7 +227,7 @@ impl Planner {
             boot_density(crate::display_power::main_display_dpi()),
         );
         let start = u64::from(boot.memory.start_mb);
-        let max = boot.memory.max_mb.unwrap_or(start);
+        let max = boot.memory.grows_to_mb();
         let mut listen_ports = vec![
             self.config.control_port,
             self.config.log_port,
@@ -255,12 +255,14 @@ impl Planner {
         Ok(BootPlan {
             vm,
             properties: Some(properties),
+            // The memory the VM may grow to, which apps see as the device's memory.
             bootconfig: dsa_host_core::bootconfig::for_boot(
                 &*self.settings,
                 &self.name,
                 Some(dir.as_path()),
                 &attached,
                 &MacFacts,
+                Some(max),
             ),
         })
     }

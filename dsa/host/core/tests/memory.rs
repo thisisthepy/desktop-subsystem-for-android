@@ -1437,3 +1437,18 @@ fn nfr2_failed_growth_is_retried_next_boot() {
     assert_eq!(before, after);
     assert!(after.max_mb.is_some());
 }
+
+#[test]
+fn fr32_apps_see_the_start_size_of_a_vm_that_does_not_grow() {
+    use dsa_host_core::memory::MemoryPlan;
+    let fixed = MemoryPlan {
+        start_mb: 4096,
+        max_mb: None,
+    };
+    assert_eq!(fixed.grows_to_mb(), 4096);
+    let growing = MemoryPlan {
+        start_mb: 2048,
+        max_mb: Some(14 * 1024),
+    };
+    assert_eq!(growing.grows_to_mb(), 14 * 1024);
+}

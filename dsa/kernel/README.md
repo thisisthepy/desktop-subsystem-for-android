@@ -128,15 +128,19 @@ in probe order, which changes when the host attaches another disk.
   dm-crypt, quotas, and the eBPF and netfilter pieces netd uses.
 - **Everything built in.** The VM boots one image with no modules, so options
   `config-wsl` builds as modules, and their dependencies, are set to `y`.
-- **The computer's memory for Google Play.** Google Play gives a device under 8 GB a Chrome
-  whose browser is 32-bit, which this 64-bit only guest cannot run, and the VM starts small
-  and grows, so its size is not the computer's. `patches/dsa-host-memory.patch` adds
-  `fs/proc/dsa_host_memory.c`: a process whose uid is in
-  `/sys/module/dsa_host_memory/parameters/uids` sees `total_kb`, the computer's physical
-  memory, as `MemTotal` in `/proc/meminfo` and as the total of `sysinfo()`. The host passes
-  `total_kb` in the bootconfig (`kernel.dsa_host_memory.total_kb`); init writes the uids the
-  guest's control daemon names (the Play Store and Play services). Only the total changes, and
-  only for those uids, so lmkd and every other process see the VM's real memory.
+- **The memory the guest may grow to, for apps.** Apps decide by the device's memory: a game
+  refuses to start under its requirement, and Google Play gives a device under 8 GB a Chrome
+  whose browser is 32-bit, which this 64-bit only guest cannot run. The VM starts small and
+  grows, so its size is not what an app may use. `patches/dsa-host-memory.patch` adds
+  `fs/proc/dsa_host_memory.c`: every app process (app ID 10000 or more, for every Android
+  user) sees `total_kb`, the memory the VM may grow to, as `MemTotal` in `/proc/meminfo` and
+  as the total of `sysinfo()`, and what the VM may still grow is added to its free and
+  available memory. The apps in `/sys/module/dsa_host_memory/parameters/uids` (the Play Store
+  and Play services) see `store_total_kb`, the computer's physical memory, as their total. The
+  host passes both in the bootconfig (`kernel.dsa_host_memory.*`); init writes the uids the
+  guest's control daemon names. System processes, and the apps in `real_uids` (DSA's agent,
+  which reports the guest's memory to the host), see the VM's real memory, so lmkd and
+  Android's own memory management are unchanged.
 - **Bootconfig**, which carries each boot's control channel secret from the host. The
   guest reads it from `/proc/bootconfig`, which apps cannot read.
 - **Its own release name** (`-dsa`), so it is never mistaken for the WSL kernel.

@@ -300,16 +300,21 @@ aapt2 from the Android SDK's build-tools for the system screen overlays.
   permission its privileged apps ask for (`dsa-gapps-privapp-permissions.xml` in each
   partition's `etc/permissions`), so the log should stay empty. `sepolicy/gapps.cil` lets init
   lay the image over.
-- Google Play sees the computer's memory as the device's memory. Play gives a device under
-  8 GB a Chrome whose browser is 32-bit, which this 64-bit only guest cannot start, and the VM
-  starts small and grows. The host passes the computer's physical memory in the bootconfig
-  (`kernel.dsa_host_memory.total_kb`). `dsa-channeld` names the Play Store's and Play services'
-  uids in `vendor.dsa.host_memory.uids`, and `dsa-memory.rc` hands them to the kernel
-  (`/sys/module/dsa_host_memory/parameters/uids`), which shows those apps the computer's memory
-  as `MemTotal` in `/proc/meminfo` and in `sysinfo()`. The framework build's
-  `libandroid_runtime` answers their `ActivityManager.getMemoryInfo` (`totalMem`) with it.
-  Every other app and Android itself see the VM's memory. Only init may write the list and only
-  the daemon may set the property (`sepolicy/memory.cil`), which `check-image.py` checks.
+- Apps see the memory the VM may grow to as the device's memory. The VM starts small and
+  grows, and apps decide by its size: a game refuses to start under its requirement, and Google
+  Play gives a device under 8 GB a Chrome whose browser is 32-bit, which this 64-bit only guest
+  cannot start. The host passes the most the VM may grow to and the computer's physical memory
+  in the bootconfig (`kernel.dsa_host_memory.total_kb` and `store_total_kb`). The kernel shows
+  every app process (an app ID of 10000 or more) the first as `MemTotal` in `/proc/meminfo` and
+  in `sysinfo()`, with what the VM may still grow added to free and available memory, and the
+  framework build's `libandroid_runtime` answers apps' `ActivityManager.getMemoryInfo`
+  (`totalMem`, `availMem`, `freeMem`) the same way. `dsa-channeld` names the Play Store's and
+  Play services' uids in `vendor.dsa.host_memory.uids`, which see the computer's memory as their
+  total, and DSA's agent's in `vendor.dsa.host_memory.real_uids`, which sees the VM's own memory
+  because it reports the guest's memory to the host; `dsa-memory.rc` hands both lists to the
+  kernel (`/sys/module/dsa_host_memory/parameters/`). Android's system processes see the VM's
+  memory, so lmkd is unchanged. Only init may write the lists and only the daemon may set the
+  properties (`sepolicy/memory.cil`), which `check-image.py` checks.
 - Google Play sees a display of at least 480 dpi (xxhdpi). Play delivers the density splits of
   an app that match the density the Play Store reads from the default display's metrics, and a
   monitor is far less dense than a phone (130 dpi at 100%, 262 at 200%), so Play delivered

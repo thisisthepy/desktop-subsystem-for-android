@@ -58,13 +58,14 @@ fn fr32_a_boots_bootconfig_names_the_computers_memory_and_no_add_ons_when_none_a
         None,
         &[],
         &Facts(Some(16 * 1024 * 1024), None),
+        Some(16 * 1024),
     );
     assert!(
         text.contains("kernel.dsa_host_memory.total_kb = \"16777216\"\n"),
         "{text}"
     );
     assert!(!text.contains("androidboot.dsa.addon_disk"), "{text}");
-    let unknown = for_boot(&store, "user", None, &[], &Facts(None, None));
+    let unknown = for_boot(&store, "user", None, &[], &Facts(None, None), None);
     assert!(!unknown.contains("total_kb"), "{unknown}");
 }
 
@@ -79,6 +80,7 @@ fn fr32_a_boots_bootconfig_names_the_memory_the_computer_is_installed_with() {
         None,
         &[],
         &Facts(Some(33_043_084), Some(32 * 1024 * 1024)),
+        None,
     );
     assert!(
         text.contains(

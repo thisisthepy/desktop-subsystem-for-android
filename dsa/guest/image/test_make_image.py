@@ -3333,6 +3333,7 @@ class GuestMemoryTests(unittest.TestCase):
             + make_image.DNS_PROPERTY_CONTEXT + "\n"
             + make_image.GOOGLE_DEVICE_ID_PROPERTY_CONTEXT + "\n"
             + make_image.HOST_MEMORY_PROPERTY_CONTEXT + "\n"
+            + make_image.HOST_MEMORY_REAL_PROPERTY_CONTEXT + "\n"
             + make_image.VIDEO_PICTURES_PROPERTY_CONTEXT + "\n"
             + make_image.GRAPHICS_MEMORY_PROPERTY_CONTEXT + "\n"
             + "".join(context + "\n" for context in make_image.GAPPS_COMPILE_PROPERTY_CONTEXTS.values())
@@ -8942,6 +8943,9 @@ class HostMemoryImageTests(unittest.TestCase):
         rc = files[make_image.MEMORY_RC].decode().replace("\r\n", "\n")
         self.assertIn("on property:vendor.dsa.host_memory.uids=*\n"
                       "    write /sys/module/dsa_host_memory/parameters/uids ${vendor.dsa.host_memory.uids}", rc)
+        self.assertIn("on property:vendor.dsa.host_memory.real_uids=*\n"
+                      "    write /sys/module/dsa_host_memory/parameters/real_uids "
+                      "${vendor.dsa.host_memory.real_uids}", rc)
 
     def test_fr32_no_app_may_name_itself_or_read_the_computers_memory(self):
         writers = re.findall(r"\(allow\s+(\S+)\s+dsa_sysfs_host_memory\s+\(\s*file\s+\(([^)]*)\)",
@@ -8966,7 +8970,9 @@ class HostMemoryImageTests(unittest.TestCase):
         framework = {"framework": {"files": {"SYSTEM/lib64/libhwui.so": "0" * 64}}}
         problems = make_image.host_memory_problems(framework, list(files), files.__getitem__)
         expected = ["does not hand vendor.dsa.host_memory.uids to the kernel",
+                    "does not hand vendor.dsa.host_memory.real_uids to the kernel",
                     "does not give vendor.dsa.host_memory.uids its type",
+                    "does not give vendor.dsa.host_memory.real_uids its type",
                     "untrusted_app may write the kernel's list",
                     "untrusted_app may name the apps",
                     "has no SYSTEM/lib64/libandroid_runtime.so"]
@@ -8974,18 +8980,24 @@ class HostMemoryImageTests(unittest.TestCase):
             self.assertTrue(any(text in p for p in problems), (text, problems))
         self.assertEqual(len(problems), len(expected), problems)
 
-    def test_fr32_the_framework_answers_google_plays_memory_info_with_the_computers(self):
-        # ActivityManager.getMemoryInfo is computed in system_server from
-        # Process.getTotalMemory; the patch answers a listed binder caller with total_kb.
+    def test_fr32_the_framework_answers_apps_memory_info_with_the_memory_the_vm_may_grow_to(self):
+        # ActivityManager.getMemoryInfo is computed in system_server from Process.getTotalMemory,
+        # getMemAvailable and getMemFree; the patch answers an app binder caller with total_kb
+        # (store_total_kb for the app store), plus what the VM may still grow, and a system
+        # caller or one in real_uids with the VM's own size.
         framework = self.HERE.parent / "framework" / "patches" / "frameworks" / "base"
         for android in ("android16", "android17"):
-            patch = (framework / android / "0002-show-google-play-the-computers-memory.patch").read_text()
+            patch = (framework / android / "0002-show-apps-the-memory-the-vm-may-grow-to.patch").read_text()
             self.assertIn("+++ b/core/jni/android_util_Process.cpp", patch)
             self.assertIn("IPCThreadState::self()->getCallingUid()", patch)
             self.assertIn("/sys/module/dsa_host_memory/parameters/", patch)
-            self.assertIn('std::string(kDir) + "uids"', patch)
-            self.assertIn('std::string(kDir) + "total_kb"', patch)
+            for name in ("total_kb", "store_total_kb", "uids", "real_uids"):
+                self.assertIn(f'"{name}"', patch)
             self.assertIn("caller % kPerUserRange", patch)
+            self.assertIn("app < kFirstApplicationUid", patch)
+            self.assertIn("+    return dsaMemoryForCaller(own, &headroom);", patch)
+            self.assertEqual(patch.count("+    return dsaFreeMemoryForCaller("), 2)
+            self.assertIn(f"(Android {android[-2:]})", patch)
         self.assertIn(make_image.HOST_MEMORY_FRAMEWORK_FILE, make_image.FRAMEWORK_FILES)
 
     def test_fr32_the_framework_shows_google_play_a_phones_density(self):

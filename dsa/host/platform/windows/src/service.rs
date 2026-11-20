@@ -416,7 +416,7 @@ pub fn create_user_android(
             user_network(sid),
         )
     })
-    .with_memory_max(memory_max)
+    .with_memory_max(memory_max.clone())
     .with_direct_mapped(direct_mapped.cloned())
     .with_boot_dir(config.machine_root().tmp())
     .with_bootconfig({
@@ -426,6 +426,7 @@ pub fn create_user_android(
         // boot attaches.
         let store = settings_store(config);
         let user = sid.to_string();
+        let grows_to = memory_max.clone();
         Box::new(move |vm: &AndroidVmConfig| {
             use dsa_host_core::addon_disk::{AddonDisk, Format};
             let image = vm.initrd.as_deref().and_then(std::path::Path::parent);
@@ -434,12 +435,19 @@ pub fn create_user_android(
                 .as_ref()
                 .map(|path| AddonDisk::new(path, Format::Vhd).attached())
                 .unwrap_or_default();
+            // The memory the VM may grow to (its start size when it does not grow), which apps
+            // see as the device's memory; set by this start's plan.
+            let grows_to = grows_to
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .unwrap_or(u64::from(vm.memory_mb));
             dsa_host_core::bootconfig::for_boot(
                 &*store,
                 &user,
                 image,
                 &attached,
                 &crate::power::ComputerFacts,
+                Some(grows_to),
             )
         })
     })

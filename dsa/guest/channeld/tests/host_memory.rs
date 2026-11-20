@@ -1,6 +1,9 @@
 //! Which apps the daemon names to see the computer's memory as the device's.
 
-use dsa_guest_channeld::host_memory::{property_value, HostMemoryApps, APPS, NONE, PROPERTY};
+use dsa_guest_channeld::host_memory::{
+    property_value, property_value_for, HostMemoryApps, APPS, NONE, PROPERTY, REAL_SIZE_APPS,
+    REAL_SIZE_PROPERTY,
+};
 use dsa_guest_channeld::su_relay::uids_from_packages_list;
 
 const PACKAGES: &str =
@@ -67,5 +70,35 @@ fn fr32_the_property_is_one_init_reads_for_the_kernel() {
     assert!(rc.contains(&format!("on property:{PROPERTY}=*")));
     assert!(rc.contains(&format!(
         "write /sys/module/dsa_host_memory/parameters/uids ${{{PROPERTY}}}"
+    )));
+}
+
+#[test]
+fn fr32_the_agent_is_named_to_see_the_vms_own_memory() {
+    // The agent reports the guest's memory to the host, so it must read the VM's real size,
+    // not the memory the VM may grow to that every other app sees.
+    assert_eq!(REAL_SIZE_APPS, ["io.github.thisisthepy.dsa.agent"]);
+    let packages = format!(
+        "{PACKAGES}io.github.thisisthepy.dsa.agent 10042 0 /data/user/0/io.github.thisisthepy.dsa.agent platform:privapp 3003\n"
+    );
+    let uids = uids_from_packages_list(&packages);
+    assert_eq!(property_value_for(&REAL_SIZE_APPS, &uids), "10042");
+    // Google Play is not on that list, and the agent is not on Google Play's.
+    assert_eq!(property_value(&uids), "10087,10123");
+    let mut agent = HostMemoryApps::for_apps(&REAL_SIZE_APPS);
+    assert_eq!(agent.look(Some(PACKAGES)).as_deref(), Some(NONE));
+    assert_eq!(agent.look(Some(&packages)).as_deref(), Some("10042"));
+}
+
+#[test]
+fn fr32_the_agents_property_is_one_init_reads_for_the_kernel() {
+    assert_eq!(REAL_SIZE_PROPERTY, "vendor.dsa.host_memory.real_uids");
+    let rc = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../image/dsa-memory.rc"),
+    )
+    .unwrap();
+    assert!(rc.contains(&format!("on property:{REAL_SIZE_PROPERTY}=*")));
+    assert!(rc.contains(&format!(
+        "write /sys/module/dsa_host_memory/parameters/real_uids ${{{REAL_SIZE_PROPERTY}}}"
     )));
 }

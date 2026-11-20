@@ -66,18 +66,25 @@ on boot
 on boot && property:ro.boot.dsa.memory_compaction=on
     write /proc/sys/vm/compaction_proactiveness 40
 
-# The apps that see the computer's memory as the device's (Google Play: the Play Store and Play
-# services). Google Play gives a device under 8 GB a build of Chrome whose browser is 32-bit,
-# which this 64-bit only guest cannot start, and the VM's size says nothing about the computer:
-# it starts small and grows. The host passes the computer's memory at each start
-# (kernel.dsa_host_memory.total_kb in the bootconfig). dsa-channeld names the apps' uids from the
-# package manager's list in vendor.dsa.host_memory.uids ("none" for no app), and init hands them
-# to the kernel, which then shows those apps the computer's memory as MemTotal in /proc/meminfo
-# and in sysinfo(). The framework reads the same two kernel parameters to answer those apps'
-# ActivityManager.getMemoryInfo. Only init may write the list (sepolicy/memory.cil), so no app
-# can name itself; every other process sees the VM's memory, so lmkd is unchanged.
+# Which memory apps see as the device's. The VM starts small and grows, so its size says
+# nothing about what an app may use, and apps decide by it: a game refuses to start under its
+# requirement, and Google Play gives a device under 8 GB a Chrome whose browser is 32-bit, which
+# this 64-bit only guest cannot start. The host passes at each start the memory the VM may grow
+# to (kernel.dsa_host_memory.total_kb in the bootconfig) and the computer's memory
+# (kernel.dsa_host_memory.store_total_kb). The kernel shows every app process the first as
+# MemTotal in /proc/meminfo and in sysinfo(), with what the VM may still grow added to free and
+# available memory, and the framework answers apps' ActivityManager.getMemoryInfo the same way.
+# dsa-channeld names two lists from the package manager's list ("none" for no app), and init
+# hands them to the kernel: vendor.dsa.host_memory.uids, the Play Store and Play services, which
+# see the computer's memory as their total, and vendor.dsa.host_memory.real_uids, DSA's agent,
+# which reports the guest's memory to the host and so sees the VM's own size. Only init may write
+# the lists (sepolicy/memory.cil), so no app can name itself; Android's system processes see the
+# VM's memory, so lmkd is unchanged.
 on property:vendor.dsa.host_memory.uids=*
     write /sys/module/dsa_host_memory/parameters/uids ${vendor.dsa.host_memory.uids}
+
+on property:vendor.dsa.host_memory.real_uids=*
+    write /sys/module/dsa_host_memory/parameters/real_uids ${vendor.dsa.host_memory.real_uids}
 
 # The memory the host shares with the guest for decoded video pictures, so a picture reaches the
 # codec HAL without a copy through the video port. Where it is in the VM's physical memory is

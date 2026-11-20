@@ -1,7 +1,7 @@
 """Tests for the framework patches that show Google Play the computer's memory.
 
 Play uploads ActivityManager.MemoryInfo.totalMem and advertisedMem. totalMem is the computer's
-memory (0002). advertisedMem came from Process.getAdvertisedMem, which rounds the total memory up
+memory for them (0002). advertisedMem came from Process.getAdvertisedMem, which rounds the total memory up
 to the next power of two in decimal units, so a 32 GB computer (33.8 GB of memory) was advertised
 as 64 GB (0008)."""
 
@@ -33,9 +33,10 @@ class ComputersMemoryPatchTests(unittest.TestCase):
             # The Java side asks the native one first and keeps Android's own value otherwise.
             self.assertIn("final long host = getHostAdvertisedMem();", joined, android)
             self.assertIn("if (host > 0) {", joined, android)
-            # The native side reuses the uid list of totalMem, so an unlisted caller gets 0.
-            self.assertIn("const jlong total = dsaHostMemoryForCaller();", joined, android)
-            self.assertIn("if (total == 0) {", joined, android)
+            # The native side reuses the uid lists of totalMem, so a caller that is not in uids,
+            # or is in real_uids, gets 0.
+            self.assertIn('!dsaHostMemoryListed("uids", app)', joined, android)
+            self.assertIn('dsaHostMemoryListed("real_uids", app)', joined, android)
             self.assertIn('{"getHostAdvertisedMem", "()J"', joined, android)
 
     def test_fr32_advertised_mem_is_the_installed_memory_in_whole_gib_counted_in_decimal_units(self):
@@ -48,10 +49,10 @@ class ComputersMemoryPatchTests(unittest.TestCase):
             self.assertIn("* 1000000000", joined, android)
             self.assertNotIn("roundStorageSize", joined, android)
 
-    def test_fr32_advertised_mem_follows_the_total_memory_when_the_host_sent_no_installed_figure(self):
+    def test_fr32_advertised_mem_follows_the_computers_memory_when_the_host_sent_no_installed_figure(self):
         for android in VERSIONS:
             joined = added(patch(android, "0008"))
-            self.assertIn("kb = static_cast<uint64_t>(total) / 1024;", joined, android)
+            self.assertIn('kb = dsaHostMemoryKb("store_total_kb");', joined, android)
 
     def test_fr32_every_hunk_line_starts_with_a_diff_marker(self):
         for android in VERSIONS:

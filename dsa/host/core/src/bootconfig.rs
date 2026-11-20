@@ -20,8 +20,9 @@ const ALIGN: usize = 4;
 /// what the add-on disk carries (`attached` is what the boot attaches of it), the ARM
 /// translator (the package the user installed, else the default one of the image in
 /// `image_dir`) while the user's setting is on, the Google apps and Widevine the user installed
-/// while their images are on the add-on disk, and the computer's physical memory and the memory
-/// it is installed with (both read from `facts` at each start), which Google Play sees as the
+/// while their images are on the add-on disk, the memory the VM may grow to (`vm_max_mb`),
+/// which apps see as the device's memory, and the computer's physical memory and the memory it
+/// is installed with (both read from `facts` at each start), which Google Play sees as the
 /// device's memory and the advertised memory.
 pub fn for_boot(
     store: &dyn SettingsStore,
@@ -29,12 +30,17 @@ pub fn for_boot(
     image_dir: Option<&Path>,
     attached: &[Addon],
     facts: &dyn HostFacts,
+    vm_max_mb: Option<u64>,
 ) -> String {
     addon_disk::bootconfig(attached).to_string()
         + &crate::arm_translation::bootconfig_for(store, user, image_dir, attached)
         + &crate::gapps::bootconfig_for(store, user, attached)
         + &crate::widevine::bootconfig_for(store, user, attached)
-        + &crate::host_memory::bootconfig(facts.physical_memory_kb(), facts.installed_memory_kb())
+        + &crate::host_memory::bootconfig(
+            facts.physical_memory_kb(),
+            vm_max_mb,
+            facts.installed_memory_kb(),
+        )
 }
 
 /// `initrd` followed by `text` as bootconfig: the text, NUL-terminated and padded with NULs
