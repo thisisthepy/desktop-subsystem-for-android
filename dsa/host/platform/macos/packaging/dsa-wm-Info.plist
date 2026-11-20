@@ -1,12 +1,39 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The Info.plist of DSA.app's helper bundle Contents/Helpers/DSA Window Manager.app, where
+     dsa-wm runs. With a bundle and an identifier of its own, macOS never takes dsa-wm for the
+     running DSA.app, so opening DSA.app starts the settings app. LSUIElement keeps it out of
+     the Dock and the menu bar. build-app.sh puts the version in. The same file is embedded in
+     dsa-wm (its __TEXT,__info_plist section) for a development build run outside the bundle. -->
 <plist version="1.0">
 <dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleExecutable</key>
+	<string>dsa-wm</string>
+	<key>CFBundleIconFile</key>
+	<string>DSA</string>
 	<key>CFBundleIdentifier</key>
 	<string>org.thisisthepy.dsa.wm</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>Desktop Subsystem for Android</string>
+	<string>DSA Window Manager</string>
+	<key>CFBundleDisplayName</key>
+	<string>DSA Window Manager</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>@VERSION@</string>
+	<key>CFBundleVersion</key>
+	<string>@VERSION@</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>13.0</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>Apache License 2.0. Android is a trademark of Google LLC.</string>
 </dict>
 </plist>

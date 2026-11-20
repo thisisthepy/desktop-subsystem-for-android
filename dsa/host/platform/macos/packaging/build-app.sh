@@ -68,11 +68,34 @@ plutil -lint "$helper/Contents/Info.plist"
 printf 'APPL????' > "$helper/Contents/PkgInfo"
 cp "$programs/dsa-app-window" "$helper/Contents/MacOS/"
 # The others are taken when they were built.
-for program in dsa dsa-hostd dsa-wm dsa-gfx dsa-devices; do
+for program in dsa dsa-hostd dsa-gfx; do
     if [[ -f "$programs/$program" ]]; then
         cp "$programs/$program" "$app/Contents/MacOS/"
     fi
 done
+# The window manager and the device lender run all session long and talk to the window
+# server, so each gets a helper bundle of its own, with its own bundle identifier, like the
+# window host. Run from DSA.app's Contents/MacOS, either would make macOS take DSA.app for
+# running, and opening DSA.app would only reactivate it instead of starting the settings app.
+# make_helper <bundle name> <program> <Info.plist>: the helper's path is printed.
+make_helper() {
+    local bundle="$app/Contents/Helpers/$1"
+    mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"
+    sed "s/@VERSION@/$version/g" "$here/$3" > "$bundle/Contents/Info.plist"
+    plutil -lint "$bundle/Contents/Info.plist" >&2
+    printf 'APPL????' > "$bundle/Contents/PkgInfo"
+    cp "$programs/$2" "$bundle/Contents/MacOS/"
+    cp "$here/icon/DSA.icns" "$bundle/Contents/Resources/DSA.icns"
+    printf '%s\n' "$bundle"
+}
+wm_helper=""
+if [[ -f "$programs/dsa-wm" ]]; then
+    wm_helper="$(make_helper "DSA Window Manager.app" dsa-wm dsa-wm-Info.plist)"
+fi
+devices_helper=""
+if [[ -f "$programs/dsa-devices" ]]; then
+    devices_helper="$(make_helper "DSA Devices.app" dsa-devices dsa-devices-Info.plist)"
+fi
 if [[ -n "$renderer" ]]; then
     frameworks="$app/Contents/Frameworks"
     cp "$renderer" "$frameworks/libgfxstream_backend.dylib"
@@ -189,7 +212,12 @@ sign() {
 # Android is told the Mac's passkeys are unavailable.
 devices_entitlements="$here/dsa.entitlements"
 if [[ -n "${DSA_PASSKEY_PROFILE:-}" ]]; then
-    cp "$DSA_PASSKEY_PROFILE" "$app/Contents/embedded.provisionprofile"
+    if [[ -z "$devices_helper" ]]; then
+        echo "DSA_PASSKEY_PROFILE is set but dsa-devices was not built" >&2
+        exit 1
+    fi
+    # The profile belongs to the bundle that holds dsa-devices, its helper bundle.
+    cp "$DSA_PASSKEY_PROFILE" "$devices_helper/Contents/embedded.provisionprofile"
     devices_entitlements="$out/dsa-devices.entitlements"
     cp "$here/dsa-devices-passkeys.entitlements" "$devices_entitlements"
     granted="$out/profile-entitlements.plist"
@@ -202,7 +230,7 @@ if [[ -n "${DSA_PASSKEY_PROFILE:-}" ]]; then
     done
     rm -f "$out/profile.plist" "$granted"
 fi
-# Inside out: libraries and helper programs first, the bundle last.
+# Inside out: libraries and programs first, then the helper bundles, the app last.
 for library in "$app/Contents/Frameworks"/*.dylib; do
     [[ -e "$library" ]] || continue
     codesign --force --timestamp=none --sign "$identity" "$library"
@@ -210,15 +238,19 @@ done
 for program in "$app/Contents/MacOS"/*; do
     case "$(basename "$program")" in
         dsa-settings) continue ;;
-        dsa-devices)
-            codesign --force --timestamp=none --options runtime \
-                --entitlements "$devices_entitlements" --sign "$identity" "$program"
-            ;;
         *) sign "$program" ;;
     esac
 done
+# Each helper bundle is signed whole (its program and its Info.plist), before the outer app.
+if [[ -n "$devices_helper" ]]; then
+    codesign --force --timestamp=none --options runtime \
+        --entitlements "$devices_entitlements" --sign "$identity" "$devices_helper"
+fi
 if [[ "$devices_entitlements" == "$out/"* ]]; then
     rm -f "$devices_entitlements"
+fi
+if [[ -n "$wm_helper" ]]; then
+    sign "$wm_helper"
 fi
 sign "$helper"
 sign "$app"

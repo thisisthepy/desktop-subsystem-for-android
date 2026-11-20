@@ -34,10 +34,11 @@ pub const DEVICES_LABEL: &str = "io.github.thisisthepy.dsa.devices";
 /// by their programs' file names.
 pub const APP_BUNDLE_ID: &str = "org.thisisthepy.dsa";
 
-/// The device lender's program in an installation: `dsa-devices` beside `dsa-hostd`.
+/// The device lender's program in an installation: `dsa-devices` in DSA.app's helper bundle
+/// `Contents/Helpers/DSA Devices.app`, else beside `dsa-hostd`, as in a development build.
 pub fn devices_beside(hostd: &Path) -> Option<PathBuf> {
-    let program = hostd.parent()?.join("dsa-devices");
-    program.is_file().then_some(program)
+    use crate::app_layout::{helper_program, DEVICES_HELPER, DEVICES_PROGRAM};
+    helper_program(hostd, DEVICES_HELPER, DEVICES_PROGRAM)
 }
 
 /// Where the device lender agent's property list goes, below the user's home.
@@ -59,10 +60,12 @@ pub fn devices_plist(program: &Path, log: &Path) -> String {
     agent_plist(DEVICES_LABEL, &arguments, None, log)
 }
 
-/// The window manager's program in an installation: `dsa-wm` beside `dsa-hostd`.
+/// The window manager's program in an installation: `dsa-wm` in DSA.app's helper bundle
+/// `Contents/Helpers/DSA Window Manager.app`, else beside `dsa-hostd`, as in a development
+/// build.
 pub fn window_manager_beside(hostd: &Path) -> Option<PathBuf> {
-    let program = hostd.parent()?.join("dsa-wm");
-    program.is_file().then_some(program)
+    use crate::app_layout::{helper_program, WINDOW_MANAGER_HELPER, WINDOW_MANAGER_PROGRAM};
+    helper_program(hostd, WINDOW_MANAGER_HELPER, WINDOW_MANAGER_PROGRAM)
 }
 
 /// Where the window manager agent's property list goes, below the user's home.

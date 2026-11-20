@@ -202,3 +202,22 @@ pub fn on_main(work: impl FnOnce() + Send + 'static) {
         );
     }
 }
+
+/// Brings this background program's panel (share, print, passkeys) to the front while it
+/// stays an accessory app: no Dock icon and no menu bar. `app` is `NSApplication.shared`.
+/// The policy is set again around the activation, so nothing that ran in between (a privacy
+/// prompt, a framework's own activation) leaves the program a regular app, which macOS would
+/// show in the Dock as a second DSA.
+///
+/// # Safety
+///
+/// `app` is the shared NSApplication or null, and this runs on the main thread.
+pub unsafe fn activate_as_accessory(app: *mut AnyObject) {
+    if app.is_null() {
+        return;
+    }
+    // NSApplicationActivationPolicyAccessory.
+    let _: bool = msg_send![app, setActivationPolicy: 1isize];
+    let _: () = msg_send![app, activateIgnoringOtherApps: true];
+    let _: bool = msg_send![app, setActivationPolicy: 1isize];
+}

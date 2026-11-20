@@ -778,7 +778,8 @@ impl BoundaryData {
 
 /// Where the boundary file is for a host program at `exe`: in a `geodata` folder beside it
 /// (Windows), beside its folder (Linux, /usr/lib/dsa/geodata), or in the bundle's Resources
-/// (macOS). The first that exists, else the first place looked.
+/// (macOS), also from a helper bundle in the app's `Contents/Helpers`, where the macOS device
+/// lender runs. The first that exists, else the first place looked.
 pub fn installed_file(exe: &Path) -> PathBuf {
     let folder = exe.parent().unwrap_or(Path::new("."));
     let candidates = [
@@ -786,6 +787,11 @@ pub fn installed_file(exe: &Path) -> PathBuf {
         folder.join("..").join("geodata").join(FILE_NAME),
         folder
             .join("..")
+            .join("Resources")
+            .join("geodata")
+            .join(FILE_NAME),
+        folder
+            .join("../../../..")
             .join("Resources")
             .join("geodata")
             .join(FILE_NAME),

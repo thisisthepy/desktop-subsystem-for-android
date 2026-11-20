@@ -64,9 +64,7 @@ unsafe fn print_on_main(job: &PrintJob) -> PrintOutcome {
         // The device lender runs in the background; its panel comes to the front.
         let app_class = class(c"NSApplication")?;
         let app: *mut AnyObject = msg_send![app_class, sharedApplication];
-        if !app.is_null() {
-            let _: () = msg_send![app, activateIgnoringOtherApps: true];
-        }
+        crate::objc::activate_as_accessory(app);
         let printed: bool = msg_send![operation, runOperation];
         Ok(printed)
     };

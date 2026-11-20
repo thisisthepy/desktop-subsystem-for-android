@@ -134,29 +134,44 @@ jobs:
           done
           plutil -convert json -o - DSA.app/Contents/Resources/ko.lproj/Localizable.strings | grep -Fq '"NavGeneral.Content"'
           test -x DSA.app/Contents/MacOS/dsa
-          # The window manager ships beside the service, which starts it through its agent.
-          test -x DSA.app/Contents/MacOS/dsa-wm
+          # The window manager and the device lender each run from a helper bundle with its own
+          # identity, never from DSA.app's Contents/MacOS, so macOS never takes DSA.app for
+          # running and opening it always starts the settings app.
           test -x DSA.app/Contents/MacOS/dsa-hostd
-          DSA.app/Contents/MacOS/dsa-wm version | grep -Fq dsa-wm
+          for program in dsa-wm dsa-devices; do
+            test ! -e "DSA.app/Contents/MacOS/$program"
+          done
+          wm_helper="DSA.app/Contents/Helpers/DSA Window Manager.app"
+          devices_helper="DSA.app/Contents/Helpers/DSA Devices.app"
+          test -x "$wm_helper/Contents/MacOS/dsa-wm"
+          test -x "$devices_helper/Contents/MacOS/dsa-devices"
+          "$wm_helper/Contents/MacOS/dsa-wm" version | grep -Fq dsa-wm
+          for bundle in "$wm_helper:org.thisisthepy.dsa.wm:dsa-wm" "$devices_helper:org.thisisthepy.dsa.devices:dsa-devices"; do
+            IFS=: read -r path id executable <<<"$bundle"
+            plutil -lint "$path/Contents/Info.plist"
+            test "$(plutil -extract CFBundleIdentifier raw "$path/Contents/Info.plist")" = "$id"
+            test "$(plutil -extract CFBundleExecutable raw "$path/Contents/Info.plist")" = "$executable"
+            test "$(plutil -extract LSUIElement raw "$path/Contents/Info.plist")" = true
+            test "$(plutil -extract CFBundleShortVersionString raw "$path/Contents/Info.plist")" = 0.1.0
+            codesign --verify --strict "$path"
+          done
           # The graphics renderer, which the window manager starts in a process of its own, and
           # signed like the other programs.
           test -x DSA.app/Contents/MacOS/dsa-gfx
           codesign --verify --strict DSA.app/Contents/MacOS/dsa-gfx
-          # The device lender ships beside them too, with its identity and the reasons for
-          # its camera, microphone and location prompts embedded in it.
-          test -x DSA.app/Contents/MacOS/dsa-devices
-          DSA.app/Contents/MacOS/dsa-devices version | grep -Fq dsa-devices
-          otool -s __TEXT __info_plist DSA.app/Contents/MacOS/dsa-devices | grep -Fq '__info_plist'
-          codesign -d -vv DSA.app/Contents/MacOS/dsa-devices > devices-sign.txt 2>&1
+          # The device lender's bundle carries the reasons for its camera, microphone and
+          # location prompts; a copy is embedded in the program for a development build.
+          devices="$devices_helper/Contents/MacOS/dsa-devices"
+          "$devices" version | grep -Fq dsa-devices
+          otool -s __TEXT __info_plist "$devices" | grep -Fq '__info_plist'
+          codesign -d -vv "$devices_helper" > devices-sign.txt 2>&1
           grep -Fxq 'Identifier=org.thisisthepy.dsa.devices' devices-sign.txt
           grep -Eq 'Info.plist entries=[1-9]' devices-sign.txt
-          devices_plist="$GITHUB_WORKSPACE/dsa/host/platform/macos/packaging/dsa-devices-Info.plist"
-          plutil -lint "$devices_plist"
           for key in NSCameraUsageDescription NSMicrophoneUsageDescription NSLocationWhenInUseUsageDescription; do
-            plutil -extract "$key" raw "$devices_plist" > /dev/null
+            plutil -extract "$key" raw "$devices_helper/Contents/Info.plist" > /dev/null
             plutil -extract "$key" raw DSA.app/Contents/Info.plist > /dev/null
           done
-          codesign -d --entitlements - --xml DSA.app/Contents/MacOS/dsa-devices > devices-entitlements.plist
+          codesign -d --entitlements - --xml "$devices_helper" > devices-entitlements.plist
           for key in com.apple.security.device.camera com.apple.security.device.audio-input com.apple.security.personal-information.location; do
             # plutil reads dots as a key path, so the keys are found as text.
             tr -d ' \t\n' < devices-entitlements.plist | grep -Fq "<key>$key</key><true/>"
@@ -178,7 +193,8 @@ jobs:
           payload=expanded/DSA-component.pkg/Payload
           test -x "$payload/DSA.app/Contents/Helpers/DSA App Window.app/Contents/MacOS/dsa-app-window"
           test -f "$payload/DSA.app/Contents/Info.plist"
-          test -x "$payload/DSA.app/Contents/MacOS/dsa-devices"
+          test -x "$payload/DSA.app/Contents/Helpers/DSA Devices.app/Contents/MacOS/dsa-devices"
+          test -x "$payload/DSA.app/Contents/Helpers/DSA Window Manager.app/Contents/MacOS/dsa-wm"
           test -x "$payload/DSA.app/Contents/MacOS/dsa-settings"
           test -f "$payload/DSA.app/Contents/Resources/DSA.icns"
           test -x expanded/DSA-component.pkg/Scripts/postinstall

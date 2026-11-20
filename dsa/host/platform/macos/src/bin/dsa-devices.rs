@@ -25,9 +25,13 @@
 //! sends to `dsa-devices.log` in the user's DSA logs.
 //!
 //! macOS reads the reasons it shows when it asks for the camera, the microphone and the
-//! location from the Info.plist embedded in this program.
+//! location from the Info.plist of the helper bundle it runs from (`DSA Devices.app`), or
+//! from the copy embedded in this program when it runs outside the bundle.
 
-/// The program's Info.plist, where macOS finds its identity and the reasons for its prompts.
+/// The program's Info.plist, the same one its helper bundle (`DSA Devices.app` in DSA.app's
+/// `Contents/Helpers`) carries, where macOS finds its identity and the reasons for its
+/// prompts. In DSA.app macOS reads the bundle's copy; this one keeps the camera, microphone
+/// and location prompts working for a development build run outside the bundle.
 #[cfg(target_os = "macos")]
 #[used]
 #[link_section = "__TEXT,__info_plist"]

@@ -94,21 +94,30 @@ impl Places {
 }
 
 /// The renderer library: `DSA_RENDERER` when set, else `libgfxstream_backend.dylib` in the
-/// `Frameworks` folder of the bundle this program is in.
+/// `Frameworks` folder of DSA.app, which this program runs in (from its helper bundle).
 pub fn renderer_path() -> PathBuf {
     if let Some(path) = std::env::var_os("DSA_RENDERER") {
         return PathBuf::from(path);
     }
     let exe = std::env::current_exe().unwrap_or_default();
-    let macos = exe.parent().map(Path::to_path_buf).unwrap_or_default();
-    macos.join("../Frameworks/libgfxstream_backend.dylib")
+    let contents = crate::app_layout::app_contents(&exe).unwrap_or_default();
+    contents.join("Frameworks/libgfxstream_backend.dylib")
+}
+
+/// The graphics renderer program (`dsa-gfx`): in DSA.app's `Contents/MacOS`, which this
+/// program finds from its own helper bundle, else beside this program (a development build).
+pub fn renderer_program() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let program =
+        crate::app_layout::programs_dir(&exe)?.join(dsa_host_core::renderer::RENDERER_PROGRAM);
+    program.is_file().then_some(program)
 }
 
 /// The Vulkan driver description (MoltenVK's) DSA.app carries beside the renderer, for the
 /// Vulkan loader to find, when this program is in the bundle.
 pub fn bundled_vulkan_driver() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
-    let contents = exe.parent()?.parent()?;
+    let contents = crate::app_layout::app_contents(&exe)?;
     let driver = contents.join("Resources/vulkan/icd.d/MoltenVK_icd.json");
     driver.is_file().then_some(driver)
 }
@@ -383,6 +392,9 @@ fn serve(places: Places, stop: Arc<AtomicBool>) -> Result<(), String> {
     let client = RendererClient::new(Arc::clone(&presenter), sockets, display_or_smallest(None));
     let fds: CurrentFds = Arc::default();
     let mut launcher = UnixLauncher::installed(fds);
+    if let Some(program) = renderer_program() {
+        launcher.program = program;
+    }
     if std::env::var_os("DSA_RENDERER").is_none() {
         launcher
             .env

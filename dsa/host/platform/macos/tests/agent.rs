@@ -219,3 +219,46 @@ fn fr2_the_window_manager_never_stands_for_dsa_itself() {
     let source = include_str!("../src/bin/dsa-wm.rs");
     assert!(source.contains("dsa-wm-Info.plist"));
 }
+
+#[test]
+fn fr2_the_window_manager_and_device_lender_have_helper_bundles_of_their_own() {
+    // Each runs from a helper bundle in DSA.app's Contents/Helpers with its own identity, so
+    // macOS never takes DSA.app for running and opening it starts the settings app.
+    for (plist, id, executable) in [
+        (
+            include_str!("../packaging/dsa-wm-Info.plist"),
+            "org.thisisthepy.dsa.wm",
+            "dsa-wm",
+        ),
+        (
+            include_str!("../packaging/dsa-devices-Info.plist"),
+            "org.thisisthepy.dsa.devices",
+            "dsa-devices",
+        ),
+    ] {
+        assert!(plist.contains(&format!(
+            "<key>CFBundleIdentifier</key>\n\t<string>{id}</string>"
+        )));
+        assert!(plist.contains(&format!(
+            "<key>CFBundleExecutable</key>\n\t<string>{executable}</string>"
+        )));
+        assert!(plist.contains("<key>LSUIElement</key>\n\t<true/>"));
+        assert!(plist.contains("<string>@VERSION@</string>"));
+    }
+    let devices = include_str!("../packaging/dsa-devices-Info.plist");
+    for key in [
+        "NSCameraUsageDescription",
+        "NSMicrophoneUsageDescription",
+        "NSLocationWhenInUseUsageDescription",
+    ] {
+        assert!(devices.contains(key), "{key}");
+    }
+    let build = include_str!("../packaging/build-app.sh");
+    assert!(build.contains(r#"make_helper "DSA Window Manager.app" dsa-wm dsa-wm-Info.plist"#));
+    assert!(build.contains(r#"make_helper "DSA Devices.app" dsa-devices dsa-devices-Info.plist"#));
+    assert!(build.contains("for program in dsa dsa-hostd dsa-gfx; do"));
+    // The helpers are signed before the outer app, whose signature seals them.
+    let wm = build.find(r#"sign "$wm_helper""#).unwrap();
+    let app = build.rfind("\nsign \"$app\"").unwrap();
+    assert!(wm < app);
+}

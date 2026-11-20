@@ -42,6 +42,7 @@
 //! platform neutral and tested on every build host. The parts that call the frameworks are
 //! compiled on macOS only.
 
+pub mod app_layout;
 pub mod cmdline;
 pub mod compositor;
 pub mod computer_identity;

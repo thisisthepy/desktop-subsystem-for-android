@@ -211,9 +211,7 @@ mod mac {
         let _: () = msg_send![&*window, orderFrontRegardless];
 
         let app: *mut AnyObject = msg_send![class(c"NSApplication")?, sharedApplication];
-        if !app.is_null() {
-            let _: () = msg_send![app, activateIgnoringOtherApps: true];
-        }
+        crate::objc::activate_as_accessory(app);
 
         let picker: Allocated<AnyObject> = msg_send![class(c"NSSharingServicePicker")?, alloc];
         let picker: Option<Retained<AnyObject>> = msg_send![picker, initWithItems: &*items];

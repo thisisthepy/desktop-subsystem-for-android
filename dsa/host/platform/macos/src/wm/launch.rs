@@ -71,22 +71,11 @@ pub fn direct_arguments(package: &str) -> Vec<String> {
 pub const HELPER_APP: &str = "DSA App Window.app";
 
 /// The window host program of an installation, which each app's bundle copies: the one in the
-/// helper bundle (`Contents/Helpers/DSA App Window.app` beside the window manager's
-/// `Contents/MacOS`), else one right beside the window manager, as in a development build.
+/// helper bundle (DSA.app's `Contents/Helpers/DSA App Window.app`, found from the window
+/// manager's own helper bundle), else one right beside the window manager, as in a
+/// development build.
 pub fn installed_window_host(window_manager: &Path) -> Option<PathBuf> {
-    let programs = window_manager.parent()?;
-    let helper = programs.parent().map(|contents| {
-        contents
-            .join("Helpers")
-            .join(HELPER_APP)
-            .join("Contents/MacOS")
-            .join(EXECUTABLE)
-    });
-    if let Some(helper) = helper.filter(|path| path.is_file()) {
-        return Some(helper);
-    }
-    let program = programs.join(EXECUTABLE);
-    program.is_file().then_some(program)
+    crate::app_layout::helper_program(window_manager, HELPER_APP, EXECUTABLE)
 }
 
 /// Starts app window hosts.
@@ -284,6 +273,17 @@ mod tests {
         std::fs::write(helper.join(EXECUTABLE), b"helper").unwrap();
         assert_eq!(
             installed_window_host(&macos.join("dsa-wm")),
+            Some(helper.join(EXECUTABLE))
+        );
+        // The window manager runs from a helper bundle of its own and still finds it.
+        let wm = contents
+            .join("Helpers")
+            .join(crate::app_layout::WINDOW_MANAGER_HELPER)
+            .join("Contents/MacOS");
+        std::fs::create_dir_all(&wm).unwrap();
+        std::fs::write(wm.join("dsa-wm"), b"wm").unwrap();
+        assert_eq!(
+            installed_window_host(&wm.join("dsa-wm")),
             Some(helper.join(EXECUTABLE))
         );
         let _ = std::fs::remove_dir_all(contents.parent().unwrap().parent().unwrap());

@@ -9,10 +9,10 @@
 //!
 //! `DSA_RENDERER` names the renderer library to load instead of the one in DSA.app.
 
-/// The program's Info.plist. `LSUIElement` makes it an app with no Dock icon and no menu
-/// bar from the moment it starts. dsa-wm lives in DSA.app, so without it macOS registers
-/// dsa-wm as the running DSA, and opening DSA brings dsa-wm forward instead of starting the
-/// settings app.
+/// The program's Info.plist, the same one its helper bundle (`DSA Window Manager.app` in
+/// DSA.app's `Contents/Helpers`) carries. In DSA.app macOS reads the bundle's copy; this one
+/// gives a development build run outside the bundle the same identity and `LSUIElement`, so it
+/// has no Dock icon and no menu bar either.
 #[cfg(target_os = "macos")]
 #[used]
 #[link_section = "__TEXT,__info_plist"]
