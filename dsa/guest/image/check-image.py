@@ -360,6 +360,13 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
             z.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()):
         problems.append("the SELinux policy does not let dsa_channeld clear pstore records the host "
                         "has collected")
+    # The reclaim logs how much memory free page reporting handed the host (reported_kb, a type
+    # of its own); an image without the rule logs an SELinux denial on every reclaim.
+    if "SYSTEM/etc/selinux/plat_sepolicy.cil" in names and not re.search(
+            r"\(allow\s+dsa_channeld\s+dsa_sysfs_page_reporting_stats\s+\(\s*file\s+\([^)]*\bread\b",
+            z.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()):
+        problems.append("the SELinux policy does not let dsa_channeld read the free page reporting "
+                        "numbers (reported_kb), so every reclaim logs a denial")
     if "META/file_contexts.bin" in names and b"dsa_channeld_exec" not in z.read("META/file_contexts.bin"):
         problems.append("META/file_contexts.bin does not label dsa-channeld, so the vendor image leaves it "
                         "vendor_file and init refuses to start it")

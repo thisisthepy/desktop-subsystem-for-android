@@ -3742,6 +3742,12 @@ pub fn describe(status: &Status) -> String {
                 plain_start_failure(why).unwrap_or(why),
             )
         });
+        // A crash reads as the sentence the user's notice says, with the account below it.
+        let crash = dsa_host_core::guest_crash::localized_crash(
+            dsa_host_core::ui_language::UiLanguage::English,
+            first,
+        );
+        let host = host.or(crash);
         match host.as_deref().or_else(|| plain_start_failure(first)) {
             Some(sentence) => {
                 let _ = write!(line, " (last stopped: {sentence})\ndetails: {first}");

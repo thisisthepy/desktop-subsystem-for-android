@@ -48,6 +48,9 @@ struct Guest {
     exited: Option<String>,
     /// What the launcher tells about the boot when a start fails.
     diagnostics: Option<String>,
+    /// The console around a kernel crash the launcher saw, as a launcher that watches the
+    /// console keeps it.
+    crash_console: Option<String>,
     /// How many times the session asked for the diagnostics, and whether the guest was
     /// already stopped each time.
     diagnostics_asked: Vec<bool>,
@@ -135,6 +138,10 @@ impl GuestLauncher for FakeLauncher {
 
     fn exited(&mut self) -> Option<String> {
         self.0.lock().unwrap().exited.clone()
+    }
+
+    fn crash_console(&mut self) -> Option<String> {
+        self.0.lock().unwrap().crash_console.clone()
     }
 
     fn diagnostics(&mut self) -> Option<String> {
@@ -1003,6 +1010,146 @@ fn nfr5_a_guest_that_ends_while_its_channel_stays_open_is_reported_stopped() {
     session.start();
     let _second_agent = connect_agent(&mut connector, &launcher);
     assert!(session.wait_for(SessionState::Active, WAIT));
+}
+
+/// The end of a console whose kernel panicked in binder, after a bad rss-counter 17 s before,
+/// as the macOS guest printed it.
+const PANIC_CONSOLE: &str = "\
+[  212.768219] BUG: Bad rss-counter state mm:00000000b1d4cef6 type:MM_ANONPAGES val:19 Comm:kworker/0:4 Pid:3265
+[  229.330312] Internal error: Oops: 0000000096000006 [#1]  SMP
+[  229.332915] lr : binder_inc_ref_for_node+0x1f0/0x528
+[  229.333755] Call trace:
+[  229.333767]  rb_insert_color+0x10/0x140 (P)
+[  229.333800]  binder_transaction+0x11a8/0x2b70
+[  229.333828]  binder_thread_write+0xd60/0x1c18
+[  229.334569] ---[ end trace 0000000000000000 ]---
+[  229.334583] Kernel panic - not syncing: Oops: Fatal exception
+[  229.334615] SMP: stopping secondary CPUs";
+
+#[test]
+fn nfr5_a_guest_whose_kernel_panics_while_active_is_reported_crashed() {
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.start();
+    let agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+
+    // The kernel panics; the VM resets in place, which takes the channel with it, and the
+    // launcher sees the panic on the console.
+    {
+        let mut guest = launcher.0.lock().unwrap();
+        guest.exited = Some("Android's VM restarted by itself while it ran".into());
+        guest.crash_console = Some(PANIC_CONSOLE.into());
+        guest.diagnostics = Some("the guest's console ended with: ...".into());
+    }
+    drop(agent);
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    let Some(StopReason::GuestCrashed { why, diagnostics }) = session.last_reason() else {
+        panic!("not reported as a crash: {:?}", session.last_reason());
+    };
+    assert!(
+        why.starts_with("kernel panic in binder_transaction"),
+        "{why}"
+    );
+    assert!(why.contains("BUG: Bad rss-counter state"), "{why}");
+    let diagnostics = diagnostics.unwrap();
+    assert!(
+        diagnostics.contains("Kernel panic - not syncing"),
+        "{diagnostics}"
+    );
+    assert!(
+        diagnostics.contains("the guest's console ended with"),
+        "{diagnostics}"
+    );
+    let reason = session.last_reason().unwrap().to_string();
+    assert!(
+        reason.starts_with("Android crashed (kernel panic in binder_transaction"),
+        "{reason}"
+    );
+    assert_eq!(
+        dsa_host_core::guest_crash::crash_reason(&reason),
+        Some(why.as_str())
+    );
+    // The orphaned boot is stopped, the host stays up, and Android starts again.
+    assert_eq!(launcher.processes(), 0);
+    {
+        let mut guest = launcher.0.lock().unwrap();
+        guest.exited = None;
+        guest.crash_console = None;
+    }
+    session.start();
+    let _second_agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+}
+
+/// A launcher that sees the reset only a moment after the channel closed still gets the
+/// crash reported, read from its diagnostics when it kept no console of the crash.
+#[test]
+fn nfr5_a_crash_seen_just_after_the_channel_closed_is_reported_crashed() {
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.start();
+    let agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+
+    launcher.0.lock().unwrap().diagnostics = Some(PANIC_CONSOLE.into());
+    drop(agent);
+    thread::sleep(Duration::from_millis(300));
+    launcher.0.lock().unwrap().exited = Some("the Android VM exited by itself".into());
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    assert!(
+        matches!(
+            session.last_reason(),
+            Some(StopReason::GuestCrashed { ref why, .. })
+                if why.starts_with("kernel panic in binder_transaction")
+        ),
+        "{:?}",
+        session.last_reason()
+    );
+}
+
+/// A VM that ends with a panic on its console while its channel stays open is a crash too.
+#[test]
+fn nfr5_a_guest_that_ends_with_a_panic_while_its_channel_stays_open_is_reported_crashed() {
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.start();
+    let _agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    {
+        let mut guest = launcher.0.lock().unwrap();
+        guest.crash_console = Some(PANIC_CONSOLE.into());
+        guest.exited = Some("Android's VM ended by itself".into());
+    }
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    assert!(
+        matches!(session.last_reason(), Some(StopReason::GuestCrashed { .. })),
+        "{:?}",
+        session.last_reason()
+    );
+    assert_eq!(launcher.processes(), 0);
+}
+
+/// A guest that ends with nothing on its console about a crash is not called one.
+#[test]
+fn nfr5_a_guest_that_ends_without_a_crash_on_its_console_is_not_called_crashed() {
+    let launcher = FakeLauncher::default();
+    let (session, mut connector) = session_with(launcher.clone(), WAIT);
+    session.start();
+    let agent = connect_agent(&mut connector, &launcher);
+    assert!(session.wait_for(SessionState::Active, WAIT));
+    {
+        let mut guest = launcher.0.lock().unwrap();
+        guest.exited = Some("Android's VM ended by itself".into());
+        guest.diagnostics = Some("the guest's console ended with:\nreboot: Power down".into());
+    }
+    drop(agent);
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    assert!(
+        matches!(session.last_reason(), Some(StopReason::GuestExited { .. })),
+        "{:?}",
+        session.last_reason()
+    );
 }
 
 #[test]

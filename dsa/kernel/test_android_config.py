@@ -12,6 +12,7 @@ CONFIG = Path(__file__).with_name("android.config")
 ARM64_CONFIG = Path(__file__).with_name("android-arm64.config")
 VIRTIO_CONFIG = Path(__file__).with_name("virtio.config")
 DXG_CONFIG = Path(__file__).with_name("dxg.config")
+DEBUG_CONFIG = Path(__file__).with_name("android-debug.config")
 PATCHES = Path(__file__).with_name("patches")
 BUILD = Path(__file__).with_name("build.sh")
 APPLY = Path(__file__).with_name("apply-patches.sh")
@@ -23,6 +24,21 @@ def fragment_lines(path):
 
 
 class AndroidKernelConfigTests(unittest.TestCase):
+    def test_nfr5_the_debug_fragment_has_the_memory_checks_and_only_an_opt_in_merges_it(self):
+        debug = fragment_lines(DEBUG_CONFIG)
+        for option in ["CONFIG_DEBUG_VM=y", "CONFIG_KFENCE=y", "CONFIG_PAGE_OWNER=y", "CONFIG_DEBUG_LIST=y"]:
+            self.assertIn(option, debug)
+        # The shipped kernel's fragments carry none of it.
+        for shipped in [CONFIG, ARM64_CONFIG, VIRTIO_CONFIG, DXG_CONFIG]:
+            for option in debug:
+                self.assertNotIn(option, fragment_lines(shipped), shipped.name)
+        # build.sh merges it only for --debug, into a build and an output of their own.
+        build = BUILD.read_text()
+        self.assertIn('--debug) extra+=("$kernel_dir/android-debug.config")', build)
+        self.assertNotRegex(build, r'fragments=\([^)]*android-debug\.config')
+        self.assertIn('build="$build-extra"', build)
+        self.assertIn('default_out="$default_out-extra"', build)
+
     def test_fr1_ashmem_is_off_and_memfd_is_on(self):
         config = CONFIG.read_text()
         self.assertNotIn("CONFIG_ASHMEM", config)

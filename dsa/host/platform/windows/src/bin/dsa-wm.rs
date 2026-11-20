@@ -255,6 +255,33 @@ fn main() {
         Arc::clone(&process),
         logger.clone(),
     );
+    // Android that crashes is said in a toast, as DSA's own news.
+    {
+        let news = Arc::clone(&news);
+        let tell: Arc<dyn Fn(dsa_host_core::notifications::Notification) + Send + Sync> =
+            Arc::new(move |notice| {
+                news.lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .push_back(notice);
+            });
+        let logger = logger.clone();
+        let told: Arc<dyn Fn(&str) + Send + Sync> = Arc::new(move |line: &str| {
+            if let Some(log) = &logger {
+                log.log(line);
+            }
+        });
+        if let Err(why) = dsa_host_core::guest_crash::watch_in_background(
+            Box::new(NamedPipeConnector {
+                name: config.pipe_name.clone(),
+            }),
+            format!("dsa-wm {} crash watch", dsa_host_windows::VERSION),
+            Arc::new(user_language),
+            tell,
+            told,
+        ) {
+            log(&format!("a crash of Android will not be told: {why}"));
+        }
+    }
     let mut compositor = Compositor::new(config, Arc::new(ServedByRenderer))
         .without_graphics_streams()
         .with_dsa_news(news)

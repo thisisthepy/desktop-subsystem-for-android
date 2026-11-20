@@ -8,8 +8,16 @@
 //!
 //! Stopping asks the guest to shut down and stops the VM outright if it has not within the
 //! stop timeout. Memory grows and shrinks through the balloon; freezing pauses the VM.
+//!
+//! The guest's kernel runs with `panic=-1`, and the Virtualization framework resets a VM
+//! that reboots in place: the VM never ends, so the session would see only its control
+//! channel close while an orphaned boot ran on with no host. The launcher reads the console
+//! as it grows ([`ConsoleWatch`]); a kernel panic or a new boot on it counts as the guest
+//! ending, and the VM is stopped at once.
 
+use dsa_host_core::guest_crash::ConsoleWatch;
 use dsa_host_core::start_failure::FailureSide;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -103,6 +111,10 @@ pub struct MacVmLauncher {
     boots: u64,
     /// The framework's process that runs the VM, for the memory report.
     process: VmProcess,
+    /// What this boot's console has shown of a kernel crash or a reset in place.
+    watch: ConsoleWatch,
+    /// How much of this boot's console the watch has read, in bytes.
+    console_read: u64,
 }
 
 impl MacVmLauncher {
@@ -124,6 +136,8 @@ impl MacVmLauncher {
             memory: None,
             boots: 0,
             process: VmProcess::default(),
+            watch: ConsoleWatch::new(),
+            console_read: 0,
         }
     }
 
@@ -214,6 +228,25 @@ impl MacVmLauncher {
         ))
     }
 
+    /// Reads what the console printed since the last look into the watch, and returns what
+    /// it showed of a crash, the first time.
+    fn read_console(&mut self) -> Option<dsa_host_core::guest_crash::ConsoleEvent> {
+        let log = self.console_log.as_ref()?;
+        let mut file = std::fs::File::open(log).ok()?;
+        file.seek(SeekFrom::Start(self.console_read)).ok()?;
+        let mut bytes = Vec::new();
+        // At most a few MiB a look, so a flood of output never holds the session up.
+        file.take(4 << 20).read_to_end(&mut bytes).ok()?;
+        // A multi-byte character cut at the end is read whole next time.
+        let whole = match std::str::from_utf8(&bytes) {
+            Ok(_) => bytes.len(),
+            Err(error) if error.error_len().is_none() => error.valid_up_to(),
+            Err(_) => bytes.len(),
+        };
+        self.console_read += whole as u64;
+        self.watch.feed(&String::from_utf8_lossy(&bytes[..whole]))
+    }
+
     /// Keeps the previous boot's console as `<name>.1.log`, so each boot's log starts empty.
     fn rotate_console(&self) {
         if let Some(log) = &self.console_log {
@@ -247,6 +280,8 @@ impl GuestLauncher for MacVmLauncher {
         plan.vm.initrd = initrd.0.clone();
         plan.vm.console_log = self.console_log.clone();
         self.rotate_console();
+        self.watch = ConsoleWatch::new();
+        self.console_read = 0;
         *self.log_signs.lock().unwrap_or_else(|e| e.into_inner()) = BootSigns::default();
         self.data_disk = plan
             .vm
@@ -300,8 +335,28 @@ impl GuestLauncher for MacVmLauncher {
 
     fn exited(&mut self) -> Option<String> {
         let vm = self.slot.get()?;
-        let ended = vm.ended()?;
-        Some(format!("Android's VM ended by itself ({ended})"))
+        if let Some(event) = self.watch.event() {
+            return Some(event.sentence().to_string());
+        }
+        if let Some(ended) = vm.ended() {
+            // A panic printed just before the end is read for the report.
+            let _ = self.read_console();
+            return Some(format!("Android's VM ended by itself ({ended})"));
+        }
+        let event = self.read_console()?;
+        // The boot the VM reset into has no host: it is stopped before it gets further.
+        eprintln!(
+            "lifecycle: {}; stopping the VM that restarted",
+            event.sentence()
+        );
+        if let Err(why) = vm.force_stop() {
+            eprintln!("lifecycle: the VM that restarted by itself did not stop: {why}");
+        }
+        Some(event.sentence().to_string())
+    }
+
+    fn crash_console(&mut self) -> Option<String> {
+        self.watch.report()
     }
 
     /// A start that returned an error never ran the guest: the Virtualization framework

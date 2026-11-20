@@ -12,6 +12,13 @@
 #   dsa/kernel/build.sh                         configure, check, and build for x86_64
 #   dsa/kernel/build.sh --arch arm64            the same for arm64
 #   dsa/kernel/build.sh [--arch A] --config-only  configure and check only (about a minute)
+#   dsa/kernel/build.sh [--arch A] --debug        also merge android-debug.config (memory
+#                                                 debugging; never the shipped kernel)
+#   dsa/kernel/build.sh --extra-config FILE       also merge FILE, last; may be repeated
+#
+# Extra fragments can also come from DSA_KERNEL_EXTRA_CONFIG (paths separated by spaces). A
+# kernel with any extra fragment builds in build-<arch>-extra and lands in out-extra/
+# (out-arm64-extra/), so it never replaces the shipped kernel's build or output.
 #
 # The architecture can also come from DSA_KERNEL_ARCH. An arm64 kernel is built natively on
 # an arm64 machine and cross-compiled with aarch64-linux-gnu- anywhere else.
@@ -35,9 +42,15 @@ work="$repo_root/.scratch/kernel/$tag"
 src="${DSA_KERNEL_SRC:-$work/src}"
 arch="${DSA_KERNEL_ARCH:-x86_64}"
 config_only=false
+extra=()
+if [[ -n "${DSA_KERNEL_EXTRA_CONFIG:-}" ]]; then
+    read -r -a extra <<< "$DSA_KERNEL_EXTRA_CONFIG"
+fi
 while (( $# > 0 )); do
     case "$1" in
         --config-only) config_only=true ;;
+        --debug) extra+=("$kernel_dir/android-debug.config") ;;
+        --extra-config) extra+=("${2:?--extra-config needs a configuration fragment}"); shift ;;
         --arch) arch="${2:?--arch needs x86_64 or arm64}"; shift ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
@@ -68,6 +81,14 @@ case "$arch" in
     *) echo "unknown architecture $arch (x86_64 or arm64)" >&2; exit 2 ;;
 esac
 build="$work/build-$arch"
+if (( ${#extra[@]} > 0 )); then
+    for fragment in "${extra[@]}"; do
+        [[ -f "$fragment" ]] || { echo "no such configuration fragment: $fragment" >&2; exit 2; }
+    done
+    fragments+=("${extra[@]}")
+    build="$build-extra"
+    default_out="$default_out-extra"
+fi
 out="${DSA_KERNEL_OUT:-$default_out}"
 
 make_flags=(-C "$src" O="$build" ARCH="$kernel_arch" -j"$(nproc)" LOCALVERSION=)

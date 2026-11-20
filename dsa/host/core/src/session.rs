@@ -237,6 +237,15 @@ pub enum StopReason {
     ListenerFailed(String),
     /// The control channel was lost while the session was active.
     ChannelLost(String),
+    /// The guest's kernel crashed while it ran: it panicked, or its VM was reset without
+    /// being asked. `why` is a short account of the crash from the guest's console, such as
+    /// `kernel panic in binder_transaction`, and `diagnostics` the console around it and
+    /// what else the launcher could tell. Its English account starts with
+    /// [`crate::guest_crash::CRASH_PREFIX`].
+    GuestCrashed {
+        why: String,
+        diagnostics: Option<String>,
+    },
     /// Stopping the guest failed and some of its processes may still run. The session stays
     /// in `Stopping`; asking to stop again retries.
     StopFailed(String),
@@ -281,6 +290,10 @@ details: {why}"
                 write!(f, "could not listen for the agent: {why}")
             }
             StopReason::ChannelLost(why) => write!(f, "the control channel was lost: {why}"),
+            StopReason::GuestCrashed { why, diagnostics } => {
+                f.write_str(&crate::guest_crash::crashed(why))?;
+                write_diagnostics(f, diagnostics)
+            }
             StopReason::StopFailed(why) => write!(f, "the guest did not stop: {why}"),
             StopReason::PrerequisiteLost(why) => {
                 write!(
@@ -406,6 +419,14 @@ pub trait GuestLauncher: Send + 'static {
     /// image. The default, for a launcher that cannot tell, is the guest.
     fn failure_side(&mut self) -> crate::start_failure::FailureSide {
         crate::start_failure::FailureSide::Guest
+    }
+
+    /// The guest's console around a kernel crash in the boot that just ended, when the
+    /// launcher saw one ([`crate::guest_crash::ConsoleWatch`]). The session asks after the
+    /// guest has been stopped, when the guest ended or its control channel was lost while it
+    /// ran, and reads the crash from it; without it, from [`GuestLauncher::diagnostics`].
+    fn crash_console(&mut self) -> Option<String> {
+        None
     }
 
     /// The runtime ID of the guest, if running (such as the VM GUID on Windows).
@@ -4421,6 +4442,11 @@ const PREREQUISITE_POLL: Duration = Duration::from_secs(1);
 /// not tell the session.
 const EXIT_POLL: Duration = Duration::from_secs(1);
 
+/// How long a session whose control channel was lost while it ran waits for the launcher to
+/// see that the guest ended or was reset, so that a crash is reported as one. A kernel panic
+/// resets the VM within a moment of closing the channel.
+const GONE_WAIT: Duration = Duration::from_secs(2);
+
 /// How often a reported problem's detail is read again, as the counts in it grow.
 const DIAGNOSIS_POLL: Duration = Duration::from_secs(10);
 
@@ -6326,7 +6352,7 @@ impl Worker {
             self.next_exit_check = now + EXIT_POLL;
             if let Some(why) = self.launcher.exited() {
                 eprintln!("lifecycle: {why}; Android is stopped and starts again when asked");
-                self.stop_failed_start(|diagnostics| StopReason::GuestExited { why, diagnostics });
+                self.stop_guest_gone(Some(why), None);
                 return false;
             }
         }
@@ -6716,7 +6742,16 @@ impl Worker {
                             "the control channel was lost during boot: {error}"
                         ));
                     } else {
-                        self.stop(StopReason::ChannelLost(error.to_string()));
+                        // A guest that crashed takes its channel with it; the launcher may
+                        // need a moment to see that the VM ended or was reset.
+                        let lost = error.to_string();
+                        let deadline = Instant::now() + GONE_WAIT;
+                        let mut exited = self.launcher.exited();
+                        while exited.is_none() && Instant::now() < deadline {
+                            thread::sleep(POLL);
+                            exited = self.launcher.exited();
+                        }
+                        self.stop_guest_gone(exited, Some(lost));
                     }
                     return;
                 }
@@ -7336,6 +7371,45 @@ impl Worker {
                 self.stop_failed_start(|diagnostics| StopReason::GuestExited { why, diagnostics })
             }
         }
+    }
+
+    /// Stops a guest that ended by itself (`exited`, the launcher's account of it) or whose
+    /// control channel was lost (`lost`) while it ran. When its console shows a kernel crash
+    /// it is reported as one, with the console around it; otherwise as the guest ending, with
+    /// the launcher's diagnostics, or as the lost channel.
+    fn stop_guest_gone(&mut self, exited: Option<String>, lost: Option<String>) {
+        self.stop_with(move |launcher| {
+            let diagnostics = launcher.diagnostics();
+            let console = launcher.crash_console();
+            let crash = console
+                .as_deref()
+                .or(diagnostics.as_deref())
+                .and_then(crate::guest_crash::summary)
+                // A launcher that kept the console of a crash saw the VM reset even when the
+                // console does not say why.
+                .or_else(|| {
+                    console
+                        .as_ref()
+                        .map(|_| "the VM restarted by itself".to_string())
+                });
+            if let Some(why) = crash {
+                eprintln!("lifecycle: Android crashed ({why}); it starts again when asked");
+                let diagnostics = match (console, diagnostics) {
+                    (Some(console), Some(rest)) => Some(format!(
+                        "the guest's console at the crash:\n{console}\n{rest}"
+                    )),
+                    (Some(console), None) => {
+                        Some(format!("the guest's console at the crash:\n{console}"))
+                    }
+                    (None, rest) => rest,
+                };
+                return StopReason::GuestCrashed { why, diagnostics };
+            }
+            match (exited, lost) {
+                (Some(why), _) => StopReason::GuestExited { why, diagnostics },
+                (None, lost) => StopReason::ChannelLost(lost.unwrap_or_default()),
+            }
+        });
     }
 
     fn stop_failed_start(&mut self, reason: impl FnOnce(Option<String>) -> StopReason) {

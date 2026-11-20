@@ -1739,10 +1739,11 @@ impl ProgramUpdateFollower {
 }
 
 /// What the status page shows for the service's last reason, in `lang`: a start the host
-/// refused reads as a problem with this computer, in core's words, with its reason; any other
-/// reason as the service gave it.
+/// refused reads as a problem with this computer, and a crash as Android having stopped
+/// unexpectedly, in core's words, with its reason; any other reason as the service gave it.
 pub fn last_reason_text(reason: &str, lang: dsa_host_core::ui_language::UiLanguage) -> String {
     dsa_host_core::start_failure::localized_host_problem(lang, reason)
+        .or_else(|| dsa_host_core::guest_crash::localized_crash(lang, reason))
         .unwrap_or_else(|| reason.to_string())
 }
 

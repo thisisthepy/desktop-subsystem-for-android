@@ -120,6 +120,7 @@ pub mod gapps;
 pub mod geocode;
 pub mod graphics_memory;
 pub mod graphics_state;
+pub mod guest_crash;
 pub mod guest_display;
 pub mod guest_log;
 pub mod guest_log_api;

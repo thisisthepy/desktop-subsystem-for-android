@@ -5,8 +5,8 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use dsa_guest_channeld::pageout::{
-    anonymous_ranges, cpu_ticks, eligible, has_window, is_google_play, Pageout, PageoutPolicy,
-    ProcessSample, Status,
+    anonymous_ranges, cpu_ticks, eligible, has_window, is_exiting, is_google_play, skip_reason,
+    state, Pageout, PageoutPolicy, ProcessSample, Recheck, Status, QUIET_AFTER_WAKE,
 };
 use dsa_guest_channeld::router::{Peer, Router};
 use dsa_protocol::control::envelope::Body;
@@ -26,6 +26,7 @@ fn gms(cpu_ticks: u64, rss_anon_mib: u64) -> ProcessSample {
         oom_score_adj: 500,
         cpu_ticks,
         rss_anon_kb: rss_anon_mib * MIB,
+        exiting: false,
     }
 }
 
@@ -77,6 +78,7 @@ fn nfr2_a_pageout_is_rate_limited_per_process_and_per_look() {
         oom_score_adj: 900,
         cpu_ticks: 1,
         rss_anon_kb: rss * MIB,
+        exiting: false,
     };
     let all = [gms(1, 30), other(800, 50), other(801, 10)];
     pageout.look(secs(0), &all, &no_windows());
@@ -116,6 +118,7 @@ fn nfr2_the_foreground_app_and_a_process_with_a_window_are_never_paged_out() {
         oom_score_adj: adj,
         cpu_ticks: 0,
         rss_anon_kb: 100 * MIB,
+        exiting: false,
     };
     // A window's package, in its main process and its others.
     assert!(!eligible(&app("org.example.notes", 900), &windows));
@@ -213,6 +216,7 @@ fn nfr2_proc_files_are_read_for_cpu_time_memory_and_anonymous_ranges() {
             uid: 10123,
             rss_anon_kb: 30720,
             swap_kb: 76800,
+            has_mm: false,
         }
     );
 
@@ -265,4 +269,90 @@ fn nfr2_the_router_says_which_packages_have_a_window() {
         )
         .unwrap();
     assert!(router.task_packages().is_empty());
+}
+
+#[test]
+fn nfr2_an_exiting_process_is_never_paged_out() {
+    // A zombie, or a process whose address space is gone, is being torn down by the kernel:
+    // paging it out raced with that, and the kernel reported a bad rss-counter.
+    let mut pageout = Pageout::new(PageoutPolicy::default());
+    let exiting = ProcessSample {
+        exiting: true,
+        ..gms(100, 30)
+    };
+    assert!(!eligible(&exiting, &no_windows()));
+    assert!(pageout
+        .look(secs(0), std::slice::from_ref(&exiting), &no_windows())
+        .is_empty());
+    assert!(pageout.look(secs(30), &[exiting], &no_windows()).is_empty());
+
+    // Read from /proc: state Z or X, or no VmSize line.
+    let zombie = "700 (com.google.android.gms) Z 500 500 0 0 -1 0 0 0 0 0 1 1 0 0 20 0 1 0 9 0\n";
+    let dead = "700 (com.google.android.gms) X 500 500 0 0 -1 0 0 0 0 0 1 1 0 0 20 0 1 0 9 0\n";
+    let sleeping = "700 (com.google.android.gms) S 500 500 0 0 -1 0 0 0 0 0 1 1 0 0 20 0 1 0 9 0\n";
+    let alive = Status::parse("Uid:\t10123\nVmSize:\t 1000 kB\nRssAnon:\t 30720 kB\n");
+    let no_mm = Status::parse("Uid:\t10123\n");
+    assert_eq!(state(zombie), Some('Z'));
+    assert!(is_exiting(zombie, &alive));
+    assert!(is_exiting(dead, &alive));
+    assert!(is_exiting(sleeping, &no_mm));
+    assert!(!is_exiting(sleeping, &alive));
+    assert!(alive.has_mm);
+}
+
+#[test]
+fn nfr2_a_process_that_used_the_cpu_within_the_grace_period_is_not_paged_out() {
+    let mut pageout = Pageout::new(PageoutPolicy::default());
+    assert_eq!(PageoutPolicy::default().quiet, QUIET_AFTER_WAKE);
+    assert!(pageout
+        .look(secs(0), &[gms(100, 30)], &no_windows())
+        .is_empty());
+    // It runs again just before the grace period ends: the wait starts over.
+    let woke_at = QUIET_AFTER_WAKE - secs(1);
+    assert!(pageout
+        .look(woke_at, &[gms(110, 30)], &no_windows())
+        .is_empty());
+    assert!(pageout
+        .look(QUIET_AFTER_WAKE, &[gms(110, 30)], &no_windows())
+        .is_empty());
+    let due = pageout.look(woke_at + QUIET_AFTER_WAKE, &[gms(110, 30)], &no_windows());
+    assert_eq!(due.len(), 1);
+    assert_eq!(due[0].cpu_ticks, 110);
+
+    // Read again right before the pageout: a process that woke since the look, began to exit,
+    // or came forward is left alone.
+    let target = &due[0];
+    let quiet = Recheck {
+        oom_score_adj: 500,
+        cpu_ticks: 110,
+        exiting: false,
+    };
+    assert_eq!(skip_reason(target, &quiet), None);
+    assert!(skip_reason(
+        target,
+        &Recheck {
+            cpu_ticks: 111,
+            ..quiet
+        }
+    )
+    .unwrap()
+    .contains("used the CPU"));
+    assert!(skip_reason(
+        target,
+        &Recheck {
+            exiting: true,
+            ..quiet
+        }
+    )
+    .unwrap()
+    .contains("exiting"));
+    assert!(skip_reason(
+        target,
+        &Recheck {
+            oom_score_adj: 0,
+            ..quiet
+        }
+    )
+    .unwrap()
+    .contains("more important"));
 }

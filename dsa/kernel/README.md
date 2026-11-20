@@ -10,6 +10,7 @@ kernel, and the user's WSL kernel is not touched.
 | `android-arm64.config` | The options the arm64 kernel adds after `android.config` |
 | `virtio.config` | The virtio drivers the macOS host's VM needs, merged after those for both architectures |
 | `dxg.config` | Hyper-V's paravirtualized GPU driver (dxgkrnl, `/dev/dxg`), merged last for both architectures. It is idle unless the host gives the VM a GPU (experimental, off by default) |
+| `android-debug.config` | Memory debugging (`CONFIG_DEBUG_VM`, `CONFIG_KFENCE`, `CONFIG_PAGE_OWNER`, `CONFIG_DEBUG_LIST`), merged only by `build.sh --debug`, never into the shipped kernel |
 | `patches/` | Small patches applied to the pinned source before configuration, the same for both architectures |
 | `apply-patches.sh` | Leaves a checkout of the tag with the whole patch series applied, however often it runs; the patches stack (several change `mm/page_reporting.c`), so it checks the series as a whole, not one patch at a time |
 | `build.sh` | Fetches the source into `.scratch/`, merges the configuration, checks it and builds `bzImage` (x86_64) or `Image` (arm64) |
@@ -198,7 +199,13 @@ region has to be reserved on either architecture.
 dsa/kernel/build.sh --config-only               # merge and check, about a minute
 dsa/kernel/build.sh                             # also build bzImage, tens of minutes
 dsa/kernel/build.sh --arch arm64 [--config-only] # the same for arm64 (Image)
+dsa/kernel/build.sh [--arch arm64] --debug       # with android-debug.config, for chasing memory bugs
 ```
+
+`--debug` merges `android-debug.config` last, and `--extra-config FILE` (or
+`DSA_KERNEL_EXTRA_CONFIG`) any other fragment. Such a kernel builds and lands in directories of
+its own (`build-<arch>-extra`, `out-extra`), so it never replaces the shipped kernel. It is
+slower and larger, and only for reproducing a memory bug.
 
 The check fails when any line of `android.config` did not survive the merge, which is how
 Kconfig reports a missing dependency: by silently dropping the option. It also fails if

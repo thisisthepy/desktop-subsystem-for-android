@@ -747,6 +747,31 @@ fn start_accessibility(to_main: ToMain) -> Arc<Accessibility> {
     )
 }
 
+/// Tells the user when Android crashes, as DSA's own notice in the session's notification
+/// service, from a thread of its own.
+fn tell_crashes(icons: Option<PathBuf>) {
+    let icons = icons.unwrap_or_else(std::env::temp_dir);
+    let tell: Arc<dyn Fn(dsa_host_core::notifications::Notification) + Send + Sync> =
+        Arc::new(move |notice| {
+            let shown = Notifier::connect(icons.clone())
+                .and_then(|notifier| notifier.notify(&dsa_notice(&notice), &[]).map(drop));
+            if let Err(why) = shown {
+                log(&format!(
+                    "the user was not told that Android crashed: {why}"
+                ));
+            }
+        });
+    if let Err(why) = dsa_host_core::guest_crash::watch_in_background(
+        Box::new(connector()),
+        format!("dsa-compositor {BUILD} crash watch"),
+        Arc::new(ui_language),
+        tell,
+        Arc::new(|line: &str| log(line)),
+    ) {
+        log(&format!("a crash of Android will not be told: {why}"));
+    }
+}
+
 /// The guest's compositor did not recover from a GPU reset: tells the user, as DSA's own
 /// notice in the session's notification service, and restarts Android through the service
 /// when `stall` says so, opening `packages` (the apps that had windows) again. Both on threads
@@ -1301,6 +1326,7 @@ pub fn run() -> Result<(), String> {
         show_notifications(requests.clone(), folders.icons.join("notifications"));
     }
     let pins = folders.clone().map(ask_pins);
+    tell_crashes(folders.as_ref().map(|folders| folders.icons.clone()));
     follow_gamepads(active.clone());
     let images = desktop
         .state

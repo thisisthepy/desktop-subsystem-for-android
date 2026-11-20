@@ -337,6 +337,28 @@ fn fr2_dsa_shows_the_guest_console_of_a_failed_start_below_the_status_line() {
 }
 
 #[test]
+fn nfr5_dsa_status_says_android_crashed_with_its_reason() {
+    use dsa_host_core::host_api::Status;
+    let line = dsa_cli::describe(&Status {
+        state: SessionState::Stopped,
+        last_reason: Some(
+            "Android crashed (kernel panic in binder_transaction)\nthe guest's console at the crash:\n  Kernel panic"
+                .into(),
+        ),
+        update_notice: None,
+        problem: None,
+        program_update: None,
+    });
+    assert_eq!(
+        line,
+        "Android: Stopped (last stopped: Android stopped unexpectedly. Open an app to start \
+         Android again. Reason: kernel panic in binder_transaction)\n\
+         details: Android crashed (kernel panic in binder_transaction)\n\
+         the guest's console at the crash:\n  Kernel panic"
+    );
+}
+
+#[test]
 fn fr17_dsa_status_says_an_error_code_in_a_sentence_and_keeps_the_raw_line() {
     use dsa_host_core::host_api::Status;
     let raw =

@@ -443,6 +443,27 @@ fn serve(places: Places, stop: Arc<AtomicBool>) -> Result<(), String> {
         news_posted,
         Arc::clone(&launcher),
     );
+    // Android that crashes is said in the Notification Center, as DSA's own news.
+    {
+        let news = Mutex::new(news.clone());
+        let tell: Arc<dyn Fn(Notification) + Send + Sync> = Arc::new(move |notice| {
+            let sent = news.lock().unwrap_or_else(|e| e.into_inner()).send(notice);
+            if sent.is_err() {
+                log("the notifications have ended; the user is not told that Android crashed");
+            }
+        });
+        if let Err(why) = dsa_host_core::guest_crash::watch_in_background(
+            Box::new(UnixLocalConnector {
+                path: places.host_api.clone(),
+            }),
+            format!("{BUILD} crash watch"),
+            Arc::new(crate::ui_language::current),
+            tell,
+            Arc::new(|line: &str| log(line)),
+        ) {
+            log(&format!("a crash of Android will not be told: {why}"));
+        }
+    }
     let platform = MacPlatform {
         links: Arc::clone(&links),
         presenter: Arc::clone(&presenter),

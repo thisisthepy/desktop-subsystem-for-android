@@ -102,6 +102,20 @@ class ImageLayoutTests(unittest.TestCase):
         self.assertRegex(cil, r"\(allow dsa_channeld pstorefs \(dir \([^)]*\bsetattr\b[^)]*\bremove_name\b")
         self.assertRegex(cil, r"\(allow dsa_channeld pstorefs \(file \([^)]*\bunlink\b")
 
+    def test_nfr2_channeld_may_read_the_free_page_reporting_numbers(self):
+        # Every console showed "avc: denied { read } ... name="reported_kb"
+        # tcontext=...dsa_sysfs_page_reporting_stats" from an image without the rule.
+        cil = (Path(__file__).parent / "sepolicy" / "channeld.cil").read_text()
+        self.assertRegex(
+            cil,
+            r"\(allow dsa_channeld dsa_sysfs_page_reporting_stats \(file \([^)]*\bread\b[^)]*\bopen\b")
+        memory = (Path(__file__).parent / "sepolicy" / "memory.cil").read_text()
+        self.assertIn('(genfscon sysfs "/module/page_reporting/parameters/reported_kb" '
+                      '(u object_r dsa_sysfs_page_reporting_stats ((s0) (s0))))', memory)
+        # The image check refuses an image whose policy lost it.
+        check = (Path(__file__).with_name("check-image.py")).read_text()
+        self.assertIn("dsa_sysfs_page_reporting_stats", check)
+
     # The SELinux type and class of every kernel file dsa-channeld opens, as the guest's kernel
     # labels it, and the permission an open asks of it when that is not read (dir: search). A
     # path the daemon opens that is not listed here fails the test below, so a new read cannot
