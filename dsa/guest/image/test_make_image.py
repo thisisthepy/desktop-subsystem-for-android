@@ -62,15 +62,17 @@ class ImageLayoutTests(unittest.TestCase):
 
     def test_fr32_a_root_helper_reads_the_android_id_google_play_services_keep(self):
         # Google Play services refuse their gservices provider to the agent and keep the ID in a
-        # file of their app user. The platform's neverallow rules forbid dac_read_search and
-        # opening privapp_data_file to the daemon and to any domain declared for the job, so the
-        # image must not carry such a rule: the helper init runs as root is permissive instead,
-        # as the approved root command's domain is, and has the one capability the file needs.
+        # file of their app user. AOSP's domain.te has a neverallow that forbids dac_read_search
+        # outside its own list of domains, and another for opening privapp_data_file. The image's
+        # secilc compile runs with -N, so it does not enforce neverallow rules and this test is
+        # DSA's own guard: the daemon and the helper's domain must not use the capability or open
+        # that data, so the helper init runs as root is permissive instead, as the approved root
+        # command's domain is, and gets the one capability the file needs from init.
         here = Path(__file__).parent
         rules = [line for sd in (here / "sepolicy").glob("*.cil")
                  for line in sd.read_text().splitlines() if not line.lstrip().startswith(";")]
-        # Only these two domains are held to it: the platform's lists name them, while the
-        # mount and Widevine reset domains hold dac_read_search for folders they own and ship so.
+        # Only these two domains are held to it. dsa_sharemount and dsa_widevine_reset carry
+        # dac_read_search for folders they own, as shipped since Nov 5 and Nov 13.
         for line in rules:
             if re.match(r"\(allow\s+(dsa_channeld|dsa_google_id)\s", line):
                 self.assertNotIn("dac_read_search", line, line)
