@@ -2309,7 +2309,7 @@ Turn it on under ARM apps, restart Android, and install the app again.</value>
     <value>The newest supported version (now Android {0})</value>
   </data>
   <data name="Android_FollowsMajor" xml:space="preserve">
-    <value>Android {0} and its security updates</value>
+    <value>Fixed to Android {0}: its security and image updates, never a newer Android on its own</value>
   </data>
   <data name="AndroidUpdateCard.Header" xml:space="preserve">
     <value>Android update</value>

@@ -804,8 +804,8 @@ msgstr "Cài đặt này áp dụng cho mọi người dùng máy tính này, n�
 msgid "The newest supported version (now Android {0})"
 msgstr "Phiên bản được hỗ trợ mới nhất (hiện là Android {0})"
 
-msgid "Android {0} and its security updates"
-msgstr "Android {0} và các bản cập nhật bảo mật của nó"
+msgid "Fixed to Android {0}: its security and image updates, never a newer Android on its own"
+msgstr "Cố định ở Android {0}: chỉ nhận các bản cập nhật bảo mật và ảnh hệ thống của nó, không tự chuyển sang Android mới hơn"
 
 msgid "No Android update is waiting. DSA checks every day, and restarts Android into an update once no app window is open."
 msgstr "Không có cập nhật Android đang chờ. DSA kiểm tra hằng ngày và khởi động lại Android để cập nhật khi không mở cửa sổ ứng dụng nào."

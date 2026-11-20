@@ -45,6 +45,9 @@
         <?ifdef AndroidMajor ?>
         <Variable Name="AndroidMajor" Type="string" Value="$(AndroidMajor)" />
         <?endif?>
+        <?ifdef AndroidPinned ?>
+        <Variable Name="AndroidPinned" Type="string" Value="1" />
+        <?endif?>
         <?ifdef BundledImage ?>
         <Variable Name="BundledImage" Type="string" Value="1" />
         <?endif?>

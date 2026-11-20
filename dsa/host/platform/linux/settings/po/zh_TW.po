@@ -804,8 +804,8 @@ msgstr "此設定會套用到這台電腦的所有使用者，因此變更時會
 msgid "The newest supported version (now Android {0})"
 msgstr "支援的最新版本（目前為 Android {0}）"
 
-msgid "Android {0} and its security updates"
-msgstr "Android {0} 及其安全性更新"
+msgid "Fixed to Android {0}: its security and image updates, never a newer Android on its own"
+msgstr "固定為 Android {0}：只接收其安全性更新和映像更新，不會自動換成更新的 Android"
 
 msgid "No Android update is waiting. DSA checks every day, and restarts Android into an update once no app window is open."
 msgstr "沒有等待中的 Android 更新。DSA 每天都會檢查，並在沒有開啟任何應用程式視窗時重新啟動 Android 以套用更新。"

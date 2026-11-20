@@ -180,6 +180,14 @@
              stays. -->
         <Property Id="REINSTALLMODE" Value="amus" />
         <ComponentGroup Id="Service" Directory="INSTALLFOLDER">
+            <?ifdef PresetMajor ?>
+            <!-- A preset package (a17, a16): the Android major it fixes this computer to. The
+                 service applies it once. A default package has none, so an upgrade by one
+                 removes it and leaves the computer on the version it follows. -->
+            <Component Id="InstallerPreset" Guid="*">
+                <File Id="InstallerPreset" Source="$(SourceDir)\installer-preset.json" KeyPath="yes" />
+            </Component>
+            <?endif?>
             <Component Id="HostdExe" Guid="*">
                 <File Id="HostdExe" Source="$(SourceDir)\dsa-hostd.exe" KeyPath="yes" />
                 <ServiceInstall Id="DsaHost"

@@ -804,8 +804,8 @@ msgstr "Esta configuração vale para todos os usuários deste computador, entã
 msgid "The newest supported version (now Android {0})"
 msgstr "A versão compatível mais recente (agora Android {0})"
 
-msgid "Android {0} and its security updates"
-msgstr "Android {0} e suas atualizações de segurança"
+msgid "Fixed to Android {0}: its security and image updates, never a newer Android on its own"
+msgstr "Fixado no Android {0}: suas atualizações de segurança e de imagem, nunca um Android mais novo por conta própria"
 
 msgid "No Android update is waiting. DSA checks every day, and restarts Android into an update once no app window is open."
 msgstr "Nenhuma atualização do Android pendente. O DSA verifica todo dia e, sem janelas de apps abertas, reinicia o Android para atualizar."

@@ -2309,7 +2309,7 @@ Schalten Sie sie unter ARM-Apps ein, starten Sie Android neu und installieren Si
     <value>Die neueste unterstützte Version (derzeit Android {0})</value>
   </data>
   <data name="Android_FollowsMajor" xml:space="preserve">
-    <value>Android {0} und seine Sicherheitsupdates</value>
+    <value>Fest auf Android {0}: seine Sicherheits- und Image-Updates, nie von selbst ein neueres Android</value>
   </data>
   <data name="AndroidUpdateCard.Header" xml:space="preserve">
     <value>Android-Update</value>

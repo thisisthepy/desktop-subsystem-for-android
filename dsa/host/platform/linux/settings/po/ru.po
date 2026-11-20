@@ -804,8 +804,8 @@ msgstr "Этот параметр действует для всех польз�
 msgid "The newest supported version (now Android {0})"
 msgstr "Самая новая поддерживаемая версия (сейчас Android {0})"
 
-msgid "Android {0} and its security updates"
-msgstr "Android {0} и его обновления безопасности"
+msgid "Fixed to Android {0}: its security and image updates, never a newer Android on its own"
+msgstr "Закреплено на Android {0}: только его обновления безопасности и образа, без самостоятельного перехода на более новый Android"
 
 msgid "No Android update is waiting. DSA checks every day, and restarts Android into an update once no app window is open."
 msgstr "Обновлений Android нет. DSA проверяет их ежедневно и перезапускает Android с обновлением, когда окна приложений закрыты."

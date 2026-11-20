@@ -239,6 +239,11 @@ fn apply_list(
     if state.on_trial {
         return Ok(moved_up);
     }
+    if let Some(pinned) = state.pinned_major() {
+        if !manifest.supported_majors.contains(&pinned) {
+            return Ok(Some(super::store::pinned_unsupported(pinned)));
+        }
+    }
     let decision = match release {
         Some(release) => decide_on_channel(
             &state.current,
@@ -1402,6 +1407,10 @@ pub struct UpdatesConfig<'a> {
     pub bundled_image: Option<&'a InstalledImage>,
     /// How long a new image may take to finish its first boot; 300 when `None`.
     pub boot_timeout_secs: Option<u64>,
+    /// The folder where a preset installer (such as `a16`) leaves its preset file, which fixes
+    /// the computer to one Android major once. `None`, or a folder without the file, for a
+    /// default installation.
+    pub preset_dir: Option<&'a Path>,
 }
 
 /// Why image updates are off although the configuration asked for them: the store could not
@@ -1457,6 +1466,12 @@ pub fn open_updates(config: UpdatesConfig<'_>, build: &str) -> Result<Option<Upd
                 bundled.version
             ),
         }
+    }
+    if let Some(line) = config
+        .preset_dir
+        .and_then(|dir| crate::host_config::InstallerPreset::apply_from(dir, &store))
+    {
+        eprintln!("{build}: {line}");
     }
     // An installation can find a state that names an image it cannot boot, such as a test
     // package's stand-in, and Android would then never start.

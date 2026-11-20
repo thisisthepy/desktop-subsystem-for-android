@@ -804,8 +804,8 @@ msgstr "Bu ayar bu bilgisayarın tüm kullanıcılarına uygulanır, bu yüzden 
 msgid "The newest supported version (now Android {0})"
 msgstr "Desteklenen en yeni sürüm (şu an Android {0})"
 
-msgid "Android {0} and its security updates"
-msgstr "Android {0} ve güvenlik güncellemeleri"
+msgid "Fixed to Android {0}: its security and image updates, never a newer Android on its own"
+msgstr "Android {0} sürümüne sabit: yalnızca güvenlik ve görüntü güncellemeleri alır, kendiliğinden daha yeni bir Android'e geçmez"
 
 msgid "No Android update is waiting. DSA checks every day, and restarts Android into an update once no app window is open."
 msgstr "Bekleyen Android güncellemesi yok. DSA her gün denetler; açık uygulama penceresi kalmayınca Android'i güncellemeyle yeniden başlatır."

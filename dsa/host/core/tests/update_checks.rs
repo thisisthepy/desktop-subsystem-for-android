@@ -57,6 +57,7 @@ fn config<'a>(
         first_image: Some(first),
         bundled_image: bundled,
         boot_timeout_secs: None,
+        preset_dir: None,
     }
 }
 
@@ -67,8 +68,28 @@ fn fr14_no_store_in_the_configuration_is_no_updates() {
         first_image: None,
         bundled_image: None,
         boot_timeout_secs: None,
+        preset_dir: None,
     };
     assert!(open_updates(none, "t").unwrap().is_none());
+}
+
+#[test]
+fn fr1_opening_the_store_applies_the_installers_preset_once() {
+    let root = scratch("preset");
+    let first = image("16.0.1", 16, 1);
+    put_image(&root, "16.0.1");
+    let preset = scratch("preset-dir");
+    std::fs::write(
+        preset.join("installer-preset.json"),
+        r#"{"android_major": 16}"#,
+    )
+    .unwrap();
+    let mut with = config(&root, &first, None);
+    with.preset_dir = Some(&preset);
+    let updates = open_updates(with, "t").unwrap().unwrap();
+    let state = updates.store.state().unwrap();
+    assert_eq!(state.preset_major, Some(16));
+    assert_eq!(state.pinned_major(), Some(16));
 }
 
 #[test]

@@ -71,6 +71,22 @@ namespace Dsa.Setup
             "Versi {0}",
             "Sürüm {0}");
         public const string AndroidChip = "Android {0}";
+        /// <summary>The chip of a preset setup (a17, a16): the Android it installs and keeps.</summary>
+        public static string AndroidChipPinned => Pick(
+            "Android {0} (fixed)",
+            "Android {0} 고정",
+            "Android {0} (固定)",
+            "Android {0}（固定）",
+            "Android {0}（固定）",
+            "Android {0} (fijo)",
+            "Android {0} (fixe)",
+            "Android {0} (fest)",
+            "Android {0} (fixo)",
+            "Android {0} (закреплено)",
+            "Android {0} (fisso)",
+            "Android {0} (cố định)",
+            "Android {0} (tetap)",
+            "Android {0} (sabit)");
         public static string Logo => Pick(
             "Desktop Subsystem for Android™ logo",
             "Desktop Subsystem for Android™ 로고",

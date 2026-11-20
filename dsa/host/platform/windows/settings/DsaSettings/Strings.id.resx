@@ -2309,7 +2309,7 @@ Aktifkan di Aplikasi ARM, mulai ulang Android, lalu instal aplikasi lagi.</value
     <value>Versi terbaru yang didukung (saat ini Android {0})</value>
   </data>
   <data name="Android_FollowsMajor" xml:space="preserve">
-    <value>Android {0} dan pembaruan keamanannya</value>
+    <value>Tetap di Android {0}: hanya pembaruan keamanan dan image-nya, tidak pernah pindah sendiri ke Android yang lebih baru</value>
   </data>
   <data name="AndroidUpdateCard.Header" xml:space="preserve">
     <value>Pembaruan Android</value>

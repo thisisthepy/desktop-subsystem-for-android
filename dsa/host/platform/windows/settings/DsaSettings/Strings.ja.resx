@@ -2309,7 +2309,7 @@ Android は今すぐ停止し、次回は最初にインストールしたとき
     <value>対応する最新のバージョン (現在は Android {0})</value>
   </data>
   <data name="Android_FollowsMajor" xml:space="preserve">
-    <value>Android {0} とそのセキュリティ更新</value>
+    <value>Android {0} に固定: そのセキュリティ アップデートとイメージ アップデートのみを受け取り、新しい Android には自動で移りません</value>
   </data>
   <data name="AndroidUpdateCard.Header" xml:space="preserve">
     <value>Android の更新</value>

@@ -804,8 +804,8 @@ msgstr "この設定はこのコンピューターのすべてのユーザーに
 msgid "The newest supported version (now Android {0})"
 msgstr "対応する最新バージョン (現在は Android {0})"
 
-msgid "Android {0} and its security updates"
-msgstr "Android {0} とそのセキュリティアップデート"
+msgid "Fixed to Android {0}: its security and image updates, never a newer Android on its own"
+msgstr "Android {0} に固定: そのセキュリティ アップデートとイメージ アップデートのみを受け取り、新しい Android には自動で移りません"
 
 msgid "No Android update is waiting. DSA checks every day, and restarts Android into an update once no app window is open."
 msgstr "保留中の Android アップデートはありません。DSA は毎日確認し、アプリのウィンドウがすべて閉じたら Android を再起動して適用します。"

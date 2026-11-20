@@ -2309,7 +2309,7 @@ Hãy bật trong Ứng dụng ARM, khởi động lại Android và cài đặt 
     <value>Phiên bản mới nhất được hỗ trợ (hiện là Android {0})</value>
   </data>
   <data name="Android_FollowsMajor" xml:space="preserve">
-    <value>Android {0} và các bản cập nhật bảo mật của nó</value>
+    <value>Cố định ở Android {0}: chỉ nhận các bản cập nhật bảo mật và ảnh hệ thống của nó, không tự chuyển sang Android mới hơn</value>
   </data>
   <data name="AndroidUpdateCard.Header" xml:space="preserve">
     <value>Cập nhật Android</value>

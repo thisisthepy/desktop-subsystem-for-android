@@ -24,8 +24,12 @@ inputs:
     description: The public key that signs the lists
     required: true
   android-major:
-    description: The newest Android major the list supports, which setup's first screen names
+    description: The major of the newest image on the list, which the default setup's first screen names
     required: true
+  preset-majors:
+    description: "The Android majors to build a preset setup for (setup-a<major>-<version>.exe), space separated, newest first; empty for none"
+    required: false
+    default: ""
   program-list-url:
     description: The stable channel's signed program list
     required: true
@@ -99,6 +103,7 @@ runs:
       env:
         VERSION: ${{ inputs.version }}
         RELEASE_TAG: ${{ inputs.release-tag }}
+        PRESET_MAJORS: ${{ inputs.preset-majors }}
       run: |
         # A hashtable, not an array: splatting an array passes '-ReleaseTag' as a
         # positional value, which build.ps1 then takes as -ImageDir.
@@ -109,6 +114,7 @@ runs:
           -ListUrl '${{ inputs.list-url }}' `
           -TrustedKey '${{ inputs.trusted-key }}' `
           -AndroidMajor ${{ inputs.android-major }} `
+          -PresetMajors ([int[]]@($env:PRESET_MAJORS -split ' ' | Where-Object { $_ })) `
           -ProgramListUrl '${{ inputs.program-list-url }}' `
           -PrereleaseProgramListUrl '${{ inputs.prerelease-program-list-url }}' `
           -Channel '${{ inputs.channel }}'

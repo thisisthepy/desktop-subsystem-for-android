@@ -2309,7 +2309,7 @@ ARM 앱에서 ARM 번역을 켜고 Android를 다시 시작한 뒤 앱을 다시
     <value>지원하는 가장 새 버전(지금은 Android {0})</value>
   </data>
   <data name="Android_FollowsMajor" xml:space="preserve">
-    <value>Android {0} 버전과 그 보안 업데이트</value>
+    <value>Android {0}에 고정: 그 버전의 보안 업데이트와 이미지 업데이트만 받고, 더 새 Android로 저절로 바뀌지 않습니다</value>
   </data>
   <data name="AndroidUpdateCard.Header" xml:space="preserve">
     <value>Android 업데이트</value>

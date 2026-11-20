@@ -652,8 +652,14 @@ pub fn serve(
     );
     // A store that cannot be opened turns image updates off; Android still starts from the
     // image it has, and the reason is shown with the Android version.
-    let (updates, updates_disabled) = match open_updates_or_disable(updates_config(&config), build)
-    {
+    let preset_dir = installer_preset_dir();
+    let (updates, updates_disabled) = match open_updates_or_disable(
+        dsa_host_core::update::service::UpdatesConfig {
+            preset_dir: preset_dir.as_deref(),
+            ..updates_config(&config)
+        },
+        build,
+    ) {
         Ok(updates) => (updates, None),
         Err(disabled) => (None, Some(disabled)),
     };
@@ -844,4 +850,13 @@ pub fn serve(
     } else {
         Err("Android's VM did not stop".into())
     }
+}
+
+/// Where this installation's preset file would be. A preset installer (such as a16) carries installer-preset.json in DSA.app's resources.
+fn installer_preset_dir() -> Option<std::path::PathBuf> {
+    std::env::current_exe().ok().and_then(|exe| {
+        exe.parent()?
+            .parent()
+            .map(|contents| contents.join("Resources"))
+    })
 }

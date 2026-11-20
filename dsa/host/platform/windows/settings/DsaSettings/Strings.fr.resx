@@ -2309,7 +2309,7 @@ Activez-la sous Applications ARM, redémarrez Android, puis réinstallez l'appli
     <value>La version prise en charge la plus récente (actuellement Android {0})</value>
   </data>
   <data name="Android_FollowsMajor" xml:space="preserve">
-    <value>Android {0} et ses mises à jour de sécurité</value>
+    <value>Fixé sur Android {0} : ses mises à jour de sécurité et d'image, jamais un Android plus récent de lui-même</value>
   </data>
   <data name="AndroidUpdateCard.Header" xml:space="preserve">
     <value>Mise à jour d'Android</value>

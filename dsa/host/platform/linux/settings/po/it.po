@@ -804,8 +804,8 @@ msgstr "Questa impostazione vale per ogni utente di questo computer, quindi modi
 msgid "The newest supported version (now Android {0})"
 msgstr "La versione supportata più recente (ora Android {0})"
 
-msgid "Android {0} and its security updates"
-msgstr "Android {0} e i suoi aggiornamenti di sicurezza"
+msgid "Fixed to Android {0}: its security and image updates, never a newer Android on its own"
+msgstr "Fissato su Android {0}: i suoi aggiornamenti di sicurezza e dell'immagine, mai un Android più recente da solo"
 
 msgid "No Android update is waiting. DSA checks every day, and restarts Android into an update once no app window is open."
 msgstr "Nessun aggiornamento di Android in attesa. DSA controlla ogni giorno e, senza finestre di app aperte, riavvia Android per aggiornarlo."

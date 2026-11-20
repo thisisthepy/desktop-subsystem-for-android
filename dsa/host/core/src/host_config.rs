@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ed25519_dalek::VerifyingKey;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::session::SessionConfig;
 use crate::settings::{
@@ -22,6 +22,7 @@ use crate::update::manifest;
 use crate::update::policy::InstalledImage;
 use crate::update::program::ReleaseChannel;
 use crate::update::service::UpdatesConfig;
+use crate::update::store::ImageStore;
 
 /// The VM's memory when the configuration names none and the user set no limit, in MiB: what
 /// it boots with, before it grows. 2 GiB rather than 3: the guest kernel keeps 64 bytes of page
@@ -220,6 +221,76 @@ pub fn expand_locations(text: &str, data: &Path, program: &Path) -> String {
         .replace("{program}", &json(program))
 }
 
+/// The file a preset installer leaves beside the program (in the app bundle's resources on
+/// macOS) to fix the computer to one Android major. A default installer leaves none.
+pub const PRESET_FILE: &str = "installer-preset.json";
+
+/// What a preset installer (such as `a16`) carries: the Android major it installs and keeps.
+/// The installer is the same build as the default one; only this differs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InstallerPreset {
+    pub android_major: u32,
+}
+
+impl InstallerPreset {
+    pub fn parse(json: &str) -> Result<InstallerPreset, HostConfigError> {
+        let preset: InstallerPreset =
+            serde_json::from_str(json).map_err(|e| HostConfigError(e.to_string()))?;
+        if preset.android_major == 0 {
+            return Err(HostConfigError(
+                "an installer preset names Android major 0, which is no version".into(),
+            ));
+        }
+        Ok(preset)
+    }
+
+    /// Reads [`PRESET_FILE`] in `dir`: `Ok(None)` when there is none (a default
+    /// installation).
+    pub fn read_in(dir: &Path) -> Result<Option<InstallerPreset>, HostConfigError> {
+        let path = dir.join(PRESET_FILE);
+        match std::fs::read_to_string(&path) {
+            Ok(text) => InstallerPreset::parse(&text)
+                .map(Some)
+                .map_err(|e| HostConfigError(format!("{}: {}", path.display(), e.0))),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(HostConfigError(format!("reading {}: {e}", path.display()))),
+        }
+    }
+
+    /// Reads the preset in `dir`, if there is one, and applies it to `store`: the line to
+    /// log, or `None` for a default installation.
+    pub fn apply_from(dir: &Path, store: &ImageStore) -> Option<String> {
+        match InstallerPreset::read_in(dir) {
+            Ok(Some(preset)) => preset.apply(store),
+            Ok(None) => None,
+            Err(why) => Some(why.to_string()),
+        }
+    }
+
+    /// Fixes `store` to this preset's major ([`ImageStore::apply_preset`]), once. Returns the
+    /// line to log: what was done, or why the version was left as it was.
+    pub fn apply(&self, store: &ImageStore) -> Option<String> {
+        match store.apply_preset(self.android_major) {
+            Ok(None) => store
+                .state()
+                .ok()
+                .filter(|state| state.pinned_major() == Some(self.android_major))
+                .map(|_| {
+                    format!(
+                        "this installation is fixed to Android {}",
+                        self.android_major
+                    )
+                }),
+            Ok(Some(why)) => Some(why),
+            Err(why) => Some(format!(
+                "fixing this installation to Android {}: {why}",
+                self.android_major
+            )),
+        }
+    }
+}
+
 /// What every host's configuration file says in the same words: where the image store is,
 /// how the session is timed and where updates come from. Each platform's file has these keys
 /// beside its own (the VM's sockets, its pipe, how it finds a user's profile), reads them into
@@ -279,6 +350,7 @@ pub fn updates_config(config: &dyn HostConfigFile) -> UpdatesConfig<'_> {
         first_image: config.first_image(),
         bundled_image: config.bundled_image(),
         boot_timeout_secs: config.update().map(|u| u.boot_timeout_secs),
+        preset_dir: None,
     }
 }
 

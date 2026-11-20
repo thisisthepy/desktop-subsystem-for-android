@@ -1189,6 +1189,7 @@ jobs:
     outputs:
       public_key: ${{ steps.sign.outputs.public_key }}
       newest_major: ${{ steps.write.outputs.newest_major }}
+      preset_majors: ${{ steps.write.outputs.preset_majors }}
     permissions:
       contents: write
       pull-requests: read
@@ -1295,8 +1296,12 @@ jobs:
               fi
             done
           fi
-          # The installer's first screen names the newest Android the list supports.
-          echo "newest_major=$(jq '.supported_majors | max' dsa/android-versions.json)" >> "$GITHUB_OUTPUT"
+          # The default installer's first screen names the major of the newest image on the
+          # list the installers read, and one preset installer is built per supported major
+          # with an image on it.
+          majors_list=images.json
+          if [[ ! -f "$majors_list" ]]; then majors_list=images-prerelease.json; fi
+          .github/scripts/release/installer-majors.sh "$majors_list" >> "$GITHUB_OUTPUT"
 
       - name: Sign and check the lists
         id: sign
@@ -1395,6 +1400,7 @@ jobs:
     outputs:
       public_key: ${{ steps.list.outputs.public_key }}
       newest_major: ${{ steps.list.outputs.newest_major }}
+      preset_majors: ${{ steps.list.outputs.preset_majors }}
     env:
       GH_TOKEN: ${{ github.token }}
       CHANNEL: ${{ needs.channel.outputs.channel }}
@@ -1443,7 +1449,9 @@ jobs:
             exit 1
           fi
           echo "public_key=$public" >> "$GITHUB_OUTPUT"
-          echo "newest_major=$(jq '.supported_majors | max' ../images.json)" >> "$GITHUB_OUTPUT"
+          # The default installer names the newest image's major; one preset installer per
+          # supported major with an image.
+          ../.github/scripts/release/installer-majors.sh ../images.json >> "$GITHUB_OUTPUT"
 
       # Every image carries the same kernel; the newest image's is taken and checked
       # against the hash the signed list gives: the newest by major, build and pre-release
@@ -1514,11 +1522,14 @@ jobs:
           list-url: https://github.com/${{ env.OFFICIAL_REPOSITORY }}/releases/download/images/images.json
           trusted-key: ${{ needs.list.outputs.public_key || needs.published.outputs.public_key }}
           android-major: ${{ needs.list.outputs.newest_major || needs.published.outputs.newest_major }}
+          preset-majors: ${{ needs.list.outputs.preset_majors || needs.published.outputs.preset_majors }}
           program-list-url: https://github.com/${{ env.OFFICIAL_REPOSITORY }}/releases/download/images/program-stable.json
           prerelease-program-list-url: https://github.com/${{ env.OFFICIAL_REPOSITORY }}/releases/download/images/program-prerelease.json
           channel: ${{ needs.channel.outputs.channel }}
 
       - name: Publish the installer
+        env:
+          PRESET_MAJORS: ${{ needs.list.outputs.preset_majors || needs.published.outputs.preset_majors }}
         run: |
           $version = '${{ inputs.installer_version }}'
           # The asset says what it is, its version, and what it runs on. "win" names the
@@ -1527,18 +1538,39 @@ jobs:
           $out = New-Item -ItemType Directory -Force dsa\target\release-assets
           Copy-Item "dsa/target/installer/setup-$version.exe" (Join-Path $out $asset)
           $hash = (Get-FileHash (Join-Path $out $asset) -Algorithm SHA256).Hash.ToLowerInvariant()
-          Set-Content -NoNewline -Encoding ascii (Join-Path $out SHA256SUMS.txt) "$hash  $asset`n"
+          $sums = "$hash  $asset`n"
+          # One preset installer per supported major (a17, a16): the same build, fixed to that
+          # Android major. Named DSA-v<version>-a<major>-win-x64-setup.exe.
+          $assets = @((Join-Path $out $asset))
+          $presetRows = ""
+          foreach ($major in ($env:PRESET_MAJORS -split ' ' | Where-Object { $_ })) {
+            $presetAsset = "DSA-v$version-a$major-win-x64-setup.exe"
+            Copy-Item "dsa/target/installer/setup-a$major-$version.exe" (Join-Path $out $presetAsset)
+            $presetHash = (Get-FileHash (Join-Path $out $presetAsset) -Algorithm SHA256).Hash.ToLowerInvariant()
+            $sums += "$presetHash  $presetAsset`n"
+            $assets += (Join-Path $out $presetAsset)
+            $presetRows += "| ``a$major`` | **$presetAsset** | Android $major fixed: stays on Android $major and takes its security and image updates, never a newer Android on its own |`n"
+          }
+          Set-Content -NoNewline -Encoding ascii (Join-Path $out SHA256SUMS.txt) $sums
           # Only setup.exe: it carries the package (dsa-<version>.msi) inside, and
           # wix burn extract takes it out for msiexec-based deployments.
           $notes = @"
           ## Install
 
-          Download **$asset** and run it. Setup installs the DSA service and the ``dsa`` command, and the service then downloads the newest supported Android image in the background.
+          Download **$asset** and run it. Setup installs the DSA service and the ``dsa`` command, and the service then downloads the newest supported Android image (Android ${{ needs.list.outputs.newest_major || needs.published.outputs.newest_major }}) in the background.
 
           - Needs 64-bit Windows 10 1803 or later, or Windows 11, with Virtual Machine Platform turned on.
           - ``dsa status`` shows the download; ``dsa start --wait`` starts Android once it is in.
           - SHA-256: ``$hash`` (also in SHA256SUMS.txt)
 
+          ### Installers per Android version
+
+          The default installer follows the newest Android. To run this DSA with an older Android, take the installer that names it. The settings app can change the version later.
+
+          | Name | File | Android |
+          | --- | --- | --- |
+          | (none) | **$asset** | The newest Android, moving up when a new one ships |
+          $presetRows
           Android is a trademark of Google LLC.
           "@
           gh release view "v$version" *> $null
@@ -1558,7 +1590,7 @@ jobs:
           # A pre-release is published as one, so GitHub never shows it as the latest release.
           $channelFlags = @()
           if ($env:CHANNEL -eq 'prerelease') { $channelFlags += '--prerelease' }
-          gh release create "v$version" (Join-Path $out $asset) (Join-Path $out SHA256SUMS.txt) $kernelSource --target $env:GITHUB_SHA `
+          gh release create "v$version" @assets (Join-Path $out SHA256SUMS.txt) $kernelSource --target $env:GITHUB_SHA `
             --title "DSA v$version" --notes $notes --generate-notes @channelFlags
           if ($LASTEXITCODE -ne 0) { throw "publishing the installer failed" }
 
@@ -1799,17 +1831,22 @@ jobs:
           "GFXSTREAM_DLL=$($dll.FullName)" >> $env:GITHUB_ENV
 
       - name: Build the ARM64 package and setup.exe
+        env:
+          PRESET_MAJORS: ${{ needs.list.outputs.preset_majors || needs.published.outputs.preset_majors }}
         run: >
           dsa/host/platform/windows/installer/build.ps1 -Version ${{ inputs.installer_version }} -Arch arm64
           -Kernel $env:KERNEL -GfxstreamBackend $env:GFXSTREAM_DLL
           -ListUrl https://github.com/${{ env.OFFICIAL_REPOSITORY }}/releases/download/images/images-arm64.json
           -TrustedKey $env:PUBLIC_KEY
           -AndroidMajor ${{ needs.list.outputs.newest_major || needs.published.outputs.newest_major }}
+          -PresetMajors ([int[]]@($env:PRESET_MAJORS -split ' ' | Where-Object { $_ }))
           -ProgramListUrl https://github.com/${{ env.OFFICIAL_REPOSITORY }}/releases/download/images/program-stable-arm64.json
           -PrereleaseProgramListUrl https://github.com/${{ env.OFFICIAL_REPOSITORY }}/releases/download/images/program-prerelease-arm64.json
           -Channel $env:CHANNEL
 
       - name: Add the ARM64 installer to the release
+        env:
+          PRESET_MAJORS: ${{ needs.list.outputs.preset_majors || needs.published.outputs.preset_majors }}
         run: |
           $version = '${{ inputs.installer_version }}'
           $asset = "DSA-v$version-win-arm64-setup.exe"
@@ -1819,7 +1856,16 @@ jobs:
           gh release download "v$version" --repo ${{ github.repository }} --pattern SHA256SUMS.txt --dir $out --clobber
           if ($LASTEXITCODE -ne 0) { throw "the release v$version has no SHA256SUMS.txt" }
           Add-Content -NoNewline -Encoding ascii (Join-Path $out SHA256SUMS.txt) "$hash  $asset`n"
-          gh release upload "v$version" (Join-Path $out $asset) (Join-Path $out SHA256SUMS.txt) --repo ${{ github.repository }} --clobber
+          $assets = @((Join-Path $out $asset))
+          # The ARM64 preset installers, named DSA-v<version>-a<major>-win-arm64-setup.exe.
+          foreach ($major in ($env:PRESET_MAJORS -split ' ' | Where-Object { $_ })) {
+            $presetAsset = "DSA-v$version-a$major-win-arm64-setup.exe"
+            Copy-Item "dsa/target/installer/setup-a$major-$version.exe" (Join-Path $out $presetAsset)
+            $presetHash = (Get-FileHash (Join-Path $out $presetAsset) -Algorithm SHA256).Hash.ToLowerInvariant()
+            Add-Content -NoNewline -Encoding ascii (Join-Path $out SHA256SUMS.txt) "$presetHash  $presetAsset`n"
+            $assets += (Join-Path $out $presetAsset)
+          }
+          gh release upload "v$version" @assets (Join-Path $out SHA256SUMS.txt) --repo ${{ github.repository }} --clobber
           if ($LASTEXITCODE -ne 0) { throw "adding the ARM64 installer to v$version failed" }
           # gh prints the notes as lines, which PowerShell keeps as an array: passed as is, each
           # line becomes its own argument and a line that starts with "- " reads as a flag. So

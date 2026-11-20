@@ -85,6 +85,36 @@ fn fr15_the_installers_channel_is_the_configured_one_or_follows_the_version() {
     assert!(read.has_program_list());
 }
 
+#[test]
+fn fr1_a_preset_installer_names_one_android_major() {
+    use dsa_host_core::host_config::InstallerPreset;
+    assert_eq!(
+        InstallerPreset::parse(r#"{"android_major": 16}"#).unwrap(),
+        InstallerPreset { android_major: 16 }
+    );
+    assert!(InstallerPreset::parse(r#"{"android_major": 0}"#).is_err());
+    assert!(InstallerPreset::parse(r#"{"android_major": 16, "other": 1}"#).is_err());
+}
+
+#[test]
+fn fr1_a_default_installation_has_no_preset() {
+    use dsa_host_core::host_config::InstallerPreset;
+    let dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("preset-none-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    assert_eq!(InstallerPreset::read_in(&dir).unwrap(), None);
+    std::fs::write(
+        dir.join("installer-preset.json"),
+        r#"{"android_major": 17}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        InstallerPreset::read_in(&dir).unwrap(),
+        Some(InstallerPreset { android_major: 17 })
+    );
+}
+
 mod shared_file {
     use std::path::{Path, PathBuf};
     use std::time::Duration;

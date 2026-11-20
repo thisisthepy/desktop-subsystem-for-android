@@ -386,7 +386,10 @@ pub fn android_channel_text(info: &AndroidVersion) -> String {
             &[&newest.to_string()],
         )
     } else {
-        trf("Android {0} and its security updates", &[&info.channel])
+        trf(
+            "Fixed to Android {0}: its security and image updates, never a newer Android on its own",
+            &[&info.channel],
+        )
     }
 }
 

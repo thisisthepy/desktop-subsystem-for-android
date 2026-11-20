@@ -2309,7 +2309,7 @@ Android 會立即停止，下次啟動時會回到初次安裝時的狀態。And
     <value>支援的最新版本 (目前為 Android {0})</value>
   </data>
   <data name="Android_FollowsMajor" xml:space="preserve">
-    <value>Android {0} 及其安全性更新</value>
+    <value>固定為 Android {0}：只接收其安全性更新和映像更新，不會自動換成更新的 Android</value>
   </data>
   <data name="AndroidUpdateCard.Header" xml:space="preserve">
     <value>Android 更新</value>

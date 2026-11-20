@@ -1500,3 +1500,68 @@ fn fr14_a_downloaded_image_is_applied_without_the_user_restarting() {
         done.store(true, Ordering::Relaxed);
     }
 }
+
+#[test]
+fn fr14_a_pinned_install_takes_updates_within_its_major_only() {
+    let store = fresh_store();
+    assert_eq!(store.apply_preset(16).unwrap(), None);
+    let fetch = server(&[16, 17], &[("16.0.2", 16, 2), ("17.0.1", 17, 1)], &key());
+    check(&store, &fetch, "mem://list.json", &trusted()).unwrap();
+    let state = store.state().unwrap();
+    assert_eq!(state.current.version, "16.0.2");
+    assert_eq!(state.pinned_major(), Some(16));
+    assert_eq!(store.report(None).unwrap().target_major, 16);
+}
+
+#[test]
+fn fr14_a_pinned_major_that_loses_support_stays() {
+    let store = fresh_store();
+    store.apply_preset(16).unwrap();
+    let fetch = server(&[17, 18], &[("17.0.1", 17, 1)], &key());
+    let notice = check(&store, &fetch, "mem://list.json", &trusted())
+        .unwrap()
+        .unwrap();
+    assert!(notice.contains("fixed to it"), "{notice}");
+    let state = store.state().unwrap();
+    assert_eq!(state.current, first());
+    assert_eq!(state.pinned_major(), Some(16));
+    assert!(!store.switch_pending());
+}
+
+#[test]
+fn fr14_the_installer_pin_is_applied_once() {
+    use dsa_host_core::update::versions::Channel;
+    let store = fresh_store();
+    store.apply_preset(16).unwrap();
+    store.choose(Channel::Latest, false).unwrap();
+    // The same preset installer run again (a repair, or an update to the same preset) leaves
+    // the user's later choice as it is.
+    assert_eq!(store.apply_preset(16).unwrap(), None);
+    let state = store.state().unwrap();
+    assert_eq!(state.channel, Channel::Latest);
+    assert_eq!(state.pinned_major(), None);
+}
+
+#[test]
+fn fr14_a_pin_below_the_running_major_erases_nothing() {
+    use dsa_host_core::update::versions::Channel;
+    let store = fresh_store();
+    store.choose(Channel::Major(17), false).unwrap();
+    let fetch = server(&[16, 17], &[("17.0.1", 17, 1)], &key());
+    check(&store, &fetch, "mem://list.json", &trusted()).unwrap();
+    store.confirm().unwrap();
+    let notice = store.apply_preset(16).unwrap().unwrap();
+    assert!(notice.contains("Android 17 is kept"), "{notice}");
+    let state = store.state().unwrap();
+    assert_eq!(state.current.android_major, 17);
+    assert_eq!(state.channel, Channel::Major(17));
+    assert!(!state.older_allowed);
+}
+
+#[test]
+fn fr14_a_default_install_writes_no_pin() {
+    let store = fresh_store();
+    let state = store.state().unwrap();
+    assert_eq!(state.preset_major, None);
+    assert_eq!(state.pinned_major(), None);
+}

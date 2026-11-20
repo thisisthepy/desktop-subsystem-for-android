@@ -588,8 +588,14 @@ pub fn serve(config: HostConfig, build: &str, stop: Arc<AtomicBool>) -> Result<(
     let store = service_settings_store(&config, build);
     // A store that cannot be opened turns image updates off; Android still starts from the
     // image it has, and the reason is shown with the Android version.
-    let (updates, updates_disabled) = match open_updates_or_disable(updates_config(&config), build)
-    {
+    let preset_dir = installer_preset_dir();
+    let (updates, updates_disabled) = match open_updates_or_disable(
+        dsa_host_core::update::service::UpdatesConfig {
+            preset_dir: preset_dir.as_deref(),
+            ..updates_config(&config)
+        },
+        build,
+    ) {
         Ok(updates) => (updates, None),
         Err(disabled) => (None, Some(disabled)),
     };
@@ -935,4 +941,14 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+}
+
+/// Where this installation's preset file would be. A preset package (such as a16) installs installer-preset.json in share/dsa beside the
+/// program's bin folder.
+fn installer_preset_dir() -> Option<std::path::PathBuf> {
+    std::env::current_exe().ok().and_then(|exe| {
+        exe.parent()?
+            .parent()
+            .map(|prefix| prefix.join("share").join("dsa"))
+    })
 }

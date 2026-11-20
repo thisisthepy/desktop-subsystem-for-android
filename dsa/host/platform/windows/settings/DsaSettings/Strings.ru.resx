@@ -2309,7 +2309,7 @@ Android сейчас остановится, а при следующем зап
     <value>Новейшая поддерживаемая версия (сейчас Android {0})</value>
   </data>
   <data name="Android_FollowsMajor" xml:space="preserve">
-    <value>Android {0} и его обновления безопасности</value>
+    <value>Закреплено на Android {0}: только его обновления безопасности и образа, без самостоятельного перехода на более новый Android</value>
   </data>
   <data name="AndroidUpdateCard.Header" xml:space="preserve">
     <value>Обновление Android</value>

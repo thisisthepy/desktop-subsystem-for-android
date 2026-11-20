@@ -7041,85 +7041,85 @@
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Android {0} und seine Sicherheitsupdates"
+            "value": "Fest auf Android {0}: seine Sicherheits- und Image-Updates, nie von selbst ein neueres Android"
           }
         },
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Android {0} and its security updates"
+            "value": "Fixed to Android {0}: its security and image updates, never a newer Android on its own"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Android {0} y sus actualizaciones de seguridad"
+            "value": "Fijado en Android {0}: recibe sus actualizaciones de seguridad y de imagen, nunca un Android más nuevo por sí solo"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Android {0} et ses mises à jour de sécurité"
+            "value": "Fixé sur Android {0} : ses mises à jour de sécurité et d'image, jamais un Android plus récent de lui-même"
           }
         },
         "id": {
           "stringUnit": {
             "state": "translated",
-            "value": "Android {0} dan pembaruan keamanannya"
+            "value": "Tetap di Android {0}: hanya pembaruan keamanan dan image-nya, tidak pernah pindah sendiri ke Android yang lebih baru"
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "Android {0} e i suoi aggiornamenti di sicurezza"
+            "value": "Fissato su Android {0}: i suoi aggiornamenti di sicurezza e dell'immagine, mai un Android più recente da solo"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "Android {0} とそのセキュリティ アップデート"
+            "value": "Android {0} に固定: そのセキュリティ アップデートとイメージ アップデートのみを受け取り、新しい Android には自動で移りません"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "Android {0} 버전과 그 보안 업데이트"
+            "value": "Android {0}에 고정: 그 버전의 보안 업데이트와 이미지 업데이트만 받고, 더 새 Android로 저절로 바뀌지 않습니다"
           }
         },
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Android {0} e suas atualizações de segurança"
+            "value": "Fixado no Android {0}: suas atualizações de segurança e de imagem, nunca um Android mais novo por conta própria"
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Android {0} и его обновления безопасности"
+            "value": "Закреплено на Android {0}: только его обновления безопасности и образа, без самостоятельного перехода на более новый Android"
           }
         },
         "tr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Android {0} ve güvenlik güncellemeleri"
+            "value": "Android {0} sürümüne sabit: yalnızca güvenlik ve görüntü güncellemeleri alır, kendiliğinden daha yeni bir Android'e geçmez"
           }
         },
         "vi": {
           "stringUnit": {
             "state": "translated",
-            "value": "Android {0} và các bản cập nhật bảo mật của nó"
+            "value": "Cố định ở Android {0}: chỉ nhận các bản cập nhật bảo mật và ảnh hệ thống của nó, không tự chuyển sang Android mới hơn"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Android {0} 及其安全更新"
+            "value": "固定为 Android {0}：只接收其安全更新和映像更新，不会自动换成更新的 Android"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "Android {0} 及其安全性更新"
+            "value": "固定為 Android {0}：只接收其安全性更新和映像更新，不會自動換成更新的 Android"
           }
         }
       }

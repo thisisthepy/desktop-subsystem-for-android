@@ -804,8 +804,8 @@ msgstr "Pengaturan ini berlaku untuk setiap pengguna komputer ini, sehingga meng
 msgid "The newest supported version (now Android {0})"
 msgstr "Versi terbaru yang didukung (saat ini Android {0})"
 
-msgid "Android {0} and its security updates"
-msgstr "Android {0} dan pembaruan keamanannya"
+msgid "Fixed to Android {0}: its security and image updates, never a newer Android on its own"
+msgstr "Tetap di Android {0}: hanya pembaruan keamanan dan image-nya, tidak pernah pindah sendiri ke Android yang lebih baru"
 
 msgid "No Android update is waiting. DSA checks every day, and restarts Android into an update once no app window is open."
 msgstr "Belum ada pembaruan Android. DSA memeriksa setiap hari dan memulai ulang Android ke pembaruan saat tidak ada jendela aplikasi terbuka."
