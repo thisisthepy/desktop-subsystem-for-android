@@ -1192,10 +1192,15 @@ impl UserAndroid for WithProgramStatus {
     fn problem(&self) -> Option<String> {
         self.android.problem()
     }
-    fn start(&self) {
+    fn start_because(&self, reason: &str) {
         if self.status.installing().is_none() {
-            self.android.start();
+            self.android.start_because(reason);
+        } else {
+            eprintln!("start of Android asked by {reason} was held back: the program is updating");
         }
+    }
+    fn start(&self) {
+        self.start_because("a start request");
     }
     fn stop(&self) {
         self.android.stop();

@@ -611,7 +611,8 @@ enum RefreshInput {
 }
 
 enum Command {
-    Start,
+    /// Starts the guest; the text says who asked, for the log.
+    Start(String),
     Stop,
     Send(Vec<u8>, Sender<Result<(), SessionError>>),
     Shutdown,
@@ -1445,6 +1446,10 @@ impl Shared {
     }
 }
 
+/// What [`Session::android_files_with_token`] says while Android is stopped. The files door
+/// answers it at once instead of waiting for a start nobody asked for.
+pub const ANDROID_STOPPED: &str = "Android is stopped";
+
 /// A guest session. Dropping it stops the guest if it is running.
 pub struct Session {
     commands: Sender<Command>,
@@ -1911,7 +1916,13 @@ impl Session {
             .clone()
             .ok_or_else(|| "this host cannot reach Android's files".to_string())?;
         if self.state() == SessionState::Stopped {
-            self.start();
+            // Only a caller that asked for the address itself starts Android. The files door
+            // answers whatever connects to its port, Explorer and the Web Client service
+            // included, so it must not bring back an Android the user stopped.
+            match wanted {
+                None => self.start_because("a request for the address of Android's files"),
+                Some(_) => return Err(ANDROID_STOPPED.to_string()),
+            }
         }
         let mut bridge = self
             .android_files_bridge
@@ -2016,7 +2027,13 @@ impl Session {
 
     /// Asks the session to start. Ignored unless the session is `Stopped`.
     pub fn start(&self) {
-        let _ = self.commands.send(Command::Start);
+        self.start_because("a start request");
+    }
+
+    /// As [`Session::start`], and `reason` (who asked, and why) goes to the log when the
+    /// start goes in, so that a start nobody remembers asking for can be traced.
+    pub fn start_because(&self, reason: &str) {
+        let _ = self.commands.send(Command::Start(reason.to_string()));
     }
 
     /// Asks the session to stop. From `Stopping` after a failed stop, it retries.
@@ -4495,7 +4512,7 @@ impl Worker {
                         return;
                     }
                     match self.commands.recv() {
-                        Ok(Command::Start) => self.start(),
+                        Ok(Command::Start(reason)) => self.start(&reason),
                         Ok(Command::Stop) => {}
                         Ok(Command::Send(_, reply))
                         | Ok(Command::Freeze(reply))
@@ -4530,7 +4547,7 @@ impl Worker {
                     }
                     match self.commands.recv() {
                         Ok(Command::Stop) => self.stop(StopReason::Requested),
-                        Ok(Command::Start) => {}
+                        Ok(Command::Start(_)) => {}
                         Ok(Command::Send(_, reply))
                         | Ok(Command::Freeze(reply))
                         | Ok(Command::Notification(_, reply))
@@ -4572,7 +4589,7 @@ impl Worker {
     /// has left the running states.
     fn handle_running(&mut self, command: Command) -> bool {
         match command {
-            Command::Start => true,
+            Command::Start(_) => true,
             Command::Stop => {
                 self.stop(StopReason::Requested);
                 false
@@ -6340,7 +6357,8 @@ impl Worker {
         }
     }
 
-    fn start(&mut self) {
+    fn start(&mut self, reason: &str) {
+        eprintln!("session: starting Android, asked by: {reason}");
         self.shared.set(SessionState::Starting, None);
         self.boot_completed_at = None;
         self.agent_connected = false;
@@ -6512,7 +6530,7 @@ impl Worker {
     /// Handles a request while starting. Returns false once the start was abandoned.
     fn handle_starting(&mut self, command: Command) -> bool {
         match command {
-            Command::Start => true,
+            Command::Start(_) => true,
             Command::Send(_, reply)
             | Command::Freeze(reply)
             | Command::Notification(_, reply)

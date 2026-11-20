@@ -7288,3 +7288,43 @@ fn fr36_a_spelling_request_with_no_host_session_to_serve_it_is_unsupported() {
         other => panic!("expected a spelling result, got {other:?}"),
     }
 }
+
+#[test]
+fn fr10_android_files_under_a_key_do_not_start_a_stopped_android() {
+    let launcher = FakeLauncher::default();
+    let (session, _connector) = session_with(launcher.clone(), WAIT);
+    let (connect, _reached) = fake_adbd();
+    session.set_android_files_connect(connect);
+    let why = session.android_files_with_token("feedface").unwrap_err();
+    assert_eq!(why, dsa_host_core::session::ANDROID_STOPPED);
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(session.state(), SessionState::Stopped);
+    assert_eq!(launcher.0.lock().unwrap().starts, 0);
+}
+
+#[test]
+fn fr10_a_stop_the_user_asked_for_holds_against_the_files_door() {
+    let (session, _agent, launcher) = active_session();
+    let (connect, _reached) = fake_adbd();
+    session.set_android_files_connect(connect);
+    session.stop();
+    assert!(session.wait_for(SessionState::Stopped, WAIT));
+    for _ in 0..3 {
+        assert!(session.android_files_with_token("feedface").is_err());
+    }
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(session.state(), SessionState::Stopped);
+    assert_eq!(launcher.0.lock().unwrap().starts, 1, "no second boot");
+}
+
+#[test]
+fn fr10_a_request_for_the_address_of_android_files_starts_a_stopped_android() {
+    let launcher = FakeLauncher::default();
+    let (session, _connector) = session_with(launcher.clone(), WAIT);
+    let (connect, _reached) = fake_adbd();
+    session.set_android_files_connect(connect);
+    session.android_files().unwrap();
+    wait_until("the start goes in", || {
+        launcher.0.lock().unwrap().starts == 1
+    });
+}

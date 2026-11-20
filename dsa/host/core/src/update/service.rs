@@ -1068,6 +1068,11 @@ impl UserAndroid for UpdatingAndroid {
         UserAndroid::notification_action(&*self.session, action)
     }
 
+    fn start_because(&self, reason: &str) {
+        eprintln!("start of Android asked by: {reason}");
+        self.start();
+    }
+
     fn start(&self) {
         if self.no_image_yet() {
             return;

@@ -9,8 +9,8 @@
 //! Every user has a key of their own, a long random name only they (and the service) can read.
 //! The first segment of every path through the door is that key. The door asks the platform
 //! whose key it is ([`KeyOwners`]), has that user's Android serve its storage under the key
-//! itself as the token ([`crate::host_api::UserAndroid::android_files_with_token`]), starting
-//! Android when it is stopped, and from then on copies the connection's bytes both ways
+//! itself as the token ([`crate::host_api::UserAndroid::android_files_with_token`]), and from
+//! then on copies the connection's bytes both ways
 //! unchanged. A path with a key nobody has is refused, and so is a request for anything but
 //! the door's own empty root, which a WebDAV client looks at before the folder under it.
 //!
@@ -25,6 +25,7 @@ use std::time::{Duration, Instant};
 
 use crate::adb_bridge::{splice, BridgeStream};
 use crate::host_api::UserAndroids;
+use crate::session::ANDROID_STOPPED;
 
 /// The loopback port of the door.
 pub const DOOR_PORT: u16 = 47591;
@@ -266,8 +267,11 @@ fn serve(
     }
 }
 
-/// A connection to `user`'s Android's files, served under `key`, once they answer: Android
-/// is started when it is stopped, and is waited for at most `wait`.
+/// A connection to `user`'s Android's files, served under `key`, once they answer, waited for
+/// at most `wait` while Android starts. A stopped Android is not started: whatever connects to
+/// the door (Explorer, the Web Client service, an indexer) is not the user asking for it, and
+/// the stop the user asked for holds. Opening Android's files from the shell starts Android
+/// first, through the local API, and only then reaches the door.
 fn reach(
     androids: &dyn UserAndroids,
     user: &str,
@@ -287,6 +291,7 @@ fn reach(
                 Ok(stream) => return Ok(stream),
                 Err(why) => why,
             },
+            Err(why) if why == ANDROID_STOPPED => return Err(why),
             Err(why) => why,
         };
         let now = Instant::now();

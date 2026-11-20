@@ -109,7 +109,10 @@ impl UserAndroid for FilesAndroid {
         None
     }
     fn android_files_with_token(&self, token: &str) -> Result<String, String> {
-        self.start();
+        // As the session does: a stopped Android is refused, not started.
+        if self.state() == SessionState::Stopped {
+            return Err(dsa_host_core::session::ANDROID_STOPPED.to_string());
+        }
         *self.token.lock().unwrap() = Some(token.to_string());
         Ok(format!("http://{}/{token}/", self.serve()))
     }
@@ -179,8 +182,9 @@ fn fr29_the_files_door_refuses_a_key_nobody_has() {
 }
 
 #[test]
-fn fr29_the_files_door_starts_android_and_serves_its_files_under_the_users_key() {
+fn fr29_the_files_door_serves_a_running_androids_files_under_the_users_key() {
     let (door, android) = door();
+    android.start();
     let mut stream = TcpStream::connect(door.address()).unwrap();
     let (status, body) = ask(
         &mut stream,
@@ -193,4 +197,22 @@ fn fr29_the_files_door_starts_android_and_serves_its_files_under_the_users_key()
     let (status, body) = ask(&mut stream, &format!("GET /{KEY}/a.txt HTTP/1.1\r\n\r\n"));
     assert_eq!(status, "HTTP/1.1 207 Multi-Status");
     assert_eq!(body, format!("<served>/{KEY}/a.txt</served>"));
+}
+
+#[test]
+fn fr10_the_files_door_does_not_start_a_stopped_android() {
+    // Explorer and the Web Client service reach the door without the user asking for Android.
+    let (door, android) = door();
+    let mut stream = TcpStream::connect(door.address()).unwrap();
+    let asked = std::time::Instant::now();
+    let (status, _) = ask(
+        &mut stream,
+        &format!("PROPFIND /{KEY}/ HTTP/1.1\r\nDepth: 1\r\nContent-Length: 0\r\n\r\n"),
+    );
+    assert_eq!(status, "HTTP/1.1 503 Service Unavailable");
+    assert!(
+        asked.elapsed() < Duration::from_secs(2),
+        "a stopped Android is refused at once, not waited for"
+    );
+    assert_eq!(android.state(), SessionState::Stopped);
 }

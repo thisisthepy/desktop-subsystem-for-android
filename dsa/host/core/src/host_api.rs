@@ -161,6 +161,11 @@ pub trait UserAndroid: Send + Sync {
         None
     }
     fn start(&self);
+    /// As [`UserAndroid::start`], and `reason` says who asked, for the log.
+    fn start_because(&self, reason: &str) {
+        let _ = reason;
+        self.start();
+    }
     fn stop(&self);
     /// News about the Android image for the user, if there is any.
     fn update_notice(&self) -> Option<String> {
@@ -865,11 +870,14 @@ impl UserAndroid for Session {
     /// On a stopped session, returns once it has moved on, so that what the caller reads
     /// next is the start's progress or its failure, never the state from before it.
     fn start(&self) {
+        self.start_because("a start request");
+    }
+    fn start_because(&self, reason: &str) {
         if Session::state(self) != SessionState::Stopped {
-            return Session::start(self);
+            return Session::start_because(self, reason);
         }
         let events = self.events();
-        Session::start(self);
+        Session::start_because(self, reason);
         let _ = events.recv_timeout(Duration::from_secs(5));
     }
     fn stop(&self) {
@@ -2663,10 +2671,13 @@ impl HostApiService {
 
     /// Serves one client until it disconnects or breaks the protocol.
     pub fn serve_connection(&self, mut connection: Box<dyn Connection>, peer: Peer) {
-        if let Err(error) = service_accept(&mut *connection, &self.hello, self.handshake_timeout) {
-            eprintln!("local API: refused a client of {}: {error}", peer.user);
-            return;
-        }
+        let client = match service_accept(&mut *connection, &self.hello, self.handshake_timeout) {
+            Ok(hello) => hello.build,
+            Err(error) => {
+                eprintln!("local API: refused a client of {}: {error}", peer.user);
+                return;
+            }
+        };
         loop {
             let frame = match connection.recv(None) {
                 Ok(frame) => frame,
@@ -2791,7 +2802,7 @@ impl HostApiService {
             if let Some(request::Body::OpenFile(open)) = &request.body {
                 return self.open_file(connection, &peer, request.id, open.clone());
             }
-            let response = self.answer(&peer, request);
+            let response = self.answer(&peer, &client, request);
             if send(&mut *connection, Body::Response(response)).is_err() {
                 return;
             }
@@ -5168,7 +5179,7 @@ impl HostApiService {
         connection.close();
     }
 
-    fn answer(&self, peer: &Peer, request: Request) -> Response {
+    fn answer(&self, peer: &Peer, client: &str, request: Request) -> Response {
         let body = match request.body {
             None => error(
                 ErrorCode::UnknownRequest,
@@ -5445,7 +5456,10 @@ impl HostApiService {
                 Ok(android) => {
                     match body {
                         request::Body::GetStatus(_) => {}
-                        request::Body::StartSession(_) => android.start(),
+                        request::Body::StartSession(_) => android.start_because(&format!(
+                            "{client} of {} through the local API",
+                            peer.user
+                        )),
                         request::Body::StopSession(_) => android.stop(),
                         request::Body::UpdateProgram(_)
                         | request::Body::GetVmId(_)
