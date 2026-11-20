@@ -351,13 +351,7 @@ pub fn create_user_android(
             use dsa_host_core::addon_disk::{AddonDisk, Format};
             let dir = image.initrd.as_deref().and_then(Path::parent);
             let attached = AddonDisk::new(&addons, Format::Raw).attached();
-            dsa_host_core::bootconfig::for_boot(
-                &*store,
-                &user,
-                dir,
-                &attached,
-                &ProcFacts,
-            )
+            dsa_host_core::bootconfig::for_boot(&*store, &user, dir, &attached, &ProcFacts)
         })
     })
     .with_boot_properties({

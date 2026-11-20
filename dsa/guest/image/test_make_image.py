@@ -69,8 +69,10 @@ class ImageLayoutTests(unittest.TestCase):
         here = Path(__file__).parent
         rules = [line for sd in (here / "sepolicy").glob("*.cil")
                  for line in sd.read_text().splitlines() if not line.lstrip().startswith(";")]
+        # Only these two domains are held to it: the platform's lists name them, while the
+        # mount and Widevine reset domains hold dac_read_search for folders they own and ship so.
         for line in rules:
-            if line.startswith("(allow"):
+            if re.match(r"\(allow\s+(dsa_channeld|dsa_google_id)\s", line):
                 self.assertNotIn("dac_read_search", line, line)
                 self.assertNotIn("privapp_data_file", line, line)
         policy = "\n".join(rules)

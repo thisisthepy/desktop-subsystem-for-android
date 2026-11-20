@@ -52,7 +52,13 @@ fn fr32_a_boots_bootconfig_names_the_computers_memory_and_no_add_ons_when_none_a
     use dsa_host_core::bootconfig::for_boot;
     use dsa_host_core::settings::MemorySettings;
     let store = MemorySettings::default();
-    let text = for_boot(&store, "user", None, &[], &Facts(Some(16 * 1024 * 1024), None));
+    let text = for_boot(
+        &store,
+        "user",
+        None,
+        &[],
+        &Facts(Some(16 * 1024 * 1024), None),
+    );
     assert!(
         text.contains("kernel.dsa_host_memory.total_kb = \"16777216\"\n"),
         "{text}"
@@ -75,8 +81,10 @@ fn fr32_a_boots_bootconfig_names_the_memory_the_computer_is_installed_with() {
         &Facts(Some(33_043_084), Some(32 * 1024 * 1024)),
     );
     assert!(
-        text.contains("androidboot.dsa.host_installed_kb = \"33554432\"
-"),
+        text.contains(
+            "androidboot.dsa.host_installed_kb = \"33554432\"
+"
+        ),
         "{text}"
     );
 }

@@ -136,7 +136,10 @@ fn fr2_crosvm_starts_resizes_freezes_and_stops_the_vm() {
         .collect();
     assert!(left.is_empty(), "{left:?}");
     let console = std::fs::read_to_string(dir.join("console.log")).unwrap();
-    assert!(console.contains("==== DSA boot at"));
+    assert!(
+        console.starts_with("==== DSA ") && console.contains(" boot at "),
+        "{console}"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

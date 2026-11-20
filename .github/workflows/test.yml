@@ -406,7 +406,7 @@ jobs:
             echo "::error::the compositor exited (code $code) instead of waiting for the service"
             exit 1
           fi
-          grep -q "waiting for the DSA service" "$RUNNER_TEMP/compositor.log"
+          grep -q "cannot watch Android's tasks" "$RUNNER_TEMP/compositor.log"
 
       - name: Check a second compositor in the same session leaves the first alone
         run: |

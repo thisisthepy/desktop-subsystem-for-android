@@ -34,10 +34,7 @@ pub fn for_boot(
         + &crate::arm_translation::bootconfig_for(store, user, image_dir, attached)
         + &crate::gapps::bootconfig_for(store, user, attached)
         + &crate::widevine::bootconfig_for(store, user, attached)
-        + &crate::host_memory::bootconfig(
-            facts.physical_memory_kb(),
-            facts.installed_memory_kb(),
-        )
+        + &crate::host_memory::bootconfig(facts.physical_memory_kb(), facts.installed_memory_kb())
 }
 
 /// `initrd` followed by `text` as bootconfig: the text, NUL-terminated and padded with NULs
