@@ -102,11 +102,11 @@ class NativeLibraryCrashesTest {
     }
 
     @Test
-    fun fr25_an_app_that_keeps_crashing_is_reported_once_every_few_minutes() {
+    fun fr25_a_tight_crash_loop_is_reported_once() {
         started(arm64 = false)
 
         write("data_app_crash", javaCrash("com.example.game", MISSING_LIBRARY))
-        now += 60_000
+        now += 1_000
         write("data_app_crash", javaCrash("com.example.game", MISSING_LIBRARY))
         assertEquals(1, reported().size)
         assertTrue("the host is told no translator is in place", !reported().single().arm64Supported)
@@ -114,6 +114,19 @@ class NativeLibraryCrashesTest {
         now += NativeLibraryCrashes.REPEAT_MILLIS
         write("data_app_crash", javaCrash("com.example.game", MISSING_LIBRARY))
         assertEquals(2, reported().size)
+    }
+
+    @Test
+    fun fr25_a_crash_after_the_hosts_burst_is_reported_again() {
+        started()
+
+        write("data_app_crash", javaCrash("com.android.chrome", MISSING_LIBRARY))
+        now += 30_000
+        write("data_app_crash", javaCrash("com.android.chrome", MISSING_LIBRARY))
+        now += 27_000
+        write("data_app_crash", javaCrash("com.android.chrome", MISSING_LIBRARY))
+
+        assertEquals(3, reported().size)
     }
 
     @Test
