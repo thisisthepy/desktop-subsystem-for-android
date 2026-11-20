@@ -43,6 +43,7 @@
 //! compiled on macOS only.
 
 pub mod app_layout;
+pub mod app_service;
 pub mod cmdline;
 pub mod compositor;
 pub mod computer_identity;

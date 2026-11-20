@@ -57,6 +57,8 @@ fn main() -> std::process::ExitCode {
     use objc2::msg_send;
     use objc2::runtime::AnyObject;
 
+    dsa_host_macos::app_service::log_to_agent_file();
+
     const HELP: &str = "usage: dsa-devices [--socket <path>] [--no-location] [--no-print] \
                         [--no-links] [--no-settings] [--no-gamepads] [--no-passkeys] [--no-language] \
                         [--no-geocoding] [--no-share] [--no-device-ports] \

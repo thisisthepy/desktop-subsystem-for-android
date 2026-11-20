@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- DSA @VERSION@ -->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>io.github.thisisthepy.dsa.devices</string>
+	<key>AssociatedBundleIdentifiers</key>
+	<array>
+		<string>org.thisisthepy.dsa</string>
+	</array>
+	<key>BundleProgram</key>
+	<string>Contents/Helpers/DSA Devices.app/Contents/MacOS/dsa-devices</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>dsa-devices</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<dict>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
+	<key>LimitLoadToSessionType</key>
+	<string>Aqua</string>
+	<key>ProcessType</key>
+	<string>Interactive</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>DSA_AGENT_LOG</key>
+		<string>dsa-devices.log</string>
+	</dict>
+</dict>
+</plist>

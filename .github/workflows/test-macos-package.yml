@@ -155,6 +155,30 @@ jobs:
             test "$(plutil -extract CFBundleShortVersionString raw "$path/Contents/Info.plist")" = 0.1.0
             codesign --verify --strict "$path"
           done
+          # The agents DSA.app registers through SMAppService: one property list each in
+          # Contents/Library/LaunchAgents, the version filled in, each program inside the bundle.
+          agents=DSA.app/Contents/Library/LaunchAgents
+          for entry in \
+            "io.github.thisisthepy.dsa.hostd:Contents/MacOS/dsa-hostd" \
+            "io.github.thisisthepy.dsa.wm:Contents/Helpers/DSA Window Manager.app/Contents/MacOS/dsa-wm" \
+            "io.github.thisisthepy.dsa.devices:Contents/Helpers/DSA Devices.app/Contents/MacOS/dsa-devices"; do
+            IFS=: read -r label program <<<"$entry"
+            plist="$agents/$label.plist"
+            plutil -lint "$plist"
+            test "$(plutil -extract Label raw "$plist")" = "$label"
+            test "$(plutil -extract BundleProgram raw "$plist")" = "$program"
+            test -x "DSA.app/$program"
+            test "$(plutil -extract AssociatedBundleIdentifiers.0 raw "$plist")" = org.thisisthepy.dsa
+            grep -Fq '<!-- DSA 0.1.0 -->' "$plist"
+            if grep -Fq '@VERSION@' "$plist"; then
+              echo "$plist still has @VERSION@" >&2
+              exit 1
+            fi
+          done
+          test "$(plutil -extract ProgramArguments.1 raw "$agents/io.github.thisisthepy.dsa.hostd.plist")" = serve
+          # plutil reads dots as a key path, so the Mach service is found as text.
+          plutil -extract MachServices xml1 -o - "$agents/io.github.thisisthepy.dsa.wm.plist" \
+            | grep -Fq '<key>io.github.thisisthepy.dsa.wm</key>'
           # The graphics renderer, which the window manager starts in a process of its own, and
           # signed like the other programs.
           test -x DSA.app/Contents/MacOS/dsa-gfx

@@ -135,9 +135,12 @@ fn window_manager(config: &MacHostConfig) -> Option<ProgramWindowManager> {
     let home = PathBuf::from(std::env::var_os("HOME")?);
     let uid = dsa_host_unix::socket::current_uid();
     // The agent runs the installed program, so a program the configuration names is run
-    // directly.
-    let agent = config.window_manager.is_none() && crate::launchd::wm_plist_path(&home).exists();
-    let launchd = agent.then(|| crate::launchd::wm_service_target(uid));
+    // directly. The agent is DSA.app's own (SMAppService) or a legacy one in
+    // ~/Library/LaunchAgents; either has the same service target.
+    let target = crate::launchd::wm_service_target(uid);
+    let agent = config.window_manager.is_none()
+        && (crate::launchd::wm_plist_path(&home).exists() || crate::app_service::loaded(&target));
+    let launchd = agent.then_some(target);
     let support = crate::host_config::user_root_in(&home);
     Some(ProgramWindowManager {
         program,

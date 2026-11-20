@@ -33,6 +33,8 @@ fn main() -> std::process::ExitCode {
 
     use dsa_host_macos::wm::run::{run, Places};
 
+    dsa_host_macos::app_service::log_to_agent_file();
+
     static STOP: OnceLock<Arc<AtomicBool>> = OnceLock::new();
     extern "C" fn on_signal(_: libc::c_int) {
         if let Some(stop) = STOP.get() {

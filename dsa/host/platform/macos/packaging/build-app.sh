@@ -96,6 +96,25 @@ devices_helper=""
 if [[ -f "$programs/dsa-devices" ]]; then
     devices_helper="$(make_helper "DSA Devices.app" dsa-devices dsa-devices-Info.plist)"
 fi
+# The agents DSA.app registers through SMAppService (dsa-hostd install-agent), so macOS names
+# them DSA in its background item notices and Login Items settings. Each property list names
+# its program relative to the bundle and is sealed by the app's signature below. One whose
+# program was not built is left out, and install-agent then falls back to legacy agents.
+agents="$app/Contents/Library/LaunchAgents"
+mkdir -p "$agents"
+add_agent() {
+    sed "s/@VERSION@/$version/g" "$here/launch-agents/$1.plist" > "$agents/$1.plist"
+    plutil -lint "$agents/$1.plist"
+}
+if [[ -f "$app/Contents/MacOS/dsa-hostd" ]]; then
+    add_agent io.github.thisisthepy.dsa.hostd
+fi
+if [[ -n "$wm_helper" ]]; then
+    add_agent io.github.thisisthepy.dsa.wm
+fi
+if [[ -n "$devices_helper" ]]; then
+    add_agent io.github.thisisthepy.dsa.devices
+fi
 if [[ -n "$renderer" ]]; then
     frameworks="$app/Contents/Frameworks"
     cp "$renderer" "$frameworks/libgfxstream_backend.dylib"
