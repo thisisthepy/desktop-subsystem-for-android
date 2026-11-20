@@ -208,3 +208,14 @@ fn fr2_an_agent_reinstalled_while_launchd_still_unloads_the_old_one_is_loaded() 
     assert!(result.is_err());
     assert_eq!(calls, 4);
 }
+
+#[test]
+fn fr2_the_window_manager_never_stands_for_dsa_itself() {
+    // dsa-wm runs from DSA.app; as a regular app it would be taken for DSA, and opening
+    // DSA would not start the settings app.
+    let plist = include_str!("../packaging/dsa-wm-Info.plist");
+    assert!(plist.contains("<key>LSUIElement</key>\n\t<true/>"));
+    assert!(plist.contains("<string>org.thisisthepy.dsa.wm</string>"));
+    let source = include_str!("../src/bin/dsa-wm.rs");
+    assert!(source.contains("dsa-wm-Info.plist"));
+}

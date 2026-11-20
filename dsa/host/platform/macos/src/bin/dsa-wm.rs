@@ -9,6 +9,16 @@
 //!
 //! `DSA_RENDERER` names the renderer library to load instead of the one in DSA.app.
 
+/// The program's Info.plist. `LSUIElement` makes it an app with no Dock icon and no menu
+/// bar from the moment it starts. dsa-wm lives in DSA.app, so without it macOS registers
+/// dsa-wm as the running DSA, and opening DSA brings dsa-wm forward instead of starting the
+/// settings app.
+#[cfg(target_os = "macos")]
+#[used]
+#[link_section = "__TEXT,__info_plist"]
+static INFO_PLIST: [u8; include_bytes!("../../packaging/dsa-wm-Info.plist").len()] =
+    *include_bytes!("../../packaging/dsa-wm-Info.plist");
+
 #[cfg(not(target_os = "macos"))]
 fn main() -> std::process::ExitCode {
     eprintln!("dsa-wm: this build is the macOS window manager and runs on macOS only");
@@ -52,18 +62,6 @@ fn main() -> std::process::ExitCode {
         );
         // A window host that goes away mid-write must not end the window manager.
         libc::signal(libc::SIGPIPE, libc::SIG_IGN);
-    }
-    // AppKit first, before anything else touches it: an accessory, with no Dock icon and no
-    // menu bar. dsa-wm lives in DSA.app, so as a regular app macOS would take it for DSA
-    // itself, and opening DSA from Finder or Launchpad would bring dsa-wm forward instead of
-    // starting the settings app.
-    unsafe {
-        use objc2::msg_send;
-        use objc2::runtime::AnyObject;
-        if let Ok(app_class) = dsa_host_macos::objc::class(c"NSApplication") {
-            let app: *mut AnyObject = msg_send![app_class, sharedApplication];
-            let _: bool = msg_send![app, setActivationPolicy: 1isize];
-        }
     }
     match run(Places::for_home(&home), stop) {
         Ok(()) => std::process::ExitCode::SUCCESS,
