@@ -75,6 +75,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use dsa_host_core::android_presence::SharedPresence;
 use dsa_host_core::app_audio::{self, AppStream, AppVolumes};
 use dsa_host_core::audio::{serve_port as serve_audio_port, AudioDevice, AUDIO_PORT};
 use dsa_host_core::compositor::frame_stall::{restart_in_background, SharedConnector, Stall};
@@ -158,6 +159,9 @@ pub struct Compositor {
     logger: Option<Arc<CompositorLogger>>,
     /// What copies each display's frames into the task windows, when there is one.
     presenter: Option<Arc<dyn DisplayPresenter>>,
+    /// Whether Android runs, fed from the service's status by the monitor thread: the
+    /// renderer and the task windows' Direct3D devices are kept only while it does.
+    presence: Option<Arc<SharedPresence>>,
     /// Opens where the app window hosts connect.
     host_listener: Option<HostListenerFn>,
     /// Starts each app's window host.
@@ -333,6 +337,7 @@ impl Compositor {
             bind_camera: Some(bind_camera),
             logger: None,
             presenter: None,
+            presence: None,
             host_listener: Some(session_host_listener()),
             launcher: None,
             windows: Arc::new(Mutex::new(Vec::new())),
@@ -376,6 +381,7 @@ impl Compositor {
             bind_camera: None,
             logger: None,
             presenter: None,
+            presence: None,
             host_listener: None,
             launcher: None,
             windows: Arc::new(Mutex::new(Vec::new())),
@@ -481,6 +487,14 @@ impl Compositor {
         Arc::clone(&self.windows)
     }
 
+    /// Feeds `presence` with the session state the service reports, and lets go of the task
+    /// windows' Direct3D devices while it says Android is stopped. The window manager's
+    /// renderer supervisor follows the same `presence`.
+    pub fn with_android_presence(mut self, presence: Arc<SharedPresence>) -> Compositor {
+        self.presence = Some(presence);
+        self
+    }
+
     /// Sets an optional file logger.
     pub fn with_logger(mut self, logger: Arc<CompositorLogger>) -> Compositor {
         self.logger = Some(logger);
@@ -541,6 +555,12 @@ impl Compositor {
         let monitor_connector_factory = (self.local_api_connector)();
         let poll_interval = self.config.status_poll_interval;
         let monitor_logger = self.logger.clone();
+        let monitor_presence = self.presence.clone();
+        let observe = move |state: Option<SessionState>| {
+            if let Some(presence) = &monitor_presence {
+                presence.observe(state);
+            }
+        };
 
         let monitor_thread = thread::Builder::new()
             .name("dsa-wm-monitor".into())
@@ -570,6 +590,7 @@ impl Compositor {
                                 }
                                 Err(_) => {
                                     *monitor_slot.lock().unwrap_or_else(|e| e.into_inner()) = None;
+                                    observe(None);
                                     thread::sleep(poll_interval);
                                     continue;
                                 }
@@ -579,6 +600,7 @@ impl Compositor {
 
                     match client.status() {
                         Ok(status) => {
+                            observe(Some(status.state));
                             // The guest renders (surfaceflinger, the boot animation)
                             // while it boots, before the agent connects, so the
                             // listeners stay bound whenever the VM is running.
@@ -613,6 +635,7 @@ impl Compositor {
                         Err(_) => {
                             client_opt = None;
                             *monitor_slot.lock().unwrap_or_else(|e| e.into_inner()) = None;
+                            observe(None);
                         }
                     }
 
@@ -1367,16 +1390,41 @@ impl Compositor {
             let presenter = Arc::clone(presenter);
             router.on_forget(Box::new(move |display| presenter.forget_display(display)));
         }
-        let mut luid = None;
+        // The GPU the renderer runs on, which it names once it has started; asked again each
+        // time the devices are made and each time a window host attaches.
+        let luid: Arc<dyn Fn() -> Option<[u8; 8]> + Send + Sync> = match &self.presenter {
+            Some(presenter) => {
+                let presenter = Arc::clone(presenter);
+                Arc::new(move || presenter.adapter_luid())
+            }
+            None => Arc::new(|| None),
+        };
         let gpu = match &self.presenter {
             None => None,
             Some(presenter) => {
-                luid = presenter.adapter_luid();
-                match Gpu::new(luid) {
+                let made = match &self.presence {
+                    // The devices are made when a window or a frame first needs them, on the
+                    // renderer's GPU, and let go of while Android is stopped.
+                    Some(_) => {
+                        let luid = Arc::clone(&luid);
+                        let logger = self.logger.clone();
+                        Ok(Gpu::lazy(
+                            Box::new(move || luid()),
+                            Box::new(move |line: &str| note(logger.as_deref(), line)),
+                        ))
+                    }
+                    None => {
+                        let luid = luid();
+                        Gpu::new(luid).inspect(|gpu| {
+                            if luid.is_some() && gpu.on_renderer_gpu() == Some(false) {
+                                log("the renderer's GPU was not found; task windows may stay \
+                                     empty");
+                            }
+                        })
+                    }
+                };
+                match made {
                     Ok(gpu) => {
-                        if luid.is_some() && !gpu.on_renderer_gpu() {
-                            log("the renderer's GPU was not found; task windows may stay empty");
-                        }
                         match presenter
                             .present_displays(Some(Arc::clone(&router) as Arc<dyn DisplaySink>))
                         {
@@ -1484,7 +1532,7 @@ impl Compositor {
                 hosts::accept_hosts(
                     listener,
                     accept_events,
-                    luid,
+                    move || luid(),
                     accept_gpu,
                     accept_stop,
                     accept_logger,
@@ -1527,14 +1575,18 @@ impl Compositor {
         let trim_let_go = Arc::clone(&self.video_let_go);
         let trim_stop = Arc::clone(&manager_stop);
         let trim_logger = self.logger.clone();
+        let trim_presence = self.presence.clone();
         let trimmer = thread::Builder::new()
             .name("dsa-wm-trim".into())
             .spawn(move || {
                 let quiet_for = Box::new(move || quiet_router.quiet_for());
                 trim::run(
                     trim_idle,
-                    trim_gpu,
-                    trim_renderer,
+                    trim::Holdings {
+                        gpu: trim_gpu,
+                        renderer: trim_renderer,
+                        presence: trim_presence,
+                    },
                     quiet_for,
                     trim_let_go,
                     trim_stop,

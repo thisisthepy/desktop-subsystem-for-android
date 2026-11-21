@@ -1,8 +1,8 @@
 //! The DSA Window Manager (`dsa-wm`), the user-session compositor of Desktop Subsystem for Android.
 //!
 //! Runs in the user session without a console window, starts the graphics renderer
-//! (`dsa-gfx.exe`, which takes the guest's graphics streams on the VM's Hyper-V sockets) and
-//! starts it again when it ends, shows one window per Android task with that task's frames,
+//! (`dsa-gfx.exe`, which takes the guest's graphics streams on the VM's Hyper-V sockets) while
+//! Android runs and starts it again when it ends, shows one window per Android task with that task's frames,
 //! follows the VM across restarts, and exits cleanly on sign-out.
 #![windows_subsystem = "windows"]
 
@@ -24,9 +24,10 @@ fn main() {
     use std::sync::atomic::AtomicBool;
     use std::sync::Arc;
 
+    use dsa_host_core::android_presence::SharedPresence;
     use dsa_host_core::graphics_state::GraphicsState;
     use dsa_host_core::host_api::HostApiClient;
-    use dsa_host_core::renderer::spawn_supervisor;
+    use dsa_host_core::renderer::spawn_supervisor_for;
     use dsa_host_windows::compositor::display_gpu::{adapter_names, display_sources};
     use dsa_host_windows::compositor::graphics_notice::{self, GraphicsNotices};
     use dsa_host_windows::compositor::log::{default_log_file, CompositorLogger};
@@ -127,6 +128,9 @@ fn main() {
 
     let stop = Arc::new(AtomicBool::new(false));
     let _signout = SignOutListener::start(Arc::clone(&stop));
+    // Whether Android runs: the renderer and the task windows' Direct3D device are kept only
+    // while it does. The service's first answer below says where it is now.
+    let presence = SharedPresence::new();
 
     // The GPU the renderer runs on: the one driving the primary monitor unless the user's
     // settings name another. It is chosen once, before the renderer starts. The settings are
@@ -150,6 +154,9 @@ fn main() {
             std::time::Duration::from_secs(5),
         )
         .map_err(|e| e.to_string())?;
+        if let Ok(status) = client.status() {
+            presence.observe(Some(status.state));
+        }
         client
             .settings()
             .map(|report| {
@@ -190,9 +197,11 @@ fn main() {
         &adapter_names(),
     ));
 
-    // The renderer runs in a process of its own, dsa-gfx.exe, which this process starts, and
-    // starts again whenever it ends: a crash in the renderer or the GPU driver then ends only
-    // that process, and the app windows stay with their last frame.
+    // The renderer runs in a process of its own, dsa-gfx.exe, which this process starts while
+    // Android runs, and starts again whenever it ends: a crash in the renderer or the GPU
+    // driver then ends only that process, and the app windows stay with their last frame.
+    // While Android is stopped no renderer runs; it starts as soon as Android starts, before
+    // the guest draws.
     let ports = (config.command_port, config.process_pipe_port);
     let process: RendererProcess = Arc::default();
     // What each renderer runs on goes to the service, which keeps Android stopped while there
@@ -285,23 +294,26 @@ fn main() {
     let mut compositor = Compositor::new(config, Arc::new(ServedByRenderer))
         .without_graphics_streams()
         .with_dsa_news(news)
-        .with_display_presenter(client.clone());
+        .with_display_presenter(client.clone())
+        .with_android_presence(Arc::clone(&presence));
     if let Some(log) = logger.clone() {
         compositor = compositor.with_logger(log);
     }
-    let supervisor = spawn_supervisor(
+    let supervisor = spawn_supervisor_for(
         Box::new(ProgramLauncher::installed(process)),
         client.clone(),
         format!("dsa-wm {}", dsa_host_windows::VERSION),
         Arc::clone(&stop),
+        Arc::clone(&presence),
     );
     if let Err(why) = &supervisor {
         log(&format!("the graphics renderer cannot be started: {why}"));
     }
     let vm_thread = client.follow_vm(compositor.vm_id_slot(), Arc::clone(&stop));
     // The windows' textures are made on the GPU the renderer runs on, which it names once it
-    // has started.
-    if !client.wait_started(std::time::Duration::from_secs(30)) {
+    // has started. While Android is stopped no renderer starts, and nothing waits for one:
+    // the windows' device is made later, once the renderer has said its GPU.
+    if presence.renderer_wanted() && !client.wait_started(std::time::Duration::from_secs(30)) {
         log(
             "the graphics renderer has not started yet; the task windows' textures are made \
              on the default GPU",
