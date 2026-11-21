@@ -1015,9 +1015,21 @@ class AndroidKernelConfigTests(unittest.TestCase):
             self.assertEqual(arch, named, f"{merged} is a {built} configuration, not {named}")
         fragments = ([CONFIG] + ([ARM64_CONFIG] if arch == "arm64" else [])
                      + [VIRTIO_CONFIG, DXG_CONFIG])
-        for fragment in fragments:
+        # A kernel built with extra fragments (build.sh --debug, DSA_KERNEL_EXTRA_CONFIG) keeps
+        # their lines too, and an option an extra fragment sets is theirs to decide.
+        extras = [Path(path) for path in os.environ.get("DSA_KERNEL_EXTRA_CONFIG", "").split()]
+        extra_names = {re.split(r"[= ]", line.removeprefix("# "))[0]
+                       for extra in extras for line in fragment_lines(extra)}
+        kept = set(lines)
+        for fragment in fragments + extras:
             for line in fragment_lines(fragment):
-                self.assertIn(line, lines, f"{fragment.name} for {arch}")
+                name = re.split(r"[= ]", line.removeprefix("# "))[0]
+                if fragment not in extras and name in extra_names:
+                    continue
+                # The line alone, not the whole merged file, so a CI log shows what is missing.
+                if line not in kept:
+                    self.fail(f"{line!r} from {fragment.name} is not in the merged {arch} "
+                              f"configuration {merged}")
         self.assertFalse(any(line.startswith("CONFIG_ASHMEM=") for line in lines))
         if arch == "arm64":
             self.assertIn("CONFIG_ARM64=y", lines)
