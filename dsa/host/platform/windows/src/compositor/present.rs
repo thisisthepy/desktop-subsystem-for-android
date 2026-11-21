@@ -64,7 +64,7 @@ use dsa_host_core::compositor::surface_calls::{
     SURFACE_OP_TICK,
 };
 use dsa_host_core::compositor::window_sizing::{
-    frame_placement, to_task_length, uncovered_fill, window_size_of, FramePlacement, Scale,
+    shown_frame_placement, to_task_length, uncovered_fill, window_size_of, FramePlacement, Scale,
 };
 use dsa_protocol::window_host::encode_body;
 use dsa_protocol::window_host::types::{envelope::Body, SurfaceAnswer, SurfaceCall};
@@ -1465,7 +1465,13 @@ impl WindowPresenter {
             return false;
         };
         let view = state.follow.view();
-        let placement = frame_placement(state.frame, view, state.scale, state.follow.held());
+        let placement = shown_frame_placement(
+            state.frame,
+            view,
+            state.scale,
+            state.follow.held(),
+            state.follow.pending(),
+        );
         // The window has no redirection surface (WS_EX_NOREDIRECTIONBITMAP) and paints no
         // background (WM_ERASEBKGND), so wherever the frame's visual does not reach, beside a
         // frame shown in a larger window, the desktop shows through unless the fill under the
@@ -1828,7 +1834,7 @@ fn frame_transform(buffer_scale: (f32, f32), placement: FramePlacement) -> (f32,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dsa_host_core::compositor::window_sizing::vectors;
+    use dsa_host_core::compositor::window_sizing::{frame_placement, vectors};
 
     #[test]
     fn nfr8_windows_places_each_frame_as_the_shared_vectors_say() {

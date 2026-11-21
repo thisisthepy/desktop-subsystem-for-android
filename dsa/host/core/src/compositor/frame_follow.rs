@@ -148,6 +148,14 @@ impl FrameFollow {
         self.limit = limit;
     }
 
+    /// Whether a window that holds its size still waits for the guest's answer to it: the
+    /// frame on the screen is the app's drawing of the size before, and is shown stretched to
+    /// the window until the answer comes
+    /// ([`shown_frame_placement`](super::window_sizing::shown_frame_placement)).
+    pub fn pending(&self) -> bool {
+        self.held && self.waiting_from.is_some()
+    }
+
     /// The limit [`FrameFollow::set_limit`] gave.
     pub fn limit(&self) -> Option<(u32, u32)> {
         self.limit

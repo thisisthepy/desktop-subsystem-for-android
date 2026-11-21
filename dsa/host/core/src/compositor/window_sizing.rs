@@ -403,6 +403,30 @@ pub fn frame_placement(
     }
 }
 
+/// Where a window of `view` pixels shows the last frame it has (`frame` task pixels, at
+/// `scale`) while a frame of its new size is still `pending`: the window holds a new size (the
+/// maximise button, a double click on the title bar, a snap, a restore) and the guest has not
+/// answered it yet ([`FrameFollow::pending`](super::frame_follow::FrameFollow::pending)). The
+/// last frame is stretched to fit the window, keeping its shape, in the window's middle, in
+/// every scaling mode, so the window grows with the app in it. Once nothing is pending the
+/// frame is placed as [`frame_placement`] says.
+pub fn shown_frame_placement(
+    frame: (u32, u32),
+    view: (u32, u32),
+    scale: Scale,
+    held: bool,
+    pending: bool,
+) -> FramePlacement {
+    let placed = frame_placement(frame, view, scale, held);
+    if !pending || frame.0 == 0 || frame.1 == 0 || view.0 == 0 || view.1 == 0 {
+        return placed;
+    }
+    if to_window_size(frame, scale) == view {
+        return placed;
+    }
+    fit_placement(frame, view)
+}
+
 /// `frame` task pixels scaled to fit a window of `view` pixels, keeping their shape, centred.
 fn fit_placement(frame: (u32, u32), view: (u32, u32)) -> FramePlacement {
     // The direction that fills the window first sets the scale.
@@ -1830,10 +1854,10 @@ mod tests {
     }
 
     #[test]
-    fn fr4_a_main_monitor_maximise_places_the_last_frame_as_before_the_fill_and_scales_nothing() {
+    fn fr4_a_held_frame_that_is_not_pending_is_placed_as_before() {
         // Settings at 1041x1495, drawn at its window's density, maximised on the 2880x1800 main
-        // monitor: until its frame of 2880x1704 comes, the last frame is placed exactly as it was
-        // before the window ever filled or stretched anything, 1:1 and never scaled.
+        // monitor: a held frame of another size that is not pending (shown_frame_placement
+        // stretches only a pending one) is placed 1:1 in the window's middle, as it always was.
         let placed = frame_placement((1041, 1495), (2880, 1704), (1, 1), true);
         assert_eq!(
             placed,
@@ -1851,6 +1875,62 @@ mod tests {
         let placed = frame_placement((1041, 1495), (2880, 1704), (1, 1), false);
         assert_eq!(placed.origin, (0, 0));
         assert_eq!(placed.size, (1041, 1495));
+    }
+
+    #[test]
+    fn fr4_a_main_monitor_maximise_stretches_the_last_frame_then_shows_the_new_one() {
+        use crate::compositor::frame_follow::FrameFollow;
+        // Settings at 1041x1495 is maximised on the 2880x1800 main monitor (work area
+        // 2880x1704). While its frame of the new size is pending, the last frame is stretched to
+        // the window's height, keeping its shape, in the window's middle; nothing is filled.
+        let mut follow = FrameFollow::new((1041, 1495));
+        follow.frame_arrived((1041, 1495));
+        follow.set_held(true);
+        follow.set_limit(Some((2880, 2880)));
+        follow.view_taken((2880, 1704));
+        assert!(follow.pending());
+        assert!(!follow.strips_filled());
+        let view = follow.view();
+        let placed = shown_frame_placement((1041, 1495), view, (1, 1), true, follow.pending());
+        assert_eq!(placed.size.1, 1704);
+        assert!((1185..=1187).contains(&placed.size.0), "{placed:?}");
+        assert_eq!(placed.origin.1, 0);
+        assert_eq!(placed.origin.0, (2880 - placed.size.0) / 2);
+        // The frame of the new size comes: shown 1:1, filling the window, nothing pending.
+        follow.frame_arrived((2880, 1704));
+        assert!(!follow.pending());
+        let placed = shown_frame_placement((2880, 1704), view, (1, 1), true, follow.pending());
+        assert_eq!(
+            placed,
+            FramePlacement {
+                scale: (1, 1),
+                origin: (0, 0),
+                size: (2880, 1704),
+            }
+        );
+        // A frame that is not pending is placed as frame_placement says.
+        assert_eq!(
+            shown_frame_placement((1041, 1495), view, (1, 1), true, false),
+            frame_placement((1041, 1495), view, (1, 1), true)
+        );
+    }
+
+    #[test]
+    fn fr4_a_size_limited_maximise_stretches_while_pending_and_leaves_no_transparent_strip() {
+        use crate::compositor::frame_follow::FrameFollow;
+        // On a 2560x1440 monitor at 125% the guest can draw at most 2400x1380 window pixels
+        // for a task kept at the main monitor's density; the maximised window is 2560x1380.
+        let mut follow = FrameFollow::new((1140, 836));
+        follow.set_limit(Some((2400, 1380)));
+        follow.frame_arrived((1140, 836));
+        follow.set_held(true);
+        follow.view_taken((2560, 1380));
+        // Beyond the limit: the strips are filled from the start, under the stretched frame.
+        assert!(follow.pending());
+        assert!(follow.strips_filled());
+        follow.frame_arrived((2400, 1380));
+        assert!(!follow.pending());
+        assert!(follow.strips_filled());
     }
 
     #[test]
