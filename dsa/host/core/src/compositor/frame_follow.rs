@@ -45,10 +45,20 @@ pub enum Arrival {
     Keep,
     /// The window is taking the size of the frame kept before it: wait until it has.
     Wait,
-    /// It is of the size the window had before its monitor's scale changed: keep it out of
-    /// sight and leave the window at the size it took for the new scale.
+    /// It is of the size the window had before its monitor's scale changed, or of a size the
+    /// user dragged past before the size of the frame on the screen: keep it out of sight and
+    /// leave the window at the size it has.
     Stale,
 }
+
+/// How many sizes proposed for a window are remembered, to tell a late frame of a size dragged
+/// past from a new one.
+const PROPOSALS_KEPT: usize = 256;
+
+/// How many frames in a row of a size dragged past are kept out of sight before the window
+/// takes that size after all: an app that goes on drawing it has settled there, and a window
+/// that never followed would show its last frame for good.
+pub const SUPERSEDED_FRAMES: u32 = 30;
 
 /// One window's frames and size.
 #[derive(Debug, Clone, Default)]
@@ -66,6 +76,10 @@ pub struct FrameFollow {
     stale: Option<(u32, u32)>,
     /// Whether the window holds the size the desktop gave it ([`FrameFollow::set_held`]).
     held: bool,
+    /// The sizes proposed for the window, oldest first, each once at its latest place.
+    proposals: Vec<(u32, u32)>,
+    /// The size of the last frames kept out of sight as dragged past, and how many in a row.
+    superseded: Option<((u32, u32), u32)>,
 }
 
 impl FrameFollow {
@@ -116,6 +130,8 @@ impl FrameFollow {
         self.kept = None;
         self.claimed = false;
         self.stale = None;
+        self.proposals.clear();
+        self.superseded = None;
         if !held {
             self.shown = Some(self.view);
         }
@@ -135,12 +151,53 @@ impl FrameFollow {
             self.shown = Some(size);
             self.kept = None;
             self.stale = None;
+            self.superseded = None;
             Arrival::Show
         } else if self.stale == Some(size) {
             Arrival::Stale
-        } else {
+        } else if self.dragged_past(size) {
+            // A late frame of a size the user dragged past: the window has a newer size, whose
+            // frame the app drew or is drawing. Following it would shrink or grow the window
+            // back to that older size after the user let go.
+            let count = match self.superseded {
+                Some((last, count)) if last == size => count + 1,
+                _ => 1,
+            };
+            if count < SUPERSEDED_FRAMES {
+                self.superseded = Some((size, count));
+                return Arrival::Stale;
+            }
+            // The app goes on drawing it: that is the size it settled at.
+            self.superseded = None;
             self.kept = Some(size);
             Arrival::Keep
+        } else {
+            self.superseded = None;
+            self.kept = Some(size);
+            Arrival::Keep
+        }
+    }
+
+    /// Whether a frame of `size` is of a size proposed for the window before the size the
+    /// window has now. A window whose size was never proposed (the guest resized it) has no
+    /// order to go by, and every frame of another size is followed.
+    pub fn dragged_past(&self, size: (u32, u32)) -> bool {
+        let at = |wanted: (u32, u32)| self.proposals.iter().rposition(|p| *p == wanted);
+        match (at(size), at(self.view)) {
+            (Some(frame), Some(view)) => frame < view,
+            _ => false,
+        }
+    }
+
+    /// Remembers `size` as the newest size proposed for the window.
+    fn remember(&mut self, size: (u32, u32)) {
+        if self.proposals.last() == Some(&size) {
+            return;
+        }
+        self.proposals.retain(|p| *p != size);
+        self.proposals.push(size);
+        if self.proposals.len() > PROPOSALS_KEPT {
+            self.proposals.remove(0);
         }
     }
 
@@ -162,6 +219,7 @@ impl FrameFollow {
             self.claimed = true;
             return Some(kept);
         }
+        self.remember(proposed);
         if let Some(stale) = self.stale {
             if proposed == stale {
                 self.stale = None;
@@ -181,6 +239,9 @@ impl FrameFollow {
     pub fn scale_changed(&mut self, proposed: (u32, u32)) -> (u32, u32) {
         self.claimed = false;
         self.kept = None;
+        // Sizes of the old scale say nothing about the order of the new scale's frames.
+        self.proposals.clear();
+        self.superseded = None;
         // A window that holds its size shows every frame anyway.
         self.stale = self.shown.filter(|shown| !self.held && *shown != proposed);
         proposed
@@ -568,5 +629,63 @@ mod tests {
         assert_eq!(follow.size_for((2637, 1691)), Some((2637, 1691)));
         follow.view_taken((2637, 1691));
         assert_eq!(follow.frame_arrived((2637, 1691)), Arrival::Show);
+    }
+
+    #[test]
+    fn fr4_a_late_frame_of_a_size_dragged_past_does_not_snap_the_window_back() {
+        // FLO, dragged to 677x987: the app draws 670x977, 676x986 and 677x987, and then, after
+        // the user let go, more frames of 670x977, a size the drag passed.
+        let mut screen = Screen::new((644, 949), (644, 949));
+        for size in [(670, 977), (675, 985), (676, 986)] {
+            screen.propose(size);
+        }
+        screen.frame((670, 977));
+        assert_eq!(screen.follow.view(), (670, 977));
+        screen.propose((677, 987));
+        screen.frame((676, 986));
+        screen.propose((677, 987));
+        screen.frame((677, 987));
+        assert_eq!(screen.follow.view(), (677, 987));
+        for _ in 0..4 {
+            assert_eq!(screen.follow.frame_arrived((670, 977)), Arrival::Stale);
+        }
+        assert_eq!(screen.follow.view(), (677, 987));
+        assert_eq!(screen.follow.kept(), None);
+        assert_eq!(screen.on_screen, Some((677, 987)));
+        // A frame of the window's size goes on being shown.
+        assert_eq!(screen.follow.frame_arrived((677, 987)), Arrival::Show);
+    }
+
+    #[test]
+    fn fr4_an_app_that_keeps_drawing_a_size_dragged_past_is_followed_in_the_end() {
+        let mut follow = FrameFollow::new((644, 949));
+        follow.frame_arrived((644, 949));
+        follow.size_for((670, 977));
+        follow.size_for((677, 987));
+        assert_eq!(follow.frame_arrived((677, 987)), Arrival::Keep);
+        follow.size_for((677, 987));
+        assert!(follow.view_taken((677, 987)));
+        for _ in 1..SUPERSEDED_FRAMES {
+            assert_eq!(follow.frame_arrived((670, 977)), Arrival::Stale);
+        }
+        assert_eq!(follow.frame_arrived((670, 977)), Arrival::Keep);
+    }
+
+    #[test]
+    fn fr4_a_frame_of_a_size_proposed_after_the_windows_is_followed() {
+        // A drag that goes on: the app is behind, and its frames of newer sizes are followed.
+        let mut follow = FrameFollow::new((644, 949));
+        follow.frame_arrived((644, 949));
+        follow.size_for((660, 960));
+        follow.size_for((670, 977));
+        assert_eq!(follow.frame_arrived((660, 960)), Arrival::Keep);
+        follow.size_for((670, 977));
+        assert!(follow.view_taken((660, 960)));
+        assert_eq!(follow.frame_arrived((670, 977)), Arrival::Keep);
+        follow.size_for((670, 977));
+        assert!(follow.view_taken((670, 977)));
+        // A size the drag comes back to is newer again.
+        follow.size_for((660, 960));
+        assert_eq!(follow.frame_arrived((660, 960)), Arrival::Keep);
     }
 }

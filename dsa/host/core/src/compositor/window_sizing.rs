@@ -612,7 +612,20 @@ pub struct WindowSizing {
     /// A size asked of the guest and the other size the guest gave the task for it, until the
     /// window manager takes it to log ([`take_clamped`](Self::take_clamped)).
     clamped: Option<((u32, u32), (u32, u32))>,
+    /// The sizes asked of the guest during the last drag, oldest first, each once at its latest
+    /// place, until [`SETTLE`] after the drag ended.
+    passed: Vec<(u32, u32)>,
+    /// When the last drag ended, while its sizes are remembered.
+    drag_ended: Option<Instant>,
+    /// A late report of a size the drag passed, and the newer size the task keeps instead,
+    /// until the window manager takes it to log ([`take_stale`](Self::take_stale)).
+    stale: Option<((u32, u32), (u32, u32))>,
+    /// The size of the last report left aside as late: a second report of it is taken.
+    ignored: Option<(u32, u32)>,
 }
+
+/// How many sizes of a drag are remembered to tell a late report from a new one.
+const PASSED_KEPT: usize = 256;
 
 impl WindowSizing {
     /// A window that shows `task` at the size the guest gave it, whose task follows its
@@ -648,6 +661,10 @@ impl WindowSizing {
             switch_due: false,
             interim_asked: None,
             clamped: None,
+            passed: Vec::new(),
+            drag_ended: None,
+            stale: None,
+            ignored: None,
         }
     }
 
@@ -870,6 +887,9 @@ impl WindowSizing {
         }
         self.view = view;
         let size = clamp_size(to_task_size(view, self.asking_scale()), self.max);
+        if self.dragging {
+            self.pass(size);
+        }
         let current = self.asked.map(|(size, _)| size).unwrap_or(self.guest);
         if size == current {
             return None;
@@ -926,6 +946,9 @@ impl WindowSizing {
         if active {
             if !self.dragging {
                 self.dragging = true;
+                self.passed.clear();
+                self.drag_ended = None;
+                self.ignored = None;
                 // A size given live just before the drag is reconfigured with the drag's.
                 self.resized_live = std::mem::take(&mut self.reconfigure);
             }
@@ -935,6 +958,7 @@ impl WindowSizing {
             return None;
         }
         self.dragging = false;
+        self.drag_ended = Some(now);
         if self.interim != 0
             && self.mode == ScalingMode::App
             && self.asked_density.unwrap_or(self.density) != self.monitor_density
@@ -952,6 +976,7 @@ impl WindowSizing {
             return None;
         }
         let size = clamp_size(to_task_size(self.view, self.asking_scale()), self.max);
+        self.pass(size);
         // A task that has the size already reports the same bounds after it is
         // reconfigured, if it reports at all, so there is nothing to wait for.
         self.asked = (size != self.guest).then_some((size, now));
@@ -984,7 +1009,21 @@ impl WindowSizing {
         if let Some(min) = task.min_size() {
             self.min = Some(min);
         }
-        let previous = std::mem::replace(&mut self.guest, size);
+        let previous = self.guest;
+        if self.reported_late(size, previous) {
+            // A report of a size the drag passed, after the guest already reported a newer
+            // one it was asked for later: the task is on its way to, or at, the newer size.
+            // Taking it would resize the window back to where the user dragged it before they
+            // let go. The task is asked once more, not live, for the size it keeps; a guest
+            // that reports the older size again after that has really settled there.
+            self.stale = Some((size, previous));
+            self.ignored = Some(size);
+            if !self.dragging && self.asked.is_none() {
+                self.reconfigure = true;
+            }
+            return None;
+        }
+        self.guest = size;
         let shown = window_size_of(size, self.scale(), &[self.view]);
         match self.asked {
             Some((asked, _)) if asked == size => {
@@ -1022,6 +1061,38 @@ impl WindowSizing {
         self.clamped.take()
     }
 
+    /// A late report of a size the last drag passed, and the newer size the task keeps
+    /// instead, once, when [`guest_updated`](Self::guest_updated) left it aside. The window
+    /// manager logs it.
+    pub fn take_stale(&mut self) -> Option<((u32, u32), (u32, u32))> {
+        self.stale.take()
+    }
+
+    /// Remembers `size` as the newest size asked during the drag.
+    fn pass(&mut self, size: (u32, u32)) {
+        if self.passed.last() == Some(&size) {
+            return;
+        }
+        self.passed.retain(|p| *p != size);
+        self.passed.push(size);
+        if self.passed.len() > PASSED_KEPT {
+            self.passed.remove(0);
+        }
+    }
+
+    /// Whether a report of `size` comes after the guest reported `previous`, a size the last
+    /// drag asked for after it, and is not a size already left aside once.
+    fn reported_late(&self, size: (u32, u32), previous: (u32, u32)) -> bool {
+        if size == previous || self.ignored == Some(size) {
+            return false;
+        }
+        let at = |wanted: (u32, u32)| self.passed.iter().rposition(|p| *p == wanted);
+        match (at(size), at(previous)) {
+            (Some(late), Some(newer)) => late < newer,
+            _ => false,
+        }
+    }
+
     /// Time has passed. Returns the client size the window must take when the guest has not
     /// taken the size the host asked for within [`SETTLE`]: the window then shows the task
     /// at the size it has, 1:1, rather than wait for a size that never comes.
@@ -1033,6 +1104,13 @@ impl WindowSizing {
             if !self.dragging && now.saturating_duration_since(since) >= SETTLE {
                 self.interim = 0;
                 self.interim_asked = None;
+            }
+        }
+        if let Some(ended) = self.drag_ended {
+            if now.saturating_duration_since(ended) >= SETTLE {
+                // The drag's late reports have all come by now.
+                self.drag_ended = None;
+                self.passed.clear();
             }
         }
         let (_, since) = self.asked?;
@@ -2487,5 +2565,87 @@ mod tests {
         assert_eq!(kept_frame_action(false, true), KeptFrame::HoldAndAsk);
         assert_eq!(kept_frame_action(false, false), KeptFrame::TakeSize);
         assert_eq!(kept_frame_action(true, true), KeptFrame::Ignore);
+    }
+
+    #[test]
+    fn fr4_a_late_report_of_a_size_dragged_past_does_not_snap_the_window_back() {
+        // FLO, dragged from 644x949 to 677x987: the guest reports each size it is asked for,
+        // the app draws 677x987, and then a report of 670x977, a size the drag passed, comes
+        // after the user let go.
+        let mut sizing = WindowSizing::new(&task(644, 949, 130));
+        let start = Instant::now();
+        sizing.dragging(true, start);
+        for size in [(670, 977), (676, 986), (677, 987)] {
+            assert!(sizing.view_resized(size, start).is_some());
+        }
+        for (width, height) in [(670, 977), (676, 986), (677, 987)] {
+            assert_eq!(sizing.guest_updated(&task(width, height, 130)), None);
+        }
+        assert_eq!(sizing.guest_size(), (677, 987));
+        // The drag ends where the guest is already: the task is reconfigured at it.
+        assert_eq!(sizing.dragging(false, start), resize(677, 987));
+        // The late report changes neither the window nor the task's size.
+        assert_eq!(sizing.guest_updated(&task(670, 977, 130)), None);
+        assert_eq!(sizing.guest_size(), (677, 987));
+        assert_eq!(sizing.take_stale(), Some(((670, 977), (677, 987))));
+        assert_eq!(sizing.take_stale(), None, "said once");
+        // Android is asked again for the size the user let go at.
+        assert_eq!(sizing.reconfigure(start), resize(677, 987));
+        assert_eq!(sizing.tick(start + SETTLE * 2), None);
+    }
+
+    #[test]
+    fn fr4_a_size_dragged_past_that_the_guest_reports_again_is_its_answer() {
+        let mut sizing = WindowSizing::new(&task(644, 949, 130));
+        let start = Instant::now();
+        sizing.dragging(true, start);
+        sizing.view_resized((670, 977), start);
+        sizing.view_resized((677, 987), start);
+        sizing.guest_updated(&task(670, 977, 130));
+        sizing.guest_updated(&task(677, 987, 130));
+        sizing.dragging(false, start);
+        assert_eq!(sizing.guest_updated(&task(670, 977, 130)), None);
+        // Asked again, the guest still says 670x977: the task is there, and the window follows.
+        assert_eq!(sizing.guest_updated(&task(670, 977, 130)), Some((670, 977)));
+        assert_eq!(sizing.guest_size(), (670, 977));
+    }
+
+    #[test]
+    fn fr4_once_the_drag_has_settled_the_guest_may_resize_the_task_to_any_size() {
+        let mut sizing = WindowSizing::new(&task(644, 949, 130));
+        let start = Instant::now();
+        sizing.dragging(true, start);
+        sizing.view_resized((670, 977), start);
+        sizing.view_resized((677, 987), start);
+        sizing.guest_updated(&task(670, 977, 130));
+        sizing.guest_updated(&task(677, 987, 130));
+        sizing.dragging(false, start);
+        assert_eq!(sizing.tick(start + SETTLE), None);
+        // The app resizes its task on its own later, to a size the drag once passed.
+        assert_eq!(sizing.guest_updated(&task(670, 977, 130)), Some((670, 977)));
+        assert_eq!(sizing.take_stale(), None);
+    }
+
+    #[test]
+    fn fr3_a_size_limit_the_app_declares_holds_during_the_drag_not_after_it() {
+        // An app that cannot be drawn wider than 700 pixels: the drag asks for no more, so
+        // the guest's answer is the size the window was let go at and nothing jumps.
+        let mut limited = task(644, 949, 130);
+        limited.max_width = 700;
+        limited.max_height = 990;
+        let mut sizing = WindowSizing::new(&limited);
+        assert_eq!(sizing.max_client_size(), Some((700, 990)));
+        let start = Instant::now();
+        sizing.dragging(true, start);
+        assert_eq!(
+            sizing.view_resized((760, 990), start),
+            live_resize(700, 990)
+        );
+        assert_eq!(sizing.dragging(false, start), resize(700, 990));
+        let mut given = limited.clone();
+        given.bounds.right = given.bounds.left + 700;
+        given.bounds.bottom = given.bounds.top + 990;
+        assert_eq!(sizing.guest_updated(&given), None);
+        assert_eq!(sizing.take_stale(), None);
     }
 }

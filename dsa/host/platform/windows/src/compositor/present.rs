@@ -1322,17 +1322,37 @@ impl WindowPresenter {
                 arrival => break arrival,
             }
         };
+        let view = state.follow.view();
         if arrival == Arrival::Stale {
+            let why = if state.follow.dragged_past(frame_in_window(&state, region)) {
+                "a size the window was dragged past before its own, drawn late: not followed"
+            } else {
+                "drawn for the monitor scale the window had before"
+            };
             trace_stage(
                 self.logger.as_deref(),
                 self.task_id,
                 "app.frame_stale",
                 region,
-                &format!("view={}x{}", state.follow.view().0, state.follow.view().1),
+                &format!("view={}x{} why={why}", view.0, view.1),
             );
             return Ok(());
         }
         let keep = arrival == Arrival::Keep;
+        if keep {
+            // The window takes this frame's size: say so, since it is what resizes the window
+            // on its own after the user let go.
+            trace_stage(
+                self.logger.as_deref(),
+                self.task_id,
+                "app.frame_kept",
+                region,
+                &format!(
+                    "view={}x{} the window takes the frame's size",
+                    view.0, view.1
+                ),
+            );
+        }
         if keep {
             state.kept_region = Some(region);
         }

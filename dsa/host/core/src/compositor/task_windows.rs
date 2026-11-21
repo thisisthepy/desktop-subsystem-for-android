@@ -804,6 +804,14 @@ impl TaskWindows {
                                 describe_size(task.max_size()),
                             ));
                         }
+                        if let Some((late, kept)) = sizing.take_stale() {
+                            self.notes.push(format!(
+                                "task {} reported {}x{}, a size its window was dragged past, \
+                                 after it had reported {}x{}: the window keeps the size the \
+                                 user let go at and asks Android for it again",
+                                task.task_id, late.0, late.1, kept.0, kept.1,
+                            ));
+                        }
                         follow
                     }
                     _ => {
