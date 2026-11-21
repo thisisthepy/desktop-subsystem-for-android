@@ -736,9 +736,7 @@ mod tests {
         let mut assembler = ImageAssembler::default();
         assert_eq!(assembler.take(first.next().unwrap()), Ok(None));
         let other = vec![9u8; 5];
-        assert_eq!(
-            assembler.take(image_pieces(2, &other).next().unwrap()),
-            Ok(Some(other))
-        );
+        let piece = image_pieces(2, &other).next().unwrap();
+        assert_eq!(assembler.take(piece), Ok(Some(other)));
     }
 }
