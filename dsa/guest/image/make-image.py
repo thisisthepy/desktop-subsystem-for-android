@@ -2170,7 +2170,7 @@ def system_overlay_targets(z, otatools, work, env, replaced=None):
     the bytes the image carries instead (a default app in the published app's place, DocumentsUI)
     is read from there, so the overlay is built against the app the image has."""
     replaced = replaced or {}
-    names = sorted(set(z.namelist()) | set(replaced))
+    names = sorted(set(z.namelist()) | (set(replaced) - {PERMISSION_CONTROLLER_IMAGE}))
     tables = {}
     for overlay in SYSTEM_OVERLAYS:
         if overlay["target_apk"] is not None:
@@ -2189,7 +2189,9 @@ def system_overlay_targets(z, otatools, work, env, replaced=None):
         apks = sorted(payload.rglob(PERMISSION_CONTROLLER_APK))
         if not apks:
             raise ValueError(f"{apex} has no {PERMISSION_CONTROLLER_APK}, which {overlay['apk']} overlays")
-        tables[overlay["apk"]] = apk_resource_table(apks[0].read_bytes())
+        # The overlay is built against the PermissionController the image carries.
+        built = replaced.get(PERMISSION_CONTROLLER_IMAGE)
+        tables[overlay["apk"]] = apk_resource_table(built if built is not None else apks[0].read_bytes())
         shutil.rmtree(folder, ignore_errors=True)
     return tables
 
@@ -5332,9 +5334,34 @@ DEFAULT_APP_CERTIFICATE = "build/make/target/product/security/{}.x509.pem"
 DEFAULT_APP_PRIVATE_KEY = "build/make/target/product/security/{}.pk8"
 
 
-def default_apps():
-    """The default apps apps.json lists."""
+def image_apps():
+    """Every app apps.json lists: the default apps and the system screens."""
     return json.loads(DEFAULT_APPS_SOURCE.read_text(encoding="utf-8"))["apps"]
+
+
+def default_apps():
+    """The default apps apps.json lists (a clock, a gallery and the rest), not the system screens."""
+    return [app for app in image_apps() if app.get("role") != "system"]
+
+
+# The system screens apps.json lists (role "system"): Settings, PermissionController,
+# PackageInstaller and the share sheet (IntentResolver), each built in the Framework build's
+# tree from the image's own pin with DSA's design, in place of the published app. They keep
+# their AOSP names, packages and configuration; only the APK changes. PermissionController is
+# inside the permission APEX, so its "image" path is the APEX's followed by the APK's name, and
+# make-image.py puts it into the APEX's payload (edit_permission_apex).
+def system_screen_apps():
+    """The system screens apps.json lists."""
+    return [app for app in image_apps() if app.get("role") == "system"]
+
+
+def in_apex(app):
+    """Whether `app` is inside an APEX (PermissionController) rather than an APK of its own."""
+    return "apex" in app["build"]
+
+
+# Where the permission APEX's PermissionController goes in the default apps' payloads.
+PERMISSION_CONTROLLER_IMAGE = "SYSTEM/apex/com.android.permission.apex/PermissionController.apk"
 
 
 def _apps_script():
@@ -5370,7 +5397,7 @@ def load_default_apps(folder, android):
     is not the one this repository makes."""
     folder = Path(folder)
     payloads, records, problems = {}, [], []
-    for app in default_apps():
+    for app in image_apps():
         record_path = folder / f"{app['name']}.json"
         if not record_path.is_file():
             problems.append(f"{folder} has no {record_path.name}, so the image would have no {app['label']} app")
@@ -5424,8 +5451,9 @@ def default_apps_permissions(apps):
 def default_app_apkcerts(app):
     """The apkcerts.txt line that has signing give a default app its certificate."""
     key = app.get("certificate", "testkey")
+    partition = app["image"].split("/", 1)[0].lower()
     return (f'name="{Path(app["image"]).name}" certificate="{DEFAULT_APP_CERTIFICATE.format(key)}" '
-            f'private_key="{DEFAULT_APP_PRIVATE_KEY.format(key)}" partition="system"')
+            f'private_key="{DEFAULT_APP_PRIVATE_KEY.format(key)}" partition="{partition}"')
 
 
 def default_apps_fs_config(apps):
@@ -5491,6 +5519,43 @@ def default_apps_problems(names, read, records, android):
     for name in sorted(names):
         if name.endswith(".apk") and (replaced_by_default_apps(name, apps) or "/Calendar/" in name):
             problems.append(f"{name} is still in the image, beside the default app that replaces it")
+    return problems
+
+
+def system_screens_problems(names, read, records, android):
+    """What is wrong with the system screens of a signed target_files whose members are `names`
+    and read with `read`: one missing or under another package, or built from another pin or
+    other patches than dsa/apps has now (`records`, image.json's "default_apps"), so the image
+    would show the published AOSP screen and not DSA's design. PermissionController is inside
+    the permission APEX, which takes otatools to open, so for it the APEX must be there and the
+    record must match."""
+    problems = []
+    names = set(names)
+    recorded = {r.get("name"): r for r in records or []}
+    for app in system_screen_apps():
+        label = app["label"]
+        if in_apex(app):
+            if not any(apex in names for apex in PERMISSION_APEXES):
+                problems.append(f"the image has no permission APEX, so it has no {label} screens")
+        elif app["image"] not in names:
+            problems.append(f"{app['image']} is missing, so the image has no {label} screens")
+            continue
+        else:
+            try:
+                package = apk_manifest_package(read(app["image"]))
+            except (ValueError, KeyError, zipfile.BadZipFile) as e:
+                problems.append(f"{app['image']} has no readable manifest ({e})")
+                continue
+            if package != app["package"]:
+                problems.append(f"{app['image']} is {package}, not {app['package']}")
+        wanted = default_app_provenance(app, android)
+        record = recorded.get(app["name"])
+        if record is None:
+            problems.append(f"image.json does not say what the {label} screens were built from, so the "
+                            "image may carry the published AOSP app without DSA's design")
+        elif {key: record.get(key) for key in wanted} != wanted:
+            problems.append(f"the {label} screens were built from another source or other patches than "
+                            "dsa/apps has now")
     return problems
 
 
@@ -6810,10 +6875,15 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
     `default_apps_payloads`, the default apps' APKs by their target_files names
     (load_default_apps), the image carries them with their configuration, in place of the AOSP
     apps they replace."""
-    apps_in_image = [app for app in default_apps() if app["image"] in (default_apps_payloads or {})]
+    apps_in_image = [app for app in image_apps() if app["image"] in (default_apps_payloads or {})]
+    # The default apps get their own configuration; the system screens keep the build's.
+    default_apps_in_image = [app for app in apps_in_image if app.get("role") != "system"]
+    permission_controller_payload = None
     if default_apps_payloads is not None:
         default_apps_payloads = dict(default_apps_payloads)
-        unknown = sorted(set(default_apps_payloads) - {app["image"] for app in default_apps()})
+        # PermissionController goes into the permission APEX, not to a path of its own.
+        permission_controller_payload = default_apps_payloads.pop(PERMISSION_CONTROLLER_IMAGE, None)
+        unknown = sorted(set(default_apps_payloads) - {app["image"] for app in image_apps()})
         if unknown:
             raise ValueError(f"{', '.join(unknown)} is not where apps.json puts a default app")
     fstab = (HERE / "fstab.dsa").read_bytes()
@@ -6936,7 +7006,7 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
         if default_apps_payloads is not None:
             # A default app replaced in place (DocumentsUI) keeps the build's own lines.
             added_fs_config.setdefault(SYSTEM_FS_CONFIG, []).extend(
-                default_apps_fs_config([app for app in apps_in_image if app["image"] not in names]))
+                default_apps_fs_config([app for app in default_apps_in_image if app["image"] not in names]))
         for name in names:
             if name.endswith(".cil"):
                 cil_map[name] = zin.read(name)
@@ -7109,9 +7179,12 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                 data = framework[name]
                 replaced_framework.add(name)
             elif default_apps_payloads is not None and name in default_apps_payloads:
-                # A default app in the published app's place (DocumentsUI).
-                print(f"replacing {name} with the default app built from dsa/apps", flush=True)
+                # A default app or a system screen in the published app's place (DocumentsUI,
+                # Settings, PackageInstaller, IntentResolver). Settings still gets its edits.
+                print(f"replacing {name} with the app built from dsa/apps", flush=True)
                 data = default_apps_payloads.pop(name)
+                if name.endswith(SETTINGS_APK):
+                    data = edit_settings_apk(data, name)
             else:
                 data = zin.read(name)
                 if name in PROP_FILES:
@@ -7145,7 +7218,8 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                 elif name == SERVICES_JAR:
                     data = edit_services_jar(data, name)
                 elif name in PERMISSION_APEXES:
-                    data = edit_permission_apex(data, name, otatools, Path(dest).parent)
+                    data = edit_permission_apex(data, name, otatools, Path(dest).parent,
+                                                replacement=permission_controller_payload)
                 elif name.endswith("lib/modules/modules.load") or name.endswith("lib/modules/modules.dep"):
                     data = b""
                 elif name == "META/apexkeys.txt":
@@ -7161,12 +7235,13 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                         if not any(f'name="{a}.apk"' in line.decode()
                                    for a in REMOVED_APPS + ["DsaAgent"]
                                    + [Path(overlay).stem for overlay in SYSTEM_OVERLAY_FILES]
-                                   + ([Path(app["image"]).stem for app in apps_in_image]
+                                   + ([Path(app["image"]).stem for app in apps_in_image if not in_apex(app)]
                                       + [r for app in default_apps() for r in app["replaces"]]
                                       if default_apps_payloads is not None else []))
                     )
                     for app in apps_in_image:
-                        data += default_app_apkcerts(app).encode() + b"\n"
+                        if not in_apex(app):
+                            data += default_app_apkcerts(app).encode() + b"\n"
                     if agent_payload is not None:
                         data += AGENT_APKCERTS.encode() + b"\n"
                     if overlay_payload is not None:
@@ -7357,8 +7432,8 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
             for path, payload in default_apps_payloads.items():
                 print(f"adding the default app {path}", flush=True)
                 zout.writestr(path, payload)
-            zout.writestr(DEFAULT_APPS_SYSCONFIG, default_apps_sysconfig(apps_in_image))
-            zout.writestr(DEFAULT_APPS_PERMISSIONS, default_apps_permissions(apps_in_image))
+            zout.writestr(DEFAULT_APPS_SYSCONFIG, default_apps_sysconfig(default_apps_in_image))
+            zout.writestr(DEFAULT_APPS_PERMISSIONS, default_apps_permissions(default_apps_in_image))
         if agent_payload is not None:
             zout.writestr(AGENT_APK, agent_payload)
             zout.writestr(AGENT_PERMISSIONS, AGENT_PERMISSIONS_SOURCE.read_bytes())
@@ -8067,10 +8142,11 @@ def edit_apex_apks(data, name, edit, otatools, work):
     return result
 
 
-def edit_permission_apex(data, name, otatools, work):
+def edit_permission_apex(data, name, otatools, work, replacement=None):
     """The permission APEX with PermissionController's lists edited (see
-    permission_controller_edits). Without otatools nothing can pack it again, and it is
-    left as it is."""
+    permission_controller_edits), and with `replacement`, PermissionController built from
+    dsa/apps, in place of the published APK first. Without otatools nothing can pack it again,
+    and it is left as it is."""
     if otatools is None:
         print(f"not editing {name}: there is no otatools to pack it again", flush=True)
         return data
@@ -8078,6 +8154,9 @@ def edit_permission_apex(data, name, otatools, work):
     def edit(apk, apk_name):
         if not apk_name.endswith("/" + PERMISSION_CONTROLLER_APK):
             return apk
+        if replacement is not None:
+            print(f"replacing {apk_name} with the app built from dsa/apps", flush=True)
+            apk = replacement
         return edit_permission_controller_apk(apk, apk_name)
 
     return edit_apex_apks(data, name, edit, otatools, work)

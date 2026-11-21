@@ -1,0 +1,42 @@
+Follow DSA's design in every SettingsLib screen (Settings and PermissionController):
+a large title that opens expanded in a window 600 dp or more high and folded below it,
+on sub-pages too, bold variable-weight titles, and a title that shrinks into the toolbar.
+
+diff --git a/CollapsingToolbarBaseActivity/src/com/android/settingslib/collapsingtoolbar/CollapsingToolbarDelegate.java b/CollapsingToolbarBaseActivity/src/com/android/settingslib/collapsingtoolbar/CollapsingToolbarDelegate.java
+--- a/CollapsingToolbarBaseActivity/src/com/android/settingslib/collapsingtoolbar/CollapsingToolbarDelegate.java
++++ b/CollapsingToolbarBaseActivity/src/com/android/settingslib/collapsingtoolbar/CollapsingToolbarDelegate.java
+@@ -158,2 +158,7 @@
+         mAppBarLayout = view.findViewById(R.id.app_bar);
++        if (useCollapsingToolbar && mAppBarLayout != null) {
++            // A tall window opens with the large title expanded, a low one with it folded
++            // into the toolbar, where it leaves the room to the list.
++            io.github.thisisthepy.dsa.design.DsaDesign.showLargeTitle(mAppBarLayout);
++        }
+ 
+@@ -581,3 +586,6 @@
+                         if (appBarLayout != null) {
+-                            appBarLayout.post(() -> appBarLayout.setExpanded(false, true));
++                            // A sub-page follows the same rule as a page of its own.
++                            appBarLayout.post(() -> appBarLayout.setExpanded(
++                                    io.github.thisisthepy.dsa.design.DsaDesign
++                                            .largeTitleStartsExpanded(activity), true));
+                         } else {
+diff --git a/CollapsingToolbarBaseActivity/res/values-v36/styles_expressive.xml b/CollapsingToolbarBaseActivity/res/values-v36/styles_expressive.xml
+--- a/CollapsingToolbarBaseActivity/res/values-v36/styles_expressive.xml
++++ b/CollapsingToolbarBaseActivity/res/values-v36/styles_expressive.xml
+@@ -30,3 +30,4 @@
+         <item name="expandedTitleTextColor">@color/settingslib_materialColorOnSurface</item>
+-        <item name="titleCollapseMode">fade</item>
++        <!-- The large title shrinks into the toolbar as the list scrolls. -->
++        <item name="titleCollapseMode">scale</item>
+         <item name="extraMultilineHeightEnabled">true</item>
+@@ -40,2 +41,4 @@
+         <item name="android:textSize">22dp</item>
++        <item name="android:textStyle">bold</item>
++        <item name="android:fontVariationSettings">'wght' 700</item>
+     </style>
+@@ -44,2 +47,4 @@
+         <item name="android:textSize">36dp</item>
++        <item name="android:textStyle">bold</item>
++        <item name="android:fontVariationSettings">'wght' 750</item>
+     </style>

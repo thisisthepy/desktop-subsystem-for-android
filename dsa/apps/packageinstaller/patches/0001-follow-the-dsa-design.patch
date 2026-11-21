@@ -1,0 +1,25 @@
+Follow DSA's design: the Material 3 install dialogs (rounded, buttons side by side, dynamic
+colour) always, and a bold title.
+
+diff --git a/src/com/android/packageinstaller/v2/model/PackageUtil.kt b/src/com/android/packageinstaller/v2/model/PackageUtil.kt
+--- a/src/com/android/packageinstaller/v2/model/PackageUtil.kt
++++ b/src/com/android/packageinstaller/v2/model/PackageUtil.kt
+@@ -512,2 +512,10 @@
+     fun isMaterialDesignEnabled(context: Context): Boolean {
++        // The install dialogs always take the Material 3 design: a rounded dialog with its
++        // buttons side by side, in the system's dynamic colours.
++        return true
++    }
++
++    /** Whether the device's configuration asks for the Material 3 install dialogs. */
++    @JvmStatic
++    fun isMaterialDesignEnabledByConfig(context: Context): Boolean {
+         var result: Boolean
+diff --git a/res/values/styles.xml b/res/values/styles.xml
+--- a/res/values/styles.xml
++++ b/res/values/styles.xml
+@@ -141,2 +141,4 @@
+         <item name="android:textColor">@color/onSurfaceColor</item>
++        <item name="android:textStyle">bold</item>
++        <item name="android:fontVariationSettings">'wght' 700</item>
+     </style>

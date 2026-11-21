@@ -1,0 +1,29 @@
+Follow DSA's design: a bold title in the permission dialog, and the system font in its
+buttons in place of a font the guest does not ship.
+
+diff --git a/res/values/styles.xml b/res/values/styles.xml
+--- a/res/values/styles.xml
++++ b/res/values/styles.xml
+@@ -186,2 +186,4 @@
+            parent="@android:style/TextAppearance.DeviceDefault.WindowTitle">
++        <item name="android:textStyle">bold</item>
++        <item name="android:fontVariationSettings">'wght' 700</item>
+         <item name="android:layout_width">match_parent</item>
+diff --git a/res/values-v31/styles.xml b/res/values-v31/styles.xml
+--- a/res/values-v31/styles.xml
++++ b/res/values-v31/styles.xml
+@@ -69,3 +69,3 @@
+         <item name="android:layout_marginBottom">2dp</item>
+-        <item name="android:fontFamily">google-sans-medium</item>
++        <item name="android:fontFamily">sans-serif-medium</item>
+         <item name="android:textSize">14sp</item>
+@@ -84,3 +84,3 @@
+         <item name="android:layout_marginBottom">2dp</item>
+-        <item name="android:fontFamily">google-sans-medium</item>
++        <item name="android:fontFamily">sans-serif-medium</item>
+         <item name="android:textSize">14sp</item>
+@@ -99,3 +99,3 @@
+         <item name="android:layout_marginBottom">2dp</item>
+-        <item name="android:fontFamily">google-sans-medium</item>
++        <item name="android:fontFamily">sans-serif-medium</item>
+         <item name="android:textSize">14sp</item>

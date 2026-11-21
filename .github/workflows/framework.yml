@@ -61,6 +61,11 @@ on:
   #     - dsa/guest/framework/framework-lock.json
   #     - dsa/guest/framework/patches/**
   #     - dsa/apps/documentsui/**
+  #     - dsa/apps/settingslib/**
+  #     - dsa/apps/settings/**
+  #     - dsa/apps/permissioncontroller/**
+  #     - dsa/apps/packageinstaller/**
+  #     - dsa/apps/intentresolver/**
   #     - dsa/apps/design/**
 
 concurrency:
@@ -466,7 +471,7 @@ jobs:
           DSA_SERVICES_JOBS: 2
         run: |
           start=$SECONDS
-          # The same tree builds the image's patched DocumentsUI (dsa/apps/documentsui), which
+          # The same tree builds the image's patched DocumentsUI and system screens (dsa/apps), which
           # builds only in an Android tree, into the last folder.
           DSA_SERVICES_LOCK="$RUNNER_TEMP/services-lock.json" \
             .github/scripts/framework/build-services.sh "$DSA_TRANSLATOR_WORK/aosp" "$ANDROID_BRANCH" \
