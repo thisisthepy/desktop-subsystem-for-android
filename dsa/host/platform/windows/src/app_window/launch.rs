@@ -16,7 +16,6 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use dsa_host_core::host_api::HostApiClient;
 use dsa_transport::Connector;
 use windows_sys::Win32::Foundation::{
     GetLastError, ERROR_CLASS_ALREADY_EXISTS, ERROR_SEM_TIMEOUT, HWND, LPARAM, LRESULT, RECT,
@@ -36,7 +35,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 
 /// How long Android may take to start before opening the app gives up.
-pub const START_ANDROID: Duration = Duration::from_secs(360);
+pub const START_ANDROID: Duration = dsa_host_core::host_api::APP_START_ANDROID;
 
 /// How long the window manager may take to open its pipe once started.
 pub const START_WINDOW_MANAGER: Duration = Duration::from_secs(20);
@@ -57,23 +56,13 @@ pub const WINDOW_MANAGER_NAME: &str = "dsa-wm.exe";
 /// Makes sure the caller's Android runs: asks the service at `api` to start it when it is
 /// stopped and waits until it runs. `waiting` is called once when it has to wait, to show
 /// that something is happening.
-pub fn ensure_android(api: &mut dyn Connector, mut waiting: impl FnMut()) -> Result<(), String> {
+pub fn ensure_android(api: &mut dyn Connector, waiting: impl FnMut()) -> Result<(), String> {
     // The service sizes Android's display from this when it starts it. It can still start
     // without: the last record, or the image's size, serves.
     if let Err(why) = crate::monitors::record_current() {
         eprintln!("{BUILD}: {why}");
     }
-    let mut client = HostApiClient::connect(api, BUILD, Duration::from_secs(5))
-        .map_err(|e| format!("Android cannot be started: {e}"))?;
-    let mut told = false;
-    client
-        .ensure_running(START_ANDROID, POLL, |_| {
-            if !told {
-                told = true;
-                waiting();
-            }
-        })
-        .map_err(|e| format!("Android did not start: {e}"))
+    dsa_host_core::host_api::ensure_android_for_app(api, BUILD, START_ANDROID, POLL, waiting)
 }
 
 /// Makes sure the window manager runs: when `running` says it does not, `start` starts it,

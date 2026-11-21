@@ -791,11 +791,36 @@ pub struct HostSetup {
     pub shortcut: Option<String>,
 }
 
+/// How often a launch looks at how far Android has got while it starts.
+const START_POLL: Duration = Duration::from_millis(250);
+
+/// Before a launch the user made reaches the window manager: Android cannot finish booting
+/// without the window manager's renderer, so the window manager must be listening first; then
+/// a stopped Android is started and waited for, so the launch reaches a running Android and
+/// the app's window opens once it is ready.
+fn prepare_launch(setup: &HostSetup) -> Result<(), String> {
+    std::os::unix::net::UnixStream::connect(&setup.window_manager)
+        .map_err(|e| format!("the window manager is not running: {e}"))?;
+    let mut api = UnixLocalConnector {
+        path: setup.host_api.clone(),
+    };
+    dsa_host_core::host_api::ensure_android_for_app(
+        &mut api,
+        BUILD,
+        dsa_host_core::host_api::APP_START_ANDROID,
+        START_POLL,
+        || eprintln!("dsa-app-window: starting Android for {}", setup.package),
+    )
+}
+
 /// Runs the window host until the window manager lets it go. Must be called on the main
 /// thread; it runs the application's run loop.
 pub fn run(setup: HostSetup) -> Result<(), String> {
     if !crate::objc::is_main_thread() {
         return Err("the window host must run on the main thread".into());
+    }
+    if setup.launch {
+        prepare_launch(&setup)?;
     }
     let mut connection = UnixLocalConnector {
         path: setup.window_manager.clone(),

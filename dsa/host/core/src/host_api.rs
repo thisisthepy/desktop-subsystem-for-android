@@ -7385,6 +7385,36 @@ impl ClientError {
     }
 }
 
+/// How long Android may take to start before opening an app gives up.
+pub const APP_START_ANDROID: Duration = Duration::from_secs(360);
+
+/// Makes sure the caller's Android runs before one of its apps opens. An app opened from its
+/// shortcut or bundle is the user asking for Android, so a stopped Android (never started,
+/// stopped by a crash, or left stopped by a restart of the service) is started and waited
+/// for. `api` reaches the service, `build` names the caller, and `waiting` is called once when
+/// it has to wait, so the caller can show that something is happening. Every host's window
+/// program calls this before it asks for the app, so the app's window opens once Android is
+/// ready.
+pub fn ensure_android_for_app(
+    api: &mut dyn Connector,
+    build: &str,
+    timeout: Duration,
+    poll: Duration,
+    mut waiting: impl FnMut(),
+) -> Result<(), String> {
+    let mut client = HostApiClient::connect(api, build, Duration::from_secs(5))
+        .map_err(|e| format!("Android cannot be started: {e}"))?;
+    let mut told = false;
+    client
+        .ensure_running(timeout, poll, |_| {
+            if !told {
+                told = true;
+                waiting();
+            }
+        })
+        .map_err(|e| format!("Android did not start: {e}"))
+}
+
 /// The client end of the local API.
 pub struct HostApiClient {
     connection: Box<dyn Connection>,
