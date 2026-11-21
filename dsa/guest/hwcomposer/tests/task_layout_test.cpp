@@ -827,4 +827,20 @@ TEST(fr41_the_registry_keeps_whether_a_task_is_an_overlay) {
     EXPECT_TRUE(tasks[1].overlay && tasks[1].id == kLyrics);
 }
 
+TEST(fr3_a_task_reported_again_is_sent_again_for_its_reopened_window) {
+    // The agent restarted and reported a still app's task with the bounds it had: the host
+    // reopened its window, which needs a frame though the app draws nothing new.
+    const std::vector<int64_t> resend = resendAfterReport(false, true);
+    EXPECT_EQ(resend.size(), static_cast<size_t>(2));
+    EXPECT_EQ(resend[0], static_cast<int64_t>(0));
+    EXPECT_TRUE(resend[1] > 0);
+}
+
+TEST(fr3_only_a_task_with_a_frame_sent_is_sent_again_on_a_report) {
+    // New bounds ask for a frame anyway; a task never sent has no window waiting for it.
+    EXPECT_TRUE(resendAfterReport(true, true).empty());
+    EXPECT_TRUE(resendAfterReport(false, false).empty());
+    EXPECT_TRUE(resendAfterReport(true, false).empty());
+}
+
 int main() { return ::dsa::test::runAll(); }

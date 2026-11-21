@@ -287,6 +287,13 @@ uint64_t drawnGeometry(const Rect& bounds, const std::vector<LayerFill>& layers)
 
 bool leavesLastFrame(bool layerMissing, bool hasFrame) { return layerMissing && hasFrame; }
 
+std::vector<int64_t> resendAfterReport(bool boundsChanged, bool posted) {
+    if (boundsChanged || !posted) {
+        return {};
+    }
+    return {0, kResendLateMs};
+}
+
 bool leavesLastFrameUndrawn(const std::vector<LayerFill>& layers, bool hasFrame) {
     if (!hasFrame) {
         return false;

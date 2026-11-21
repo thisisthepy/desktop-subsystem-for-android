@@ -76,6 +76,12 @@ an app's incomplete frame while it is recreated. A task's first frame goes as it
 hwcomposer asks SurfaceFlinger for a frame when a layout settles or a slow app is due to be
 logged, in case nothing else changes.
 
+When the agent restarts, it reports every task again and the host reopens their windows,
+which have no frame yet. SurfaceFlinger presents only when something changes, so a still app
+would leave its window on the host's splash. So a task reported again with the bounds it had,
+whose frame was sent before, is sent again at once and once more 1.5 s later
+(`resendAfterReport`), the second for a window the host reopens after the first arrived.
+
 A layer no task contains is never sent: the wallpaper, display-wide backgrounds and dim
 layers, and anything that straddles a window's edge. Sending it would put pixels that
 belong to no window, or to another one, into a host window. A popup that reaches outside
