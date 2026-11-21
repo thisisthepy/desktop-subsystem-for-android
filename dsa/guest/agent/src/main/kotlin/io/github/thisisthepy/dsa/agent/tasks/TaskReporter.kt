@@ -61,7 +61,7 @@ class TaskReporter(
         val current = LinkedHashMap<Int, TaskSnapshot>()
         for (task in tasks) {
             // The host is not told a task's screen size in dp, so a change to it alone is no news.
-            if (reportable(task) && task.taskId !in current) current[task.taskId] = task.copy(screenDp = null)
+            if (reportable(task) && task.taskId !in current) current[task.taskId] = task.copy(screenDp = null, activityPackages = emptySet())
         }
         for (taskId in told.keys.toList()) {
             if (taskId !in current && send(Messages.taskRemoved(taskId))) told.remove(taskId)

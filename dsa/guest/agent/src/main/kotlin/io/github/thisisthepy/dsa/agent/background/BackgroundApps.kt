@@ -307,6 +307,7 @@ class BackgroundApps(
             log.info("the host asked to stop $packageName, which is not stopped")
             return
         }
+        log.info("force-stopping $packageName: the host asked to stop it from its background apps")
         val stopped = try {
             stopper.stop(packageName)
         } catch (e: Exception) {

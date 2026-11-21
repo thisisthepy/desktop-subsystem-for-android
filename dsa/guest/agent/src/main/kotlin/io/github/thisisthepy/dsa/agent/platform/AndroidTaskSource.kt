@@ -159,6 +159,12 @@ class AndroidTaskSource(
             // The same for a change of font scale, of the top activity and of the root one
             // under it, which Android restarts too when the user goes back to it. False when
             // the package manager does not know the top activity.
+            activityPackages = listOfNotNull(
+                info.baseActivity?.packageName,
+                info.baseIntent?.component?.packageName,
+                info.topActivity?.packageName,
+                owner,
+            ).filter { it.isNotEmpty() }.toSet(),
             handlesFontScaleChange = top != null && handlesFontScaleChange(top.configChanges) &&
                 rootHandlesFontScale(info, root),
         )

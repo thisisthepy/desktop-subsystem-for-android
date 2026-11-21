@@ -1332,7 +1332,9 @@ class Agent(
         syncInputBounds()
         val packages = reported.mapNotNull(reporter::reportedPackage).toSet()
         // An app whose overlay is on the screen is open, though it has no task.
-        closedApps.tasks(packages + overlays.packages)
+        // An app with an activity in any task (under a permission dialog it opened, or on top
+        // of another app's task) is open too, though no task the host was told of is its own.
+        closedApps.tasks(packages + overlays.packages, inTasks = running.flatMap { it.activityPackages }.toSet())
         // Every task's app keeps its processes, a task the host was not told of included.
         cachedProcesses?.tasks(packages + overlays.packages + running.mapNotNull { it.packageName })
         appSound.tasks(packages, reporter.focusedTask()?.let(reporter::reportedPackage))

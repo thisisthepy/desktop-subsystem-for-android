@@ -22,6 +22,12 @@ interface AppProcesses {
     /** Whether the app runs a foreground service: music, a call, a download the user sees. */
     fun hasForegroundService(packageName: String): Boolean
 
+    /**
+     * Whether a process of the app is visible to the user or in front: one of its activities
+     * shows, in whichever task, even behind a dialog.
+     */
+    fun showsActivity(packageName: String): Boolean = false
+
     /** Ends every process of the app, as "am force-stop" does. */
     fun stop(packageName: String)
 
@@ -119,14 +125,22 @@ class ClosedApps(
         closing[packageName] = Before(clock(), guestOrNull(), appOrNull(packageName), fromClose = true)
     }
 
-    /** Takes the packages that have a task window now; ends those that had one and have not. */
-    fun tasks(packages: Set<String>) {
-        val closed = open - packages
-        open = packages
+    /**
+     * Takes the packages that have a task window now, and [inTasks], those with an activity in
+     * any running task (another app's task, or their own under a dialog of another app that
+     * the framework now counts as its root); ends those that had either and have neither.
+     */
+    fun tasks(packages: Set<String>, inTasks: Set<String> = emptySet()) {
+        val now = packages + inTasks
+        val closed = open - now
+        open = now
         for (packageName in closed) stop(packageName, force = false)
         // A close that left the app a window (another task of it) is forgotten.
-        closing.keys.retainAll { it !in packages }
+        closing.keys.retainAll { it !in now }
     }
+
+    /** How many times an app that still showed an activity has been looked at again, by package. */
+    private val rechecks = HashMap<String, Int>()
 
     /**
      * Ends [packageName]'s processes and logs what that gave back. Without [force] an app with
@@ -148,9 +162,16 @@ class ClosedApps(
                 log.info("closed $packageName: kept running because $keep")
                 return false
             }
+            if (shows(packageName)) {
+                keepWhileShown(packageName)
+                return false
+            }
         }
+        rechecks.remove(packageName)
         val before = closing.remove(packageName)?.takeIf { it.at + BEFORE_KEPT_MILLIS >= clock() }
             ?: Before(clock(), guestOrNull(), appOrNull(packageName), fromClose = false)
+        val why = if (force) "the host asked to stop it" else "it has no task window and no activity in any task"
+        log.info("force-stopping $packageName: $why")
         try {
             processes.stop(packageName)
         } catch (e: Exception) {
@@ -162,16 +183,48 @@ class ClosedApps(
             log.info(line(packageName, before, guestOrNull(), left))
             // A process that outlived the end (one the system started again for a broadcast, or
             // one that was starting as the app was ended) is ended once more, unless the app has
-            // a window again.
+            // a window again, an activity in a task, or one that shows.
             if (!left?.pids.isNullOrEmpty() && packageName !in open) {
-                try {
-                    processes.stop(packageName)
-                } catch (e: Exception) {
-                    log.warn("closed $packageName: its processes could not be ended again", e)
+                if (shows(packageName)) {
+                    log.info("closed $packageName: its process ${left!!.pids.joinToString(", ")} outlived the end but shows an activity, so it keeps running")
+                } else {
+                    log.info("force-stopping $packageName again: process ${left!!.pids.joinToString(", ")} outlived the end and the app has no window")
+                    try {
+                        processes.stop(packageName)
+                    } catch (e: Exception) {
+                        log.warn("closed $packageName: its processes could not be ended again", e)
+                    }
                 }
             }
         }
         return true
+    }
+
+    /** Whether [packageName] shows an activity; true when that cannot be read, so it is kept. */
+    private fun shows(packageName: String): Boolean = try {
+        processes.showsActivity(packageName)
+    } catch (e: Exception) {
+        true
+    }
+
+    /**
+     * Keeps [packageName], which has no task window but still shows an activity, and looks
+     * again [settleMillis] later: a window the user just closed stops showing within moments,
+     * and the app is ended then; one the user still sees keeps it running.
+     */
+    private fun keepWhileShown(packageName: String) {
+        closing.remove(packageName)
+        val tries = (rechecks[packageName] ?: 0) + 1
+        if (tries > MAX_RECHECKS) {
+            rechecks.remove(packageName)
+            log.info("closed $packageName: kept running because it still shows an activity")
+            return
+        }
+        rechecks[packageName] = tries
+        log.info("closed $packageName: not stopped yet because it still shows an activity; looking again in $settleMillis ms")
+        scheduler.postDelayed(settleMillis) {
+            if (packageName in open) rechecks.remove(packageName) else stop(packageName, force = false)
+        }
     }
 
     /** The line that says what ending [packageName] gave back, from [before] to [guest] and [left]. */
@@ -222,6 +275,9 @@ class ClosedApps(
          * finish.
          */
         const val SETTLE_MILLIS = 4000L
+
+        /** How many times an app with no window that still shows an activity is looked at again. */
+        const val MAX_RECHECKS = 3
 
         /**
          * Cached processes the activity manager keeps: a phone keeps 32 so apps resume fast,
