@@ -2619,4 +2619,31 @@ Uygulamanın x86_64 veya arm64-v8a derlemesini alın.</value>
   <data name="ApkWindow_PickerAllFiles" xml:space="preserve">
     <value>Tüm dosyalar</value>
   </data>
+  <data name="AltStoresHeader.Text" xml:space="preserve">
+    <value>Alternatif mağazalar</value>
+  </data>
+  <data name="AltStoresCard.Description" xml:space="preserve">
+    <value>DSA bir mağazayı resmi sitesinden indirir, kimin imzaladığını denetler ve diğer uygulamalar gibi yükler. DSA bu mağazaları içermez ve her ad kendi sahibinin ticari markasıdır. Bir mağazayı uygulama listesinden kaldırın.</value>
+  </data>
+  <data name="AltStore_NotInstalled" xml:space="preserve">
+    <value>Yüklü değil</value>
+  </data>
+  <data name="AltStore_Installed" xml:space="preserve">
+    <value>Yüklü</value>
+  </data>
+  <data name="AltStore_InstalledVersion" xml:space="preserve">
+    <value>Yüklü, sürüm {0}</value>
+  </data>
+  <data name="AltStore_Installing" xml:space="preserve">
+    <value>İndiriliyor ve yükleniyor…</value>
+  </data>
+  <data name="AltStore_Failed" xml:space="preserve">
+    <value>Yüklenmedi: {0}</value>
+  </data>
+  <data name="AltStoreInstallButton.Content" xml:space="preserve">
+    <value>Yükle</value>
+  </data>
+  <data name="AltStoreOpenButton.Content" xml:space="preserve">
+    <value>Aç</value>
+  </data>
 </root>

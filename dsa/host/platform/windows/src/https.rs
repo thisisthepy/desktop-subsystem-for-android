@@ -80,6 +80,16 @@ pub fn status_problem(url: &str, status: u32, follow_redirects: bool) -> Option<
 
 /// Reads `url` into `out` as `policy` says, and returns how many bytes were written.
 pub fn get(url: &str, policy: &Policy, out: &mut dyn Write) -> Result<u64, String> {
+    get_as(url, policy, None, out)
+}
+
+/// As [`get`], asking with `user_agent` in place of DSA's own when one is given.
+pub fn get_as(
+    url: &str,
+    policy: &Policy,
+    user_agent: Option<&str>,
+    out: &mut dyn Write,
+) -> Result<u64, String> {
     let url_w = wide(url);
     let mut parts = URL_COMPONENTS {
         dwStructSize: std::mem::size_of::<URL_COMPONENTS>() as u32,
@@ -125,7 +135,11 @@ pub fn get(url: &str, policy: &Policy, out: &mut dyn Write) -> Result<u64, Strin
         (host, path)
     };
 
-    let agent = wide(&format!("DSA/{}", crate::VERSION));
+    let agent = wide(
+        &user_agent
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("DSA/{}", crate::VERSION)),
+    );
     // SAFETY: a NUL-terminated agent string; the proxy follows the system settings.
     let session = Handle::new(
         unsafe {
@@ -264,13 +278,22 @@ impl Default for WinHttpFetch {
 
 impl Fetch for WinHttpFetch {
     fn fetch(&self, url: &str, out: &mut dyn Write) -> Result<u64, String> {
+        self.fetch_as(url, None, out)
+    }
+
+    fn fetch_as(
+        &self,
+        url: &str,
+        user_agent: Option<&str>,
+        out: &mut dyn Write,
+    ) -> Result<u64, String> {
         let policy = Policy {
             timeout: self.timeout,
             https_only: false,
             follow_redirects: true,
             limit: None,
         };
-        get(url, &policy, out)
+        get_as(url, &policy, user_agent, out)
     }
 }
 
@@ -284,6 +307,20 @@ impl Fetch for UrlFetch {
         let lower = url.to_ascii_lowercase();
         if lower.starts_with("https://") || lower.starts_with("http://") {
             self.0.fetch(url, out)
+        } else {
+            dsa_host_core::update::store::FileFetch.fetch(url, out)
+        }
+    }
+
+    fn fetch_as(
+        &self,
+        url: &str,
+        user_agent: Option<&str>,
+        out: &mut dyn Write,
+    ) -> Result<u64, String> {
+        let lower = url.to_ascii_lowercase();
+        if lower.starts_with("https://") || lower.starts_with("http://") {
+            self.0.fetch_as(url, user_agent, out)
         } else {
             dsa_host_core::update::store::FileFetch.fetch(url, out)
         }

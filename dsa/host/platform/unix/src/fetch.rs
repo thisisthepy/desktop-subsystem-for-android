@@ -45,11 +45,25 @@ pub fn download_args(url: &str) -> Vec<String> {
 /// Writes what `url` holds to `out` and returns its length: web URLs through the `curl` at
 /// `curl`, anything else read directly as a file.
 pub fn fetch_with_curl(curl: &Path, url: &str, out: &mut dyn Write) -> Result<u64, String> {
+    fetch_with_curl_as(curl, url, None, out)
+}
+
+/// As [`fetch_with_curl`], asking with `user_agent` when one is given.
+pub fn fetch_with_curl_as(
+    curl: &Path,
+    url: &str,
+    user_agent: Option<&str>,
+    out: &mut dyn Write,
+) -> Result<u64, String> {
     use dsa_host_core::update::store::Fetch;
     if !is_web_url(url) {
         return FileFetch.fetch(url, out);
     }
-    let mut child = Command::new(curl)
+    let mut command = Command::new(curl);
+    if let Some(agent) = user_agent {
+        command.arg("--user-agent").arg(agent);
+    }
+    let mut child = command
         .args(download_args(url))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

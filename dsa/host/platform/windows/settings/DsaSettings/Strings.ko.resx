@@ -2617,4 +2617,31 @@ Android가 설치를 거부합니다.</value>
   <data name="ApkWindow_PickerAllFiles" xml:space="preserve">
     <value>모든 파일</value>
   </data>
+  <data name="AltStoresHeader.Text" xml:space="preserve">
+    <value>대체 스토어</value>
+  </data>
+  <data name="AltStoresCard.Description" xml:space="preserve">
+    <value>DSA가 스토어를 공식 사이트에서 받아 서명한 곳을 확인한 뒤 다른 앱처럼 설치합니다. DSA에는 이 스토어들이 들어 있지 않으며, 각 이름은 그 소유자의 상표입니다. 스토어는 앱 목록에서 제거합니다.</value>
+  </data>
+  <data name="AltStore_NotInstalled" xml:space="preserve">
+    <value>설치되지 않음</value>
+  </data>
+  <data name="AltStore_Installed" xml:space="preserve">
+    <value>설치됨</value>
+  </data>
+  <data name="AltStore_InstalledVersion" xml:space="preserve">
+    <value>설치됨, 버전 {0}</value>
+  </data>
+  <data name="AltStore_Installing" xml:space="preserve">
+    <value>받아서 설치하는 중…</value>
+  </data>
+  <data name="AltStore_Failed" xml:space="preserve">
+    <value>설치하지 못했습니다: {0}</value>
+  </data>
+  <data name="AltStoreInstallButton.Content" xml:space="preserve">
+    <value>설치</value>
+  </data>
+  <data name="AltStoreOpenButton.Content" xml:space="preserve">
+    <value>열기</value>
+  </data>
 </root>

@@ -11,6 +11,7 @@ final class AppModel: ObservableObject {
     let programUpdate: ProgramUpdateViewModel
     let settings: SettingsViewModel
     let gapps: GappsViewModel
+    let stores: StoresViewModel
     let widevine: WidevineViewModel
     let backup: BackupViewModel
     let memory: MemoryViewModel
@@ -33,6 +34,7 @@ final class AppModel: ObservableObject {
         settings = SettingsViewModel(service: service, text: appText)
         settings.isAdministrator = Shell.isAdministrator
         gapps = GappsViewModel(service: service, text: appText)
+        stores = StoresViewModel(service: service, text: appText)
         widevine = WidevineViewModel(service: service, text: appText)
         backup = BackupViewModel(service: service, text: appText)
         memory = MemoryViewModel(service: service, text: appText)

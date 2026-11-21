@@ -2619,4 +2619,31 @@ Android 会拒绝安装它。</value>
   <data name="ApkWindow_PickerAllFiles" xml:space="preserve">
     <value>所有文件</value>
   </data>
+  <data name="AltStoresHeader.Text" xml:space="preserve">
+    <value>其他应用商店</value>
+  </data>
+  <data name="AltStoresCard.Description" xml:space="preserve">
+    <value>DSA 从官方网站下载应用商店，确认签名者后，像其他应用一样安装。DSA 不附带这些应用商店，各名称是其所有者的商标。在应用列表中移除应用商店。</value>
+  </data>
+  <data name="AltStore_NotInstalled" xml:space="preserve">
+    <value>未安装</value>
+  </data>
+  <data name="AltStore_Installed" xml:space="preserve">
+    <value>已安装</value>
+  </data>
+  <data name="AltStore_InstalledVersion" xml:space="preserve">
+    <value>已安装，版本 {0}</value>
+  </data>
+  <data name="AltStore_Installing" xml:space="preserve">
+    <value>正在下载并安装…</value>
+  </data>
+  <data name="AltStore_Failed" xml:space="preserve">
+    <value>未安装：{0}</value>
+  </data>
+  <data name="AltStoreInstallButton.Content" xml:space="preserve">
+    <value>安装</value>
+  </data>
+  <data name="AltStoreOpenButton.Content" xml:space="preserve">
+    <value>打开</value>
+  </data>
 </root>

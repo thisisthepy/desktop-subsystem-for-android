@@ -1841,3 +1841,18 @@ msgstr "Theo mặc định (trong cửa sổ)"
 
 msgid "Android stops and starts again.\n\nIts app windows close. Open the apps again once it has started."
 msgstr "Android dừng rồi khởi động lại.\n\nCác cửa sổ ứng dụng của nó sẽ đóng. Hãy mở lại ứng dụng khi nó đã khởi động xong."
+
+msgid "Alternative stores"
+msgstr "Cửa hàng thay thế"
+
+msgid "DSA downloads a store from its official site, checks who signed it, and installs it like any other app. DSA does not ship these stores, and each name is a trademark of its owner. Remove a store from the list of apps."
+msgstr "DSA tải cửa hàng từ trang chính thức, kiểm tra ai đã ký và cài đặt như mọi ứng dụng khác. DSA không đi kèm các cửa hàng này, và mỗi tên là nhãn hiệu của chủ sở hữu. Gỡ cửa hàng trong danh sách ứng dụng."
+
+msgid "Installed, version {0}"
+msgstr "Đã cài đặt, phiên bản {0}"
+
+msgid "Downloading and installing…"
+msgstr "Đang tải và cài đặt…"
+
+msgid "Not installed: {0}"
+msgstr "Chưa cài đặt: {0}"

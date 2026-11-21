@@ -80,6 +80,7 @@ pub mod accessibility;
 pub mod adb_bridge;
 pub mod adb_discovery;
 pub mod addon_disk;
+pub mod alt_stores;
 pub mod android_presence;
 pub mod apk;
 pub mod apk_bundle;

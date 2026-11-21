@@ -1841,3 +1841,18 @@ msgstr "Seguir o padrão (dentro da janela)"
 
 msgid "Android stops and starts again.\n\nIts app windows close. Open the apps again once it has started."
 msgstr "O Android para e inicia novamente.\n\nAs janelas dos apps são fechadas. Abra os apps novamente quando ele tiver iniciado."
+
+msgid "Alternative stores"
+msgstr "Lojas alternativas"
+
+msgid "DSA downloads a store from its official site, checks who signed it, and installs it like any other app. DSA does not ship these stores, and each name is a trademark of its owner. Remove a store from the list of apps."
+msgstr "O DSA baixa uma loja do site oficial dela, verifica quem a assinou e a instala como qualquer outro app. O DSA não inclui essas lojas, e cada nome é marca registrada de seu proprietário. Remova uma loja pela lista de apps."
+
+msgid "Installed, version {0}"
+msgstr "Instalada, versão {0}"
+
+msgid "Downloading and installing…"
+msgstr "Baixando e instalando…"
+
+msgid "Not installed: {0}"
+msgstr "Não instalada: {0}"

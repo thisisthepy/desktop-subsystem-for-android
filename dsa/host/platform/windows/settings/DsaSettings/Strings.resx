@@ -2620,4 +2620,31 @@ Get the app's x86_64 or arm64-v8a build.</value>
   <data name="ApkWindow_PickerAllFiles" xml:space="preserve">
     <value>All files</value>
   </data>
+  <data name="AltStoresHeader.Text" xml:space="preserve">
+    <value>Alternative stores</value>
+  </data>
+  <data name="AltStoresCard.Description" xml:space="preserve">
+    <value>DSA downloads a store from its official site, checks who signed it, and installs it like any other app. DSA does not ship these stores, and each name is a trademark of its owner. Remove a store from the list of apps.</value>
+  </data>
+  <data name="AltStore_NotInstalled" xml:space="preserve">
+    <value>Not installed</value>
+  </data>
+  <data name="AltStore_Installed" xml:space="preserve">
+    <value>Installed</value>
+  </data>
+  <data name="AltStore_InstalledVersion" xml:space="preserve">
+    <value>Installed, version {0}</value>
+  </data>
+  <data name="AltStore_Installing" xml:space="preserve">
+    <value>Downloading and installing…</value>
+  </data>
+  <data name="AltStore_Failed" xml:space="preserve">
+    <value>Not installed: {0}</value>
+  </data>
+  <data name="AltStoreInstallButton.Content" xml:space="preserve">
+    <value>Install</value>
+  </data>
+  <data name="AltStoreOpenButton.Content" xml:space="preserve">
+    <value>Open</value>
+  </data>
 </root>

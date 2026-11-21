@@ -683,6 +683,9 @@ pub fn advanced(ctx: &Shared) -> gtk::Widget {
     // Google Play.
     google_play(ctx, &page);
 
+    // Alternative stores.
+    alt_stores(ctx, &page);
+
     // Protected content.
     widevine(ctx, &page);
 
@@ -1184,6 +1187,136 @@ fn google_play(ctx: &Shared, page: &Rc<Page>) {
         ctx,
         |c| c.gapps(),
         move |r| show(tr("Where Google Play stands could not be read"), r),
+    );
+}
+
+/// The alternative stores item, under Google Play: a row for each store with its plain name
+/// (no logo, as each name is its owner's trademark), where it stands, and Install or Open.
+/// A store is removed from the app list like any other app.
+fn alt_stores(ctx: &Shared, page: &Rc<Page>) {
+    let stores_group = group(
+        &tr("Alternative stores"),
+        Some(&tr("DSA downloads a store from its official site, checks who signed it, and installs it like any other app. DSA does not ship these stores, and each name is a trademark of its owner. Remove a store from the list of apps.")),
+    );
+    page.add(&stores_group);
+    type Row = (adw::ActionRow, gtk::Button, gtk::Button);
+    let rows: Rc<Vec<Row>> = Rc::new(
+        crate::model::AltStore::defaults()
+            .iter()
+            .map(|store| {
+                let (row, install) = button_row(&store.name, "", &tr("Install"));
+                install.add_css_class("suggested-action");
+                let open = item_button(&tr("Open"), &store.name);
+                open.set_visible(false);
+                row.add_suffix(&open);
+                stores_group.add(&row);
+                (row, install, open)
+            })
+            .collect(),
+    );
+    let now: Rc<RefCell<Vec<crate::model::AltStore>>> =
+        Rc::new(RefCell::new(crate::model::AltStore::defaults()));
+    let installing: Rc<RefCell<Option<String>>> = Rc::default();
+    let failures: Rc<RefCell<Vec<(String, crate::api::Failure)>>> = Rc::default();
+    // Every row follows what is installed; no button works while a store is being installed.
+    let show: Rc<dyn Fn()> = {
+        let (rows, now, installing, failures) = (
+            rows.clone(),
+            now.clone(),
+            installing.clone(),
+            failures.clone(),
+        );
+        Rc::new(move || {
+            let busy = installing.borrow().is_some();
+            for (store, (row, install, open)) in now.borrow().iter().zip(rows.iter()) {
+                let failures = failures.borrow();
+                let failure = failures
+                    .iter()
+                    .find(|(id, _)| id == &store.id)
+                    .map(|(_, f)| f);
+                let this = installing.borrow().as_deref() == Some(store.id.as_str());
+                row.set_title(&store.name);
+                row.set_subtitle(&view::alt_store_status(store, this, failure));
+                install.set_visible(!store.installed);
+                install.set_sensitive(store.can_install(busy));
+                open.set_visible(store.installed);
+                open.set_sensitive(store.can_open(busy));
+            }
+        })
+    };
+    for (index, (_, install, open)) in rows.iter().enumerate() {
+        {
+            let (ctx, now, installing, failures, show) = (
+                ctx.clone(),
+                now.clone(),
+                installing.clone(),
+                failures.clone(),
+                show.clone(),
+            );
+            install.connect_clicked(move |_| {
+                let Some(id) = now.borrow().get(index).map(|s| s.id.clone()) else {
+                    return;
+                };
+                *installing.borrow_mut() = Some(id.clone());
+                failures.borrow_mut().retain(|(f, _)| f != &id);
+                show();
+                let (now, installing, failures, show) = (
+                    now.clone(),
+                    installing.clone(),
+                    failures.clone(),
+                    show.clone(),
+                );
+                let asked = id.clone();
+                request(
+                    &ctx,
+                    move |c| c.install_store(&asked),
+                    move |r| {
+                        *installing.borrow_mut() = None;
+                        match r {
+                            Ok(stores) if !stores.is_empty() => *now.borrow_mut() = stores,
+                            Ok(_) => {}
+                            Err(failure) => failures.borrow_mut().push((id, failure)),
+                        }
+                        show();
+                    },
+                );
+            });
+        }
+        {
+            let (ctx, now, failures, show) =
+                (ctx.clone(), now.clone(), failures.clone(), show.clone());
+            open.connect_clicked(move |_| {
+                let Some(store) = now.borrow().get(index).cloned() else {
+                    return;
+                };
+                let (failures, show) = (failures.clone(), show.clone());
+                let package = store.package.clone();
+                request(
+                    &ctx,
+                    move |c| c.launch(&package),
+                    move |r| {
+                        failures.borrow_mut().retain(|(f, _)| f != &store.id);
+                        if let Err(failure) = r {
+                            failures.borrow_mut().push((store.id, failure));
+                        }
+                        show();
+                    },
+                );
+            });
+        }
+    }
+    show();
+    request(
+        ctx,
+        |c| c.stores(),
+        move |r| {
+            if let Ok(stores) = r {
+                if stores.len() == now.borrow().len() {
+                    *now.borrow_mut() = stores;
+                }
+            }
+            show();
+        },
     );
 }
 

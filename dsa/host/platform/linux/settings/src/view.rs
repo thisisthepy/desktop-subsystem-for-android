@@ -6,8 +6,8 @@ use std::collections::VecDeque;
 use crate::api::{Failure, Problem};
 use crate::i18n::{tr, trf};
 use crate::model::{
-    AdbAutoConnectState, AndroidVersion, App, AppWindow, ArmTranslation, Backup, BackupJob,
-    DnsResolver, DpiScaling, FullScreenPlace, Gapps, GappsState, GuestMemory, HostRole,
+    AdbAutoConnectState, AltStore, AndroidVersion, App, AppWindow, ArmTranslation, Backup,
+    BackupJob, DnsResolver, DpiScaling, FullScreenPlace, Gapps, GappsState, GuestMemory, HostRole,
     ImportedCertificate, KeyProtection, KeyProtectionShown, Memory, MemoryShare, Network,
     NetworkMode, Outcome, ProgramUpdateAnswer, ProgramUpdatePhase, State, Status, ALL_FOLDERS,
 };
@@ -1013,6 +1013,25 @@ pub fn gapps_source(gapps: &Gapps) -> String {
             trf("Downloaded from the LiteGapps project: {0}", &[file])
         }
         None => String::new(),
+    }
+}
+
+/// One line on where an alternative store stands: being installed, why its install failed,
+/// installed (with its version), or not installed.
+pub fn alt_store_status(store: &AltStore, installing: bool, failure: Option<&Failure>) -> String {
+    if installing {
+        return tr("Downloading and installing…");
+    }
+    if let Some(failure) = failure {
+        return trf(
+            "Not installed: {0}",
+            &[&problem_text(failure).replace('\n', " ")],
+        );
+    }
+    match (store.installed, store.version.is_empty()) {
+        (true, false) => trf("Installed, version {0}", &[&store.version]),
+        (true, true) => tr("Installed"),
+        (false, _) => tr("Not installed"),
     }
 }
 

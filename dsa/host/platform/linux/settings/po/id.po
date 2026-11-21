@@ -1841,3 +1841,18 @@ msgstr "Ikuti bawaan (di dalam jendela)"
 
 msgid "Android stops and starts again.\n\nIts app windows close. Open the apps again once it has started."
 msgstr "Android berhenti lalu dimulai lagi.\n\nJendela aplikasinya ditutup. Buka aplikasi lagi setelah Android selesai dimulai."
+
+msgid "Alternative stores"
+msgstr "Toko alternatif"
+
+msgid "DSA downloads a store from its official site, checks who signed it, and installs it like any other app. DSA does not ship these stores, and each name is a trademark of its owner. Remove a store from the list of apps."
+msgstr "DSA mengunduh toko dari situs resminya, memeriksa siapa yang menandatanganinya, lalu memasangnya seperti aplikasi lain. DSA tidak menyertakan toko-toko ini, dan setiap nama adalah merek dagang pemiliknya. Hapus toko dari daftar aplikasi."
+
+msgid "Installed, version {0}"
+msgstr "Terpasang, versi {0}"
+
+msgid "Downloading and installing…"
+msgstr "Mengunduh dan memasang…"
+
+msgid "Not installed: {0}"
+msgstr "Tidak terpasang: {0}"

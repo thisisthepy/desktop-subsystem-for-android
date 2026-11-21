@@ -364,6 +364,13 @@
 //! nothing to fetch. The `DSA_GOOGLE_REPOSITORY` environment variable points at a mirror of
 //! Google's repository (a URL or a folder) instead.
 //!
+//! `dsa stores status` (or `dsa stores`) says whether each alternative store DSA can install
+//! (ONE store, Aurora Store, F-Droid) is installed, and which version. `dsa stores install
+//! onestore|aurora|fdroid` downloads the store's newest APK from the project's official address,
+//! checks that it is the store's package signed by the certificate DSA records for it, and
+//! installs it as `dsa install` does. DSA ships none of them. A store is removed like any other
+//! app, with `dsa apps uninstall`.
+//!
 //! `dsa gapps status` (or `dsa gapps`) says whether Google Play is installed: which LiteGapps
 //! build, for which Android, where it came from, whether the running Android has it, and the
 //! Android ID Google's page for uncertified devices asks for. DSA ships no Google app.
@@ -443,6 +450,7 @@ use std::fmt::Write as _;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use dsa_host_core::alt_stores;
 use dsa_host_core::apk::{InstallKind, InstallOutcome, InstalledPackage};
 use dsa_host_core::apk_bundle::{Bundle, Device, InstallFile, Refusal, Selection};
 use dsa_host_core::apk_info::{signing, ApkInfo, Icon, Layer, Vector};
@@ -488,6 +496,7 @@ pub const USAGE: &str = "usage: dsa <status [--no-start] | start | stop | freeze
      logcat [-d] [-b <buffers>] [<tag>[:<priority>] ...] | logs collect -o <file.zip> | \
      arm-translation [status | install <folder> | fetch google [--yes] | remove | use-default] | \
      files [open] | gapps [status | install [--progress] | remove] | \
+     stores [status | install onestore|aurora|fdroid [--progress]] | \
      drm widevine [status | install [--yes] | remove] | reset-data --yes | \
      backup [status | on | off [--delete-backups] | now | restore | key show | \
      key import <recovery key>] | \
@@ -558,6 +567,11 @@ pub enum Command {
     GappsInstall,
     /// Remove Google Play.
     GappsRemove,
+    /// Say whether each alternative store is installed.
+    StoresStatus,
+    /// Download an alternative store, named in [`Invocation::package`], check it, and install
+    /// it.
+    StoresInstall,
     /// Say whether Widevine is installed, and from which image.
     WidevineStatus,
     /// Take Widevine out of Google's emulator image and install it.
@@ -1309,6 +1323,32 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
                     }
                 });
             }
+            "stores" if command.is_none() => {
+                // A bare option such as --json belongs to the default action, status.
+                let action = match args.peek() {
+                    Some(next) if next.starts_with("--") => None,
+                    _ => args.next().map(String::as_str),
+                };
+                command = Some(match action {
+                    None | Some("status") => Command::StoresStatus,
+                    Some("install") => {
+                        let name = args.next().ok_or_else(|| {
+                            format!(
+                                "dsa stores install needs the store: onestore, aurora or \
+                                 fdroid\n{USAGE}"
+                            )
+                        })?;
+                        let id = alt_stores::StoreId::parse(name)?;
+                        package = Some(id.code().to_string());
+                        Command::StoresInstall
+                    }
+                    Some(other) => {
+                        return Err(format!(
+                            "dsa stores takes status or install, not {other:?}\n{USAGE}"
+                        ))
+                    }
+                });
+            }
             "backup" if command.is_none() => {
                 let action = match args.peek() {
                     Some(next) if next.starts_with("--") => None,
@@ -1529,7 +1569,12 @@ pub fn parse(args: &[String]) -> Result<Invocation, String> {
             "--no-start" if command == Some(Command::Status) => no_start = true,
             "--delete-backups" if command == Some(Command::BackupOff) => delete_backups = true,
             "reset-data" if command.is_none() => command = Some(Command::ResetData),
-            "--progress" if matches!(command, Some(Command::Install | Command::GappsInstall)) => {
+            "--progress"
+                if matches!(
+                    command,
+                    Some(Command::Install | Command::GappsInstall | Command::StoresInstall)
+                ) =>
+            {
                 progress = true
             }
             "--wait-first-frame" if command == Some(Command::Launch) => wait_first_frame = true,
@@ -4518,6 +4563,110 @@ fn show_gapps(invocation: &Invocation, status: &GappsStatus, done: Option<&str>)
     }
 }
 
+/// Where each alternative store stands, as one JSON object: `stores`, in the order the settings
+/// apps show them, each with its `id`, `name`, `package`, `homepage`, whether it is
+/// `installed`, and its `version`.
+pub fn stores_json(states: &[(alt_stores::Store, alt_stores::State)]) -> Value {
+    let stores: Vec<Value> = states
+        .iter()
+        .map(|(store, state)| {
+            let version = match state {
+                alt_stores::State::Installed { version } => version.as_str(),
+                alt_stores::State::NotInstalled => "",
+            };
+            json!({
+                "id": store.id.code(),
+                "name": store.name,
+                "package": store.package,
+                "homepage": store.homepage,
+                "installed": matches!(state, alt_stores::State::Installed { .. }),
+                "version": version,
+            })
+        })
+        .collect();
+    json!({ "stores": stores })
+}
+
+/// Where each alternative store stands, one line each.
+pub fn describe_stores(states: &[(alt_stores::Store, alt_stores::State)]) -> String {
+    let mut lines = vec!["Alternative stores (dsa stores install <store>):".to_string()];
+    for (store, state) in states {
+        let what = match state {
+            alt_stores::State::Installed { version } if !version.is_empty() => {
+                format!("installed, {version}")
+            }
+            alt_stores::State::Installed { .. } => "installed".to_string(),
+            alt_stores::State::NotInstalled => "not installed".to_string(),
+        };
+        lines.push(format!("  {} ({}): {what}", store.name, store.id.code()));
+    }
+    lines.push("A store is removed like any other app: dsa apps uninstall <package>".into());
+    lines.join("\n")
+}
+
+fn show_stores(
+    invocation: &Invocation,
+    states: &[(alt_stores::Store, alt_stores::State)],
+    done: Option<&str>,
+) -> String {
+    if invocation.json {
+        stores_json(states).to_string()
+    } else {
+        match done {
+            Some(done) => format!("{done}\n{}", describe_stores(states)),
+            None => describe_stores(states),
+        }
+    }
+}
+
+/// `dsa stores install <store>`: downloads the store's newest APK from its official address
+/// into a folder of its own, checks its package and signing certificate, and installs it as
+/// `dsa install` does. The folder, with the download, is removed whatever happens.
+fn install_store(
+    invocation: &Invocation,
+    client: HostApiClient,
+    connector: &mut dyn Connector,
+) -> Result<String, String> {
+    let id = alt_stores::StoreId::parse(invocation.package.as_deref().unwrap_or_default())?;
+    let store = id.store();
+    if invocation.progress {
+        println!("stage downloading");
+    }
+    let dir = user_tmp()?.join(format!("dsa-store-{}-{}", id.code(), std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let fetch = web_fetch();
+    let result = alt_stores::download(&store, &*fetch, &dir).and_then(|path| {
+        let mut install_as = invocation.clone();
+        install_as.command = Command::Install;
+        install_as.file = Some(path);
+        install_as.package = None;
+        install_as.json = false;
+        install(&install_as, client, connector)
+    });
+    let _ = std::fs::remove_dir_all(&dir);
+    result?;
+    let mut installed = connect(connector, None, false, Duration::from_secs(10))
+        .ok()
+        .and_then(|mut client| client.installed_apps().ok().flatten())
+        .unwrap_or_default();
+    if !installed
+        .iter()
+        .any(|app| app.package_name == store.package)
+    {
+        // The service's list may not have heard of the new app yet; it is installed.
+        installed.push(dsa_host_core::tasks::AppInfo {
+            package_name: store.package.to_string(),
+            ..Default::default()
+        });
+    }
+    let done = format!("Installed {}", store.name);
+    Ok(show_stores(
+        invocation,
+        &alt_stores::states(&installed),
+        Some(&done),
+    ))
+}
+
 /// Where ARM translation stands as one JSON object.
 pub fn arm_translation_json(status: &ArmTranslationStatus) -> Value {
     let package_json = |package: &arm_translation::Package| {
@@ -4629,12 +4778,25 @@ struct CurlFetch;
 #[cfg(all(unix, not(target_os = "macos")))]
 impl Fetch for CurlFetch {
     fn fetch(&self, url: &str, out: &mut dyn std::io::Write) -> Result<u64, String> {
+        self.fetch_as(url, None, out)
+    }
+
+    fn fetch_as(
+        &self,
+        url: &str,
+        user_agent: Option<&str>,
+        out: &mut dyn std::io::Write,
+    ) -> Result<u64, String> {
         use std::io::Read;
         use std::process::Stdio;
         if !url.starts_with("https://") {
             return dsa_host_core::update::store::FileFetch.fetch(url, out);
         }
-        let mut child = std::process::Command::new("curl")
+        let mut command = std::process::Command::new("curl");
+        if let Some(agent) = user_agent {
+            command.arg("--user-agent").arg(agent);
+        }
+        let mut child = command
             .args(["--fail", "--silent", "--show-error", "--location"])
             .args(["--proto", "=https", "--proto-redir", "=https"])
             .args(["--retry", "3", "--connect-timeout", "30", "--", url])
@@ -5501,6 +5663,18 @@ pub fn run_with_starter(
             return Ok(show_gapps(invocation, &status, None));
         }
         Command::GappsInstall => return install_gapps(invocation, client, connector),
+        Command::StoresStatus => {
+            let installed = client
+                .installed_apps()
+                .map_err(|e| e.to_string())?
+                .unwrap_or_default();
+            return Ok(show_stores(
+                invocation,
+                &alt_stores::states(&installed),
+                None,
+            ));
+        }
+        Command::StoresInstall => return install_store(invocation, client, connector),
         Command::GappsRemove => return remove_gapps(invocation, client),
         Command::WidevineStatus => {
             let status = client.widevine().map_err(|e| e.to_string())?;

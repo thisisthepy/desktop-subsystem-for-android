@@ -1841,3 +1841,18 @@ msgstr "Seguir el valor predeterminado (dentro de la ventana)"
 
 msgid "Android stops and starts again.\n\nIts app windows close. Open the apps again once it has started."
 msgstr "Android se detiene y vuelve a iniciarse.\n\nSus ventanas de aplicaciones se cierran. Vuelve a abrir las aplicaciones cuando haya iniciado."
+
+msgid "Alternative stores"
+msgstr "Tiendas alternativas"
+
+msgid "DSA downloads a store from its official site, checks who signed it, and installs it like any other app. DSA does not ship these stores, and each name is a trademark of its owner. Remove a store from the list of apps."
+msgstr "DSA descarga una tienda desde su sitio oficial, comprueba quién la firmó y la instala como cualquier otra app. DSA no incluye estas tiendas y cada nombre es una marca de su propietario. Una tienda se quita desde la lista de apps."
+
+msgid "Installed, version {0}"
+msgstr "Instalada, versión {0}"
+
+msgid "Downloading and installing…"
+msgstr "Descargando e instalando…"
+
+msgid "Not installed: {0}"
+msgstr "No instalada: {0}"

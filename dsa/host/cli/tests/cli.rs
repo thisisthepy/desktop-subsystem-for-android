@@ -4273,6 +4273,47 @@ fn fr32_dsa_gapps_commands_are_parsed() {
     assert!(parse(&args("gapps enable")).is_err());
 }
 
+#[test]
+fn fr43_dsa_stores_install_names_one_of_three_stores() {
+    assert_eq!(parse(&args("stores")).unwrap().command, Cmd::StoresStatus);
+    assert_eq!(
+        parse(&args("stores --json")).unwrap().command,
+        Cmd::StoresStatus
+    );
+    for (name, code) in [
+        ("onestore", "onestore"),
+        ("Aurora", "aurora"),
+        ("fdroid", "fdroid"),
+    ] {
+        let install = parse(&args(&format!("stores install {name} --progress --json"))).unwrap();
+        assert_eq!(install.command, Cmd::StoresInstall);
+        assert_eq!(install.package.as_deref(), Some(code));
+        assert!(install.progress);
+        assert!(install.json);
+    }
+    assert!(parse(&args("stores install")).is_err());
+    assert!(parse(&args("stores install playstore")).is_err());
+    assert!(parse(&args("stores remove aurora")).is_err());
+}
+
+#[test]
+fn fr43_dsa_stores_json_lists_every_store_with_its_state() {
+    use dsa_host_core::alt_stores;
+    let app = dsa_host_core::tasks::AppInfo {
+        package_name: "com.aurora.store".into(),
+        version_name: "4.8.4".into(),
+        ..Default::default()
+    };
+    let json = dsa_cli::stores_json(&alt_stores::states(&[app]));
+    let stores = json["stores"].as_array().unwrap();
+    let ids: Vec<&str> = stores.iter().map(|s| s["id"].as_str().unwrap()).collect();
+    assert_eq!(ids, ["onestore", "aurora", "fdroid"]);
+    assert_eq!(stores[0]["installed"], false);
+    assert_eq!(stores[1]["installed"], true);
+    assert_eq!(stores[1]["version"], "4.8.4");
+    assert_eq!(stores[2]["package"], "org.fdroid.fdroid");
+}
+
 /// LiteGapps' file host, from memory: one x86_64 build for API level 36.
 struct FakeLiteGapps(std::collections::HashMap<String, Vec<u8>>);
 

@@ -2619,4 +2619,31 @@ Dapatkan build x86_64 atau arm64-v8a dari aplikasi tersebut.</value>
   <data name="ApkWindow_PickerAllFiles" xml:space="preserve">
     <value>Semua file</value>
   </data>
+  <data name="AltStoresHeader.Text" xml:space="preserve">
+    <value>Toko alternatif</value>
+  </data>
+  <data name="AltStoresCard.Description" xml:space="preserve">
+    <value>DSA mengunduh toko dari situs resminya, memeriksa siapa yang menandatanganinya, lalu memasangnya seperti aplikasi lain. DSA tidak menyertakan toko-toko ini, dan setiap nama adalah merek dagang pemiliknya. Hapus toko dari daftar aplikasi.</value>
+  </data>
+  <data name="AltStore_NotInstalled" xml:space="preserve">
+    <value>Tidak terpasang</value>
+  </data>
+  <data name="AltStore_Installed" xml:space="preserve">
+    <value>Terpasang</value>
+  </data>
+  <data name="AltStore_InstalledVersion" xml:space="preserve">
+    <value>Terpasang, versi {0}</value>
+  </data>
+  <data name="AltStore_Installing" xml:space="preserve">
+    <value>Mengunduh dan memasang…</value>
+  </data>
+  <data name="AltStore_Failed" xml:space="preserve">
+    <value>Tidak terpasang: {0}</value>
+  </data>
+  <data name="AltStoreInstallButton.Content" xml:space="preserve">
+    <value>Pasang</value>
+  </data>
+  <data name="AltStoreOpenButton.Content" xml:space="preserve">
+    <value>Buka</value>
+  </data>
 </root>

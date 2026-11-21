@@ -16,4 +16,13 @@ impl Fetch for CurlFetch {
     fn fetch(&self, url: &str, out: &mut dyn Write) -> Result<u64, String> {
         dsa_host_unix::fetch::fetch_with_curl(Path::new("/usr/bin/curl"), url, out)
     }
+
+    fn fetch_as(
+        &self,
+        url: &str,
+        user_agent: Option<&str>,
+        out: &mut dyn Write,
+    ) -> Result<u64, String> {
+        dsa_host_unix::fetch::fetch_with_curl_as(Path::new("/usr/bin/curl"), url, user_agent, out)
+    }
 }

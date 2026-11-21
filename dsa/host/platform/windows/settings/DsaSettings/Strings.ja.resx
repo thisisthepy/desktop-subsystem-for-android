@@ -2619,4 +2619,31 @@ Android はこれを拒否します。</value>
   <data name="ApkWindow_PickerAllFiles" xml:space="preserve">
     <value>すべてのファイル</value>
   </data>
+  <data name="AltStoresHeader.Text" xml:space="preserve">
+    <value>代替ストア</value>
+  </data>
+  <data name="AltStoresCard.Description" xml:space="preserve">
+    <value>DSA はストアを公式サイトからダウンロードし、署名者を確認してから、ほかのアプリと同じようにインストールします。DSA にはこれらのストアは含まれておらず、各名称はその所有者の商標です。ストアはアプリの一覧から削除します。</value>
+  </data>
+  <data name="AltStore_NotInstalled" xml:space="preserve">
+    <value>未インストール</value>
+  </data>
+  <data name="AltStore_Installed" xml:space="preserve">
+    <value>インストール済み</value>
+  </data>
+  <data name="AltStore_InstalledVersion" xml:space="preserve">
+    <value>インストール済み、バージョン {0}</value>
+  </data>
+  <data name="AltStore_Installing" xml:space="preserve">
+    <value>ダウンロードしてインストールしています…</value>
+  </data>
+  <data name="AltStore_Failed" xml:space="preserve">
+    <value>インストールできませんでした: {0}</value>
+  </data>
+  <data name="AltStoreInstallButton.Content" xml:space="preserve">
+    <value>インストール</value>
+  </data>
+  <data name="AltStoreOpenButton.Content" xml:space="preserve">
+    <value>開く</value>
+  </data>
 </root>

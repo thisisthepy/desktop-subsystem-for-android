@@ -2619,4 +2619,31 @@ Hãy lấy bản dựng x86_64 hoặc arm64-v8a của ứng dụng.</value>
   <data name="ApkWindow_PickerAllFiles" xml:space="preserve">
     <value>Tất cả tệp</value>
   </data>
+  <data name="AltStoresHeader.Text" xml:space="preserve">
+    <value>Cửa hàng thay thế</value>
+  </data>
+  <data name="AltStoresCard.Description" xml:space="preserve">
+    <value>DSA tải cửa hàng từ trang chính thức, kiểm tra ai đã ký và cài đặt như mọi ứng dụng khác. DSA không đi kèm các cửa hàng này, và mỗi tên là nhãn hiệu của chủ sở hữu. Gỡ cửa hàng trong danh sách ứng dụng.</value>
+  </data>
+  <data name="AltStore_NotInstalled" xml:space="preserve">
+    <value>Chưa cài đặt</value>
+  </data>
+  <data name="AltStore_Installed" xml:space="preserve">
+    <value>Đã cài đặt</value>
+  </data>
+  <data name="AltStore_InstalledVersion" xml:space="preserve">
+    <value>Đã cài đặt, phiên bản {0}</value>
+  </data>
+  <data name="AltStore_Installing" xml:space="preserve">
+    <value>Đang tải và cài đặt…</value>
+  </data>
+  <data name="AltStore_Failed" xml:space="preserve">
+    <value>Chưa cài đặt: {0}</value>
+  </data>
+  <data name="AltStoreInstallButton.Content" xml:space="preserve">
+    <value>Cài đặt</value>
+  </data>
+  <data name="AltStoreOpenButton.Content" xml:space="preserve">
+    <value>Mở</value>
+  </data>
 </root>

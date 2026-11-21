@@ -1841,3 +1841,18 @@ msgstr "依循預設值（在視窗內）"
 
 msgid "Android stops and starts again.\n\nIts app windows close. Open the apps again once it has started."
 msgstr "Android 會停止並重新啟動。\n\n它的應用程式視窗會關閉。啟動完成後，請重新開啟應用程式。"
+
+msgid "Alternative stores"
+msgstr "其他應用程式商店"
+
+msgid "DSA downloads a store from its official site, checks who signed it, and installs it like any other app. DSA does not ship these stores, and each name is a trademark of its owner. Remove a store from the list of apps."
+msgstr "DSA 會從官方網站下載應用程式商店，確認簽署者後，像其他應用程式一樣安裝。DSA 不隨附這些商店，各名稱為其所有者的商標。請在應用程式清單中移除商店。"
+
+msgid "Installed, version {0}"
+msgstr "已安裝，版本 {0}"
+
+msgid "Downloading and installing…"
+msgstr "正在下載並安裝…"
+
+msgid "Not installed: {0}"
+msgstr "未安裝：{0}"

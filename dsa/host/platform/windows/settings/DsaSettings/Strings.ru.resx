@@ -2619,4 +2619,31 @@ Android его отклонит.</value>
   <data name="ApkWindow_PickerAllFiles" xml:space="preserve">
     <value>Все файлы</value>
   </data>
+  <data name="AltStoresHeader.Text" xml:space="preserve">
+    <value>Альтернативные магазины</value>
+  </data>
+  <data name="AltStoresCard.Description" xml:space="preserve">
+    <value>DSA скачивает магазин с его официального сайта, проверяет, кем он подписан, и устанавливает его как любое другое приложение. DSA не поставляет эти магазины, и каждое название является товарным знаком своего владельца. Удалить магазин можно в списке приложений.</value>
+  </data>
+  <data name="AltStore_NotInstalled" xml:space="preserve">
+    <value>Не установлен</value>
+  </data>
+  <data name="AltStore_Installed" xml:space="preserve">
+    <value>Установлен</value>
+  </data>
+  <data name="AltStore_InstalledVersion" xml:space="preserve">
+    <value>Установлен, версия {0}</value>
+  </data>
+  <data name="AltStore_Installing" xml:space="preserve">
+    <value>Загрузка и установка…</value>
+  </data>
+  <data name="AltStore_Failed" xml:space="preserve">
+    <value>Не установлен: {0}</value>
+  </data>
+  <data name="AltStoreInstallButton.Content" xml:space="preserve">
+    <value>Установить</value>
+  </data>
+  <data name="AltStoreOpenButton.Content" xml:space="preserve">
+    <value>Открыть</value>
+  </data>
 </root>

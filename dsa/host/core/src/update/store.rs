@@ -28,6 +28,18 @@ use super::{from_hex, to_hex, UpdateError};
 pub trait Fetch {
     /// Writes the body of `url` to `out`, returning how many bytes were written.
     fn fetch(&self, url: &str, out: &mut dyn Write) -> Result<u64, String>;
+
+    /// As [`Fetch::fetch`], asking with `user_agent` when one is given, for a server that
+    /// serves a file to some browsers only. A fetcher that cannot set one fetches as usual.
+    fn fetch_as(
+        &self,
+        url: &str,
+        user_agent: Option<&str>,
+        out: &mut dyn Write,
+    ) -> Result<u64, String> {
+        let _ = user_agent;
+        self.fetch(url, out)
+    }
 }
 
 /// Fetches `file:` URLs and plain paths, for a local mirror and for tests.

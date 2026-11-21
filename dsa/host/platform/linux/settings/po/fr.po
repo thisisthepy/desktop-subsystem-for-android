@@ -1841,3 +1841,18 @@ msgstr "Suivre le paramètre par défaut (dans la fenêtre)"
 
 msgid "Android stops and starts again.\n\nIts app windows close. Open the apps again once it has started."
 msgstr "Android s'arrête puis redémarre.\n\nSes fenêtres d'applications se ferment. Rouvrez les applications une fois qu'il a démarré."
+
+msgid "Alternative stores"
+msgstr "Magasins alternatifs"
+
+msgid "DSA downloads a store from its official site, checks who signed it, and installs it like any other app. DSA does not ship these stores, and each name is a trademark of its owner. Remove a store from the list of apps."
+msgstr "DSA télécharge un magasin depuis son site officiel, vérifie qui l'a signé et l'installe comme toute autre app. DSA ne fournit pas ces magasins, et chaque nom est une marque de son propriétaire. Un magasin se supprime depuis la liste des apps."
+
+msgid "Installed, version {0}"
+msgstr "Installé, version {0}"
+
+msgid "Downloading and installing…"
+msgstr "Téléchargement et installation…"
+
+msgid "Not installed: {0}"
+msgstr "Non installé : {0}"
