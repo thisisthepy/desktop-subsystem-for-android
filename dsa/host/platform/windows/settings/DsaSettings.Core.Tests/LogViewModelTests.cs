@@ -52,6 +52,39 @@ public class LogViewModelTests
     }
 
     [Fact]
+    public void Nfr1_leaving_the_logs_page_lets_go_of_its_lines()
+    {
+        var (model, _, _) = Make();
+        model.AddMany(new[] { Record("A", "one"), Record("B", "two") });
+        model.Filter = "zzz";
+        model.Filter = "";
+        Assert.Equal(2, model.Lines.Count);
+        model.Release();
+        Assert.Empty(model.Lines);
+        Assert.False(model.IsReading);
+        // Nothing read before is shown again: the filter rebuilds from what is kept.
+        model.Filter = "o";
+        Assert.Empty(model.Lines);
+        var page = File.ReadAllText(Path.Combine(FindSettings(), "DsaSettings", "Pages", "LogsPage.xaml.cs"));
+        Assert.Contains("ViewModel.Release();", page);
+    }
+
+    private static string FindSettings()
+    {
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            foreach (var candidate in new[] { dir.FullName, Path.Combine(dir.FullName, "host", "platform", "windows", "settings") })
+            {
+                if (File.Exists(Path.Combine(candidate, "DsaSettings", "Pages", "LogsPage.xaml.cs")))
+                {
+                    return candidate;
+                }
+            }
+        }
+        throw new DirectoryNotFoundException("DsaSettings");
+    }
+
+    [Fact]
     public void Fr21_copying_selected_lines_gives_each_whole_line_in_page_order()
     {
         var (model, _, _) = Make();

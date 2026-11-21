@@ -51,6 +51,10 @@ public partial class MainWindow : FluentWindow
         // Pages sit 56 px from the edges in a wide window and 36 px in a narrow one, as the
         // Settings app's do; 1008 px is WinUI's wide breakpoint.
         SizeChanged += (_, e) => ApplyPageMargins(e.NewSize.Width);
+        // Memory goes back to Windows while the window is minimised or hidden, and the heap is
+        // compacted after each page change, once the page left has let go of its controls.
+        WorkingSetTrim.Attach(this);
+        Navigation.Navigated += (_, _) => WorkingSetTrim.PageLeft(this);
         Loaded += (_, _) =>
         {
             // The watcher follows changes; the theme to start with is the apps' setting, which

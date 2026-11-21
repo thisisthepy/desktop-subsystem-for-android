@@ -24,3 +24,26 @@ public static class IconDecodeSize
         return sourcePixels > 0 ? Math.Min(wanted, sourcePixels) : wanted;
     }
 }
+
+/// <summary>What the settings app gives back to Windows after something in its window changes.
+/// A page that is left leaves its controls and their data to the garbage collector; the window
+/// stays on screen, so only the heap is compacted. A minimised or hidden window draws nothing
+/// until it comes back, so its working set goes back to Windows as well; the pages it touches
+/// again come back on use.</summary>
+public enum WindowChange
+{
+    PageLeft,
+    Minimized,
+    Hidden,
+    Restored,
+}
+
+public readonly record struct MemoryTrim(bool CompactHeap, bool EmptyWorkingSet)
+{
+    public static MemoryTrim After(WindowChange change) => change switch
+    {
+        WindowChange.PageLeft => new(CompactHeap: true, EmptyWorkingSet: false),
+        WindowChange.Minimized or WindowChange.Hidden => new(CompactHeap: true, EmptyWorkingSet: true),
+        _ => new(CompactHeap: false, EmptyWorkingSet: false),
+    };
+}

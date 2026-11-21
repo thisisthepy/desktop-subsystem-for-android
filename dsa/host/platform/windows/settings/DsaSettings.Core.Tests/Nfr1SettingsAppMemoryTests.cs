@@ -73,6 +73,39 @@ public class Nfr1SettingsAppMemoryTests
     }
 
     [Fact]
+    public void Nfr1_the_settings_app_renders_in_software_before_its_first_window()
+    {
+        var app = File.ReadAllText(Find("DsaSettings", "App.xaml.cs"));
+        var software = app.IndexOf("RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly",
+            StringComparison.Ordinal);
+        Assert.True(software >= 0, "the settings app does not set software rendering");
+        Assert.True(software < app.IndexOf("new MainWindow()", StringComparison.Ordinal));
+        Assert.True(software < app.IndexOf("base.OnStartup(e)", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Nfr1_a_minimised_or_hidden_window_gives_its_memory_back()
+    {
+        Assert.Equal(new MemoryTrim(true, true), MemoryTrim.After(WindowChange.Minimized));
+        Assert.Equal(new MemoryTrim(true, true), MemoryTrim.After(WindowChange.Hidden));
+        Assert.Equal(new MemoryTrim(false, false), MemoryTrim.After(WindowChange.Restored));
+        var window = File.ReadAllText(Find("DsaSettings", "MainWindow.xaml.cs"));
+        Assert.Contains("WorkingSetTrim.Attach(this)", window);
+        var trim = File.ReadAllText(Find("DsaSettings", "WorkingSetTrim.cs"));
+        Assert.Contains("SetProcessWorkingSetSize(GetCurrentProcess(), -1, -1)", trim);
+    }
+
+    [Fact]
+    public void Nfr1_the_heap_is_compacted_after_a_page_is_left()
+    {
+        Assert.Equal(new MemoryTrim(true, false), MemoryTrim.After(WindowChange.PageLeft));
+        var window = File.ReadAllText(Find("DsaSettings", "MainWindow.xaml.cs"));
+        Assert.Contains("Navigation.Navigated += (_, _) => WorkingSetTrim.PageLeft(this)", window);
+        var trim = File.ReadAllText(Find("DsaSettings", "WorkingSetTrim.cs"));
+        Assert.Contains("GCLargeObjectHeapCompactionMode.CompactOnce", trim);
+    }
+
+    [Fact]
     public void Nfr1_the_settings_app_runs_with_a_small_dotnet_footprint()
     {
         var project = XDocument.Load(Find("DsaSettings", "DsaSettings.csproj"));

@@ -28,7 +28,7 @@ public partial class LogsPage : Page
         Unloaded += (_, _) =>
         {
             ViewModel.Lines.CollectionChanged -= OnLinesChanged;
-            ViewModel.Stop();
+            ViewModel.Release();
         };
     }
 

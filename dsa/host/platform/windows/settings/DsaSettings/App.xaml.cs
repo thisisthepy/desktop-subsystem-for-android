@@ -46,6 +46,12 @@ public partial class App : Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        // The app draws in software, before its first window exists. Hardware rendering loads
+        // Direct3D 9, the shader compiler and the graphics driver's user mode part into the
+        // process, and the driver keeps its own heaps and a back buffer for every window: tens
+        // of MiB of private memory for a window of text, switches and lists, which software
+        // rendering draws as fast as anyone can see.
+        System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
         base.OnStartup(e);
         General.Updating = () => ProgramUpdate.InProgress;
         // Each app's "Follow the default" says where the Display page's choice takes it now.

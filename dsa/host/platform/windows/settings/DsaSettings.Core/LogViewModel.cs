@@ -341,6 +341,19 @@ public sealed class LogViewModel : ObservableObject
         Changed(nameof(IsReading));
     }
 
+    /// <summary>Stops reading and lets go of every line read, for a page that is left: the
+    /// page reads the log afresh each time it is shown, so the lines are never seen again,
+    /// and up to <see cref="MaxLines"/> of them would stay in memory for nothing.</summary>
+    public void Release()
+    {
+        Stop();
+        _all.Clear();
+        _all.TrimExcess();
+        _waiting = 0;
+        Lines.Clear();
+        ChangedAll();
+    }
+
     /// <summary>Saves the diagnostics of Android and of DSA to <paramref name="path"/>, as one
     /// zip archive.</summary>
     public async Task SaveDiagnosticsAsync(string path)
