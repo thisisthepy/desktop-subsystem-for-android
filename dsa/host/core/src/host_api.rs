@@ -876,7 +876,9 @@ impl UserAndroid for Session {
     /// On a stopped session, returns once it has moved on, so that what the caller reads
     /// next is the start's progress or its failure, never the state from before it.
     fn start(&self) {
-        self.start_because("a start request");
+        // Named through the trait: `self.start_because` would pick Session's own method,
+        // which only sends the request and returns before the session has moved on.
+        UserAndroid::start_because(self, "a start request");
     }
     fn start_because(&self, reason: &str) {
         if Session::state(self) != SessionState::Stopped {
