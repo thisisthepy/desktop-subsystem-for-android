@@ -5420,15 +5420,24 @@ def default_app_apkcerts(app):
             f'private_key="{DEFAULT_APP_PRIVATE_KEY.format(key)}" partition="{partition}"')
 
 
+def fs_config_path(name):
+    """The filesystem_config.txt path of a target_files member: its partition folder in lower
+    case (SYSTEM/ is system/) and the rest exactly as it is. mkfs.erofs looks paths up with
+    their case, so system/app/dsacalculator does not match system/app/DsaCalculator and the
+    image fails to build."""
+    partition, _, rest = name.partition("/")
+    return f"{partition.lower()}/{rest}" if rest else partition.lower()
+
+
 def default_apps_fs_config(apps):
     """The filesystem_config.txt lines of the default apps' folders, APKs and configuration."""
     lines = []
     for app in apps:
-        folder = Path(app["image"]).parent.as_posix().lower()
+        folder = fs_config_path(Path(app["image"]).parent.as_posix())
         lines.append(f"{folder} 0 0 755 capabilities=0x0")
-        lines.append(f"{app['image'].lower()} 0 0 644 capabilities=0x0")
-    lines.append(f"{DEFAULT_APPS_SYSCONFIG.lower()} 0 0 644 capabilities=0x0")
-    lines.append(f"{DEFAULT_APPS_PERMISSIONS.lower()} 0 0 644 capabilities=0x0")
+        lines.append(f"{fs_config_path(app['image'])} 0 0 644 capabilities=0x0")
+    lines.append(f"{fs_config_path(DEFAULT_APPS_SYSCONFIG)} 0 0 644 capabilities=0x0")
+    lines.append(f"{fs_config_path(DEFAULT_APPS_PERMISSIONS)} 0 0 644 capabilities=0x0")
     return lines
 
 
@@ -6975,7 +6984,7 @@ def modify(source, dest, graphics_library=None, vulkan_driver=None, otatools=Non
                 added_fs_config.setdefault(config, []).extend(rules)
         for folder in added_gapps_folders:
             config = GAPPS_PARTITION_FS_CONFIG[folder.split("/", 1)[0]]
-            added_fs_config.setdefault(config, []).append(f"{folder.lower()} 0 0 755 capabilities=0x0")
+            added_fs_config.setdefault(config, []).append(f"{fs_config_path(folder)} 0 0 755 capabilities=0x0")
         if default_apps_payloads is not None:
             # A default app replaced in place (DocumentsUI) keeps the build's own lines.
             added_fs_config.setdefault(SYSTEM_FS_CONFIG, []).extend(

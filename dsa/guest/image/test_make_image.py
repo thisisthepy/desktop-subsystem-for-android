@@ -10104,8 +10104,18 @@ class DefaultAppsTests(unittest.TestCase):
         self.assertIn('<exception package="com.android.deskclock">', permissions)
         self.assertIn('<permission name="android.permission.POST_NOTIFICATIONS" fixed="false" />', permissions)
         fs_config = make_image.default_apps_fs_config([by_name["camera"]])
-        self.assertIn("system/app/dsacamera 0 0 755 capabilities=0x0", fs_config)
-        self.assertIn("system/app/dsacamera/dsacamera.apk 0 0 644 capabilities=0x0", fs_config)
+        self.assertIn("system/app/DsaCamera 0 0 755 capabilities=0x0", fs_config)
+        self.assertIn("system/app/DsaCamera/DsaCamera.apk 0 0 644 capabilities=0x0", fs_config)
+
+    def test_fr42_default_apps_fs_config_keeps_the_case_mkfs_erofs_looks_up(self):
+        # mkfs.erofs refused the image with "failed to find system/app/DsaCalculator in
+        # canned fs_config" when these lines were lower cased: it matches paths with their case.
+        for app in make_image.default_apps():
+            fs_config = make_image.default_apps_fs_config([app])
+            partition, rest = app["image"].split("/", 1)
+            self.assertIn(f"{partition.lower()}/{rest} 0 0 644 capabilities=0x0", fs_config)
+            self.assertIn(f"{partition.lower()}/{rest.rsplit('/', 1)[0]} 0 0 755 capabilities=0x0", fs_config)
+        self.assertEqual(make_image.fs_config_path("SYSTEM/app/DsaCalculator"), "system/app/DsaCalculator")
         self.assertIn("system/etc/sysconfig/dsa-default-apps.xml 0 0 644 capabilities=0x0", fs_config)
 
     def test_fr42_make_image_refuses_default_apps_built_from_other_patches(self):
