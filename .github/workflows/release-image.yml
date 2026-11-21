@@ -1299,8 +1299,13 @@ jobs:
           # The default installer's first screen names the major of the newest image on the
           # list the installers read, and one preset installer is built per supported major
           # with an image on it.
-          majors_list=images.json
-          if [[ ! -f "$majors_list" ]]; then majors_list=images-prerelease.json; fi
+          # A run for arm64 alone writes only the arm64 lists, so those are read when no x64
+          # list was written.
+          majors_list=""
+          for candidate in images.json images-prerelease.json images-arm64.json images-prerelease-arm64.json; do
+            if [[ -f "$candidate" ]]; then majors_list="$candidate"; break; fi
+          done
+          [[ -n "$majors_list" ]] || { echo "::error::no image list was written"; exit 1; }
           .github/scripts/release/installer-majors.sh "$majors_list" >> "$GITHUB_OUTPUT"
 
       - name: Sign and check the lists
