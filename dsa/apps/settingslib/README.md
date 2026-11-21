@@ -26,3 +26,7 @@ in the same APK would not build.
   back when it is let go. It also sinks a little and springs back, drawn with a path shaped like
   a spring's response, as the framework's animators take a path and not spring physics.
 - Group titles are emphasized: bold, in the accent colour.
+
+The image lays nothing over these: the Settings overlay and the edits `make-image.py` makes in the
+compiled Settings and PermissionController leave the cards, their colour, radius and spacing,
+and the titles to this source, and `check-image.py` refuses an image that overrides one of them.

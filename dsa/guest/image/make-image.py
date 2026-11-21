@@ -1490,12 +1490,9 @@ def settings_overlay_map():
     Settings' ids."""
     mapping = {name: name for name in SETTINGS_OVERLAID}
     mapping.update({f"bool/{name}": f"bool/{name}" for name in SETTINGS_OVERLAY_BOOLEANS})
-    mapping.update({f"drawable/{name}": f"drawable/{name}" for name in SETTINGS_CARDS})
-    mapping["dimen/settingslib_preference_corner_radius"] = "dimen/settingslib_preference_corner_radius"
     mapping[f"style/{SETTINGS_TITLE_THEME}"] = "style/DsaAppBarTheme"
     mapping[f"style/{SETTINGS_TITLE_THEME_PARENT}"] = f"style/{SETTINGS_TITLE_THEME_PARENT}"
     mapping["attr/expanded"] = "attr/expanded"
-    mapping.update({f"style/{name}": f"style/{ours}" for name, (ours, _) in SETTINGS_TITLE_STYLES.items()})
     mapping[f"layout/{SETTINGS_HOME_LAYOUT}"] = f"layout/{SETTINGS_HOME_LAYOUT}"
     mapping.update({f"id/{name}": f"id/{name}" for name in SETTINGS_HOME_IDS})
     mapping.update({f"attr/{name}": f"attr/{name}" for name in SETTINGS_HOME_ATTRS})
@@ -1516,9 +1513,6 @@ def settings_overlay_files():
         "res/values/dsa_config.xml": resources_xml(
             [f'<bool name="{name}">{str(value).lower()}</bool>'
              for name, value in SETTINGS_OVERLAY_BOOLEANS.items()]),
-        "res/values-v36/dsa_design.xml": resources_xml(
-            [f'<dimen name="settingslib_preference_corner_radius">{DESIGN_CORNER_DP}dp</dimen>']
-            + [design_style(ours, "", f"{size}dp") for ours, size in SETTINGS_TITLE_STYLES.values()]),
         f"res/layout/{SETTINGS_HOME_LAYOUT}.xml": settings_home_layout(large_title=False),
         f"res/layout-h{DESIGN_TALL_WINDOW_DP}dp/{SETTINGS_HOME_LAYOUT}.xml": settings_home_layout(large_title=True),
         f"res/drawable/{SETTINGS_SEARCH_ICON}.xml": search_icon(),
@@ -1532,39 +1526,9 @@ def settings_overlay_files():
         [f'<style name="{SETTINGS_TITLE_THEME_PARENT}" parent="" />'])
     for folder, theme in (("drawable-v36", "light"), ("drawable-night-v36", "dark")):
         files[f"res/{folder}/{SETTINGS_BACK_ICON}.xml"] = settings_back_icon(theme)
-        for name, (top, bottom) in SETTINGS_CARDS.items():
-            files[f"res/{folder}/{name}.xml"] = settings_card(top, bottom, theme)
     for folder, theme in (("drawable", "light"), ("drawable-night", "dark")):
         files[f"res/{folder}/{SETTINGS_SEARCH_ICON}_background.xml"] = search_background(theme)
     return files
-
-
-def settings_card(top, bottom, theme):
-    """One of SettingsLib's group backgrounds: the row's surface, inset from the list's sides
-    as SettingsLib insets it, with the group's outer corners rounded (`top`, `bottom`) and
-    square corners where the next row of the same group joins it. The 32 dp padding is
-    SettingsLib's own, which its adapter gives the row."""
-    top_dp, bottom_dp = (DESIGN_CORNER_DP if top else 0), (DESIGN_CORNER_DP if bottom else 0)
-    return (
-        XML_HEADER
-        + f'<ripple {ANDROID_XMLNS}\n'
-        '    android:color="?android:attr/colorControlHighlight"\n'
-        '    android:paddingStart="32dp"\n'
-        '    android:paddingEnd="32dp">\n'
-        '    <item\n'
-        '        android:start="?android:attr/listPreferredItemPaddingStart"\n'
-        '        android:end="?android:attr/listPreferredItemPaddingEnd">\n'
-        '        <shape android:shape="rectangle">\n'
-        f'            <solid android:color="@*android:color/system_surface_bright_{theme}" />\n'
-        '            <corners\n'
-        f'                android:topLeftRadius="{top_dp}dp"\n'
-        f'                android:topRightRadius="{top_dp}dp"\n'
-        f'                android:bottomLeftRadius="{bottom_dp}dp"\n'
-        f'                android:bottomRightRadius="{bottom_dp}dp" />\n'
-        '        </shape>\n'
-        '    </item>\n'
-        '</ripple>\n'
-    )
 
 
 def search_icon():
@@ -3257,15 +3221,15 @@ def image_services_jar(data):
 
 
 def edit_permission_controller_apk(data, name):
-    """PermissionController.apk with its preference lists grouped in cards with Settings'
-    corners, and with the room Settings' lists keep below their last row."""
+    """PermissionController.apk with the room Settings' lists keep below their last row. Its
+    cards are SettingsLib's own as dsa/apps patches them (SOURCE_OWNED_SETTINGSLIB)."""
     return edit_apk(data, name, dimensions=permission_controller_edits())
 
 
 def permission_controller_edits():
-    """The compiled XML edits PermissionController.apk gets: its cards, and the room below
-    the last row of its lists, as Settings' have it."""
-    return {**PERMISSION_CONTROLLER_CARDS, **PERMISSION_CONTROLLER_LIST_END}
+    """The compiled XML edits PermissionController.apk gets: the room below the last row of
+    its lists, as Settings' have it."""
+    return dict(PERMISSION_CONTROLLER_LIST_END)
 
 
 # Properties the vendor and odm build.prop files may not set. init reads those two files as
@@ -5522,6 +5486,37 @@ def default_apps_problems(names, read, records, android):
     return problems
 
 
+def system_screen_override_problems():
+    """What in the image would override what the patched SettingsLib owns
+    (SOURCE_OWNED_SETTINGSLIB): a Settings or PermissionController overlay resource, or a
+    compiled edit of PermissionController.apk, that replaces one of them."""
+    owned = set(SOURCE_OWNED_SETTINGSLIB)
+    problems = [f"DsaSettingsOverlay.apk replaces {name}, which the patched SettingsLib owns"
+                for name in sorted(owned & set(settings_overlay_map()))]
+    overlay_files = settings_overlay_files()
+    for path in sorted(overlay_files):
+        parts = path.split("/")
+        if len(parts) == 3 and parts[0] == "res":
+            kind = parts[1].split("-")[0]
+            if f"{kind}/{Path(parts[2]).stem}" in owned:
+                problems.append(f"DsaSettingsOverlay.apk has {path}, which the patched SettingsLib owns")
+        if path.endswith(".xml") and path.startswith("res/values"):
+            for name in re.findall(r'<(?:dimen|color|style) name="([^"]+)"', overlay_files[path]):
+                for kind in ("dimen", "color", "style"):
+                    if f"{kind}/{name}" in owned and f'<{kind} name="{name}"' in overlay_files[path]:
+                        problems.append(f"DsaSettingsOverlay.apk sets {kind}/{name} in {path}, which the "
+                                        "patched SettingsLib owns")
+    for xml in permission_controller_edits():
+        kind_folder, name = xml.split("/")[1], Path(xml).stem
+        if f"{kind_folder.split('-')[0]}/{name}" in owned:
+            problems.append(f"PermissionController.apk's {xml} is edited, which the patched SettingsLib owns")
+    for overlay in DESIGN_OVERLAYS:
+        if overlay == "DsaPermissionControllerOverlay.apk":
+            for name in sorted(owned & set(design_overlay_resources(overlay)[1])):
+                problems.append(f"{overlay} replaces {name}, which the patched SettingsLib owns")
+    return problems
+
+
 def system_screens_problems(names, read, records, android):
     """What is wrong with the system screens of a signed target_files whose members are `names`
     and read with `read`: one missing or under another package, or built from another pin or
@@ -5954,16 +5949,26 @@ FRAMEWORK_DESIGN_OVERLAID = (
     + [f"layout/{DIALOG_BUTTON_BAR_LAYOUT}", f"layout/{TOAST_LAYOUT}", f"drawable/{TOAST_FRAME}"]
 )
 
-# Settings: SettingsLib's group backgrounds round the outer corners of a group by
-# settingslib_preference_corner_radius and the inner ones by 4 dp, so every row is a card of
-# its own. Here the inner corners are square, and a group reads as one card; the 2 dp
-# SettingsLib keeps below each row shows the page through as the line between rows.
-SETTINGS_CARDS = {
-    "settingslib_round_background": (True, True),
-    "settingslib_round_background_top": (True, False),
-    "settingslib_round_background_center": (False, False),
-    "settingslib_round_background_bottom": (False, True),
-}
+# What SettingsLib, as dsa/apps patches it, owns in Settings and PermissionController: the cards
+# of a preference group (their shape, the shape a pressed row morphs to, their surface colour in
+# light and dark, their corner radius), the room between groups, and the large and folded
+# titles. The patched source is the one place that says them, so neither the Settings overlay
+# nor an edit of a compiled APK replaces any of them: an override would put the published
+# values back over the design (system_screen_override_problems checks it).
+SOURCE_OWNED_SETTINGSLIB = [
+    "drawable/settingslib_round_background",
+    "drawable/settingslib_round_background_top",
+    "drawable/settingslib_round_background_center",
+    "drawable/settingslib_round_background_bottom",
+    "dimen/settingslib_preference_corner_radius",
+    "color/settingslib_dsa_card",
+    "dimen/settingslib_dsa_inner_corner",
+    "dimen/settingslib_dsa_group_gap",
+    "style/ExpressivePreferenceCategoryRootLayoutStyle",
+    "style/ExpressivePreferenceCategoryTitleStyle",
+    "style/SettingsLibCollapsingToolbarTitle.Expanded",
+    "style/SettingsLibCollapsingToolbarTitle.Collapsed",
+]
 # The large title of a SettingsLib page opens expanded in a window 600 dp tall or more and
 # folded below it. SettingsLib's app bar takes the theme overlay SETTINGS_TITLE_THEME (an
 # empty style over Material's theme); the overlay's version of it says whether the app bar
@@ -5974,10 +5979,6 @@ SETTINGS_CARDS = {
 SETTINGS_TITLE_THEME = "SettingsLibTheme.CollapsingToolbar.Expressive"
 SETTINGS_TITLE_THEME_PARENT = "Theme.MaterialComponents.DayNight"
 SETTINGS_TITLE_EXPANDS = {"values-v36": False, f"values-h{DESIGN_TALL_WINDOW_DP}dp-v36": True}
-SETTINGS_TITLE_STYLES = {
-    "SettingsLibCollapsingToolbarTitle.Expanded": ("DsaLargeTitle", DESIGN_LARGE_TITLE_DP),
-    "SettingsLibCollapsingToolbarTitle.Collapsed": ("DsaToolbarTitle", DESIGN_TOOLBAR_TITLE_DP),
-}
 # Settings' home page has no title: its app bar holds only the search bar. The overlay's
 # layout puts the large title above the search bar in windows 600 dp tall or more, where it
 # scrolls away and leaves the search bar as the toolbar. The ids are Settings' own, which the
@@ -6006,7 +6007,8 @@ SETTINGS_SEARCH_ICON = "dsa_search"
 # option. Its layouts are not overlayable, so it gets no large title.
 DOCUMENTSUI_DESIGN = {"bool/force_material3": "true"}
 # PermissionController lets an overlay replace only what it declares overlayable: the
-# permission dialog's title is, its list backgrounds are not (PERMISSION_CONTROLLER_CARDS).
+# permission dialog's title is, its list backgrounds are not (the patched SettingsLib draws
+# them, SOURCE_OWNED_SETTINGSLIB).
 PERMISSION_TITLE_STYLE = "PermissionGrantTitleMessageExpressive"
 # PackageInstaller's dialog titles, for its DeviceDefault and Material 3 themes.
 PACKAGE_INSTALLER_TITLES = {
@@ -6057,7 +6059,7 @@ SETTINGS_LIST_END = {
 # The permission pages Settings opens (the permission manager, an app's permissions) are
 # PermissionController's, with the same preference list and the same missing inset. Its
 # <overlayable> lets no overlay replace the layout, so the compiled one in its APK gets the
-# room (the APK is edited for its cards already, see PERMISSION_CONTROLLER_CARDS).
+# room (its cards are the patched SettingsLib's, see SOURCE_OWNED_SETTINGSLIB).
 PERMISSION_CONTROLLER_LIST_END = {
     "res/layout/preference_recyclerview.xml": [(RECYCLER_VIEW, *_LIST_END)],
 }
@@ -6068,35 +6070,6 @@ SETTINGS_LIST_END_CLASSES = [
     f"{_SPA}/framework/compose/VerticalPaddingValues;->calculateBottomPadding-D9Ej5fM",
     f"{_SPA}/widget/scaffold/SearchScaffoldKt;->SearchScaffold",
 ]
-
-# PermissionController's lists are SettingsLib's, but the app declares <overlayable> and its
-# list backgrounds are not in it, so idmap2 refuses any overlay of them. Their compiled
-# drawables in the APK get the corners Settings' cards have instead: outer corners of
-# DESIGN_CORNER_DP, square inner ones.
-ANDROID_RADIUS = 0x010101A8
-ANDROID_TOP_LEFT_RADIUS = 0x010101A9
-ANDROID_TOP_RIGHT_RADIUS = 0x010101AA
-ANDROID_BOTTOM_LEFT_RADIUS = 0x010101AB
-ANDROID_BOTTOM_RIGHT_RADIUS = 0x010101AC
-
-
-def card_corner_edits(top, bottom, single):
-    """The corner edits of one of SettingsLib's group backgrounds: a whole-card one names one
-    radius, the others the four corners."""
-    if single:
-        return [("corners", ANDROID_RADIUS, DESIGN_CORNER_DP if top else 0)]
-    top_dp, bottom_dp = (DESIGN_CORNER_DP if top else 0), (DESIGN_CORNER_DP if bottom else 0)
-    return [("corners", ANDROID_TOP_LEFT_RADIUS, top_dp), ("corners", ANDROID_TOP_RIGHT_RADIUS, top_dp),
-            ("corners", ANDROID_BOTTOM_LEFT_RADIUS, bottom_dp), ("corners", ANDROID_BOTTOM_RIGHT_RADIUS, bottom_dp)]
-
-
-# The center and single backgrounds name one radius for all four corners; the top and bottom
-# ones name each corner.
-PERMISSION_CONTROLLER_CARDS = {
-    f"res/drawable-v36/{name}.xml": card_corner_edits(top, bottom, single=name in (
-        "settingslib_round_background", "settingslib_round_background_center"))
-    for name, (top, bottom) in SETTINGS_CARDS.items()
-}
 
 SYSTEM_EXT_FS_CONFIG = "META/system_ext_filesystem_config.txt"
 AGENT_FS_CONFIG = [
@@ -8213,9 +8186,8 @@ def settings_list_end_problems(apk):
 
 
 def permission_controller_problems(signed, otatools, work, env):
-    """What is wrong with PermissionController in a signed target_files: its lists without
-    their cards' corners or the room below their last row, looked for in the permission APEX
-    the image ships."""
+    """What is wrong with PermissionController in a signed target_files: its lists without the
+    room below their last row, looked for in the permission APEX the image ships."""
     with zipfile.ZipFile(signed) as z:
         found = [n for n in PERMISSION_APEXES if n in z.namelist()]
         if not found:
@@ -8229,7 +8201,7 @@ def permission_controller_problems(signed, otatools, work, env):
         left = apk_edits_left(apk.read_bytes(), dimensions=permission_controller_edits())
         if left:
             problems.append(f"{found[0]}:{apk.relative_to(payload).as_posix()} still has {'; '.join(left)}, "
-                            "so its lists keep corners of their own or end on the window's bottom edge")
+                            "so its lists end on the window's bottom edge")
     shutil.rmtree(folder, ignore_errors=True)
     return problems
 

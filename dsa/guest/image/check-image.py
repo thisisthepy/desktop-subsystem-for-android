@@ -435,6 +435,8 @@ with zipfile.ZipFile(image / "signed-target_files.zip") as z:
     # the one dsa/apps builds with DSA's design, not the published AOSP app.
     problems.extend(make_image.system_screens_problems(
         names, z.read, manifest.get("default_apps"), f"android{manifest['android_major']}"))
+    # Nothing the image lays over them puts the published cards, spacing or titles back.
+    problems.extend(make_image.system_screen_override_problems())
 
     # The network: eth0 shown as Wi-Fi, with its address and DNS servers from DHCP.
     problems.extend(make_image.network_problems(names, z.read, manifest["kernel_cmdline"]))
