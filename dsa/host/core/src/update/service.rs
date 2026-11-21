@@ -1051,6 +1051,12 @@ impl UserAndroid for UpdatingAndroid {
     fn watch_clipboard(&self) -> Option<std::sync::mpsc::Receiver<String>> {
         UserAndroid::watch_clipboard(&*self.session)
     }
+    fn host_clipboard_image(&self, png: Vec<u8>) {
+        UserAndroid::host_clipboard_image(&*self.session, png)
+    }
+    fn watch_clips(&self) -> Option<std::sync::mpsc::Receiver<crate::clipboard::Clip>> {
+        UserAndroid::watch_clips(&*self.session)
+    }
     fn watch_notifications(
         &self,
     ) -> Option<std::sync::mpsc::Receiver<crate::notifications::NotificationEvent>> {

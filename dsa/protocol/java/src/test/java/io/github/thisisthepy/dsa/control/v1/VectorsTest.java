@@ -416,6 +416,13 @@ public final class VectorsTest {
         cases.put("clipboard_sharing_off", Envelope.newBuilder()
                 .setClipboardSharing(ClipboardSharing.newBuilder().setOn(false))
                 .build());
+        cases.put("clipboard_image", Envelope.newBuilder()
+                .setClipboardImage(ClipboardImage.newBuilder()
+                        .setClipId(7)
+                        .setSize(4)
+                        .setOffset(0)
+                        .setData(ByteString.copyFrom(new byte[] {(byte) 0x89, 0x50, 0x4e, 0x47})))
+                .build());
         String chatKey = "0|com.example.chat|1|null|10100";
         cases.put("notification", Envelope.newBuilder()
                 .setNotification(GuestNotification.newBuilder()

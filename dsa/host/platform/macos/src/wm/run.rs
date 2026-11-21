@@ -462,6 +462,7 @@ fn serve(places: Places, stop: Arc<AtomicBool>) -> Result<(), String> {
         news_posted,
         Arc::clone(&launcher),
     );
+    super::clipboard::share(places.host_api.clone(), Arc::clone(&stop));
     // Android that crashes is said in the Notification Center, as DSA's own news.
     {
         let news = Mutex::new(news.clone());

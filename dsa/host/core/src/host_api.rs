@@ -83,6 +83,7 @@ use crate::background::{
     self, BackgroundApp, BackgroundCommand, BackgroundEvent, BackgroundWatch, MediaCommand,
     MediaSession, Playback,
 };
+use crate::clipboard::Clip;
 use crate::data_reset::{UserDataReset, RESET_STOP_WAIT};
 use crate::device_identity::{
     ComputerSource, DeviceIdentity, DeviceIdentityStore, IdentityReport, ImageBuild,
@@ -255,6 +256,17 @@ pub trait UserAndroid: Send + Sync {
     /// The text this Android copies from now on, while the clipboard is shared. `None` when
     /// this Android does not share its clipboard at all.
     fn watch_clipboard(&self) -> Option<Receiver<String>>;
+    /// The user's host clipboard got an image, as PNG, for this Android to take while the
+    /// clipboard is shared. An Android that shares only text drops it.
+    fn host_clipboard_image(&self, png: Vec<u8>) {
+        let _ = png;
+    }
+    /// The text and the images this Android copies from now on, while the clipboard is
+    /// shared. `None` when this Android shares only text, or nothing; its text then comes from
+    /// [`UserAndroid::watch_clipboard`].
+    fn watch_clips(&self) -> Option<Receiver<crate::clipboard::Clip>> {
+        None
+    }
     /// Lets the web links apps in this Android open go to apps in it (`on`), or to the host,
     /// as the user's setting says.
     fn links_in_android(&self, on: bool) {
@@ -944,6 +956,12 @@ impl UserAndroid for Session {
     }
     fn watch_clipboard(&self) -> Option<Receiver<String>> {
         Some(Session::watch_clipboard(self))
+    }
+    fn host_clipboard_image(&self, png: Vec<u8>) {
+        Session::host_clipboard_image(self, png)
+    }
+    fn watch_clips(&self) -> Option<Receiver<crate::clipboard::Clip>> {
+        Some(Session::watch_clips(self))
     }
     fn watch_location(&self) -> Option<Receiver<Wanted>> {
         Some(Session::watch_location(self))
@@ -3424,19 +3442,22 @@ impl HostApiService {
         }
     }
 
-    /// Answers a WatchClipboard request, then passes the text the client copies to its
-    /// Android, and the text its Android copies to the client, until the client goes away.
-    /// What the client sends that is not clipboard text closes the connection; a frame that
-    /// cannot be read is dropped.
+    /// Answers a WatchClipboard request, then passes the text and the images the client copies
+    /// to its Android, and those its Android copies to the client, until the client goes away.
+    /// What the client sends that is neither closes the connection; a frame that cannot be read
+    /// is dropped.
     fn watch_clipboard(&self, mut connection: Box<dyn Connection>, peer: &Peer, id: u64) {
         let watched = match self.androids.android(&peer.user) {
             Err(why) => Err(error(ErrorCode::Unavailable, why)),
-            Ok(android) => match android.watch_clipboard() {
-                Some(watch) => Ok((android, watch)),
-                None => Err(error(
-                    ErrorCode::Unavailable,
-                    "this Android does not share its clipboard".into(),
-                )),
+            Ok(android) => match android.watch_clips() {
+                Some(watch) => Ok((android, ClipWatch::Clips(watch))),
+                None => match android.watch_clipboard() {
+                    Some(watch) => Ok((android, ClipWatch::Text(watch))),
+                    None => Err(error(
+                        ErrorCode::Unavailable,
+                        "this Android does not share its clipboard".into(),
+                    )),
+                },
             },
         };
         let (android, watch) = match watched {
@@ -3462,8 +3483,13 @@ impl HostApiService {
         loop {
             loop {
                 match watch.try_recv() {
-                    Ok(text) => {
-                        let frame = Body::ClipboardText(types::ClipboardText { text });
+                    Ok(clip) => {
+                        let frame = match clip {
+                            Clip::Text(text) => Body::ClipboardText(types::ClipboardText { text }),
+                            Clip::Image(png) => {
+                                Body::ClipboardImage(types::ClipboardImage { png: png.to_vec() })
+                            }
+                        };
                         if send(&mut *connection, frame).is_err() {
                             return;
                         }
@@ -3484,10 +3510,13 @@ impl HostApiService {
                 Ok(Envelope {
                     body: Some(Body::ClipboardText(clip)),
                 }) => android.host_clipboard(clip.text),
+                Ok(Envelope {
+                    body: Some(Body::ClipboardImage(image)),
+                }) => android.host_clipboard_image(image.png),
                 Ok(_) => {
                     eprintln!(
-                        "local API: a client of {} sent something other than clipboard text on \
-                         a connection that carries the clipboard; closing its connection",
+                        "local API: a client of {} sent something other than a clip on a \
+                         connection that carries the clipboard; closing its connection",
                         peer.user
                     );
                     connection.close();
@@ -3503,7 +3532,24 @@ impl HostApiService {
             }
         }
     }
+}
 
+/// What an Android copies, as text only or as text and images.
+enum ClipWatch {
+    Text(Receiver<String>),
+    Clips(Receiver<Clip>),
+}
+
+impl ClipWatch {
+    fn try_recv(&self) -> Result<Clip, TryRecvError> {
+        match self {
+            ClipWatch::Text(watch) => watch.try_recv().map(Clip::Text),
+            ClipWatch::Clips(watch) => watch.try_recv(),
+        }
+    }
+}
+
+impl HostApiService {
     /// Answers a WatchLocation request, then tells the client each time its Android starts or
     /// stops wanting the location, and passes the positions and statuses the client sends to
     /// its Android, until the client goes away. A position that is not on Earth is dropped,
@@ -9235,9 +9281,37 @@ impl ClipboardStream {
         .map_err(ClientError::Transport)
     }
 
-    /// The next text the caller's Android copied, waiting at most `timeout`. `Ok(None)` means
-    /// none came in time; an error means the connection has ended.
+    /// Says that the host's clipboard got an image, as PNG. Nothing is awaited. A PNG that may
+    /// not cross (longer than [`MAX_IMAGE_BYTES`](crate::clipboard::MAX_IMAGE_BYTES), or not a
+    /// PNG) is refused here and nothing is sent. An error of the transport means the connection
+    /// has ended, and a new one is needed.
+    pub fn send_image(&mut self, png: &[u8]) -> Result<(), ClientError> {
+        crate::clipboard::check_image(png).map_err(ClientError::Malformed)?;
+        send(
+            &mut *self.connection,
+            Body::ClipboardImage(types::ClipboardImage { png: png.to_vec() }),
+        )
+        .map_err(ClientError::Transport)
+    }
+
+    /// The next text the caller's Android copied, waiting at most `timeout`; images it copied
+    /// meanwhile are passed over. `Ok(None)` means none came in time; an error means the
+    /// connection has ended.
     pub fn next(&mut self, timeout: Duration) -> Result<Option<String>, ClientError> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            match self.next_clip(left)? {
+                Some(Clip::Text(text)) => return Ok(Some(text)),
+                Some(Clip::Image(_)) if !left.is_zero() => continue,
+                _ => return Ok(None),
+            }
+        }
+    }
+
+    /// The next text or image the caller's Android copied, waiting at most `timeout`.
+    /// `Ok(None)` means none came in time; an error means the connection has ended.
+    pub fn next_clip(&mut self, timeout: Duration) -> Result<Option<Clip>, ClientError> {
         let frame = match self.connection.recv(Some(timeout)) {
             Ok(frame) => frame,
             Err(TransportError::Timeout) => return Ok(None),
@@ -9246,8 +9320,11 @@ impl ClipboardStream {
         match decode(&frame) {
             Ok(Envelope {
                 body: Some(Body::ClipboardText(clip)),
-            }) => Ok(Some(clip.text)),
-            Ok(_) => Err(ClientError::Malformed("expected clipboard text".into())),
+            }) => Ok(Some(Clip::Text(clip.text))),
+            Ok(Envelope {
+                body: Some(Body::ClipboardImage(image)),
+            }) => Ok(Some(Clip::Image(image.png.into()))),
+            Ok(_) => Err(ClientError::Malformed("expected a clip".into())),
             Err(error) => Err(ClientError::Malformed(error.to_string())),
         }
     }

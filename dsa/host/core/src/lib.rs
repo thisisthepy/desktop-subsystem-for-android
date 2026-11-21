@@ -40,7 +40,7 @@
 //! - [`guest_log`]: the guest's log, streamed only while someone reads it, and
 //!   [`diagnostics`]: the archive a problem report carries.
 //! - [`files`]: host files the user opens or shares in an app in the guest.
-//! - [`clipboard`]: the text clipboard the host and the guest share.
+//! - [`clipboard`]: the clipboard the host and the guest share, text and images.
 //! - [`notifications`]: the notifications of the guest, which the host shows.
 //! - [`background`]: the apps that keep running with no window, and their media sessions.
 //! - [`widgets`]: the widgets of the guest, which the host places on its desktop.

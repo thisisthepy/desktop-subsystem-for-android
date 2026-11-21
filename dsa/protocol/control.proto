@@ -1139,9 +1139,26 @@ message ClipboardText {
   string text = 1;
 }
 
+// An image on a clipboard, in either direction, as PNG, in the same way as ClipboardText: it
+// becomes the other side's clipboard, and neither side sends back what it was just given. The
+// image goes in pieces of at most 256 KiB, in order, so other messages pass between them; every
+// piece names the clip and its whole length. A clip is whole once `offset` plus the length of
+// `data` reaches `size`. A piece of a new `clip_id` drops a clip that was not whole. A sender
+// drops an image whose PNG is longer than 12 MiB instead of sending part of it, and a receiver
+// drops a clip that says it is longer.
+message ClipboardImage {
+  // Unique among the images one side sends on one connection.
+  uint32 clip_id = 1;
+  // The PNG's whole length in bytes.
+  uint64 size = 2;
+  // Where `data` starts in the PNG.
+  uint64 offset = 3;
+  bytes data = 4;
+}
+
 // Host to guest: whether the clipboards are shared. The agent takes them to be shared when it
 // connects; the host says so when they are not, and on every change after that. While they
-// are not, the agent sends no ClipboardText and ignores the host's.
+// are not, the agent sends no ClipboardText or ClipboardImage and ignores the host's.
 message ClipboardSharing {
   bool on = 1;
 }
@@ -3454,6 +3471,7 @@ message Envelope {
     GuestBoot guest_boot = 25;
     ClipboardText clipboard_text = 26;
     ClipboardSharing clipboard_sharing = 27;
+    ClipboardImage clipboard_image = 31;
     ClockProbe clock_probe = 28;
     ClockAnswer clock_answer = 29;
     ScreenState screen_state = 40;

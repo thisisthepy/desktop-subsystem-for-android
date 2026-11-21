@@ -84,6 +84,11 @@ nothing. Its one activity is the guest's home, which draws nothing (see "The hom
   clipboard as the guest's default input method, which Android 10 and later allow whichever
   app has the focus. It does not send back the clip it set, drops text longer than 256 KiB
   of UTF-8, and sends nothing while the host says sharing is off (`ClipboardSharing`).
+  Images cross as PNG in `ClipboardImage` pieces of at most 256 KiB, both ways. An image
+  from the host becomes a clip of a `content://` URI of the agent's own provider
+  (`HostClipboardProvider`, MIME `image/png`), which the app that pastes it may read; an
+  image an app copied is read through its URI and made PNG when it is another type. Text
+  wins over an image copied with it, and a PNG longer than 12 MiB is dropped, never cut.
 - **Notifications.** The guest has no SystemUI, so the agent's notification listener reads
   the guest's notifications and sends each one a person would see to the host
   (`GuestNotification`): title, text, app name, a 96-pixel PNG icon, its importance, and

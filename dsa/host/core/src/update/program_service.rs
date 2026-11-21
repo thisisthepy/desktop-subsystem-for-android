@@ -1365,6 +1365,12 @@ impl UserAndroid for WithProgramStatus {
     fn watch_clipboard(&self) -> Option<std::sync::mpsc::Receiver<String>> {
         self.android.watch_clipboard()
     }
+    fn host_clipboard_image(&self, png: Vec<u8>) {
+        self.android.host_clipboard_image(png)
+    }
+    fn watch_clips(&self) -> Option<std::sync::mpsc::Receiver<crate::clipboard::Clip>> {
+        self.android.watch_clips()
+    }
     fn watch_notifications(
         &self,
     ) -> Option<std::sync::mpsc::Receiver<crate::notifications::NotificationEvent>> {

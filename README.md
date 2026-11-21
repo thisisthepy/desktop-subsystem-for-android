@@ -117,8 +117,9 @@ Dates after today are expected dates, not releases.
 - Apps that run in the background as notification area icons, with media keys and the
   Windows media controls for apps that play media.
 - Android widgets placed on the desktop, each in a window of its own.
-- Text clipboard shared both ways, web links opened in the Windows browser, Windows files
-  opened in and shared into Android apps, and your Windows folders shared with Android.
+- Text and image clipboard shared both ways, web links opened in the Windows browser,
+  Windows files opened in and shared into Android apps, and your Windows folders shared with
+  Android.
 - Android's files in File Explorer, under **Android** in the navigation pane.
 - APK install by double-click, from the context menu, by dropping the file on a window, or
   with `dsa install`, with a window that shows what the APK is before Android starts.
@@ -367,7 +368,8 @@ These are true today:
 - Only 64-bit apps run: `arm64-v8a` and, on x64, `x86_64`. 32-bit apps do not run.
 - Widevine is L3, so protected streams play in standard definition at most.
 - Google Play is not Google-certified on DSA; Google may ask you to register the device.
-- The clipboard shares text only.
+- The clipboard shares text and images. An image larger than 12 MiB as PNG is not shared,
+  and other kinds of content, such as copied files, stay on the side they were copied on.
 - The **System (forced)** scaling choice is not available yet and works like **System**.
 - Address lookups without Google Play give the area (country down to city, or district in
   Korea), not street addresses.

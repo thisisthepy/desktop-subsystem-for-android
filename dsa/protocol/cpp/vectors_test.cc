@@ -405,6 +405,13 @@ std::map<std::string, v1::Envelope> Cases() {
   cases["clipboard_text"].mutable_clipboard_text()->set_text("hello \xec\x95\x88\xeb\x85\x95");
   cases["clipboard_sharing_off"].mutable_clipboard_sharing()->set_on(false);
   {
+    auto* image = cases["clipboard_image"].mutable_clipboard_image();
+    image->set_clip_id(7);
+    image->set_size(4);
+    image->set_offset(0);
+    image->set_data(std::string("\x89\x50\x4e\x47", 4));
+  }
+  {
     const std::string key = "0|com.example.chat|1|null|10100";
     v1::GuestNotification* n = cases["notification"].mutable_notification();
     n->set_key(key);

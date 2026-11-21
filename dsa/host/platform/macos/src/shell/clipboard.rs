@@ -1,23 +1,32 @@
-//! The text clipboard the Mac and the guest share, through the general `NSPasteboard`.
+//! The clipboard the Mac and the guest share, through the general `NSPasteboard`: text, and
+//! images as PNG.
 //!
 //! macOS sends no notice when the pasteboard changes; its change count goes up instead, so
-//! the host reads [`Pasteboard::change_count`] on a timer and passes text on when it moved.
-//! Text the host put there itself is not sent back to the guest.
+//! the window manager reads [`Pasteboard::changed`] on a timer and passes on what changed.
+//! What the host put there itself is not sent back to the guest. An image is read as
+//! `public.png`, or as `public.tiff` made into PNG; an image from the guest is written as both,
+//! since some programs read only TIFF.
 
-use dsa_host_core::clipboard::fits;
+use dsa_host_core::clipboard::{choose, Clip, HostClipboard};
 use objc2::msg_send;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 
-use crate::objc::{class, ns_string, string_of};
+use crate::objc::{bytes_of, class, ns_data, ns_string, string_of};
 
 /// `NSPasteboardTypeString`.
 const TEXT_TYPE: &str = "public.utf8-plain-text";
+/// `NSPasteboardTypePNG`.
+const PNG_TYPE: &str = "public.png";
+/// `NSPasteboardTypeTIFF`.
+const TIFF_TYPE: &str = "public.tiff";
+/// `NSBitmapImageFileTypePNG`.
+const FILE_TYPE_PNG: usize = 4;
 
 /// The general pasteboard.
 pub struct Pasteboard {
     board: Retained<AnyObject>,
-    /// The change count of the text the host itself last wrote, which is not passed back.
+    /// The change count of what the host itself last wrote, which is not passed back.
     written: Option<isize>,
     /// The change count last seen.
     seen: isize,
@@ -55,10 +64,34 @@ impl Pasteboard {
         }
     }
 
-    /// Text another program copied since the last call, to pass to the guest. `None` when
-    /// nothing changed, the change was the host's own, the pasteboard holds no text, or the
-    /// text is too long for the guest's clipboard.
-    pub fn changed_text(&mut self) -> Option<String> {
+    fn data(&self, kind: &str) -> Option<Vec<u8>> {
+        unsafe {
+            let data: *mut AnyObject = msg_send![&*self.board, dataForType: &*ns_string(kind)];
+            (!data.is_null())
+                .then(|| bytes_of(data))
+                .filter(|bytes| !bytes.is_empty())
+        }
+    }
+
+    /// The image on the pasteboard as PNG, if any: its PNG, or its TIFF made into PNG.
+    pub fn image(&self) -> Option<Vec<u8>> {
+        if let Some(png) = self.data(PNG_TYPE) {
+            return Some(png);
+        }
+        let tiff = self.data(TIFF_TYPE)?;
+        match convert(&tiff, Some(FILE_TYPE_PNG)) {
+            Ok(png) => Some(png),
+            Err(why) => {
+                eprintln!("clipboard: an image copied on the Mac cannot cross: {why}");
+                None
+            }
+        }
+    }
+
+    /// What another program copied since the last call, to pass to the guest. `None` when
+    /// nothing changed, the change was the host's own, or the pasteboard holds neither text
+    /// nor an image.
+    pub fn changed(&mut self) -> Option<Clip> {
         let count = self.change_count();
         if count == self.seen {
             return None;
@@ -67,7 +100,7 @@ impl Pasteboard {
         if self.written == Some(count) {
             return None;
         }
-        self.text().filter(|text| fits(text))
+        self.read()
     }
 
     /// Puts `text`, which the guest copied, on the pasteboard.
@@ -83,9 +116,70 @@ impl Pasteboard {
                 return Err("the pasteboard did not take the text".into());
             }
         }
+        self.wrote();
+        Ok(())
+    }
+
+    /// Puts the image `png`, which the guest copied, on the pasteboard as PNG and as TIFF.
+    pub fn set_image(&mut self, png: &[u8]) -> Result<(), String> {
+        let tiff = convert(png, None).ok();
+        unsafe {
+            let _: isize = msg_send![&*self.board, clearContents];
+            let data = ns_data(png)?;
+            let ok: bool = msg_send![&*self.board, setData: &*data, forType: &*ns_string(PNG_TYPE)];
+            if !ok {
+                return Err("the pasteboard did not take the image".into());
+            }
+            if let Some(tiff) = tiff {
+                let data = ns_data(&tiff)?;
+                let _: bool =
+                    msg_send![&*self.board, setData: &*data, forType: &*ns_string(TIFF_TYPE)];
+            }
+        }
+        self.wrote();
+        Ok(())
+    }
+
+    fn wrote(&mut self) {
         let count = self.change_count();
         self.written = Some(count);
         self.seen = count;
-        Ok(())
+    }
+}
+
+impl HostClipboard for Pasteboard {
+    fn read(&mut self) -> Option<Clip> {
+        choose(self.text(), || self.image())
+    }
+
+    fn write(&mut self, clip: &Clip) -> Result<(), String> {
+        match clip {
+            Clip::Text(text) => self.set_text(text),
+            Clip::Image(png) => self.set_image(png),
+        }
+    }
+}
+
+/// Reads an image (`bytes`, PNG or TIFF) with `NSBitmapImageRep` and writes it again: as PNG
+/// when `png` names the file type, otherwise as TIFF.
+fn convert(bytes: &[u8], png: Option<usize>) -> Result<Vec<u8>, String> {
+    unsafe {
+        let data = ns_data(bytes)?;
+        let rep: *mut AnyObject = msg_send![class(c"NSBitmapImageRep")?, imageRepWithData: &*data];
+        if rep.is_null() {
+            return Err("the image cannot be read".into());
+        }
+        let out: *mut AnyObject = match png {
+            Some(kind) => {
+                let properties: *mut AnyObject = msg_send![class(c"NSDictionary")?, dictionary];
+                msg_send![rep, representationUsingType: kind, properties: properties]
+            }
+            None => msg_send![rep, TIFFRepresentation],
+        };
+        let out = bytes_of(out);
+        if out.is_empty() {
+            return Err("the image cannot be written".into());
+        }
+        Ok(out)
     }
 }

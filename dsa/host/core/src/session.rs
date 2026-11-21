@@ -70,7 +70,10 @@
 //! host's latest text goes to it again each time it gets there, as when Android starts. Text
 //! the guest copies goes to every [`Session::watch_clipboard`] watcher. Text that came from one
 //! side is never sent back to it, and text longer than
-//! [`MAX_CLIPBOARD_BYTES`](crate::clipboard::MAX_CLIPBOARD_BYTES) does not cross.
+//! [`MAX_CLIPBOARD_BYTES`](crate::clipboard::MAX_CLIPBOARD_BYTES) does not cross. Images go
+//! the same way as PNG ([`Session::host_clipboard_image`], [`Session::watch_clips`]), in
+//! pieces on the control channel so other messages pass between them; a PNG longer than
+//! [`MAX_IMAGE_BYTES`](crate::clipboard::MAX_IMAGE_BYTES) does not cross.
 //!
 //! The guest's notifications go to every [`Session::watch_notifications`] watcher, checked
 //! and limited in rate ([`crate::notifications`]); when the guest stops, each one shown is
@@ -678,8 +681,8 @@ enum Command {
     Freeze(Sender<Result<(), SessionError>>),
     /// Whether web links open in the guest rather than on the host.
     LinksInAndroid(bool),
-    /// The host's clipboard got new text.
-    HostClipboard(String),
+    /// The host's clipboard got new text or a new image.
+    HostClipboard(clipboard::Clip),
     /// Whether the clipboards are shared.
     ShareClipboard(bool),
     /// The user did something with a notification on the host.
@@ -751,6 +754,8 @@ struct Shared {
     live_resizes: Mutex<crate::guest_refresh::LiveResizes>,
     /// Who hears of the text the guest copies.
     clipboard_watchers: Mutex<Vec<Sender<String>>>,
+    /// Who hears of the text and the images the guest copies.
+    clip_watchers: Mutex<Vec<Sender<clipboard::Clip>>>,
     /// Who plays the rumble effects the guest's apps play on the host's controllers.
     rumble_watchers: Mutex<Vec<Sender<GamepadRumble>>>,
     /// Who hears of the guest's notifications.
@@ -1379,11 +1384,19 @@ impl Shared {
             .retain(|watcher| watcher.send(rumble).is_ok());
     }
 
-    fn publish_clipboard(&self, text: &str) {
-        self.clipboard_watchers
+    /// Hands what the guest copied to every clipboard watcher still listening: text to the
+    /// watchers of text and of clips, an image to the watchers of clips.
+    fn publish_clipboard(&self, clip: &clipboard::Clip) {
+        if let clipboard::Clip::Text(text) = clip {
+            self.clipboard_watchers
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .retain(|watcher| watcher.send(text.clone()).is_ok());
+        }
+        self.clip_watchers
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .retain(|watcher| watcher.send(text.to_string()).is_ok());
+            .retain(|watcher| watcher.send(clip.clone()).is_ok());
     }
 
     /// Hands the agent's answer about widgets to whoever asked. An answer nobody waits for
@@ -1544,6 +1557,7 @@ impl Session {
             clock_trace: Mutex::new(None),
             live_resizes: Mutex::new(Default::default()),
             clipboard_watchers: Mutex::new(Vec::new()),
+            clip_watchers: Mutex::new(Vec::new()),
             rumble_watchers: Mutex::new(Vec::new()),
             notification_watchers: Mutex::new(Vec::new()),
             print_watchers: Mutex::new(Vec::new()),
@@ -1648,6 +1662,8 @@ impl Session {
             clipboard_sharing: true,
             host_clipboard: None,
             clipboard_last: None,
+            clipboard_image_in: clipboard::ImageAssembler::default(),
+            clipboard_image_out: 0,
             notifications: HashMap::new(),
             notification_limit: RateLimit::new(Instant::now()),
             notice_posted: HashMap::new(),
@@ -2774,7 +2790,30 @@ impl Session {
     /// the guest is `Active` or `Dozing`; otherwise the latest text waits for the guest to get
     /// there. Taken in every state.
     pub fn host_clipboard(&self, text: String) {
-        let _ = self.commands.send(Command::HostClipboard(text));
+        let _ = self
+            .commands
+            .send(Command::HostClipboard(clipboard::Clip::Text(text)));
+    }
+
+    /// Says that the host's clipboard got an image, as PNG. It goes to the guest in the same
+    /// way as text, in pieces; a PNG longer than
+    /// [`MAX_IMAGE_BYTES`](crate::clipboard::MAX_IMAGE_BYTES) is dropped and logged.
+    pub fn host_clipboard_image(&self, png: Vec<u8>) {
+        let _ = self
+            .commands
+            .send(Command::HostClipboard(clipboard::Clip::Image(png.into())));
+    }
+
+    /// The text and the images the guest copies from now on, while sharing is on. The watch
+    /// lasts across restarts of the guest.
+    pub fn watch_clips(&self) -> Receiver<clipboard::Clip> {
+        let (tx, rx) = mpsc::channel();
+        self.shared
+            .clip_watchers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(tx);
+        rx
     }
 
     /// Shares the clipboards (`on`, the default) or stops sharing them, as the user's setting
@@ -4540,11 +4579,17 @@ struct Worker {
     next_clock_probe: Instant,
     /// Whether the clipboards are shared, as the user last said.
     clipboard_sharing: bool,
-    /// The host's latest clipboard text while sharing is on, for a guest that gets ready later.
-    host_clipboard: Option<String>,
-    /// The last text that crossed, either way, since the agent connected. Text equal to it is
-    /// not sent, so what one side was given never comes back to it.
-    clipboard_last: Option<String>,
+    /// The host's latest clipboard text or image while sharing is on, for a guest that gets
+    /// ready later.
+    host_clipboard: Option<clipboard::Clip>,
+    /// The last clip that crossed, either way, since the agent connected. A clip equal to it is
+    /// not sent, so what one side was given never comes back to it. An image is held once,
+    /// shared with `host_clipboard`.
+    clipboard_last: Option<clipboard::Clip>,
+    /// The pieces of the image the guest is sending.
+    clipboard_image_in: clipboard::ImageAssembler,
+    /// The id of the last image sent to the guest.
+    clipboard_image_out: u32,
     /// The guest's notifications the watchers were given, by key.
     notifications: HashMap<String, Notification>,
     /// When each of the host's own notices was last shown, by key.
@@ -5543,22 +5588,22 @@ impl Worker {
         }
     }
 
-    /// Takes new text from the host's clipboard. It is sent at once if the guest can take it,
-    /// and kept for when it can.
-    fn host_clipboard(&mut self, text: String) {
+    /// Takes new text or a new image from the host's clipboard. It is sent at once if the
+    /// guest can take it, and kept for when it can.
+    fn host_clipboard(&mut self, clip: clipboard::Clip) {
         if !self.clipboard_sharing {
             return;
         }
-        if !clipboard::fits(&text) {
-            eprintln!("{}", clipboard::too_long(&text, "host"));
+        if let Err(why) = clip.check("host") {
+            eprintln!("{why}");
             return;
         }
-        self.host_clipboard = Some(text);
+        self.host_clipboard = Some(clip);
         self.offer_host_clipboard();
     }
 
-    /// Sends the host's latest clipboard text to a guest that is ready for it and does not
-    /// have it yet.
+    /// Sends the host's latest clipboard text or image to a guest that is ready for it and does
+    /// not have it yet. An image goes in pieces, which other threads' messages pass between.
     fn offer_host_clipboard(&mut self) {
         if !self.clipboard_sharing
             || !self.agent_connected
@@ -5566,35 +5611,57 @@ impl Worker {
         {
             return;
         }
-        let Some(text) = &self.host_clipboard else {
+        let Some(clip) = &self.host_clipboard else {
             return;
         };
-        if self.clipboard_last.as_ref() == Some(text) {
+        if self.clipboard_last.as_ref() == Some(clip) {
             return;
         }
-        let text = text.clone();
-        self.clipboard_last = Some(text.clone());
-        self.send_body(Body::ClipboardText(control::ClipboardText { text }));
+        let clip = clip.clone();
+        self.clipboard_last = Some(clip.clone());
+        match clip {
+            clipboard::Clip::Text(text) => {
+                self.send_body(Body::ClipboardText(control::ClipboardText { text }))
+            }
+            clipboard::Clip::Image(png) => {
+                self.clipboard_image_out = self.clipboard_image_out.wrapping_add(1);
+                for piece in clipboard::image_pieces(self.clipboard_image_out, &png) {
+                    self.send_body(Body::ClipboardImage(piece));
+                }
+            }
+        }
     }
 
-    /// Takes text the guest copied, and hands it to the watchers unless it is what the guest
-    /// was just given.
-    fn guest_clipboard(&mut self, text: String) {
+    /// Takes a piece of an image the guest copied, and the whole image once it is there.
+    fn guest_clipboard_image(&mut self, piece: control::ClipboardImage) {
         if !self.clipboard_sharing {
-            eprintln!("clipboard: dropped text copied in Android; sharing is off");
             return;
         }
-        if !clipboard::fits(&text) {
-            eprintln!("{}", clipboard::too_long(&text, "guest"));
+        match self.clipboard_image_in.take(piece) {
+            Ok(Some(png)) => self.guest_clipboard(clipboard::Clip::Image(png.into())),
+            Ok(None) => {}
+            Err(why) => eprintln!("clipboard: dropped an image copied in Android: {why}"),
+        }
+    }
+
+    /// Takes text or an image the guest copied, and hands it to the watchers unless it is what
+    /// the guest was just given.
+    fn guest_clipboard(&mut self, clip: clipboard::Clip) {
+        if !self.clipboard_sharing {
+            eprintln!("clipboard: dropped a clip copied in Android; sharing is off");
             return;
         }
-        if self.clipboard_last.as_ref() == Some(&text) {
+        if let Err(why) = clip.check("guest") {
+            eprintln!("{why}");
             return;
         }
-        self.clipboard_last = Some(text.clone());
+        if self.clipboard_last.as_ref() == Some(&clip) {
+            return;
+        }
+        self.clipboard_last = Some(clip.clone());
         // The host's clipboard is about to hold it, so it is not offered back.
-        self.host_clipboard = Some(text.clone());
-        self.shared.publish_clipboard(&text);
+        self.host_clipboard = Some(clip.clone());
+        self.shared.publish_clipboard(&clip);
     }
 
     /// Turns clipboard sharing on or off, and tells a connected agent.
@@ -5606,6 +5673,7 @@ impl Worker {
         // Nothing copied while sharing was off crosses later; the next copy does.
         self.host_clipboard = None;
         self.clipboard_last = None;
+        self.clipboard_image_in.reset();
         eprintln!("clipboard: sharing is {}", if on { "on" } else { "off" });
         if self.running() && self.agent_connected {
             self.send_body(Body::ClipboardSharing(control::ClipboardSharing { on }));
@@ -6223,7 +6291,8 @@ impl Worker {
                     ));
                 }
             }
-            // A new agent takes the clipboards to be shared, and has none of the host's text.
+            // A new agent takes the clipboards to be shared, and has none of the host's clips.
+            self.clipboard_image_in.reset();
             self.clipboard_last = None;
             if !self.clipboard_sharing {
                 self.send_body(Body::ClipboardSharing(control::ClipboardSharing {
@@ -6990,7 +7059,10 @@ impl Worker {
             Some(Body::GuestSleepReady(_)) => self.guest_sleep_ready(),
             Some(Body::OpenLink(link)) => self.guest_link(link.url),
             Some(Body::FileProgress(progress)) => self.shared.file_progress(progress),
-            Some(Body::ClipboardText(clip)) => self.guest_clipboard(clip.text),
+            Some(Body::ClipboardText(clip)) => {
+                self.guest_clipboard(clipboard::Clip::Text(clip.text))
+            }
+            Some(Body::ClipboardImage(piece)) => self.guest_clipboard_image(piece),
             Some(Body::GamepadRumble(rumble)) => self
                 .shared
                 .publish_rumble(GamepadRumble::from_control(&rumble)),

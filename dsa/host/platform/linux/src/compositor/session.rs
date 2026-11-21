@@ -162,7 +162,7 @@ enum Message {
     /// The task watch ended: the windows stay until the next watch says otherwise.
     TasksLost,
     /// The guest copied text.
-    GuestClipboard(String),
+    GuestClipboard(dsa_host_core::clipboard::Clip),
     /// An app drags `offer` out of task `task_id`'s window, from the press `serial`; `client`
     /// reads its files and ends it.
     DragOut {
@@ -390,7 +390,7 @@ fn ask_drag_out(to_main: ToMain, out: DragOut, serial: u32) {
     });
 }
 
-fn sync_clipboard(to_main: ToMain, outgoing: Receiver<String>) {
+fn sync_clipboard(to_main: ToMain, outgoing: Receiver<dsa_host_core::clipboard::Clip>) {
     let outgoing = Arc::new(Mutex::new(outgoing));
     std::thread::spawn(move || loop {
         let mut stream = match connect()
@@ -405,8 +405,20 @@ fn sync_clipboard(to_main: ToMain, outgoing: Receiver<String>) {
         loop {
             let mut ended = false;
             if let Ok(outgoing) = outgoing.lock() {
-                while let Ok(text) = outgoing.try_recv() {
-                    if stream.send(&text).is_err() {
+                while let Ok(clip) = outgoing.try_recv() {
+                    let sent = match &clip {
+                        dsa_host_core::clipboard::Clip::Text(text) => stream.send(text),
+                        dsa_host_core::clipboard::Clip::Image(png) => stream.send_image(png),
+                    };
+                    if let Err(dsa_host_core::host_api::ClientError::Malformed(why)) = &sent {
+                        log(&format!(
+                            "clipboard: dropped an image copied on the desktop: {why}"
+                        ));
+                    }
+                    if matches!(
+                        sent,
+                        Err(dsa_host_core::host_api::ClientError::Transport(_))
+                    ) {
                         ended = true;
                         break;
                     }
@@ -415,9 +427,9 @@ fn sync_clipboard(to_main: ToMain, outgoing: Receiver<String>) {
             if ended {
                 break;
             }
-            match stream.next(Duration::from_millis(100)) {
-                Ok(Some(text)) => {
-                    if !to_main.send(Message::GuestClipboard(text)) {
+            match stream.next_clip(Duration::from_millis(100)) {
+                Ok(Some(clip)) => {
+                    if !to_main.send(Message::GuestClipboard(clip)) {
                         return;
                     }
                 }
@@ -819,7 +831,7 @@ struct Main {
     shown: ShownWindows,
     requests: Sender<Request>,
     input: Sender<InputEvent>,
-    clipboard: Sender<String>,
+    clipboard: Sender<dsa_host_core::clipboard::Clip>,
     frames: Arc<Mutex<LatestFrames>>,
     images: Option<gfxstream::GpuImages>,
     active: Arc<AtomicBool>,
@@ -827,7 +839,7 @@ struct Main {
     apps: BTreeMap<String, AppInfo>,
     folders: Option<Folders>,
     /// What the guest copied last, so its echo from the desktop is not sent back.
-    guest_clipboard: Option<String>,
+    guest_clipboard: Option<dsa_host_core::clipboard::Clip>,
     focused: Option<i32>,
     /// Where the threads that ask about drags hand their offers.
     to_main: ToMain,
@@ -967,9 +979,9 @@ impl Main {
             }
             Message::Task(event) => self.task_event(&event),
             Message::TasksLost => {}
-            Message::GuestClipboard(text) => {
-                self.guest_clipboard = Some(text.clone());
-                self.desktop.state.set_clipboard(text);
+            Message::GuestClipboard(clip) => {
+                self.guest_clipboard = Some(clip.clone());
+                self.desktop.state.set_clipboard(clip);
             }
             Message::DragOut {
                 task_id,
@@ -1051,9 +1063,9 @@ impl Main {
             Event::X11Widget { widget_id, input } => {
                 self.desktop.state.x11_widget_input(widget_id, input)
             }
-            Event::HostClipboard(text) => {
-                if self.guest_clipboard.as_deref() != Some(text.as_str()) {
-                    let _ = self.clipboard.send(text);
+            Event::HostClipboard(clip) => {
+                if self.guest_clipboard.as_ref() != Some(&clip) {
+                    let _ = self.clipboard.send(clip);
                 }
             }
             Event::DragOut { mut out, serial } => {

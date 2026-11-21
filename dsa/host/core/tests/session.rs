@@ -3703,6 +3703,184 @@ fn fr13_text_longer_than_the_limit_does_not_cross_either_way() {
     assert_eq!(session.state(), SessionState::Active);
 }
 
+/// An image as PNG that takes several pieces on the control channel: noise does not compress.
+fn large_png() -> Vec<u8> {
+    let (width, height) = (400u32, 400u32);
+    let mut dib = vec![0u8; 40];
+    dib[0..4].copy_from_slice(&40u32.to_le_bytes());
+    dib[4..8].copy_from_slice(&width.to_le_bytes());
+    dib[8..12].copy_from_slice(&height.to_le_bytes());
+    dib[12..14].copy_from_slice(&1u16.to_le_bytes());
+    dib[14..16].copy_from_slice(&32u16.to_le_bytes());
+    let mut seed = 0x1234_5678u32;
+    for _ in 0..width * height * 4 {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        dib.push(seed as u8);
+    }
+    let png = dsa_host_core::clipboard::dib_to_png(&dib).expect("a PNG");
+    assert!(png.len() > 2 * dsa_host_core::clipboard::IMAGE_PIECE_BYTES);
+    png
+}
+
+/// A small image as PNG.
+fn small_png(red: u8) -> Vec<u8> {
+    let mut dib = vec![0u8; 40];
+    dib[0] = 40;
+    dib[4] = 1;
+    dib[8] = 1;
+    dib[12] = 1;
+    dib[14] = 24;
+    dib.extend_from_slice(&[0, 0, red, 0]);
+    dsa_host_core::clipboard::dib_to_png(&dib).expect("a PNG")
+}
+
+/// Reads the pieces of one image the guest is sent, checking each one's length, and puts
+/// them together.
+fn image_for_the_guest(agent: &mut Box<dyn Connection>) -> (Vec<u8>, usize) {
+    let mut assembler = dsa_host_core::clipboard::ImageAssembler::default();
+    let mut pieces = 0;
+    loop {
+        match next_body(agent) {
+            Body::ClipboardImage(piece) => {
+                assert!(piece.data.len() <= dsa_host_core::clipboard::IMAGE_PIECE_BYTES);
+                pieces += 1;
+                if let Some(png) = assembler.take(piece).expect("pieces in order") {
+                    return (png, pieces);
+                }
+            }
+            other => panic!("expected a piece of an image, got {other:?}"),
+        }
+    }
+}
+
+fn send_image(agent: &mut Box<dyn Connection>, clip_id: u32, png: &[u8]) {
+    for piece in dsa_host_core::clipboard::image_pieces(clip_id, png) {
+        send_body(agent, Body::ClipboardImage(piece));
+    }
+}
+
+fn nothing_for_the_host_clips(watch: &Receiver<dsa_host_core::clipboard::Clip>) {
+    if let Ok(clip) = watch.recv_timeout(Duration::from_millis(300)) {
+        panic!("the host was given {clip:?}");
+    }
+}
+
+#[test]
+fn fr13_an_image_copied_on_the_host_pastes_in_android() {
+    let (session, mut agent, _launcher) = active_session();
+    let png = large_png();
+    session.host_clipboard_image(png.clone());
+    let (given, pieces) = image_for_the_guest(&mut agent);
+    assert_eq!(given, png);
+    assert!(pieces > 1, "a large image goes in pieces");
+    assert_eq!(session.state(), SessionState::Active);
+}
+
+#[test]
+fn fr13_an_image_copied_in_android_pastes_on_the_host() {
+    let (session, mut agent, _launcher) = active_session();
+    let clips = session.watch_clips();
+    let texts = session.watch_clipboard();
+    let png = large_png();
+    send_image(&mut agent, 1, &png);
+    assert_eq!(
+        clips.recv_timeout(WAIT).expect("the guest's image"),
+        dsa_host_core::clipboard::Clip::Image(png.into())
+    );
+    // A watcher of text only is not given images.
+    nothing_for_the_host(&texts);
+    // Text still reaches both kinds of watcher.
+    send_body(&mut agent, clipboard_text("then text"));
+    assert_eq!(texts.recv_timeout(WAIT).unwrap(), "then text");
+    assert_eq!(
+        clips.recv_timeout(WAIT).unwrap(),
+        dsa_host_core::clipboard::Clip::Text("then text".into())
+    );
+}
+
+#[test]
+fn fr13_an_image_that_crossed_is_not_sent_back() {
+    let (session, mut agent, _launcher) = active_session();
+    let clips = session.watch_clips();
+
+    // From the guest: the host puts it on its clipboard, whose listener hears it again.
+    let from_guest = small_png(10);
+    send_image(&mut agent, 1, &from_guest);
+    assert!(clips.recv_timeout(WAIT).is_ok());
+    session.host_clipboard_image(from_guest);
+    nothing_for_the_guest(&mut agent);
+
+    // From the host: the guest sets its primary clip, whose listener hears it again.
+    let from_host = small_png(20);
+    session.host_clipboard_image(from_host.clone());
+    assert_eq!(image_for_the_guest(&mut agent).0, from_host);
+    send_image(&mut agent, 2, &from_host);
+    nothing_for_the_host_clips(&clips);
+}
+
+#[test]
+fn fr13_an_image_larger_than_the_cap_does_not_cross() {
+    use dsa_host_core::clipboard::MAX_IMAGE_BYTES;
+    let (session, mut agent, _launcher) = active_session();
+    let clips = session.watch_clips();
+    let mut huge = small_png(30);
+    huge.resize(MAX_IMAGE_BYTES + 1, 0);
+
+    session.host_clipboard_image(huge.clone());
+    nothing_for_the_guest(&mut agent);
+    // The guest says its image is longer than the cap: none of its pieces are kept.
+    send_body(
+        &mut agent,
+        Body::ClipboardImage(dsa_protocol::control::ClipboardImage {
+            clip_id: 9,
+            size: MAX_IMAGE_BYTES as u64 + 1,
+            offset: 0,
+            data: huge[..1024].to_vec(),
+        }),
+    );
+    nothing_for_the_host_clips(&clips);
+    // Something that is not a PNG does not cross either.
+    send_image(&mut agent, 10, b"not an image at all");
+    nothing_for_the_host_clips(&clips);
+
+    // An image under the cap still crosses, and the session is still there.
+    let small = small_png(40);
+    session.host_clipboard_image(small.clone());
+    assert_eq!(image_for_the_guest(&mut agent).0, small);
+    assert_eq!(session.state(), SessionState::Active);
+}
+
+#[test]
+fn fr13_with_sharing_off_no_image_crosses() {
+    let (session, mut agent, _launcher) = active_session();
+    let clips = session.watch_clips();
+    session.share_clipboard(false);
+    assert_eq!(next_body(&mut agent), clipboard_sharing(false));
+    session.host_clipboard_image(small_png(50));
+    nothing_for_the_guest(&mut agent);
+    send_image(&mut agent, 1, &small_png(60));
+    nothing_for_the_host_clips(&clips);
+}
+
+#[test]
+fn nfr5_an_image_whose_pieces_do_not_follow_is_dropped() {
+    let (session, mut agent, _launcher) = active_session();
+    let clips = session.watch_clips();
+    let png = large_png();
+    let mut pieces: Vec<_> = dsa_host_core::clipboard::image_pieces(1, &png).collect();
+    pieces.swap(0, 1);
+    for piece in pieces {
+        send_body(&mut agent, Body::ClipboardImage(piece));
+    }
+    nothing_for_the_host_clips(&clips);
+    // The next image is taken.
+    send_image(&mut agent, 2, &png);
+    assert!(clips.recv_timeout(WAIT).is_ok());
+    assert_eq!(session.state(), SessionState::Active);
+}
+
 #[test]
 fn nfr5_a_clipboard_sharing_message_from_the_guest_is_dropped() {
     let (session, mut agent, _launcher) = active_session();

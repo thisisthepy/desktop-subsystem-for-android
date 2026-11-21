@@ -11,8 +11,8 @@ use std::path::PathBuf;
 use dsa_protocol::control::{
     envelope::Body, AccessibilityAction, AccessibilityActionResult, AccessibilityAnnouncement,
     AccessibilityListening, AccessibilityNode, AccessibilityTree, AccessibilityWatch,
-    AgentConnected, ApkChunk, AppInfo, AuthChallenge, AuthProof, CancelInstall, ClipboardSharing,
-    ClipboardText, ClockAnswer, ClockProbe, CloseTask, DeviceIdle, Envelope, FileAction, FileChunk,
+    AgentConnected, ApkChunk, AppInfo, AuthChallenge, AuthProof, CancelInstall, ClipboardImage,
+    ClipboardSharing, ClipboardText, ClockAnswer, ClockProbe, CloseTask, DeviceIdle, Envelope, FileAction, FileChunk,
     FileProgress, GuestBoot, GuestMemory, GuestNotification, Hello, HelloAccepted, HelloRejected,
     ImeCommit, ImeComposition, ImeCursor, ImeEditor, ImeInputKind, ImeSetComposingRegion,
     ImeSetSelection, InstallApk, InstallPart, InstallProgress, InstallResult, InstallStatus,
@@ -634,6 +634,15 @@ fn cases() -> BTreeMap<&'static str, Envelope> {
             "clipboard_text",
             wrap(Body::ClipboardText(ClipboardText {
                 text: "hello \u{c548}\u{b155}".into(),
+            })),
+        ),
+        (
+            "clipboard_image",
+            wrap(Body::ClipboardImage(ClipboardImage {
+                clip_id: 7,
+                size: 4,
+                offset: 0,
+                data: vec![0x89, 0x50, 0x4e, 0x47],
             })),
         ),
         (
