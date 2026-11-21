@@ -143,8 +143,13 @@ failed=0
 for fragment in "${fragments[@]}"; do
     while IFS= read -r line; do
         [[ "$line" =~ ^CONFIG_[A-Z0-9_]+= ]] || continue
+        name="${line%%=*}"
+        # An extra fragment (--debug, --extra-config) decides the options it names itself.
+        if [[ " ${extra[*]} " != *" $fragment "* ]] && \
+           grep -qhE "^(# )?$name[= ]" "${extra[@]}" /dev/null 2>/dev/null; then
+            continue
+        fi
         if ! grep -qxF -- "$line" "$config"; then
-            name="${line%%=*}"
             actual="$(grep -E "^(# )?$name[= ]" "$config" || echo "$name missing")"
             echo "not applied ($arch, $(basename "$fragment")): $line (the kernel has: $actual); a dependency is missing" >&2
             failed=1
