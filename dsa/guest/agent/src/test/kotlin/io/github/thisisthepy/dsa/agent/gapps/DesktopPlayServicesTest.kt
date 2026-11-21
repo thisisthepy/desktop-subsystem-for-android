@@ -81,7 +81,15 @@ class DesktopPlayServicesTest {
     /** What Play services runs that the agent leaves alone: push, accounts, location, Integrity. */
     private val needed = listOf(
         "com.google.android.gms.gcm.GcmService",
+        "com.google.android.gms.gcm.nts.SchedulerService",
         "com.google.android.gms.chimera.PersistentApiService",
+        "com.google.android.gms.chimera.PersistentDirectBootAwareApiService",
+        "com.google.android.gms.chimera.PersistentInternalBoundBrokerService",
+        "com.google.android.location.internal.GoogleLocationManagerService",
+        "com.google.android.gms.location.geocode.GeocodeService",
+        "com.google.android.gms.cast.media.CastMediaRoute2ProviderService_Persistent",
+        "com.google.android.gms.auth.setup.devicesignals.LockScreenService",
+        "com.google.android.gms.fido.authenticator.service.AuthenticatorService",
         "com.google.android.location.fused.FusedLocationService",
         "com.google.android.gms.play.integrity.api.service.IntegrityApiPersistentService",
         "com.google.android.gms.droidguard.DroidGuardService",
@@ -121,6 +129,24 @@ class DesktopPlayServicesTest {
         scheduler.advance(DesktopPlayServices.SETTLE_MILLIS)
         assertEquals(needed.toSet(), states.on(gms))
         assertTrue(log.lines.toString(), log.lines.any { it.startsWith("info: turned off again") && "crisis alerts" in it })
+    }
+
+    @Test
+    fun nfr1_radio_and_debug_only_play_services_are_off_and_push_stays_on() {
+        val radioAndDebug = listOf(
+            "com.google.android.gms.findmydevice.spot.bleadvertising.OfflineBeaconService_Persistent",
+            "com.google.android.gms.location.gnssassistance.GnssAssistanceService",
+            "com.google.android.gms.clearcut.debug.ClearcutDebugDumpService",
+        )
+        assertTrue(unused.containsAll(radioAndDebug))
+        // Nothing the agent turns off is on the push, sign-in, Integrity or location path.
+        assertTrue(unused.none { it in needed })
+
+        states.install(gms, unused + needed)
+        startedAgent()
+
+        assertTrue(radioAndDebug.none { it in states.on(gms) })
+        assertEquals(needed.toSet(), states.on(gms))
     }
 
     @Test
