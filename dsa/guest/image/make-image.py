@@ -5091,7 +5091,8 @@ RECLAIM_PROPERTY_CONTEXT = f"{RECLAIM_PROPERTY} u:object_r:dsa_memory_prop:s0 ex
 # reclaim property.
 RECLAIM_STEP_PROPERTY = "vendor.dsa.memory.reclaim_step"
 RECLAIM_STEP_PROPERTY_CONTEXT = f"{RECLAIM_STEP_PROPERTY} u:object_r:dsa_memory_prop:s0 exact int"
-# The gentler property for the gradual trim while apps are open: init drops only the page cache.
+# The gentler property for the gradual trim while apps are open: init reclaims the coldest pages,
+# mostly page cache.
 TRIM_PROPERTY = "vendor.dsa.memory.trim"
 TRIM_PROPERTY_CONTEXT = f"{TRIM_PROPERTY} u:object_r:dsa_memory_prop:s0 exact bool"
 # How many MiB the next gradual trim takes; the daemon sets it before the trim property.

@@ -99,15 +99,18 @@ on property:vendor.dsa.memory.writeback=1 && property:sys.boot_completed=1
 # under memory pressure, whether or not the host is short. vendor.dsa.memory.trim_size says
 # how many MiB: all of the excess at once. The kernel takes them from the
 # root cgroup, which every process's memory is charged under, coldest pages first, so the hot
-# pages of running apps and system_server stay. "swappiness=0" takes page cache only: app
-# memory moves to zram in the idle reclaim, not while an app is in use. The root's file is
+# pages of running apps and system_server stay. "swappiness=30" takes mostly page cache and a
+# little anonymous memory, the coldest of it, into zram: pages no process has touched since
+# the last trims, such as a background service's heap. The hot pages of the shown app stay on
+# the active list and are not taken. With "swappiness=0" the trim took files only, so the open
+# app's own working files went first while cold heap stayed resident. The root's file is
 # root's, unlike those of the groups libprocessgroup makes, so init's vendor scripts can always
 # open it. The pages it frees are scattered among pages in use. On a host that takes back only
 # whole free blocks (androidboot.dsa.memory_compaction=on), compaction then gathers them and they
 # go back to the host at once rather than whenever background compaction gets to them; a host
 # that takes back every free page gets them as they are, without moving any memory.
 on property:vendor.dsa.memory.trim=1
-    write /sys/fs/cgroup/memory.reclaim "${vendor.dsa.memory.trim_size}M swappiness=0"
+    write /sys/fs/cgroup/memory.reclaim "${vendor.dsa.memory.trim_size}M swappiness=30"
 
 on property:vendor.dsa.memory.trim=1 && property:ro.boot.dsa.memory_compaction=on
     write /proc/sys/vm/compact_memory 1

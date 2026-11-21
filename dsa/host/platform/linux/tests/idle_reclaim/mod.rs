@@ -4,7 +4,7 @@
 //!
 //! dsa-channeld asks init for two kinds of reclaim. The idle reclaim moves cold anonymous
 //! pages to zram in four steps, drops the clean caches (`drop_caches`) and compacts memory;
-//! the working set trim reclaims cold page cache only (`memory.reclaim` with `swappiness=0`)
+//! the working set trim reclaims cold page cache and a little cold anonymous memory (`memory.reclaim` with `swappiness=30`)
 //! and compacts. init's subcontext runs the vendor script's writes, and the kernel does each
 //! write's work in the writer, so the kernel time of the processes named `init` is the cost of
 //! a run. A sampler ([SAMPLER]) reads it once a second in the guest, with `/proc/stat`,
@@ -916,7 +916,7 @@ mod tests {
                    104.20     1     1 I init    : Command 'write /proc/sys/vm/drop_caches 3' action=property:vendor.dsa.memory.reclaim=1 && property:sys.boot_completed=1 (/vendor/etc/init/dsa-channeld.rc:36) took 88ms and succeeded\n\
                    104.50     1     1 I init    : Command 'write /proc/sys/vm/compact_memory 1' action=property:vendor.dsa.memory.reclaim=1 && property:sys.boot_completed=1 (/vendor/etc/init/dsa-channeld.rc:37) took 230ms and succeeded\n\
                    108.70   700   700 I dsa-channeld: trimming 128 MiB of cold page cache (working set target 256 MiB)\n\
-                   109.10     1     1 I init    : Command 'write /sys/fs/cgroup/memory.reclaim ${vendor.dsa.memory.trim_size}M swappiness=0' action=y (/vendor/etc/init/dsa-channeld.rc:52) took 140ms and succeeded\n\
+                   109.10     1     1 I init    : Command 'write /sys/fs/cgroup/memory.reclaim ${vendor.dsa.memory.trim_size}M swappiness=30' action=y (/vendor/etc/init/dsa-channeld.rc:52) took 140ms and succeeded\n\
                    109.20     1     1 I init    : Command 'start foo' action=z (/x.rc:1) took 70ms and succeeded\n\
                    not a line\n";
         let events = log_events(log);
