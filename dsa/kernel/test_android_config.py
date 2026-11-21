@@ -1027,6 +1027,11 @@ class AndroidKernelConfigTests(unittest.TestCase):
                 if fragment not in extras and name in extra_names:
                     continue
                 # The line alone, not the whole merged file, so a CI log shows what is missing.
+                # In a kernel with extra fragments an option the base turns off may vanish
+                # from the menu altogether; it is still off as long as nothing turns it on.
+                if (extras and fragment not in extras and line.endswith(" is not set")
+                        and not any(other.startswith(f"{name}=") for other in kept)):
+                    continue
                 if line not in kept:
                     self.fail(f"{line!r} from {fragment.name} is not in the merged {arch} "
                               f"configuration {merged}")
