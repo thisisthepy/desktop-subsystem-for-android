@@ -2,7 +2,8 @@
 //! writes, against text in the kernel's own formats.
 
 use dsa_guest_channeld::memory_report::{
-    kernel_thread_kind, process, report, slab_caches, thread_groups, vmalloc_users, Sources,
+    allocation_sites, kernel_thread_kind, process, report, slab_caches, thread_groups,
+    vmalloc_users, Sources,
 };
 
 const SLABINFO: &str = "slabinfo - version: 2.1\n\
@@ -126,6 +127,7 @@ fn nfr1_the_report_has_every_part_between_begin_and_end_and_says_what_it_could_n
         processes: Vec::new(),
         cgroup_stat: Some("nr_descendants 212\nnr_dying_descendants 37\n".into()),
         bufio_bytes: Some("41943040\n".into()),
+        allocinfo: None,
     });
     assert_eq!(lines.first().map(String::as_str), Some("begin"));
     assert_eq!(lines.last().map(String::as_str), Some("end"));
@@ -137,9 +139,50 @@ fn nfr1_the_report_has_every_part_between_begin_and_end_and_says_what_it_could_n
     assert!(lines.contains(&"bufio 41943040".to_string()));
     assert!(lines.iter().any(|l| l.starts_with("missing vmalloc ")));
     assert!(lines.iter().any(|l| l.starts_with("missing threads ")));
+    // The shipped kernel has no allocation profiling; the report says how to get it.
+    assert!(lines
+        .iter()
+        .any(|l| l.starts_with("missing allocinfo ") && l.contains("--memory-profile")));
     // Without SLUB's debugging support the kernel has no slabinfo; the report says so.
     let without = report(&Sources::default());
     assert!(without.iter().any(|l| l.starts_with("missing slab ")));
     // Every line is one record of the kernel log.
     assert!(lines.iter().all(|l| !l.contains('\n') && l.len() < 900));
+}
+
+const ALLOCINFO: &str = "allocinfo - version: 2.0\n\
+#     <size>  <calls> <tag info>\n\
+    58720256    14336 mm/sparse-vmemmap.c:85 func:vmemmap_alloc_block\n\
+     3145728      768 drivers/gpu/drm/drm_gem_shmem_helper.c:180 [drm] func:drm_gem_shmem_get_pages\n\
+           0        0 init/main.c:1310 func:do_initcalls\n\
+   104857600    25600 mm/slub.c:2462 func:alloc_slab_page\n";
+
+#[test]
+fn nfr1_allocation_sites_say_where_the_unaccounted_kernel_memory_was_allocated() {
+    let sites = allocation_sites(ALLOCINFO);
+    // Sites that hold nothing now are left out; the rest are largest first.
+    let names: Vec<&str> = sites.iter().map(|s| s.function.as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            "alloc_slab_page",
+            "vmemmap_alloc_block",
+            "drm_gem_shmem_get_pages"
+        ]
+    );
+    assert_eq!(sites[1].site, "mm/sparse-vmemmap.c:85");
+    assert_eq!((sites[1].kib, sites[1].calls), (57344, 14336));
+    let lines = report(&Sources {
+        allocinfo: Some(ALLOCINFO.into()),
+        ..Sources::default()
+    });
+    assert!(
+        lines.contains(&"allocinfo-total 3 162816".to_string()),
+        "{lines:?}"
+    );
+    assert!(lines.contains(
+        &"allocinfo drivers/gpu/drm/drm_gem_shmem_helper.c:180 drm_gem_shmem_get_pages 3072 768"
+            .to_string()
+    ));
+    assert!(!lines.iter().any(|l| l.starts_with("missing allocinfo ")));
 }

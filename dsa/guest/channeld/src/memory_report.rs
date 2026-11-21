@@ -26,6 +26,7 @@ pub const SLAB_LINES: usize = 40;
 pub const VMALLOC_LINES: usize = 30;
 pub const THREAD_LINES: usize = 40;
 pub const PAGE_TABLE_LINES: usize = 15;
+pub const ALLOCATION_LINES: usize = 40;
 
 /// The `/proc/meminfo` lines the report repeats, so its parts can be read against them.
 pub const MEMINFO_KEYS: [&str; 11] = [
@@ -141,6 +142,48 @@ pub fn vmalloc_users(vmallocinfo: &str) -> Vec<VmallocUser> {
     }
     users.sort_by(|a, b| b.kib.cmp(&a.kib).then_with(|| a.caller.cmp(&b.caller)));
     users
+}
+
+/// One allocation site of the kernel, as memory allocation profiling (`/proc/allocinfo`)
+/// counts it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AllocationSite {
+    /// The source file and line, such as `mm/slub.c:2462`.
+    pub site: String,
+    /// The function the allocation is made in.
+    pub function: String,
+    pub kib: u64,
+    /// How many allocations made there are still held.
+    pub calls: u64,
+}
+
+/// The allocation sites of a `/proc/allocinfo` that hold memory now, largest first. Only a
+/// kernel built with memory allocation profiling has the file; it lists every page and slab
+/// allocation by the place in the source that made it, including the memory `/proc/meminfo`
+/// gives no line of its own (drivers, DMA buffers, page structs of added memory).
+pub fn allocation_sites(allocinfo: &str) -> Vec<AllocationSite> {
+    let mut sites: Vec<AllocationSite> = allocinfo
+        .lines()
+        .filter(|line| !line.starts_with("allocinfo") && !line.trim_start().starts_with('#'))
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            let bytes: u64 = fields.next()?.parse().ok()?;
+            let calls: u64 = fields.next()?.parse().ok()?;
+            let site = fields.next()?.to_string();
+            let function = fields
+                .find_map(|f| f.strip_prefix("func:"))
+                .unwrap_or("unknown")
+                .to_string();
+            (bytes > 0).then_some(AllocationSite {
+                site,
+                function,
+                kib: bytes / 1024,
+                calls,
+            })
+        })
+        .collect();
+    sites.sort_by(|a, b| b.kib.cmp(&a.kib).then_with(|| a.site.cmp(&b.site)));
+    sites
 }
 
 /// One process as its `/proc/<pid>/status` and command line describe it.
@@ -270,6 +313,8 @@ pub struct Sources {
     pub cgroup_stat: Option<String>,
     /// dm-bufio's `current_allocated_bytes`: the dm-verity hash blocks it caches.
     pub bufio_bytes: Option<String>,
+    /// `/proc/allocinfo`, which only a kernel built with memory allocation profiling has.
+    pub allocinfo: Option<String>,
 }
 
 /// The report's lines, without [`MARK`]: `begin`, then each part, then `end`. Each line is
@@ -283,6 +328,7 @@ pub struct Sources {
 /// - `page-tables <process> <KiB>`
 /// - `cgroups <descendants> <dying>`
 /// - `bufio <bytes>`
+/// - `allocinfo-total <sites> <KiB>`, then `allocinfo <file:line> <function> <KiB> <calls>`
 /// - `missing <what> <why>` for a part that could not be read
 pub fn report(sources: &Sources) -> Vec<String> {
     let mut lines = vec!["begin".to_string()];
@@ -390,6 +436,24 @@ pub fn report(sources: &Sources) -> Vec<String> {
             lines.push("missing bufio dm-bufio's current_allocated_bytes could not be read".into())
         }
     }
+    match &sources.allocinfo {
+        Some(allocinfo) => {
+            let sites = allocation_sites(allocinfo);
+            let total: u64 = sites.iter().map(|s| s.kib).sum();
+            lines.push(format!("allocinfo-total {} {total}", sites.len()));
+            for s in sites.iter().take(ALLOCATION_LINES) {
+                lines.push(format!(
+                    "allocinfo {} {} {} {}",
+                    s.site, s.function, s.kib, s.calls
+                ));
+            }
+        }
+        None => lines.push(
+            "missing allocinfo /proc/allocinfo could not be read (only a kernel built with \
+             build.sh --memory-profile has it)"
+                .into(),
+        ),
+    }
     lines.push("end".into());
     lines
 }
@@ -425,6 +489,7 @@ pub fn read_sources() -> Sources {
         processes,
         cgroup_stat: read("/sys/fs/cgroup/cgroup.stat"),
         bufio_bytes: read("/sys/module/dm_bufio/parameters/current_allocated_bytes"),
+        allocinfo: read("/proc/allocinfo"),
     }
 }
 

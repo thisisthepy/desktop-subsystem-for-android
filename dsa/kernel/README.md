@@ -11,6 +11,7 @@ kernel, and the user's WSL kernel is not touched.
 | `virtio.config` | The virtio drivers the macOS host's VM needs, merged after those for both architectures |
 | `dxg.config` | Hyper-V's paravirtualized GPU driver (dxgkrnl, `/dev/dxg`), merged last for both architectures. It is idle unless the host gives the VM a GPU (experimental, off by default) |
 | `android-debug.config` | Memory debugging (`CONFIG_DEBUG_VM`, `CONFIG_KFENCE`, `CONFIG_PAGE_OWNER`, `CONFIG_DEBUG_LIST`), merged only by `build.sh --debug`, never into the shipped kernel |
+| `android-memory-profile.config` | Memory allocation profiling (`CONFIG_MEM_ALLOC_PROFILING`, `/proc/allocinfo`), merged only by `build.sh --memory-profile`, never into the shipped kernel |
 | `patches/` | Small patches applied to the pinned source before configuration, the same for both architectures |
 | `apply-patches.sh` | Leaves a checkout of the tag with the whole patch series applied, however often it runs; the patches stack (several change `mm/page_reporting.c`), so it checks the series as a whole, not one patch at a time |
 | `build.sh` | Fetches the source into `.scratch/`, merges the configuration, checks it and builds `bzImage` (x86_64) or `Image` (arm64) |
@@ -148,6 +149,14 @@ in probe order, which changes when the host attaches another disk.
 - **pstore on a disk (pstore/blk)**, so the kernel's last messages, an oops's report and
   Android's last log lines (pmsg) are kept on a small disk and shown in `/sys/fs/pstore` at
   the next boot. `dsa logs collect` carries what is there, and the guest then clears it.
+- **A kernel sized for the VM.** The kernel's own memory stays resident for the VM's whole
+  life, so the fragment leaves out what config-wsl carries for a WSL distribution on any
+  machine: room for 512 processors and 1024 NUMA nodes (`CONFIG_NR_CPUS=64`, no NUMA; the VM
+  has 4 processors by default and one node), unmerged slab caches and per-CPU partial slab
+  lists, the function tracer's per-function records, the virtual terminals and the
+  framebuffer layer (with which vkms also kept an fbdev buffer nobody draws), and, on arm64,
+  KVM. Tracepoints, BTF, kallsyms and `/proc/slabinfo` stay, because atrace, perfetto, netd
+  and the memory measurement use them. `android.config` says why each one goes.
 
 ## The pstore disk
 
@@ -200,7 +209,15 @@ dsa/kernel/build.sh --config-only               # merge and check, about a minut
 dsa/kernel/build.sh                             # also build bzImage, tens of minutes
 dsa/kernel/build.sh --arch arm64 [--config-only] # the same for arm64 (Image)
 dsa/kernel/build.sh [--arch arm64] --debug       # with android-debug.config, for chasing memory bugs
+dsa/kernel/build.sh [--arch arm64] --memory-profile # with android-memory-profile.config, /proc/allocinfo
 ```
+
+`--memory-profile` merges `android-memory-profile.config`: memory allocation profiling, on
+from boot. `/proc/allocinfo` then lists every page and slab allocation by the source line that
+made it, which is how the kernel memory `/proc/meminfo` names no line for (drivers, DMA, page
+structs) can be told apart. `dsa-channeld --memory-report` writes its largest sites to the
+kernel log as `allocinfo` lines. The profiling takes about 1% of the guest's memory itself,
+so compare what each site holds, not the totals.
 
 `--debug` merges `android-debug.config` last, and `--extra-config FILE` (or
 `DSA_KERNEL_EXTRA_CONFIG`) any other fragment. Such a kernel builds and lands in directories of

@@ -762,6 +762,25 @@ pub fn kernel_markdown(lines: &[String]) -> String {
             mib1(number(w.first()) / 1024)
         ));
     }
+    // Only a kernel built with memory allocation profiling (build.sh --memory-profile) has
+    // these: every page and slab allocation by the place in the source that made it.
+    if let Some(total) = report_lines(lines, "allocinfo-total").next() {
+        md.push_str(&format!(
+            "**Allocation sites: {}, {} MiB.**\n\n| Site | Function | MiB | Allocations |\n|---|---|---|---|\n",
+            number(total.first()),
+            mib1(number(total.get(1)))
+        ));
+        for w in report_lines(lines, "allocinfo").take(25) {
+            md.push_str(&format!(
+                "| {} | {} | {} | {} |\n",
+                w.first().unwrap_or(&"?"),
+                w.get(1).unwrap_or(&"?"),
+                mib1(number(w.get(2))),
+                number(w.get(3))
+            ));
+        }
+        md.push('\n');
+    }
     for w in report_lines(lines, "missing") {
         md.push_str(&format!("Not read: {}.\n\n", w.join(" ")));
     }

@@ -289,6 +289,8 @@
 (allow dsa_memory_report proc_meminfo (file (read open getattr)))
 (allow dsa_memory_report proc_slabinfo (file (read open getattr)))
 (allow dsa_memory_report proc_vmallocinfo (file (read open getattr)))
+; /proc/allocinfo, which only a kernel built with memory allocation profiling has.
+(allow dsa_memory_report proc_allocinfo (file (read open getattr)))
 (allow dsa_memory_report proc (dir (search read open getattr)))
 (allow dsa_memory_report domain (dir (search getattr)))
 (allow dsa_memory_report domain (file (read open getattr)))

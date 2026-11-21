@@ -170,6 +170,7 @@ class ImageLayoutTests(unittest.TestCase):
             "/proc": [("proc", "dir")],
             "/proc/slabinfo": [("proc_slabinfo", "file")],
             "/proc/vmallocinfo": [("proc_vmallocinfo", "file")],
+            "/proc/allocinfo": [("proc_allocinfo", "file")],
             "/sys/fs/cgroup/cgroup.stat": [("cgroup_v2", "dir"), ("cgroup_v2", "file")],
             "/sys/module/dm_bufio/parameters/current_allocated_bytes": [
                 ("sysfs", "dir"),
@@ -3213,7 +3214,7 @@ class GuestMemoryTests(unittest.TestCase):
             self.assertEqual(rc[trigger + 1], "    start dsa_memory_report")
             policy = archive.read("SYSTEM/etc/selinux/plat_sepolicy.cil").decode()
             self.assertIn("(typeattributeset domain (dsa_memory_report))", policy)
-            for kind in ["proc_slabinfo", "proc_vmallocinfo", "proc_meminfo"]:
+            for kind in ["proc_slabinfo", "proc_vmallocinfo", "proc_meminfo", "proc_allocinfo"]:
                 self.assertIn(f"(allow dsa_memory_report {kind} (file (read open getattr)))", policy)
             # It writes nothing but its log.
             writes = re.findall(r"\(allow dsa_memory_report (\S+) \((\S+) \([^)]*\b(?:write|append)\b", policy)

@@ -256,7 +256,8 @@ service dsa_cacerts_setup /vendor/bin/dsa-channeld --cacerts-setup
     stdio_to_kmsg
 
 # What the guest kernel's own memory is made of: the largest slab caches, vmalloc users and
-# threads, which only root may read. dsa-channeld --memory-report reads them, writes them to
+# threads, and on a kernel built with allocation profiling its largest allocation sites
+# (/proc/allocinfo), which only root may read. dsa-channeld --memory-report reads them, writes them to
 # the kernel log ("memory report:" lines, which `logcat -b kernel` shows) and exits. It runs as
 # root, which /proc/slabinfo and /proc/vmallocinfo need, in a domain of its own that may only
 # read (channeld.cil), and in the readproc group, which lets it see every process under /proc.

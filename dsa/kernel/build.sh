@@ -14,6 +14,9 @@
 #   dsa/kernel/build.sh [--arch A] --config-only  configure and check only (about a minute)
 #   dsa/kernel/build.sh [--arch A] --debug        also merge android-debug.config (memory
 #                                                 debugging; never the shipped kernel)
+#   dsa/kernel/build.sh [--arch A] --memory-profile  also merge android-memory-profile.config
+#                                                 (/proc/allocinfo, for the memory
+#                                                 measurement; never the shipped kernel)
 #   dsa/kernel/build.sh --extra-config FILE       also merge FILE, last; may be repeated
 #
 # Extra fragments can also come from DSA_KERNEL_EXTRA_CONFIG (paths separated by spaces). A
@@ -50,6 +53,7 @@ while (( $# > 0 )); do
     case "$1" in
         --config-only) config_only=true ;;
         --debug) extra+=("$kernel_dir/android-debug.config") ;;
+        --memory-profile) extra+=("$kernel_dir/android-memory-profile.config") ;;
         --extra-config) extra+=("${2:?--extra-config needs a configuration fragment}"); shift ;;
         --arch) arch="${2:?--arch needs x86_64 or arm64}"; shift ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
