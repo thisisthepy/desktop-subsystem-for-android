@@ -21,8 +21,8 @@ use std::sync::OnceLock;
 use dsa_host_core::compositor::caption::{BandSample, CaptionBand, CaptionTone};
 use dsa_host_core::compositor::frame_follow::{Arrival, FrameFollow};
 use dsa_host_core::compositor::window_sizing::{
-    frame_placement, frame_rect, kept_frame_action, to_task_size, to_window_size, FrameRectRequest,
-    KeptFrame, MoveLoop,
+    frame_rect, kept_frame_action, shown_frame_placement, to_task_size, to_window_size,
+    FrameRectRequest, KeptFrame, MoveLoop,
 };
 use dsa_host_core::tasks::Bounds;
 use dsa_host_core::ui_text::caption::back_name;
@@ -1014,7 +1014,7 @@ impl TaskWindow {
         self.place_frame();
     }
 
-    /// Puts the frame on the screen where core places it in the window ([`frame_placement`])
+    /// Puts the frame on the screen where core places it in the window ([`shown_frame_placement`])
     /// and paints the rest of the content the colour core gives it ([`fill_colour`]), so no
     /// part of the window shows AppKit's own background and no frame is scaled unless core
     /// scales it.
@@ -1023,7 +1023,8 @@ impl TaskWindow {
         let (view, backing) = unsafe { content_pixels(window) };
         let frame = self.on_screen.unwrap_or(view);
         let held = self.follow.held() && !self.overlay;
-        let placement = frame_placement(frame, view, self.frame_scale, held);
+        let pending = held && self.follow.pending();
+        let placement = shown_frame_placement(frame, view, self.frame_scale, held, pending);
         let sample = TONES.with(|tones| {
             tones
                 .borrow()
