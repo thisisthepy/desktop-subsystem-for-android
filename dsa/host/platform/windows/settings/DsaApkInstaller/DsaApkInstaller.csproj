@@ -58,6 +58,8 @@
        of its monitor and inside it, as the settings window does. -->
   <ItemGroup>
     <Compile Include="..\DsaSettings\StartupPlacement.cs" Link="StartupPlacement.cs" />
+    <!-- The settings app's memory trim, on the same rules (MemoryTrim in DsaSettings.Core). -->
+    <Compile Include="..\DsaSettings\WorkingSetTrim.cs" Link="WorkingSetTrim.cs" />
   </ItemGroup>
 
   <!-- The settings app's title bar colours: the bar shows whether the window has the focus,

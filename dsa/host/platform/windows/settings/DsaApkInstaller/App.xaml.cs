@@ -23,6 +23,10 @@ public partial class App : Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        // Software rendering before the first window, as the settings app: hardware rendering
+        // loads Direct3D, the shader compiler and the graphics driver, with private heaps of
+        // their own, for one window of text and a progress bar.
+        System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
         base.OnStartup(e);
         _ = SetCurrentProcessExplicitAppUserModelID(AppUserModelId);
         // `--lang ko-KR` shows the app in another language than the user's display language,

@@ -29,6 +29,7 @@ public partial class InstallerWindow : FluentWindow
     private bool _closed;
     private ApkIcon? _drawnIcon;
     private bool _iconShown;
+    private ApkInstallPage? _shownPage;
     /// <summary>The page the keyboard focus was last placed on, null before the first.</summary>
     private ApkInstallPage? _focusedPage;
     /// <summary>The result last told to a screen reader, so each one is told once.</summary>
@@ -45,6 +46,8 @@ public partial class InstallerWindow : FluentWindow
         // The title bar dims while another window has the focus, as Windows' own do, and the
         // icon's tile with it; the tile's colours follow the theme.
         Dsa.Settings.TitleBarActivation.Attach(this, AppIconTileColours);
+        // Memory goes back to Windows while the window is minimised or hidden.
+        Dsa.Settings.WorkingSetTrim.Attach(this);
         Icon =BitmapFrame.Create(new Uri("pack://application:,,,/Assets/apk-installer.ico"));
         Resources["SensitiveText"] = App.Text.Get("ApkWindow_Sensitive");
         // The window's name in the user's language, from the same text the settings app names
@@ -136,6 +139,12 @@ public partial class InstallerWindow : FluentWindow
             return;
         }
         var page = _vm.Page;
+        // A step that is left lets go of its controls' state: the heap is compacted once idle.
+        if (_shownPage is { } shown && shown != page)
+        {
+            Dsa.Settings.WorkingSetTrim.PageLeft(this);
+        }
+        _shownPage = page;
         var read = _vm.Apk is not null;
         HeroTitle.Text = _vm.HeroTitle;
         // The labels and the values in their two columns; the row goes with its value.
