@@ -27,6 +27,11 @@ on:
         description: "A WSL kernel tag to build instead of the pinned one, to try a newer tag"
         required: false
         default: ""
+      debug:
+        description: "Also merge dsa/kernel/android-debug.config, to find memory corruption; never the shipped kernel"
+        type: boolean
+        required: false
+        default: false
   # Checks (checks.yml) runs it as one of its jobs, with every other test, in one run.
   workflow_call:
     inputs:
@@ -76,6 +81,8 @@ jobs:
       actions: write
     env:
       DSA_KERNEL_OUT: ${{ github.workspace }}/.scratch/kernel-out-${{ matrix.arch }}
+      # A debug kernel merges the memory debugging fragment last (build.sh reads it here).
+      DSA_KERNEL_EXTRA_CONFIG: ${{ inputs.debug && format('{0}/dsa/kernel/android-debug.config', github.workspace) || '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -89,7 +96,8 @@ jobs:
           arch: ${{ matrix.arch }}
           out: ${{ env.DSA_KERNEL_OUT }}
           check-config: "true"
-          save: ${{ github.ref == 'refs/heads/develop' }}
+          # A debug kernel is never kept, so it can never replace the shipped kernel's cache.
+          save: ${{ github.ref == 'refs/heads/develop' && !inputs.debug }}
           token: ${{ github.token }}
 
       # On one runner only: the tag is the same for both kernels.
@@ -120,6 +128,6 @@ jobs:
       - name: Upload the kernel
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
+          name: ${{ matrix.artifact }}${{ inputs.debug && '-debug' || '' }}
           path: ${{ env.DSA_KERNEL_OUT }}/
           if-no-files-found: error
