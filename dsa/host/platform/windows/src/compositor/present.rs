@@ -1456,14 +1456,21 @@ impl WindowPresenter {
         let placement = frame_placement(state.frame, view, state.scale, state.follow.held());
         // The window has no redirection surface (WS_EX_NOREDIRECTIONBITMAP) and paints no
         // background (WM_ERASEBKGND), so wherever the frame's visual does not reach, beside a
-        // frame shown 1:1 in a larger window, the desktop shows through unless the fill under
-        // the frame covers it.
-        let colour = fill_colour(
-            self.see_through,
-            state.band_sample,
-            state.splash_background,
-            || super::system_settings::read().dark_mode,
-        );
+        // frame shown in a larger window, the desktop shows through unless the fill under the
+        // frame covers it. Core says when it does (FrameFollow::strips_filled): only beside the
+        // guest's answer to a held size that it keeps smaller. While a maximise, snap or restore
+        // waits for the app, the last frame is shown with nothing around it, as before any fill
+        // existed, so the window's animation is of the app and not of a colour around it.
+        let colour = if state.follow.strips_filled() {
+            fill_colour(
+                self.see_through,
+                state.band_sample,
+                state.splash_background,
+                || super::system_settings::read().dark_mode,
+            )
+        } else {
+            None
+        };
         let wanted = (buffers, state.frame, placement, view, colour);
         if state.committed == Some(wanted) {
             return false;
@@ -1497,11 +1504,13 @@ impl WindowPresenter {
             M31: dx,
             M32: dy,
         };
+        // No colour: the fill's one pixel is scaled to nothing, so it covers nothing.
+        let fill_size = if colour.is_some() { view } else { (0, 0) };
         let fill = Matrix3x2 {
-            M11: view.0 as f32,
+            M11: fill_size.0 as f32,
             M12: 0.0,
             M21: 0.0,
-            M22: view.1 as f32,
+            M22: fill_size.1 as f32,
             M31: 0.0,
             M32: 0.0,
         };

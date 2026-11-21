@@ -73,6 +73,11 @@ pub struct FrameFollow {
     held: bool,
     /// The sizes proposed for the window, oldest first, each once at its latest place.
     proposals: Vec<(u32, u32)>,
+    /// While a window that holds its size waits for the guest's answer to a new size: the size
+    /// of the frame it showed when the size changed. Frames of that size are the app's old
+    /// drawing; the first frame of another size is the guest's answer
+    /// ([`FrameFollow::strips_filled`]).
+    waiting_from: Option<Option<(u32, u32)>>,
 }
 
 impl FrameFollow {
@@ -109,6 +114,26 @@ impl FrameFollow {
         self.held
     }
 
+    /// Whether what the frame leaves of the window is filled with the app's colour. Only for a
+    /// window that holds its size and shows the guest's answer to it: the guest kept the task
+    /// smaller than the window (its display holds no more, as on a monitor of another size
+    /// or scale than the one it was made for), so the strips beside the frame would stay for
+    /// as long as the window does. While that answer is still coming (the moment of a
+    /// maximise, a snap or a restore), the last frame is shown as it is with nothing drawn
+    /// around it, so the window's own animation shows the app, not a solid colour around a
+    /// frame cut out of it.
+    pub fn strips_filled(&self) -> bool {
+        self.held && self.waiting_from.is_none()
+    }
+
+    /// A frame of `size` is on the screen of a window that holds its size.
+    fn held_frame_shown(&mut self, size: (u32, u32)) {
+        if self.waiting_from.is_some_and(|from| from != Some(size)) {
+            self.waiting_from = None;
+        }
+        self.shown = Some(size);
+    }
+
     /// The window holds the size the desktop gives it (`true`: it is maximised, snapped or
     /// full screen) or takes the size of its frames again. While it holds its size, every size
     /// proposed is taken at once and every frame is shown as it comes, whatever its size: the
@@ -124,6 +149,7 @@ impl FrameFollow {
         self.claimed = false;
         self.stale = None;
         self.proposals.clear();
+        self.waiting_from = held.then_some(self.shown);
         if !held {
             self.shown = Some(self.view);
         }
@@ -135,7 +161,7 @@ impl FrameFollow {
             return Arrival::Wait;
         }
         if self.held {
-            self.shown = Some(size);
+            self.held_frame_shown(size);
             self.kept = None;
             return Arrival::Show;
         }
@@ -242,7 +268,11 @@ impl FrameFollow {
             return Arrival::Wait;
         }
         if self.held || size == self.view {
-            self.shown = Some(size);
+            if self.held {
+                self.held_frame_shown(size);
+            } else {
+                self.shown = Some(size);
+            }
             self.kept = None;
             if !self.held {
                 self.stale = None;
@@ -258,6 +288,9 @@ impl FrameFollow {
     /// The window's client area is now `view`. Returns whether the kept frame is of that size
     /// and is to be shown with it. Ends any claim.
     pub fn view_taken(&mut self, view: (u32, u32)) -> bool {
+        if self.held && view != self.view {
+            self.waiting_from = Some(self.shown);
+        }
         self.view = view;
         self.claimed = false;
         if self.kept == Some(view) {
@@ -439,6 +472,56 @@ mod tests {
         assert_eq!(follow.frame_arrived((1401, 1649)), Arrival::Keep);
         assert_eq!(follow.size_for((1401, 1649)), Some((1401, 1649)));
         assert!(follow.view_taken((1401, 1649)));
+    }
+
+    #[test]
+    fn fr4_a_maximise_on_the_main_monitor_shows_the_last_frame_as_before_with_nothing_filled() {
+        // Settings at 1041x1495 is maximised on the 2880x1800 main monitor (work area
+        // 2880x1704). Until the app draws the new size, the last frame is shown as it was before
+        // the strips beside it were ever filled: no solid colour is drawn around it.
+        let mut follow = FrameFollow::new((1041, 1495));
+        follow.frame_arrived((1041, 1495));
+        follow.set_held(true);
+        assert!(!follow.strips_filled());
+        assert_eq!(follow.size_for((2880, 1704)), None);
+        follow.view_taken((2880, 1704));
+        assert!(!follow.strips_filled());
+        // The app draws its old size once more: still the old drawing, still nothing filled.
+        assert_eq!(follow.frame_arrived((1041, 1495)), Arrival::Show);
+        assert!(!follow.strips_filled());
+        // The frame of the maximised size covers the window; nothing is left to fill.
+        assert_eq!(follow.frame_arrived((2880, 1704)), Arrival::Show);
+        // Restored, the window follows its frames and never fills anything.
+        follow.set_held(false);
+        assert!(!follow.strips_filled());
+        // A window that never holds its size never fills anything either.
+        let mut follow = FrameFollow::new((800, 600));
+        follow.frame_arrived((800, 600));
+        follow.size_for((900, 600));
+        follow.frame_arrived((900, 600));
+        assert!(!follow.strips_filled());
+    }
+
+    #[test]
+    fn fr4_a_size_limited_maximise_on_a_secondary_monitor_leaves_no_transparent_strip() {
+        // A task kept at the 200% main monitor's density is maximised on a 2560x1440 monitor
+        // at 125%: the window is 2560x1380, the guest's display holds 3840 task pixels across,
+        // and the task comes back 3840x2205, shown 2400x1380 in the window. The strips beside
+        // it would stay for as long as the window is maximised, so they are filled.
+        let mut follow = FrameFollow::new((1140, 836));
+        follow.frame_arrived((1140, 836));
+        follow.set_held(true);
+        follow.view_taken((2560, 1380));
+        assert!(!follow.strips_filled());
+        assert_eq!(follow.frame_arrived((2400, 1380)), Arrival::Show);
+        assert!(follow.strips_filled());
+        // Snapped to another size, the window waits for the answer to it again.
+        follow.view_taken((1280, 1380));
+        assert!(!follow.strips_filled());
+        assert_eq!(follow.frame_arrived((2400, 1380)), Arrival::Show);
+        assert!(!follow.strips_filled());
+        assert_eq!(follow.frame_arrived((1200, 1380)), Arrival::Show);
+        assert!(follow.strips_filled());
     }
 
     #[test]
