@@ -28,6 +28,8 @@ pub mod metal;
 #[cfg(target_os = "macos")]
 pub mod renderer;
 #[cfg(target_os = "macos")]
+pub mod starting_splash;
+#[cfg(target_os = "macos")]
 pub mod surface;
 #[cfg(target_os = "macos")]
 pub mod surface_port;

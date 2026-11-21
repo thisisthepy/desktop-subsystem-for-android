@@ -804,13 +804,39 @@ fn prepare_launch(setup: &HostSetup) -> Result<(), String> {
     let mut api = UnixLocalConnector {
         path: setup.host_api.clone(),
     };
-    dsa_host_core::host_api::ensure_android_for_app(
-        &mut api,
-        BUILD,
-        dsa_host_core::host_api::APP_START_ANDROID,
-        START_POLL,
-        || eprintln!("dsa-app-window: starting Android for {}", setup.package),
-    )
+    // The wait runs on a thread of its own, so the main thread keeps the starting window
+    // (the DSA logo, breathing) responsive while Android starts.
+    let (waiting_tx, waiting_rx) = channel::<()>();
+    let worker = std::thread::Builder::new()
+        .name("dsa-app-window-starting".into())
+        .spawn(move || {
+            dsa_host_core::host_api::ensure_android_for_app(
+                &mut api,
+                BUILD,
+                dsa_host_core::host_api::APP_START_ANDROID,
+                START_POLL,
+                || {
+                    let _ = waiting_tx.send(());
+                },
+            )
+        })
+        .map_err(|e| format!("could not wait for Android: {e}"))?;
+    let mut shown = false;
+    while !worker.is_finished() {
+        if !shown && waiting_rx.try_recv().is_ok() {
+            shown = true;
+            eprintln!("dsa-app-window: starting Android for {}", setup.package);
+            super::starting_splash::show(&setup.package);
+        }
+        super::starting_splash::pump(0.05);
+    }
+    let outcome = worker
+        .join()
+        .unwrap_or_else(|_| Err("waiting for Android failed".into()));
+    if outcome.is_err() {
+        super::starting_splash::dismiss();
+    }
+    outcome
 }
 
 /// Runs the window host until the window manager lets it go. Must be called on the main

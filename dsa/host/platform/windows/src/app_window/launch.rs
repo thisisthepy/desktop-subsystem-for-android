@@ -4,8 +4,8 @@
 //! Android either. Before it becomes the app's window host it makes sure both run: it starts the
 //! window manager when its pipe is not there, because Android cannot finish booting without the
 //! renderer in it, then asks the service to start the user's Android and waits until it is
-//! ready. While it waits it shows a small window under the app's
-//! name and icon, so the taskbar shows the app at once. Then it connects to the window manager
+//! ready. While it waits it shows a window under the app's name
+//! and icon with the DSA logo breathing in it, so the taskbar shows the app at once. Then it connects to the window manager
 //! as the app's window host, which asks Android for the app; if the app has a window host
 //! already, that one gets the app and this program ends, so an app never has two.
 
@@ -17,22 +17,9 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use dsa_transport::Connector;
-use windows_sys::Win32::Foundation::{
-    GetLastError, ERROR_CLASS_ALREADY_EXISTS, ERROR_SEM_TIMEOUT, HWND, LPARAM, LRESULT, RECT,
-    WPARAM,
-};
-use windows_sys::Win32::Graphics::Gdi::{
-    BeginPaint, DrawTextW, EndPaint, GetStockObject, SelectObject, COLOR_WINDOW, DEFAULT_GUI_FONT,
-    DT_CENTER, DT_SINGLELINE, DT_VCENTER, HBRUSH, PAINTSTRUCT,
-};
-use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows_sys::Win32::Foundation::{GetLastError, ERROR_SEM_TIMEOUT, HWND};
 use windows_sys::Win32::System::Pipes::WaitNamedPipeW;
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect, GetMessageW, LoadCursorW,
-    LoadIconW, PostMessageW, PostQuitMessage, RegisterClassExW, ShowWindow, TranslateMessage,
-    CW_USEDEFAULT, IDC_APPSTARTING, MSG, SW_SHOW, WM_CLOSE, WM_DESTROY, WM_PAINT, WNDCLASSEXW,
-    WS_CAPTION, WS_MINIMIZEBOX, WS_OVERLAPPED, WS_SYSMENU,
-};
+use windows_sys::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
 
 /// How long Android may take to start before opening the app gives up.
 pub const START_ANDROID: Duration = dsa_host_core::host_api::APP_START_ANDROID;
@@ -227,19 +214,14 @@ pub fn tell_user_done(title: &str, text: &str) {
     };
 }
 
-/// The class of the window shown while the app is being opened.
-const STARTING_CLASS: &str = "DsaStartingApp";
-
-/// The program's own icon: the app's, in an app's copy of the window host.
-const ICON_ID: usize = 1;
-
-/// What the waiting window says, in the user's display language.
+/// What the waiting window says of itself to a screen reader, in the user's display language.
 pub fn starting_text() -> &'static str {
     super::messages::starting(crate::ui_language::user_language())
 }
 
-/// A small window under the app's name and icon, shown while the app is being opened, so the
-/// taskbar shows the app at once. It closes when dropped.
+/// A window under the app's name and icon, shown while the app is being opened, so the
+/// taskbar shows the app at once. It shows the DSA logo breathing while Android starts
+/// ([`super::starting_splash`]) and fades out when it is closed.
 pub struct StartingWindow {
     hwnd: Arc<AtomicIsize>,
     thread: Option<JoinHandle<()>>,
@@ -253,7 +235,7 @@ impl StartingWindow {
         let title = title.to_string();
         let thread = thread::Builder::new()
             .name("dsa-app-window-starting".into())
-            .spawn(move || starting_window(&title, &shared))
+            .spawn(move || super::starting_splash::run(&title, &shared))
             .ok();
         StartingWindow { hwnd, thread }
     }
@@ -288,98 +270,5 @@ impl StartingWindow {
 impl Drop for StartingWindow {
     fn drop(&mut self) {
         self.end();
-    }
-}
-
-fn starting_window(title: &str, hwnd: &AtomicIsize) {
-    let class = wide(STARTING_CLASS);
-    let title = wide(title);
-    // SAFETY: plain Win32 calls on this thread's own window; the strings outlive them.
-    unsafe {
-        let module = GetModuleHandleW(std::ptr::null());
-        let icon = LoadIconW(module, ICON_ID as *const u16);
-        let class_info = WNDCLASSEXW {
-            cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
-            style: 0,
-            lpfnWndProc: Some(starting_window_proc),
-            cbClsExtra: 0,
-            cbWndExtra: 0,
-            hInstance: module,
-            hIcon: icon,
-            hCursor: LoadCursorW(std::ptr::null_mut(), IDC_APPSTARTING),
-            hbrBackground: (COLOR_WINDOW + 1) as usize as HBRUSH,
-            lpszMenuName: std::ptr::null(),
-            lpszClassName: class.as_ptr(),
-            hIconSm: icon,
-        };
-        if RegisterClassExW(&class_info) == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS {
-            return;
-        }
-        let window = CreateWindowExW(
-            0,
-            class.as_ptr(),
-            title.as_ptr(),
-            WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-            CW_USEDEFAULT,
-            CW_USEDEFAULT,
-            360,
-            140,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            module,
-            std::ptr::null(),
-        );
-        if window.is_null() {
-            return;
-        }
-        hwnd.store(window as isize, Ordering::SeqCst);
-        ShowWindow(window, SW_SHOW);
-        let mut message: MSG = std::mem::zeroed();
-        while GetMessageW(&mut message, std::ptr::null_mut(), 0, 0) > 0 {
-            TranslateMessage(&message);
-            DispatchMessageW(&message);
-        }
-    }
-}
-
-unsafe extern "system" fn starting_window_proc(
-    hwnd: HWND,
-    message: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> LRESULT {
-    match message {
-        WM_PAINT => {
-            // SAFETY: painting this window, between BeginPaint and EndPaint.
-            unsafe {
-                let mut paint: PAINTSTRUCT = std::mem::zeroed();
-                let dc = BeginPaint(hwnd, &mut paint);
-                let mut rect = RECT {
-                    left: 0,
-                    top: 0,
-                    right: 0,
-                    bottom: 0,
-                };
-                GetClientRect(hwnd, &mut rect);
-                SelectObject(dc, GetStockObject(DEFAULT_GUI_FONT));
-                let mut text: Vec<u16> = starting_text().encode_utf16().collect();
-                DrawTextW(
-                    dc,
-                    text.as_mut_ptr(),
-                    text.len() as i32,
-                    &mut rect,
-                    DT_CENTER | DT_VCENTER | DT_SINGLELINE,
-                );
-                EndPaint(hwnd, &paint);
-            }
-            0
-        }
-        WM_DESTROY => {
-            // SAFETY: ends this thread's message loop.
-            unsafe { PostQuitMessage(0) };
-            0
-        }
-        // SAFETY: the default handling of every other message.
-        _ => unsafe { DefWindowProcW(hwnd, message, wparam, lparam) },
     }
 }

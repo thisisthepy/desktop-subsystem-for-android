@@ -33,6 +33,7 @@ pub mod overlay;
 pub mod pointer;
 pub mod screenshot;
 pub mod splash;
+pub mod starting_splash;
 pub mod system_menu;
 pub mod text_store;
 pub mod thumb_bar;

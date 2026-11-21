@@ -1430,12 +1430,25 @@ pub fn run() -> Result<(), String> {
 /// pinned shortcut on the desktop: starts Android when it is off, then the shortcut.
 pub fn launch_shortcut(package: &str, id: &str) -> Result<(), String> {
     let mut client = connect()?;
+    let mut starting = None;
     client
-        .ensure_running(Duration::from_secs(120), Duration::from_millis(500), |_| {})
+        .ensure_running(Duration::from_secs(120), Duration::from_millis(500), |_| {
+            show_starting(&mut starting, package)
+        })
         .map_err(|error| error.to_string())?;
-    client
+    let launched = client
         .launch_shortcut(package, id)
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string());
+    // The DSA logo fades out as the app is asked for.
+    drop(starting);
+    launched
+}
+
+/// Shows the window with the DSA logo the first time a launch has to wait for Android.
+fn show_starting(starting: &mut Option<super::starting_splash::StartingWindow>, package: &str) {
+    if starting.is_none() {
+        *starting = Some(super::starting_splash::StartingWindow::show(package));
+    }
 }
 
 /// `--launch <package>` and the launcher entry's actions: one request, then exit.
@@ -1443,12 +1456,17 @@ pub fn one_shot(action: &str, package: &str) -> Result<(), String> {
     let mut client = connect()?;
     match action {
         "--launch" => {
+            let mut starting = None;
             client
-                .ensure_running(Duration::from_secs(120), Duration::from_millis(500), |_| {})
+                .ensure_running(Duration::from_secs(120), Duration::from_millis(500), |_| {
+                    show_starting(&mut starting, package)
+                })
                 .map_err(|error| error.to_string())?;
-            client
+            let launched = client
                 .launch_app(package)
-                .map_err(|error| error.to_string())
+                .map_err(|error| error.to_string());
+            drop(starting);
+            launched
         }
         "--app-settings" => client
             .open_app_settings(Some(package))

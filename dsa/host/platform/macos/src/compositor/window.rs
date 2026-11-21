@@ -869,6 +869,8 @@ impl TaskWindow {
 
             let _: () = msg_send![&*window, center];
             let _: () = msg_send![&*window, makeKeyAndOrderFront: std::ptr::null::<AnyObject>()];
+            // The window shown while Android started fades out over this one.
+            super::starting_splash::dismiss();
             // Tells the guest the band from the start, which also clears what a window of the
             // task said before this window host started.
             report_band(Retained::as_ptr(&window) as *mut AnyObject);

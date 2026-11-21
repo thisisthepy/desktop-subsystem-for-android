@@ -16,6 +16,7 @@
 #[cfg(target_os = "linux")]
 pub mod dmabuf_read;
 pub mod frames;
+pub mod starting_logo;
 pub mod title_bar;
 pub mod toplevel;
 pub mod widget_menu;
@@ -26,6 +27,8 @@ pub mod window_menu;
 pub mod gfxstream;
 #[cfg(target_os = "linux")]
 pub mod session;
+#[cfg(target_os = "linux")]
+pub mod starting_splash;
 #[cfg(target_os = "linux")]
 pub mod text;
 #[cfg(target_os = "linux")]

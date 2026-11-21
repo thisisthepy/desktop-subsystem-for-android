@@ -30,6 +30,28 @@ pub fn loading_status(language: UiLanguage, loading: bool) -> Option<&'static st
     })
 }
 
+/// What the window shown while an app waits for Android to start says of itself (its
+/// accessible name), in `language`. The window shows the DSA logo and no words, so a screen
+/// reader still hears why the app has not opened yet.
+pub fn starting_android(language: UiLanguage) -> &'static str {
+    match language {
+        UiLanguage::English => "Starting Android\u{2026}",
+        UiLanguage::Korean => "Android를 시작하는 중\u{2026}",
+        UiLanguage::Japanese => "Android を起動しています\u{2026}",
+        UiLanguage::ChineseSimplified => "正在启动 Android\u{2026}",
+        UiLanguage::ChineseTraditional => "正在啟動 Android\u{2026}",
+        UiLanguage::Spanish => "Iniciando Android\u{2026}",
+        UiLanguage::French => "Démarrage d'Android\u{2026}",
+        UiLanguage::German => "Android wird gestartet\u{2026}",
+        UiLanguage::PortugueseBrazil => "Iniciando o Android\u{2026}",
+        UiLanguage::Russian => "Запуск Android\u{2026}",
+        UiLanguage::Italian => "Avvio di Android\u{2026}",
+        UiLanguage::Vietnamese => "Đang khởi động Android\u{2026}",
+        UiLanguage::Indonesian => "Memulai Android\u{2026}",
+        UiLanguage::Turkish => "Android başlatılıyor\u{2026}",
+    }
+}
+
 /// The title bar buttons' names in `language`, as Windows names its own caption buttons:
 /// Back, System menu, Minimize, Maximize, Restore and Close.
 pub fn caption_names(language: UiLanguage) -> [&'static str; 6] {
@@ -202,6 +224,22 @@ mod tests {
             return Some(format!("{what} is still English in {tag}"));
         }
         None
+    }
+
+    #[test]
+    fn fr7_boot_splash_keeps_saying_android_is_starting_to_screen_readers() {
+        for language in UiLanguage::ALL {
+            let name = starting_android(language);
+            assert!(name.contains("Android"), "{language:?}: {name}");
+            if let Some(wrong) = problem(
+                language,
+                "the starting window's name",
+                starting_android(UiLanguage::English),
+                name,
+            ) {
+                panic!("{wrong}");
+            }
+        }
     }
 
     #[test]

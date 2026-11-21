@@ -15,11 +15,13 @@
 //! the guest has drawn nothing since a GPU reset, so Android is restarted;
 //! [`caption`] lays out and draws the title bar a window draws over its app;
 //! [`early_frames`] keeps a task's first frames until its window host connects, and
-//! [`splash`] draws what a window shows before its first frame;
+//! [`splash`] draws what a window shows before its first frame, and [`boot_splash`] what the
+//! window shown while Android starts shows;
 //! [`window_mode`] says whether a window fills its monitor or floats as picture-in-picture;
 //! the platform only carries it out.
 
 pub mod blank_windows;
+pub mod boot_splash;
 pub mod caption;
 pub mod caption_icon;
 pub mod early_frames;

@@ -50,6 +50,21 @@ pub struct DesktopSettings {
     localtime: Option<SystemTime>,
 }
 
+/// Whether the desktop prefers dark windows, and whether its animations are turned off, as
+/// the window shown while Android starts asks once when it opens.
+pub fn starting_look() -> (bool, bool) {
+    let settings = DesktopSettings::open();
+    let dark = settings
+        .portal_read(APPEARANCE, "color-scheme")
+        .and_then(|v| u32::try_from(v).ok())
+        == Some(1);
+    let animations = settings
+        .portal_read("org.gnome.desktop.interface", "enable-animations")
+        .and_then(|v| bool::try_from(v).ok())
+        .unwrap_or(true);
+    (dark, !animations)
+}
+
 impl DesktopSettings {
     pub fn open() -> DesktopSettings {
         let session = Connection::session().ok();

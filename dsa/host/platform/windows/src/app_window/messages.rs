@@ -163,24 +163,10 @@ pub fn messages(language: UiLanguage) -> Messages {
     }
 }
 
-/// What the small window shown while an app waits for Android says, in `language`.
+/// What the window shown while an app waits for Android says of itself to a screen reader,
+/// in `language`. It shows the DSA logo instead of these words.
 pub fn starting(language: UiLanguage) -> &'static str {
-    match language {
-        UiLanguage::English => "Starting Android\u{2026}",
-        UiLanguage::Korean => "Android를 시작하는 중\u{2026}",
-        UiLanguage::Japanese => "Android を起動しています\u{2026}",
-        UiLanguage::ChineseSimplified => "正在启动 Android\u{2026}",
-        UiLanguage::ChineseTraditional => "正在啟動 Android\u{2026}",
-        UiLanguage::Spanish => "Iniciando Android\u{2026}",
-        UiLanguage::French => "Démarrage d'Android\u{2026}",
-        UiLanguage::German => "Android wird gestartet\u{2026}",
-        UiLanguage::PortugueseBrazil => "Iniciando o Android\u{2026}",
-        UiLanguage::Russian => "Запуск Android\u{2026}",
-        UiLanguage::Italian => "Avvio di Android\u{2026}",
-        UiLanguage::Vietnamese => "Đang khởi động Android\u{2026}",
-        UiLanguage::Indonesian => "Memulai Android\u{2026}",
-        UiLanguage::Turkish => "Android başlatılıyor\u{2026}",
-    }
+    dsa_host_core::ui_text::caption::starting_android(language)
 }
 
 /// `template` with `{name}`, `{package}`, `{file}` and `{why}` filled in.
