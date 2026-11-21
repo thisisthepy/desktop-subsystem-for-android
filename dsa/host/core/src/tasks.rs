@@ -695,6 +695,11 @@ fn installed_list(apps: &[AppInfo]) -> Vec<AppInfo> {
 pub struct TaskTable {
     tasks: BTreeMap<i32, Task>,
     frames: BTreeMap<i32, u32>,
+    /// The display each task posted to when the agent that reported it went away. The
+    /// hwcomposer, not the agent, made those pairings and keeps posting to them, and it says
+    /// nothing again for a task that outlived the agent. So a task the next agent reports
+    /// again takes its display back from here.
+    kept_frames: BTreeMap<i32, u32>,
     /// The name and icon of each app, by package. An app is forgotten when its last task
     /// ends; the guest describes it again before its next task.
     apps: BTreeMap<String, AppInfo>,
@@ -771,6 +776,11 @@ impl TaskTable {
                 if !self.knows(*task_id) && self.len() >= MAX_TASKS {
                     return false;
                 }
+                // A display carries one task's frames at a time: a kept pairing of the
+                // display, or of the task, is out of date now.
+                self.kept_frames.retain(|kept_task, kept_display| {
+                    kept_task != task_id && kept_display != display_id
+                });
                 self.frames.insert(*task_id, *display_id);
                 true
             }
@@ -976,11 +986,37 @@ impl TaskTable {
         ids.dedup();
         self.tasks.clear();
         self.frames.clear();
+        self.kept_frames.clear();
         self.apps.clear();
         self.cursors.clear();
         ids.into_iter()
             .map(|task_id| TaskEvent::Removed { task_id })
             .collect()
+    }
+
+    /// Forgets every task because the agent that reported them went away, and returns the
+    /// removals that say so. The guest's hwcomposer is still there and still posts each task
+    /// to its display, so the pairings are kept aside: a task the next agent reports again
+    /// gets its display back through [`TaskTable::restore_frames`].
+    pub fn clear_reported(&mut self) -> Vec<TaskEvent> {
+        let frames = std::mem::take(&mut self.frames);
+        let removed = self.clear();
+        self.kept_frames = frames;
+        removed
+    }
+
+    /// When `task_id` is a task the agent reported again after the last agent went away,
+    /// gives it back the display it posted to then, and returns the event that says so.
+    pub fn restore_frames(&mut self, task_id: i32) -> Option<TaskEvent> {
+        if !self.tasks.contains_key(&task_id) || self.frames.contains_key(&task_id) {
+            return None;
+        }
+        let display_id = self.kept_frames.remove(&task_id)?;
+        self.frames.insert(task_id, display_id);
+        Some(TaskEvent::Frames {
+            task_id,
+            display_id,
+        })
     }
 }
 
@@ -1220,6 +1256,68 @@ mod tests {
             ]
         );
         assert!(table.is_empty());
+    }
+
+    #[test]
+    fn fr3_a_task_that_outlives_its_agent_gets_its_display_back() {
+        // The agent died (an ANR) while the hwcomposer kept posting task 128 to display 2,
+        // and announces that pairing only once.
+        let mut table = TaskTable::new();
+        table.apply(&TaskEvent::Updated(task(128, "ONE store")));
+        table.apply(&TaskEvent::Frames {
+            task_id: 128,
+            display_id: 2,
+        });
+        assert_eq!(
+            table.clear_reported(),
+            vec![TaskEvent::Removed { task_id: 128 }]
+        );
+        assert!(table.frames().is_empty());
+        assert_eq!(table.restore_frames(128), None);
+        // The next agent reports the task again: its window gets its frames again.
+        table.apply(&TaskEvent::Updated(task(128, "ONE store")));
+        assert_eq!(
+            table.restore_frames(128),
+            Some(TaskEvent::Frames {
+                task_id: 128,
+                display_id: 2
+            })
+        );
+        assert_eq!(table.frames(), vec![(128, 2)]);
+        assert_eq!(table.restore_frames(128), None);
+    }
+
+    #[test]
+    fn fr3_a_kept_display_goes_to_the_task_the_hwcomposer_names_next() {
+        let mut table = TaskTable::new();
+        table.apply(&TaskEvent::Updated(task(5, "a")));
+        table.apply(&TaskEvent::Frames {
+            task_id: 5,
+            display_id: 1,
+        });
+        table.clear_reported();
+        // Task 5 ended with the agent; the hwcomposer gives display 1 to a new task.
+        table.apply(&TaskEvent::Frames {
+            task_id: 6,
+            display_id: 1,
+        });
+        table.apply(&TaskEvent::Updated(task(5, "a")));
+        assert_eq!(table.restore_frames(5), None);
+        assert_eq!(table.frames(), vec![(6, 1)]);
+    }
+
+    #[test]
+    fn fr3_a_stopped_guest_keeps_no_display() {
+        let mut table = TaskTable::new();
+        table.apply(&TaskEvent::Updated(task(5, "a")));
+        table.apply(&TaskEvent::Frames {
+            task_id: 5,
+            display_id: 1,
+        });
+        table.clear_reported();
+        table.clear();
+        table.apply(&TaskEvent::Updated(task(5, "a")));
+        assert_eq!(table.restore_frames(5), None);
     }
 
     #[test]

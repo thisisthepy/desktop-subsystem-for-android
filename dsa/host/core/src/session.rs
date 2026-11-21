@@ -1168,8 +1168,14 @@ impl Shared {
         if !hub.table.apply(&event) {
             return;
         }
+        // A task that outlived the agent which reported it gets its display back.
+        let restored = match &event {
+            TaskEvent::Updated(task) => hub.table.restore_frames(task.task_id),
+            _ => None,
+        };
+        let events: Vec<TaskEvent> = std::iter::once(event).chain(restored).collect();
         hub.watchers
-            .retain(|watcher| watcher.send(event.clone()).is_ok());
+            .retain(|watcher| events.iter().all(|e| watcher.send(e.clone()).is_ok()));
     }
 
     /// The user's first display language as the host last said it; empty while it has not.
@@ -1493,6 +1499,18 @@ impl Shared {
     fn clear_tasks(&self) {
         let mut hub = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
         let removed = hub.table.clear();
+        hub.watchers.retain(|watcher| {
+            removed
+                .iter()
+                .all(|event| watcher.send(event.clone()).is_ok())
+        });
+    }
+
+    /// Removes every task the agent reported, as when the agent has gone away while the
+    /// guest and its hwcomposer stay. Each task's display is kept for the next agent's report.
+    fn clear_reported_tasks(&self) {
+        let mut hub = self.tasks.lock().unwrap_or_else(|e| e.into_inner());
+        let removed = hub.table.clear_reported();
         hub.watchers.retain(|watcher| {
             removed
                 .iter()
@@ -6319,8 +6337,10 @@ impl Worker {
             // restarts, which ends every app's task with it. Their windows close rather than
             // keep a last frame nothing answers, and a task number the new framework hands out
             // again is a new task. Tasks that outlived an agent alone are reported again by the
-            // next one, and their windows open again.
-            self.shared.clear_tasks();
+            // next one, and their windows open again. The hwcomposer, which stays, keeps
+            // posting such a task to the display it announced once, so that pairing is kept
+            // for it.
+            self.shared.clear_reported_tasks();
             eprintln!("lifecycle: the agent is gone; the tasks it reported have ended");
         }
     }
