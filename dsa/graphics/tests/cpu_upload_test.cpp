@@ -200,6 +200,17 @@ static void nfr5_planes_outside_the_mapping_are_not_read() {
                             packed.data()));
 }
 
+// A video buffer's ColorBuffer holds zeros (green in YUV) until its first copy up succeeds,
+// and a buffer whose copy of a new picture failed holds an older one: neither is shown.
+static void fr26_a_buffer_never_copied_up_is_not_shown() {
+    dsa::UploadTracker tracker;
+    EXPECT(!tracker.holds(7));  // a new buffer, never copied
+    tracker.uploaded(7, 42);
+    EXPECT(tracker.holds(7));
+    tracker.forget(7);  // its next picture could not be copied
+    EXPECT(!tracker.holds(7));
+}
+
 static void pr4_a_picture_is_copied_once_and_again_only_when_it_changes() {
     Yv12 b = makeYv12(64, 32);
     const dsa::UploadLayout layout = dsa::uploadLayout(kYv12, 64, 32, true);
@@ -251,6 +262,7 @@ int main() {
     fr26_a_portrait_short_goes_up_from_its_top_row();
     nfr5_planes_outside_the_mapping_are_not_read();
     pr4_a_picture_is_copied_once_and_again_only_when_it_changes();
+    fr26_a_buffer_never_copied_up_is_not_shown();
     pr4_the_bytes_copied_are_reported_once_a_second();
     if (failures) {
         std::fprintf(stderr, "%d expectation(s) failed\n", failures);

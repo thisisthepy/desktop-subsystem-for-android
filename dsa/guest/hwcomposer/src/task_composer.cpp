@@ -517,7 +517,9 @@ void TaskComposer::compose(Frame& frame, double presentedMs) {
                                  static_cast<long long>(layer.id), kFenceTimeoutMs);
                     }
                     in.colorBuffer = sharedHandleLocked(layer.buffer);
-                    if (in.colorBuffer == 0) {
+                    // A video buffer whose picture never reached its ColorBuffer would show
+                    // solid green: the task keeps its last frame (the last good picture) instead.
+                    if (in.colorBuffer == 0 || !mUploads.holdsPicture(mHost, layer.buffer)) {
                         layerMissing = true;
                         continue;
                     }

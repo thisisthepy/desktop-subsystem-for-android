@@ -38,4 +38,17 @@ bool FailureThrottle::shouldLog(uint32_t* count) {
     return mCount == 1 || (mEvery > 0 && mCount % mEvery == 0);
 }
 
+bool StarvationWatch::noBuffer(Clock::time_point now) {
+    if (!mStarving) {
+        mStarving = true;
+        mSince = now;
+    }
+    ++mDrops;
+    if (mReported || mDrops < mPictures || now - mSince < mLimit) {
+        return false;
+    }
+    mReported = true;
+    return true;
+}
+
 }  // namespace dsa::codec2
