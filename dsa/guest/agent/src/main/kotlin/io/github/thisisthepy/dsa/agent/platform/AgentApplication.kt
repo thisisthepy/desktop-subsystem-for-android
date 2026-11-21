@@ -113,6 +113,11 @@ class AgentApplication : Application() {
             // Reading an app's accessibility tree waits on the app's UI thread for each node,
             // so it has a thread of its own and never holds up the host's requests.
             accessibilityReader = HandlerScheduler(HandlerThread("dsa-accessibility").apply { start() }.looper),
+            // What a screen reader waits for (which node the focus moved to) is asked on a
+            // thread of its own, so it never waits behind a tree read on the reader's.
+            accessibilityFocusReader = HandlerScheduler(
+                HandlerThread("dsa-accessibility-focus", Process.THREAD_PRIORITY_DISPLAY).apply { start() }.looper,
+            ),
             diagnostics = AndroidDiagnostics(this),
             wifi = AndroidWifi(this),
             privateDns = AndroidPrivateDns(this),

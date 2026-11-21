@@ -96,6 +96,12 @@ interface NodeHandle {
 
     fun children(): List<NodeHandle>
 
+    /**
+     * The node this one is a child of; null for a window's root or when it cannot be told. Asks
+     * the app, so it is only called on the export's reader threads.
+     */
+    fun parent(): NodeHandle? = null
+
     /** Does [action] on the node; [text] is the new text of a set-text action. */
     fun perform(action: NodeAction, text: String): Boolean
 
@@ -129,6 +135,21 @@ data class AccessibilityChange(
      * the export follows.
      */
     val resolve: (() -> AccessibilityChange?)? = null,
+    /**
+     * For a focus event, the node [source] is a child of, asked with it, so a node new to the
+     * tree is placed under a parent the host has without a read.
+     */
+    val parent: NodeHandle? = null,
+    /**
+     * For a content event while a screen reader listens, how to find the node it names. It is
+     * asked only when the task is read, on the reader's thread, and the events of one burst are
+     * read once: the thread that delivers events asks Android nothing.
+     */
+    val lazySource: (() -> NodeHandle?)? = null,
+    /** When Android made the event, in milliseconds of the export's clock; 0 when unknown. */
+    val eventAt: Long = 0,
+    /** When the service received it, in milliseconds of the export's clock; 0 when unknown. */
+    val receivedAt: Long = 0,
 ) {
     enum class Kind {
         /** The input focus, the accessibility focus or the selection moved. */
@@ -326,6 +347,14 @@ data class TreeTarget(val taskId: Int, val widgetId: Int) {
  * whole task, falling back to the whole task when the source is new to it. Without a screen
  * reader nothing of this runs and the waits stay as they were.
  *
+ * A focus event never waits behind a tree read: its node is asked for on [focusReader], a
+ * thread of its own, and the answer goes to the front of the scheduler's queue. A focused node
+ * new to the tree is placed under its parent at once when the tree has the parent, or else
+ * read from its nearest ancestor the tree has on [focusReader], ahead of any read that waits
+ * (after a busy read or a resize) and beside any read under way. A read that began before a
+ * focus move was sent keeps the focus that was sent. A content event's node is found only when
+ * its task is read, so the events of one burst cost one lookup each at most, on [reader].
+ *
  * A tree holds at most [MAX_NODES] nodes and [MAX_TREE_BYTES] bytes, the nearest nodes first,
  * so one frame stays far below what the binder call to the daemon may carry. A node's links
  * and the app's own actions on it are added below it as nodes a client can press.
@@ -375,11 +404,43 @@ class AccessibilityExport(
     private val widgets: WidgetNodes = WidgetNodes.NONE,
     /** The package of a task's app, to tell which task a toast belongs to. */
     private val taskPackage: (Int) -> String? = { null },
+    /**
+     * Where what a screen reader waits for is asked: the node a focus event names, and the
+     * read that places a focused node new to the tree. A thread of its own on the guest, so it
+     * never waits behind a tree read on [reader].
+     */
+    private val focusReader: Scheduler = reader,
 ) {
     private class TaskState {
         var epoch = 0
         var needFull = true
         var pending = false
+
+        /** When the read [pending] waits for is due, and which posting is the live one. */
+        var pendingDue = 0L
+        var pendingToken = 0
+
+        /** Whether the read that is due is one a focus change asked for. */
+        var urgent = false
+
+        /** When the read an urgent one went ahead of was due; null when none was. */
+        var preemptedDue: Long? = null
+
+        /** When Android made the focus event the focus read is for, for its trace line. */
+        var focusEvent: AccessibilityChange? = null
+
+        /** The focused nodes new to the tree, to be placed by a read on [focusReader]. */
+        val focusDirty = LinkedHashMap<Any, NodeHandle>()
+
+        /** Whether a focus read is under way, and whether another focus came during it. */
+        var focusReading = false
+        var focusAgain = false
+
+        /** Counts the focus moves sent, so a read that began before one does not undo it. */
+        var focusSeq = 0
+
+        /** How to find the nodes content events named since the last read, while a screen reader listens. */
+        val lazyDirty = ArrayList<() -> NodeHandle?>()
         var lastSentAt = Long.MIN_VALUE / 2
         var nextId = 1
         val ids = HashMap<Any, Int>()
@@ -500,32 +561,51 @@ class AccessibilityExport(
         for (target in targets) {
             val state = watched[target] ?: continue
             val node = change.source
+            val lazy = change.lazySource
+            if (state.listening && taskId != null && node == null && lazy != null && change.kind == AccessibilityChange.Kind.CONTENT) {
+                // A burst of content events is one read: the nodes they name are found then.
+                if (state.lazyDirty.size < MAX_LAZY_SOURCES) state.lazyDirty += lazy else state.readAll = true
+                schedule(target, state, state.batch)
+                continue
+            }
             if (!state.listening || node == null || taskId == null) {
                 state.readAll = true
                 schedule(target, state, state.batch)
                 continue
             }
-            if (change.kind == AccessibilityChange.Kind.FOCUS && focusUpdate(target, state, node)) continue
+            if (change.kind == AccessibilityChange.Kind.FOCUS) {
+                if (focusUpdate(target, state, node, change) || focusAttach(target, state, node, change)) continue
+                // New to the tree with no parent the host has: a read on the focus thread
+                // places it, from its nearest ancestor the tree has, whatever else waits.
+                state.focusDirty[node.key] = node
+                state.focusEvent = change
+                schedule(target, state, 0, urgent = true)
+                continue
+            }
             state.dirty[node.key] = node
-            schedule(target, state, if (change.kind == AccessibilityChange.Kind.FOCUS) 0 else state.batch)
+            schedule(target, state, state.batch)
         }
     }
 
     /**
      * An event as the service delivers it, on whatever thread Android calls the service on (the
      * agent's UI thread). Nothing here waits: what needs asking Android is asked on [reader],
-     * and the rest goes to the scheduler thread.
+     * or for a focus event on [focusReader], which no tree read holds up, and the answer goes
+     * to the front of the scheduler's queue.
      */
     private fun delivered(change: AccessibilityChange) {
         val resolve = change.resolve ?: return scheduler.post { changed(change) }
-        reader.post {
+        val focus = change.kind == AccessibilityChange.Kind.FOCUS
+        (if (focus) focusReader else reader).post {
             val resolved = try {
                 resolve()
             } catch (e: Exception) {
                 log.warn("could not read what an accessibility event was about", e)
                 AccessibilityChange.ANY
             }
-            if (resolved != null) scheduler.post { changed(resolved) }
+            if (resolved != null) {
+                if (focus) scheduler.postFirst { changed(resolved) } else scheduler.post { changed(resolved) }
+            }
         }
     }
 
@@ -691,17 +771,48 @@ class AccessibilityExport(
         }
     }
 
-    private fun schedule(target: TreeTarget, state: TaskState, wait: Long) {
-        if (state.pending) return
-        state.pending = true
+    /**
+     * Reads the target after [wait], the least interval between its trees and the quiet after a
+     * resize. A read already due is not moved. An [urgent] one (a focus a screen reader waits
+     * for) waits for nothing: it goes ahead of a read due later, the wait after a busy read and
+     * the quiet after a resize included.
+     */
+    private fun schedule(target: TreeTarget, state: TaskState, wait: Long, urgent: Boolean = false) {
         val now = clock()
+        if (state.pending && !(urgent && state.pendingDue > now)) {
+            if (urgent) state.urgent = true
+            return
+        }
         // A focus change a screen reader waits for skips the least interval between trees.
         val interval = if (wait == 0L && state.listening) 0L else state.lastSentAt + state.interval - now
-        val delay = maxOf(wait, interval, state.quietAt - now, 0L)
-        scheduler.postDelayed(delay) {
+        val delay = if (urgent) 0L else maxOf(wait, interval, state.quietAt - now, 0L)
+        // The read the urgent one goes ahead of keeps its time: a busy app is still left alone.
+        if (urgent && state.pending) state.preemptedDue = maxOf(state.preemptedDue ?: state.pendingDue, state.pendingDue)
+        state.pending = true
+        state.pendingDue = now + delay
+        if (urgent) state.urgent = true
+        val token = ++state.pendingToken
+        val work: () -> Unit = work@{
+            if (state.pendingToken != token) return@work
             state.pending = false
-            if (watched[target] === state) read(target, state)
+            val wasUrgent = state.urgent
+            state.urgent = false
+            if (watched[target] !== state) return@work
+            if (!wasUrgent) {
+                read(target, state)
+                return@work
+            }
+            if (state.focusDirty.isNotEmpty()) focusRead(target, state)
+            // What else was due waits as long as it would have.
+            val preempted = state.preemptedDue
+            if (state.readAll || state.dirty.isNotEmpty() || state.lazyDirty.isNotEmpty() || preempted != null) {
+                val now2 = clock()
+                val left = maxOf((preempted ?: now2) - now2, state.lastSentAt + state.interval - now2, state.quietAt - now2, 0L)
+                state.preemptedDue = null
+                if (left > 0) schedule(target, state, left) else read(target, state)
+            }
         }
+        if (urgent) scheduler.postFirst(work) else scheduler.postDelayed(delay, work)
     }
 
     /** Where the target's nodes are measured from: its task's place, or its widget's image. */
@@ -721,7 +832,7 @@ class AccessibilityExport(
      * before. Its fields come with the event, so this asks the app nothing. False when the
      * node is new to the tree, which is then read.
      */
-    private fun focusUpdate(target: TreeTarget, state: TaskState, handle: NodeHandle): Boolean {
+    private fun focusUpdate(target: TreeTarget, state: TaskState, handle: NodeHandle, event: AccessibilityChange): Boolean {
         if (state.needFull || state.sent.isEmpty()) return false
         val id = state.ids[handle.key] ?: return false
         val previous = state.sent[id] ?: return false
@@ -734,10 +845,55 @@ class AccessibilityExport(
         val node = toNode(id, previous.childIdsList, info, bounds)
         val changed = LinkedHashMap<Int, AccessibilityNode>()
         if (node != previous) changed[id] = node
+        sendFocus(target, state, id, handle, info, changed, event)
+        return true
+    }
+
+    /**
+     * Places a focused node new to the tree under its parent, which the tree has, and sends it
+     * at once: its fields come with the event and its parent was asked with it, so this asks
+     * the app nothing more. The node's children and its place among its siblings follow with a
+     * read of the parent. False when the parent is not in the tree either.
+     */
+    private fun focusAttach(target: TreeTarget, state: TaskState, handle: NodeHandle, event: AccessibilityChange): Boolean {
+        val parent = event.parent ?: return false
+        if (state.needFull || state.sent.isEmpty() || state.ids.size > MAX_IDS) return false
+        val parentId = state.ids[parent.key] ?: return false
+        val parentNode = state.sent[parentId] ?: return false
+        val bounds = boundsOf(target) ?: return false
+        val info = try {
+            handle.info()
+        } catch (e: Exception) {
+            return false
+        }
+        if (!info.visible) return false
+        val id = state.ids.getOrPut(handle.key) { state.nextId++ }
+        val changed = LinkedHashMap<Int, AccessibilityNode>()
+        changed[id] = toNode(id, emptyList(), info, bounds)
+        if (id !in parentNode.childIdsList) changed[parentId] = parentNode.toBuilder().addChildIds(id).build()
+        sendFocus(target, state, id, handle, info, changed, event)
+        state.dirty[parent.key] = parent
+        schedule(target, state, state.batch)
+        return true
+    }
+
+    /**
+     * Sends [changed] with the focus moved as [info] says for node [id], and the node that had
+     * the focus before no longer focused.
+     */
+    private fun sendFocus(
+        target: TreeTarget,
+        state: TaskState,
+        id: Int,
+        handle: NodeHandle,
+        info: NodeInfo,
+        changed: LinkedHashMap<Int, AccessibilityNode>,
+        event: AccessibilityChange?,
+    ) {
         var focus = state.sentFocus
         var accessibilityFocus = state.sentAccessibilityFocus
         if (info.focused && focus != id) {
-            state.sent[focus]?.let { changed[focus] = it.toBuilder().setFocused(false).build() }
+            state.sent[focus]?.let { changed[focus] = (changed[focus] ?: it).toBuilder().setFocused(false).build() }
             focus = id
         } else if (!info.focused && focus == id) {
             focus = 0
@@ -750,7 +906,8 @@ class AccessibilityExport(
         } else if (!info.accessibilityFocused && accessibilityFocus == id) {
             accessibilityFocus = 0
         }
-        if (changed.isEmpty() && focus == state.sentFocus && accessibilityFocus == state.sentAccessibilityFocus) return true
+        val moved = focus != state.sentFocus || accessibilityFocus != state.sentAccessibilityFocus
+        if (changed.isEmpty() && !moved) return
         val tree = AccessibilityTree.newBuilder()
             .setTaskId(target.taskId)
             .setWidgetId(target.widgetId)
@@ -763,13 +920,34 @@ class AccessibilityExport(
             .build()
         if (!send(Envelope.newBuilder().setAccessibilityTree(tree).build().toByteArray())) {
             state.needFull = true
-            return true
+            return
         }
         state.sent = state.sent + changed
         state.handles = state.handles + (id to handle)
         state.sentFocus = focus
         state.sentAccessibilityFocus = accessibilityFocus
-        return true
+        if (moved) {
+            state.focusSeq++
+            traceFocus(target, focus, accessibilityFocus, event)
+        }
+    }
+
+    /**
+     * Logs a focus move the agent sent, with when Android made its event and when the service
+     * had it, so a trace of one move can be read hop by hop beside the host's lines.
+     */
+    private fun traceFocus(target: TreeTarget, focus: Int, accessibilityFocus: Int, event: AccessibilityChange?) {
+        val now = clock()
+        val hops = listOfNotNull(
+            "the agent sent it at ${System.currentTimeMillis()} ms",
+            event?.eventAt?.takeIf { it > 0 }?.let { "${now - it} ms after Android made its event" },
+            event?.receivedAt?.takeIf { it > 0 }?.let { "${now - it} ms after the agent received it" },
+        )
+        log.info(
+            "accessibility focus trace: $target: focus ${focus.takeIf { it != 0 } ?: "none"}, " +
+                "accessibility focus ${accessibilityFocus.takeIf { it != 0 } ?: "none"}, " +
+                hops.joinToString(", "),
+        )
     }
 
     private fun announce(change: AccessibilityChange) {
@@ -808,18 +986,23 @@ class AccessibilityExport(
             retry(target, state, unplaced(target))
             return
         }
-        // Only the nodes events named, when all of them are in the tree already.
-        val starts = if (state.readAll || state.needFull || state.ids.size > MAX_IDS) {
-            null
-        } else {
-            state.dirty.values.filter { it.key in state.ids }.takeIf { it.size == state.dirty.size && it.isNotEmpty() }
-        }
+        // Only the nodes events named (or their nearest ancestors the tree has), unless the
+        // whole task is to be read.
+        val whole = state.readAll || state.needFull || state.ids.size > MAX_IDS || state.lazyDirty.size >= MAX_LAZY_SOURCES
+        val named = if (whole) emptyList() else state.dirty.values.toList()
+        val lazy = if (whole) emptyList() else state.lazyDirty.toList()
+        // The IDs' keys go to the reader as a copy only when it has to look a node up there.
+        val known: Set<Any>? = if (whole || (named.all { it.key in state.ids } && lazy.isEmpty())) null else HashSet(state.ids.keys)
+        val partial = !whole && (named.isNotEmpty() || lazy.isNotEmpty())
         state.dirty.clear()
+        state.lazyDirty.clear()
         state.readAll = false
         state.reading = true
         state.changedWhileReading = false
+        val focusSeq = state.focusSeq
         reader.post {
             val read = try {
+                val starts = if (partial) startsOf(named, lazy, known) else null
                 if (starts != null) {
                     readNodes(starts, bounds, subtree = true)
                 } else {
@@ -833,19 +1016,21 @@ class AccessibilityExport(
             scheduler.post {
                 state.reading = false
                 if (watched[target] !== state) return@post
+                // A focus sent while this read ran is newer than what it read.
+                val pin = state.focusSeq != focusSeq
                 if (read?.busy != null) {
                     if (!state.busyWarned) {
                         state.busyWarned = true
                         log.info("$target's app is busy (${read.busy}); what was read is sent, and its accessibility tree is read again in $BUSY_RETRY_MILLIS ms")
                     }
-                    if (read.nodes.isNotEmpty()) sendRead(target, state, read)
+                    if (read.nodes.isNotEmpty()) sendRead(target, state, read, pin)
                     state.changedWhileReading = false
                     state.readAll = true
                     schedule(target, state, BUSY_RETRY_MILLIS)
                     return@post
                 }
                 state.busyWarned = false
-                sendRead(target, state, read)
+                sendRead(target, state, read, pin)
                 if (state.changedWhileReading) {
                     state.changedWhileReading = false
                     state.readAll = state.readAll || !state.listening
@@ -855,7 +1040,12 @@ class AccessibilityExport(
         }
     }
 
-    private fun sendRead(target: TreeTarget, state: TaskState, read: ReadNodes?) {
+    /**
+     * Sends what [read] found. When [pin] holds, a focus move was sent while the read ran, and
+     * the focus it sent stands over what the older read saw. [focusEvent] is the focus event a
+     * focus read was for, whose move is then traced.
+     */
+    private fun sendRead(target: TreeTarget, state: TaskState, read: ReadNodes?, pin: Boolean = false, focusEvent: AccessibilityChange? = null) {
         val bounds = boundsOf(target)
         if (read == null) {
             val why = if (target.isWidget) "the widget's views could not be read" else "the accessibility service gave no windows"
@@ -892,11 +1082,25 @@ class AccessibilityExport(
             // A node whose children were not read keeps the ones it had.
             nodes[id] = if (id in snapshot.complete) node else state.sent[id]?.let { old -> node.toBuilder().clearChildIds().addAllChildIds(old.childIdsList.filter { it !in removed }).build() } ?: node
         }
-        val next = if (whole) nodes else (state.sent - removed.toSet()) + nodes
+        var next = if (whole) nodes else (state.sent - removed.toSet()) + nodes
         val roots = if (read.subtree) state.sentRoots else snapshot.roots
-        val focus = snapshot.focus.takeIf { it != 0 } ?: state.sentFocus.takeIf { it in next && it !in nodes } ?: 0
-        val accessibilityFocus = snapshot.accessibilityFocus.takeIf { it != 0 }
+        var focus = snapshot.focus.takeIf { it != 0 } ?: state.sentFocus.takeIf { it in next && it !in nodes } ?: 0
+        var accessibilityFocus = snapshot.accessibilityFocus.takeIf { it != 0 }
             ?: state.sentAccessibilityFocus.takeIf { it in next && it !in nodes } ?: 0
+        if (pin && !full) {
+            if (state.sentFocus == 0 || state.sentFocus in next) focus = state.sentFocus
+            if (state.sentAccessibilityFocus == 0 || state.sentAccessibilityFocus in next) accessibilityFocus = state.sentAccessibilityFocus
+            // The nodes read say the focus is where it was sent since, not where they saw it.
+            for ((id, node) in nodes.entries.toList()) {
+                val focused = id == focus || (node.focused && focus == 0)
+                val accessibilityFocused = id == accessibilityFocus || (node.accessibilityFocused && accessibilityFocus == 0)
+                if (node.focused != focused || node.accessibilityFocused != accessibilityFocused) {
+                    nodes[id] = node.toBuilder().setFocused(focused).setAccessibilityFocused(accessibilityFocused).build()
+                }
+            }
+            next = if (whole) nodes else (state.sent - removed.toSet()) + nodes
+        }
+        val moved = focus != state.sentFocus || accessibilityFocus != state.sentAccessibilityFocus
         val changed = nodes.values.filter { state.sent[it.id] != it }
         if (!full && changed.isEmpty() && removed.isEmpty() && roots == state.sentRoots && focus == state.sentFocus && accessibilityFocus == state.sentAccessibilityFocus) {
             state.handles = state.handles + snapshot.handles
@@ -930,6 +1134,100 @@ class AccessibilityExport(
         state.sentAccessibilityFocus = accessibilityFocus
         state.handles = (if (whole) emptyMap() else state.handles - removed.toSet()) + snapshot.handles
         if (snapshot.truncated) log.warn("$target has more accessibility nodes than one tree holds; the farthest were left out")
+        if (moved && focusEvent != null) {
+            state.focusSeq++
+            traceFocus(target, focus, accessibilityFocus, focusEvent)
+        }
+    }
+
+    /**
+     * Places the focused nodes new to the tree ([TaskState.focusDirty]) with a read on
+     * [focusReader], beside whatever read runs on [reader]: from each node's nearest ancestor
+     * the tree has, or the whole task when it has none. A busy app is not asked again for it:
+     * what was read is sent, and the usual reads go on as they would.
+     */
+    private fun focusRead(target: TreeTarget, state: TaskState) {
+        if (state.focusReading) {
+            state.focusAgain = true
+            return
+        }
+        val bounds = boundsOf(target) ?: return
+        val named = state.focusDirty.values.toList()
+        state.focusDirty.clear()
+        val event = state.focusEvent
+        if (state.needFull || state.sent.isEmpty()) {
+            // No tree yet to place it in: the first read, under way or next, brings it.
+            state.readAll = true
+            return
+        }
+        val known: Set<Any> = HashSet(state.ids.keys)
+        state.focusReading = true
+        focusReader.post {
+            val read = try {
+                val starts = startsOf(named, emptyList(), known)
+                if (starts != null) {
+                    readNodes(starts, bounds, subtree = true)
+                } else {
+                    source.roots(target.taskId)?.let { readNodes(it, bounds, subtree = false) }
+                }
+            } catch (e: Exception) {
+                log.warn("reading where the focus of $target went failed", e)
+                null
+            }
+            scheduler.postFirst {
+                state.focusReading = false
+                if (watched[target] !== state) return@postFirst
+                if (read != null && read.nodes.isNotEmpty()) {
+                    sendRead(target, state, read, focusEvent = event)
+                } else {
+                    state.readAll = true
+                    schedule(target, state, state.batch)
+                }
+                if (state.focusAgain) {
+                    state.focusAgain = false
+                    if (state.focusDirty.isNotEmpty()) schedule(target, state, 0, urgent = true)
+                }
+            }
+        }
+    }
+
+    /**
+     * Where a partial read starts: each node named, or when the tree does not have it, its
+     * nearest ancestor the tree ([known]) has. With [known] null, the nodes named are all in
+     * the tree and nothing is looked up. Null when a node has no such ancestor, or when the
+     * events named nothing that is still there: the whole task is then read. Runs on a reader.
+     */
+    private fun startsOf(named: List<NodeHandle>, lazy: List<() -> NodeHandle?>, known: Set<Any>?): List<NodeHandle>? {
+        if (known == null) return named
+        val nodes = named + lazy.mapNotNull {
+            try {
+                it()
+            } catch (e: Exception) {
+                null
+            }
+        }
+        if (nodes.isEmpty()) return null
+        val starts = LinkedHashMap<Any, NodeHandle>()
+        for (node in nodes) {
+            val anchor = anchorOf(node, known) ?: return null
+            starts[anchor.key] = anchor
+        }
+        return starts.values.toList()
+    }
+
+    /** The nearest of [node] and its ancestors that the tree has, within [MAX_ANCESTOR_STEPS]. */
+    private fun anchorOf(node: NodeHandle, known: Set<Any>): NodeHandle? {
+        var at: NodeHandle? = node
+        var steps = 0
+        while (at != null && steps++ <= MAX_ANCESTOR_STEPS) {
+            if (at.key in known) return at
+            at = try {
+                at.parent()
+            } catch (e: Exception) {
+                null
+            }
+        }
+        return null
     }
 
     /**
@@ -1134,6 +1432,15 @@ class AccessibilityExport(
         const val FAST_MIN_INTERVAL_MILLIS = 50L
 
         const val RESIZE_QUIET_MILLIS = 500L
+
+        /**
+         * The most content events of one burst whose nodes a read looks up; past it, the burst
+         * changed so much that the whole task is read instead.
+         */
+        const val MAX_LAZY_SOURCES = 32
+
+        /** How far up a read looks for an ancestor of a node new to the tree. */
+        const val MAX_ANCESTOR_STEPS = 32
 
         const val SLOW_CALL_MILLIS = 250L
 

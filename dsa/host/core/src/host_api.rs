@@ -58,7 +58,7 @@ use dsa_protocol::host_api::types::{
     self, envelope::Body, request, response, Envelope, ErrorCode, Request, Response, Role,
 };
 use dsa_protocol::host_api::{
-    client_connect, decode, local_hello, send, service_accept, HandshakeError,
+    client_connect, decode, encode, local_hello, send, service_accept, HandshakeError,
 };
 use dsa_transport::local::{LocalListener, Peer};
 use dsa_transport::{Connection, Connector, TransportError};
@@ -67,7 +67,7 @@ use dsa_transport::{Connection, Connector, TransportError};
 pub use dsa_protocol::host_api::types::AppRootStatus;
 
 use crate::accessibility::{
-    AccessibilityTarget, AccessibilityWatch, ActionRequest, ActionResult, Announcement,
+    AccessibilityTarget, AccessibilityWatch, ActionRequest, ActionResult, Announcement, FocusTrace,
     GuestAccessibility, TreeUpdate,
 };
 use crate::adb_discovery::AutoConnectState;
@@ -2008,9 +2008,13 @@ const GAPPS_ANSWER_WAIT: Duration = Duration::from_secs(30);
 const LINK_POLL: Duration = Duration::from_millis(100);
 
 /// How long a connection that watches an accessibility tree waits for its client's next action
-/// before it looks for news from Android again. Short against the second a change may take to
-/// reach a host client.
-const ACCESSIBILITY_POLL: Duration = Duration::from_millis(30);
+/// before it looks for news from Android again, on a transport that cannot send from a second
+/// thread. A tree waits at most this long, so a screen reader hears a focus move within it.
+const ACCESSIBILITY_POLL: Duration = Duration::from_millis(5);
+
+/// How long a watch whose trees go out on a thread of their own waits for its client before it
+/// checks that thread is still running. A tree never waits for this: it goes out as it comes.
+const ACCESSIBILITY_END_CHECK: Duration = Duration::from_millis(250);
 
 /// How long the service waits for the next piece of a file a client sends. A client reads
 /// the file before it starts, so a gap this long means it is stuck or gone.
@@ -2019,6 +2023,28 @@ const FILE_CHUNK_WAIT: Duration = Duration::from_secs(30);
 /// How long a client waits for the service to say Android has a file: sending 64 MiB into
 /// the guest takes seconds, and each chunk may wait half a minute for the agent.
 const FILE_ANSWER_WAIT: Duration = Duration::from_secs(5 * 60);
+
+/// What a watch's client receives for one message from the guest.
+fn client_body(update: GuestAccessibility) -> Body {
+    match update {
+        GuestAccessibility::Tree(tree) => Body::AccessibilityTree(tree.to_host_api()),
+        GuestAccessibility::ActionResult(result) => {
+            Body::AccessibilityActionResult(result.to_host_api())
+        }
+        GuestAccessibility::Announcement(announcement) => {
+            Body::AccessibilityAnnouncement(announcement.to_host_api())
+        }
+    }
+}
+
+/// Logs when a tree the service passes on moves the focus, with the time it passed.
+fn trace_focus(trace: &mut FocusTrace, update: &GuestAccessibility, target: AccessibilityTarget) {
+    if let GuestAccessibility::Tree(tree) = update {
+        if let Some(line) = trace.moved(tree, target, "the host service sent it on") {
+            eprintln!("{line}");
+        }
+    }
+}
 
 fn from_wire(state: i32) -> Option<SessionState> {
     match types::SessionState::try_from(state).ok()? {
@@ -2938,7 +2964,7 @@ impl HostApiService {
                 }
             }
         };
-        let (android, watch) = match watch {
+        let (android, mut watch) = match watch {
             Ok(watch) => watch,
             Err(body) => {
                 let _ = send(
@@ -2958,29 +2984,73 @@ impl HostApiService {
         if send(&mut *connection, Body::Response(answer)).is_err() {
             return;
         }
+        // Android's trees go to the client as they come, on a thread of their own, while this
+        // one waits for the client's actions: a focus move then reaches the screen reader with
+        // no wait at all. A transport that cannot send from a second thread keeps both here,
+        // and the trees wait at most ACCESSIBILITY_POLL.
+        let forward = connection.try_clone_sender().map(|sender| {
+            let sender = Arc::new(Mutex::new(sender));
+            let updates = std::mem::replace(&mut watch.updates, std::sync::mpsc::channel().1);
+            let ended = Arc::new(AtomicBool::new(false));
+            let forwarder = Arc::clone(&sender);
+            let forwarder_ended = Arc::clone(&ended);
+            let spawned = thread::Builder::new()
+                .name("dsa-accessibility-forward".into())
+                .spawn(move || {
+                    let mut trace = FocusTrace::new();
+                    while let Ok(update) = updates.recv() {
+                        trace_focus(&mut trace, &update, target);
+                        let frame = encode(&Envelope {
+                            body: Some(client_body(update)),
+                        });
+                        let sent = forwarder
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .send(&frame);
+                        if sent.is_err() {
+                            break;
+                        }
+                    }
+                    forwarder_ended.store(true, Ordering::Relaxed);
+                });
+            if let Err(why) = spawned {
+                eprintln!(
+                    "local API: could not start the thread that sends {target}'s accessibility \
+                     tree ({why}); closing the watch"
+                );
+                ended.store(true, Ordering::Relaxed);
+            }
+            (sender, ended)
+        });
+        let mut trace = FocusTrace::new();
         loop {
-            loop {
-                let frame = match watch.updates.try_recv() {
-                    Ok(GuestAccessibility::Tree(tree)) => {
-                        Body::AccessibilityTree(tree.to_host_api())
-                    }
-                    Ok(GuestAccessibility::ActionResult(result)) => {
-                        Body::AccessibilityActionResult(result.to_host_api())
-                    }
-                    Ok(GuestAccessibility::Announcement(announcement)) => {
-                        Body::AccessibilityAnnouncement(announcement.to_host_api())
-                    }
-                    Err(TryRecvError::Empty) => break,
-                    Err(TryRecvError::Disconnected) => {
+            let wait = match &forward {
+                Some((_, ended)) => {
+                    if ended.load(Ordering::Relaxed) {
                         connection.close();
                         return;
                     }
-                };
-                if send(&mut *connection, frame).is_err() {
-                    return;
+                    ACCESSIBILITY_END_CHECK
                 }
-            }
-            let frame = match connection.recv(Some(ACCESSIBILITY_POLL)) {
+                None => {
+                    loop {
+                        let update = match watch.updates.try_recv() {
+                            Ok(update) => update,
+                            Err(TryRecvError::Empty) => break,
+                            Err(TryRecvError::Disconnected) => {
+                                connection.close();
+                                return;
+                            }
+                        };
+                        trace_focus(&mut trace, &update, target);
+                        if send(&mut *connection, client_body(update)).is_err() {
+                            return;
+                        }
+                    }
+                    ACCESSIBILITY_POLL
+                }
+            };
+            let frame = match connection.recv(Some(wait)) {
                 Err(TransportError::Timeout) => continue,
                 Err(_) => return,
                 Ok(frame) => frame,
@@ -3018,12 +3088,17 @@ impl HostApiService {
                             request_id,
                             outcome: Err(why),
                         };
-                        if send(
-                            &mut *connection,
-                            Body::AccessibilityActionResult(result.to_host_api()),
-                        )
-                        .is_err()
-                        {
+                        let body = Body::AccessibilityActionResult(result.to_host_api());
+                        // With the trees on their own thread, the answer goes the same way, so
+                        // the two never write to the connection at once.
+                        let replied = match &forward {
+                            Some((sender, _)) => sender
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .send(&encode(&Envelope { body: Some(body) })),
+                            None => send(&mut *connection, body),
+                        };
+                        if replied.is_err() {
                             return;
                         }
                     }
