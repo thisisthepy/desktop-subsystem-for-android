@@ -35,12 +35,12 @@ diff --git a/CollapsingToolbarBaseActivity/res/values-v36/styles_expressive.xml 
 @@ -40,2 +41,4 @@
          <item name="android:textSize">22dp</item>
 +        <item name="android:textStyle">bold</item>
-+        <item name="android:fontVariationSettings">'wght' 700</item>
++        <item name="android:fontVariationSettings">"'wght' 700"</item>
      </style>
 @@ -44,2 +47,4 @@
          <item name="android:textSize">36dp</item>
 +        <item name="android:textStyle">bold</item>
-+        <item name="android:fontVariationSettings">'wght' 750</item>
++        <item name="android:fontVariationSettings">"'wght' 750"</item>
      </style>
 diff --git a/SettingsTheme/res/values-v36/dimens.xml b/SettingsTheme/res/values-v36/dimens.xml
 --- a/SettingsTheme/res/values-v36/dimens.xml
@@ -298,7 +298,7 @@ diff --git a/SettingsTheme/res/values-v36/styles_preference_expressive.xml b/Set
 +        <!-- An emphasized group title in the accent colour. -->
 +        <item name="android:textColor">@color/settingslib_materialColorPrimary</item>
 +        <item name="android:textStyle">bold</item>
-+        <item name="android:fontVariationSettings">'wght' 650</item>
++        <item name="android:fontVariationSettings">"'wght' 650"</item>
          <item name="android:layout_width">match_parent</item>
 diff --git a/SettingsTheme/src/com/android/settingslib/widget/SettingsPreferenceGroupAdapter.kt b/SettingsTheme/src/com/android/settingslib/widget/SettingsPreferenceGroupAdapter.kt
 --- a/SettingsTheme/src/com/android/settingslib/widget/SettingsPreferenceGroupAdapter.kt

@@ -18,7 +18,7 @@ diff --git a/java/res/values/styles.xml b/java/res/values/styles.xml
 +            parent="@android:style/TextAppearance.DeviceDefault.WindowTitle">
 +        <item name="android:textSize">22sp</item>
 +        <item name="android:textStyle">bold</item>
-+        <item name="android:fontVariationSettings">'wght' 700</item>
++        <item name="android:fontVariationSettings">"'wght' 700"</item>
 +    </style>
 +
      <style name="TextAppearance.ChooserDefault"

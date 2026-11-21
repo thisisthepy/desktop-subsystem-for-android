@@ -24,4 +24,7 @@ grep -Fq 'name: framework-${{ matrix.android }}-${{ matrix.arch }}-${{ steps.pin
 grep -Fq 'wanted+=("framework-$android-$arch-$version")' .github/workflows/release-image.yml
 grep -Fq 'echo "args=--framework .scratch/framework" >> "$GITHUB_OUTPUT"' .github/workflows/release-image.yml
 grep -Fq '${{ steps.framework.outputs.args }}' .github/workflows/release-image.yml
+# A run for one version or architecture never displaces a waiting run for another.
+grep -Fq "group: framework-\${{ github.ref }}-\${{ inputs.android || 'all' }}-\${{ inputs.arch || 'all' }}" \
+  .github/workflows/framework.yml
 echo "framework build: ok"

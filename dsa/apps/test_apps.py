@@ -231,6 +231,27 @@ class SystemScreensTests(unittest.TestCase):
         self.assertNotIn("+        <item name=\"android:fontFamily\">google-sans", permissions)
         self.assertIn("TextAppearance.Dsa.ChooserTitle", "".join(p.read_text() for p in apps.patches("intentresolver")))
 
+    def test_fr34_no_patch_adds_a_resource_value_with_a_bare_apostrophe(self):
+        # aapt2 rejects an apostrophe that is neither escaped nor inside double quotes
+        # ("unescaped apostrophe in string"), so 'wght' 700 is written "'wght' 700".
+        value = re.compile(r"^\+.*<(item|string)\b[^>]*>([^<]*)</\1>")
+        for app in [*self.manifest["apps"], *self.manifest["libraries"]]:
+            for patch in apps.patches(app["name"]):
+                for line in patch.read_text().splitlines():
+                    found = value.match(line)
+                    if not found or "'" not in found.group(2):
+                        continue
+                    text = found.group(2)
+                    quoted = text.startswith('"') and text.endswith('"')
+                    with self.subTest(patch=f"{app['name']}/{patch.name}", line=line):
+                        self.assertTrue(quoted or "'" not in text.replace("\\'", ""), line)
+
+    def test_fr42_recorder_builds_with_a_kotlin_that_sees_its_java_helpers(self):
+        # Kotlin 2.1.10 on Gradle 9.1 does not see the Java design helpers from Kotlin code.
+        text = "".join(p.read_text() for p in apps.patches("recorder"))
+        self.assertIn('+    id("org.jetbrains.kotlin.android") version "2.2.0" apply false', text)
+        self.assertIn('+    implementation(platform("org.jetbrains.kotlin:kotlin-bom:2.2.0"))', text)
+
     def test_fr34_only_settingslib_carries_the_design_helper(self):
         # Settings and PermissionController take DsaDesign from SettingsLib; a second copy of the
         # class in the same APK would not build.

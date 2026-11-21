@@ -68,8 +68,11 @@ on:
   #     - dsa/apps/intentresolver/**
   #     - dsa/apps/design/**
 
+# One group per branch and per choice of version and architecture. GitHub keeps one waiting
+# run per group and cancels the older one, so with one group for every choice a run started
+# for one version cancelled one started a moment earlier for the other while a third ran.
 concurrency:
-  group: framework-${{ github.ref }}
+  group: framework-${{ github.ref }}-${{ inputs.android || 'all' }}-${{ inputs.arch || 'all' }}
   cancel-in-progress: false
 
 permissions:

@@ -7,7 +7,7 @@ diff --git a/res/values/styles.xml b/res/values/styles.xml
 @@ -186,2 +186,4 @@
             parent="@android:style/TextAppearance.DeviceDefault.WindowTitle">
 +        <item name="android:textStyle">bold</item>
-+        <item name="android:fontVariationSettings">'wght' 700</item>
++        <item name="android:fontVariationSettings">"'wght' 700"</item>
          <item name="android:layout_width">match_parent</item>
 diff --git a/res/values-v31/styles.xml b/res/values-v31/styles.xml
 --- a/res/values-v31/styles.xml
