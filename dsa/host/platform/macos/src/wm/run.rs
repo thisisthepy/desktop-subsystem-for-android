@@ -36,7 +36,8 @@ use crate::host_config::{user_root_in, MacHostConfig, UserFolders};
 use crate::launchd::WM_LABEL;
 use crate::service::relay_socket;
 use crate::shell::app_stubs;
-use dsa_host_core::renderer::{spawn_supervisor, RendererHandler};
+use dsa_host_core::android_presence::{follow_in_background as follow_presence, SharedPresence};
+use dsa_host_core::renderer::{spawn_supervisor_for, RendererHandler};
 use dsa_host_unix::renderer_launch::{CurrentFds, UnixLauncher};
 
 /// How long to wait for the service before trying again.
@@ -381,8 +382,8 @@ fn serve(places: Places, stop: Arc<AtomicBool>) -> Result<(), String> {
     let links: Links = Arc::default();
     let drawn = DrawnFrames::new();
     let presenter = Arc::new(Presenter::new(Arc::clone(&links), ports, drawn.clone()));
-    // The renderer runs in a process of its own, dsa-gfx, which this process starts and
-    // starts again whenever it ends: a crash in the renderer or MoltenVK then ends only that
+    // The renderer runs in a process of its own, dsa-gfx, which this process starts while
+    // Android runs (none runs while it is stopped) and starts again whenever it ends: a crash in the renderer or MoltenVK then ends only that
     // process, and the app windows keep their last frame. It serves the guest's streams on the
     // relay sockets.
     let sockets = (
@@ -400,11 +401,26 @@ fn serve(places: Places, stop: Arc<AtomicBool>) -> Result<(), String> {
             .env
             .push(("DSA_RENDERER".into(), places.renderer.display().to_string()));
     }
-    if let Err(why) = spawn_supervisor(
+    let presence = SharedPresence::new();
+    {
+        let host_api = places.host_api.clone();
+        if let Err(why) = follow_presence(
+            move || connect(&host_api),
+            Arc::clone(&presence),
+            Arc::clone(&stop),
+        ) {
+            log(&format!(
+                "graphics: Android's state cannot be followed ({why}); the renderer starts \
+                 only once"
+            ));
+        }
+    }
+    if let Err(why) = spawn_supervisor_for(
         Box::new(launcher),
         Arc::clone(&client) as Arc<dyn RendererHandler>,
         BUILD.to_string(),
         Arc::clone(&stop),
+        presence,
     ) {
         log(&format!(
             "graphics: the renderer cannot be started ({why}); task windows open but show no \

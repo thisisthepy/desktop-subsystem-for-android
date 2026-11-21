@@ -37,6 +37,7 @@ use dsa_protocol::renderer::{
 };
 use dsa_transport::{Connection, FrameSender, TransportError};
 
+use crate::android_presence::SharedPresence;
 use crate::memory::{mib, HeldMemory, RendererMemory};
 
 /// The renderer's program name, without the platform's extension.
@@ -613,9 +614,14 @@ fn reap(child: &mut dyn RendererChild, limit: Duration) -> String {
 enum Ending {
     /// The window manager is stopping.
     Stopping,
+    /// Android stopped: the renderer is not wanted until it starts again.
+    Unwanted,
     /// The renderer ended or broke its connection.
     Ended,
 }
+
+/// Whether the renderer is wanted now; [`supervise`] wants it always.
+pub type Wanted<'a> = &'a (dyn Fn() -> bool + Sync);
 
 /// Runs one started renderer: the handshake, `Start`, and its messages until it ends.
 fn run_one(
@@ -623,6 +629,7 @@ fn run_one(
     handler: &dyn RendererHandler,
     build: &str,
     stop: &AtomicBool,
+    wanted: Wanted<'_>,
     backoff: &mut RestartBackoff,
 ) -> Result<Ending, String> {
     let connection = &mut launched.connection;
@@ -633,9 +640,19 @@ fn run_one(
     )
     .map_err(|e| e.to_string())?;
     send(&mut **connection, Body::Start(handler.start())).map_err(|e| e.to_string())?;
-    let started = wait_started(&mut **connection, &mut *launched.process, handler, stop)?;
+    let started = wait_started(
+        &mut **connection,
+        &mut *launched.process,
+        handler,
+        stop,
+        wanted,
+    )?;
     let Some(started) = started else {
-        return Ok(Ending::Stopping);
+        return Ok(if stop.load(Ordering::Relaxed) {
+            Ending::Stopping
+        } else {
+            Ending::Unwanted
+        });
     };
     if !started.error.is_empty() {
         return Err(format!("it could not start: {}", started.error));
@@ -647,6 +664,10 @@ fn run_one(
         if stop.load(Ordering::Relaxed) {
             link.send(Body::Stop(Stop {}));
             break Ending::Stopping;
+        }
+        if !wanted() {
+            link.send(Body::Stop(Stop {}));
+            break Ending::Unwanted;
         }
         match connection.recv(Some(Duration::from_millis(100))) {
             Ok(frame) => match decode_body(&frame) {
@@ -685,16 +706,18 @@ fn send(connection: &mut dyn Connection, body: Body) -> Result<(), TransportErro
     dsa_protocol::renderer::send(connection, body)
 }
 
-/// Waits for the renderer's `Started`. `None` when the window manager is stopping.
+/// Waits for the renderer's `Started`. `None` when the window manager is stopping, or the
+/// renderer is no longer wanted.
 fn wait_started(
     connection: &mut dyn Connection,
     child: &mut dyn RendererChild,
     handler: &dyn RendererHandler,
     stop: &AtomicBool,
+    wanted: Wanted<'_>,
 ) -> Result<Option<Started>, String> {
     let deadline = Instant::now() + START_TIMEOUT;
     loop {
-        if stop.load(Ordering::Relaxed) {
+        if stop.load(Ordering::Relaxed) || !wanted() {
             return Ok(None);
         }
         if Instant::now() >= deadline {
@@ -732,8 +755,31 @@ pub fn supervise(
     build: &str,
     stop: &AtomicBool,
 ) {
+    supervise_while(launcher, handler, build, stop, &|| true)
+}
+
+/// How often a supervisor without a renderer looks whether one is wanted again.
+const WANTED_POLL: Duration = Duration::from_millis(50);
+
+/// [`supervise`], with the renderer running only while `wanted` says so: while it does not,
+/// no renderer process runs; when it does again, one is started at once. A window manager
+/// passes what its [`SharedPresence`](crate::android_presence::SharedPresence) says, so the
+/// renderer runs only while Android does.
+pub fn supervise_while(
+    launcher: &mut dyn RendererLauncher,
+    handler: &dyn RendererHandler,
+    build: &str,
+    stop: &AtomicBool,
+    wanted: Wanted<'_>,
+) {
     let mut backoff = RestartBackoff::new();
     while !stop.load(Ordering::Relaxed) {
+        if !wanted() {
+            if sleep_unless(stop, WANTED_POLL) {
+                return;
+            }
+            continue;
+        }
         let mut launched = match launcher.launch() {
             Ok(launched) => launched,
             Err(why) => {
@@ -751,7 +797,18 @@ pub fn supervise(
             }
         };
         let process_id = launched.process.id();
-        let outcome = run_one(&mut launched, handler, build, stop, &mut backoff);
+        let outcome = run_one(&mut launched, handler, build, stop, wanted, &mut backoff);
+        if matches!(outcome, Ok(Ending::Unwanted)) {
+            launched.connection.close();
+            let reason = reap(&mut *launched.process, STOP_GRACE);
+            handler.log(&format!(
+                "the graphics renderer ({RENDERER_PROGRAM}, pid {process_id}) stopped while \
+                 Android is stopped: {reason}; it starts again with Android"
+            ));
+            // The next start is a fresh one, not a restart after a failure.
+            backoff = RestartBackoff::new();
+            continue;
+        }
         let stopping = matches!(outcome, Ok(Ending::Stopping));
         if stopping {
             launched.connection.close();
@@ -793,6 +850,60 @@ pub fn spawn_supervisor(
     thread::Builder::new()
         .name("dsa-wm-renderer".into())
         .spawn(move || supervise(&mut *launcher, &*handler, &build, &stop))
+}
+
+/// A handler that ends `presence`'s probe once the first renderer has started, or could not.
+struct EndsProbe {
+    inner: Arc<dyn RendererHandler>,
+    presence: Arc<SharedPresence>,
+}
+
+impl RendererHandler for EndsProbe {
+    fn start(&self) -> Start {
+        self.inner.start()
+    }
+    fn connected(&self, started: &Started, link: &RendererLink) {
+        self.inner.connected(started, link);
+        self.presence.probe_done();
+    }
+    fn message(&self, body: Body, link: &RendererLink) {
+        self.inner.message(body, link)
+    }
+    fn disconnected(&self) {
+        self.inner.disconnected()
+    }
+    fn log(&self, line: &str) {
+        self.inner.log(line)
+    }
+    fn start_failed(&self) {
+        self.inner.start_failed();
+        self.presence.probe_done();
+    }
+}
+
+/// Runs [`supervise_while`] on a thread of its own, with the renderer running only while
+/// `presence` says Android runs; the thread ends after `stop` is set. The first renderer
+/// starts at once whatever Android's state (a probe): the window manager learns which GPU
+/// and which Vulkan it has, and the service whether Android would have anything to draw on,
+/// before anything asks; while Android is stopped it ends as soon as it has started.
+pub fn spawn_supervisor_for(
+    mut launcher: Box<dyn RendererLauncher>,
+    handler: Arc<dyn RendererHandler>,
+    build: String,
+    stop: Arc<AtomicBool>,
+    presence: Arc<SharedPresence>,
+) -> std::io::Result<thread::JoinHandle<()>> {
+    presence.probe();
+    let handler = EndsProbe {
+        inner: handler,
+        presence: Arc::clone(&presence),
+    };
+    thread::Builder::new()
+        .name("dsa-wm-renderer".into())
+        .spawn(move || {
+            let wanted = move || presence.renderer_wanted();
+            supervise_while(&mut *launcher, &handler, &build, &stop, &wanted)
+        })
 }
 
 /// How many textures one display keeps on each side: a display may take turns between two
