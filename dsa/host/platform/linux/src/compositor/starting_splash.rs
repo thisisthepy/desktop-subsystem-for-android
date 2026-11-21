@@ -6,9 +6,9 @@
 //! The timing and the sizes are `dsa_host_core::compositor::boot_splash`, shared with every
 //! host. Frames are paced by the compositor's frame callbacks, so none is drawn while the
 //! window is hidden, minimized or on another workspace, and none at all once the logo stands
-//! still (animations turned off on the desktop). The window's title says that Android is
-//! starting, which is what the desktop's window list and a screen reader announce for it; its
-//! body shows the logo and no words.
+//! still (animations turned off on the desktop). The window shows no words, not even a title;
+//! a screen reader hears "Starting Android..." from its frame on the accessibility bus. It
+//! stays until the app's window shows its first frame, then fades out over it.
 
 use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -170,6 +170,29 @@ impl Drop for Buffer {
     }
 }
 
+/// The key of the starting window's frame among the provider's windows. The process has no
+/// task windows, and the provider watches no tree for it.
+const ACCESS_KEY: i32 = 0;
+
+/// The starting window as an AT-SPI application, the way the compositor shows its windows:
+/// one active frame named "Starting Android..." in `language`, with no buttons and no tree.
+/// It joins the accessibility bus only while the session's accessibility is on.
+fn announce(
+    language: dsa_host_core::ui_language::UiLanguage,
+) -> Arc<crate::accessibility::watch::Shared> {
+    use crate::accessibility::objects::{starting_window_facts, Access};
+    use crate::accessibility::watch::Shared;
+    let shared = Shared::new(
+        Access::new(language, dsa_host_core::accessibility::PRESENCE_GRACE),
+        None,
+        Arc::new(|_| {}),
+        Arc::new(|line: &str| super::session::log(line)),
+    );
+    crate::accessibility::bus::start(Arc::clone(&shared));
+    shared.sync(ACCESS_KEY, starting_window_facts(language));
+    shared
+}
+
 fn run(package: &str, stop: &AtomicBool) -> Result<(), String> {
     let connection = Connection::connect_to_env()
         .map_err(|error| format!("cannot reach the Wayland display: {error}"))?;
@@ -192,8 +215,9 @@ fn run(package: &str, stop: &AtomicBool) -> Result<(), String> {
     let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
     let toplevel = xdg.get_toplevel(&qh, ());
     toplevel.set_app_id(crate::shell::desktop_entry::app_id(package));
-    // What the window says of itself: the desktop's window list and a screen reader read it.
-    toplevel.set_title(dsa_host_core::ui_text::caption::starting_android(language).to_string());
+    // No title: a decorated window shows no words. A screen reader hears what the window
+    // waits for from its frame on the accessibility bus instead.
+    let access = announce(language);
     surface.commit();
 
     let free = Arc::new(AtomicBool::new(true));
@@ -307,6 +331,7 @@ fn run(package: &str, stop: &AtomicBool) -> Result<(), String> {
         }
     }
     drop(buffer);
+    access.close(ACCESS_KEY);
     toplevel.destroy();
     xdg.destroy();
     surface.destroy();

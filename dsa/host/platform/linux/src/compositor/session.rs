@@ -1436,12 +1436,58 @@ pub fn launch_shortcut(package: &str, id: &str) -> Result<(), String> {
             show_starting(&mut starting, package)
         })
         .map_err(|error| error.to_string())?;
+    let watch = starting.as_ref().and_then(|_| watch_for_window(package));
     let launched = client
         .launch_shortcut(package, id)
         .map_err(|error| error.to_string());
-    // The DSA logo fades out as the app is asked for.
-    drop(starting);
+    fade_into_app(starting, watch, launched.is_ok());
     launched
+}
+
+type WindowWatch = (
+    dsa_host_core::host_api::TaskStream,
+    dsa_host_core::compositor::boot_splash::AppWindowWait,
+);
+
+/// Watches the tasks, before the app is asked for, so the app's first frame is not missed.
+fn watch_for_window(package: &str) -> Option<WindowWatch> {
+    let stream = connect().ok()?.watch_tasks().ok()?;
+    let current = stream.current();
+    let wait = dsa_host_core::compositor::boot_splash::AppWindowWait::new(
+        package,
+        &current.tasks,
+        &current.frames,
+    );
+    Some((stream, wait))
+}
+
+/// Keeps the starting window until the app's window shows its first frame (or the wait
+/// gives up, or the launch failed), so the logo fades into the app rather than into nothing.
+fn fade_into_app(
+    starting: Option<super::starting_splash::StartingWindow>,
+    watch: Option<WindowWatch>,
+    launched: bool,
+) {
+    use dsa_host_core::compositor::boot_splash::APP_WINDOW_WAIT;
+    if let (true, Some((mut stream, mut wait)), true) = (starting.is_some(), watch, launched) {
+        let deadline = std::time::Instant::now() + APP_WINDOW_WAIT;
+        while !wait.shown() {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            if left.is_zero() {
+                log("the app's window did not show in time; the starting window goes");
+                break;
+            }
+            match stream.next(left) {
+                Ok(Some(event)) => {
+                    wait.see(&event);
+                }
+                Ok(None) => {}
+                Err(_) => break,
+            }
+        }
+    }
+    // The DSA logo fades out over the app's first frame.
+    drop(starting);
 }
 
 /// Shows the window with the DSA logo the first time a launch has to wait for Android.
@@ -1462,10 +1508,11 @@ pub fn one_shot(action: &str, package: &str) -> Result<(), String> {
                     show_starting(&mut starting, package)
                 })
                 .map_err(|error| error.to_string())?;
+            let watch = starting.as_ref().and_then(|_| watch_for_window(package));
             let launched = client
                 .launch_app(package)
                 .map_err(|error| error.to_string());
-            drop(starting);
+            fade_into_app(starting, watch, launched.is_ok());
             launched
         }
         "--app-settings" => client

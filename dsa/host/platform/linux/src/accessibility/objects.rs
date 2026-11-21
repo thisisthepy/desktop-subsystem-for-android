@@ -388,6 +388,20 @@ pub struct WindowFacts {
     pub caption: Option<CaptionCells>,
 }
 
+/// What the window shown while Android starts tells a screen reader: an active frame named
+/// "Starting Android..." in `language`, with no title bar buttons and no tree. The window
+/// itself shows only the DSA logo.
+pub fn starting_window_facts(language: UiLanguage) -> WindowFacts {
+    let (width, height) = dsa_host_core::compositor::boot_splash::WINDOW_DIP;
+    WindowFacts {
+        title: dsa_host_core::ui_text::caption::starting_android(language).to_string(),
+        scale: 1,
+        shown: (width, height),
+        active: true,
+        ..Default::default()
+    }
+}
+
 /// What a window shows of itself now, from its model and its title bar.
 pub fn window_facts(model: &Toplevel, title_bar: &TitleBar) -> WindowFacts {
     let caption = model.has_caption().then(|| {
@@ -1681,4 +1695,26 @@ fn events_of(
         }
     }
     events
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fr7_boot_splash_linux_frame_is_named_android_is_starting() {
+        for language in UiLanguage::ALL {
+            let mut access = Access::new(language, Duration::from_secs(1));
+            access.sync(0, starting_window_facts(language));
+            let frame = Object::Window(0);
+            assert!(access.exists(frame));
+            assert_eq!(access.role(frame), role::FRAME);
+            assert_eq!(
+                access.name(frame),
+                dsa_host_core::ui_text::caption::starting_android(language)
+            );
+            // No title bar buttons: only the name is there to read.
+            assert!(access.children(frame).is_empty());
+        }
+    }
 }

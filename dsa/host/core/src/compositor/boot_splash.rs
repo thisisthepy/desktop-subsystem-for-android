@@ -159,9 +159,113 @@ impl BootSplash {
     }
 }
 
+/// How long the starting window waits for the app's window after Android is ready before it
+/// fades out anyway: an app that never opens a window must not leave the logo on the screen.
+pub const APP_WINDOW_WAIT: Duration = Duration::from_secs(20);
+
+/// Watches the tasks for the app's first frame, for a host whose starting window lives in
+/// another process than the app's window: it fades out once a task of `package` has frames,
+/// which is when the app's window shows its first frame.
+#[derive(Debug, Clone)]
+pub struct AppWindowWait {
+    package: String,
+    tasks: Vec<i32>,
+    shown: bool,
+}
+
+impl AppWindowWait {
+    /// Starts from the tasks there are (`tasks`) and the tasks whose frames are placed
+    /// (`frames`): an app that already shows a window counts as shown.
+    pub fn new(
+        package: &str,
+        tasks: &[crate::tasks::Task],
+        frames: &[(i32, u32)],
+    ) -> AppWindowWait {
+        let mut wait = AppWindowWait {
+            package: package.to_string(),
+            tasks: Vec::new(),
+            shown: false,
+        };
+        for task in tasks {
+            wait.see(&crate::tasks::TaskEvent::Updated(task.clone()));
+        }
+        for &(task_id, display_id) in frames {
+            wait.see(&crate::tasks::TaskEvent::Frames {
+                task_id,
+                display_id,
+            });
+        }
+        wait
+    }
+
+    /// Takes one task event; returns whether the app's window now shows a frame.
+    pub fn see(&mut self, event: &crate::tasks::TaskEvent) -> bool {
+        use crate::tasks::TaskEvent;
+        match event {
+            TaskEvent::Updated(task) if task.package_name == self.package => {
+                if !self.tasks.contains(&task.task_id) {
+                    self.tasks.push(task.task_id);
+                }
+            }
+            TaskEvent::Removed { task_id } => self.tasks.retain(|id| id != task_id),
+            TaskEvent::Frames { task_id, .. } if self.tasks.contains(task_id) => {
+                self.shown = true;
+            }
+            _ => {}
+        }
+        self.shown
+    }
+
+    /// Whether the app's window shows a frame.
+    pub fn shown(&self) -> bool {
+        self.shown
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn task(task_id: i32, package: &str) -> crate::tasks::Task {
+        crate::tasks::Task {
+            task_id,
+            package_name: package.into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn fr7_boot_splash_fades_only_when_the_apps_window_shows_a_frame() {
+        use crate::tasks::TaskEvent;
+        let mut wait = AppWindowWait::new("com.example.notes", &[task(3, "other.app")], &[(3, 0)]);
+        assert!(!wait.shown());
+        // Another app's frames and the app's task without frames are not enough.
+        assert!(!wait.see(&TaskEvent::Frames {
+            task_id: 3,
+            display_id: 1
+        }));
+        assert!(!wait.see(&TaskEvent::Updated(task(7, "com.example.notes"))));
+        assert!(wait.see(&TaskEvent::Frames {
+            task_id: 7,
+            display_id: 2
+        }));
+        // An app that already shows a window counts as shown from the start.
+        let open = AppWindowWait::new(
+            "com.example.notes",
+            &[task(7, "com.example.notes")],
+            &[(7, 2)],
+        );
+        assert!(open.shown());
+        // A task that ended before its frames came does not count.
+        let mut gone = AppWindowWait::new("com.example.notes", &[], &[]);
+        gone.see(&TaskEvent::Updated(task(9, "com.example.notes")));
+        gone.see(&TaskEvent::Removed { task_id: 9 });
+        assert!(!gone.see(&TaskEvent::Frames {
+            task_id: 9,
+            display_id: 1
+        }));
+        assert!(APP_WINDOW_WAIT >= Duration::from_secs(5));
+    }
 
     fn ms(value: u64) -> Duration {
         Duration::from_millis(value)
