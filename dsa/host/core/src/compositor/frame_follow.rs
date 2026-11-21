@@ -36,6 +36,8 @@
 //! drag, which the guest is asked for when the drag ends, arrives as a frame like any other.
 //! It names no window system.
 
+use super::window_sizing::FramePlacement;
+
 /// What to do with a frame that arrived.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Arrival {
@@ -117,29 +119,33 @@ impl FrameFollow {
         self.held
     }
 
-    /// Whether what the frame leaves of the window is filled with the app's colour. Only for a
-    /// window that holds its size and shows the guest's answer to it: the guest kept the task
-    /// smaller than the window (its display holds no more, as on a monitor of another size
-    /// or scale than the one it was made for), so the strips beside the frame would stay for
-    /// as long as the window does. While that answer is still coming (the moment of a
-    /// maximise, a snap or a restore), the last frame is shown as it is with nothing drawn
-    /// around it, so the window's own animation shows the app, not a solid colour around a
-    /// frame cut out of it.
+    /// Whether what the frame leaves of the window is filled with the app's colour, decided
+    /// by geometry: the frame where the window shows it (`placement`) does not cover the
+    /// window, and it cannot, or no longer will. Only a window that holds its size has such
+    /// strips; any other takes its frame's size.
     ///
-    /// A held window larger than the largest client area the guest can draw
-    /// ([`FrameFollow::set_limit`]) is filled at once, whatever frame comes: no answer of the
-    /// guest can cover it, including one of the same size as the frame already shown (a
-    /// window already at the limit, maximised again). A window within the limit is filled
-    /// only beside the guest's answer, so a maximise that the app catches up with shows
-    /// nothing around its last frame meanwhile.
-    pub fn strips_filled(&self) -> bool {
+    /// - A held window larger than the largest client area the guest can draw
+    ///   ([`FrameFollow::set_limit`]) can never be covered, whatever frame comes (including
+    ///   one of the size already shown, a window already at the limit maximised again), so
+    ///   its strips are filled at once.
+    /// - Within the limit, the strips beside a settled frame that does not cover the window
+    ///   are filled. While the window's new size is pending (the moment of a maximise, a snap
+    ///   or a restore), the app is still catching up and its stretched last frame is shown
+    ///   with nothing drawn around it.
+    pub fn strips_filled(&self, placement: FramePlacement) -> bool {
         if !self.held {
+            return false;
+        }
+        let view = self.view;
+        let covers =
+            placement.origin == (0, 0) && placement.size.0 >= view.0 && placement.size.1 >= view.1;
+        if covers {
             return false;
         }
         let beyond_limit = self
             .limit
-            .is_some_and(|limit| self.view.0 > limit.0 || self.view.1 > limit.1);
-        beyond_limit || self.waiting_from.is_none()
+            .is_some_and(|limit| view.0 > limit.0 || view.1 > limit.1);
+        beyond_limit || !self.pending()
     }
 
     /// The largest client area the guest can draw for the task at the window's scale: its
@@ -347,7 +353,20 @@ impl FrameFollow {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compositor::window_sizing::{clamp_size, rescale};
+    use crate::compositor::window_sizing::{clamp_size, rescale, shown_frame_placement};
+
+    /// Whether the strips beside the frame `follow` shows (1:1, as core places it) are filled.
+    fn filled(follow: &FrameFollow) -> bool {
+        let frame = follow.shown().unwrap_or(follow.view());
+        let placement = shown_frame_placement(
+            frame,
+            follow.view(),
+            (1, 1),
+            follow.held(),
+            follow.pending(),
+        );
+        follow.strips_filled(placement)
+    }
 
     /// A window and its app, stepped by hand: what is on the screen after each step.
     struct Screen {
@@ -517,24 +536,24 @@ mod tests {
         let mut follow = FrameFollow::new((1041, 1495));
         follow.frame_arrived((1041, 1495));
         follow.set_held(true);
-        assert!(!follow.strips_filled());
+        assert!(!filled(&follow));
         assert_eq!(follow.size_for((2880, 1704)), None);
         follow.view_taken((2880, 1704));
-        assert!(!follow.strips_filled());
+        assert!(!filled(&follow));
         // The app draws its old size once more: still the old drawing, still nothing filled.
         assert_eq!(follow.frame_arrived((1041, 1495)), Arrival::Show);
-        assert!(!follow.strips_filled());
+        assert!(!filled(&follow));
         // The frame of the maximised size covers the window; nothing is left to fill.
         assert_eq!(follow.frame_arrived((2880, 1704)), Arrival::Show);
         // Restored, the window follows its frames and never fills anything.
         follow.set_held(false);
-        assert!(!follow.strips_filled());
+        assert!(!filled(&follow));
         // A window that never holds its size never fills anything either.
         let mut follow = FrameFollow::new((800, 600));
         follow.frame_arrived((800, 600));
         follow.size_for((900, 600));
         follow.frame_arrived((900, 600));
-        assert!(!follow.strips_filled());
+        assert!(!filled(&follow));
     }
 
     #[test]
@@ -547,16 +566,16 @@ mod tests {
         follow.frame_arrived((1140, 836));
         follow.set_held(true);
         follow.view_taken((2560, 1380));
-        assert!(!follow.strips_filled());
+        assert!(!filled(&follow));
         assert_eq!(follow.frame_arrived((2400, 1380)), Arrival::Show);
-        assert!(follow.strips_filled());
+        assert!(filled(&follow));
         // Snapped to another size, the window waits for the answer to it again.
         follow.view_taken((1280, 1380));
-        assert!(!follow.strips_filled());
+        assert!(!filled(&follow));
         assert_eq!(follow.frame_arrived((2400, 1380)), Arrival::Show);
-        assert!(!follow.strips_filled());
+        assert!(!filled(&follow));
         assert_eq!(follow.frame_arrived((1200, 1380)), Arrival::Show);
-        assert!(follow.strips_filled());
+        assert!(filled(&follow));
     }
 
     #[test]
@@ -570,15 +589,15 @@ mod tests {
         follow.set_held(true);
         follow.view_taken((2560, 1380));
         // Beyond the limit, the strips are filled at once and stay filled.
-        assert!(follow.strips_filled());
+        assert!(filled(&follow));
         assert_eq!(follow.frame_arrived((2400, 1380)), Arrival::Show);
-        assert!(follow.strips_filled());
+        assert!(filled(&follow));
         // Restored and maximised again: the same.
         follow.set_held(false);
-        assert!(!follow.strips_filled());
+        assert!(!filled(&follow));
         follow.set_held(true);
         follow.view_taken((2560, 1380));
-        assert!(follow.strips_filled());
+        assert!(filled(&follow));
 
         // On the main monitor the limit is above the maximised size, and a maximise the app
         // catches up with fills nothing meanwhile, as before.
@@ -587,7 +606,7 @@ mod tests {
         follow.frame_arrived((1041, 1495));
         follow.set_held(true);
         follow.view_taken((2880, 1704));
-        assert!(!follow.strips_filled());
+        assert!(!filled(&follow));
     }
 
     #[test]

@@ -1036,7 +1036,7 @@ impl TaskWindow {
         // Only beside the guest's answer to a held size that it keeps smaller, as core says
         // (FrameFollow::strips_filled): while a zoom waits for the app, the last frame is shown
         // with nothing drawn around it, as on every host.
-        let fill = if self.follow.strips_filled() {
+        let fill = if !self.overlay && self.follow.strips_filled(placement) {
             fill_colour(self.overlay, sample, None, system_dark)
         } else {
             None

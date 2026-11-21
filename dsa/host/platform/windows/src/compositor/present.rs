@@ -1475,11 +1475,11 @@ impl WindowPresenter {
         // The window has no redirection surface (WS_EX_NOREDIRECTIONBITMAP) and paints no
         // background (WM_ERASEBKGND), so wherever the frame's visual does not reach, beside a
         // frame shown in a larger window, the desktop shows through unless the fill under the
-        // frame covers it. Core says when it does (FrameFollow::strips_filled): only beside the
-        // guest's answer to a held size that it keeps smaller. While a maximise, snap or restore
-        // waits for the app, the last frame is shown with nothing around it, as before any fill
-        // existed, so the window's animation is of the app and not of a colour around it.
-        let colour = if state.follow.strips_filled() {
+        // frame covers it. Core decides from where the frame is (FrameFollow::strips_filled):
+        // only when the placed frame does not cover a held window and cannot (the window is
+        // beyond what the guest can draw) or no longer will (nothing is pending). While a
+        // maximise, snap or restore waits for the app, nothing is drawn around the last frame.
+        let colour = if state.follow.strips_filled(placement) {
             fill_colour(
                 self.see_through,
                 state.band_sample,

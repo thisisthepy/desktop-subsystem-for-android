@@ -1880,6 +1880,12 @@ mod tests {
     #[test]
     fn fr4_a_main_monitor_maximise_stretches_the_last_frame_then_shows_the_new_one() {
         use crate::compositor::frame_follow::FrameFollow;
+        let filled = |follow: &FrameFollow| {
+            let frame = follow.shown().unwrap_or(follow.view());
+            let placement =
+                shown_frame_placement(frame, follow.view(), (1, 1), true, follow.pending());
+            follow.strips_filled(placement)
+        };
         // Settings at 1041x1495 is maximised on the 2880x1800 main monitor (work area
         // 2880x1704). While its frame of the new size is pending, the last frame is stretched to
         // the window's height, keeping its shape, in the window's middle; nothing is filled.
@@ -1889,7 +1895,7 @@ mod tests {
         follow.set_limit(Some((2880, 2880)));
         follow.view_taken((2880, 1704));
         assert!(follow.pending());
-        assert!(!follow.strips_filled());
+        assert!(!filled(&follow));
         let view = follow.view();
         let placed = shown_frame_placement((1041, 1495), view, (1, 1), true, follow.pending());
         assert_eq!(placed.size.1, 1704);
@@ -1899,6 +1905,8 @@ mod tests {
         // The frame of the new size comes: shown 1:1, filling the window, nothing pending.
         follow.frame_arrived((2880, 1704));
         assert!(!follow.pending());
+        // It covers the window, so nothing is filled.
+        assert!(!filled(&follow));
         let placed = shown_frame_placement((2880, 1704), view, (1, 1), true, follow.pending());
         assert_eq!(
             placed,
@@ -1918,6 +1926,12 @@ mod tests {
     #[test]
     fn fr4_a_size_limited_maximise_stretches_while_pending_and_leaves_no_transparent_strip() {
         use crate::compositor::frame_follow::FrameFollow;
+        let filled = |follow: &FrameFollow| {
+            let frame = follow.shown().unwrap_or(follow.view());
+            let placement =
+                shown_frame_placement(frame, follow.view(), (1, 1), true, follow.pending());
+            follow.strips_filled(placement)
+        };
         // On a 2560x1440 monitor at 125% the guest can draw at most 2400x1380 window pixels
         // for a task kept at the main monitor's density; the maximised window is 2560x1380.
         let mut follow = FrameFollow::new((1140, 836));
@@ -1927,10 +1941,10 @@ mod tests {
         follow.view_taken((2560, 1380));
         // Beyond the limit: the strips are filled from the start, under the stretched frame.
         assert!(follow.pending());
-        assert!(follow.strips_filled());
+        assert!(filled(&follow));
         follow.frame_arrived((2400, 1380));
         assert!(!follow.pending());
-        assert!(follow.strips_filled());
+        assert!(filled(&follow));
     }
 
     #[test]
