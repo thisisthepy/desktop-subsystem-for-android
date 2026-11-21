@@ -8,11 +8,13 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use dsa_host_core::android_presence::SharedPresence;
 use dsa_host_core::renderer::{
-    describe_exit_code, describe_signal, open_renderer, restart_line, spawn_supervisor, Given,
-    HeldTargets, Launched, Pending, RendererChild, RendererHandler, RendererLauncher, RendererLink,
-    ServedVm, TextureBook, WindowManagerLink,
+    describe_exit_code, describe_signal, open_renderer, restart_line, spawn_supervisor,
+    spawn_supervisor_for, Given, HeldTargets, Launched, Pending, RendererChild, RendererHandler,
+    RendererLauncher, RendererLink, ServedVm, TextureBook, WindowManagerLink,
 };
+use dsa_host_core::session::SessionState;
 use dsa_protocol::renderer::types::{envelope::Body, FrameDone, Start, Started, Target};
 use dsa_protocol::renderer::{decode_body, send};
 use dsa_transport::{memory, Connector, Listener, TransportError};
@@ -233,6 +235,67 @@ fn nfr5_a_renderer_that_ends_is_started_again_and_frames_resume() {
     supervisor.join().unwrap();
     assert!(second.stopped_by_window_manager.load(Ordering::SeqCst));
     assert!(second.exited.load(Ordering::SeqCst));
+}
+
+#[test]
+fn nfr1_the_renderer_runs_only_while_android_runs() {
+    let launcher = FakeLauncher::default();
+    let lives = Arc::clone(&launcher.lives);
+    let window = Arc::new(Window::default());
+    let stop = Arc::new(AtomicBool::new(false));
+    let presence = SharedPresence::with_linger(Duration::from_millis(200));
+    presence.observe(Some(SessionState::Stopped));
+    let supervisor = spawn_supervisor_for(
+        Box::new(launcher),
+        Arc::clone(&window) as Arc<dyn RendererHandler>,
+        "dsa-wm test".into(),
+        Arc::clone(&stop),
+        Arc::clone(&presence),
+    )
+    .unwrap();
+
+    // Android is stopped: the one probe starts, says what it runs on, and is told to stop.
+    wait_until("the probe to start", || {
+        window.connected.load(Ordering::SeqCst) == 1
+    });
+    let probe = Arc::clone(&lives.lock().unwrap()[0]);
+    wait_until("the probe to end", || probe.exited.load(Ordering::SeqCst));
+    assert!(probe.stopped_by_window_manager.load(Ordering::SeqCst));
+    // No other renderer runs while Android stays stopped.
+    thread::sleep(Duration::from_millis(400));
+    assert_eq!(
+        lives.lock().unwrap().len(),
+        1,
+        "a renderer ran while Android was stopped"
+    );
+    let log = window.log.lock().unwrap().join("\n");
+    assert!(log.contains("stopped while Android is stopped"), "{log}");
+
+    // Android starts: a renderer starts at once and frames flow.
+    presence.observe(Some(SessionState::Starting));
+    wait_until("the renderer to start with Android", || {
+        window.connected.load(Ordering::SeqCst) == 2
+    });
+    let running = Arc::clone(&lives.lock().unwrap()[1]);
+
+    // Android stops: after the linger the renderer is told to stop, ends, and is not started
+    // again.
+    presence.observe(Some(SessionState::Stopped));
+    wait_until("the renderer to end", || {
+        running.exited.load(Ordering::SeqCst)
+    });
+    assert!(running.stopped_by_window_manager.load(Ordering::SeqCst));
+    thread::sleep(Duration::from_millis(400));
+    assert_eq!(lives.lock().unwrap().len(), 2, "it was started again");
+
+    // Android starts again: so does a renderer.
+    presence.observe(Some(SessionState::Starting));
+    wait_until("a third renderer", || {
+        window.connected.load(Ordering::SeqCst) == 3
+    });
+
+    stop.store(true, Ordering::SeqCst);
+    supervisor.join().unwrap();
 }
 
 /// A launcher whose renderer cannot start.

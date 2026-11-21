@@ -69,9 +69,29 @@ impl Gpu {
         Ok(Arc::new(Gpu { devices }))
     }
 
-    /// Whether the device is on the GPU the renderer named; frames cannot cross GPUs.
-    pub fn on_renderer_gpu(&self) -> bool {
-        self.devices.current().0.on_renderer_gpu
+    /// Makes no devices until a window or a frame needs them, and then on the GPU `luid` names
+    /// at that moment (the renderer's, which it says once it has started). While Android is
+    /// stopped the window manager then holds no Direct3D device at all; [`Gpu::park`] lets go
+    /// of one it made. `log` is told when the renderer's GPU was not found.
+    pub fn lazy(
+        luid: Box<dyn Fn() -> Option<[u8; 8]> + Send + Sync>,
+        log: Box<dyn Fn(&str) + Send + Sync>,
+    ) -> Arc<Gpu> {
+        let devices = Recovering::lazy(Box::new(move || {
+            let wanted = luid();
+            let devices = Devices::new(wanted)?;
+            if wanted.is_some() && !devices.on_renderer_gpu {
+                log("the renderer's GPU was not found; task windows may stay empty");
+            }
+            Ok(devices)
+        }));
+        Arc::new(Gpu { devices })
+    }
+
+    /// Whether the device is on the GPU the renderer named; frames cannot cross GPUs. `None`
+    /// while no devices are made.
+    pub fn on_renderer_gpu(&self) -> Option<bool> {
+        self.devices.peek().map(|devices| devices.on_renderer_gpu)
     }
 
     /// How many times the devices were made: 1 until a GPU reset makes them again.
@@ -79,9 +99,26 @@ impl Gpu {
         self.devices.generation()
     }
 
-    /// The current devices and their generation.
-    pub fn devices(&self) -> (Arc<Devices>, u64) {
+    /// The current devices and their generation, made now when there are none.
+    pub fn devices(&self) -> Result<(Arc<Devices>, u64), String> {
         self.devices.current()
+    }
+
+    /// Lets go of the devices when no window holds them, so the driver frees their memory;
+    /// true when they went. The next window or frame makes new ones.
+    pub fn park(&self) -> bool {
+        self.devices.park()
+    }
+
+    /// Whether devices are made now.
+    pub fn is_made(&self) -> bool {
+        self.devices.is_made()
+    }
+
+    /// How many GPU resets had the devices made again; devices let go of while unused and
+    /// made again later do not count.
+    pub fn resets(&self) -> u64 {
+        self.devices.resets()
     }
 
     /// Asks the device whether a GPU reset removed it, and makes new devices if it did.
@@ -101,14 +138,16 @@ impl Gpu {
     /// are alive (its command buffers, caches and pools), as an app does on suspend. Called when
     /// no task window is shown; the driver makes what it needs again on the next copy.
     pub fn trim(&self) {
-        self.devices.current().0.trim();
+        if let Some(devices) = self.devices.peek() {
+            devices.trim();
+        }
     }
 
     /// The GPU memory this whole process uses on this device's GPU, in KiB: its dedicated
     /// video memory (local) and the system memory the GPU maps for it (non-local). It counts
     /// every API in the process, so the renderer's Vulkan memory is in it too.
     pub fn video_memory_kb(&self) -> Option<(u64, u64)> {
-        self.devices.current().0.video_memory_kb()
+        self.devices.peek()?.video_memory_kb()
     }
 
     /// A texture the renderer can open by its shared handle and copy a frame into. Made on new

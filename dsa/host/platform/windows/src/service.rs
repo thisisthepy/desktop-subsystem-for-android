@@ -75,6 +75,27 @@ use dsa_host_core::boot::{BootPlanner, MemoryInputs};
 use dsa_host_core::boot_signs::{watch_boot_signs, BootSigns};
 use dsa_host_core::clock_trace::ClockTrace;
 
+/// Gives back the service's free heap memory and empties its working set once each time the
+/// user's Android settles stopped (as [`Presence`] says), until the session is gone. What the
+/// service needs again faults back in; nothing a running Android uses is touched, since none
+/// runs.
+///
+/// [`Presence`]: dsa_host_core::android_presence::Presence
+fn trim_while_stopped(session: std::sync::Weak<Session>) {
+    let mut presence = dsa_host_core::android_presence::Presence::new();
+    loop {
+        let Some(session) = session.upgrade() else {
+            return;
+        };
+        presence.observe(Some(session.state()), Instant::now());
+        drop(session);
+        if presence.release_due(Instant::now()) {
+            crate::compositor::trim::give_back_minimized();
+        }
+        thread::sleep(Duration::from_secs(1));
+    }
+}
+
 /// Sizes the guest's display for the monitors the user's session recorded, and gives it the
 /// main monitor's density, which every app starts at. This process runs in session 0 and
 /// cannot see them itself. Without a record the display is the smallest square, so a window
@@ -603,6 +624,20 @@ pub fn create_user_android(
     }
     if let Some(power) = power {
         power.attach(&session);
+    }
+    // Once this user's Android has stopped, the buffers the service filled for it (its
+    // console, its streams, its files) are free but stay committed in the heap and resident in
+    // the working set: they go back, once for each stop.
+    {
+        let (watched, user_name) = (Arc::downgrade(&session), sid.to_string());
+        if let Err(error) = std::thread::Builder::new()
+            .name("dsa-idle-trim".into())
+            .spawn(move || trim_while_stopped(watched))
+        {
+            eprintln!(
+                "{user_name}: memory: cannot give back memory while Android is stopped: {error}"
+            );
+        }
     }
     // The guest's display refreshes as fast as the user's fastest monitor, which their session
     // records; energy saver, which comes with the power, caps it at 60 Hz.

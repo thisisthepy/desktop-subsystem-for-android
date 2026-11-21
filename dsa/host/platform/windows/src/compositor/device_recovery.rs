@@ -11,6 +11,7 @@
 //! once however many find it, and each set of devices carries a generation, so whatever was
 //! made on an older set knows it has to be made again on the new one.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// `DXGI_ERROR_DEVICE_REMOVED`: the GPU was reset or taken away.
@@ -36,23 +37,33 @@ pub trait Removable: Send + Sync {
     fn removed(&self) -> Option<i32>;
 }
 
-/// An error that carries an `HRESULT`.
+/// An error that carries an `HRESULT`, and can say that no devices could be made.
 pub trait Code {
     fn code(&self) -> i32;
+    /// The error for devices that could not be made (`why`).
+    fn not_made(why: String) -> Self;
 }
 
 impl Code for windows::core::Error {
     fn code(&self) -> i32 {
         windows::core::Error::code(self).0
     }
+    fn not_made(why: String) -> Self {
+        windows::core::Error::new(windows::Win32::Foundation::E_FAIL, why)
+    }
 }
 
 /// What makes a new set of devices.
 pub type MakeDevices<D> = Box<dyn Fn() -> Result<D, String> + Send + Sync>;
 
-/// The current devices, made again whenever they are found removed.
+/// The current devices, made again whenever they are found removed. They can be let go of
+/// while nothing uses them ([`Recovering::park`]), and are made again, as a new generation,
+/// when they are next needed.
 pub struct Recovering<D: Removable> {
-    current: Mutex<(Arc<D>, u64)>,
+    current: Mutex<(Option<Arc<D>>, u64)>,
+    /// How many of the generations were made because none were made (the first, and each
+    /// after [`Recovering::park`]), not because a GPU reset removed them.
+    fresh: AtomicU64,
     make: MakeDevices<D>,
 }
 
@@ -61,15 +72,71 @@ impl<D: Removable> Recovering<D> {
     pub fn new(make: MakeDevices<D>) -> Result<Recovering<D>, String> {
         let first = make()?;
         Ok(Recovering {
-            current: Mutex::new((Arc::new(first), 1)),
+            current: Mutex::new((Some(Arc::new(first)), 1)),
+            fresh: AtomicU64::new(1),
             make,
         })
     }
 
-    /// The current devices and their generation.
-    pub fn current(&self) -> (Arc<D>, u64) {
+    /// Makes no devices until they are first needed.
+    pub fn lazy(make: MakeDevices<D>) -> Recovering<D> {
+        Recovering {
+            current: Mutex::new((None, 0)),
+            fresh: AtomicU64::new(0),
+            make,
+        }
+    }
+
+    /// The current devices and their generation, made now when there are none.
+    pub fn current(&self) -> Result<(Arc<D>, u64), String> {
+        let mut current = self.current.lock().unwrap_or_else(|e| e.into_inner());
+        let devices = match &current.0 {
+            Some(devices) => Arc::clone(devices),
+            None => {
+                let made = Arc::new((self.make)()?);
+                current.1 += 1;
+                self.fresh.fetch_add(1, Ordering::SeqCst);
+                current.0 = Some(Arc::clone(&made));
+                made
+            }
+        };
+        Ok((devices, current.1))
+    }
+
+    /// The current devices, when there are any; makes none.
+    pub fn peek(&self) -> Option<Arc<D>> {
+        self.current
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .0
+            .as_ref()
+            .map(Arc::clone)
+    }
+
+    /// Lets go of the devices when nothing else holds them, so the driver frees what it keeps
+    /// for them. True when they went. The next [`current`](Self::current) makes new ones, of
+    /// the next generation.
+    pub fn park(&self) -> bool {
+        let mut current = self.current.lock().unwrap_or_else(|e| e.into_inner());
+        match &current.0 {
+            Some(devices) if Arc::strong_count(devices) == 1 => {
+                current.0 = None;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Whether devices are made now.
+    pub fn is_made(&self) -> bool {
+        self.peek().is_some()
+    }
+
+    /// How many times GPU resets had the devices made again: devices let go of while unused
+    /// and made again later are not a reset.
+    pub fn resets(&self) -> u64 {
         let current = self.current.lock().unwrap_or_else(|e| e.into_inner());
-        (Arc::clone(&current.0), current.1)
+        current.1 - self.fresh.load(Ordering::SeqCst)
     }
 
     /// The current devices' generation; it grows by one each time they are made again.
@@ -83,12 +150,12 @@ impl<D: Removable> Recovering<D> {
     /// tries again.
     pub fn recover(&self) -> Result<Option<(i32, u64)>, String> {
         let mut current = self.current.lock().unwrap_or_else(|e| e.into_inner());
-        let Some(reason) = current.0.removed() else {
+        let Some(reason) = current.0.as_ref().and_then(|devices| devices.removed()) else {
             return Ok(None);
         };
         let made = (self.make)()?;
         current.1 += 1;
-        current.0 = Arc::new(made);
+        current.0 = Some(Arc::new(made));
         Ok(Some((reason, current.1)))
     }
 
@@ -101,7 +168,7 @@ impl<D: Removable> Recovering<D> {
         }
         let made = (self.make)()?;
         current.1 += 1;
-        current.0 = Arc::new(made);
+        current.0 = Some(Arc::new(made));
         Ok(current.1)
     }
 
@@ -109,14 +176,14 @@ impl<D: Removable> Recovering<D> {
     /// made again and `op` runs once more, on the new ones. Returns what `op` made and the
     /// generation it was made on.
     pub fn with<R, E: Code>(&self, op: impl Fn(&D) -> Result<R, E>) -> Result<(R, u64), E> {
-        let (devices, generation) = self.current();
+        let (devices, generation) = self.current().map_err(E::not_made)?;
         match op(&devices) {
             Ok(made) => Ok((made, generation)),
             Err(error) if is_device_lost(error.code()) => {
                 if self.replace(generation).is_err() {
                     return Err(error);
                 }
-                let (devices, generation) = self.current();
+                let (devices, generation) = self.current().map_err(E::not_made)?;
                 op(&devices).map(|made| (made, generation))
             }
             Err(error) => Err(error),
@@ -149,6 +216,9 @@ mod tests {
     impl Code for FakeError {
         fn code(&self) -> i32 {
             self.0
+        }
+        fn not_made(_: String) -> Self {
+            FakeError(-1)
         }
     }
 
@@ -200,7 +270,7 @@ mod tests {
     fn nfr5_a_device_removed_during_a_swapchain_resize_is_replaced_and_later_frames_show() {
         let (gpu, removed, made) = devices();
         // A frame's texture is opened on the devices current then.
-        let (opened_on, first) = (gpu.generation(), gpu.current().0.number);
+        let (opened_on, first) = (gpu.generation(), gpu.current().unwrap().0.number);
         assert_eq!((opened_on, first), (1, 1));
         // The GPU is reset while the window resizes its swapchain for a new size: the resize
         // fails as the removed device's calls do, the devices are made again, and the resize
@@ -237,14 +307,14 @@ mod tests {
         assert_eq!(gpu.recover(), Ok(None));
         removed.lock().unwrap().store(true, Ordering::SeqCst);
         assert_eq!(gpu.recover(), Ok(Some((DEVICE_REMOVED, 2))));
-        assert_eq!(gpu.current().0.number, 2);
+        assert_eq!(gpu.current().unwrap().0.number, 2);
         assert_eq!(gpu.recover(), Ok(None));
     }
 
     #[test]
     fn nfr5_many_callers_that_find_one_removed_device_make_one_new_device() {
         let (gpu, removed, made) = devices();
-        let (_, generation) = gpu.current();
+        let (_, generation) = gpu.current().unwrap();
         removed.lock().unwrap().store(true, Ordering::SeqCst);
         // Every window that saw the old device fail asks; only the first one remakes it.
         assert_eq!(gpu.replace(generation), Ok(2));
@@ -261,6 +331,47 @@ mod tests {
             gpu.with(|_| Err::<u32, _>(FakeError(invalid))),
             Err(FakeError(invalid))
         );
+        assert_eq!(made.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn nfr1_devices_nothing_uses_are_let_go_and_made_again_as_a_new_generation() {
+        let (gpu, _, made) = devices();
+        let (held, generation) = gpu.current().unwrap();
+        assert_eq!(generation, 1);
+        // A window still holds them: they stay.
+        assert!(!gpu.park());
+        drop(held);
+        assert!(gpu.park());
+        assert!(!gpu.is_made());
+        assert_eq!(gpu.resets(), 0);
+        assert_eq!(
+            gpu.recover(),
+            Ok(None),
+            "nothing to recover while none are made"
+        );
+        // The next use makes new ones, which whatever was made on the old ones can tell.
+        assert_eq!(gpu.with(shared_texture), Ok((2, 2)));
+        assert_eq!(made.load(Ordering::SeqCst), 2);
+        // Made again after being let go of is not a GPU reset.
+        assert_eq!(gpu.resets(), 0);
+    }
+
+    #[test]
+    fn nfr1_lazy_devices_are_made_on_first_use_only() {
+        let made = Arc::new(AtomicU32::new(0));
+        let count = Arc::clone(&made);
+        let gpu = Recovering::lazy(Box::new(move || {
+            let number = count.fetch_add(1, Ordering::SeqCst) + 1;
+            Ok(FakeDevice {
+                number,
+                removed: Arc::new(AtomicBool::new(false)),
+            })
+        }));
+        assert!(gpu.peek().is_none());
+        assert_eq!(made.load(Ordering::SeqCst), 0);
+        assert_eq!(gpu.with(shared_texture), Ok((1, 1)));
+        assert_eq!(gpu.with(shared_texture), Ok((1, 1)));
         assert_eq!(made.load(Ordering::SeqCst), 1);
     }
 

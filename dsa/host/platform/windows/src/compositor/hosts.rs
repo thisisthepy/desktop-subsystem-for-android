@@ -265,9 +265,22 @@ impl HostLink {
             .get(&call.task_id)
             .cloned();
         let mut surfaces = self.surfaces.lock().unwrap_or_else(|e| e.into_inner());
-        let window = surfaces
-            .entry(call.task_id)
-            .or_insert_with(|| WindowSurfaces::new(call.task_id, Arc::clone(gpu), logger.clone()));
+        let window = match surfaces.entry(call.task_id) {
+            std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                match WindowSurfaces::new(call.task_id, Arc::clone(gpu), logger.clone()) {
+                    Ok(window) => entry.insert(window),
+                    Err(why) => {
+                        return vec![SurfaceAnswer {
+                            task_id: call.task_id,
+                            call_id: call.call_id,
+                            error: format!("the window manager has no GPU device now: {why}"),
+                            ..Default::default()
+                        }]
+                    }
+                }
+            }
+        };
         let answers = window.call(call, texture, &|handle| self.place(handle));
         if call.op == dsa_host_core::compositor::surface_calls::SURFACE_OP_RELEASE_ALL {
             surfaces.remove(&call.task_id);
@@ -689,11 +702,12 @@ impl FrameTarget for RemoteWindow {
 }
 
 /// Takes the window hosts' connections until `stop` is set, and reads each one on a thread
-/// of its own. `adapter_luid` is the GPU the frames are on, which each window host is told.
+/// of its own. `adapter_luid` says the GPU the frames are on, which each window host is told
+/// as it attaches: the renderer names it once it has started, so it is read for each one.
 pub fn accept_hosts(
     mut listener: Box<dyn Listener>,
     events: Sender<ManagerEvent>,
-    adapter_luid: Option<[u8; 8]>,
+    adapter_luid: impl Fn() -> Option<[u8; 8]>,
     gpu: Option<Arc<Gpu>>,
     stop: Arc<AtomicBool>,
     logger: Option<Arc<CompositorLogger>>,
@@ -718,6 +732,7 @@ pub fn accept_hosts(
         let stop = Arc::clone(&stop);
         let logger = logger.clone();
         let gpu = gpu.clone();
+        let adapter_luid = adapter_luid();
         let _ = thread::Builder::new()
             .name("dsa-wm-host".into())
             .spawn(move || serve_host(connection, id, events, adapter_luid, gpu, stop, logger));
@@ -942,7 +957,7 @@ struct Manager {
 /// Runs the manager until the window manager stops, or every sender of its events is gone.
 /// Every window host is disconnected when it ends.
 pub fn manage(setup: ManagerSetup) {
-    let gpu_generation = setup.gpu.as_ref().map_or(0, |gpu| gpu.generation());
+    let gpu_generation = setup.gpu.as_ref().map_or(0, |gpu| gpu.resets());
     let renderer_generation = setup.renderer_generation.as_ref().map_or(0, |seen| seen());
     let mut manager = Manager {
         windows: TaskWindows::new(),
@@ -1344,7 +1359,8 @@ impl Manager {
                     "the GPU was reset, and a new Direct3D device cannot be made yet: {why}"
                 )),
             }
-            let generation = gpu.generation();
+            // Devices let go of while Android was stopped and made again are not a reset.
+            let generation = gpu.resets();
             if generation != self.gpu_generation {
                 self.gpu_generation = generation;
                 reset = true;

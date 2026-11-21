@@ -652,7 +652,7 @@ fn fr3_an_apps_window_program_shows_a_frame_made_in_another_process() {
                 };
                 (ok != 0).then_some(placed as usize as u64)
             };
-            let mut surfaces = WindowSurfaces::new(1, std::sync::Arc::clone(&gpu), None);
+            let mut surfaces = WindowSurfaces::new(1, std::sync::Arc::clone(&gpu), None).unwrap();
             // Reads until the window host answers frame `sequence`, doing the GPU work it asks
             // for meanwhile.
             let mut until_presented = |connection: &mut Box<dyn dsa_transport::Connection>| loop {

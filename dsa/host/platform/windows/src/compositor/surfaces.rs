@@ -302,9 +302,9 @@ impl WindowSurfaces {
         task_id: i32,
         gpu: Arc<Gpu>,
         logger: Option<Arc<CompositorLogger>>,
-    ) -> WindowSurfaces {
-        let (devices, generation) = gpu.devices();
-        WindowSurfaces {
+    ) -> Result<WindowSurfaces, String> {
+        let (devices, generation) = gpu.devices()?;
+        Ok(WindowSurfaces {
             task_id,
             gpu,
             devices,
@@ -329,7 +329,7 @@ impl WindowSurfaces {
             watch: None,
             no_statistics: false,
             logger,
-        }
+        })
     }
 
     /// Lets every swapchain and copy go, as when the devices they were made on are gone.
@@ -369,7 +369,11 @@ impl WindowSurfaces {
                 ),
             ),
         }
-        let (devices, generation) = self.gpu.devices();
+        // This window holds its devices, so they are never let go of under it; new ones
+        // cannot be made only when a GPU reset is still going on, and the next call tries again.
+        let Ok((devices, generation)) = self.gpu.devices() else {
+            return;
+        };
         if generation != self.generation {
             self.drop_all();
             self.devices = devices;

@@ -50,7 +50,8 @@ use crate::shell::dbus::{Notifier, Signal};
 use crate::shell::desktop_entry::{self, Folders};
 use crate::shell::notifications::{dsa_notice, Shown as ShownNotifications, UPDATE_PAGE_ARGUMENTS};
 use crate::shell::pin_shortcuts::{self, Questions};
-use dsa_host_core::renderer::{spawn_supervisor, RendererHandler};
+use dsa_host_core::android_presence::{follow_in_background as follow_presence, SharedPresence};
+use dsa_host_core::renderer::{spawn_supervisor_for, RendererHandler};
 use dsa_host_core::update::alerts::is_update_key;
 use dsa_host_unix::renderer_launch::{CurrentFds, UnixLauncher};
 
@@ -697,8 +698,9 @@ fn follow_gamepads(active: Arc<AtomicBool>) {
     });
 }
 
-/// Starts the graphics renderer process (`dsa-gfx`), and starts it again whenever it ends;
-/// its frames go to `frames` and `images`. The renderer runs on the GPU the user's render GPU
+/// Starts the graphics renderer process (`dsa-gfx`) while Android runs, and starts it again
+/// whenever it ends; while Android is stopped none runs. Its frames go to `frames` and
+/// `images`. The renderer runs on the GPU the user's render GPU
 /// setting names, read once now.
 fn start_renderer(
     frames: Arc<Mutex<LatestFrames>>,
@@ -717,11 +719,19 @@ fn start_renderer(
     let fds: CurrentFds = Arc::default();
     let client = RendererClient::new(sink, Arc::clone(&fds), render_gpu, Box::new(log));
     let stop = Arc::new(AtomicBool::new(false));
-    if let Err(why) = spawn_supervisor(
+    let presence = SharedPresence::new();
+    if let Err(why) = follow_presence(connect, Arc::clone(&presence), Arc::clone(&stop)) {
+        log(&format!(
+            "graphics: Android's state cannot be followed ({why}); the renderer starts only \
+             once"
+        ));
+    }
+    if let Err(why) = spawn_supervisor_for(
         Box::new(UnixLauncher::installed(fds)),
         Arc::clone(&client) as Arc<dyn RendererHandler>,
         format!("dsa-compositor {BUILD}"),
         stop,
+        presence,
     ) {
         log(&format!(
             "graphics: the renderer cannot be started ({why}); task windows open but show no \
