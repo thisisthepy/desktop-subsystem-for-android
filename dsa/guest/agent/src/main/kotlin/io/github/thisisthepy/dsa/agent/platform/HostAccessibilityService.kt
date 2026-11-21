@@ -62,7 +62,13 @@ class HostAccessibilityService : AccessibilityService() {
         onEvent(change(event) ?: return)
     }
 
-    /** What the event says. Read here: Android reuses the event once this returns. */
+    /**
+     * What the event says. Read here: Android reuses the event once this returns. This runs on
+     * the agent's UI thread, which also takes HomeActivity's input, so it asks Android nothing.
+     * The window's task and the event's node are found by asking Android, which waits on the
+     * app that owns the window, up to five seconds when that app is closing; that is left to
+     * [AccessibilityChange.resolve], which the export runs on its reader thread.
+     */
     private fun change(event: AccessibilityEvent): AccessibilityChange? {
         val text = event.text.joinToString(" ") { it?.toString().orEmpty() }.trim()
         val packageName = event.packageName?.toString().orEmpty()
@@ -75,14 +81,30 @@ class HostAccessibilityService : AccessibilityService() {
                 } else {
                     null
                 }
-            AccessibilityEvent.TYPE_VIEW_FOCUSED,
-            AccessibilityEvent.TYPE_VIEW_SELECTED,
-            AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED,
-            AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
-            -> AccessibilityChange(AccessibilityChange.Kind.FOCUS, taskOf(event.windowId), event.source?.let { AndroidNode(it, this) })
-            else -> AccessibilityChange(AccessibilityChange.Kind.CONTENT, taskOf(event.windowId), event.source?.let { AndroidNode(it, this) })
+            else -> {
+                // The agent's own windows (its home, its splash screens and the toasts it draws
+                // for apps) belong to no task the host watches, and asking about them would
+                // wait on the agent's own UI thread.
+                if (packageName == this.packageName) return null
+                val kind = when (event.eventType) {
+                    AccessibilityEvent.TYPE_VIEW_FOCUSED,
+                    AccessibilityEvent.TYPE_VIEW_SELECTED,
+                    AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED,
+                    AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED,
+                    -> AccessibilityChange.Kind.FOCUS
+                    else -> AccessibilityChange.Kind.CONTENT
+                }
+                // A copy keeps what getSource() needs after Android reuses the event.
+                val copy = AccessibilityEvent(event)
+                val windowId = event.windowId
+                AccessibilityChange(kind, packageName = packageName, resolve = { resolve(kind, windowId, copy) })
+            }
         }
     }
+
+    /** Finds the event's task and node. Asks Android, so it runs on the export's reader thread. */
+    private fun resolve(kind: AccessibilityChange.Kind, windowId: Int, event: AccessibilityEvent): AccessibilityChange =
+        AccessibilityChange(kind, taskOf(windowId), event.source?.let { AndroidNode(it, this) })
 
     /** The task of the window [windowId], from the windows Android keeps for the service. */
     private fun taskOf(windowId: Int): Int? {

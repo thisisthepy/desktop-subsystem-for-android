@@ -120,6 +120,15 @@ data class AccessibilityChange(
     val text: String = "",
     /** The app the event came from. */
     val packageName: String = "",
+    /**
+     * Finds the task and the node the event is about, when finding them asks Android and so
+     * waits on the app that owns the window. The export calls it on its reader thread, never on
+     * the thread that delivered the event: that is the agent's UI thread, and an app that does
+     * not answer (one that is closing, say) holds the asker for seconds. Null when the event
+     * says it all already; the change it gives is null when it turned out to be about nothing
+     * the export follows.
+     */
+    val resolve: (() -> AccessibilityChange?)? = null,
 ) {
     enum class Kind {
         /** The input focus, the accessibility focus or the selection moved. */
@@ -502,6 +511,24 @@ class AccessibilityExport(
         }
     }
 
+    /**
+     * An event as the service delivers it, on whatever thread Android calls the service on (the
+     * agent's UI thread). Nothing here waits: what needs asking Android is asked on [reader],
+     * and the rest goes to the scheduler thread.
+     */
+    private fun delivered(change: AccessibilityChange) {
+        val resolve = change.resolve ?: return scheduler.post { changed(change) }
+        reader.post {
+            val resolved = try {
+                resolve()
+            } catch (e: Exception) {
+                log.warn("could not read what an accessibility event was about", e)
+                AccessibilityChange.ANY
+            }
+            if (resolved != null) scheduler.post { changed(resolved) }
+        }
+    }
+
     /** The views of widget [widgetId] may have changed. Called on the scheduler thread. */
     fun widgetChanged(widgetId: Int) {
         val target = TreeTarget.widget(widgetId)
@@ -549,7 +576,7 @@ class AccessibilityExport(
             reconnectAt = clock() + RECONNECT_MILLIS
             log.info("a host accessibility client watches $target; the accessibility service is on")
             try {
-                source.enableEvents { change -> scheduler.post { changed(change) } }
+                source.enableEvents(::delivered)
             } catch (e: Exception) {
                 log.warn("could not turn the accessibility service on", e)
             }
