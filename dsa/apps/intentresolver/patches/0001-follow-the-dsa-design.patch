@@ -1,0 +1,24 @@
+Follow DSA's design: a bold share sheet title (its corners are the framework overlay's).
+
+diff --git a/java/res/layout/chooser_grid_scrollable_preview.xml b/java/res/layout/chooser_grid_scrollable_preview.xml
+--- a/java/res/layout/chooser_grid_scrollable_preview.xml
++++ b/java/res/layout/chooser_grid_scrollable_preview.xml
+@@ -53,3 +53,3 @@
+                   android:layout_width="wrap_content"
+-                  android:textAppearance="@android:style/TextAppearance.DeviceDefault.WindowTitle"
++                  android:textAppearance="@style/TextAppearance.Dsa.ChooserTitle"
+                   android:gravity="center"
+diff --git a/java/res/values/styles.xml b/java/res/values/styles.xml
+--- a/java/res/values/styles.xml
++++ b/java/res/values/styles.xml
+@@ -50,2 +50,10 @@
+ 
++    <!-- The share sheet's title: bold, as every DSA screen title is. -->
++    <style name="TextAppearance.Dsa.ChooserTitle"
++            parent="@android:style/TextAppearance.DeviceDefault.WindowTitle">
++        <item name="android:textSize">22sp</item>
++        <item name="android:textStyle">bold</item>
++        <item name="android:fontVariationSettings">'wght' 700</item>
++    </style>
++
+     <style name="TextAppearance.ChooserDefault"

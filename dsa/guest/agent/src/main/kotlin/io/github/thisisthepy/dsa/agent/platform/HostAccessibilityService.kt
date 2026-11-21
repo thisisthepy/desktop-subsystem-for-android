@@ -6,6 +6,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.graphics.Rect
 import android.os.Bundle
+import android.os.SystemClock
 import android.provider.Settings
 import android.text.Spanned
 import android.text.style.ClickableSpan
@@ -31,6 +32,7 @@ import io.github.thisisthepy.dsa.agent.accessibility.TextLink
 import io.github.thisisthepy.dsa.agent.accessibility.WindowInfo
 import io.github.thisisthepy.dsa.agent.tasks.TaskBounds
 import io.github.thisisthepy.dsa.control.v1.NodeAction
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * The agent's accessibility service: it reads the nodes of the tasks a host accessibility
@@ -97,21 +99,69 @@ class HostAccessibilityService : AccessibilityService() {
                 // A copy keeps what getSource() needs after Android reuses the event.
                 val copy = AccessibilityEvent(event)
                 val windowId = event.windowId
-                AccessibilityChange(kind, packageName = packageName, resolve = { resolve(kind, windowId, copy) })
+                val eventAt = event.eventTime
+                val receivedAt = SystemClock.uptimeMillis()
+                val known = windowTasks[windowId]
+                when {
+                    event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED ->
+                        // Which window is whose task is looked up again, past this thread.
+                        AccessibilityChange(kind, packageName = packageName, resolve = {
+                            refreshWindowTasks()
+                            AccessibilityChange(kind, windowTasks[windowId])
+                        })
+                    kind == AccessibilityChange.Kind.CONTENT && known != null ->
+                        // The task is known without asking; the node is found only when the
+                        // task is read, once for the whole burst.
+                        AccessibilityChange(
+                            kind, known, packageName = packageName,
+                            lazySource = { copy.source?.let { AndroidNode(it, this) } },
+                            eventAt = eventAt, receivedAt = receivedAt,
+                        )
+                    else -> AccessibilityChange(kind, packageName = packageName, resolve = { resolve(kind, windowId, copy, eventAt, receivedAt) })
+                }
             }
         }
     }
 
-    /** Finds the event's task and node. Asks Android, so it runs on the export's reader thread. */
-    private fun resolve(kind: AccessibilityChange.Kind, windowId: Int, event: AccessibilityEvent): AccessibilityChange =
-        AccessibilityChange(kind, taskOf(windowId), event.source?.let { AndroidNode(it, this) })
+    /**
+     * Finds the event's task and node, and for a focus event the node's parent too. Asks
+     * Android, so it runs on one of the export's reader threads (a focus event's own one).
+     */
+    private fun resolve(kind: AccessibilityChange.Kind, windowId: Int, event: AccessibilityEvent, eventAt: Long, receivedAt: Long): AccessibilityChange {
+        val source = event.source
+        val parent = if (kind == AccessibilityChange.Kind.FOCUS) source?.parent else null
+        return AccessibilityChange(
+            kind, taskOf(windowId), source?.let { AndroidNode(it, this) },
+            parent = parent?.let { AndroidNode(it, this) },
+            eventAt = eventAt, receivedAt = receivedAt,
+        )
+    }
 
-    /** The task of the window [windowId], from the windows Android keeps for the service. */
+    /**
+     * The task of the window [windowId]: from [windowTasks] when it is known, which asks
+     * nothing, else from the windows Android keeps for the service.
+     */
     private fun taskOf(windowId: Int): Int? {
         if (windowId < 0) return null
+        windowTasks[windowId]?.let { return it }
         val window = windows?.firstOrNull { it.id == windowId } ?: return null
-        return taskOfWindow(window)
+        return taskOfWindow(window)?.also { windowTasks[windowId] = it }
     }
+
+    /** Reads which window belongs to which task again. Asks Android: never on the UI thread. */
+    private fun refreshWindowTasks() {
+        val now = windows ?: return
+        val fresh = HashMap<Int, Int>()
+        for (window in now) taskOfWindow(window)?.let { fresh[window.id] = it }
+        windowTasks.keys.retainAll(fresh.keys)
+        windowTasks.putAll(fresh)
+    }
+
+    /**
+     * Which task each window belongs to, kept from TYPE_WINDOWS_CHANGED, so the UI thread finds
+     * an event's task without asking Android.
+     */
+    private val windowTasks = ConcurrentHashMap<Int, Int>()
 
     /** Takes the events and batching [listening] asks for. */
     fun takeEvents(listening: Boolean) {
@@ -119,6 +169,16 @@ class HostAccessibilityService : AccessibilityService() {
         info.eventTypes = if (listening) LISTENING_EVENTS else USUAL_EVENTS
         info.notificationTimeout = if (listening) 0 else USUAL_TIMEOUT_MILLIS
         serviceInfo = info
+        // The windows are looked up once now, past this thread, so the first events already
+        // find their task.
+        if (listening) {
+            onEvent?.invoke(
+                AccessibilityChange(AccessibilityChange.Kind.CONTENT, resolve = {
+                    refreshWindowTasks()
+                    null
+                }),
+            )
+        }
     }
 
     override fun onInterrupt() = Unit
@@ -362,6 +422,8 @@ private class AndroidNode(
     }
 
     override fun children(): List<NodeHandle> = (0 until node.childCount).mapNotNull { node.getChild(it)?.let { child -> AndroidNode(child, context) } }
+
+    override fun parent(): NodeHandle? = node.parent?.let { AndroidNode(it, context) }
 
     override fun perform(action: NodeAction, text: String): Boolean = perform(action, ActionArguments(text = text))
 

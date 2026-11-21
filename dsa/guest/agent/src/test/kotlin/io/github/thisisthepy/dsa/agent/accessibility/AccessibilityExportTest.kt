@@ -39,6 +39,15 @@ class FakeNode(
 
     override fun children(): List<NodeHandle> = children
 
+    /** The node this one is a child of, as the app says; counted, as each asks the app. */
+    var parentNode: FakeNode? = null
+    var parentAsks = 0
+
+    override fun parent(): NodeHandle? {
+        parentAsks++
+        return parentNode
+    }
+
     override fun perform(action: NodeAction, text: String): Boolean {
         performed += action to text
         return action in info.actions
@@ -918,5 +927,176 @@ class AccessibilityExportTest {
         assertTrue(widgetViews.listener != null)
         watchWidget(12, false)
         assertEquals(listOf("disable", "enable", "disable"), service.calls)
+    }
+
+    /** An agent whose trees are read on [reader] and whose focus events are asked on [focusReader]. */
+    private fun startedWith(reader: FakeScheduler, focusReader: FakeScheduler) {
+        locator.up = daemon
+        tasks.running = listOf(appTask(3, bounds = TaskBounds(30, 20, 430, 620)))
+        Agent(
+            AGENT, tasks, FakeActions(), locator, FakeWindowing(), FakeInjector(), scheduler, log,
+            accessibility = service,
+            accessibilityReader = reader,
+            accessibilityFocusReader = focusReader,
+            clock = { scheduler.now },
+        ).start()
+        scheduler.runDue()
+        service.windows[3] = listOf(list)
+        watch(3, true)
+        scheduler.advance(10)
+        reader.runDue()
+        scheduler.runDue()
+        listen(3, true)
+    }
+
+    private val focusKind = AccessibilityChange.Kind.FOCUS
+    private val contentKind = AccessibilityChange.Kind.CONTENT
+
+    @Test
+    fun fr18_a_focus_event_never_waits_behind_a_tree_read() {
+        val reader = FakeScheduler()
+        val focusReader = FakeScheduler()
+        startedWith(reader, focusReader)
+        val rowId = trees().single().nodesList.single { it.className == "android.widget.LinearLayout" }.id
+        // A change is being read, and the app keeps the reader's thread waiting.
+        title.info = title.info.copy(text = "Wi-Fi")
+        event(AccessibilityChange(contentKind, 3, title))
+        scheduler.advance(AccessibilityExport.FAST_BATCH_MILLIS + AccessibilityExport.FAST_MIN_INTERVAL_MILLIS)
+        val sent = trees().size
+        // The focus moves meanwhile: it is asked on its own thread and sent at once.
+        row.info = row.info.copy(focused = true)
+        service.onEvent!!.invoke(AccessibilityChange(focusKind, resolve = { AccessibilityChange(focusKind, 3, row) }))
+        focusReader.runDue()
+        scheduler.runDue()
+        assertEquals(sent + 1, trees().size)
+        assertEquals(rowId, trees().last().focusedId)
+        // The read it went past is still under way, and comes after.
+        reader.runDue()
+        scheduler.runDue()
+        assertEquals("Wi-Fi", trees().last().nodesList.single { it.text.startsWith("Wi") }.text)
+        assertEquals(rowId, trees().last().focusedId)
+    }
+
+    @Test
+    fun fr18_a_focused_node_new_to_the_tree_is_placed_under_its_parent_at_once() {
+        started()
+        watch(3, true)
+        scheduler.advance(10)
+        listen(3, true)
+        val listId = trees().single().nodesList.single { it.className == "androidx.recyclerview.widget.RecyclerView" }.id
+        val fresh = FakeNode(
+            "fresh",
+            NodeInfo(className = "android.widget.TextView", text = "Bluetooth", focusable = true, focused = true, bounds = TaskBounds(30, 100, 430, 180)),
+        )
+        list.children = listOf(row, hidden, fresh)
+        val reads = list.reads
+        // The list scrolled a row in and the focus went to it: its parent came with the event.
+        event(AccessibilityChange(focusKind, 3, fresh, parent = list))
+        assertEquals(2, trees().size)
+        val delta = trees().last()
+        assertFalse(delta.full)
+        val freshId = delta.nodesList.single { it.text == "Bluetooth" }.id
+        assertEquals(freshId, delta.focusedId)
+        assertTrue(delta.nodesList.single { it.id == listId }.childIdsList.contains(freshId))
+        assertEquals("nothing was read for it", reads, list.reads)
+        // The parent is read soon after, for the rest of what changed in it.
+        scheduler.advance(AccessibilityExport.FAST_BATCH_MILLIS + AccessibilityExport.FAST_MIN_INTERVAL_MILLIS)
+        assertEquals(freshId, trees().last().focusedId)
+    }
+
+    @Test
+    fun fr18_a_focus_on_a_new_node_goes_ahead_of_every_wait() {
+        started()
+        watch(3, true)
+        scheduler.advance(10)
+        listen(3, true)
+        val fresh = FakeNode(
+            "fresh",
+            NodeInfo(className = "android.widget.TextView", text = "Bluetooth", focusable = true, focused = true, bounds = TaskBounds(30, 100, 430, 180)),
+        )
+        val pane = FakeNode("pane", NodeInfo(className = "android.widget.LinearLayout", bounds = TaskBounds(30, 100, 430, 300)), listOf(fresh))
+        fresh.parentNode = pane
+        pane.parentNode = list
+        list.children = listOf(row, hidden, pane)
+        // The host resizes the task: its reads wait for the app to draw, and so does a change.
+        daemon.deliver(
+            Envelope.newBuilder()
+                .setResizeTask(io.github.thisisthepy.dsa.control.v1.ResizeTask.newBuilder().setTaskId(3).setWidth(400).setHeight(600))
+                .build().toByteArray(),
+        )
+        scheduler.runDue()
+        title.info = title.info.copy(text = "Wi-Fi")
+        event(AccessibilityChange(contentKind, 3, title))
+        scheduler.advance(AccessibilityExport.FAST_BATCH_MILLIS + AccessibilityExport.FAST_MIN_INTERVAL_MILLIS)
+        val sent = trees().size
+        // The focus goes to a node whose parent the tree does not have either: it is read from
+        // the nearest ancestor the tree has, at once.
+        event(AccessibilityChange(focusKind, 3, fresh, parent = pane))
+        assertEquals(sent + 1, trees().size)
+        val delta = trees().last()
+        assertFalse(delta.full)
+        assertEquals(delta.nodesList.single { it.text == "Bluetooth" }.id, delta.focusedId)
+        assertTrue(fresh.parentAsks > 0)
+        // The read the resize held back keeps its time: nothing more is read before it.
+        val reads = title.reads
+        scheduler.advance(AccessibilityExport.RESIZE_QUIET_MILLIS / 2)
+        assertEquals(reads, title.reads)
+        assertEquals(sent + 1, trees().size)
+    }
+
+    @Test
+    fun fr18_with_a_screen_reader_a_content_event_asks_android_nothing_until_its_task_is_read() {
+        started()
+        watch(3, true)
+        scheduler.advance(10)
+        listen(3, true)
+        val titleId = trees().single().nodesList.single { it.text == "Network & internet" }.id
+        var asked = 0
+        title.info = title.info.copy(text = "Wi-Fi")
+        // One screen change makes a burst of events: none of them asks the app anything.
+        repeat(5) { event(AccessibilityChange(contentKind, 3, lazySource = { asked++; title })) }
+        assertEquals(0, asked)
+        scheduler.advance(AccessibilityExport.FAST_BATCH_MILLIS + AccessibilityExport.FAST_MIN_INTERVAL_MILLIS)
+        // The burst is one read, of the node it named.
+        assertEquals(5, asked)
+        assertEquals(2, trees().size)
+        assertEquals(listOf(titleId), trees().last().nodesList.map { it.id })
+        // A burst too large to look up is the whole task, read once, with no node looked up.
+        asked = 0
+        title.info = title.info.copy(text = "Wi-Fi off")
+        repeat(AccessibilityExport.MAX_LAZY_SOURCES + 1) { event(AccessibilityChange(contentKind, 3, lazySource = { asked++; title })) }
+        scheduler.advance(AccessibilityExport.FAST_BATCH_MILLIS + AccessibilityExport.FAST_MIN_INTERVAL_MILLIS)
+        assertEquals(0, asked)
+        assertEquals(3, trees().size)
+        assertTrue(trees().last().nodesList.any { it.text == "Wi-Fi off" })
+    }
+
+    @Test
+    fun nfr5_a_read_that_began_before_a_focus_move_does_not_undo_it() {
+        title.info = title.info.copy(focused = true)
+        val reader = FakeScheduler()
+        val focusReader = FakeScheduler()
+        startedWith(reader, focusReader)
+        val first = trees().single()
+        val titleId = first.nodesList.single { it.text == "Network & internet" }.id
+        val rowId = first.nodesList.single { it.className == "android.widget.LinearLayout" }.id
+        assertEquals(titleId, first.focusedId)
+        // A change is read while the title still has the focus; its answer is on its way.
+        title.info = title.info.copy(text = "Wi-Fi")
+        event(AccessibilityChange(contentKind, 3, title))
+        scheduler.advance(AccessibilityExport.FAST_BATCH_MILLIS + AccessibilityExport.FAST_MIN_INTERVAL_MILLIS)
+        reader.runDue()
+        // The focus moves to the row before that answer is sent.
+        title.info = title.info.copy(focused = false)
+        row.info = row.info.copy(focused = true)
+        service.onEvent!!.invoke(AccessibilityChange(focusKind, resolve = { AccessibilityChange(focusKind, 3, row) }))
+        focusReader.runDue()
+        scheduler.runDue()
+        val last = trees().last()
+        assertEquals(rowId, last.focusedId)
+        val readTitle = last.nodesList.single { it.id == titleId }
+        assertEquals("Wi-Fi", readTitle.text)
+        assertFalse(readTitle.focused)
+        assertTrue(log.lines.any { it.contains("accessibility focus trace: task 3: focus $rowId") })
     }
 }

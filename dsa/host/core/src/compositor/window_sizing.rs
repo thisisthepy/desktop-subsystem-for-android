@@ -422,8 +422,10 @@ fn fit_placement(frame: (u32, u32), view: (u32, u32)) -> FramePlacement {
 }
 
 /// The solid colour (`0xAARRGGBB`, opaque) under a task's frame, which shows wherever the
-/// frame does not cover the window: beside the last frame, shown 1:1, while a frame of the
-/// new size is pending, or beside a frame the guest keeps smaller. It is the app's own
+/// frame does not cover the window: beside a frame the guest keeps smaller than a window that
+/// holds its size, once that frame is the guest's answer to the window's size
+/// ([`FrameFollow::strips_filled`](super::frame_follow::FrameFollow::strips_filled)). While a
+/// frame of the new size is pending, nothing is drawn around the last frame. It is the app's own
 /// colour, never the desktop and never a white the app did not draw: the colour of the
 /// frame's top edge
 /// (`band`, then `fill`, as the title bar's band reads it) when it is known, else the app's
@@ -1825,6 +1827,30 @@ mod tests {
             host_sizing: true,
             ..SizeProposal::default()
         }));
+    }
+
+    #[test]
+    fn fr4_a_main_monitor_maximise_places_the_last_frame_as_before_the_fill_and_scales_nothing() {
+        // Settings at 1041x1495, drawn at its window's density, maximised on the 2880x1800 main
+        // monitor: until its frame of 2880x1704 comes, the last frame is placed exactly as it was
+        // before the window ever filled or stretched anything, 1:1 and never scaled.
+        let placed = frame_placement((1041, 1495), (2880, 1704), (1, 1), true);
+        assert_eq!(
+            placed,
+            FramePlacement {
+                scale: (1, 1),
+                origin: (919, 104),
+                size: (1041, 1495),
+            }
+        );
+        // The frame of the maximised size fills the window from its top left.
+        let placed = frame_placement((2880, 1704), (2880, 1704), (1, 1), true);
+        assert_eq!(placed.origin, (0, 0));
+        assert_eq!(placed.size, (2880, 1704));
+        // A window that does not hold its size shows its frame at its top left, as it always did.
+        let placed = frame_placement((1041, 1495), (2880, 1704), (1, 1), false);
+        assert_eq!(placed.origin, (0, 0));
+        assert_eq!(placed.size, (1041, 1495));
     }
 
     #[test]

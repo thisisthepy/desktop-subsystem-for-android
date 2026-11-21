@@ -4,9 +4,10 @@
 use std::time::{Duration, Instant};
 
 use dsa_host_core::accessibility::{
-    from_screen, role_of, to_screen, ActionRequest, ActionResult, ClientDemand, ClientPresence,
-    Demand, DemandReason, Node, NodeAction, NodeRange, NodeStates, PresenceChange, Role, Tree,
-    TreeError, TreeUpdate, MAX_NODES, MAX_TEXT_CHARS, SNAPSHOT_INTERVAL,
+    focus_trace_line, from_screen, role_of, to_screen, AccessibilityTarget, ActionRequest,
+    ActionResult, ClientDemand, ClientPresence, Demand, DemandReason, FocusTrace, Node, NodeAction,
+    NodeRange, NodeStates, PresenceChange, Role, Tree, TreeError, TreeUpdate, MAX_NODES,
+    MAX_TEXT_CHARS, SNAPSHOT_INTERVAL,
 };
 use dsa_host_core::compositor::window_sizing::{density_for_dpi, scale_between, to_window_size};
 use dsa_host_core::input::WindowGeometry;
@@ -698,5 +699,43 @@ fn fr18_selection_and_accessibility_focus_cross_both_wires() {
     assert_eq!(
         TreeUpdate::from_control(none).unwrap().nodes[0].selection,
         None
+    );
+}
+
+#[test]
+fn fr18_each_focus_move_is_traced_once_with_the_hop_and_time() {
+    let target = AccessibilityTarget::Task(7);
+    let mut trace = FocusTrace::new();
+    let mut screen = settings_screen(1);
+    screen.focused = Some(3);
+    let line = trace
+        .moved(&screen, target, "the host service sent it on")
+        .expect("the first focus is a move");
+    assert!(
+        line.contains("task 7: focus 3, accessibility focus none"),
+        "{line}"
+    );
+    assert!(line.contains("the host service sent it on at "), "{line}");
+    // A change that moves no focus logs nothing, however many nodes it carries.
+    let mut same = change(
+        1,
+        vec![node(4, &[], "android.widget.TextView", "Wi-Fi")],
+        vec![],
+        vec![1],
+    );
+    same.focused = Some(3);
+    assert_eq!(
+        trace.moved(&same, target, "the host service sent it on"),
+        None
+    );
+    // The accessibility focus moving is a move too.
+    let mut moved = change(1, vec![], vec![], vec![1]);
+    moved.focused = Some(3);
+    moved.accessibility_focused = Some(5);
+    assert!(trace.moved(&moved, target, "raised").is_some());
+    assert_eq!(
+        focus_trace_line(target, Some(3), None, "raised", 1_700_000_000_123),
+        "accessibility focus trace: task 7: focus 3, accessibility focus none, raised at \
+         1700000000123 ms"
     );
 }

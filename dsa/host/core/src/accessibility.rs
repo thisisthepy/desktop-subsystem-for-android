@@ -376,6 +376,70 @@ pub enum GuestAccessibility {
     Announcement(Announcement),
 }
 
+/// Follows the focus the trees of one watch carry, so each place a focus move passes on its
+/// way to a screen reader (the host service, the window that raises it) logs one line per
+/// move with the wall-clock time it passed. The agent logs the same for the event and for
+/// the tree it sent, so the lines of one move, read side by side, say how long each hop took.
+#[derive(Debug, Default)]
+pub struct FocusTrace {
+    focused: Option<u32>,
+    accessibility_focused: Option<u32>,
+}
+
+impl FocusTrace {
+    pub fn new() -> FocusTrace {
+        FocusTrace::default()
+    }
+
+    /// The line to log when `update` moves the input or the accessibility focus, saying that
+    /// the move passed `hop` now; `None` when neither moved.
+    pub fn moved(
+        &mut self,
+        update: &TreeUpdate,
+        target: AccessibilityTarget,
+        hop: &str,
+    ) -> Option<String> {
+        if update.focused == self.focused
+            && update.accessibility_focused == self.accessibility_focused
+        {
+            return None;
+        }
+        self.focused = update.focused;
+        self.accessibility_focused = update.accessibility_focused;
+        Some(focus_trace_line(
+            target,
+            update.focused,
+            update.accessibility_focused,
+            hop,
+            wall_millis(),
+        ))
+    }
+}
+
+/// One focus trace line: which focus moved where, which hop it passed, and when, in
+/// milliseconds since 1970 so the guest's and the host's lines compare.
+pub fn focus_trace_line(
+    target: AccessibilityTarget,
+    focused: Option<u32>,
+    accessibility_focused: Option<u32>,
+    hop: &str,
+    wall_millis: u128,
+) -> String {
+    let id = |node: Option<u32>| node.map_or_else(|| "none".to_string(), |id| id.to_string());
+    format!(
+        "accessibility focus trace: {target}: focus {}, accessibility focus {}, {hop} at {wall_millis} ms",
+        id(focused),
+        id(accessibility_focused)
+    )
+}
+
+/// Milliseconds since 1970 by the wall clock, for trace lines that compare across machines.
+pub fn wall_millis() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_millis())
+}
+
 impl Announcement {
     pub fn from_control(announcement: control::AccessibilityAnnouncement) -> Announcement {
         Announcement {

@@ -1032,7 +1032,14 @@ impl TaskWindow {
                 .unwrap_or_default()
         });
         // An overlay window is transparent wherever its app draws nothing.
-        let fill = fill_colour(self.overlay, sample, None, system_dark);
+        // Only beside the guest's answer to a held size that it keeps smaller, as core says
+        // (FrameFollow::strips_filled): while a zoom waits for the app, the last frame is shown
+        // with nothing drawn around it, as on every host.
+        let fill = if self.follow.strips_filled() {
+            fill_colour(self.overlay, sample, None, system_dark)
+        } else {
+            None
+        };
         self.presenter.place(layer_frame(placement, backing), fill);
     }
 
@@ -1399,6 +1406,15 @@ impl TaskWindow {
                 }
                 _ => {}
             }
+        }
+    }
+
+    /// The largest client area the guest can draw for the task, in client pixels: a held
+    /// window larger than it fills the strips beside its frame (FrameFollow::strips_filled).
+    pub fn set_frame_limit(&mut self, max: Option<(u32, u32)>) {
+        if self.follow.limit() != max {
+            self.follow.set_limit(max);
+            self.place_frame();
         }
     }
 

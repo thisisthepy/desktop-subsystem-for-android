@@ -1484,6 +1484,12 @@ macro_rules! host_api_conformance {
             $crate::host_api_conformance::accessibility_reaches_the_client(&mut || $make);
         }
         #[test]
+        fn fr18_a_tree_reaches_the_client_at_once_with_no_poll_wait() {
+            $crate::host_api_conformance::accessibility_trees_reach_the_client_at_once(&mut || {
+                $make
+            });
+        }
+        #[test]
         fn fr18_a_screen_reader_listening_reaches_the_callers_android() {
             $crate::host_api_conformance::accessibility_listening_reaches_the_caller(&mut || $make);
         }
@@ -3264,6 +3270,38 @@ pub fn accessibility_reaches_the_client(make: MakeLocal<'_>) {
     assert_eq!(
         stream.next(WAIT).unwrap(),
         Some(GuestAccessibility::Announcement(toast))
+    );
+}
+
+/// A screen reader hears a focus move as soon as Android sends it: the service passes each
+/// tree on as it comes, not at its next look for news. The median over many trees is taken so
+/// one slow wake-up of a busy machine does not decide it.
+pub fn accessibility_trees_reach_the_client_at_once(make: MakeLocal<'_>) {
+    let (listener, mut connector, user) = make();
+    let androids = Arc::new(FakeAndroids::default());
+    let _service = RunningService::start(listener, androids.clone());
+    let mut stream = connect(&mut *connector)
+        .watch_accessibility(7)
+        .expect("watching the tree");
+    let android = androids.of(&user).expect("the caller's Android");
+    wait_for_watches(&android, &[(7, true)]);
+    let mut took = Vec::new();
+    for _ in 0..21 {
+        // The service is idle, waiting for its client, when the tree comes.
+        thread::sleep(Duration::from_millis(12));
+        let sent = Instant::now();
+        android.publish_accessibility(7, GuestAccessibility::Tree(small_tree(1)));
+        assert_eq!(
+            stream.next(WAIT).unwrap(),
+            Some(GuestAccessibility::Tree(small_tree(1)))
+        );
+        took.push(sent.elapsed());
+    }
+    took.sort();
+    let median = took[took.len() / 2];
+    assert!(
+        median < Duration::from_millis(10),
+        "a tree took {median:?} (median) to reach the client; all: {took:?}"
     );
 }
 

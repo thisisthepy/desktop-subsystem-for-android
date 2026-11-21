@@ -6,8 +6,12 @@
 #
 #   build-services.sh <tree> <android16|android17> <out folder> [<apps folder>]
 #
-# With <apps folder>, the same tree also builds the image's patched DocumentsUI
-# (dsa/apps/documentsui) and leaves it there as dsa/apps/apps.py records an app.
+# DSA_TREE_PART chooses what one runner builds from the tree: "services" (services.jar and
+# DocumentsUI), "screens" (the system screens alone, no services.jar), or, unset, everything.
+#
+# With <apps folder>, the same tree also builds every app dsa/apps/apps.json builds in the tree
+# (DocumentsUI and the system screens: Settings, PermissionController, PackageInstaller and the
+# share sheet), with DSA's patches, and leaves each there as dsa/apps/apps.py records an app.
 #
 # The Java framework reaches across most of the platform, so unlike build.sh this builds in the
 # whole tree, with the published build's own product (the lock's target) and release
@@ -235,18 +239,26 @@ build() {
 uv run "$repo/dsa/guest/framework/apply-patches.py" --android "$android" --top "$top"
 # soong_ui is built from this source when the build starts, so the change is in the first run.
 uv run "$repo/dsa/guest/framework/framework_lock.py" soong-memory-limit "$top/build/soong/ui/build/soong.go"
-# DocumentsUI, the image's file manager (dsa/apps/documentsui), builds only in an Android tree,
-# and this one is the published build's own. Its design files, its patches and the flag value
-# that turns its Material 3 look on go in before the analysis: they add files that the
-# analysis globs, and changing them afterwards would make the next build analyse the whole
-# tree again. DSA_SERVICES_LOCK, when set, is the lock the tree was fetched from, which says
-# the tree has DocumentsUI at the commit dsa/apps/apps.json pins.
+# The apps built in the tree (DocumentsUI and the system screens) build only in an Android
+# tree, and this one is the published build's own. Their design files, their patches (and
+# SettingsLib's, which Settings and PermissionController build from, laid over once before them)
+# and the flag value that turns DocumentsUI's Material 3 look on go in before the analysis: they
+# add files that the analysis globs, and changing them afterwards would make the next build
+# analyse the whole tree again. DSA_SERVICES_LOCK, when set, is the lock the tree was fetched
+# from, which says the tree has each at the commit dsa/apps/apps.json pins.
 apps_out="${4:-}"
+tree_part="${DSA_TREE_PART:-}"
+part_args=()
+[[ -z "$tree_part" ]] || part_args=(--part "$tree_part")
+tree_apps=()
 if [[ -n "$apps_out" ]]; then
   lock_args=()
   [[ -z "${DSA_SERVICES_LOCK:-}" ]] || lock_args=(--lock "$DSA_SERVICES_LOCK")
-  uv run "$repo/dsa/apps/apps.py" patch-tree documentsui --top "$top" --android "$android" \
-    --release "$release" "${lock_args[@]}"
+  for part in $(uv run "$repo/dsa/apps/apps.py" tree-order "${part_args[@]}" | jq -r '.[]'); do
+    uv run "$repo/dsa/apps/apps.py" patch-tree "$part" --top "$top" --android "$android" \
+      --release "$release" "${lock_args[@]}"
+  done
+  mapfile -t tree_apps < <(uv run "$repo/dsa/apps/apps.py" tree-apps "${part_args[@]}" | jq -r '.[]')
 fi
 
 cd "$top"
@@ -301,10 +313,12 @@ ninja_file="$(ls -t out/combined-*.ninja 2>/dev/null | head -1 || true)"
 ninja=prebuilts/build-tools/linux-x86/bin/ninja
 
 # What each install rule copies: the module's own output, which the install path is a copy of.
-outputs="$(uv run "$repo/dsa/guest/framework/framework_lock.py" java-outputs)"
+outputs=""
+[[ "$tree_part" == screens ]] || outputs="$(uv run "$repo/dsa/guest/framework/framework_lock.py" java-outputs)"
 names=()
 jars=()
 while read -r name installed; do
+  [[ -n "$name" ]] || continue
   query="$("$ninja" -f "$ninja_file" -t query "$product_out/$installed")" \
     || { echo "::error::ninja knows no rule for $product_out/$installed"; exit 1; }
   if ! jar="$(uv run "$repo/dsa/guest/framework/framework_lock.py" install-source <<< "$query")"; then
@@ -317,20 +331,34 @@ while read -r name installed; do
   jars+=("$jar")
 done <<< "$outputs"
 
-# DocumentsUI's APK, which its install path is a copy of, the same way: the module's own APK,
-# signed with the tree's platform test key (make-image.py signs it again with the image's).
-documentsui_apk=""
-if [[ -n "$apps_out" ]]; then
-  installed="$(jq -r '.apps[] | select(.name == "documentsui") | .build.installed' "$repo/dsa/apps/apps.json")"
-  query="$("$ninja" -f "$ninja_file" -t query "$product_out/$installed")" \
-    || { echo "::error::ninja knows no rule for $product_out/$installed"; exit 1; }
-  if ! documentsui_apk="$(uv run "$repo/dsa/guest/framework/framework_lock.py" install-source --apk <<< "$query")"; then
-    head -40 <<< "$query"
-    echo "::error::$installed: the build cannot make DocumentsUI's own APK in place of the install path"
-    exit 1
+# Each tree app's APK, which its install path is a copy of, the same way: the module's own APK,
+# signed with the tree's platform test key (make-image.py signs it again with the image's). An
+# app inside an APEX (PermissionController) has no install path of its own, so its APK is the
+# one ninja target its apk_pattern in apps.json names.
+tree_apks=()
+targets_file=""
+for app in "${tree_apps[@]}"; do
+  installed="$(jq -r --arg a "$app" '.apps[] | select(.name == $a) | .build.installed // empty' "$repo/dsa/apps/apps.json")"
+  if [[ -z "$installed" ]]; then
+    if [[ -z "$targets_file" ]]; then
+      targets_file="$(mktemp)"
+      "$ninja" -f "$ninja_file" -t targets all > "$targets_file"
+    fi
+    apk="$(uv run "$repo/dsa/apps/apps.py" apk-target "$app" < "$targets_file")" \
+      || { echo "::error::$app: the build has no APK target its apk_pattern names"; exit 1; }
+    echo "$app is built as $apk"
+  else
+    query="$("$ninja" -f "$ninja_file" -t query "$product_out/$installed")" \
+      || { echo "::error::ninja knows no rule for $product_out/$installed"; exit 1; }
+    if ! apk="$(uv run "$repo/dsa/guest/framework/framework_lock.py" install-source --apk <<< "$query")"; then
+      head -40 <<< "$query"
+      echo "::error::$installed: the build cannot make $app's own APK in place of the install path"
+      exit 1
+    fi
+    echo "$installed is a copy of $apk"
   fi
-  echo "$installed is a copy of $documentsui_apk"
-fi
+  tree_apks+=("$apk")
+done
 
 # The Java build needs no more than the runner's own memory and the first swap file.
 if [[ -n "${DSA_ANALYSIS_SWAP:-}" && -f "$DSA_ANALYSIS_SWAP" ]]; then
@@ -340,8 +368,10 @@ if [[ -n "${DSA_ANALYSIS_SWAP:-}" && -f "$DSA_ANALYSIS_SWAP" ]]; then
 fi
 room "before the build"
 
-echo "building ${jars[*]} for $product with release configuration $release"
-build "the services.jar build" "${jars[@]}"
+if (( ${#jars[@]} )); then
+  echo "building ${jars[*]} for $product with release configuration $release"
+  build "the services.jar build" "${jars[@]}"
+fi
 room "after the build"
 
 mkdir -p "$out"
@@ -352,11 +382,11 @@ for i in "${!names[@]}"; do
 done
 cp "$top/.dsa-patches.json" "$out/services-patches.json"
 
-# After services.jar is in its folder, so that a DocumentsUI failure still leaves the jar for
-# the workflow to keep.
-if [[ -n "$documentsui_apk" ]]; then
-  build "the DocumentsUI build" "$documentsui_apk"
-  room "after the DocumentsUI build"
-  uv run "$repo/dsa/apps/apps.py" record documentsui --apk "$documentsui_apk" --android "$android" --out "$apps_out"
-  ls -l "$apps_out"
-fi
+# After services.jar is in its folder, so that an app's failure still leaves the jar for the
+# workflow to keep. One app at a time, so a failure names the app.
+for i in "${!tree_apps[@]}"; do
+  build "the ${tree_apps[$i]} build" "${tree_apks[$i]}"
+  room "after the ${tree_apps[$i]} build"
+  uv run "$repo/dsa/apps/apps.py" record "${tree_apps[$i]}" --apk "${tree_apks[$i]}" --android "$android" --out "$apps_out"
+done
+[[ -z "$apps_out" ]] || ls -l "$apps_out"

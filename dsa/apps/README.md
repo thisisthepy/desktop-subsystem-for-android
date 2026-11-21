@@ -19,6 +19,28 @@ or the gallery by its AOSP name finds it, and the image leaves the AOSP app out.
 see is the plain one ("Clock", "Gallery"), in every language the app is translated into. The
 LineageOS apps already use those names, so no string is patched for it.
 
+## System screens
+
+The image's system screens are built here too, so that they follow the same design where an
+overlay cannot reach: Settings, the permission screens and dialogs (PermissionController), the
+install dialogs (PackageInstaller) and the share sheet (IntentResolver). They are marked
+`"role": "system"` in `apps.json`. Each is the AOSP app at the image's own pin, with DSA's
+patches, in place of the published APK; it keeps its package, its partition and its
+configuration. SettingsLib, which Settings and PermissionController both build their screens
+from, is a library in `apps.json`: its patches go over the tree once, before the apps, and each
+app's record names them. They build in the same tree as DocumentsUI but on a runner of their own
+(the Framework build's "screens" part), so services.jar keeps its runner's time and disk. The
+system screen overlays stay for what an overlay can change, and are
+built against these APKs.
+
+| Folder | Screens | Upstream |
+| --- | --- | --- |
+| `settingslib` | the large title of Settings and the permission screens | `frameworks/base/packages/SettingsLib` |
+| `settings` | Settings | `packages/apps/Settings` |
+| `permissioncontroller` | permission screens and dialogs | `packages/modules/Permission` |
+| `packageinstaller` | install and uninstall dialogs | `frameworks/base/packages/PackageInstaller` |
+| `intentresolver` | the share sheet | `packages/modules/IntentResolver` |
+
 ## Where the source comes from
 
 Nothing upstream is kept here. `apps.json` pins each app: the LineageOS apps to a commit of

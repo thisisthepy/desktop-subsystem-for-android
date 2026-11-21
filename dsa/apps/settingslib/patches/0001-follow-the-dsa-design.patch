@@ -1,0 +1,389 @@
+Follow DSA's design in every SettingsLib screen (Settings and PermissionController):
+a large title that opens expanded in a window 600 dp or more high and folded below it,
+on sub-pages too, bold variable-weight titles, and a title that shrinks into the toolbar.
+Preference groups as cards on their own surface, with room between groups, rows whose shape
+morphs and that spring when pressed, and emphasized group titles.
+
+diff --git a/CollapsingToolbarBaseActivity/src/com/android/settingslib/collapsingtoolbar/CollapsingToolbarDelegate.java b/CollapsingToolbarBaseActivity/src/com/android/settingslib/collapsingtoolbar/CollapsingToolbarDelegate.java
+--- a/CollapsingToolbarBaseActivity/src/com/android/settingslib/collapsingtoolbar/CollapsingToolbarDelegate.java
++++ b/CollapsingToolbarBaseActivity/src/com/android/settingslib/collapsingtoolbar/CollapsingToolbarDelegate.java
+@@ -158,2 +158,7 @@
+         mAppBarLayout = view.findViewById(R.id.app_bar);
++        if (useCollapsingToolbar && mAppBarLayout != null) {
++            // A tall window opens with the large title expanded, a low one with it folded
++            // into the toolbar, where it leaves the room to the list.
++            io.github.thisisthepy.dsa.design.DsaDesign.showLargeTitle(mAppBarLayout);
++        }
+ 
+@@ -581,3 +586,6 @@
+                         if (appBarLayout != null) {
+-                            appBarLayout.post(() -> appBarLayout.setExpanded(false, true));
++                            // A sub-page follows the same rule as a page of its own.
++                            appBarLayout.post(() -> appBarLayout.setExpanded(
++                                    io.github.thisisthepy.dsa.design.DsaDesign
++                                            .largeTitleStartsExpanded(activity), true));
+                         } else {
+diff --git a/CollapsingToolbarBaseActivity/res/values-v36/styles_expressive.xml b/CollapsingToolbarBaseActivity/res/values-v36/styles_expressive.xml
+--- a/CollapsingToolbarBaseActivity/res/values-v36/styles_expressive.xml
++++ b/CollapsingToolbarBaseActivity/res/values-v36/styles_expressive.xml
+@@ -30,3 +30,4 @@
+         <item name="expandedTitleTextColor">@color/settingslib_materialColorOnSurface</item>
+-        <item name="titleCollapseMode">fade</item>
++        <!-- The large title shrinks into the toolbar as the list scrolls. -->
++        <item name="titleCollapseMode">scale</item>
+         <item name="extraMultilineHeightEnabled">true</item>
+@@ -40,2 +41,4 @@
+         <item name="android:textSize">22dp</item>
++        <item name="android:textStyle">bold</item>
++        <item name="android:fontVariationSettings">'wght' 700</item>
+     </style>
+@@ -44,2 +47,4 @@
+         <item name="android:textSize">36dp</item>
++        <item name="android:textStyle">bold</item>
++        <item name="android:fontVariationSettings">'wght' 750</item>
+     </style>
+diff --git a/SettingsTheme/res/values-v36/dimens.xml b/SettingsTheme/res/values-v36/dimens.xml
+--- a/SettingsTheme/res/values-v36/dimens.xml
++++ b/SettingsTheme/res/values-v36/dimens.xml
+@@ -18,3 +18,3 @@
+ <resources>
+-    <dimen name="settingslib_preference_corner_radius">20dp</dimen>
++    <dimen name="settingslib_preference_corner_radius">26dp</dimen>
+ </resources>
+\ No newline at end of file
+diff --git a/SettingsTheme/res/drawable-v36/settingslib_round_background.xml b/SettingsTheme/res/drawable-v36/settingslib_round_background.xml
+--- a/SettingsTheme/res/drawable-v36/settingslib_round_background.xml
++++ b/SettingsTheme/res/drawable-v36/settingslib_round_background.xml
+@@ -2,17 +2,5 @@
+ <!--
+-  Copyright (C) 2024 The Android Open Source Project
+-
+-  Licensed under the Apache License, Version 2.0 (the "License");
+-  you may not use this file except in compliance with the License.
+-  You may obtain a copy of the License at
+-
+-       http://www.apache.org/licenses/LICENSE-2.0
+-
+-  Unless required by applicable law or agreed to in writing, software
+-  distributed under the License is distributed on an "AS IS" BASIS,
+-  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-  See the License for the specific language governing permissions and
+-  limitations under the License.
+-  -->
+-
++     SPDX-FileCopyrightText: The Desktop Subsystem for Android authors
++     SPDX-License-Identifier: Apache-2.0
++-->
+ <ripple xmlns:android="http://schemas.android.com/apk/res/android"
+@@ -24,8 +12,26 @@
+         android:end="?android:attr/listPreferredItemPaddingEnd">
+-        <shape android:shape="rectangle">
+-            <solid
+-                android:color="@color/settingslib_materialColorSurfaceBright" />
+-            <corners
+-                android:radius="@dimen/settingslib_preference_corner_radius" />
+-        </shape>
++        <selector
++            android:enterFadeDuration="@integer/settingslib_dsa_morph_ms"
++            android:exitFadeDuration="@integer/settingslib_dsa_morph_ms">
++            <item android:state_pressed="true">
++                <shape android:shape="rectangle">
++                    <solid android:color="@color/settingslib_dsa_card" />
++                    <corners
++                        android:topLeftRadius="@dimen/settingslib_preference_corner_radius"
++                        android:topRightRadius="@dimen/settingslib_preference_corner_radius"
++                        android:bottomLeftRadius="@dimen/settingslib_preference_corner_radius"
++                        android:bottomRightRadius="@dimen/settingslib_preference_corner_radius" />
++                </shape>
++            </item>
++            <item>
++                <shape android:shape="rectangle">
++                    <solid android:color="@color/settingslib_dsa_card" />
++                    <corners
++                        android:topLeftRadius="@dimen/settingslib_preference_corner_radius"
++                        android:topRightRadius="@dimen/settingslib_preference_corner_radius"
++                        android:bottomLeftRadius="@dimen/settingslib_preference_corner_radius"
++                        android:bottomRightRadius="@dimen/settingslib_preference_corner_radius" />
++                </shape>
++            </item>
++        </selector>
+     </item>
+diff --git a/SettingsTheme/res/drawable-v36/settingslib_round_background_top.xml b/SettingsTheme/res/drawable-v36/settingslib_round_background_top.xml
+--- a/SettingsTheme/res/drawable-v36/settingslib_round_background_top.xml
++++ b/SettingsTheme/res/drawable-v36/settingslib_round_background_top.xml
+@@ -2,17 +2,5 @@
+ <!--
+-  Copyright (C) 2024 The Android Open Source Project
+-
+-  Licensed under the Apache License, Version 2.0 (the "License");
+-  you may not use this file except in compliance with the License.
+-  You may obtain a copy of the License at
+-
+-       http://www.apache.org/licenses/LICENSE-2.0
+-
+-  Unless required by applicable law or agreed to in writing, software
+-  distributed under the License is distributed on an "AS IS" BASIS,
+-  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-  See the License for the specific language governing permissions and
+-  limitations under the License.
+-  -->
+-
++     SPDX-FileCopyrightText: The Desktop Subsystem for Android authors
++     SPDX-License-Identifier: Apache-2.0
++-->
+ <ripple xmlns:android="http://schemas.android.com/apk/res/android"
+@@ -24,11 +12,26 @@
+         android:end="?android:attr/listPreferredItemPaddingEnd">
+-        <shape android:shape="rectangle">
+-            <solid
+-                android:color="@color/settingslib_materialColorSurfaceBright" />
+-            <corners
+-                android:topLeftRadius="@dimen/settingslib_preference_corner_radius"
+-                android:bottomLeftRadius="4dp"
+-                android:topRightRadius="@dimen/settingslib_preference_corner_radius"
+-                android:bottomRightRadius="4dp" />
+-        </shape>
++        <selector
++            android:enterFadeDuration="@integer/settingslib_dsa_morph_ms"
++            android:exitFadeDuration="@integer/settingslib_dsa_morph_ms">
++            <item android:state_pressed="true">
++                <shape android:shape="rectangle">
++                    <solid android:color="@color/settingslib_dsa_card" />
++                    <corners
++                        android:topLeftRadius="@dimen/settingslib_preference_corner_radius"
++                        android:topRightRadius="@dimen/settingslib_preference_corner_radius"
++                        android:bottomLeftRadius="@dimen/settingslib_preference_corner_radius"
++                        android:bottomRightRadius="@dimen/settingslib_preference_corner_radius" />
++                </shape>
++            </item>
++            <item>
++                <shape android:shape="rectangle">
++                    <solid android:color="@color/settingslib_dsa_card" />
++                    <corners
++                        android:topLeftRadius="@dimen/settingslib_preference_corner_radius"
++                        android:topRightRadius="@dimen/settingslib_preference_corner_radius"
++                        android:bottomLeftRadius="@dimen/settingslib_dsa_inner_corner"
++                        android:bottomRightRadius="@dimen/settingslib_dsa_inner_corner" />
++                </shape>
++            </item>
++        </selector>
+     </item>
+diff --git a/SettingsTheme/res/drawable-v36/settingslib_round_background_center.xml b/SettingsTheme/res/drawable-v36/settingslib_round_background_center.xml
+--- a/SettingsTheme/res/drawable-v36/settingslib_round_background_center.xml
++++ b/SettingsTheme/res/drawable-v36/settingslib_round_background_center.xml
+@@ -2,17 +2,5 @@
+ <!--
+-  Copyright (C) 2024 The Android Open Source Project
+-
+-  Licensed under the Apache License, Version 2.0 (the "License");
+-  you may not use this file except in compliance with the License.
+-  You may obtain a copy of the License at
+-
+-       http://www.apache.org/licenses/LICENSE-2.0
+-
+-  Unless required by applicable law or agreed to in writing, software
+-  distributed under the License is distributed on an "AS IS" BASIS,
+-  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-  See the License for the specific language governing permissions and
+-  limitations under the License.
+-  -->
+-
++     SPDX-FileCopyrightText: The Desktop Subsystem for Android authors
++     SPDX-License-Identifier: Apache-2.0
++-->
+ <ripple xmlns:android="http://schemas.android.com/apk/res/android"
+@@ -24,8 +12,26 @@
+         android:end="?android:attr/listPreferredItemPaddingEnd">
+-        <shape android:shape="rectangle">
+-            <solid
+-                android:color="@color/settingslib_materialColorSurfaceBright" />
+-            <corners
+-                android:radius="4dp" />
+-        </shape>
++        <selector
++            android:enterFadeDuration="@integer/settingslib_dsa_morph_ms"
++            android:exitFadeDuration="@integer/settingslib_dsa_morph_ms">
++            <item android:state_pressed="true">
++                <shape android:shape="rectangle">
++                    <solid android:color="@color/settingslib_dsa_card" />
++                    <corners
++                        android:topLeftRadius="@dimen/settingslib_preference_corner_radius"
++                        android:topRightRadius="@dimen/settingslib_preference_corner_radius"
++                        android:bottomLeftRadius="@dimen/settingslib_preference_corner_radius"
++                        android:bottomRightRadius="@dimen/settingslib_preference_corner_radius" />
++                </shape>
++            </item>
++            <item>
++                <shape android:shape="rectangle">
++                    <solid android:color="@color/settingslib_dsa_card" />
++                    <corners
++                        android:topLeftRadius="@dimen/settingslib_dsa_inner_corner"
++                        android:topRightRadius="@dimen/settingslib_dsa_inner_corner"
++                        android:bottomLeftRadius="@dimen/settingslib_dsa_inner_corner"
++                        android:bottomRightRadius="@dimen/settingslib_dsa_inner_corner" />
++                </shape>
++            </item>
++        </selector>
+     </item>
+diff --git a/SettingsTheme/res/drawable-v36/settingslib_round_background_bottom.xml b/SettingsTheme/res/drawable-v36/settingslib_round_background_bottom.xml
+--- a/SettingsTheme/res/drawable-v36/settingslib_round_background_bottom.xml
++++ b/SettingsTheme/res/drawable-v36/settingslib_round_background_bottom.xml
+@@ -2,17 +2,5 @@
+ <!--
+-  Copyright (C) 2024 The Android Open Source Project
+-
+-  Licensed under the Apache License, Version 2.0 (the "License");
+-  you may not use this file except in compliance with the License.
+-  You may obtain a copy of the License at
+-
+-       http://www.apache.org/licenses/LICENSE-2.0
+-
+-  Unless required by applicable law or agreed to in writing, software
+-  distributed under the License is distributed on an "AS IS" BASIS,
+-  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-  See the License for the specific language governing permissions and
+-  limitations under the License.
+-  -->
+-
++     SPDX-FileCopyrightText: The Desktop Subsystem for Android authors
++     SPDX-License-Identifier: Apache-2.0
++-->
+ <ripple xmlns:android="http://schemas.android.com/apk/res/android"
+@@ -24,11 +12,26 @@
+         android:end="?android:attr/listPreferredItemPaddingEnd">
+-        <shape android:shape="rectangle">
+-            <solid
+-                android:color="@color/settingslib_materialColorSurfaceBright" />
+-            <corners
+-                android:topLeftRadius="4dp"
+-                android:bottomLeftRadius="@dimen/settingslib_preference_corner_radius"
+-                android:topRightRadius="4dp"
+-                android:bottomRightRadius="@dimen/settingslib_preference_corner_radius" />
+-        </shape>
++        <selector
++            android:enterFadeDuration="@integer/settingslib_dsa_morph_ms"
++            android:exitFadeDuration="@integer/settingslib_dsa_morph_ms">
++            <item android:state_pressed="true">
++                <shape android:shape="rectangle">
++                    <solid android:color="@color/settingslib_dsa_card" />
++                    <corners
++                        android:topLeftRadius="@dimen/settingslib_preference_corner_radius"
++                        android:topRightRadius="@dimen/settingslib_preference_corner_radius"
++                        android:bottomLeftRadius="@dimen/settingslib_preference_corner_radius"
++                        android:bottomRightRadius="@dimen/settingslib_preference_corner_radius" />
++                </shape>
++            </item>
++            <item>
++                <shape android:shape="rectangle">
++                    <solid android:color="@color/settingslib_dsa_card" />
++                    <corners
++                        android:topLeftRadius="@dimen/settingslib_dsa_inner_corner"
++                        android:topRightRadius="@dimen/settingslib_dsa_inner_corner"
++                        android:bottomLeftRadius="@dimen/settingslib_preference_corner_radius"
++                        android:bottomRightRadius="@dimen/settingslib_preference_corner_radius" />
++                </shape>
++            </item>
++        </selector>
+     </item>
+diff --git a/SettingsTheme/res/values-v36/styles_preference_expressive.xml b/SettingsTheme/res/values-v36/styles_preference_expressive.xml
+--- a/SettingsTheme/res/values-v36/styles_preference_expressive.xml
++++ b/SettingsTheme/res/values-v36/styles_preference_expressive.xml
+@@ -183,3 +183,3 @@
+         <item name="android:paddingEnd">?android:attr/listPreferredItemPaddingEnd</item>
+-        <item name="android:paddingTop">@dimen/settingslib_expressive_space_small1</item>
++        <item name="android:paddingTop">@dimen/settingslib_dsa_group_gap</item>
+         <item name="android:background">?android:attr/selectableItemBackground</item>
+@@ -201,2 +201,6 @@
+         parent="@style/PreferenceCategoryTitleTextStyle">
++        <!-- An emphasized group title in the accent colour. -->
++        <item name="android:textColor">@color/settingslib_materialColorPrimary</item>
++        <item name="android:textStyle">bold</item>
++        <item name="android:fontVariationSettings">'wght' 650</item>
+         <item name="android:layout_width">match_parent</item>
+diff --git a/SettingsTheme/src/com/android/settingslib/widget/SettingsPreferenceGroupAdapter.kt b/SettingsTheme/src/com/android/settingslib/widget/SettingsPreferenceGroupAdapter.kt
+--- a/SettingsTheme/src/com/android/settingslib/widget/SettingsPreferenceGroupAdapter.kt
++++ b/SettingsTheme/src/com/android/settingslib/widget/SettingsPreferenceGroupAdapter.kt
+@@ -110,2 +110,8 @@
+             updateBackground(holder, position)
++            // A row answers a press with a small spring.
++            if (holder.itemView.stateListAnimator == null) {
++                holder.itemView.stateListAnimator =
++                    android.animation.AnimatorInflater.loadStateListAnimator(
++                        holder.itemView.context, R.animator.settingslib_dsa_press_spring)
++            }
+         }
+diff --git a/SettingsTheme/res/values-v36/settingslib_dsa_cards.xml b/SettingsTheme/res/values-v36/settingslib_dsa_cards.xml
+new file mode 100644
+--- /dev/null
++++ b/SettingsTheme/res/values-v36/settingslib_dsa_cards.xml
+@@ -0,0 +1,16 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!--
++     SPDX-FileCopyrightText: The Desktop Subsystem for Android authors
++     SPDX-License-Identifier: Apache-2.0
++-->
++<resources>
++    <!-- DSA's cards: the rows of a group on a surface that stands clear of the window's
++         background, in light and dark. -->
++    <color name="settingslib_dsa_card">@color/settingslib_materialColorSurfaceContainerLowest</color>
++    <!-- The corners inside a card, between two of its rows. -->
++    <dimen name="settingslib_dsa_inner_corner">6dp</dimen>
++    <!-- The room above a group's title, which sets one group apart from the next. -->
++    <dimen name="settingslib_dsa_group_gap">28dp</dimen>
++    <!-- How long a pressed row takes to change its shape. -->
++    <integer name="settingslib_dsa_morph_ms">150</integer>
++</resources>
+diff --git a/SettingsTheme/res/values-night-v36/settingslib_dsa_cards.xml b/SettingsTheme/res/values-night-v36/settingslib_dsa_cards.xml
+new file mode 100644
+--- /dev/null
++++ b/SettingsTheme/res/values-night-v36/settingslib_dsa_cards.xml
+@@ -0,0 +1,8 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!--
++     SPDX-FileCopyrightText: The Desktop Subsystem for Android authors
++     SPDX-License-Identifier: Apache-2.0
++-->
++<resources>
++    <color name="settingslib_dsa_card">@color/settingslib_materialColorSurfaceContainerHigh</color>
++</resources>
+diff --git a/SettingsTheme/res/interpolator-v36/settingslib_dsa_spring.xml b/SettingsTheme/res/interpolator-v36/settingslib_dsa_spring.xml
+new file mode 100644
+--- /dev/null
++++ b/SettingsTheme/res/interpolator-v36/settingslib_dsa_spring.xml
+@@ -0,0 +1,7 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!--
++     SPDX-FileCopyrightText: The Desktop Subsystem for Android authors
++     SPDX-License-Identifier: Apache-2.0
++-->
++<pathInterpolator xmlns:android="http://schemas.android.com/apk/res/android"
++    android:pathData="M 0,0 C 0.15,0.6 0.25,1.12 0.45,1.06 C 0.65,1.0 0.8,0.99 1,1" />
+diff --git a/SettingsTheme/res/animator-v36/settingslib_dsa_press_spring.xml b/SettingsTheme/res/animator-v36/settingslib_dsa_press_spring.xml
+new file mode 100644
+--- /dev/null
++++ b/SettingsTheme/res/animator-v36/settingslib_dsa_press_spring.xml
+@@ -0,0 +1,24 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!--
++     SPDX-FileCopyrightText: The Desktop Subsystem for Android authors
++     SPDX-License-Identifier: Apache-2.0
++-->
++<selector xmlns:android="http://schemas.android.com/apk/res/android">
++    <!-- A pressed row sinks a little, and springs back when it is let go. -->
++    <item android:state_pressed="true">
++        <set>
++            <objectAnimator android:propertyName="scaleX" android:valueTo="0.98"
++                android:duration="120" android:interpolator="@interpolator/settingslib_dsa_spring" />
++            <objectAnimator android:propertyName="scaleY" android:valueTo="0.98"
++                android:duration="120" android:interpolator="@interpolator/settingslib_dsa_spring" />
++        </set>
++    </item>
++    <item>
++        <set>
++            <objectAnimator android:propertyName="scaleX" android:valueTo="1"
++                android:duration="350" android:interpolator="@interpolator/settingslib_dsa_spring" />
++            <objectAnimator android:propertyName="scaleY" android:valueTo="1"
++                android:duration="350" android:interpolator="@interpolator/settingslib_dsa_spring" />
++        </set>
++    </item>
++</selector>

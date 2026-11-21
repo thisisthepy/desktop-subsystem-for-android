@@ -221,6 +221,8 @@ class Agent(
     accessibility: AccessibilitySource = AccessibilitySource.NONE,
     /** Where the accessibility trees of watched tasks are read, past the scheduler's thread. */
     accessibilityReader: Scheduler = scheduler,
+    /** Where the node an accessibility focus event names is asked for, past the reader's queue. */
+    accessibilityFocusReader: Scheduler = accessibilityReader,
     /** The desktop widgets' views as accessibility nodes: the widget platform's, when it has them. */
     widgetNodes: io.github.thisisthepy.dsa.agent.accessibility.WidgetNodes =
         (widgets as? io.github.thisisthepy.dsa.agent.accessibility.WidgetNodes)
@@ -544,6 +546,7 @@ class Agent(
         accessibilityReader,
         widgetNodes,
         reporter::reportedPackage,
+        accessibilityFocusReader,
     )
     /** Where the apps on the display keep system gestures out, as last heard. */
     private var exclusion: List<TaskBounds> = emptyList()

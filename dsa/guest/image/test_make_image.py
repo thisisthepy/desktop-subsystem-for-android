@@ -5188,17 +5188,6 @@ def top_level_settings_dex():
     return dex_file(methods, {0: (4, on_create_recycler_view), 4: (2, is_running_in_freeform_window)})
 
 
-def card_background(top_radius):
-    """SettingsLib's top group background, as PermissionController compiles it, whose top
-    corners are `top_radius` dp."""
-    return compiled_layout(("ripple", [], [("item", [], [("shape", [], [("corners", [
-        ("topLeftRadius", 0x010101A9, TYPE_DIMENSION, dp(top_radius)),
-        ("topRightRadius", 0x010101AA, TYPE_DIMENSION, dp(top_radius)),
-        ("bottomLeftRadius", 0x010101AB, TYPE_DIMENSION, dp(4)),
-        ("bottomRightRadius", 0x010101AC, TYPE_DIMENSION, dp(4))], [])])])]))
-
-
-CARD_TOP = "res/drawable-v36/settingslib_round_background_top.xml"
 
 
 LIST_END = dp(16)
@@ -5529,7 +5518,7 @@ class ListBottomRoomTests(unittest.TestCase):
                 return {n: payload.read(n) for n in payload.namelist()}, apex.read("apex_build_info.pb")
 
     def test_fr34_the_permission_apex_is_packed_again_with_the_edited_controller(self):
-        controller = self.apk({CARD_TOP: card_background(4)})
+        controller = self.apk({PREFERENCE_LIST: compiled_layout(PREFERENCE_LIST_LAYOUT)})
         capex = self.permission_capex(controller)
         name = "SYSTEM/apex/com.android.permission.capex"
         self.assertIn(name, make_image.PERMISSION_APEXES)
@@ -5553,14 +5542,14 @@ class ListBottomRoomTests(unittest.TestCase):
                 problems = make_image.permission_controller_problems(signed, Path(tmp) / "otatools", Path(tmp), {})
                 self.assertEqual(bool(problems), found, problems)
                 if found:
-                    self.assertIn("so its lists keep corners of their own", problems[0])
+                    self.assertIn("so its lists end on the window's bottom edge", problems[0])
         self.assertEqual(build_info, b"build info")
         # apexer writes the manifest into the payload itself.
         self.assertNotIn("apex_manifest.pb", files)
         self.assertEqual(files["priv-app/SafetyCenterResources@BP4A/SafetyCenterResources.apk"], b"resources")
         with zipfile.ZipFile(io.BytesIO(files["priv-app/PermissionController@BP4A/PermissionController.apk"])) as apk:
-            found_top = layout_attributes(apk.read(CARD_TOP))
-        self.assertIn(("topLeftRadius", TYPE_DIMENSION, dp(26)), found_top[3][2])
+            found = layout_attributes(apk.read(PREFERENCE_LIST))
+        self.assertIn(("paddingBottom", TYPE_DIMENSION, dp(make_image.SETTINGS_LIST_END_DP)), found[0][2])
 
     def test_fr34_without_otatools_the_permission_apex_is_left_as_it_is(self):
         capex = self.permission_capex(b"controller")
@@ -6227,52 +6216,41 @@ class SystemScreenDesignTests(unittest.TestCase):
         self.assertEqual(set(make_image.SETTINGS_TITLE_EXPANDED), {
             SETTINGS_TITLE_LAYOUT, "res/layout-v36/settingslib_expressive_support_toolbar_layout.xml"})
 
-    def test_fr34_settings_lists_are_grouped_in_rounded_cards(self):
+    def test_fr34_nothing_overrides_the_cards_and_titles_the_patched_source_owns(self):
+        # The patched SettingsLib draws the cards, their colour, radius and spacing, and the
+        # titles; the Settings overlay and the compiled edits leave all of them alone.
+        self.assertEqual(make_image.system_screen_override_problems(), [])
         files = self.every_overlay()["DsaSettingsOverlay.apk"]
-        corners = {"settingslib_round_background": (26, 26), "settingslib_round_background_top": (26, 0),
-                   "settingslib_round_background_center": (0, 0), "settingslib_round_background_bottom": (0, 26)}
-        for folder, theme in [("drawable-v36", "light"), ("drawable-night-v36", "dark")]:
-            for name, (top, bottom) in corners.items():
-                ripple = ET.fromstring(files[f"res/{folder}/{name}.xml"])
-                # SettingsLib's padding, which its adapter gives the row.
-                self.assertEqual(ripple.get(NS + "paddingStart"), "32dp")
-                item = ripple.find("item")
-                self.assertEqual(item.get(NS + "start"), "?android:attr/listPreferredItemPaddingStart")
-                shape = item.find("shape")
-                self.assertIn(f"system_surface_bright_{theme}", shape.find("solid").get(NS + "color"))
-                radii = shape.find("corners")
-                self.assertEqual([radii.get(NS + f"{side}Radius") for side in
-                                  ("topLeft", "topRight", "bottomLeft", "bottomRight")],
-                                 [f"{top}dp", f"{top}dp", f"{bottom}dp", f"{bottom}dp"], name)
-        values = ET.fromstring(files["res/values-v36/dsa_design.xml"])
-        self.assertEqual({d.get("name"): d.text for d in values.findall("dimen")},
-                         {"settingslib_preference_corner_radius": "26dp"})
-        # The page and the cards differ in both themes, so the cards show.
-        colors = make_image.DESIGN_COLORS
-        for theme in ("light", "dark"):
-            self.assertNotEqual(colors[f"system_surface_container_{theme}"], colors[f"system_surface_bright_{theme}"])
+        for name in ("settingslib_round_background", "settingslib_round_background_top",
+                     "settingslib_round_background_center", "settingslib_round_background_bottom"):
+            for folder in ("drawable-v36", "drawable-night-v36"):
+                self.assertNotIn(f"res/{folder}/{name}.xml", files)
+        self.assertNotIn("res/values-v36/dsa_design.xml", files)
+        overlaid = set(make_image.settings_overlay_map())
+        for owned in make_image.SOURCE_OWNED_SETTINGSLIB:
+            self.assertNotIn(owned, overlaid)
+        # What the source does not cover stays: the home page's large title, the back button,
+        # the large title's expanded state by window height.
+        self.assertIn(f"layout/{make_image.SETTINGS_HOME_LAYOUT}", overlaid)
+        self.assertIn(f"style/{make_image.SETTINGS_TITLE_THEME}", overlaid)
+        # PermissionController's compiled edits are the list end alone.
+        self.assertEqual(make_image.permission_controller_edits(), make_image.PERMISSION_CONTROLLER_LIST_END)
 
-    def test_fr34_permission_controller_lists_get_the_same_cards(self):
-        def corners(attrs):
-            return compiled_layout(("ripple", [], [("item", [], [("shape", [], [("corners", attrs, [])])])]))
+    def test_fr34_the_override_check_names_an_overlay_that_puts_a_card_back(self):
+        original = make_image.settings_overlay_map
 
-        top = corners([("topLeftRadius", 0x010101A9, TYPE_REFERENCE, 0x7F0705F5),
-                       ("topRightRadius", 0x010101AA, TYPE_REFERENCE, 0x7F0705F5),
-                       ("bottomLeftRadius", 0x010101AB, TYPE_DIMENSION, dp(4)),
-                       ("bottomRightRadius", 0x010101AC, TYPE_DIMENSION, dp(4))])
-        center = corners([("radius", 0x010101A8, TYPE_DIMENSION, dp(4))])
-        apk = ListBottomRoomTests.apk({"res/drawable-v36/settingslib_round_background_top.xml": top,
-                                         "res/drawable-v36/settingslib_round_background_center.xml": center})
-        edited = make_image.edit_permission_controller_apk(apk, "PermissionController.apk")
-        with zipfile.ZipFile(io.BytesIO(edited)) as archive:
-            found_top = layout_attributes(archive.read("res/drawable-v36/settingslib_round_background_top.xml"))
-            found_center = layout_attributes(archive.read("res/drawable-v36/settingslib_round_background_center.xml"))
-        self.assertEqual(found_top[3][2], [("topLeftRadius", TYPE_DIMENSION, dp(26)),
-                                           ("topRightRadius", TYPE_DIMENSION, dp(26)),
-                                           ("bottomLeftRadius", TYPE_DIMENSION, dp(0)),
-                                           ("bottomRightRadius", TYPE_DIMENSION, dp(0))])
-        self.assertEqual(found_center[3][2], [("radius", TYPE_DIMENSION, dp(0))])
-        self.assertEqual(make_image.apk_edits_left(edited, dimensions=make_image.permission_controller_edits()), [])
+        def with_card():
+            return {**original(), "drawable/settingslib_round_background_top": "drawable/settingslib_round_background_top",
+                    "dimen/settingslib_preference_corner_radius": "dimen/settingslib_preference_corner_radius"}
+
+        with patch.object(make_image, "settings_overlay_map", with_card):
+            problems = make_image.system_screen_override_problems()
+        self.assertTrue(any("drawable/settingslib_round_background_top" in p for p in problems), problems)
+        self.assertTrue(any("dimen/settingslib_preference_corner_radius" in p for p in problems), problems)
+        edits = {**make_image.PERMISSION_CONTROLLER_LIST_END, "res/drawable-v36/settingslib_round_background.xml": []}
+        with patch.object(make_image, "permission_controller_edits", lambda: edits):
+            problems = make_image.system_screen_override_problems()
+        self.assertTrue(any("settingslib_round_background.xml is edited" in p for p in problems), problems)
 
     def test_fr34_the_accent_is_blue_in_the_light_and_the_dark_theme(self):
         colors = make_image.DESIGN_COLORS
@@ -10134,13 +10112,14 @@ class DefaultAppsTests(unittest.TestCase):
         apps_script = make_image._apps_script()
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp) / "default-apps"
-            for app in self.apps:
+            every = make_image.image_apps()
+            for app in every:
                 apk = Path(tmp) / f"{app['name']}.apk"
-                apk.write_bytes(self.files[app["image"]])
+                apk.write_bytes(fake_apk(app["package"]))
                 apps_script.write_record(app, apk, folder, self.ANDROID)
             payloads, records = make_image.load_default_apps(folder, self.ANDROID)
-            self.assertEqual(set(payloads), {app["image"] for app in self.apps})
-            self.assertEqual([r["name"] for r in records], [app["name"] for app in self.apps])
+            self.assertEqual(set(payloads), {app["image"] for app in every})
+            self.assertEqual([r["name"] for r in records], [app["name"] for app in every])
             self.assertEqual(self.problems(records=records), [])
 
             record = folder / "music.json"
@@ -10152,6 +10131,73 @@ class DefaultAppsTests(unittest.TestCase):
             record.unlink()
             with self.assertRaisesRegex(ValueError, "no Music app"):
                 make_image.load_default_apps(folder, self.ANDROID)
+
+
+class SystemScreensTests(unittest.TestCase):
+    ANDROID = "android17"
+
+    def setUp(self):
+        self.apps = make_image.system_screen_apps()
+        self.files = {app["image"]: fake_apk(app["package"]) for app in self.apps if not make_image.in_apex(app)}
+        self.files["SYSTEM/apex/com.android.permission.apex"] = b"apex"
+        self.records = [{**make_image.default_app_provenance(app, self.ANDROID), "image": app["image"]}
+                        for app in self.apps]
+
+    def problems(self, files=None, records="same"):
+        files = self.files if files is None else files
+        return make_image.system_screens_problems(
+            set(files), files.__getitem__, self.records if records == "same" else records, self.ANDROID)
+
+    def test_fr34_each_system_screen_is_built_from_dsa_apps_in_the_published_apps_place(self):
+        self.assertEqual({app["name"]: app["image"] for app in self.apps}, {
+            "settings": "SYSTEM_EXT/priv-app/Settings/Settings.apk",
+            "permissioncontroller": make_image.PERMISSION_CONTROLLER_IMAGE,
+            "packageinstaller": "SYSTEM/priv-app/PackageInstaller/PackageInstaller.apk",
+            "intentresolver": "SYSTEM/priv-app/IntentResolver/IntentResolver.apk",
+        })
+        self.assertEqual(self.problems(), [])
+        for app in self.apps:
+            # In place of the published app: nothing of it is taken out, and it is not a default app.
+            self.assertEqual(app["replaces"], [])
+            self.assertNotIn(app, make_image.default_apps())
+        self.assertTrue(make_image.replaced_by_default_apps("SYSTEM_EXT/priv-app/Settings/oat/x86_64/Settings.odex"))
+
+    def test_fr34_the_image_check_refuses_a_published_system_screen(self):
+        # No record: the image may carry the published AOSP app.
+        self.assertTrue(any("Settings screens were built from" in p or "does not say what the Settings" in p
+                            for p in self.problems(records=None)))
+        stale = [dict(r) for r in self.records]
+        stale[0]["patches"] = {"0001-follow-the-dsa-design.patch": "0" * 64}
+        self.assertTrue(any("other patches" in p for p in self.problems(records=stale)))
+        # SettingsLib's patches are part of what Settings and PermissionController are built from.
+        settings = next(r for r in self.records if r["name"] == "settings")
+        self.assertIn("settingslib", settings["libraries"])
+        changed = [dict(r) for r in self.records]
+        for record in changed:
+            if record["name"] == "settings":
+                record["libraries"] = {"settingslib": {**record["libraries"]["settingslib"], "commit": "0" * 40}}
+        self.assertTrue(any("Settings screens were built from another source" in p
+                            for p in self.problems(records=changed)))
+        missing = {k: v for k, v in self.files.items() if "IntentResolver" not in k}
+        self.assertTrue(any("no Share sheet screens" in p for p in self.problems(missing)))
+        renamed = dict(self.files)
+        renamed["SYSTEM/priv-app/PackageInstaller/PackageInstaller.apk"] = fake_apk("com.example")
+        self.assertTrue(any("is com.example, not com.android.packageinstaller" in p for p in self.problems(renamed)))
+        no_apex = {k: v for k, v in self.files.items() if "apex" not in k}
+        self.assertTrue(any("no permission APEX" in p for p in self.problems(no_apex)))
+
+    def test_fr34_system_screens_are_signed_on_their_own_partition_and_keep_their_configuration(self):
+        by_name = {app["name"]: app for app in self.apps}
+        self.assertEqual(
+            make_image.default_app_apkcerts(by_name["settings"]),
+            'name="Settings.apk" certificate="build/make/target/product/security/platform.x509.pem" '
+            'private_key="build/make/target/product/security/platform.pk8" partition="system_ext"')
+        self.assertIn('partition="system"', make_image.default_app_apkcerts(by_name["intentresolver"]))
+        self.assertTrue(make_image.in_apex(by_name["permissioncontroller"]))
+        self.assertFalse(make_image.in_apex(by_name["settings"]))
+        # The default apps' sysconfig is not theirs.
+        names = {app["name"] for app in make_image.default_apps()}
+        self.assertFalse(names & set(by_name))
 
 
 if __name__ == "__main__":

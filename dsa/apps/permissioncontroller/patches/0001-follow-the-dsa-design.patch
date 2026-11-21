@@ -1,0 +1,96 @@
+Follow DSA's design: a bold title in the permission dialog, and its buttons stacked as
+full-width rounded tonal buttons in the system font.
+
+diff --git a/res/values/styles.xml b/res/values/styles.xml
+--- a/res/values/styles.xml
++++ b/res/values/styles.xml
+@@ -186,2 +186,4 @@
+            parent="@android:style/TextAppearance.DeviceDefault.WindowTitle">
++        <item name="android:textStyle">bold</item>
++        <item name="android:fontVariationSettings">'wght' 700</item>
+         <item name="android:layout_width">match_parent</item>
+diff --git a/res/values-v31/styles.xml b/res/values-v31/styles.xml
+--- a/res/values-v31/styles.xml
++++ b/res/values-v31/styles.xml
+@@ -67,8 +67,8 @@
+         <item name="android:layout_marginRight">24dp</item>
+-        <item name="android:layout_marginTop">2dp</item>
+-        <item name="android:layout_marginBottom">2dp</item>
+-        <item name="android:fontFamily">google-sans-medium</item>
++        <item name="android:layout_marginTop">4dp</item>
++        <item name="android:layout_marginBottom">4dp</item>
++        <item name="android:fontFamily">sans-serif-medium</item>
+         <item name="android:textSize">14sp</item>
+-        <item name="android:textColor">@android:color/system_neutral1_900</item>
+-        <item name="android:background">@drawable/grant_permissions_buttons_top</item>
++        <item name="android:textColor">?android:attr/textColorPrimary</item>
++        <item name="android:background">@drawable/dsa_grant_button</item>
+     </style>
+@@ -82,8 +82,8 @@
+         <item name="android:layout_marginRight">24dp</item>
+-        <item name="android:layout_marginTop">2dp</item>
+-        <item name="android:layout_marginBottom">2dp</item>
+-        <item name="android:fontFamily">google-sans-medium</item>
++        <item name="android:layout_marginTop">4dp</item>
++        <item name="android:layout_marginBottom">4dp</item>
++        <item name="android:fontFamily">sans-serif-medium</item>
+         <item name="android:textSize">14sp</item>
+-        <item name="android:textColor">@android:color/system_neutral1_900</item>
+-        <item name="android:background">@drawable/grant_permissions_buttons_middle</item>
++        <item name="android:textColor">?android:attr/textColorPrimary</item>
++        <item name="android:background">@drawable/dsa_grant_button</item>
+     </style>
+@@ -97,8 +97,8 @@
+         <item name="android:layout_marginRight">24dp</item>
+-        <item name="android:layout_marginTop">2dp</item>
+-        <item name="android:layout_marginBottom">2dp</item>
+-        <item name="android:fontFamily">google-sans-medium</item>
++        <item name="android:layout_marginTop">4dp</item>
++        <item name="android:layout_marginBottom">4dp</item>
++        <item name="android:fontFamily">sans-serif-medium</item>
+         <item name="android:textSize">14sp</item>
+-        <item name="android:textColor">@android:color/system_neutral1_900</item>
+-        <item name="android:background">@drawable/grant_permissions_buttons_bottom</item>
++        <item name="android:textColor">?android:attr/textColorPrimary</item>
++        <item name="android:background">@drawable/dsa_grant_button</item>
+     </style>
+diff --git a/res/drawable-v31/dsa_grant_button.xml b/res/drawable-v31/dsa_grant_button.xml
+new file mode 100644
+--- /dev/null
++++ b/res/drawable-v31/dsa_grant_button.xml
+@@ -0,0 +1,15 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!--
++     SPDX-FileCopyrightText: The Desktop Subsystem for Android authors
++     SPDX-License-Identifier: Apache-2.0
++-->
++<!-- A full-width, fully rounded tonal button, as the buttons of DSA's dialogs are. -->
++<ripple xmlns:android="http://schemas.android.com/apk/res/android"
++    android:color="?android:attr/colorControlHighlight">
++    <item>
++        <shape android:shape="rectangle">
++            <solid android:color="@android:color/system_accent2_100" />
++            <corners android:radius="28dp" />
++        </shape>
++    </item>
++</ripple>
+diff --git a/res/drawable-night-v31/dsa_grant_button.xml b/res/drawable-night-v31/dsa_grant_button.xml
+new file mode 100644
+--- /dev/null
++++ b/res/drawable-night-v31/dsa_grant_button.xml
+@@ -0,0 +1,15 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!--
++     SPDX-FileCopyrightText: The Desktop Subsystem for Android authors
++     SPDX-License-Identifier: Apache-2.0
++-->
++<!-- A full-width, fully rounded tonal button, as the buttons of DSA's dialogs are. -->
++<ripple xmlns:android="http://schemas.android.com/apk/res/android"
++    android:color="?android:attr/colorControlHighlight">
++    <item>
++        <shape android:shape="rectangle">
++            <solid android:color="@android:color/system_accent2_700" />
++            <corners android:radius="28dp" />
++        </shape>
++    </item>
++</ripple>
