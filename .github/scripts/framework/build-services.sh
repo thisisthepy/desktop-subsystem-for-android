@@ -6,6 +6,9 @@
 #
 #   build-services.sh <tree> <android16|android17> <out folder> [<apps folder>]
 #
+# DSA_TREE_PART chooses what one runner builds from the tree: "services" (services.jar and
+# DocumentsUI), "screens" (the system screens alone, no services.jar), or, unset, everything.
+#
 # With <apps folder>, the same tree also builds every app dsa/apps/apps.json builds in the tree
 # (DocumentsUI and the system screens: Settings, PermissionController, PackageInstaller and the
 # share sheet), with DSA's patches, and leaves each there as dsa/apps/apps.py records an app.
@@ -244,15 +247,18 @@ uv run "$repo/dsa/guest/framework/framework_lock.py" soong-memory-limit "$top/bu
 # analyse the whole tree again. DSA_SERVICES_LOCK, when set, is the lock the tree was fetched
 # from, which says the tree has each at the commit dsa/apps/apps.json pins.
 apps_out="${4:-}"
+tree_part="${DSA_TREE_PART:-}"
+part_args=()
+[[ -z "$tree_part" ]] || part_args=(--part "$tree_part")
 tree_apps=()
 if [[ -n "$apps_out" ]]; then
   lock_args=()
   [[ -z "${DSA_SERVICES_LOCK:-}" ]] || lock_args=(--lock "$DSA_SERVICES_LOCK")
-  for part in $(uv run "$repo/dsa/apps/apps.py" tree-order | jq -r '.[]'); do
+  for part in $(uv run "$repo/dsa/apps/apps.py" tree-order "${part_args[@]}" | jq -r '.[]'); do
     uv run "$repo/dsa/apps/apps.py" patch-tree "$part" --top "$top" --android "$android" \
       --release "$release" "${lock_args[@]}"
   done
-  mapfile -t tree_apps < <(uv run "$repo/dsa/apps/apps.py" list --kind aosp | jq -r '.[]')
+  mapfile -t tree_apps < <(uv run "$repo/dsa/apps/apps.py" tree-apps "${part_args[@]}" | jq -r '.[]')
 fi
 
 cd "$top"
@@ -307,10 +313,12 @@ ninja_file="$(ls -t out/combined-*.ninja 2>/dev/null | head -1 || true)"
 ninja=prebuilts/build-tools/linux-x86/bin/ninja
 
 # What each install rule copies: the module's own output, which the install path is a copy of.
-outputs="$(uv run "$repo/dsa/guest/framework/framework_lock.py" java-outputs)"
+outputs=""
+[[ "$tree_part" == screens ]] || outputs="$(uv run "$repo/dsa/guest/framework/framework_lock.py" java-outputs)"
 names=()
 jars=()
 while read -r name installed; do
+  [[ -n "$name" ]] || continue
   query="$("$ninja" -f "$ninja_file" -t query "$product_out/$installed")" \
     || { echo "::error::ninja knows no rule for $product_out/$installed"; exit 1; }
   if ! jar="$(uv run "$repo/dsa/guest/framework/framework_lock.py" install-source <<< "$query")"; then
@@ -360,8 +368,10 @@ if [[ -n "${DSA_ANALYSIS_SWAP:-}" && -f "$DSA_ANALYSIS_SWAP" ]]; then
 fi
 room "before the build"
 
-echo "building ${jars[*]} for $product with release configuration $release"
-build "the services.jar build" "${jars[@]}"
+if (( ${#jars[@]} )); then
+  echo "building ${jars[*]} for $product with release configuration $release"
+  build "the services.jar build" "${jars[@]}"
+fi
 room "after the build"
 
 mkdir -p "$out"

@@ -221,7 +221,11 @@
         "tree_path": "packages/modules/Permission/PermissionController",
         "module": "PermissionController",
         "apex": "com.android.permission",
-        "apk_pattern": "/PermissionController/PermissionController/android_common_apex[0-9]*/PermissionController\\.apk$",
+        "apk_patterns": [
+          "/PermissionController/PermissionController/android_common_apex[0-9]+/PermissionController[.]apk$",
+          "/PermissionController/PermissionController/android_common_com[.]android[.]permission/PermissionController[.]apk$",
+          "/PermissionController/PermissionController/android_common/PermissionController[.]apk$"
+        ],
         "java": "src",
         "res": "res",
         "preference": false

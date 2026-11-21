@@ -18,3 +18,11 @@ in the same APK would not build.
   activity follows the same rule, where SettingsLib folded it always.
 - The large and the folded title are bold, with the variable font's weight set to match, and
   the title shrinks into the toolbar as the list scrolls rather than fading.
+- Every preference group is a card on its own surface (the lowest surface container in light,
+  a high one in dark), which stands clear of the window behind it. The outer corners are 26 dp
+  and the corners between two rows of a card 6 dp, and each group title has 28 dp of room above
+  it, so one group reads apart from the next.
+- A pressed row morphs its shape: its corners take the outer radius while it is held, and fade
+  back when it is let go. It also sinks a little and springs back, drawn with a path shaped like
+  a spring's response, as the framework's animators take a path and not spring physics.
+- Group titles are emphasized: bold, in the accent colour.

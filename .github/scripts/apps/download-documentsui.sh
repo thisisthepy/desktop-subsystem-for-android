@@ -2,7 +2,11 @@
 # Downloads the image's patched DocumentsUI for one Android version into a folder of default
 # apps (make-image.py --default-apps).
 #
-#   download-documentsui.sh <android major> <out folder>
+#   download-documentsui.sh <android major> <out folder> [<part>]
+#
+# <part> is documentsui (the default) or system-screens: the Framework build keeps the system
+# screens (Settings, PermissionController, PackageInstaller, IntentResolver), which a runner of
+# their own builds, as default-app-system-screens-android<major>-<lock version>.
 #
 # DocumentsUI builds only in an Android tree, so the Framework build's services job builds it in
 # the tree it already has for services.jar and keeps it as
@@ -16,10 +20,11 @@ set -euo pipefail
 
 major="$1"
 out="$2"
+part="${3:-documentsui}"
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 android="android$major"
 version="$(python3 "$repo_root/dsa/guest/framework/framework_lock.py" version "$android")"
-name="default-app-documentsui-$android-$version"
+name="default-app-$part-$android-$version"
 echo "looking for $name"
 for run in $(gh run list --repo "$GITHUB_REPOSITORY" --workflow framework.yml --branch develop \
                --limit 30 --json databaseId --jq '.[].databaseId'); do
@@ -31,5 +36,5 @@ for run in $(gh run list --repo "$GITHUB_REPOSITORY" --workflow framework.yml --
   ls -l "$out"
   exit 0
 done
-echo "::error::No Framework build run on develop has $name, so the image would have no patched DocumentsUI. Run the Framework build workflow with android set to $android."
+echo "::error::No Framework build run on develop has $name, so the image would have no patched $part. Run the Framework build workflow with android set to $android."
 exit 1

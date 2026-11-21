@@ -328,8 +328,15 @@ jobs:
   # swapped harder than in the runs that passed kept the agent waiting until GitHub gave up. So
   # the build now runs in a cgroup of its own whose memory.high leaves the runner a share the
   # build's reclaim never touches.
+  #
+  # The same tree builds the apps dsa/apps builds in an Android tree. DocumentsUI is small and
+  # goes with services.jar. The system screens (Settings, PermissionController, PackageInstaller,
+  # IntentResolver) together take about as long to compile as services.jar, and Settings alone
+  # needs several GiB of disk for its intermediates, so they build on a runner of their own
+  # (part "screens"): the same fetch, the same analysis, and the four APKs, with the time and
+  # disk services.jar's runner has to itself.
   services:
-    name: Build services.jar (ubuntu-24.04, ${{ matrix.android }})
+    name: ${{ matrix.part == 'services' && 'Build services.jar' || 'Build the system screens' }} (ubuntu-24.04, ${{ matrix.android }})
     needs: versions
     runs-on: ubuntu-24.04
     timeout-minutes: 355
@@ -337,8 +344,11 @@ jobs:
       fail-fast: false
       matrix:
         android: ${{ fromJSON(needs.versions.outputs.android) }}
+        part: [services, screens]
     env:
       ANDROID_BRANCH: ${{ matrix.android }}
+      # Which part of the tree's builds this runner makes (build-services.sh).
+      DSA_TREE_PART: ${{ matrix.part }}
     steps:
       - uses: actions/checkout@v4
 
@@ -463,7 +473,7 @@ jobs:
       # with the build in its own cgroup the runner answers however long the analysis takes, so
       # the bound now only keeps a slower analysis (it has less memory than before) and the
       # Java build after it (up to 92 minutes so far) within DSA_BUILD_MINUTES.
-      - name: Build services.jar
+      - name: Build ${{ matrix.part == 'services' && 'services.jar and DocumentsUI' || 'the system screens' }}
         timeout-minutes: 300
         env:
           DSA_BUILD_MINUTES: 285
@@ -482,7 +492,7 @@ jobs:
       # Kept even when the DocumentsUI build after it failed: services.jar was in its folder by
       # then.
       - name: Keep services.jar
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && matrix.part == 'services' }}
         uses: actions/upload-artifact@v4
         with:
           name: framework-services-${{ matrix.android }}-${{ steps.pins.outputs.version }}
@@ -493,9 +503,20 @@ jobs:
       # The patched DocumentsUI and its record, which the image workflows take for every image
       # of this Android version (.github/scripts/apps/download-documentsui.sh).
       - name: Keep DocumentsUI
+        if: ${{ matrix.part == 'services' }}
         uses: actions/upload-artifact@v4
         with:
           name: default-app-documentsui-${{ matrix.android }}-${{ steps.pins.outputs.version }}
+          path: ${{ env.DSA_TRANSLATOR_WORK }}/default-apps/
+          if-no-files-found: error
+          retention-days: 90
+
+      # The system screens and their records, which the image workflows take the same way.
+      - name: Keep the system screens
+        if: ${{ matrix.part == 'screens' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: default-app-system-screens-${{ matrix.android }}-${{ steps.pins.outputs.version }}
           path: ${{ env.DSA_TRANSLATOR_WORK }}/default-apps/
           if-no-files-found: error
           retention-days: 90
@@ -504,7 +525,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: framework-services-logs-${{ matrix.android }}
+          name: framework-${{ matrix.part }}-logs-${{ matrix.android }}
           path: |
             ${{ env.DSA_TRANSLATOR_WORK }}/aosp/out/error.log
             ${{ env.DSA_TRANSLATOR_WORK }}/aosp/out/soong.log

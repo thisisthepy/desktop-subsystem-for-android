@@ -28,7 +28,9 @@ install dialogs (PackageInstaller) and the share sheet (IntentResolver). They ar
 patches, in place of the published APK; it keeps its package, its partition and its
 configuration. SettingsLib, which Settings and PermissionController both build their screens
 from, is a library in `apps.json`: its patches go over the tree once, before the apps, and each
-app's record names them. The system screen overlays stay for what an overlay can change, and are
+app's record names them. They build in the same tree as DocumentsUI but on a runner of their own
+(the Framework build's "screens" part), so services.jar keeps its runner's time and disk. The
+system screen overlays stay for what an overlay can change, and are
 built against these APKs.
 
 | Folder | Screens | Upstream |

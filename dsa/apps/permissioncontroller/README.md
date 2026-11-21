@@ -11,5 +11,8 @@ published APK, then makes its compiled edits (the cards) and packs the APEX agai
 `patches/0001-follow-the-dsa-design.patch`:
 
 - The permission dialog's title is bold.
-- The dialog's buttons asked for a font family the guest does not ship; they use the system's
-  medium sans serif, so the font is the image's own and not a fallback chosen by chance.
+- The dialog's three answers are too long to sit side by side, so they stay stacked, each a
+  full-width, fully rounded tonal button (the secondary container colour, in light and dark)
+  with room between them, as the buttons of DSA's dialogs are, in place of the segmented group.
+- The buttons asked for a font family the guest does not ship; they use the system's medium
+  sans serif, so the font is the image's own and not a fallback chosen by chance.

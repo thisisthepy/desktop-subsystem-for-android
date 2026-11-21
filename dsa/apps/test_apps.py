@@ -244,7 +244,7 @@ class SystemScreensTests(unittest.TestCase):
         self.assertEqual(self.screens["permissioncontroller"]["libraries"], ["settingslib"])
 
     def test_fr34_settingslib_is_laid_over_the_tree_once_before_the_apps(self):
-        order = apps.tree_order(self.manifest)
+        order = apps.tree_order(apps=self.manifest)
         self.assertEqual(order[0], "settingslib")
         self.assertEqual(order.count("settingslib"), 1)
         self.assertEqual(set(order[1:]), {"documentsui", *self.screens})
@@ -278,6 +278,62 @@ class SystemScreensTests(unittest.TestCase):
                          targets[0].split(": ")[0])
         with self.assertRaises(apps.AppsError):
             apps.apk_target("permissioncontroller", targets[2:], self.manifest)
+        # The module's Android.bp names the platform too (apex_available), so a tree whose APEX
+        # variant is named otherwise still has the platform variant, built from the same sources.
+        base = "out/soong/.intermediates/packages/modules/Permission/PermissionController/PermissionController/"
+        platform = [base + "android_common/PermissionController.apk: phony", targets[2]]
+        self.assertEqual(apps.apk_target("permissioncontroller", platform, self.manifest),
+                         base + "android_common/PermissionController.apk")
+        named = [base + "android_common_com.android.permission/PermissionController.apk: phony", *platform]
+        self.assertEqual(apps.apk_target("permissioncontroller", named, self.manifest),
+                         base + "android_common_com.android.permission/PermissionController.apk")
+        # The APEX variant comes first when the tree has both.
+        self.assertEqual(apps.apk_target("permissioncontroller", [targets[0], *platform], self.manifest),
+                         targets[0].split(": ")[0])
+
+    def test_fr34_the_system_screens_build_on_a_runner_of_their_own(self):
+        self.assertEqual(apps.tree_apps("services", self.manifest), ["documentsui"])
+        self.assertEqual(set(apps.tree_apps("screens", self.manifest)), set(self.screens))
+        self.assertEqual(apps.tree_order("screens", self.manifest)[0], "settingslib")
+        self.assertNotIn("settingslib", apps.tree_order("services", self.manifest))
+        workflow = (HERE.parents[1] / ".github/workflows/framework.yml").read_text()
+        self.assertIn("part: [services, screens]", workflow)
+        self.assertIn("DSA_TREE_PART: ${{ matrix.part }}", workflow)
+        self.assertIn("default-app-system-screens-${{ matrix.android }}", workflow)
+        script = (HERE.parents[1] / ".github/scripts/framework/build-services.sh").read_text()
+        self.assertIn('[[ "$tree_part" == screens ]] || outputs=', script)
+        for image in ("release-image.yml", "test-image.yml"):
+            text = (HERE.parents[1] / ".github/workflows" / image).read_text()
+            self.assertIn("download-documentsui.sh ${{ matrix.android }} .scratch/default-apps system-screens", text)
+
+    def test_fr34_settings_lists_are_cards_with_room_between_groups(self):
+        lib = "".join(p.read_text() for p in apps.patches("settingslib"))
+        # A card surface that stands clear of the window, in light and dark.
+        self.assertIn("+    <color name=\"settingslib_dsa_card\">@color/settingslib_materialColorSurfaceContainerLowest</color>", lib)
+        self.assertIn("b/SettingsTheme/res/values-night-v36/settingslib_dsa_cards.xml", lib)
+        self.assertIn("+    <dimen name=\"settingslib_preference_corner_radius\">26dp</dimen>", lib)
+        self.assertIn("+        <item name=\"android:paddingTop\">@dimen/settingslib_dsa_group_gap</item>", lib)
+        for card in ("", "_top", "_center", "_bottom"):
+            self.assertIn(f"b/SettingsTheme/res/drawable-v36/settingslib_round_background{card}.xml", lib)
+        # Emphasized group titles in the accent colour.
+        self.assertIn("+        <item name=\"android:textColor\">@color/settingslib_materialColorPrimary</item>", lib)
+
+    def test_fr34_pressed_rows_morph_their_shape_and_spring(self):
+        lib = "".join(p.read_text() for p in apps.patches("settingslib"))
+        self.assertIn("+            <item android:state_pressed=\"true\">", lib)
+        self.assertIn("android:enterFadeDuration=\"@integer/settingslib_dsa_morph_ms\"", lib)
+        self.assertIn("R.animator.settingslib_dsa_press_spring", lib)
+        self.assertIn("b/SettingsTheme/res/interpolator-v36/settingslib_dsa_spring.xml", lib)
+        self.assertIn("+<pathInterpolator", lib)
+
+    def test_fr34_the_permission_dialog_buttons_are_full_width_rounded_tonal_buttons(self):
+        text = "".join(p.read_text() for p in apps.patches("permissioncontroller"))
+        self.assertEqual(text.count("+        <item name=\"android:background\">@drawable/dsa_grant_button</item>"), 3)
+        self.assertIn("b/res/drawable-v31/dsa_grant_button.xml", text)
+        self.assertIn("b/res/drawable-night-v31/dsa_grant_button.xml", text)
+        self.assertIn("+            <corners android:radius=\"28dp\" />", text)
+        self.assertIn("@android:color/system_accent2_100", text)
+        self.assertIn("@android:color/system_accent2_700", text)
 
 
 if __name__ == "__main__":

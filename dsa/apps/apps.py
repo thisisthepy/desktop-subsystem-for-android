@@ -5,7 +5,8 @@
     uv run dsa/apps/apps.py build <app> --out DIR [--src DIR]
     uv run dsa/apps/apps.py patch-tree documentsui --top TREE --android android17 --release cp2a [--lock LOCK]
     uv run dsa/apps/apps.py record documentsui --apk APK --android android17 --out DIR
-    uv run dsa/apps/apps.py tree-order
+    uv run dsa/apps/apps.py tree-order [--part services|screens]
+    uv run dsa/apps/apps.py tree-apps [--part services|screens]
     uv run dsa/apps/apps.py apk-target permissioncontroller < targets.txt
 
 The system screens (Settings, PermissionController, PackageInstaller, the share sheet) are
@@ -266,23 +267,41 @@ def patch_tree(name, top, android, release, lock=None):
         set_flags(app, top, release)
 
 
-def tree_order(apps=None):
-    """What patch-tree lays over the Android tree, in order: the libraries first, each once,
-    then the apps built in the tree."""
+def tree_apps(part=None, apps=None):
+    """The apps built in the Android tree, for one part of the Framework build: "services" (the
+    default apps built there, DocumentsUI, which go with services.jar), "screens" (the system
+    screens, which a runner of their own builds), or every one when `part` is None."""
     apps = apps or load()
-    return ([lib["name"] for lib in apps.get("libraries", [])]
-            + [a["name"] for a in apps["apps"] if a["build"]["kind"] == "aosp"])
+    roles = {"services": {"default"}, "screens": {"system"}, None: {"default", "system"}}[part]
+    return [a["name"] for a in apps["apps"]
+            if a["build"]["kind"] == "aosp" and a.get("role", "default") in roles]
+
+
+def tree_order(part=None, apps=None):
+    """What patch-tree lays over the Android tree for `part` (see tree_apps), in order: the
+    libraries those apps build from first, each once, then the apps."""
+    apps = apps or load()
+    names = tree_apps(part, apps)
+    needed = {lib for name in names for lib in app_entry(name, apps).get("libraries", [])}
+    return [lib["name"] for lib in apps.get("libraries", []) if lib["name"] in needed] + names
 
 
 def apk_target(name, targets, apps=None):
     """The ninja target that is the APK of `name`, an app built in the tree inside an APEX
     (PermissionController), whose APK has no install path of its own: the one target of
-    `targets` (lines of `ninja -t targets all`) that matches the app's apk_pattern."""
-    pattern = re.compile(app_entry(name, apps)["build"]["apk_pattern"])
-    found = sorted({t.split(": ")[0].strip() for t in targets if pattern.search(t.split(": ")[0].strip())})
-    if len(found) != 1:
-        raise AppsError(f"expected one APK target of {name}, found {', '.join(found) or 'none'}")
-    return found[0]
+    `targets` (lines of `ninja -t targets all`) that the first of the app's apk_patterns with any
+    match names. The patterns go from the APEX's own variant (named apex<min_sdk>, or after the
+    APEX in some Soong versions) to the platform variant, which the module also has
+    (apex_available names the platform) and which is built from the same sources."""
+    paths = {t.split(": ")[0].strip() for t in targets}
+    patterns = app_entry(name, apps)["build"]["apk_patterns"]
+    for pattern in patterns:
+        found = sorted(p for p in paths if re.search(pattern, p))
+        if len(found) > 1:
+            raise AppsError(f"expected one APK target of {name} for {pattern}, found {', '.join(found)}")
+        if found:
+            return found[0]
+    raise AppsError(f"the build has no APK target of {name}; looked for {', '.join(patterns)}")
 
 
 def main(argv=None):
@@ -290,7 +309,10 @@ def main(argv=None):
     commands = parser.add_subparsers(dest="command", required=True)
     listing = commands.add_parser("list", help="print the apps' names as a JSON list")
     listing.add_argument("--kind", choices=["gradle", "aosp"])
-    commands.add_parser("tree-order", help="print what patch-tree lays over the tree, in order, as a JSON list")
+    ordering = commands.add_parser("tree-order", help="print what patch-tree lays over the tree, in order, as a JSON list")
+    ordering.add_argument("--part", choices=["services", "screens"])
+    in_tree = commands.add_parser("tree-apps", help="print the apps one part of the tree build makes, as a JSON list")
+    in_tree.add_argument("--part", choices=["services", "screens"])
     target = commands.add_parser("apk-target", help="pick an APEX app's APK from `ninja -t targets all` on stdin")
     target.add_argument("app")
     fetching = commands.add_parser("fetch", help="clone, check and patch an app")
@@ -317,7 +339,9 @@ def main(argv=None):
             print(json.dumps([a["name"] for a in load()["apps"]
                               if args.kind is None or a["build"]["kind"] == args.kind]))
         elif args.command == "tree-order":
-            print(json.dumps(tree_order()))
+            print(json.dumps(tree_order(args.part)))
+        elif args.command == "tree-apps":
+            print(json.dumps(tree_apps(args.part)))
         elif args.command == "apk-target":
             print(apk_target(args.app, sys.stdin.read().splitlines()))
         elif args.command == "fetch":
