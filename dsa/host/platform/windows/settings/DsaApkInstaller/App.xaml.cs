@@ -21,12 +21,17 @@ public partial class App : Application
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)]
     private static extern int SetCurrentProcessExplicitAppUserModelID(string appId);
 
+    static App()
+    {
+        // Software rendering, as the settings app, set before the application's resources load
+        // and before the first window: hardware rendering creates a Direct3D device in the
+        // graphics driver, with private heaps of its own, for one window of text and a
+        // progress bar.
+        System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
+    }
+
     protected override void OnStartup(StartupEventArgs e)
     {
-        // Software rendering before the first window, as the settings app: hardware rendering
-        // loads Direct3D, the shader compiler and the graphics driver, with private heaps of
-        // their own, for one window of text and a progress bar.
-        System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
         base.OnStartup(e);
         _ = SetCurrentProcessExplicitAppUserModelID(AppUserModelId);
         // `--lang ko-KR` shows the app in another language than the user's display language,

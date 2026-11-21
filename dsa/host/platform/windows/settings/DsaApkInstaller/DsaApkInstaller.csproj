@@ -30,7 +30,24 @@
     <!-- Precompiled like the settings app it is published beside, so the assemblies they
          share stay ReadyToRun whichever is published last. -->
     <PublishReadyToRun>true</PublishReadyToRun>
+    <!-- The settings app's runtime settings, for the same reasons (DsaSettings.csproj): one
+         workstation heap with no background GC thread, no profile instrumentation, and
+         ReadyToRun code that is never compiled a second time. -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <TieredPGO>false</TieredPGO>
+    <TieredCompilation>false</TieredCompilation>
   </PropertyGroup>
+
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="5" />
+    <!-- Windows' national language support instead of ICU and the collators it builds in the
+         process's heap. -->
+    <RuntimeHostConfigurationOption Include="System.Globalization.UseNls" Value="true" />
+    <!-- Touch and pen through Windows' pointer messages, without the Tablet PC input libraries
+         (wisp, tpcps, PenIMC) and their two input threads. -->
+    <RuntimeHostConfigurationOption Include="Switch.System.Windows.Input.Stylus.EnablePointerSupport" Value="true" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="WPF-UI" Version="3.0.5" />

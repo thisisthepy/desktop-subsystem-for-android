@@ -51,4 +51,43 @@ public class Nfr1ApkInstallerMemoryTests
         Assert.Contains("Dsa.Settings.WorkingSetTrim.PageLeft(this)", window);
         Assert.True(MemoryTrim.After(WindowChange.PageLeft).CompactHeap);
     }
+
+    [Fact]
+    public void Nfr1_the_apk_installer_sets_software_rendering_before_its_resources_load()
+    {
+        var app = Read("DsaApkInstaller", "App.xaml.cs");
+        var staticCtor = app.IndexOf("static App()", StringComparison.Ordinal);
+        Assert.True(staticCtor >= 0, "the software mode is not set in the static constructor");
+        var software = app.IndexOf("RenderMode.SoftwareOnly", staticCtor, StringComparison.Ordinal);
+        Assert.True(software > staticCtor && software < app.IndexOf("OnStartup(", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Nfr1_apk_installer_tool_tips_draw_no_shadow_effect()
+    {
+        var xaml = System.Xml.Linq.XDocument.Parse(Read("DsaApkInstaller", "App.xaml"));
+        System.Xml.Linq.XNamespace p = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        var toolTip = xaml.Descendants(p + "Style").Single(s => (string?)s.Attribute("TargetType") == "ToolTip");
+        Assert.Contains(toolTip.Elements(p + "Setter"), s => (string?)s.Attribute("Property") == "Template");
+        Assert.Contains(toolTip.Elements(p + "Setter"),
+            s => (string?)s.Attribute("Property") == "Effect" && (string?)s.Attribute("Value") == "{x:Null}");
+        Assert.DoesNotContain(xaml.Descendants(), e => e.Name.LocalName.EndsWith("Effect", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Nfr1_the_apk_installer_runs_with_the_settings_apps_runtime_options()
+    {
+        var project = System.Xml.Linq.XDocument.Parse(Read("DsaApkInstaller", "DsaApkInstaller.csproj"));
+        string? Property(string name) => (string?)project.Descendants(name).SingleOrDefault();
+        string? Option(string name) => project.Descendants("RuntimeHostConfigurationOption")
+            .Where(o => (string?)o.Attribute("Include") == name)
+            .Select(o => (string?)o.Attribute("Value")).SingleOrDefault();
+        Assert.Equal("false", Property("ServerGarbageCollection"));
+        Assert.Equal("false", Property("ConcurrentGarbageCollection"));
+        Assert.Equal("false", Property("TieredPGO"));
+        Assert.Equal("false", Property("TieredCompilation"));
+        Assert.Equal("5", Option("System.GC.ConserveMemory"));
+        Assert.Equal("true", Option("System.Globalization.UseNls"));
+        Assert.Equal("true", Option("Switch.System.Windows.Input.Stylus.EnablePointerSupport"));
+    }
 }

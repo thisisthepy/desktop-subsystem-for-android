@@ -36,6 +36,35 @@ and checking them by hand on real hardware goes on with every release, so please
 what you find. Linux and macOS are in progress and not released (see
 [Supported platforms](#supported-platforms)).
 
+**DSA 1.0 is here.** The first stable release brings Android apps back to the Windows
+desktop, each in a window of its own. Watch the launch film:
+
+[![DSA 1.0 launch film](https://img.youtube.com/vi/4VgRY6QKiwM/maxresdefault.jpg)](https://www.youtube.com/watch?v=4VgRY6QKiwM)
+
+## Supported platforms
+
+| Host | Status |
+|---|---|
+| Windows 11, x64 | Released as `DSA-v<version>-win-x64-setup.exe` |
+| Windows 11, ARM64 | Released as `DSA-v<version>-win-arm64-setup.exe`. Android is ARM64 too, so ARM apps run without translation |
+| Linux (x64, ARM64) | In progress, not released. The KVM host, the Wayland compositor and the `.deb` and `.rpm` packages build and run in CI |
+| macOS (Apple silicon) | In progress, not released. The host on Apple's Virtualization framework and its app bundle build in CI |
+
+### Android versions
+
+DSA supports the newest two Android major versions: today Android 16 and Android 17. A
+version leaves support when the second newer major ships, so Android 16 is supported until
+Android 18 is released. The image updater moves each user to a supported version and never
+to a lower major on its own. You can choose either supported version in DSA Settings or
+with `dsa android use`; moving to the older one erases the Android data, because Android
+cannot read data a newer version wrote.
+
+<p align="center">
+  <img src=".github/assets/android-support.svg" alt="Timeline of the Android versions DSA supports: Android 16 and 17 from DSA 0.1.0 in October 2026, Android 18 and 19 expected in 2027 and 2028" width="860">
+</p>
+
+Dates after today are expected dates, not releases.
+
 ## Features
 
 **Windows and input**
@@ -146,7 +175,7 @@ Settings or the command line.
   play protected video. At security level L3, streaming services send standard definition
   at most, so watch in high definition in a Windows browser or app.
 - **ARM translation.** On x64 PCs, apps built only for ARM run through a translator. The
-  open source translator Digitalis comes with the x64 image and is used from the first
+  open source translator [Digitalis](https://digitalisx64.github.io/) comes with the x64 image and is used from the first
   start. You can replace it with Google's translator (`dsa arm-translation fetch google`)
   or a package of your own. Only 64-bit ARM apps (`arm64-v8a`) run. On ARM64 PCs, Android
   runs ARM apps itself.
@@ -261,30 +290,6 @@ for Orca; Linux is not released yet. The macOS host does not export app trees ye
 screen reader and its version, the app, what you did, what you heard and what you expected.
 A diagnostic bundle from `dsa logs collect -o diag.zip` helps. The
 [DSA Discord](https://discord.gg/MtpQnR4eQQ) is open for questions too.
-
-## Supported platforms
-
-| Host | Status |
-|---|---|
-| Windows 11, x64 | Released as `DSA-v<version>-win-x64-setup.exe` |
-| Windows 11, ARM64 | Released as `DSA-v<version>-win-arm64-setup.exe`. Android is ARM64 too, so ARM apps run without translation |
-| Linux (x64, ARM64) | In progress, not released. The KVM host, the Wayland compositor and the `.deb` and `.rpm` packages build and run in CI |
-| macOS (Apple silicon) | In progress, not released. The host on Apple's Virtualization framework and its app bundle build in CI |
-
-### Android versions
-
-DSA supports the newest two Android major versions: today Android 16 and Android 17. A
-version leaves support when the second newer major ships, so Android 16 is supported until
-Android 18 is released. The image updater moves each user to a supported version and never
-to a lower major on its own. You can choose either supported version in DSA Settings or
-with `dsa android use`; moving to the older one erases the Android data, because Android
-cannot read data a newer version wrote.
-
-<p align="center">
-  <img src=".github/assets/android-support.svg" alt="Timeline of the Android versions DSA supports: Android 16 and 17 from DSA 0.1.0 in October 2026, Android 18 and 19 expected in 2027 and 2028" width="860">
-</p>
-
-Dates after today are expected dates, not releases.
 
 ## Install
 

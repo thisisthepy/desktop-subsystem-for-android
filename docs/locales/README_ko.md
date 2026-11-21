@@ -33,6 +33,35 @@ DSA는 Android를 전용 경량 VM에서 실행하고, Android 태스크마다 �
 하드웨어에서 손으로 하는 확인은 릴리스마다 이어집니다. 발견한 것이 있으면 알려 주세요.
 Linux와 macOS는 진행 중이며 아직 배포하지 않았습니다([지원 플랫폼](#지원-플랫폼) 참고).
 
+**DSA 1.0이 나왔습니다.** 첫 정식 릴리스로, Android 앱이 다시 Windows 데스크톱에서 앱마다
+자기 창으로 열립니다. 출시 영상을 보세요.
+
+[![DSA 1.0 launch film](https://img.youtube.com/vi/4VgRY6QKiwM/maxresdefault.jpg)](https://www.youtube.com/watch?v=4VgRY6QKiwM)
+
+## 지원 플랫폼
+
+| 호스트 | 상태 |
+|---|---|
+| Windows 11, x64 | `DSA-v<version>-win-x64-setup.exe`로 배포합니다 |
+| Windows 11, ARM64 | `DSA-v<version>-win-arm64-setup.exe`로 배포합니다. Android도 ARM64이므로 ARM 앱이 번역 없이 실행됩니다 |
+| Linux (x64, ARM64) | 진행 중이며 아직 배포하지 않았습니다. KVM 호스트, Wayland 합성기, `.deb`와 `.rpm` 패키지를 CI에서 빌드하고 실행합니다 |
+| macOS (Apple silicon) | 진행 중이며 아직 배포하지 않았습니다. Apple Virtualization 프레임워크 기반 호스트와 그 앱 번들을 CI에서 빌드합니다 |
+
+### Android 버전
+
+DSA는 가장 새로운 Android 메이저 버전 두 개를 지원합니다. 지금은 Android 16과 Android
+17입니다. 한 버전은 두 단계 새로운 메이저가 나오면 지원이 끝나므로, Android 16은 Android 18이
+출시될 때까지 지원합니다. 이미지 업데이터는 사용자를 지원되는 버전으로 옮기며, 더 낮은
+메이저로는 스스로 옮기지 않습니다. 지원되는 두 버전 가운데 하나를 DSA 설정이나
+`dsa android use`로 고를 수 있습니다. 더 오래된 버전으로 옮기면 Android 데이터가 지워집니다.
+Android가 더 새 버전이 쓴 데이터를 읽지 못하기 때문입니다.
+
+<p align="center">
+  <img src="../../.github/assets/android-support.svg" alt="DSA가 지원하는 Android 버전의 타임라인: Android 16과 17은 2026년 10월 DSA 0.1.0부터, Android 18과 19는 2027년과 2028년 예정" width="860">
+</p>
+
+오늘 이후의 날짜는 출시가 아니라 예정일입니다.
+
 ## 기능
 
 **창과 입력**
@@ -137,7 +166,7 @@ DSA에는 Google 소프트웨어가 들어 있지 않습니다. 아래 구성 �
   수 있습니다. 보안 수준 L3에서는 스트리밍 서비스가 표준 화질까지만 보내므로, 고화질은 Windows
   브라우저나 앱으로 보세요.
 - **ARM 번역.** x64 PC에서는 ARM 전용 앱이 번역기를 거쳐 실행됩니다. 오픈 소스 번역기
-  Digitalis가 x64 이미지에 함께 들어 있어 처음 시작할 때부터 쓰입니다. Google의
+  [Digitalis](https://digitalisx64.github.io/)가 x64 이미지에 함께 들어 있어 처음 시작할 때부터 쓰입니다. Google의
   번역기(`dsa arm-translation fetch google`)나 직접 만든 패키지로 바꿀 수 있습니다. 64비트 ARM
   앱(`arm64-v8a`)만 실행됩니다. ARM64 PC에서는 Android가 ARM 앱을 직접 실행합니다.
 
@@ -246,30 +275,6 @@ Linux에서는 호스트가 같은 트리를 AT-SPI로 내보내며, Orca를 위
 [이슈](https://github.com/thisisthepy/desktop-subsystem-for-android/issues/new)를 올려 주세요.
 `dsa logs collect -o diag.zip`으로 만든 진단 묶음이 도움이 됩니다. 질문은
 [DSA Discord](https://discord.gg/MtpQnR4eQQ)에서도 받습니다.
-
-## 지원 플랫폼
-
-| 호스트 | 상태 |
-|---|---|
-| Windows 11, x64 | `DSA-v<version>-win-x64-setup.exe`로 배포합니다 |
-| Windows 11, ARM64 | `DSA-v<version>-win-arm64-setup.exe`로 배포합니다. Android도 ARM64이므로 ARM 앱이 번역 없이 실행됩니다 |
-| Linux (x64, ARM64) | 진행 중이며 아직 배포하지 않았습니다. KVM 호스트, Wayland 합성기, `.deb`와 `.rpm` 패키지를 CI에서 빌드하고 실행합니다 |
-| macOS (Apple silicon) | 진행 중이며 아직 배포하지 않았습니다. Apple Virtualization 프레임워크 기반 호스트와 그 앱 번들을 CI에서 빌드합니다 |
-
-### Android 버전
-
-DSA는 가장 새로운 Android 메이저 버전 두 개를 지원합니다. 지금은 Android 16과 Android
-17입니다. 한 버전은 두 단계 새로운 메이저가 나오면 지원이 끝나므로, Android 16은 Android 18이
-출시될 때까지 지원합니다. 이미지 업데이터는 사용자를 지원되는 버전으로 옮기며, 더 낮은
-메이저로는 스스로 옮기지 않습니다. 지원되는 두 버전 가운데 하나를 DSA 설정이나
-`dsa android use`로 고를 수 있습니다. 더 오래된 버전으로 옮기면 Android 데이터가 지워집니다.
-Android가 더 새 버전이 쓴 데이터를 읽지 못하기 때문입니다.
-
-<p align="center">
-  <img src="../../.github/assets/android-support.svg" alt="DSA가 지원하는 Android 버전의 타임라인: Android 16과 17은 2026년 10월 DSA 0.1.0부터, Android 18과 19는 2027년과 2028년 예정" width="860">
-</p>
-
-오늘 이후의 날짜는 출시가 아니라 예정일입니다.
 
 ## 설치
 
