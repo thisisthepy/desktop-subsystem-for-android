@@ -19,7 +19,11 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use dsa_host_core::compositor::caption::{BandSample, CaptionBand, CaptionTone};
-use dsa_host_core::compositor::window_sizing::to_task_size;
+use dsa_host_core::compositor::frame_follow::{Arrival, FrameFollow};
+use dsa_host_core::compositor::window_sizing::{
+    frame_placement, frame_rect, kept_frame_action, to_task_size, to_window_size, FrameRectRequest,
+    KeptFrame, MoveLoop,
+};
 use dsa_host_core::tasks::Bounds;
 use dsa_host_core::ui_text::caption::back_name;
 use objc2::msg_send;
@@ -28,7 +32,11 @@ use objc2::runtime::{AnyClass, AnyObject, Bool, ClassBuilder, Sel};
 use objc2::sel;
 
 use super::metal::{FrameRef, Presenter};
-use super::sizing::{picture_in_picture, task_pixels, window_points, Rect, MIN_CONTENT_POINTS};
+use super::sizing::{
+    fill_colour, holds_size, layer_frame, min_content_points, picture_in_picture, task_pixels,
+    window_points, Rect,
+};
+use super::surface::Surface;
 use super::title_bar::{
     appearance_name, sample_bgra, title_layout, BandTone, Chrome, Look, ITEM_GAP_POINTS,
 };
@@ -54,6 +62,15 @@ pub trait WindowEvents {
     fn caption(&mut self, _band: CaptionBand) {}
     /// The user clicked the title bar's back button: the task should go back.
     fn back_pressed(&mut self) {}
+    /// The window's content changed size, or whether it holds its size may have: the window
+    /// takes a frame kept for that size ([`TaskWindow::view_changed`]).
+    fn view_changed(&mut self) {}
+    /// The user drags an edge and AppKit proposes a content of `proposed` pixels. Returns the
+    /// size the window takes instead, the size of a frame it has or keeps
+    /// ([`TaskWindow::size_for`]), or `None` to take the proposal.
+    fn size_for(&mut self, _proposed: (u32, u32)) -> Option<(u32, u32)> {
+        None
+    }
 }
 
 /// No title bar, no buttons, no border: the window of an app overlay window.
@@ -89,7 +106,13 @@ thread_local! {
     static FILLS: RefCell<HashMap<usize, Retained<AnyObject>>> = RefCell::new(HashMap::new());
     /// The parts of each open window's title bar, by the window's address.
     static TITLES: RefCell<HashMap<usize, TitleParts>> = RefCell::new(HashMap::new());
+    /// Each open window's move by its title bar, by the window's address.
+    static MOVES: RefCell<HashMap<usize, MoveLoop>> = RefCell::new(HashMap::new());
 }
+
+/// How often a window that the user moves checks whether the mouse button is up, in seconds.
+/// AppKit says when a move starts but not when it ends.
+const MOVE_CHECK: f64 = 0.05;
 
 /// The back button and the window's name, both subviews of the title bar the window buttons
 /// stand in. A transparent title bar puts AppKit's own title elsewhere, and its accessories
@@ -303,6 +326,27 @@ unsafe fn apply_look(window: *mut AnyObject, look: Look) {
     layout_fill(window);
 }
 
+/// Whether the user's appearance is dark, for the theme's colour under a frame.
+fn system_dark() -> bool {
+    unsafe {
+        let Ok(defaults) = class(c"NSUserDefaults") else {
+            return false;
+        };
+        let defaults: *mut AnyObject = msg_send![defaults, standardUserDefaults];
+        if defaults.is_null() {
+            return false;
+        }
+        let key = ns_string("AppleInterfaceStyle");
+        let style: *mut AnyObject = msg_send![defaults, stringForKey: &*key];
+        if style.is_null() {
+            return false;
+        }
+        let dark = ns_string("Dark");
+        let same: bool = msg_send![style, isEqualToString: &*dark];
+        same
+    }
+}
+
 /// Dims the name in the title bar while its window is not the key window, as AppKit dims its own.
 unsafe fn dim_title(window: *mut AnyObject, dim: bool) {
     TITLES.with(|titles| {
@@ -454,14 +498,127 @@ unsafe fn content_pixels(window: *mut AnyObject) -> ((u32, u32), f64) {
 unsafe extern "C-unwind" fn did_resize(_this: &AnyObject, _: Sel, note: *mut AnyObject) {
     let window: *mut AnyObject = msg_send![note, object];
     let (pixels, _) = content_pixels(window);
-    with_events(window, |events| events.resized(pixels));
+    // While the user drags an edge the window has the size of the frame it shows, and the
+    // guest was asked for the size proposed (`will_resize`), not for this one.
+    let live: bool = msg_send![window, inLiveResize];
+    with_events(window, |events| {
+        if !live {
+            events.resized(pixels);
+        }
+        events.view_changed();
+    });
     report_band(window);
+}
+
+/// The user drags an edge: the guest is asked for the size AppKit proposes, and the window
+/// takes the size of the frame it has for it, keeping the edges the user does not drag where
+/// they are, as on every host ([`frame_rect`]).
+unsafe extern "C-unwind" fn will_resize(
+    _this: &AnyObject,
+    _: Sel,
+    window: *mut AnyObject,
+    size: CGSize,
+) -> CGSize {
+    let live: bool = msg_send![window, inLiveResize];
+    if !live {
+        return size;
+    }
+    let frame: CGRect = msg_send![window, frame];
+    let proposed_frame = CGRect {
+        origin: frame.origin,
+        size,
+    };
+    let content: CGRect = msg_send![window, contentRectForFrameRect: proposed_frame];
+    let scale: f64 = msg_send![window, backingScaleFactor];
+    let proposed = task_pixels((content.size.width, content.size.height), scale);
+    let mut taken = None;
+    with_events(window, |events| {
+        events.resized(proposed);
+        taken = events.size_for(proposed);
+    });
+    let (_, _, width, height) = frame_rect(FrameRectRequest {
+        requested: (0, 0, proposed.0 as i32, proposed.1 as i32),
+        frame_outer: taken.map(|(w, h)| (w as i32, h as i32)),
+        edge_drag: true,
+        // AppKit keeps the edges the user does not drag where they are.
+        moves: (false, false),
+    });
+    if (width, height) == (proposed.0 as i32, proposed.1 as i32) {
+        return size;
+    }
+    let points = window_points((width.max(1) as u32, height.max(1) as u32), scale);
+    let content = CGRect {
+        origin: content.origin,
+        size: CGSize {
+            width: points.0,
+            height: points.1,
+        },
+    };
+    let outer: CGRect = msg_send![window, frameRectForContentRect: content];
+    outer.size
+}
+
+/// The user started moving the window by its title bar. The move is reported as a drag, as on
+/// every host, so a task that crosses onto a display of another scale switches its density
+/// once, when the move ends.
+unsafe extern "C-unwind" fn will_move(this: &AnyObject, _: Sel, note: *mut AnyObject) {
+    let window: *mut AnyObject = msg_send![note, object];
+    let key = window as usize;
+    let started = MOVES.with(|moves| {
+        let mut moves = moves.borrow_mut();
+        let entry = moves.entry(key).or_default();
+        entry.entered();
+        entry.moved()
+    });
+    if started != Some(true) {
+        return;
+    }
+    with_events(window, |events| events.dragging(true));
+    if let Ok(timers) = class(c"NSTimer") {
+        let _: *mut AnyObject = msg_send![
+            timers,
+            scheduledTimerWithTimeInterval: MOVE_CHECK,
+            target: this,
+            selector: sel!(moveCheck:),
+            userInfo: window,
+            repeats: true
+        ];
+    }
+}
+
+/// Ends a move once the mouse button is up.
+unsafe extern "C-unwind" fn move_check(_this: &AnyObject, _: Sel, timer: *mut AnyObject) {
+    let Ok(events_class) = class(c"NSEvent") else {
+        return;
+    };
+    let pressed: usize = msg_send![events_class, pressedMouseButtons];
+    if pressed != 0 {
+        return;
+    }
+    let _: () = msg_send![timer, invalidate];
+    let window: *mut AnyObject = msg_send![timer, userInfo];
+    if window.is_null() {
+        return;
+    }
+    let ended = MOVES.with(|moves| {
+        moves
+            .borrow_mut()
+            .get_mut(&(window as usize))
+            .and_then(MoveLoop::exited)
+    });
+    if let Some(dragging) = ended {
+        with_events(window, |events| {
+            events.dragging(dragging);
+            events.view_changed();
+        });
+    }
 }
 
 unsafe extern "C-unwind" fn full_screen_changed(_this: &AnyObject, _: Sel, note: *mut AnyObject) {
     // Full screen hides the title bar until the pointer reaches the top of the screen, so an
     // app drawing its own title bar has no band to keep clear there.
     let window: *mut AnyObject = msg_send![note, object];
+    with_events(window, |events| events.view_changed());
     report_band(window);
 }
 
@@ -509,12 +666,21 @@ unsafe extern "C-unwind" fn did_deminiaturize(_this: &AnyObject, _: Sel, note: *
 
 unsafe extern "C-unwind" fn live_resize_began(_this: &AnyObject, _: Sel, note: *mut AnyObject) {
     let window: *mut AnyObject = msg_send![note, object];
-    with_events(window, |events| events.dragging(true));
+    with_events(window, |events| {
+        events.dragging(true);
+        events.view_changed();
+    });
 }
 
 unsafe extern "C-unwind" fn did_end_live_resize(_this: &AnyObject, _: Sel, note: *mut AnyObject) {
     let window: *mut AnyObject = msg_send![note, object];
-    with_events(window, |events| events.dragging(false));
+    let (pixels, _) = content_pixels(window);
+    with_events(window, |events| {
+        events.dragging(false);
+        // The size the drag ends at, which the window now has.
+        events.resized(pixels);
+        events.view_changed();
+    });
 }
 
 fn delegate_class() -> Result<&'static AnyClass, String> {
@@ -560,6 +726,18 @@ fn delegate_class() -> Result<&'static AnyClass, String> {
                 sel!(windowDidEndLiveResize:),
                 did_end_live_resize as unsafe extern "C-unwind" fn(_, _, _),
             );
+            builder.add_method(
+                sel!(windowWillResize:toSize:),
+                will_resize as unsafe extern "C-unwind" fn(_, _, _, _) -> _,
+            );
+            builder.add_method(
+                sel!(windowWillMove:),
+                will_move as unsafe extern "C-unwind" fn(_, _, _),
+            );
+            builder.add_method(
+                sel!(moveCheck:),
+                move_check as unsafe extern "C-unwind" fn(_, _, _),
+            );
             for selector in [
                 sel!(windowDidEnterFullScreen:),
                 sel!(windowDidExitFullScreen:),
@@ -594,6 +772,16 @@ pub struct TaskWindow {
     frame_scale: (u32, u32),
     /// Whether the window shows an app overlay window rather than a task.
     overlay: bool,
+    /// How the window's size follows the frames its app draws, as on every host.
+    follow: FrameFollow,
+    /// A frame of another size than the window's, kept out of sight until the window takes
+    /// its size: its texture and the task's part of it.
+    kept: Option<(u64, (u32, u32))>,
+    /// A frame that arrived while the window was taking a kept frame's size, shown or kept
+    /// once it has.
+    waiting: Option<(u64, (u32, u32))>,
+    /// The size of the frame on the screen, in task pixels, once there is one.
+    on_screen: Option<(u32, u32)>,
 }
 
 thread_local! {
@@ -628,8 +816,8 @@ impl TaskWindow {
             let rect = CGRect {
                 origin: CGPoint::default(),
                 size: CGSize {
-                    width: points.0.max(MIN_CONTENT_POINTS.0),
-                    height: points.1.max(MIN_CONTENT_POINTS.1),
+                    width: points.0.max(min_content_points(scale, None, None).0),
+                    height: points.1.max(min_content_points(scale, None, None).1),
                 },
             };
             let allocated: Allocated<AnyObject> = msg_send![window_class, alloc];
@@ -649,15 +837,16 @@ impl TaskWindow {
             let _: () = msg_send![&*window, setTitleVisibility: TITLE_HIDDEN];
             let native_title = ns_string(title);
             let _: () = msg_send![&*window, setTitle: &*native_title];
+            let min = min_content_points(scale, None, None);
             let min = CGSize {
-                width: MIN_CONTENT_POINTS.0,
-                height: MIN_CONTENT_POINTS.1,
+                width: min.0,
+                height: min.1,
             };
             let _: () = msg_send![&*window, setContentMinSize: min];
             let _: () = msg_send![&*window, setCollectionBehavior: BEHAVIOR_FULL_SCREEN_PRIMARY];
 
             let presenter = Presenter::new(scale)?;
-            let view = view::make(task_id, rect, presenter.layer(), input)?;
+            let view = view::make(task_id, rect, presenter.root_layer(), input)?;
             let _: () = msg_send![&*window, setContentView: &*view];
             let _: () = msg_send![&*window, makeFirstResponder: &*view];
 
@@ -694,6 +883,10 @@ impl TaskWindow {
                 shown: None,
                 frame_scale: (1, 1),
                 overlay: false,
+                follow: FrameFollow::new(task_pixels((rect.size.width, rect.size.height), scale)),
+                kept: None,
+                waiting: None,
+                on_screen: None,
             })
         }
     }
@@ -723,6 +916,9 @@ impl TaskWindow {
         }
         let content = frame.content;
         let shown = self.presenter.present(frame);
+        if shown.is_ok() && content != (0, 0) {
+            self.on_screen = Some(content);
+        }
         self.read_band(content, |rows| {
             sample_bgra(
                 frame.pixels,
@@ -732,6 +928,7 @@ impl TaskWindow {
                 rows,
             )
         });
+        self.place_frame();
         shown
     }
 
@@ -740,7 +937,121 @@ impl TaskWindow {
     pub fn present_surface(
         &mut self,
         texture_id: u64,
-        surface: &super::surface::Surface,
+        surface: &Surface,
+        content: (u32, u32),
+    ) -> Result<(), String> {
+        if self.overlay || content == (0, 0) {
+            return self.show_surface(texture_id, surface, content);
+        }
+        let size = to_window_size(content, self.frame_scale);
+        match self.follow.frame_arrived(size) {
+            Arrival::Show => self.show_surface(texture_id, surface, content),
+            Arrival::Keep => {
+                self.kept = Some((texture_id, content));
+                let live: bool = unsafe { msg_send![&*self.window, inLiveResize] };
+                // During the user's drag the window takes the kept size at AppKit's next
+                // proposal (`size_for`); otherwise it takes it now, unless it holds its size.
+                if !live && kept_frame_action(self.follow.held(), false) == KeptFrame::TakeSize {
+                    self.set_content_pixels(size);
+                    self.view_changed(&|id| (id == texture_id).then_some(surface));
+                }
+                Ok(())
+            }
+            Arrival::Wait => {
+                self.waiting = Some((texture_id, content));
+                Ok(())
+            }
+            // Drawn for the display the window left; the app draws the new one next.
+            Arrival::Stale => Ok(()),
+        }
+    }
+
+    /// The size the window takes for a content of `proposed` pixels the user drags it to:
+    /// that of a frame it keeps or shows, or `None` to take the proposal.
+    pub fn size_for(&mut self, proposed: (u32, u32)) -> Option<(u32, u32)> {
+        if self.overlay {
+            return None;
+        }
+        self.follow.size_for(proposed)
+    }
+
+    /// The window's content may have changed size, or whether it holds its size may have
+    /// changed. A frame kept for its new size is shown now (`surface` finds it by texture),
+    /// and a frame that waited meanwhile arrives again.
+    pub fn view_changed<'s>(&mut self, surface: &dyn Fn(u64) -> Option<&'s Surface>) {
+        if self.overlay {
+            return;
+        }
+        let (view, _) = unsafe { content_pixels(self.ptr()) };
+        let (zoomed, live): (bool, bool) = unsafe {
+            (
+                msg_send![&*self.window, isZoomed],
+                msg_send![&*self.window, inLiveResize],
+            )
+        };
+        self.follow
+            .set_held(holds_size(zoomed, self.is_full_screen(), live));
+        if self.follow.view_taken(view) {
+            if let Some((texture_id, content)) = self.kept.take() {
+                if let Some(found) = surface(texture_id) {
+                    if let Err(why) = self.show_surface(texture_id, found, content) {
+                        eprintln!("dsa-app-window: a kept frame was not shown: {why}");
+                    }
+                }
+            }
+        }
+        if !live {
+            // The window settled: a size it chose and did not get no longer holds frames.
+            self.follow.release();
+        }
+        if let Some((texture_id, content)) = self.waiting.take() {
+            if let Some(found) = surface(texture_id) {
+                let _ = self.present_surface(texture_id, found, content);
+            }
+        }
+        self.place_frame();
+    }
+
+    /// Puts the frame on the screen where core places it in the window ([`frame_placement`])
+    /// and paints the rest of the content the colour core gives it ([`fill_colour`]), so no
+    /// part of the window shows AppKit's own background and no frame is scaled unless core
+    /// scales it.
+    fn place_frame(&self) {
+        let window = self.ptr();
+        let (view, backing) = unsafe { content_pixels(window) };
+        let frame = self.on_screen.unwrap_or(view);
+        let held = self.follow.held() && !self.overlay;
+        let placement = frame_placement(frame, view, self.frame_scale, held);
+        let sample = TONES.with(|tones| {
+            tones
+                .borrow()
+                .get(&(window as usize))
+                .map(BandTone::sample)
+                .unwrap_or_default()
+        });
+        // An overlay window is transparent wherever its app draws nothing.
+        let fill = fill_colour(self.overlay, sample, None, system_dark);
+        self.presenter.place(layer_frame(placement, backing), fill);
+    }
+
+    /// Gives the window's content `pixels`, in client pixels.
+    fn set_content_pixels(&self, pixels: (u32, u32)) {
+        unsafe {
+            let scale: f64 = msg_send![&*self.window, backingScaleFactor];
+            let points = window_points(pixels, scale);
+            let size = CGSize {
+                width: points.0,
+                height: points.1,
+            };
+            let _: () = msg_send![&*self.window, setContentSize: size];
+        }
+    }
+
+    /// Puts the frame in `surface` on the screen.
+    fn show_surface(
+        &mut self,
+        texture_id: u64,
+        surface: &Surface,
         content: (u32, u32),
     ) -> Result<(), String> {
         if content != (0, 0) {
@@ -749,11 +1060,15 @@ impl TaskWindow {
         self.presenter
             .present_surface(texture_id, surface, content)?;
         self.shown = Some((texture_id, content));
+        if content != (0, 0) {
+            self.on_screen = Some(content);
+        }
         self.read_band(content, |rows| {
             surface
                 .read(|pixels, stride| sample_bgra(pixels, stride, content.0, content.1, rows))
                 .unwrap_or_default()
         });
+        self.place_frame();
         Ok(())
     }
 
@@ -893,9 +1208,15 @@ impl TaskWindow {
         unsafe { msg_send![&*self.window, isMiniaturized] }
     }
 
-    /// The display's backing scale changed.
+    /// The display's backing scale changed. The window takes the size AppKit gives it there
+    /// at once, before a frame of it, as on every host.
     pub fn set_scale(&mut self, scale: f64) {
         self.presenter.set_scale(scale);
+        let (view, _) = unsafe { content_pixels(self.ptr()) };
+        let taken = self.follow.scale_changed(view);
+        self.follow.view_taken(taken);
+        self.kept = None;
+        self.place_frame();
     }
 
     /// The window shows each of its task's pixels at `scale` (window pixels per task pixels)
@@ -906,23 +1227,15 @@ impl TaskWindow {
             return;
         }
         self.frame_scale = scale;
-        self.presenter.set_frame_scale(scale);
         view::set_frame_scale(&self.view, scale);
+        self.place_frame();
     }
 
     /// Gives the window's content `pixels`, the size that shows its task at the window's
     /// scale, as when the guest itself resizes its task.
     pub fn resize_to(&mut self, pixels: (u32, u32)) {
         self.task = to_task_size(pixels, self.frame_scale);
-        unsafe {
-            let scale: f64 = msg_send![&*self.window, backingScaleFactor];
-            let points = window_points(pixels, scale);
-            let size = CGSize {
-                width: points.0,
-                height: points.1,
-            };
-            let _: () = msg_send![&*self.window, setContentSize: size];
-        }
+        self.set_content_pixels(pixels);
     }
 
     /// Enters or leaves full screen in its own space.
@@ -1091,10 +1404,11 @@ impl TaskWindow {
     pub fn set_limits(&self, min: Option<(u32, u32)>, max: Option<(u32, u32)>) {
         unsafe {
             let scale: f64 = msg_send![&*self.window, backingScaleFactor];
-            let min = min.map(|m| window_points(m, scale)).unwrap_or((0.0, 0.0));
+            // The smallest client area every host gives a task window.
+            let min = min_content_points(scale, max, min);
             let min = CGSize {
-                width: min.0.max(MIN_CONTENT_POINTS.0),
-                height: min.1.max(MIN_CONTENT_POINTS.1),
+                width: min.0,
+                height: min.1,
             };
             let max = max
                 .map(|m| window_points(m, scale))

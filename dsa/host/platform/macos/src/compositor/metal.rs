@@ -4,8 +4,9 @@
 //! each frame is copied from it into the layer's next drawable by a blit on the GPU and
 //! presented, without passing through memory. Where the surface cannot be made a texture,
 //! its BGRA pixels are read and written into a staging texture instead. The drawable takes
-//! the size of the frame's content ([`super::sizing::place`]), and the layer pins it to the
-//! top left without scaling.
+//! the size of the frame's content ([`super::sizing::place`]). The task's layer sits in a
+//! root layer the window's view hosts, over the rectangle core places the frame in
+//! ([`Presenter::place`]), and the root layer is painted the colour core gives the rest.
 
 use std::ffi::c_void;
 
@@ -14,7 +15,7 @@ use objc2::msg_send;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 
-use super::sizing::{contents_scale, place};
+use super::sizing::place;
 use super::surface::Surface;
 use crate::objc::{class, ns_string, CGSize};
 
@@ -102,16 +103,14 @@ pub struct FrameRef<'a> {
 pub struct Presenter {
     device: Retained<AnyObject>,
     queue: Retained<AnyObject>,
+    /// The layer the window's view hosts: the colour under the frame.
+    root: Retained<AnyObject>,
+    /// The task's layer, over the rectangle the frame is placed in.
     layer: Retained<AnyObject>,
     staging: Option<(Retained<AnyObject>, (u32, u32))>,
     /// The texture over the frame surface last shown, by its texture ID.
     surface_texture: Option<(u64, Retained<AnyObject>)>,
     drawable: (u32, u32),
-    /// The display's backing scale.
-    backing: f64,
-    /// How large the window shows each of the task's pixels (window pixels per task pixels):
-    /// 1:1 unless the task keeps its density on a display of another scale.
-    frame_scale: (u32, u32),
 }
 
 impl Presenter {
@@ -131,50 +130,76 @@ impl Presenter {
             // The blit writes into the drawable, which a framebuffer-only texture forbids.
             let _: () = msg_send![&*layer, setFramebufferOnly: false];
             let _: () = msg_send![&*layer, setContentsScale: scale];
-            // No scaling: a drawable that does not match the window is never stretched.
-            // AppKit's layers are not flipped, so the visual top is the layer's top only once
-            // the geometry is flipped.
-            let _: () = msg_send![&*layer, setGeometryFlipped: true];
-            let gravity = ns_string("topLeft");
+            // The drawable fills the rectangle core places the frame in, which is the frame's
+            // own size unless core scales it.
+            let gravity = ns_string("resize");
             let _: () = msg_send![&*layer, setContentsGravity: &*gravity];
             let _: () = msg_send![&*layer, setOpaque: true];
+            let root_class = class(c"CALayer")?;
+            let root: Option<Retained<AnyObject>> = msg_send![root_class, layer];
+            let root = root.ok_or("no CALayer could be made")?;
+            // AppKit's layers are not flipped, so a frame placed from the top left is placed
+            // from the visual top only once the root's geometry is flipped.
+            let _: () = msg_send![&*root, setGeometryFlipped: true];
+            let _: () = msg_send![&*root, setContentsScale: scale];
+            let _: () = msg_send![&*root, addSublayer: &*layer];
             let _: () = msg_send![&*layer, setAllowsNextDrawableTimeout: false];
             Ok(Presenter {
                 device,
                 queue,
+                root,
                 layer,
                 staging: None,
                 surface_texture: None,
                 drawable: (0, 0),
-                backing: scale,
-                frame_scale: (1, 1),
             })
         }
     }
 
-    /// The layer, for the window's content view to host.
-    pub fn layer(&self) -> &AnyObject {
-        &self.layer
+    /// The root layer, for the window's content view to host.
+    pub fn root_layer(&self) -> &AnyObject {
+        &self.root
+    }
+
+    /// Puts the frame over `frame` (x, y, width, height in points from the content's top
+    /// left) and paints the rest `fill` (0xAARRGGBB), or leaves it clear for `None`. Both
+    /// change at once, without Core Animation's implicit animation.
+    pub fn place(&self, (x, y, width, height): (f64, f64, f64, f64), fill: Option<u32>) {
+        unsafe {
+            let Ok(transactions) = class(c"CATransaction") else {
+                return;
+            };
+            let _: () = msg_send![transactions, begin];
+            let _: () = msg_send![transactions, setDisableActions: true];
+            let frame = crate::objc::CGRect {
+                origin: crate::objc::CGPoint { x, y },
+                size: CGSize { width, height },
+            };
+            let _: () = msg_send![&*self.layer, setFrame: frame];
+            let mut colour: *const c_void = std::ptr::null();
+            if let (Some(fill), Ok(colors)) = (fill, class(c"NSColor")) {
+                let channel = |shift: u32| f64::from((fill >> shift) & 0xFF) / 255.0;
+                let color: *mut AnyObject = msg_send![
+                    colors,
+                    colorWithSRGBRed: channel(16),
+                    green: channel(8),
+                    blue: channel(0),
+                    alpha: 1.0f64
+                ];
+                if !color.is_null() {
+                    colour = msg_send![color, CGColor];
+                }
+            }
+            let _: () = msg_send![&*self.root, setBackgroundColor: colour];
+            let _: () = msg_send![transactions, commit];
+        }
     }
 
     /// The display's backing scale changed (the window moved to another display).
     pub fn set_scale(&mut self, scale: f64) {
-        self.backing = scale;
-        self.apply_scale();
-    }
-
-    /// The window shows each of the task's pixels at `frame_scale` (window pixels per task
-    /// pixels) from now on: the task keeps its density on a display of another scale, and is
-    /// shown the same size to the eye. The drawable on the screen takes it at once.
-    pub fn set_frame_scale(&mut self, frame_scale: (u32, u32)) {
-        self.frame_scale = frame_scale;
-        self.apply_scale();
-    }
-
-    fn apply_scale(&self) {
-        let scale = contents_scale(self.backing, self.frame_scale);
         unsafe {
             let _: () = msg_send![&*self.layer, setContentsScale: scale];
+            let _: () = msg_send![&*self.root, setContentsScale: scale];
         }
     }
 

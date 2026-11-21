@@ -1429,12 +1429,11 @@ impl WindowPresenter {
         // background (WM_ERASEBKGND), so wherever the frame's visual does not reach, beside a
         // frame shown 1:1 in a larger window, the desktop shows through unless the fill under
         // the frame covers it.
-        let colour = uncovered_fill(
+        let colour = fill_colour(
             self.see_through,
-            state.band_sample.band,
-            state.band_sample.fill,
+            state.band_sample,
             state.splash_background,
-            || splash::background(super::system_settings::read().dark_mode),
+            || super::system_settings::read().dark_mode,
         );
         let wanted = (buffers, state.frame, placement, view, colour);
         if state.committed == Some(wanted) {
@@ -1460,17 +1459,14 @@ impl WindowPresenter {
             }
             fill_shown &= state.fill_colour == Some(colour) && state.fill_surface.is_some();
         }
-        let (x, y) = frame_scale(buffers, state.frame);
-        let (numerator, denominator) = placement.scale;
-        let ratio = numerator as f32 / denominator.max(1) as f32;
-        let (x, y) = (x * ratio, y * ratio);
+        let (x, y, dx, dy) = frame_transform(frame_scale(buffers, state.frame), placement);
         let matrix = Matrix3x2 {
             M11: x,
             M12: 0.0,
             M21: 0.0,
             M22: y,
-            M31: placement.origin.0 as f32,
-            M32: placement.origin.1 as f32,
+            M31: dx,
+            M32: dy,
         };
         let fill = Matrix3x2 {
             M11: view.0 as f32,
@@ -1745,5 +1741,79 @@ impl WindowPresenter {
             new_size,
             resize_buffers: remade.then(|| Duration::from_micros(first.resize_us)),
         })
+    }
+}
+
+/// The colour under a window's frame, from core ([`uncovered_fill`]): the app's colours read
+/// from its frame, its splash background, else the theme's, `dark` asked only when needed.
+fn fill_colour(
+    see_through: bool,
+    sample: BandSample,
+    splash_background: Option<u32>,
+    dark: impl FnOnce() -> bool,
+) -> Option<u32> {
+    uncovered_fill(
+        see_through,
+        sample.band,
+        sample.fill,
+        splash_background,
+        || splash::background(dark()),
+    )
+}
+
+/// The frame visual's scale and offset (x scale, y scale, x, y) that shows the frame where
+/// core places it (`placement`), for a swapchain whose buffers the frame fills at
+/// `buffer_scale`.
+fn frame_transform(buffer_scale: (f32, f32), placement: FramePlacement) -> (f32, f32, f32, f32) {
+    let (numerator, denominator) = placement.scale;
+    let ratio = numerator as f32 / denominator.max(1) as f32;
+    (
+        buffer_scale.0 * ratio,
+        buffer_scale.1 * ratio,
+        placement.origin.0 as f32,
+        placement.origin.1 as f32,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dsa_host_core::compositor::window_sizing::vectors;
+
+    #[test]
+    fn nfr8_windows_places_each_frame_as_the_shared_vectors_say() {
+        for case in vectors::PLACEMENTS {
+            let placement = frame_placement(case.frame, case.view, case.scale, case.held);
+            let (x, y, dx, dy) = frame_transform((1.0, 1.0), placement);
+            let expected = case.expected;
+            assert_eq!(
+                (dx, dy),
+                (expected.origin.0 as f32, expected.origin.1 as f32)
+            );
+            assert!(
+                (case.frame.0 as f32 * x - expected.size.0 as f32).abs() <= 1.0,
+                "{case:?}"
+            );
+            assert!(
+                (case.frame.1 as f32 * y - expected.size.1 as f32).abs() <= 1.0,
+                "{case:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn nfr8_windows_fills_beside_the_frame_as_the_shared_vectors_say() {
+        for case in vectors::fills() {
+            let sample = BandSample {
+                band: case.band,
+                fill: case.fill,
+                ..BandSample::default()
+            };
+            assert_eq!(
+                fill_colour(case.see_through, sample, case.splash, || case.dark),
+                case.expected,
+                "{case:?}"
+            );
+        }
     }
 }

@@ -16,7 +16,7 @@
 //! drags the window ([`band_hit`]).
 
 use dsa_host_core::compositor::caption::{
-    band_points, band_sample, shown_tone, BandSample, CaptionTone,
+    band_points, band_sample, shown_band_fill, shown_tone, BandSample, CaptionTone,
 };
 #[cfg(test)]
 use dsa_host_core::keys::{keycode, KeyAction};
@@ -130,12 +130,17 @@ impl BandTone {
         self.shown = shown_tone(self.reported, self.sample, self.app_drawn, self.shown);
         let look = Look {
             tone: self.shown.unwrap_or_default(),
-            fill: self.sample.fill.filter(|_| !self.app_drawn),
+            fill: shown_band_fill(self.sample, self.app_drawn),
         };
         (self.told != Some(look)).then(|| {
             self.told = Some(look);
             look
         })
+    }
+
+    /// What the window last read from its frame's band.
+    pub fn sample(&self) -> BandSample {
+        self.sample
     }
 
     /// The tone the app asked for changed. Returns the new look, if it changed.

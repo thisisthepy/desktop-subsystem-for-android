@@ -166,6 +166,15 @@ pub const DENSITY_AT_BASE_DPI: u32 = 130;
 /// guest that cannot give the size at all.
 pub const SETTLE: Duration = Duration::from_secs(2);
 
+/// How often a window manager looks at its windows' timers ([`WindowSizing::tick`],
+/// [`WindowSizing::settle`]) and for window hosts that are late. A quarter of [`SETTLE`], so a
+/// size the guest did not take is followed within a little more than [`SETTLE`] on every host.
+pub const MANAGER_TICK: Duration = Duration::from_millis(500);
+
+/// How long a window host may take to show a frame before the next one goes to it without
+/// its answer, on every host.
+pub const PRESENT_WAIT: Duration = Duration::from_millis(500);
+
 /// The density a task draws at on a monitor of `dpi`, so it looks the size it would at 100%:
 /// [`DENSITY_PER_SCALE`] times the monitor's scale, rounded to the nearest dpi and then down
 /// to an even number: 130 at 96 dpi (100%), 164 at 120
@@ -1106,6 +1115,235 @@ pub fn kept_frame_action(held: bool, arranged: bool) -> KeptFrame {
     }
 }
 
+/// Inputs and the decisions the sizing policy makes for them, which every host's adapter runs
+/// through its own pure functions, so Windows and macOS decide alike for the same input.
+pub mod vectors {
+    use std::time::Duration;
+
+    use super::{FramePlacement, Scale, SizeProposal};
+
+    /// Where a frame goes in a window ([`super::frame_placement`]).
+    #[derive(Debug, Clone, Copy)]
+    pub struct PlacementCase {
+        pub frame: (u32, u32),
+        pub view: (u32, u32),
+        pub scale: Scale,
+        pub held: bool,
+        pub expected: FramePlacement,
+    }
+
+    pub const PLACEMENTS: &[PlacementCase] = &[
+        // A frame of the window's size fills it.
+        PlacementCase {
+            frame: (1000, 800),
+            view: (1000, 800),
+            scale: (1, 1),
+            held: false,
+            expected: FramePlacement {
+                scale: (1, 1),
+                origin: (0, 0),
+                size: (1000, 800),
+            },
+        },
+        // A window that does not hold its size shows a smaller frame at its top left, 1:1.
+        PlacementCase {
+            frame: (1000, 800),
+            view: (1400, 900),
+            scale: (1, 1),
+            held: false,
+            expected: FramePlacement {
+                scale: (1, 1),
+                origin: (0, 0),
+                size: (1000, 800),
+            },
+        },
+        // One that holds its size shows it 1:1 in its middle.
+        PlacementCase {
+            frame: (1000, 800),
+            view: (1400, 900),
+            scale: (1, 1),
+            held: true,
+            expected: FramePlacement {
+                scale: (1, 1),
+                origin: (200, 50),
+                size: (1000, 800),
+            },
+        },
+        // A task that keeps its density is shown at its window's scale.
+        PlacementCase {
+            frame: (500, 400),
+            view: (1000, 800),
+            scale: (2, 1),
+            held: false,
+            expected: FramePlacement {
+                scale: (2, 1),
+                origin: (0, 0),
+                size: (1000, 800),
+            },
+        },
+        // A frame too large for a window that holds its size is made to fit, in its middle.
+        PlacementCase {
+            frame: (2000, 1000),
+            view: (1000, 1000),
+            scale: (1, 1),
+            held: true,
+            expected: FramePlacement {
+                scale: (1, 2),
+                origin: (0, 250),
+                size: (1000, 500),
+            },
+        },
+    ];
+
+    /// The colour beside a frame ([`super::uncovered_fill`]), with the theme `dark` or not.
+    #[derive(Debug, Clone, Copy)]
+    pub struct FillCase {
+        pub see_through: bool,
+        pub band: Option<u32>,
+        pub fill: Option<u32>,
+        pub splash: Option<u32>,
+        pub dark: bool,
+        pub expected: Option<u32>,
+    }
+
+    pub fn fills() -> Vec<FillCase> {
+        let case = |see_through, band, fill, splash, dark, expected| FillCase {
+            see_through,
+            band,
+            fill,
+            splash,
+            dark,
+            expected,
+        };
+        vec![
+            case(
+                false,
+                Some(0x0011_2233),
+                Some(0x0044_5566),
+                None,
+                false,
+                Some(0xFF11_2233),
+            ),
+            case(
+                false,
+                None,
+                Some(0x0044_5566),
+                Some(0x0077_8899),
+                false,
+                Some(0xFF44_5566),
+            ),
+            case(
+                false,
+                None,
+                None,
+                Some(0x0077_8899),
+                true,
+                Some(0xFF77_8899),
+            ),
+            case(
+                false,
+                None,
+                None,
+                None,
+                true,
+                Some(super::super::splash::background(true) | 0xFF00_0000),
+            ),
+            case(
+                false,
+                None,
+                None,
+                None,
+                false,
+                Some(super::super::splash::background(false) | 0xFF00_0000),
+            ),
+            case(true, Some(0x0011_2233), None, None, false, None),
+        ]
+    }
+
+    /// Whether a window holds its size ([`super::size_is_held`]).
+    #[derive(Debug, Clone, Copy)]
+    pub struct HeldCase {
+        pub proposal: SizeProposal,
+        pub expected: bool,
+    }
+
+    const fn held(
+        maximized: bool,
+        fills_monitor: bool,
+        user_sizing: bool,
+        expected: bool,
+    ) -> HeldCase {
+        HeldCase {
+            proposal: SizeProposal {
+                maximized,
+                fills_monitor,
+                user_sizing,
+                host_sizing: false,
+                off_normal_size: false,
+            },
+            expected,
+        }
+    }
+
+    pub const HELD: &[HeldCase] = &[
+        held(true, false, false, true),
+        held(false, true, false, true),
+        held(false, false, false, false),
+        held(false, false, true, false),
+        held(false, true, true, true),
+    ];
+
+    /// The smallest client area ([`super::min_client_size`]).
+    #[derive(Debug, Clone, Copy)]
+    pub struct MinClientCase {
+        pub dpi: u32,
+        pub max: Option<(u32, u32)>,
+        pub task: Option<(u32, u32)>,
+        pub expected: (u32, u32),
+    }
+
+    pub const MIN_CLIENT: &[MinClientCase] = &[
+        MinClientCase {
+            dpi: 96,
+            max: None,
+            task: None,
+            expected: (179, 179),
+        },
+        MinClientCase {
+            dpi: 192,
+            max: None,
+            task: None,
+            expected: (360, 360),
+        },
+        MinClientCase {
+            dpi: 192,
+            max: Some((300, 300)),
+            task: None,
+            expected: (300, 300),
+        },
+        MinClientCase {
+            dpi: 192,
+            max: None,
+            task: Some((1000, 800)),
+            expected: (1000, 800),
+        },
+    ];
+
+    /// The times every window manager keeps.
+    #[derive(Debug, Clone, Copy)]
+    pub struct Timing {
+        pub settle: Duration,
+        pub tick: Duration,
+        pub present_wait: Duration,
+    }
+
+    pub const TIMING: Timing = Timing {
+        settle: Duration::from_secs(2),
+        tick: Duration::from_millis(500),
+        present_wait: Duration::from_millis(500),
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1450,6 +1688,49 @@ mod tests {
         // On a second monitor to the right of the primary, and on one above it.
         assert_eq!(maximized_position(1920, 2048, 2064, 8), 1912);
         assert_eq!(maximized_position(-1152, 1104, 1120, 8), -1160);
+    }
+
+    #[test]
+    fn nfr8_every_host_follows_its_windows_at_the_same_pace() {
+        // The manager looks at its timers often enough that a size the guest did not take
+        // is followed soon after SETTLE, and a window host is not waited for past one tick.
+        assert!(MANAGER_TICK * 4 <= SETTLE);
+        assert!(PRESENT_WAIT <= MANAGER_TICK);
+        assert!(!PRESENT_WAIT.is_zero() && !MANAGER_TICK.is_zero());
+    }
+
+    #[test]
+    fn nfr8_the_shared_vectors_are_the_cores_own_decisions() {
+        use super::vectors::*;
+        for case in PLACEMENTS {
+            assert_eq!(
+                frame_placement(case.frame, case.view, case.scale, case.held),
+                case.expected,
+                "{case:?}"
+            );
+        }
+        for case in fills() {
+            assert_eq!(
+                uncovered_fill(case.see_through, case.band, case.fill, case.splash, || {
+                    super::super::splash::background(case.dark)
+                }),
+                case.expected,
+                "{case:?}"
+            );
+        }
+        for case in HELD {
+            assert_eq!(size_is_held(case.proposal), case.expected, "{case:?}");
+        }
+        for case in MIN_CLIENT {
+            assert_eq!(
+                min_client_size(case.dpi, case.max, case.task),
+                case.expected,
+                "{case:?}"
+            );
+        }
+        assert_eq!(TIMING.settle, SETTLE);
+        assert_eq!(TIMING.tick, MANAGER_TICK);
+        assert_eq!(TIMING.present_wait, PRESENT_WAIT);
     }
 
     #[test]

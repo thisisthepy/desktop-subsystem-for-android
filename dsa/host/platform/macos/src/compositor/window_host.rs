@@ -240,6 +240,24 @@ impl WindowEvents for Events {
         );
     }
 
+    fn view_changed(&mut self) {
+        // Called from inside a window call the state is busy with (the window resized
+        // itself): that call takes the new size itself.
+        let task_id = self.task_id;
+        STATE.with(|state| {
+            if let Ok(mut state) = state.try_borrow_mut() {
+                window_view_changed(&mut state, task_id);
+            }
+        });
+    }
+
+    fn size_for(&mut self, proposed: (u32, u32)) -> Option<(u32, u32)> {
+        STATE.with(|state| {
+            let mut state = state.try_borrow_mut().ok()?;
+            state.windows.get_mut(&self.task_id)?.size_for(proposed)
+        })
+    }
+
     fn dragging(&mut self, dragging: bool) {
         report(
             &self.reports,
@@ -429,6 +447,16 @@ fn show(task_id: i32, title: &str, size: (u32, u32), focused: bool) {
     });
 }
 
+/// Task `task_id`'s window may have a new size: it shows a frame kept for it.
+fn window_view_changed(state: &mut State, task_id: i32) {
+    let State {
+        windows, textures, ..
+    } = state;
+    if let Some(window) = windows.get_mut(&task_id) {
+        window.view_changed(&|texture_id| textures.get(&texture_id).map(|(_, surface)| surface));
+    }
+}
+
 fn handle(message: ToHost) {
     match message {
         ToHost::Show {
@@ -448,9 +476,11 @@ fn handle(message: ToHost) {
             width,
             height,
         } => STATE.with(|state| {
-            if let Some(window) = state.borrow_mut().windows.get_mut(&task_id) {
+            let mut state = state.borrow_mut();
+            if let Some(window) = state.windows.get_mut(&task_id) {
                 window.resize_to((width, height));
             }
+            window_view_changed(&mut state, task_id);
         }),
         ToHost::Close { task_id } => STATE.with(|state| {
             let mut state = state.borrow_mut();
@@ -511,6 +541,7 @@ fn handle(message: ToHost) {
                 window.set_resizable(resizable);
                 window.set_picture_in_picture(mode == WindowMode::PictureInPicture);
                 window.set_full_screen(mode == WindowMode::Fullscreen);
+                window.view_changed(&|_| None);
             }
         }),
         ToHost::Overlay {

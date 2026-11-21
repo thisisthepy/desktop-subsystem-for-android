@@ -36,15 +36,18 @@ use crate::host_config::{user_root_in, MacHostConfig, UserFolders};
 use crate::launchd::WM_LABEL;
 use crate::service::relay_socket;
 use crate::shell::app_stubs;
+use dsa_host_core::compositor::window_sizing::{MANAGER_TICK, PRESENT_WAIT};
 use dsa_host_core::renderer::{spawn_supervisor, RendererHandler};
 use dsa_host_unix::renderer_launch::{CurrentFds, UnixLauncher};
 
 /// How long to wait for the service before trying again.
 const RETRY: Duration = Duration::from_secs(2);
-/// How often the manager looks at its timers.
-const TICK: Duration = Duration::from_millis(500);
-/// How often the presenter looks for window hosts that are late.
-const PRESENT_TICK: Duration = Duration::from_millis(100);
+/// How often the manager looks at its timers: the same on every host.
+const TICK: Duration = MANAGER_TICK;
+/// How often the presenter looks for window hosts that are late: a fifth of the time one may
+/// take, so a late window host is let go within a fifth of [`PRESENT_WAIT`] of its deadline.
+/// (The Windows host waits for each answer on the frame's own thread instead.)
+const PRESENT_TICK: Duration = Duration::from_millis(PRESENT_WAIT.as_millis() as u64 / 5);
 /// How often the user's window settings for each app are read again.
 const APP_WINDOWS_EVERY: Duration = Duration::from_secs(30);
 
@@ -510,4 +513,16 @@ fn serve(places: Places, stop: Arc<AtomicBool>) -> Result<(), String> {
     }
     log("dsa-wm stopped");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use dsa_host_core::compositor::window_sizing::vectors::TIMING;
+
+    #[test]
+    fn nfr8_the_macos_manager_keeps_the_shared_timing() {
+        assert_eq!(super::TICK, TIMING.tick);
+        assert_eq!(super::super::frame_slots::PRESENT_WAIT, TIMING.present_wait);
+        assert!(super::PRESENT_TICK < TIMING.present_wait);
+    }
 }

@@ -78,9 +78,10 @@ use std::cell::{Cell, RefCell};
 use std::sync::mpsc::Sender;
 
 use dsa_host_core::compositor::caption::{
-    below_title_bar_sample, paint_title_bar, scaled, shown_tone, title_bar_hit, tone_reason,
-    BackButton, BandSample, CaptionBand, CaptionButton, CaptionHit, CaptionLayout, CaptionPalette,
-    CaptionState, CaptionTone, TitleBarContent, TitleBarHit, TitleBarMode, TITLE_TEXT_AT_100,
+    below_title_bar_sample, paint_title_bar, scaled, shown_band_fill, shown_tone, title_bar_hit,
+    tone_reason, BackButton, BandSample, CaptionBand, CaptionButton, CaptionHit, CaptionLayout,
+    CaptionPalette, CaptionState, CaptionTone, TitleBarContent, TitleBarHit, TitleBarMode,
+    TITLE_TEXT_AT_100,
 };
 use dsa_host_core::compositor::caption_icon::{self, IconLook};
 use dsa_host_core::compositor::window_hosts::FromHost;
@@ -774,7 +775,7 @@ impl CaptionWindow {
     /// empty, and always a color for an app that starts below the title bar. An app that
     /// draws its own title bar is never filled over.
     fn fill(&self) -> Option<u32> {
-        self.band_sample().fill.filter(|_| !self.app_drawn.get())
+        shown_band_fill(self.band_sample(), self.app_drawn.get())
     }
 
     /// Settles the tone the glyphs, the name and the frame are drawn in, from the app's

@@ -68,11 +68,9 @@ const BUILD: &str = "dsa-wm";
 /// How long a window host may take over its handshake.
 const HANDSHAKE: Duration = Duration::from_secs(5);
 
-/// How long the renderer waits for a window host to copy a frame out of its texture.
-const PRESENT_WAIT: Duration = Duration::from_millis(500);
-
-/// How often the manager looks for window hosts that are late.
-const TICK: Duration = Duration::from_millis(500);
+// How long the renderer waits for a window host to copy a frame out of its texture, and how
+// often the manager looks for window hosts that are late: the same on every host.
+use dsa_host_core::compositor::window_sizing::{MANAGER_TICK as TICK, PRESENT_WAIT};
 
 /// How often the manager looks at which task windows are covered by other windows.
 const COVERS_CHECK: Duration = Duration::from_secs(1);
@@ -1630,6 +1628,13 @@ impl Manager {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn nfr8_the_windows_manager_keeps_the_shared_timing() {
+        use dsa_host_core::compositor::window_sizing::vectors::TIMING;
+        assert_eq!(super::TICK, TIMING.tick);
+        assert_eq!(super::PRESENT_WAIT, TIMING.present_wait);
+    }
+
     #[test]
     fn fr22_app_info_opens_the_apps_page_at_the_app() {
         assert_eq!(

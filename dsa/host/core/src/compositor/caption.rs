@@ -112,6 +112,13 @@ pub struct BandSample {
     pub range: Option<(u16, u16)>,
 }
 
+/// The colour a window paints over its title bar band, from what it read there (`sample`):
+/// the app's top colour while the app leaves the band empty, and none over an app that draws
+/// its own title bar (`app_drawn`), which is never filled over. Every host paints the same.
+pub fn shown_band_fill(sample: BandSample, app_drawn: bool) -> Option<u32> {
+    sample.fill.filter(|_| !app_drawn)
+}
+
 /// Samples of a frame's band (`band`, from inside it) and of the row under it (`below`), each
 /// 0xAARRGGBB, as a window reads them.
 pub fn band_sample(band: &[u32], below: &[u32]) -> BandSample {
@@ -1518,6 +1525,17 @@ fn over(bottom: [f64; 4], top: [f64; 4]) -> [u8; 4] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nfr8_the_band_fill_is_the_apps_top_colour_unless_the_app_draws_its_band() {
+        let sample = BandSample {
+            fill: Some(0xFF11_2233),
+            ..BandSample::default()
+        };
+        assert_eq!(shown_band_fill(sample, false), Some(0xFF11_2233));
+        assert_eq!(shown_band_fill(sample, true), None);
+        assert_eq!(shown_band_fill(BandSample::default(), false), None);
+    }
 
     /// A window 800 pixels wide at 100%, with a title bar of 31 and a top edge of 8.
     fn at_100() -> CaptionLayout {
