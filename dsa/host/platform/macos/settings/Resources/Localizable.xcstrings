@@ -36761,6 +36761,95 @@
         }
       }
     },
+    "Memory_FreeDetail": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Speicher, den gerade nichts nutzt. Android gibt ihn an den PC zurück, er belegt also keinen RAM des PCs."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Memory nothing uses right now. Android hands it back to the PC, so it does not take up the PC's RAM."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Memoria que nada usa ahora. Android la devuelve al PC, así que no ocupa la RAM del PC."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mémoire que rien n'utilise pour l'instant. Android la rend au PC, elle n'occupe donc pas sa RAM."
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Memori yang saat ini tidak dipakai apa pun. Android mengembalikannya ke PC, jadi tidak memakan RAM PC."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Memoria che al momento nulla usa. Android la restituisce al PC, quindi non occupa la RAM del PC."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今は何も使っていないメモリです。Android が PC に返すので、PC の RAM を占めません。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "지금 아무것도 쓰지 않는 메모리입니다. Android가 PC에 돌려주므로 PC의 RAM을 차지하지 않습니다."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Memória que nada está usando agora. O Android a devolve ao PC, então ela não ocupa a RAM do PC."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Память, которую сейчас ничто не использует. Android возвращает её компьютеру, поэтому она не занимает его оперативную память."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Şu anda hiçbir şeyin kullanmadığı bellek. Android onu bilgisayara geri verir, bu yüzden bilgisayarın RAM'ini kaplamaz."
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bộ nhớ hiện không có gì dùng. Android trả lại cho PC, nên nó không chiếm RAM của PC."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前没有任何东西在用的内存。Android 会把它还给电脑，因此不占用电脑的内存。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "目前沒有任何東西在用的記憶體。Android 會把它還給電腦，因此不佔用電腦的記憶體。"
+          }
+        }
+      }
+    },
     "Memory_GooglePlay": {
       "extractionState": "manual",
       "localizations": {
@@ -37473,6 +37562,95 @@
         }
       }
     },
+    "Memory_KernelPageTablesDetail": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Tabellen, die dem Prozessor zeigen, wo der Speicher jeder App im RAM liegt. Sie schrumpfen, wenn Apps geschlossen werden."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The maps that tell the processor where each app's memory is in RAM. They shrink as apps close."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Los mapas que indican al procesador dónde está en la RAM la memoria de cada app. Se reducen al cerrar apps."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les tables qui indiquent au processeur où se trouve en RAM la mémoire de chaque appli. Elles diminuent quand des applis se ferment."
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Peta yang memberi tahu prosesor letak memori setiap aplikasi di RAM. Mengecil saat aplikasi ditutup."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le tabelle che dicono al processore dove si trova nella RAM la memoria di ogni app. Si riducono quando le app si chiudono."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "各アプリのメモリが RAM のどこにあるかをプロセッサーに伝える対応表です。アプリを閉じると減ります。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "각 앱의 메모리가 RAM의 어디에 있는지 프로세서에 알려 주는 지도입니다. 앱을 닫으면 줄어듭니다."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Os mapas que dizem ao processador onde a memória de cada app está na RAM. Diminuem quando apps fecham."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Таблицы, по которым процессор находит память каждого приложения в ОЗУ. Уменьшаются, когда приложения закрываются."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "İşlemciye her uygulamanın belleğinin RAM'de nerede olduğunu söyleyen tablolar. Uygulamalar kapandıkça küçülür."
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Các bảng cho bộ xử lý biết bộ nhớ của mỗi ứng dụng nằm ở đâu trong RAM. Giảm khi đóng ứng dụng."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "告诉处理器每个应用的内存位于内存条何处的映射表。关闭应用后会减少。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "告訴處理器每個應用程式的記憶體位於 RAM 何處的對應表。關閉應用程式後會減少。"
+          }
+        }
+      }
+    },
     "Memory_KernelPercpu": {
       "extractionState": "manual",
       "localizations": {
@@ -37558,6 +37736,95 @@
           "stringUnit": {
             "state": "translated",
             "value": "各 CPU 資料"
+          }
+        }
+      }
+    },
+    "Memory_KernelPercpuDetail": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Daten, die der Kernel einmal für jeden Prozessorkern hält. Ihre Größe steht beim Start von Android fest."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Data the kernel keeps once for each processor core. Its size is fixed when Android starts."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Datos que el kernel guarda una vez por cada núcleo del procesador. Su tamaño se fija al iniciar Android."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Données que le noyau garde une fois par cœur de processeur. Leur taille est fixée au démarrage d'Android."
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Data yang disimpan kernel satu untuk setiap inti prosesor. Ukurannya ditetapkan saat Android mulai."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dati che il kernel tiene una volta per ogni core del processore. La dimensione è fissata all'avvio di Android."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "カーネルがプロセッサーのコアごとに 1 つずつ持つデータです。サイズは Android の起動時に決まります。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "커널이 프로세서 코어마다 하나씩 두는 데이터입니다. 크기는 Android가 시작할 때 정해집니다."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dados que o kernel mantém uma vez para cada núcleo do processador. O tamanho é fixado quando o Android inicia."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Данные, которые ядро держит по одной копии на каждое ядро процессора. Их размер задаётся при запуске Android."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Çekirdeğin her işlemci çekirdeği için birer tane tuttuğu veriler. Boyutu Android başlarken belirlenir."
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dữ liệu kernel giữ một bản cho mỗi lõi bộ xử lý. Kích thước được cố định khi Android khởi động."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "内核为每个处理器核心各保留一份的数据。大小在 Android 启动时确定。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "核心為每個處理器核心各保留一份的資料。大小在 Android 啟動時確定。"
           }
         }
       }
@@ -38007,6 +38274,95 @@
         }
       }
     },
+    "Memory_KernelStacksDetail": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arbeitsbereich, den der Kernel für jeden laufenden Thread hält. Er schrumpft, wenn Apps geschlossen werden."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Working space the kernel keeps for every running thread. It shrinks as apps close."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Espacio de trabajo que el kernel guarda para cada hilo en ejecución. Se reduce al cerrar apps."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Espace de travail que le noyau garde pour chaque thread en cours. Il diminue quand des applis se ferment."
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ruang kerja yang disimpan kernel untuk setiap thread yang berjalan. Mengecil saat aplikasi ditutup."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Spazio di lavoro che il kernel tiene per ogni thread in esecuzione. Si riduce quando le app si chiudono."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "実行中のスレッドごとにカーネルが持つ作業領域です。アプリを閉じると減ります。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "실행 중인 스레드마다 커널이 두는 작업 공간입니다. 앱을 닫으면 줄어듭니다."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Espaço de trabalho que o kernel mantém para cada thread em execução. Diminui quando apps fecham."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Рабочее место, которое ядро держит для каждого работающего потока. Уменьшается, когда приложения закрываются."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Çekirdeğin çalışan her iş parçacığı için tuttuğu çalışma alanı. Uygulamalar kapandıkça küçülür."
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vùng làm việc kernel giữ cho mỗi luồng đang chạy. Giảm khi đóng ứng dụng."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "内核为每个运行中的线程保留的工作空间。关闭应用后会减少。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "核心為每個執行中的執行緒保留的工作空間。關閉應用程式後會減少。"
+          }
+        }
+      }
+    },
     "Memory_KernelUnaccounted": {
       "extractionState": "manual",
       "localizations": {
@@ -38274,6 +38630,95 @@
         }
       }
     },
+    "Memory_KernelVmallocDetail": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Große Puffer, die der Kernel und seine Treiber reservieren, unter anderem für Grafik. Sie werden frei, wenn sie nicht mehr gebraucht werden."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Large buffers the kernel and its drivers set aside, for graphics among others. They are freed when no longer needed."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Búferes grandes que reservan el kernel y sus controladores, entre otros para gráficos. Se liberan cuando ya no hacen falta."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Grands tampons que le noyau et ses pilotes mettent de côté, entre autres pour l'affichage. Ils sont libérés quand ils ne servent plus."
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Buffer besar yang disisihkan kernel dan drivernya, antara lain untuk grafis. Dilepas saat tidak diperlukan lagi."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Grandi buffer che il kernel e i suoi driver tengono da parte, tra l'altro per la grafica. Vengono liberati quando non servono più."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "カーネルとドライバーが確保する大きなバッファです。グラフィックスなどに使います。不要になると解放されます。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "커널과 드라이버가 따로 잡아 두는 큰 버퍼입니다. 그래픽 등에 씁니다. 필요 없어지면 풀립니다."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Buffers grandes que o kernel e seus drivers reservam, entre outros para gráficos. São liberados quando não são mais necessários."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Большие буферы, которые выделяют ядро и его драйверы, в том числе для графики. Освобождаются, когда больше не нужны."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Çekirdeğin ve sürücülerinin ayırdığı büyük arabellekler; grafik bunlardan biri. Artık gerekmediğinde serbest kalır."
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Các bộ đệm lớn kernel và trình điều khiển dành riêng, trong đó có cho đồ họa. Được giải phóng khi không còn cần."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "内核及其驱动预留的大块缓冲区，用于图形等。不再需要时释放。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "核心及其驅動程式預留的大型緩衝區，用於圖形等。不再需要時釋放。"
+          }
+        }
+      }
+    },
     "Memory_ProcessDetail": {
       "extractionState": "manual",
       "localizations": {
@@ -38537,6 +38982,95 @@
           "stringUnit": {
             "state": "translated",
             "value": "共用記憶體"
+          }
+        }
+      }
+    },
+    "Memory_SharedDetail": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Speicher, den mehrere Prozesse gemeinsam nutzen, etwa Fensterbilder und Grafikpuffer. Er wird frei, wenn die Apps, die ihn nutzen, geschlossen werden."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Memory that several processes use together, such as window images and graphics buffers. It is freed when the apps using it close."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Memoria que comparten varios procesos, como las imágenes de las ventanas y los búferes gráficos. Se libera al cerrar las apps que la usan."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mémoire partagée par plusieurs processus, comme les images des fenêtres et les tampons graphiques. Elle est libérée quand les applis qui l'utilisent se ferment."
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Memori yang dipakai bersama oleh beberapa proses, seperti gambar jendela dan buffer grafis. Dilepas saat aplikasi yang memakainya ditutup."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Memoria usata insieme da più processi, come le immagini delle finestre e i buffer grafici. Viene liberata quando le app che la usano si chiudono."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "複数のプロセスが共有するメモリです。ウィンドウの画像やグラフィックスのバッファが含まれます。使っているアプリを閉じると解放されます。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "여러 프로세스가 함께 쓰는 메모리입니다. 창 화면과 그래픽 버퍼가 여기에 들어갑니다. 쓰던 앱을 닫으면 풀립니다."
+          }
+        },
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Memória que vários processos usam juntos, como imagens de janelas e buffers gráficos. É liberada quando os apps que a usam fecham."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Память, которую используют сразу несколько процессов, например изображения окон и графические буферы. Освобождается, когда использующие её приложения закрываются."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pencere görüntüleri ve grafik arabellekleri gibi birkaç işlemin birlikte kullandığı bellek. Onu kullanan uygulamalar kapanınca serbest kalır."
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bộ nhớ nhiều tiến trình dùng chung, như hình ảnh cửa sổ và bộ đệm đồ họa. Được giải phóng khi các ứng dụng dùng nó đóng lại."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "多个进程共用的内存，例如窗口画面和图形缓冲区。使用它的应用关闭后即释放。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "多個程序共用的記憶體，例如視窗畫面和圖形緩衝區。使用它的應用程式關閉後即釋放。"
           }
         }
       }

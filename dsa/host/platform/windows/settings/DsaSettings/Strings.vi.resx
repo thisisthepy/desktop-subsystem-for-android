@@ -273,6 +273,9 @@ DSA sẽ tải xuống ảnh khác nếu có. Phiên bản DSA tiếp theo sẽ 
   <data name="Memory_Shared" xml:space="preserve">
     <value>Bộ nhớ dùng chung</value>
   </data>
+  <data name="Memory_SharedDetail" xml:space="preserve">
+    <value>Bộ nhớ nhiều tiến trình dùng chung, như hình ảnh cửa sổ và bộ đệm đồ họa. Được giải phóng khi các ứng dụng dùng nó đóng lại.</value>
+  </data>
   <data name="Memory_Zram" xml:space="preserve">
     <value>Bộ nhớ nén</value>
   </data>
@@ -281,6 +284,9 @@ DSA sẽ tải xuống ảnh khác nếu có. Phiên bản DSA tiếp theo sẽ 
   </data>
   <data name="Memory_Free" xml:space="preserve">
     <value>Trống</value>
+  </data>
+  <data name="Memory_FreeDetail" xml:space="preserve">
+    <value>Bộ nhớ hiện không có gì dùng. Android trả lại cho PC, nên nó không chiếm RAM của PC.</value>
   </data>
   <data name="Memory_GuestProcessDetail" xml:space="preserve">
     <value>Tiến trình {0}</value>
@@ -864,14 +870,26 @@ Tự động: tối đa bằng bộ nhớ của PC này trừ phần Windows gi�
   <data name="Memory_KernelStacks" xml:space="preserve">
     <value>Ngăn xếp luồng</value>
   </data>
+  <data name="Memory_KernelStacksDetail" xml:space="preserve">
+    <value>Vùng làm việc kernel giữ cho mỗi luồng đang chạy. Giảm khi đóng ứng dụng.</value>
+  </data>
   <data name="Memory_KernelPageTables" xml:space="preserve">
     <value>Bảng trang</value>
+  </data>
+  <data name="Memory_KernelPageTablesDetail" xml:space="preserve">
+    <value>Các bảng cho bộ xử lý biết bộ nhớ của mỗi ứng dụng nằm ở đâu trong RAM. Giảm khi đóng ứng dụng.</value>
   </data>
   <data name="Memory_KernelVmalloc" xml:space="preserve">
     <value>Ánh xạ kernel (vmalloc)</value>
   </data>
+  <data name="Memory_KernelVmallocDetail" xml:space="preserve">
+    <value>Các bộ đệm lớn kernel và trình điều khiển dành riêng, trong đó có cho đồ họa. Được giải phóng khi không còn cần.</value>
+  </data>
   <data name="Memory_KernelPercpu" xml:space="preserve">
     <value>Dữ liệu theo từng CPU</value>
+  </data>
+  <data name="Memory_KernelPercpuDetail" xml:space="preserve">
+    <value>Dữ liệu kernel giữ một bản cho mỗi lõi bộ xử lý. Kích thước được cố định khi Android khởi động.</value>
   </data>
   <data name="Memory_KernelUnaccounted" xml:space="preserve">
     <value>Trình điều khiển</value>

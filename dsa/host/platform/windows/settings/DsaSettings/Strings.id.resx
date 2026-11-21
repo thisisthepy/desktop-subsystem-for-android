@@ -273,6 +273,9 @@ DSA mengunduh image lain jika ada. Versi DSA berikutnya mencoba image ini lagi.<
   <data name="Memory_Shared" xml:space="preserve">
     <value>Memori bersama</value>
   </data>
+  <data name="Memory_SharedDetail" xml:space="preserve">
+    <value>Memori yang dipakai bersama oleh beberapa proses, seperti gambar jendela dan buffer grafis. Dilepas saat aplikasi yang memakainya ditutup.</value>
+  </data>
   <data name="Memory_Zram" xml:space="preserve">
     <value>Memori terkompresi</value>
   </data>
@@ -281,6 +284,9 @@ DSA mengunduh image lain jika ada. Versi DSA berikutnya mencoba image ini lagi.<
   </data>
   <data name="Memory_Free" xml:space="preserve">
     <value>Kosong</value>
+  </data>
+  <data name="Memory_FreeDetail" xml:space="preserve">
+    <value>Memori yang saat ini tidak dipakai apa pun. Android mengembalikannya ke PC, jadi tidak memakan RAM PC.</value>
   </data>
   <data name="Memory_GuestProcessDetail" xml:space="preserve">
     <value>Proses {0}</value>
@@ -864,14 +870,26 @@ Otomatis: hingga memori PC ini dikurangi bagian yang disimpan Windows. Berlaku s
   <data name="Memory_KernelStacks" xml:space="preserve">
     <value>Stack thread</value>
   </data>
+  <data name="Memory_KernelStacksDetail" xml:space="preserve">
+    <value>Ruang kerja yang disimpan kernel untuk setiap thread yang berjalan. Mengecil saat aplikasi ditutup.</value>
+  </data>
   <data name="Memory_KernelPageTables" xml:space="preserve">
     <value>Tabel halaman</value>
+  </data>
+  <data name="Memory_KernelPageTablesDetail" xml:space="preserve">
+    <value>Peta yang memberi tahu prosesor letak memori setiap aplikasi di RAM. Mengecil saat aplikasi ditutup.</value>
   </data>
   <data name="Memory_KernelVmalloc" xml:space="preserve">
     <value>Pemetaan kernel (vmalloc)</value>
   </data>
+  <data name="Memory_KernelVmallocDetail" xml:space="preserve">
+    <value>Buffer besar yang disisihkan kernel dan drivernya, antara lain untuk grafis. Dilepas saat tidak diperlukan lagi.</value>
+  </data>
   <data name="Memory_KernelPercpu" xml:space="preserve">
     <value>Data per CPU</value>
+  </data>
+  <data name="Memory_KernelPercpuDetail" xml:space="preserve">
+    <value>Data yang disimpan kernel satu untuk setiap inti prosesor. Ukurannya ditetapkan saat Android mulai.</value>
   </data>
   <data name="Memory_KernelUnaccounted" xml:space="preserve">
     <value>Driver</value>

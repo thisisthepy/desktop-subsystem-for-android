@@ -1856,3 +1856,21 @@ msgstr "İndiriliyor ve yükleniyor…"
 
 msgid "Not installed: {0}"
 msgstr "Yüklenmedi: {0}"
+
+msgid "Memory that several processes use together, such as window images and graphics buffers. It is freed when the apps using it close."
+msgstr "Pencere görüntüleri ve grafik arabellekleri gibi birkaç işlemin birlikte kullandığı bellek. Onu kullanan uygulamalar kapanınca serbest kalır."
+
+msgid "Memory nothing uses right now. Android hands it back to the PC, so it does not take up the PC's RAM."
+msgstr "Şu anda hiçbir şeyin kullanmadığı bellek. Android onu bilgisayara geri verir, bu yüzden bilgisayarın RAM'ini kaplamaz."
+
+msgid "Working space the kernel keeps for every running thread. It shrinks as apps close."
+msgstr "Çekirdeğin çalışan her iş parçacığı için tuttuğu çalışma alanı. Uygulamalar kapandıkça küçülür."
+
+msgid "The maps that tell the processor where each app's memory is in RAM. They shrink as apps close."
+msgstr "İşlemciye her uygulamanın belleğinin RAM'de nerede olduğunu söyleyen tablolar. Uygulamalar kapandıkça küçülür."
+
+msgid "Large buffers the kernel and its drivers set aside, for graphics among others. They are freed when no longer needed."
+msgstr "Çekirdeğin ve sürücülerinin ayırdığı büyük arabellekler; grafik bunlardan biri. Artık gerekmediğinde serbest kalır."
+
+msgid "Data the kernel keeps once for each processor core. Its size is fixed when Android starts."
+msgstr "Çekirdeğin her işlemci çekirdeği için birer tane tuttuğu veriler. Boyutu Android başlarken belirlenir."

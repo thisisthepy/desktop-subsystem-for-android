@@ -83,10 +83,10 @@ public final class MemoryViewModel: ObservableObject {
             MemoryRow(label: text.get("Memory_Apps"), detail: shareDetail(apps), size: Format.size(apps.totalKb)),
             MemoryRow(label: text.get("Memory_Cache"), detail: text.get("Memory_CacheDetail"), size: Format.size(g.cachedKb + g.buffersKb)),
             MemoryRow(label: text.get("Memory_Kernel"), detail: text.get("Memory_KernelDetail"), size: Format.size(g.slabReclaimableKb)),
-            MemoryRow(label: text.get("Memory_Shared"), detail: "", size: Format.size(g.shmemKb)),
+            MemoryRow(label: text.get("Memory_Shared"), detail: text.get("Memory_SharedDetail"), size: Format.size(g.shmemKb)),
             MemoryRow(label: text.get("Memory_Zram"), detail: text.format("Memory_ZramDetail", Format.size(g.zramOriginalKb)),
                       size: Format.size(g.zramUsedKb)),
-            MemoryRow(label: text.get("Memory_Free"), detail: "", size: Format.size(g.freeKb)),
+            MemoryRow(label: text.get("Memory_Free"), detail: text.get("Memory_FreeDetail"), size: Format.size(g.freeKb)),
         ]
         // Google Play services, which the user chose to install, on a row of its own, so what
         // it costs is not taken for what Android and DSA cost.
@@ -111,10 +111,10 @@ public final class MemoryViewModel: ObservableObject {
         }
         var rows = [
             MemoryRow(label: text.get("Memory_KernelSlab"), detail: text.get("Memory_KernelSlabDetail"), size: Format.size(k.slabUnreclaimableKb)),
-            MemoryRow(label: text.get("Memory_KernelStacks"), detail: "", size: Format.size(k.kernelStackKb)),
-            MemoryRow(label: text.get("Memory_KernelPageTables"), detail: "", size: Format.size(k.pageTablesKb)),
-            MemoryRow(label: text.get("Memory_KernelVmalloc"), detail: "", size: Format.size(k.vmallocUsedKb)),
-            MemoryRow(label: text.get("Memory_KernelPercpu"), detail: "", size: Format.size(k.percpuKb)),
+            MemoryRow(label: text.get("Memory_KernelStacks"), detail: text.get("Memory_KernelStacksDetail"), size: Format.size(k.kernelStackKb)),
+            MemoryRow(label: text.get("Memory_KernelPageTables"), detail: text.get("Memory_KernelPageTablesDetail"), size: Format.size(k.pageTablesKb)),
+            MemoryRow(label: text.get("Memory_KernelVmalloc"), detail: text.get("Memory_KernelVmallocDetail"), size: Format.size(k.vmallocUsedKb)),
+            MemoryRow(label: text.get("Memory_KernelPercpu"), detail: text.get("Memory_KernelPercpuDetail"), size: Format.size(k.percpuKb)),
             MemoryRow(label: text.get("Memory_KernelUnaccounted"), detail: text.get("Memory_KernelUnaccountedDetail"), size: Format.size(k.unaccountedKb)),
         ]
         if let reserved = k.reservedAtBootKb {

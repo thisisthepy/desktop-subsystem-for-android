@@ -1856,3 +1856,21 @@ msgstr "Đang tải và cài đặt…"
 
 msgid "Not installed: {0}"
 msgstr "Chưa cài đặt: {0}"
+
+msgid "Memory that several processes use together, such as window images and graphics buffers. It is freed when the apps using it close."
+msgstr "Bộ nhớ nhiều tiến trình dùng chung, như hình ảnh cửa sổ và bộ đệm đồ họa. Được giải phóng khi các ứng dụng dùng nó đóng lại."
+
+msgid "Memory nothing uses right now. Android hands it back to the PC, so it does not take up the PC's RAM."
+msgstr "Bộ nhớ hiện không có gì dùng. Android trả lại cho PC, nên nó không chiếm RAM của PC."
+
+msgid "Working space the kernel keeps for every running thread. It shrinks as apps close."
+msgstr "Vùng làm việc kernel giữ cho mỗi luồng đang chạy. Giảm khi đóng ứng dụng."
+
+msgid "The maps that tell the processor where each app's memory is in RAM. They shrink as apps close."
+msgstr "Các bảng cho bộ xử lý biết bộ nhớ của mỗi ứng dụng nằm ở đâu trong RAM. Giảm khi đóng ứng dụng."
+
+msgid "Large buffers the kernel and its drivers set aside, for graphics among others. They are freed when no longer needed."
+msgstr "Các bộ đệm lớn kernel và trình điều khiển dành riêng, trong đó có cho đồ họa. Được giải phóng khi không còn cần."
+
+msgid "Data the kernel keeps once for each processor core. Its size is fixed when Android starts."
+msgstr "Dữ liệu kernel giữ một bản cho mỗi lõi bộ xử lý. Kích thước được cố định khi Android khởi động."

@@ -273,6 +273,9 @@ DSA télécharge une autre image s'il en existe une. La prochaine version de DSA
   <data name="Memory_Shared" xml:space="preserve">
     <value>Mémoire partagée</value>
   </data>
+  <data name="Memory_SharedDetail" xml:space="preserve">
+    <value>Mémoire partagée par plusieurs processus, comme les images des fenêtres et les tampons graphiques. Elle est libérée quand les applis qui l'utilisent se ferment.</value>
+  </data>
   <data name="Memory_Zram" xml:space="preserve">
     <value>Mémoire compressée</value>
   </data>
@@ -281,6 +284,9 @@ DSA télécharge une autre image s'il en existe une. La prochaine version de DSA
   </data>
   <data name="Memory_Free" xml:space="preserve">
     <value>Libre</value>
+  </data>
+  <data name="Memory_FreeDetail" xml:space="preserve">
+    <value>Mémoire que rien n'utilise pour l'instant. Android la rend au PC, elle n'occupe donc pas sa RAM.</value>
   </data>
   <data name="Memory_GuestProcessDetail" xml:space="preserve">
     <value>Processus {0}</value>
@@ -864,14 +870,26 @@ Automatique : jusqu'à la mémoire de ce PC moins ce que garde Windows. S'appliq
   <data name="Memory_KernelStacks" xml:space="preserve">
     <value>Piles des threads</value>
   </data>
+  <data name="Memory_KernelStacksDetail" xml:space="preserve">
+    <value>Espace de travail que le noyau garde pour chaque thread en cours. Il diminue quand des applis se ferment.</value>
+  </data>
   <data name="Memory_KernelPageTables" xml:space="preserve">
     <value>Tables de pages</value>
+  </data>
+  <data name="Memory_KernelPageTablesDetail" xml:space="preserve">
+    <value>Les tables qui indiquent au processeur où se trouve en RAM la mémoire de chaque appli. Elles diminuent quand des applis se ferment.</value>
   </data>
   <data name="Memory_KernelVmalloc" xml:space="preserve">
     <value>Mappages du noyau (vmalloc)</value>
   </data>
+  <data name="Memory_KernelVmallocDetail" xml:space="preserve">
+    <value>Grands tampons que le noyau et ses pilotes mettent de côté, entre autres pour l'affichage. Ils sont libérés quand ils ne servent plus.</value>
+  </data>
   <data name="Memory_KernelPercpu" xml:space="preserve">
     <value>Données par processeur</value>
+  </data>
+  <data name="Memory_KernelPercpuDetail" xml:space="preserve">
+    <value>Données que le noyau garde une fois par cœur de processeur. Leur taille est fixée au démarrage d'Android.</value>
   </data>
   <data name="Memory_KernelUnaccounted" xml:space="preserve">
     <value>Pilotes</value>

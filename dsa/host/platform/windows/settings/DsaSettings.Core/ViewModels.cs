@@ -814,11 +814,11 @@ public sealed partial class MemoryViewModel : ObservableObject
             new(_text.Get("Memory_Apps"), ShareDetail(apps), Format.Size(apps.TotalKb)),
             new(_text.Get("Memory_Cache"), _text.Get("Memory_CacheDetail"), Format.Size(guest.CachedKb + guest.BuffersKb)),
             new(_text.Get("Memory_Kernel"), _text.Get("Memory_KernelDetail"), Format.Size(guest.SlabReclaimableKb)),
-            new(_text.Get("Memory_Shared"), "", Format.Size(guest.ShmemKb)),
+            new(_text.Get("Memory_Shared"), _text.Get("Memory_SharedDetail"), Format.Size(guest.ShmemKb)),
             new(_text.Get("Memory_Zram"),
                 string.Format(CultureInfo.CurrentCulture, _text.Get("Memory_ZramDetail"), Format.Size(guest.ZramOriginalKb)),
                 Format.Size(guest.ZramUsedKb)),
-            new(_text.Get("Memory_Free"), "", Format.Size(guest.FreeKb)),
+            new(_text.Get("Memory_Free"), _text.Get("Memory_FreeDetail"), Format.Size(guest.FreeKb)),
         };
         // Google Play services, which the user chose to install, on a line of its own, so
         // what it costs is not taken for what Android and DSA cost.

@@ -498,6 +498,69 @@ fn fr17_the_memory_page_shows_the_vm_and_the_guest_breakdown() {
 }
 
 #[test]
+fn fr17_every_memory_row_has_a_description_in_every_language() {
+    let memory = Memory::read(&json!({
+        "host": [
+            { "role": "vm", "pid": 10, "working_set_kb": 1048576, "private_kb": 1000 },
+            { "role": "window manager", "pid": 11, "working_set_kb": 2048, "private_kb": 1024 }
+        ],
+        "host_total_kb": 1050624,
+        "vm_beyond_guest_kb": 262144,
+        "guest": {
+            "mem_total_kb": 2097152, "mem_available_kb": 1310720, "mem_free_kb": 1000000,
+            "total_pss_kb": 409600, "cached_kb": 1024, "buffers_kb": 0, "shmem_kb": 2048,
+            "zram_original_kb": 4096, "zram_used_kb": 1024, "age_seconds": 3,
+            "google_play": { "processes": 2, "pss_kb": 1024, "swap_pss_kb": 0, "resident_kb": 1024,
+                             "compressed_kb": 0, "swapped_out_kb": 0, "total_kb": 1024 },
+            "top_processes": [ { "pid": 400, "name": "system_server", "pss_kb": 102400 } ],
+            "kernel": { "slab_unreclaimable_kb": 51200, "kernel_stack_kb": 10240,
+                        "page_tables_kb": 20480, "vmalloc_used_kb": 30720, "percpu_kb": 1024,
+                        "cma_total_kb": 0, "mem_online_kb": 2228224, "unaccounted_kb": 40960,
+                        "reserved_at_boot_kb": 131072 }
+        }
+    }));
+    let guest = memory.guest.as_ref().unwrap();
+    let kernel = view::kernel_rows(guest);
+    assert_eq!(kernel.len(), 7);
+    let rows: Vec<_> = view::host_rows(&memory)
+        .into_iter()
+        .chain(view::guest_rows(guest))
+        .chain(kernel)
+        .chain(view::process_rows(guest))
+        .collect();
+    // Rows whose description is filled in with sizes or numbers; the others are fixed texts.
+    let formatted = [
+        "Apps and system",
+        "Google Play services",
+        "Compressed memory",
+        "Reserved at boot",
+        "system_server",
+        "Virtual machine (crosvm)",
+        "Window manager",
+    ];
+    let catalogues = catalogues();
+    for row in &rows {
+        assert!(
+            !row.detail.trim().is_empty(),
+            "\"{}\" has no description",
+            row.label
+        );
+        if formatted.contains(&row.label.as_str()) {
+            continue;
+        }
+        for (language, catalogue) in &catalogues {
+            assert!(
+                catalogue
+                    .get(&row.detail)
+                    .is_some_and(|t| !t.trim().is_empty()),
+                "po/{language}.po has no description for \"{}\"",
+                row.label
+            );
+        }
+    }
+}
+
+#[test]
 fn fr17_the_android_page_warns_before_moving_to_an_older_version() {
     let info = dsa_settings_linux::model::AndroidVersion::read(&json!({
         "version": "17.0.0-1", "android_major": 17, "channel": "latest",

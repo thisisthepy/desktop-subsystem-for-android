@@ -1856,3 +1856,21 @@ msgstr "Download e installazione in corso…"
 
 msgid "Not installed: {0}"
 msgstr "Non installato: {0}"
+
+msgid "Memory that several processes use together, such as window images and graphics buffers. It is freed when the apps using it close."
+msgstr "Memoria usata insieme da più processi, come le immagini delle finestre e i buffer grafici. Viene liberata quando le app che la usano si chiudono."
+
+msgid "Memory nothing uses right now. Android hands it back to the PC, so it does not take up the PC's RAM."
+msgstr "Memoria che al momento nulla usa. Android la restituisce al PC, quindi non occupa la RAM del PC."
+
+msgid "Working space the kernel keeps for every running thread. It shrinks as apps close."
+msgstr "Spazio di lavoro che il kernel tiene per ogni thread in esecuzione. Si riduce quando le app si chiudono."
+
+msgid "The maps that tell the processor where each app's memory is in RAM. They shrink as apps close."
+msgstr "Le tabelle che dicono al processore dove si trova nella RAM la memoria di ogni app. Si riducono quando le app si chiudono."
+
+msgid "Large buffers the kernel and its drivers set aside, for graphics among others. They are freed when no longer needed."
+msgstr "Grandi buffer che il kernel e i suoi driver tengono da parte, tra l'altro per la grafica. Vengono liberati quando non servono più."
+
+msgid "Data the kernel keeps once for each processor core. Its size is fixed when Android starts."
+msgstr "Dati che il kernel tiene una volta per ogni core del processore. La dimensione è fissata all'avvio di Android."

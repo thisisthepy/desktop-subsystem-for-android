@@ -273,6 +273,9 @@ Android {2}은(는) 아직 시작을 마치지 못했습니다({3}). Android를 
   <data name="Memory_Shared" xml:space="preserve">
     <value>공유 메모리</value>
   </data>
+  <data name="Memory_SharedDetail" xml:space="preserve">
+    <value>여러 프로세스가 함께 쓰는 메모리입니다. 창 화면과 그래픽 버퍼가 여기에 들어갑니다. 쓰던 앱을 닫으면 풀립니다.</value>
+  </data>
   <data name="Memory_Zram" xml:space="preserve">
     <value>압축 메모리</value>
   </data>
@@ -281,6 +284,9 @@ Android {2}은(는) 아직 시작을 마치지 못했습니다({3}). Android를 
   </data>
   <data name="Memory_Free" xml:space="preserve">
     <value>비어 있음</value>
+  </data>
+  <data name="Memory_FreeDetail" xml:space="preserve">
+    <value>지금 아무것도 쓰지 않는 메모리입니다. Android가 PC에 돌려주므로 PC의 RAM을 차지하지 않습니다.</value>
   </data>
   <data name="Memory_GuestProcessDetail" xml:space="preserve">
     <value>프로세스 {0}</value>
@@ -864,14 +870,26 @@ adb disconnect로 끊으면 adb 서버가 다시 시작될 때까지 연결하�
   <data name="Memory_KernelStacks" xml:space="preserve">
     <value>스레드 스택</value>
   </data>
+  <data name="Memory_KernelStacksDetail" xml:space="preserve">
+    <value>실행 중인 스레드마다 커널이 두는 작업 공간입니다. 앱을 닫으면 줄어듭니다.</value>
+  </data>
   <data name="Memory_KernelPageTables" xml:space="preserve">
     <value>페이지 테이블</value>
+  </data>
+  <data name="Memory_KernelPageTablesDetail" xml:space="preserve">
+    <value>각 앱의 메모리가 RAM의 어디에 있는지 프로세서에 알려 주는 지도입니다. 앱을 닫으면 줄어듭니다.</value>
   </data>
   <data name="Memory_KernelVmalloc" xml:space="preserve">
     <value>커널 매핑(vmalloc)</value>
   </data>
+  <data name="Memory_KernelVmallocDetail" xml:space="preserve">
+    <value>커널과 드라이버가 따로 잡아 두는 큰 버퍼입니다. 그래픽 등에 씁니다. 필요 없어지면 풀립니다.</value>
+  </data>
   <data name="Memory_KernelPercpu" xml:space="preserve">
     <value>CPU별 데이터</value>
+  </data>
+  <data name="Memory_KernelPercpuDetail" xml:space="preserve">
+    <value>커널이 프로세서 코어마다 하나씩 두는 데이터입니다. 크기는 Android가 시작할 때 정해집니다.</value>
   </data>
   <data name="Memory_KernelUnaccounted" xml:space="preserve">
     <value>드라이버</value>

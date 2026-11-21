@@ -273,6 +273,9 @@ DSA lädt ein anderes Abbild herunter, falls es eines gibt. Die nächste DSA-Ver
   <data name="Memory_Shared" xml:space="preserve">
     <value>Gemeinsamer Speicher</value>
   </data>
+  <data name="Memory_SharedDetail" xml:space="preserve">
+    <value>Speicher, den mehrere Prozesse gemeinsam nutzen, etwa Fensterbilder und Grafikpuffer. Er wird frei, wenn die Apps, die ihn nutzen, geschlossen werden.</value>
+  </data>
   <data name="Memory_Zram" xml:space="preserve">
     <value>Komprimierter Speicher</value>
   </data>
@@ -281,6 +284,9 @@ DSA lädt ein anderes Abbild herunter, falls es eines gibt. Die nächste DSA-Ver
   </data>
   <data name="Memory_Free" xml:space="preserve">
     <value>Frei</value>
+  </data>
+  <data name="Memory_FreeDetail" xml:space="preserve">
+    <value>Speicher, den gerade nichts nutzt. Android gibt ihn an den PC zurück, er belegt also keinen RAM des PCs.</value>
   </data>
   <data name="Memory_GuestProcessDetail" xml:space="preserve">
     <value>Prozess {0}</value>
@@ -864,14 +870,26 @@ Automatisch: bis zum Arbeitsspeicher dieses PCs abzüglich dessen, was Windows b
   <data name="Memory_KernelStacks" xml:space="preserve">
     <value>Thread-Stacks</value>
   </data>
+  <data name="Memory_KernelStacksDetail" xml:space="preserve">
+    <value>Arbeitsbereich, den der Kernel für jeden laufenden Thread hält. Er schrumpft, wenn Apps geschlossen werden.</value>
+  </data>
   <data name="Memory_KernelPageTables" xml:space="preserve">
     <value>Seitentabellen</value>
+  </data>
+  <data name="Memory_KernelPageTablesDetail" xml:space="preserve">
+    <value>Die Tabellen, die dem Prozessor zeigen, wo der Speicher jeder App im RAM liegt. Sie schrumpfen, wenn Apps geschlossen werden.</value>
   </data>
   <data name="Memory_KernelVmalloc" xml:space="preserve">
     <value>Kernel-Zuordnungen (vmalloc)</value>
   </data>
+  <data name="Memory_KernelVmallocDetail" xml:space="preserve">
+    <value>Große Puffer, die der Kernel und seine Treiber reservieren, unter anderem für Grafik. Sie werden frei, wenn sie nicht mehr gebraucht werden.</value>
+  </data>
   <data name="Memory_KernelPercpu" xml:space="preserve">
     <value>Daten pro CPU</value>
+  </data>
+  <data name="Memory_KernelPercpuDetail" xml:space="preserve">
+    <value>Daten, die der Kernel einmal für jeden Prozessorkern hält. Ihre Größe steht beim Start von Android fest.</value>
   </data>
   <data name="Memory_KernelUnaccounted" xml:space="preserve">
     <value>Treiber</value>

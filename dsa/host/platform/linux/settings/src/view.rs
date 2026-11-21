@@ -214,7 +214,7 @@ pub fn guest_rows(guest: &GuestMemory) -> Vec<MemoryRow> {
             tr("Kernel caches the kernel can free on demand."),
             guest.slab_reclaimable_kb,
         ),
-        row(tr("Shared memory"), String::new(), guest.shmem_kb),
+        row(tr("Shared memory"), tr("Memory that several processes use together, such as window images and graphics buffers. It is freed when the apps using it close."), guest.shmem_kb),
         row(
             tr("Compressed memory"),
             trf(
@@ -223,7 +223,7 @@ pub fn guest_rows(guest: &GuestMemory) -> Vec<MemoryRow> {
             ),
             guest.zram_used_kb,
         ),
-        row(tr("Free"), String::new(), guest.free_kb),
+        row(tr("Free"), tr("Memory nothing uses right now. Android hands it back to the PC, so it does not take up the PC's RAM."), guest.free_kb),
     ];
     // Google Play services, which the user chose to install, on a row of its own, so what it
     // costs is not taken for what Android and DSA cost.
@@ -262,14 +262,14 @@ pub fn kernel_rows(guest: &GuestMemory) -> Vec<MemoryRow> {
             tr("Memory the kernel keeps for its own data and cannot reclaim"),
             k.slab_unreclaimable_kb,
         ),
-        row(tr("Thread stacks"), String::new(), k.kernel_stack_kb),
-        row(tr("Page tables"), String::new(), k.page_tables_kb),
+        row(tr("Thread stacks"), tr("Working space the kernel keeps for every running thread. It shrinks as apps close."), k.kernel_stack_kb),
+        row(tr("Page tables"), tr("The maps that tell the processor where each app's memory is in RAM. They shrink as apps close."), k.page_tables_kb),
         row(
             tr("Kernel mappings (vmalloc)"),
-            String::new(),
+            tr("Large buffers the kernel and its drivers set aside, for graphics among others. They are freed when no longer needed."),
             k.vmalloc_used_kb,
         ),
-        row(tr("Per-CPU data"), String::new(), k.percpu_kb),
+        row(tr("Per-CPU data"), tr("Data the kernel keeps once for each processor core. Its size is fixed when Android starts."), k.percpu_kb),
         row(
             tr("Drivers"),
             tr("What no counter names, such as GPU and DMA buffers"),

@@ -1856,3 +1856,21 @@ msgstr "ダウンロードしてインストールしています…"
 
 msgid "Not installed: {0}"
 msgstr "インストールできませんでした: {0}"
+
+msgid "Memory that several processes use together, such as window images and graphics buffers. It is freed when the apps using it close."
+msgstr "複数のプロセスが共有するメモリです。ウィンドウの画像やグラフィックスのバッファが含まれます。使っているアプリを閉じると解放されます。"
+
+msgid "Memory nothing uses right now. Android hands it back to the PC, so it does not take up the PC's RAM."
+msgstr "今は何も使っていないメモリです。Android が PC に返すので、PC の RAM を占めません。"
+
+msgid "Working space the kernel keeps for every running thread. It shrinks as apps close."
+msgstr "実行中のスレッドごとにカーネルが持つ作業領域です。アプリを閉じると減ります。"
+
+msgid "The maps that tell the processor where each app's memory is in RAM. They shrink as apps close."
+msgstr "各アプリのメモリが RAM のどこにあるかをプロセッサーに伝える対応表です。アプリを閉じると減ります。"
+
+msgid "Large buffers the kernel and its drivers set aside, for graphics among others. They are freed when no longer needed."
+msgstr "カーネルとドライバーが確保する大きなバッファです。グラフィックスなどに使います。不要になると解放されます。"
+
+msgid "Data the kernel keeps once for each processor core. Its size is fixed when Android starts."
+msgstr "カーネルがプロセッサーのコアごとに 1 つずつ持つデータです。サイズは Android の起動時に決まります。"

@@ -1856,3 +1856,21 @@ msgstr "Mengunduh dan memasang…"
 
 msgid "Not installed: {0}"
 msgstr "Tidak terpasang: {0}"
+
+msgid "Memory that several processes use together, such as window images and graphics buffers. It is freed when the apps using it close."
+msgstr "Memori yang dipakai bersama oleh beberapa proses, seperti gambar jendela dan buffer grafis. Dilepas saat aplikasi yang memakainya ditutup."
+
+msgid "Memory nothing uses right now. Android hands it back to the PC, so it does not take up the PC's RAM."
+msgstr "Memori yang saat ini tidak dipakai apa pun. Android mengembalikannya ke PC, jadi tidak memakan RAM PC."
+
+msgid "Working space the kernel keeps for every running thread. It shrinks as apps close."
+msgstr "Ruang kerja yang disimpan kernel untuk setiap thread yang berjalan. Mengecil saat aplikasi ditutup."
+
+msgid "The maps that tell the processor where each app's memory is in RAM. They shrink as apps close."
+msgstr "Peta yang memberi tahu prosesor letak memori setiap aplikasi di RAM. Mengecil saat aplikasi ditutup."
+
+msgid "Large buffers the kernel and its drivers set aside, for graphics among others. They are freed when no longer needed."
+msgstr "Buffer besar yang disisihkan kernel dan drivernya, antara lain untuk grafis. Dilepas saat tidak diperlukan lagi."
+
+msgid "Data the kernel keeps once for each processor core. Its size is fixed when Android starts."
+msgstr "Data yang disimpan kernel satu untuk setiap inti prosesor. Ukurannya ditetapkan saat Android mulai."

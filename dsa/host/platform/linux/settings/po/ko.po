@@ -1860,3 +1860,21 @@ msgstr "받아서 설치하는 중…"
 
 msgid "Not installed: {0}"
 msgstr "설치하지 못했습니다: {0}"
+
+msgid "Memory that several processes use together, such as window images and graphics buffers. It is freed when the apps using it close."
+msgstr "여러 프로세스가 함께 쓰는 메모리입니다. 창 화면과 그래픽 버퍼가 여기에 들어갑니다. 쓰던 앱을 닫으면 풀립니다."
+
+msgid "Memory nothing uses right now. Android hands it back to the PC, so it does not take up the PC's RAM."
+msgstr "지금 아무것도 쓰지 않는 메모리입니다. Android가 PC에 돌려주므로 PC의 RAM을 차지하지 않습니다."
+
+msgid "Working space the kernel keeps for every running thread. It shrinks as apps close."
+msgstr "실행 중인 스레드마다 커널이 두는 작업 공간입니다. 앱을 닫으면 줄어듭니다."
+
+msgid "The maps that tell the processor where each app's memory is in RAM. They shrink as apps close."
+msgstr "각 앱의 메모리가 RAM의 어디에 있는지 프로세서에 알려 주는 지도입니다. 앱을 닫으면 줄어듭니다."
+
+msgid "Large buffers the kernel and its drivers set aside, for graphics among others. They are freed when no longer needed."
+msgstr "커널과 드라이버가 따로 잡아 두는 큰 버퍼입니다. 그래픽 등에 씁니다. 필요 없어지면 풀립니다."
+
+msgid "Data the kernel keeps once for each processor core. Its size is fixed when Android starts."
+msgstr "커널이 프로세서 코어마다 하나씩 두는 데이터입니다. 크기는 Android가 시작할 때 정해집니다."

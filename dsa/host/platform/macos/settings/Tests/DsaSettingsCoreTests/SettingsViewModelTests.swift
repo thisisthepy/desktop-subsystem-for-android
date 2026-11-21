@@ -273,6 +273,35 @@ final class SettingsViewModelTests: XCTestCase {
         XCTAssertEqual(memory.guestAge, "Memory_ReportAge")
     }
 
+    func test_fr17_every_memory_row_has_a_description_in_every_language() async throws {
+        for language in InterfaceLanguage.all {
+            let (cli, service) = make()
+            cli.answer("memory --json", """
+            {"host":[{"role":"vm","pid":10,"working_set_kb":1048576,"private_kb":1000},
+                     {"role":"window manager","pid":11,"working_set_kb":2048,"private_kb":1024}],
+             "host_total_kb":1050624,"vm_beyond_guest_kb":262144,
+             "guest":{"mem_total_kb":2097152,"mem_available_kb":1310720,"mem_free_kb":1000000,
+                      "total_pss_kb":409600,"cached_kb":1024,"buffers_kb":0,"shmem_kb":2048,
+                      "zram_original_kb":4096,"zram_used_kb":1024,"age_seconds":3,
+                      "google_play":{"processes":2,"pss_kb":1024,"swap_pss_kb":0,"resident_kb":1024,
+                                     "compressed_kb":0,"swapped_out_kb":0,"total_kb":1024},
+                      "top_processes":[{"pid":400,"name":"system_server","pss_kb":102400}],
+                      "kernel":{"slab_unreclaimable_kb":51200,"kernel_stack_kb":10240,"page_tables_kb":20480,
+                                "vmalloc_used_kb":30720,"percpu_kb":1024,"cma_total_kb":0,"mem_online_kb":2228224,
+                                "unaccounted_kb":40960,"reserved_at_boot_kb":131072}}}
+            """)
+            let memory = MemoryViewModel(service: service, text: try LanguageText(language))
+            await memory.refresh()
+            XCTAssertEqual(memory.kernelRows.count, 7)
+            for row in memory.hostRows + memory.guestRows + memory.kernelRows + memory.guestProcessRows {
+                // A text the catalog lacks comes back as its key, which starts with the page's name.
+                XCTAssertFalse(row.detail.trimmingCharacters(in: .whitespaces).isEmpty,
+                               "\(language): \"\(row.label)\" has no description")
+                XCTAssertFalse(row.detail.contains("Memory_"), "\(language): \(row.detail)")
+            }
+        }
+    }
+
     func test_nfr2_memory_page_counts_zram_compressed_and_google_play_services_apart() async {
         let (cli, service) = make()
         cli.answer("memory --json", """

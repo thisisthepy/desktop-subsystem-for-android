@@ -273,6 +273,9 @@ Android {2} はまだ起動を完了していません ({3})。Android を再び
   <data name="Memory_Shared" xml:space="preserve">
     <value>共有メモリ</value>
   </data>
+  <data name="Memory_SharedDetail" xml:space="preserve">
+    <value>複数のプロセスが共有するメモリです。ウィンドウの画像やグラフィックスのバッファが含まれます。使っているアプリを閉じると解放されます。</value>
+  </data>
   <data name="Memory_Zram" xml:space="preserve">
     <value>圧縮メモリ</value>
   </data>
@@ -281,6 +284,9 @@ Android {2} はまだ起動を完了していません ({3})。Android を再び
   </data>
   <data name="Memory_Free" xml:space="preserve">
     <value>空き</value>
+  </data>
+  <data name="Memory_FreeDetail" xml:space="preserve">
+    <value>今は何も使っていないメモリです。Android が PC に返すので、PC の RAM を占めません。</value>
   </data>
   <data name="Memory_GuestProcessDetail" xml:space="preserve">
     <value>プロセス {0}</value>
@@ -864,14 +870,26 @@ adb disconnect の後は、adb サーバーが再起動するまで接続しま�
   <data name="Memory_KernelStacks" xml:space="preserve">
     <value>スレッド スタック</value>
   </data>
+  <data name="Memory_KernelStacksDetail" xml:space="preserve">
+    <value>実行中のスレッドごとにカーネルが持つ作業領域です。アプリを閉じると減ります。</value>
+  </data>
   <data name="Memory_KernelPageTables" xml:space="preserve">
     <value>ページ テーブル</value>
+  </data>
+  <data name="Memory_KernelPageTablesDetail" xml:space="preserve">
+    <value>各アプリのメモリが RAM のどこにあるかをプロセッサーに伝える対応表です。アプリを閉じると減ります。</value>
   </data>
   <data name="Memory_KernelVmalloc" xml:space="preserve">
     <value>カーネル マッピング (vmalloc)</value>
   </data>
+  <data name="Memory_KernelVmallocDetail" xml:space="preserve">
+    <value>カーネルとドライバーが確保する大きなバッファです。グラフィックスなどに使います。不要になると解放されます。</value>
+  </data>
   <data name="Memory_KernelPercpu" xml:space="preserve">
     <value>CPU ごとのデータ</value>
+  </data>
+  <data name="Memory_KernelPercpuDetail" xml:space="preserve">
+    <value>カーネルがプロセッサーのコアごとに 1 つずつ持つデータです。サイズは Android の起動時に決まります。</value>
   </data>
   <data name="Memory_KernelUnaccounted" xml:space="preserve">
     <value>ドライバー</value>

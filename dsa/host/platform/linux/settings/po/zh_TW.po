@@ -1856,3 +1856,21 @@ msgstr "正在下載並安裝…"
 
 msgid "Not installed: {0}"
 msgstr "未安裝：{0}"
+
+msgid "Memory that several processes use together, such as window images and graphics buffers. It is freed when the apps using it close."
+msgstr "多個程序共用的記憶體，例如視窗畫面和圖形緩衝區。使用它的應用程式關閉後即釋放。"
+
+msgid "Memory nothing uses right now. Android hands it back to the PC, so it does not take up the PC's RAM."
+msgstr "目前沒有任何東西在用的記憶體。Android 會把它還給電腦，因此不佔用電腦的記憶體。"
+
+msgid "Working space the kernel keeps for every running thread. It shrinks as apps close."
+msgstr "核心為每個執行中的執行緒保留的工作空間。關閉應用程式後會減少。"
+
+msgid "The maps that tell the processor where each app's memory is in RAM. They shrink as apps close."
+msgstr "告訴處理器每個應用程式的記憶體位於 RAM 何處的對應表。關閉應用程式後會減少。"
+
+msgid "Large buffers the kernel and its drivers set aside, for graphics among others. They are freed when no longer needed."
+msgstr "核心及其驅動程式預留的大型緩衝區，用於圖形等。不再需要時釋放。"
+
+msgid "Data the kernel keeps once for each processor core. Its size is fixed when Android starts."
+msgstr "核心為每個處理器核心各保留一份的資料。大小在 Android 啟動時確定。"

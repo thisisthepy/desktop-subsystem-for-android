@@ -273,6 +273,9 @@ Android {2} 尚未完成啟動 ({3})。請再次啟動 Android 以將其開機�
   <data name="Memory_Shared" xml:space="preserve">
     <value>共用記憶體</value>
   </data>
+  <data name="Memory_SharedDetail" xml:space="preserve">
+    <value>多個程序共用的記憶體，例如視窗畫面和圖形緩衝區。使用它的應用程式關閉後即釋放。</value>
+  </data>
   <data name="Memory_Zram" xml:space="preserve">
     <value>壓縮記憶體</value>
   </data>
@@ -281,6 +284,9 @@ Android {2} 尚未完成啟動 ({3})。請再次啟動 Android 以將其開機�
   </data>
   <data name="Memory_Free" xml:space="preserve">
     <value>可用</value>
+  </data>
+  <data name="Memory_FreeDetail" xml:space="preserve">
+    <value>目前沒有任何東西在用的記憶體。Android 會把它還給電腦，因此不佔用電腦的記憶體。</value>
   </data>
   <data name="Memory_GuestProcessDetail" xml:space="preserve">
     <value>處理程序 {0}</value>
@@ -864,14 +870,26 @@ DSA 不會散布它們。只有在您要求時，才會下載公開的 LiteGapps
   <data name="Memory_KernelStacks" xml:space="preserve">
     <value>執行緒堆疊</value>
   </data>
+  <data name="Memory_KernelStacksDetail" xml:space="preserve">
+    <value>核心為每個執行中的執行緒保留的工作空間。關閉應用程式後會減少。</value>
+  </data>
   <data name="Memory_KernelPageTables" xml:space="preserve">
     <value>分頁表</value>
+  </data>
+  <data name="Memory_KernelPageTablesDetail" xml:space="preserve">
+    <value>告訴處理器每個應用程式的記憶體位於 RAM 何處的對應表。關閉應用程式後會減少。</value>
   </data>
   <data name="Memory_KernelVmalloc" xml:space="preserve">
     <value>核心對應 (vmalloc)</value>
   </data>
+  <data name="Memory_KernelVmallocDetail" xml:space="preserve">
+    <value>核心及其驅動程式預留的大型緩衝區，用於圖形等。不再需要時釋放。</value>
+  </data>
   <data name="Memory_KernelPercpu" xml:space="preserve">
     <value>個別 CPU 資料</value>
+  </data>
+  <data name="Memory_KernelPercpuDetail" xml:space="preserve">
+    <value>核心為每個處理器核心各保留一份的資料。大小在 Android 啟動時確定。</value>
   </data>
   <data name="Memory_KernelUnaccounted" xml:space="preserve">
     <value>驅動程式</value>

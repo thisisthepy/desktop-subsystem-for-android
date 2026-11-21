@@ -43,10 +43,10 @@ public sealed partial class MemoryViewModel
         var rows = new List<MemoryRow>
         {
             new(_text.Get("Memory_KernelSlab"), _text.Get("Memory_KernelSlabDetail"), Format.Size(k.SlabUnreclaimableKb)),
-            new(_text.Get("Memory_KernelStacks"), "", Format.Size(k.KernelStackKb)),
-            new(_text.Get("Memory_KernelPageTables"), "", Format.Size(k.PageTablesKb)),
-            new(_text.Get("Memory_KernelVmalloc"), "", Format.Size(k.VmallocUsedKb)),
-            new(_text.Get("Memory_KernelPercpu"), "", Format.Size(k.PercpuKb)),
+            new(_text.Get("Memory_KernelStacks"), _text.Get("Memory_KernelStacksDetail"), Format.Size(k.KernelStackKb)),
+            new(_text.Get("Memory_KernelPageTables"), _text.Get("Memory_KernelPageTablesDetail"), Format.Size(k.PageTablesKb)),
+            new(_text.Get("Memory_KernelVmalloc"), _text.Get("Memory_KernelVmallocDetail"), Format.Size(k.VmallocUsedKb)),
+            new(_text.Get("Memory_KernelPercpu"), _text.Get("Memory_KernelPercpuDetail"), Format.Size(k.PercpuKb)),
             new(_text.Get("Memory_KernelUnaccounted"), _text.Get("Memory_KernelUnaccountedDetail"), Format.Size(k.UnaccountedKb)),
         };
         if (k.ReservedAtBootKb is { } reserved)

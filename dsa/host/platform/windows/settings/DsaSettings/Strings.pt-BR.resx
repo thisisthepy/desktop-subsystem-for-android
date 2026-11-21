@@ -273,6 +273,9 @@ O DSA baixa outra imagem, se houver uma. A próxima versão do DSA tentará esta
   <data name="Memory_Shared" xml:space="preserve">
     <value>Memória compartilhada</value>
   </data>
+  <data name="Memory_SharedDetail" xml:space="preserve">
+    <value>Memória que vários processos usam juntos, como imagens de janelas e buffers gráficos. É liberada quando os apps que a usam fecham.</value>
+  </data>
   <data name="Memory_Zram" xml:space="preserve">
     <value>Memória compactada</value>
   </data>
@@ -281,6 +284,9 @@ O DSA baixa outra imagem, se houver uma. A próxima versão do DSA tentará esta
   </data>
   <data name="Memory_Free" xml:space="preserve">
     <value>Livre</value>
+  </data>
+  <data name="Memory_FreeDetail" xml:space="preserve">
+    <value>Memória que nada está usando agora. O Android a devolve ao PC, então ela não ocupa a RAM do PC.</value>
   </data>
   <data name="Memory_GuestProcessDetail" xml:space="preserve">
     <value>Processo {0}</value>
@@ -864,14 +870,26 @@ Automático: até a memória deste PC menos o que o Windows reserva. Aplicado a 
   <data name="Memory_KernelStacks" xml:space="preserve">
     <value>Pilhas de threads</value>
   </data>
+  <data name="Memory_KernelStacksDetail" xml:space="preserve">
+    <value>Espaço de trabalho que o kernel mantém para cada thread em execução. Diminui quando apps fecham.</value>
+  </data>
   <data name="Memory_KernelPageTables" xml:space="preserve">
     <value>Tabelas de páginas</value>
+  </data>
+  <data name="Memory_KernelPageTablesDetail" xml:space="preserve">
+    <value>Os mapas que dizem ao processador onde a memória de cada app está na RAM. Diminuem quando apps fecham.</value>
   </data>
   <data name="Memory_KernelVmalloc" xml:space="preserve">
     <value>Mapeamentos do kernel (vmalloc)</value>
   </data>
+  <data name="Memory_KernelVmallocDetail" xml:space="preserve">
+    <value>Buffers grandes que o kernel e seus drivers reservam, entre outros para gráficos. São liberados quando não são mais necessários.</value>
+  </data>
   <data name="Memory_KernelPercpu" xml:space="preserve">
     <value>Dados por CPU</value>
+  </data>
+  <data name="Memory_KernelPercpuDetail" xml:space="preserve">
+    <value>Dados que o kernel mantém uma vez para cada núcleo do processador. O tamanho é fixado quando o Android inicia.</value>
   </data>
   <data name="Memory_KernelUnaccounted" xml:space="preserve">
     <value>Drivers</value>

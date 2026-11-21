@@ -273,6 +273,9 @@ Android {2} 尚未完成启动（{3}）。请再次启动 Android 以引导它�
   <data name="Memory_Shared" xml:space="preserve">
     <value>共享内存</value>
   </data>
+  <data name="Memory_SharedDetail" xml:space="preserve">
+    <value>多个进程共用的内存，例如窗口画面和图形缓冲区。使用它的应用关闭后即释放。</value>
+  </data>
   <data name="Memory_Zram" xml:space="preserve">
     <value>压缩内存</value>
   </data>
@@ -281,6 +284,9 @@ Android {2} 尚未完成启动（{3}）。请再次启动 Android 以引导它�
   </data>
   <data name="Memory_Free" xml:space="preserve">
     <value>空闲</value>
+  </data>
+  <data name="Memory_FreeDetail" xml:space="preserve">
+    <value>当前没有任何东西在用的内存。Android 会把它还给电脑，因此不占用电脑的内存。</value>
   </data>
   <data name="Memory_GuestProcessDetail" xml:space="preserve">
     <value>进程 {0}</value>
@@ -864,14 +870,26 @@ DSA 不分发它们。只有在你要求时，DSA 才会下载公开的 LiteGapp
   <data name="Memory_KernelStacks" xml:space="preserve">
     <value>线程栈</value>
   </data>
+  <data name="Memory_KernelStacksDetail" xml:space="preserve">
+    <value>内核为每个运行中的线程保留的工作空间。关闭应用后会减少。</value>
+  </data>
   <data name="Memory_KernelPageTables" xml:space="preserve">
     <value>页表</value>
+  </data>
+  <data name="Memory_KernelPageTablesDetail" xml:space="preserve">
+    <value>告诉处理器每个应用的内存位于内存条何处的映射表。关闭应用后会减少。</value>
   </data>
   <data name="Memory_KernelVmalloc" xml:space="preserve">
     <value>内核映射（vmalloc）</value>
   </data>
+  <data name="Memory_KernelVmallocDetail" xml:space="preserve">
+    <value>内核及其驱动预留的大块缓冲区，用于图形等。不再需要时释放。</value>
+  </data>
   <data name="Memory_KernelPercpu" xml:space="preserve">
     <value>每 CPU 数据</value>
+  </data>
+  <data name="Memory_KernelPercpuDetail" xml:space="preserve">
+    <value>内核为每个处理器核心各保留一份的数据。大小在 Android 启动时确定。</value>
   </data>
   <data name="Memory_KernelUnaccounted" xml:space="preserve">
     <value>驱动程序</value>
